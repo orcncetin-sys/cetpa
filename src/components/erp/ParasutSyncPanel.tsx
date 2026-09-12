@@ -14,6 +14,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, CheckCircle2, XCircle, Package, Users, Loader2 } from 'lucide-react';
 import { authFetch } from '../../services/authFetch';
 import type { ErpStatusResult } from '../../types/erp';
+import { oc } from '../../i18n/ortak';
 
 interface ImportState { running: boolean; result: { created: number; updated: number; total: number } | null; error: string | null; }
 
@@ -56,11 +57,11 @@ export default function ParasutSyncPanel({ currentLanguage }: { lang?: string; c
       <button onClick={onRun} disabled={state.running || !status?.connected}
         className="apple-button-primary text-xs w-full justify-center disabled:opacity-50">
         {state.running ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-        {tr ? 'İçe Aktar' : 'Import'}
+        {oc(tr).ice_aktar}
       </button>
       {state.result && (
         <p className="text-[11px] text-emerald-600 font-medium">
-          ✓ {state.result.created} {tr ? 'yeni' : 'new'}, {state.result.updated} {tr ? 'güncel' : 'updated'} ({state.result.total} {tr ? 'toplam' : 'total'})
+          ✓ {state.result.created} {oc(tr).yeni_2}, {state.result.updated} {tr ? 'güncel' : 'updated'} ({state.result.total} {oc(tr).toplam_3})
         </p>
       )}
       {state.error && <p className="text-[11px] text-red-600">{state.error}</p>}
@@ -74,14 +75,14 @@ export default function ParasutSyncPanel({ currentLanguage }: { lang?: string; c
         <div className="flex items-center gap-2">
           {status?.connected ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-gray-400" />}
           <span className="text-xs font-semibold text-gray-700">
-            {!status ? (tr ? 'Kontrol ediliyor…' : 'Checking…')
+            {!status ? (oc(tr).kontrol_ediliyor)
               : status.connected ? (tr ? 'Paraşüt bağlı' : 'Paraşüt connected')
               : status.configured ? (tr ? 'Bağlantı hatası' : 'Connection error')
               : (tr ? 'Yapılandırılmamış' : 'Not configured')}
           </span>
         </div>
         <button onClick={() => void fetchStatus()} disabled={loading} className="text-[11px] text-brand font-bold hover:underline">
-          {tr ? 'Yenile' : 'Refresh'}
+          {oc(tr).yenile}
         </button>
       </div>
       {status && !status.configured && (
@@ -98,7 +99,7 @@ export default function ParasutSyncPanel({ currentLanguage }: { lang?: string; c
         <ImportCard icon={Users} title={tr ? 'Cariler' : 'Contacts'}
           desc={tr ? 'Müşteri/tedarikçi + bakiye' : 'Customers/suppliers + balance'}
           state={cari} onRun={() => void runImport('/api/parasut/import/cari', setCari)} />
-        <ImportCard icon={Package} title={tr ? 'Ürünler' : 'Products'}
+        <ImportCard icon={Package} title={oc(tr).urunler}
           desc={tr ? 'Stok + fiyat (Mikro V16\'da yok!)' : 'Stock + price (absent in Mikro V16!)'}
           state={stok} onRun={() => void runImport('/api/parasut/import/stok', setStok)} />
       </div>

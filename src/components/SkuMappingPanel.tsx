@@ -15,6 +15,7 @@ import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
 import { logAudit } from '../services/auditLog';
 import { RefreshCw, Search, Link2, CheckCircle2, AlertTriangle, Save } from 'lucide-react';
+import { oc } from '../i18n/ortak';
 
 interface SkuMapping {
   id: string;
@@ -147,7 +148,7 @@ const SkuMappingPanel: React.FC<Props> = ({ currentLanguage }) => {
       <div className="flex items-center gap-2 flex-wrap">
         {([
           ['all', tr ? `Tümü (${mappings.length})` : `All (${mappings.length})`],
-          ['matched', `✓ ${tr ? 'Eşleşen' : 'Matched'} (${matchedCount})`],
+          ['matched', `✓ ${oc(tr).eslesen} (${matchedCount})`],
           ['unmatched', `⚠ ${tr ? 'Eşleşmeyen' : 'Unmatched'} (${unmatchedCount})`],
         ] as const).map(([key, label]) => (
           <button
@@ -182,11 +183,11 @@ const SkuMappingPanel: React.FC<Props> = ({ currentLanguage }) => {
             <thead>
               <tr className="border-b border-gray-100">
                 <th className="py-2 px-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">Mikro SKU</th>
-                <th className="py-2 px-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{tr ? 'Ürün' : 'Product'}</th>
+                <th className="py-2 px-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden lg:table-cell">{oc(tr).urun}</th>
                 <th className="py-2 px-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">Shopify</th>
                 <th className="py-2 px-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">Trendyol</th>
                 <th className="py-2 px-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider hidden md:table-cell">Hepsiburada</th>
-                <th className="py-2 px-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider text-center">{tr ? 'Durum' : 'Status'}</th>
+                <th className="py-2 px-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider text-center">{oc(tr).durum}</th>
                 <th className="py-2 px-3"></th>
               </tr>
             </thead>
@@ -225,11 +226,11 @@ const SkuMappingPanel: React.FC<Props> = ({ currentLanguage }) => {
                     <td className="py-2 px-3 text-center">
                       {m.status === 'unmatched' ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 rounded-full px-2 py-0.5">
-                          <AlertTriangle className="w-3 h-3" /> {tr ? 'Eşleşmedi' : 'Unmatched'}
+                          <AlertTriangle className="w-3 h-3" /> {oc(tr).eslesmedi}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">
-                          <CheckCircle2 className="w-3 h-3" /> {m.status === 'manual' ? (tr ? 'Manuel' : 'Manual') : (tr ? 'Otomatik' : 'Auto')}
+                          <CheckCircle2 className="w-3 h-3" /> {m.status === 'manual' ? (oc(tr).manuel) : (tr ? 'Otomatik' : 'Auto')}
                         </span>
                       )}
                     </td>
@@ -241,7 +242,7 @@ const SkuMappingPanel: React.FC<Props> = ({ currentLanguage }) => {
                           className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-brand rounded-full px-3 py-1 disabled:opacity-60"
                         >
                           <Save className="w-3 h-3" />
-                          {savingId === m.id ? '…' : (tr ? 'Kaydet' : 'Save')}
+                          {savingId === m.id ? '…' : (oc(tr).kaydet)}
                         </button>
                       )}
                     </td>
@@ -256,7 +257,7 @@ const SkuMappingPanel: React.FC<Props> = ({ currentLanguage }) => {
       {/* Pagination */}
       {pageCount > 1 && (
         <div className="flex items-center justify-between">
-          <span className="text-xs text-[#86868B]">{filtered.length} {tr ? 'kayıt' : 'records'} · {safePage + 1}/{pageCount}</span>
+          <span className="text-xs text-[#86868B]">{filtered.length} {oc(tr).kayit} · {safePage + 1}/{pageCount}</span>
           <div className="flex gap-2">
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} className="apple-button-secondary px-4 py-1.5 text-xs font-semibold disabled:opacity-40">←</button>
             <button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} className="apple-button-secondary px-4 py-1.5 text-xs font-semibold disabled:opacity-40">→</button>

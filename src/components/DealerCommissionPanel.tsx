@@ -19,6 +19,7 @@ import ModuleHeader from './ModuleHeader';
 import { confirmAction } from '../lib/confirm';
 import { cn } from '../lib/utils';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { oc } from '../i18n/ortak';
 
 interface CommissionRule {
   id: string;
@@ -138,8 +139,8 @@ export default function DealerCommissionPanel({
       const isPermission = msg.includes('permission') || msg.includes('Missing or insufficient');
       showToast(
         isPermission
-          ? (currentLanguage === 'tr' ? 'Yetki hatası — lütfen giriş yapın.' : 'Permission denied — please sign in.')
-          : (currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.'),
+          ? (oc(currentLanguage).yetki_hatasi_lutfen_giris_yapin)
+          : (oc(currentLanguage).hata_olustu_2),
         'error'
       );
     } finally {
@@ -191,8 +192,8 @@ export default function DealerCommissionPanel({
       const isPermission = msg.includes('permission') || msg.includes('Missing or insufficient');
       showToast(
         isPermission
-          ? (currentLanguage === 'tr' ? 'Yetki hatası — lütfen giriş yapın.' : 'Permission denied — please sign in.')
-          : (currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.'),
+          ? (oc(currentLanguage).yetki_hatasi_lutfen_giris_yapin)
+          : (oc(currentLanguage).hata_olustu_2),
         'error'
       );
     }
@@ -264,7 +265,7 @@ export default function DealerCommissionPanel({
     tlYaz(tryTutar, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 });
 
   const tabs = [
-    { id: 'performance', label: currentLanguage === 'tr' ? 'Performans' : 'Performance', icon: TrendingUp },
+    { id: 'performance', label: oc(currentLanguage).performans, icon: TrendingUp },
     { id: 'rules', label: currentLanguage === 'tr' ? 'Komisyon Kuralları' : 'Commission Rules', icon: Target },
   ];
 
@@ -281,8 +282,8 @@ export default function DealerCommissionPanel({
 
   const periodLabel = (period: 'monthly' | 'quarterly') =>
     period === 'monthly'
-      ? (currentLanguage === 'tr' ? 'Aylık' : 'Monthly')
-      : (currentLanguage === 'tr' ? 'Çeyreklik' : 'Quarterly');
+      ? (oc(currentLanguage).aylik)
+      : (oc(currentLanguage).ceyreklik);
 
   return (
     <div className="space-y-6">
@@ -313,7 +314,7 @@ export default function DealerCommissionPanel({
                   </button>
                 )}
                 <button onClick={() => { setRuleForm({ tier: 'Dealer', targetAmount: 100000, commissionRate: 3, bonusRate: 1.5, period: 'monthly' }); setEditingRuleId(null); setShowRuleModal(true); }} className="apple-button-primary">
-                  <Plus size={16} /> {currentLanguage === 'tr' ? 'Kural Ekle' : 'Add Rule'}
+                  <Plus size={16} /> {oc(currentLanguage).kural_ekle}
                 </button>
               </div>
             )}
@@ -428,9 +429,9 @@ export default function DealerCommissionPanel({
                       />
                       <Tooltip
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}
-                        formatter={sayiBicimleyici((value) => [paraYaz(value, { birim: grafikBirim, ondalik: 0 }), currentLanguage === 'tr' ? 'Satış' : 'Sales'])}
+                        formatter={sayiBicimleyici((value) => [paraYaz(value, { birim: grafikBirim, ondalik: 0 }), oc(currentLanguage).satis])}
                       />
-                      <Bar dataKey="convertedSales" radius={[6, 6, 0, 0]} name={currentLanguage === 'tr' ? 'Satış' : 'Sales'}>
+                      <Bar dataKey="convertedSales" radius={[6, 6, 0, 0]} name={oc(currentLanguage).satis}>
                         {dealerPerformance.slice(0, 8).map((d, i) => (
                           <Cell key={i} fill={TIER_COLORS[d.tier] || '#ff4000'} fillOpacity={d.achievementRate >= 100 ? 1 : 0.5} />
                         ))}
@@ -458,12 +459,12 @@ export default function DealerCommissionPanel({
                     <thead>
                       <tr className="bg-gray-50 border-b border-gray-100">
                         {[
-                          {k:'name', label: currentLanguage==='tr'?'Bayi':'Dealer', align:'text-left', cls:''},
+                          {k:'name', label: oc(currentLanguage).bayi, align:'text-left', cls:''},
                           {k:'tier', label: 'Tier', align:'text-left', cls:'hidden sm:table-cell'},
-                          {k:'targetAmount', label: currentLanguage==='tr'?'Hedef':'Target', align:'text-right', cls:''},
-                          {k:'actualSales', label: currentLanguage==='tr'?'Gerçekleşen':'Actual', align:'text-right', cls:''},
+                          {k:'targetAmount', label: oc(currentLanguage).hedef, align:'text-right', cls:''},
+                          {k:'actualSales', label: oc(currentLanguage).gerceklesen, align:'text-right', cls:''},
                           {k:'effectiveRate', label: currentLanguage==='tr'?'Oran':'Rate', align:'text-center', cls:'hidden md:table-cell'},
-                          {k:'commissionEarned', label: currentLanguage==='tr'?'Komisyon':'Commission', align:'text-right', cls:''},
+                          {k:'commissionEarned', label: oc(currentLanguage).komisyon, align:'text-right', cls:''},
                           {k:'achievementRate', label: currentLanguage==='tr'?'Hedef %':'Target %', align:'text-center', cls:'hidden lg:table-cell'},
                         ].map(({k,label,align,cls}) => {
                           const active = dealerSort.key === k;
@@ -520,7 +521,7 @@ export default function DealerCommissionPanel({
                     </tbody>
                     <tfoot>
                       <tr className="bg-gray-50 border-t border-gray-200">
-                        <td colSpan={3} className="py-3 px-5 text-xs font-bold text-gray-400 uppercase">{currentLanguage === 'tr' ? 'TOPLAM' : 'TOTAL'}</td>
+                        <td colSpan={3} className="py-3 px-5 text-xs font-bold text-gray-400 uppercase">{oc(currentLanguage).toplam_2}</td>
                         <td className="py-3 px-5 text-right font-bold text-gray-900">{kurluBicim(totalSales)}</td>
                         <td className="hidden md:table-cell" />
                         <td className="py-3 px-5 text-right font-bold text-brand">{kurluBicim(totalCommission)}</td>
@@ -592,7 +593,7 @@ export default function DealerCommissionPanel({
                             const ok = await confirmAction({
                               title: currentLanguage === 'tr' ? 'Kuralı Sil' : 'Delete Rule',
                               message: currentLanguage === 'tr' ? 'Bu komisyon kuralını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this commission rule?',
-                              confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+                              confirmLabel: oc(currentLanguage).sil,
                               variant: 'danger',
                             });
                             if (!ok) return;
@@ -610,7 +611,7 @@ export default function DealerCommissionPanel({
                     </div>
                     <div className="grid grid-cols-3 gap-3">
                       <div className="text-center">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">{currentLanguage === 'tr' ? 'Hedef' : 'Target'}</p>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">{oc(currentLanguage).hedef}</p>
                         <p className="text-lg font-bold text-gray-900">{kisaTutar(rule.targetAmount, { fmt: 'K', ondalik: 0 })}</p>
                       </div>
                       <div className="text-center">
@@ -658,17 +659,17 @@ export default function DealerCommissionPanel({
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Tier' : 'Tier'}</label>
                   <select value={ruleForm.tier} onChange={e => setRuleForm({ ...ruleForm, tier: e.target.value })} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none text-sm">
-                    <option value="Dealer">{currentLanguage === 'tr' ? 'Bayi' : 'Dealer'}</option>
+                    <option value="Dealer">{oc(currentLanguage).bayi}</option>
                     <option value="B2B Premium">B2B Premium</option>
                     <option value="B2B Standard">{currentLanguage === 'tr' ? 'B2B Standart' : 'B2B Standard'}</option>
-                    <option value="Retail">{currentLanguage === 'tr' ? 'Perakende' : 'Retail'}</option>
+                    <option value="Retail">{oc(currentLanguage).perakende}</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Dönem' : 'Period'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).donem}</label>
                   <select value={ruleForm.period} onChange={e => setRuleForm({ ...ruleForm, period: e.target.value as 'monthly' | 'quarterly' })} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none text-sm">
-                    <option value="monthly">{currentLanguage === 'tr' ? 'Aylık' : 'Monthly'}</option>
-                    <option value="quarterly">{currentLanguage === 'tr' ? 'Çeyreklik' : 'Quarterly'}</option>
+                    <option value="monthly">{oc(currentLanguage).aylik}</option>
+                    <option value="quarterly">{oc(currentLanguage).ceyreklik}</option>
                   </select>
                 </div>
                 <div>
@@ -693,10 +694,10 @@ export default function DealerCommissionPanel({
               </div>
               <div className="p-6 border-t border-gray-100 flex gap-3">
                 <button onClick={() => { setShowRuleModal(false); setEditingRuleId(null); }} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">
-                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                  {oc(currentLanguage).iptal}
                 </button>
                 <button onClick={handleSaveRule} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">
-                  {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
+                  {oc(currentLanguage).kaydet}
                 </button>
               </div>
             </motion.div>

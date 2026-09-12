@@ -6,6 +6,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanMs } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'quotations' | 'currentLanguage'>;
 
@@ -26,7 +27,7 @@ export default function PipelineAsamaHizi({ quotations, currentLanguage }: Props
     else if (status === 'pending' || status === 'beklemede') stageGroups.pending.push(age);
   }
   const stages255 = [
-    { key: 'draft', label: currentLanguage === 'tr' ? 'Taslak' : 'Draft', color: 'bg-gray-400' },
+    { key: 'draft', label: oc(currentLanguage).taslak, color: 'bg-gray-400' },
     { key: 'sent', label: currentLanguage === 'tr' ? 'Gönderildi' : 'Sent', color: 'bg-blue-400' },
     { key: 'negotiation', label: currentLanguage === 'tr' ? 'Müzakere' : 'Negotiation', color: 'bg-amber-400' },
     { key: 'pending', label: currentLanguage === 'tr' ? 'Beklemede' : 'Pending', color: 'bg-purple-400' },
@@ -40,7 +41,7 @@ export default function PipelineAsamaHizi({ quotations, currentLanguage }: Props
     const statusDist: Record<string, number> = {};
     for (const q of quotations) {
       const m = q as unknown as Record<string,unknown>;
-      const st = (m.status as string) || (currentLanguage === 'tr' ? 'Bilinmiyor' : 'Unknown');
+      const st = (m.status as string) || (oc(currentLanguage).bilinmiyor);
       statusDist[st] = (statusDist[st] ?? 0) + 1;
     }
     const items = Object.entries(statusDist).sort(([,a],[,b]) => b - a).slice(0, 5);
@@ -76,7 +77,7 @@ export default function PipelineAsamaHizi({ quotations, currentLanguage }: Props
                 <span className="text-xs font-medium text-gray-700">{s.label}</span>
                 <span className="text-[10px] text-gray-400">({s.count})</span>
               </div>
-              <span className={`text-sm font-bold ${s.avg > 14 ? 'text-red-500' : s.avg > 7 ? 'text-amber-500' : 'text-emerald-600'}`}>{s.avg}d {currentLanguage === 'tr' ? 'ort.' : 'avg'}</span>
+              <span className={`text-sm font-bold ${s.avg > 14 ? 'text-red-500' : s.avg > 7 ? 'text-amber-500' : 'text-emerald-600'}`}>{s.avg}d {oc(currentLanguage).ort}</span>
             </div>
             <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
               <div className={`h-full rounded-full ${s.color}`} style={{ width: `${Math.max(4, Math.round((s.avg / maxAvg255) * 100))}%` }} />

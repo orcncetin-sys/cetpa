@@ -11,6 +11,7 @@
  */
 import { itemCostTRY, type ReportsCtx } from '../useReportsData';
 import { zamanMs, zamanDate, ayAnahtari } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'inventory' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -44,7 +45,7 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🥧 Bu Ay Müşteri Cüzdan Payı' : '🥧 This Month Customer Wallet Share'}</h3>
-              <span className="text-[10px] text-gray-400">{withCum.length} {currentLanguage === 'tr' ? 'müşteri' : 'customers'} · {fmtAna(total258,'K',0)}</span>
+              <span className="text-[10px] text-gray-400">{withCum.length} {oc(currentLanguage).musteri_2} · {fmtAna(total258,'K',0)}</span>
             </div>
             <div className="space-y-2">
               {withCum.map((c, i) => (

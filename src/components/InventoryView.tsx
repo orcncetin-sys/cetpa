@@ -46,6 +46,7 @@ import { authFetch } from '../services/authFetch';
 import { type LabelItem } from './LabelSheetModal';
 
 import { type InventoryItem, type InventoryMovement, type Warehouse, type Consignment, type StockDiscrepancy } from '../types';
+import { oc } from '../i18n/ortak';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -292,7 +293,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
   const invPaginationControls = invPageCount > 1 ? (
     <div className="flex items-center justify-between px-2 py-3">
       <span className="text-xs text-[#86868B]">
-        {filteredInventory.length} {currentLanguage === 'tr' ? 'ürün' : 'items'} · {safeInvPage + 1}/{invPageCount}
+        {filteredInventory.length} {oc(currentLanguage).urun_2} · {safeInvPage + 1}/{invPageCount}
       </span>
       <div className="flex gap-2">
         <button
@@ -628,10 +629,10 @@ const InventoryView: React.FC<InventoryViewProps> = ({
           <button
             onClick={() => setIsScannerOpen(true)}
             className="apple-button-secondary flex items-center justify-center gap-2"
-            title={currentLanguage === 'tr' ? 'Barkod / QR Tara' : 'Scan Barcode / QR'}
+            title={oc(currentLanguage).barkod_qr_tara}
           >
             <Scan className="w-4 h-4" />
-            <span>{currentLanguage === 'tr' ? 'Barkod / QR Tara' : 'Scan Barcode / QR'}</span>
+            <span>{oc(currentLanguage).barkod_qr_tara}</span>
           </button>
           {/* hidden CSV file picker */}
           <input
@@ -782,7 +783,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
               {/* footer */}
               <div className="px-8 py-5 bg-gray-50/50 border-t border-gray-100 flex items-center justify-end gap-3">
                 <button onClick={() => setImportModalOpen(false)} className="apple-button-secondary">
-                  {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                  {oc(currentLanguage).iptal}
                 </button>
                 <button
                   onClick={() => void handleConfirmImport()}
@@ -790,7 +791,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                   className="apple-button-primary px-10 flex items-center gap-2"
                 >
                   {importLoading && <RefreshCw className="w-4 h-4 animate-spin" />}
-                  {currentLanguage === 'tr' ? 'İçe Aktar' : 'Import'}
+                  {oc(currentLanguage).ice_aktar}
                 </button>
               </div>
             </motion.div>
@@ -809,7 +810,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
               : 'bg-white text-[#86868B] border border-gray-200 hover:border-gray-300',
           )}
         >
-          {currentLanguage === 'tr' ? 'Tümü' : 'All'}
+          {oc(currentLanguage).tumu}
         </button>
         {categories.map(cat => (
           <button
@@ -832,7 +833,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         isOpen={isScannerOpen}
         onClose={() => setIsScannerOpen(false)}
         currentLanguage={currentLanguage as 'tr' | 'en'}
-        title={currentLanguage === 'tr' ? 'Ürün Barkodu Tara' : 'Scan Product Barcode'}
+        title={oc(currentLanguage).urun_barkodu_tara}
         placeholder={currentLanguage === 'tr' ? 'SKU veya barkod girin...' : 'Enter SKU or barcode...'}
         onScan={(barcode) => {
         setSearchTerm(barcode);
@@ -1065,14 +1066,14 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                           <button
                             onClick={(e) => { e.stopPropagation(); setSelectedProduct(item); }}
                             className="p-2 rounded-xl hover:bg-blue-50 text-[#86868B] hover:text-blue-600 transition-all"
-                            title={currentLanguage === 'tr' ? 'İncele' : 'View'}
+                            title={oc(currentLanguage).incele}
                           >
                             <Eye className="w-4 h-4" />
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); setEditingProduct(item); setIsAddingProduct(true); }}
                             className="p-2 rounded-xl hover:bg-brand/10 text-[#86868B] hover:text-brand transition-all"
-                            title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}
+                            title={oc(currentLanguage).duzenle}
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
@@ -1122,13 +1123,13 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                                     }}
                                     className="flex-1 py-1.5 text-xs font-bold bg-brand text-white rounded-xl hover:bg-brand/90 transition-colors"
                                   >
-                                    {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
+                                    {oc(currentLanguage).kaydet}
                                   </button>
                                   <button
                                     onClick={() => setP546EditingNoteId(null)}
                                     className="px-3 py-1.5 text-xs font-bold text-gray-500 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
                                   >
-                                    {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                                    {oc(currentLanguage).iptal}
                                   </button>
                                 </div>
                               </div>
@@ -1271,7 +1272,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                           'text-[10px] font-bold uppercase px-1.5 py-0.5 rounded',
                           mov.type === 'in' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600',
                         )}>
-                          {mov.type === 'in' ? (currentLanguage === 'tr' ? 'Giriş' : 'In') : (currentLanguage === 'tr' ? 'Çıkış' : 'Out')}
+                          {mov.type === 'in' ? (oc(currentLanguage).giris) : (oc(currentLanguage).cikis)}
                         </span>
                         <span className="text-[10px] text-gray-400 font-medium">
                           {movD ? format(movD, 'HH:mm') : ''}
@@ -1368,7 +1369,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                 className="apple-button-secondary flex items-center gap-1.5 text-xs px-3 py-1.5"
               >
                 <Plus className="w-3.5 h-3.5" />
-                {currentLanguage === 'tr' ? 'Konsinye Gönder' : 'Send Consignment'}
+                {oc(currentLanguage).konsinye_gonder}
               </button>
             </div>
             {active.length === 0 ? (
@@ -1380,12 +1381,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-[10px] font-bold text-[#86868B] uppercase border-b border-gray-100">
-                      <th className="pb-2 pr-4">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</th>
+                      <th className="pb-2 pr-4">{oc(currentLanguage).urun}</th>
                       <th className="pb-2 pr-4">{currentLanguage === 'tr' ? 'Alıcı' : 'Recipient'}</th>
                       <th className="pb-2 pr-4 text-right">{currentLanguage === 'tr' ? 'Gönderilen' : 'Sent'}</th>
                       <th className="pb-2 pr-4 text-right">{currentLanguage === 'tr' ? 'Satılan' : 'Sold'}</th>
                       <th className="pb-2 pr-4 text-right">{currentLanguage === 'tr' ? 'Kalan' : 'Outstanding'}</th>
-                      <th className="pb-2 text-right">{currentLanguage === 'tr' ? 'İşlem' : 'Action'}</th>
+                      <th className="pb-2 text-right">{oc(currentLanguage).islem}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -1436,18 +1437,18 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setIsConsignmentModalOpen(false)}>
           <div className="apple-card w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h3 className="text-lg font-bold">{currentLanguage === 'tr' ? 'Konsinye Gönder' : 'Send Consignment'}</h3>
+              <h3 className="text-lg font-bold">{oc(currentLanguage).konsinye_gonder}</h3>
               <button onClick={() => setIsConsignmentModalOpen(false)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</label>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{oc(currentLanguage).urun}</label>
                 <select value={consignProductId} onChange={e => setConsignProductId(e.target.value)} className="apple-input w-full">
-                  <option value="">{currentLanguage === 'tr' ? 'Seçiniz' : 'Select'}</option>
+                  <option value="">{oc(currentLanguage).seciniz}</option>
                   {inventory.map(item => (
-                    <option key={item.id} value={item.id}>{item.name} ({item.sku}) — {currentLanguage === 'tr' ? 'stok' : 'stock'}: {item.stockLevel ?? 0}</option>
+                    <option key={item.id} value={item.id}>{item.name} ({item.sku}) — {oc(currentLanguage).stok_2}: {item.stockLevel ?? 0}</option>
                   ))}
                 </select>
               </div>
@@ -1460,7 +1461,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                 <input type="number" min={1} value={consignQuantity} onChange={e => setConsignQuantity(e.target.value)} className="apple-input w-full" />
               </div>
               <div>
-                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Not (opsiyonel)' : 'Note (optional)'}</label>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{oc(currentLanguage).not_opsiyonel}</label>
                 <input type="text" value={consignNotes} onChange={e => setConsignNotes(e.target.value)} className="apple-input w-full" />
               </div>
               <p className="text-[11px] text-gray-400">
@@ -1473,7 +1474,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                 disabled={!consignProductId || !consignRecipient.trim() || consignSaving}
                 className="apple-button-primary w-full disabled:opacity-40"
               >
-                {consignSaving ? '…' : (currentLanguage === 'tr' ? 'Gönder' : 'Send')}
+                {consignSaving ? '…' : (oc(currentLanguage).gonder)}
               </button>
             </div>
           </div>
@@ -1589,7 +1590,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                       <p className="text-[10px] text-violet-500 font-bold uppercase">
                         {currentLanguage === 'tr' ? 'Önerilen sipariş' : 'Suggested order'}
                       </p>
-                      <p className="text-sm font-black text-violet-700">{suggested} {currentLanguage === 'tr' ? 'adet' : 'units'}</p>
+                      <p className="text-sm font-black text-violet-700">{suggested} {oc(currentLanguage).adet}</p>
                     </div>
                     {onQuickPO && (
                       <button
@@ -1619,20 +1620,20 @@ const InventoryView: React.FC<InventoryViewProps> = ({
             </div>
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</label>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{oc(currentLanguage).urun}</label>
                 <select
                   value={movementProductId}
                   onChange={e => setMovementProductId(e.target.value)}
                   className="apple-input w-full"
                 >
-                  <option value="">{currentLanguage === 'tr' ? 'Seçiniz' : 'Select'}</option>
+                  <option value="">{oc(currentLanguage).seciniz}</option>
                   {inventory.map(item => (
-                    <option key={item.id} value={item.id}>{item.name} ({item.sku}) — {currentLanguage === 'tr' ? 'stok' : 'stock'}: {item.stockLevel ?? 0}</option>
+                    <option key={item.id} value={item.id}>{item.name} ({item.sku}) — {oc(currentLanguage).stok_2}: {item.stockLevel ?? 0}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Sebep' : 'Reason'}</label>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{oc(currentLanguage).sebep}</label>
                 <div className="flex gap-2">
                   {(['numune_promosyon', 'fire_hasar'] as const).map(cat => (
                     <button
@@ -1659,7 +1660,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Not (opsiyonel)' : 'Note (optional)'}</label>
+                <label className="text-xs font-bold text-[#86868B] uppercase mb-1.5 block">{oc(currentLanguage).not_opsiyonel}</label>
                 <input
                   type="text"
                   value={movementNote}
@@ -1678,7 +1679,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                 disabled={!movementProductId || movementSaving}
                 className="apple-button-primary w-full disabled:opacity-40"
               >
-                {movementSaving ? '…' : (currentLanguage === 'tr' ? 'Kaydet' : 'Save')}
+                {movementSaving ? '…' : (oc(currentLanguage).kaydet)}
               </button>
             </div>
           </div>

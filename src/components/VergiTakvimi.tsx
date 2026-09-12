@@ -5,6 +5,7 @@ import { Calendar, CheckCircle2, AlertTriangle, Clock, RefreshCw, TrendingUp } f
 import { byField } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
 import { ayAnahtari, gunFarki, gunAnahtari, bugunAnahtari, tarihYaz } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 interface VergiDeadline {
   id: string;
@@ -125,7 +126,7 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
     const days = gunFarki(sonTarih, new Date());
     if (days === null) return { label: '—', cls: 'bg-gray-100 text-gray-500' };
     if (days < 0) return { label: tr ? `${Math.abs(days)}g gecikmiş` : `${Math.abs(days)}d overdue`, cls: 'bg-red-100 text-red-700' };
-    if (days === 0) return { label: tr ? 'Bugün!' : 'Today!', cls: 'bg-red-100 text-red-700' };
+    if (days === 0) return { label: oc(tr).bugun_2, cls: 'bg-red-100 text-red-700' };
     if (days <= 7) return { label: `${days}g`, cls: 'bg-orange-100 text-orange-700' };
     if (days <= 30) return { label: `${days}g`, cls: 'bg-amber-100 text-amber-700' };
     return { label: `${days}g`, cls: 'bg-blue-100 text-blue-600' };
@@ -147,10 +148,10 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
           { label: tr ? 'Bu Ay Yaklaşan' : 'Due This Month', val: upcoming.length, icon: Calendar, color: 'text-blue-600', bg: 'bg-blue-50' },
-          { label: tr ? 'Geciken' : 'Overdue', val: late.length, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
-          { label: tr ? 'Tamamlanan' : 'Completed', val: done.length, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
-          { label: tr ? 'Toplam Tutar' : 'Total Amount', val: paraYaz(deadlines.reduce((s, d) => s + (d.tahminiTutar || 0), 0), { ondalik: 0 }), icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-          { label: tr ? 'Toplam Kayıt' : 'Total Records', val: deadlines.length, icon: Clock, color: 'text-gray-600', bg: 'bg-gray-50' },
+          { label: oc(tr).geciken, val: late.length, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
+          { label: oc(tr).tamamlanan, val: done.length, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
+          { label: oc(tr).toplam_tutar, val: paraYaz(deadlines.reduce((s, d) => s + (d.tahminiTutar || 0), 0), { ondalik: 0 }), icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+          { label: oc(tr).toplam_kayit, val: deadlines.length, icon: Clock, color: 'text-gray-600', bg: 'bg-gray-50' },
         ].map(k => (
           <div key={k.label} className={`apple-card flex items-center gap-3 p-4 ${k.bg}`}>
             <k.icon className={`w-5 h-5 flex-shrink-0 ${k.color}`} />
@@ -172,9 +173,9 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
           <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
             {[
               { id: 'upcoming', label: tr ? 'Yaklaşan (30g)' : 'Upcoming (30d)' },
-              { id: 'late', label: tr ? 'Geciken' : 'Overdue' },
+              { id: 'late', label: oc(tr).geciken },
               { id: 'done', label: tr ? 'Tamamlanan' : 'Done' },
-              { id: 'all', label: tr ? 'Tümü' : 'All' },
+              { id: 'all', label: oc(tr).tumu },
             ].map(t => (
               <button key={t.id} onClick={() => setFilter(t.id as typeof filter)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filter === t.id ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
@@ -209,7 +210,7 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
                     <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${badge.cls}`}>{badge.label}</span>
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {tr ? 'Dönem:' : 'Period:'} {d.donem} &nbsp;•&nbsp;
+                    {oc(tr).donem_2} {d.donem} &nbsp;•&nbsp;
                     {tr ? 'Son Tarih:' : 'Deadline:'} {tarihYaz(d.sonTarih)} &nbsp;•&nbsp;
                     {d.sorumlu}
                   </p>
@@ -250,12 +251,12 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
                       className="ml-3 flex items-center gap-1 text-xs font-semibold text-green-600 hover:text-amber-600 bg-green-50 hover:bg-amber-50 px-3 py-1.5 rounded-full transition-colors flex-shrink-0 group/done">
                       <CheckCircle2 className="w-3.5 h-3.5 group-hover/done:hidden" />
                       <span className="hidden group-hover/done:inline">↩</span>
-                      <span className="group-hover/done:hidden">{tr ? 'Tamam' : 'Done'}</span>
+                      <span className="group-hover/done:hidden">{oc(tr).tamam}</span>
                       <span className="hidden group-hover/done:inline">{tr ? 'Geri Al' : 'Undo'}</span>
                     </button>
                   ) : (
                     <span className="ml-3 flex items-center gap-1 text-xs font-semibold text-green-600">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> {tr ? 'Tamam' : 'Done'}
+                      <CheckCircle2 className="w-3.5 h-3.5" /> {oc(tr).tamam}
                     </span>
                   )
                 )}

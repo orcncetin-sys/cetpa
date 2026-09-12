@@ -4,6 +4,7 @@ import { CreditCard, X, Check } from 'lucide-react';
 import type { Order } from '../types';
 import type { Language } from '../translations';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 export function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(' ');
@@ -57,11 +58,11 @@ export default function PaymentMethodModal({
             </p>
             <div className="grid grid-cols-2 gap-2">
               {([
-                { key: 'cash',          icon: '💵', label: currentLanguage === 'tr' ? 'Nakit'    : 'Cash'          },
+                { key: 'cash',          icon: '💵', label: oc(currentLanguage).nakit          },
                 { key: 'bank_transfer', icon: '🏦', label: currentLanguage === 'tr' ? 'EFT/Havale' : 'Bank Transfer' },
-                { key: 'credit_card',   icon: '💳', label: currentLanguage === 'tr' ? 'Kredi Kartı' : 'Credit Card'  },
+                { key: 'credit_card',   icon: '💳', label: oc(currentLanguage).kredi_karti  },
                 { key: 'check',         icon: '📄', label: currentLanguage === 'tr' ? 'Çek'       : 'Cheque'         },
-                { key: 'other',         icon: '🔄', label: currentLanguage === 'tr' ? 'Diğer'     : 'Other'          },
+                { key: 'other',         icon: '🔄', label: oc(currentLanguage).diger          },
               ] as { key: NonNullable<Order['paymentMethod']>; icon: string; label: string }[]).map(opt => (
                 <button
                   key={opt.key}
@@ -86,7 +87,7 @@ export default function PaymentMethodModal({
               onClick={onClose}
               className="flex-1 apple-button-secondary"
             >
-              {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+              {oc(currentLanguage).iptal}
             </button>
             <button
               type="button"

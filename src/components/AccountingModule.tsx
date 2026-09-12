@@ -75,6 +75,7 @@ import {
 import { format } from 'date-fns';
 import { confirmAction } from '../lib/confirm';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { oc } from '../i18n/ortak';
 
 // --- SortHeader Component ---
 export const SortHeader = ({ 
@@ -670,7 +671,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       ],
     });
     const oranBody = Object.entries(kdvOranBreakdown).map(([oran, data]) => [
-      oran === 'karma' ? (currentLanguage === 'tr' ? 'Karma' : 'Mixed') : `%${oran}`,
+      oran === 'karma' ? (oc(currentLanguage).karma) : `%${oran}`,
       normTR(formatTRY(data.matrah)), normTR(formatTRY(data.kdv)),
     ]);
     autoTable(doc, {
@@ -1067,7 +1068,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: currentLanguage === 'tr' ? 'Hesabı Sil' : 'Delete Account',
       message: t.confirmDeleteAccount,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1164,7 +1165,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: currentLanguage === 'tr' ? 'Kaydı Sil' : 'Delete Entry',
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1231,7 +1232,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1248,7 +1249,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1327,7 +1328,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1361,7 +1362,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1395,7 +1396,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1436,7 +1437,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1470,7 +1471,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1504,7 +1505,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1531,7 +1532,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1593,7 +1594,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const ok = await confirmAction({
       title: t.confirmDeleteAccount,
       message: t.confirmDeleteEntry,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -1888,11 +1889,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const m = !!kod && satisCariKodSet.has(kod);
     const td = !!kod && alisCariKodSet.has(kod);
     if (m && td) return { label: currentLanguage === 'tr' ? 'Müşteri + Tedarikçi' : 'Customer + Supplier', cls: 'bg-purple-100 text-purple-700' };
-    if (td)      return { label: currentLanguage === 'tr' ? 'Tedarikçi' : 'Supplier', cls: 'bg-amber-100 text-amber-700' };
-    if (m)       return { label: currentLanguage === 'tr' ? 'Müşteri' : 'Customer', cls: 'bg-teal-100 text-teal-700' };
+    if (td)      return { label: oc(currentLanguage).tedarikci, cls: 'bg-amber-100 text-amber-700' };
+    if (m)       return { label: oc(currentLanguage).musteri, cls: 'bg-teal-100 text-teal-700' };
     // Satış/alış faturası YOK ama bakiyesi VAR → gider/diğer cari (7 Mehmet gibi).
     // "Gider" demiyoruz (personel/banka/vergi carisi de olabilir) — dürüst etiket "Diğer".
-    if (!!kod && cariBalanceKodSet.has(kod)) return { label: currentLanguage === 'tr' ? 'Diğer' : 'Other', cls: 'bg-gray-100 text-gray-600' };
+    if (!!kod && cariBalanceKodSet.has(kod)) return { label: oc(currentLanguage).diger, cls: 'bg-gray-100 text-gray-600' };
     return null;
   };
   const mikroTedarikcileri: Supplier[] = customers
@@ -2215,7 +2216,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     { key: 'tedarikciler', label: t.tedarikciler, icon: Truck },
     { key: 'urunler', label: t.urunler, icon: Package },
     { key: 'depo', label: t.depo, icon: Package },
-    { key: 'warehouses', label: currentLanguage === 'tr' ? 'Depo Tanımları' : 'Warehouse Definitions', icon: Home },
+    { key: 'warehouses', label: oc(currentLanguage).depo_tanimlari, icon: Home },
     { key: 'transfer', label: t.transfer, icon: ArrowRightLeft },
     { key: 'cekler', label: t.cekler, icon: CreditCard },
     { key: 'calisanlar', label: t.calisanlar, icon: FileText },
@@ -2732,7 +2733,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
               </div>
               <div className="max-h-[60vh] overflow-auto">
                 {drillDown.rows.length === 0 ? (
-                  <div className="py-12 text-center text-gray-400 text-sm">{currentLanguage === 'tr' ? 'Kayıt bulunamadı.' : 'No records found.'}</div>
+                  <div className="py-12 text-center text-gray-400 text-sm">{oc(currentLanguage).kayit_bulunamadi}</div>
                 ) : (
                   <table className="apple-table">
                     <tbody>

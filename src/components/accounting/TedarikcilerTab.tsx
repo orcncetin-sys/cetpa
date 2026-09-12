@@ -4,6 +4,7 @@ import { type Supplier } from '../../types';
 import { paraYaz } from '../../utils/currency';
 import { SortHeader, exportCSV, type AccountingT } from './shared';
 import CariEkstrePanel from '../CariEkstrePanel';
+import { oc } from '../../i18n/ortak';
 
 type SupplierForm = { name: string; company: string; email: string; phone: string; address: string; taxNo: string; notes: string; balance: number; riskGroup: 'Düşük' | 'Orta' | 'Yüksek' };
 type TedarikciSortKey = 'name' | 'company' | 'phone' | 'email' | 'taxNo' | 'balance' | 'riskGroup';
@@ -101,7 +102,7 @@ export default function TedarikcilerTab({
                     className="hidden lg:table-cell"
                   />
                   <SortHeader
-                    label={currentLanguage === 'tr' ? 'Bakiye' : 'Balance'}
+                    label={oc(currentLanguage).bakiye}
                     sortKey="balance"
                     currentSort={{ key: tedarikciSortKey, direction: tedarikciSortDir }}
                     onSort={(key) => toggleTedarikciSort(key as TedarikciSortKey)}
@@ -144,7 +145,7 @@ export default function TedarikcilerTab({
                     </td>
                     <td className="py-2.5 px-3 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => setEkstreTedarikci(s)} title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri' : 'Account statement'} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
+                        <button onClick={() => setEkstreTedarikci(s)} title={oc(currentLanguage).cari_ekstre_hareketleri} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
                         <button onClick={() => { setEditingSupplier(s); setSupplierForm({ name: s.name, company: s.company || '', email: s.email || '', phone: s.phone || '', address: s.address || '', taxNo: s.taxNo || '', notes: s.notes || '', balance: s.balance || 0, riskGroup: s.riskGroup || 'Düşük' }); setShowSupplierModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                         <button onClick={() => deleteSupplier(s.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
                       </div>
@@ -164,7 +165,7 @@ export default function TedarikcilerTab({
             <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[88vh] flex flex-col shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="flex items-start justify-between p-5 border-b border-gray-100 shrink-0">
                 <div>
-                  <h3 className="font-bold text-[#1D1D1F]">{currentLanguage === 'tr' ? 'Cari Ekstre' : 'Account Statement'}</h3>
+                  <h3 className="font-bold text-[#1D1D1F]">{oc(currentLanguage).cari_ekstre}</h3>
                   <p className="text-xs text-gray-500 mt-0.5">{ekstreTedarikci.name}</p>
                 </div>
                 <button onClick={() => setEkstreTedarikci(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
@@ -209,13 +210,13 @@ export default function TedarikcilerTab({
                 ))}
                 {/* Finansal & Risk — MusterilerTab'daki desenin aynısı (2026-08-17) */}
                 <div className="pt-2 border-t border-gray-100">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">{currentLanguage === 'tr' ? 'Finansal & Risk' : 'Financial & Risk'}</p>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">{oc(currentLanguage).finansal_risk}</p>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Açık Bakiye (₺)' : 'Open Balance (₺)'}</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).acik_bakiye}</label>
                     <input type="number" value={supplierForm.balance} onChange={e => setSupplierForm(prev => ({ ...prev, balance: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                   </div>
                   <div className="mt-3">
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">{currentLanguage === 'tr' ? 'Risk Grubu' : 'Risk Group'}</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">{oc(currentLanguage).risk_grubu}</label>
                     <div className="flex gap-2">
                       {(['Düşük', 'Orta', 'Yüksek'] as const).map(g => (
                         <button key={g} type="button"

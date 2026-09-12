@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Eye, Edit2, Trash2, X, Save, MapPin, User, Home } from 'lucide-react';
 import { type Warehouse, type WarehouseItem } from '../../types';
 import { formatTRY, type AccountingT } from './shared';
+import { oc } from '../../i18n/ortak';
 
 type WarehouseForm = { name: string; location: string; manager: string; notes: string };
 
@@ -32,7 +33,7 @@ export default function WarehousesTab({
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Depo Tanımları' : 'Warehouse Definitions'}</h3>
+            <h3 className="font-semibold text-gray-800">{oc(currentLanguage).depo_tanimlari}</h3>
             <button onClick={() => { setEditingWarehouse(null); setWarehouseForm({ name: '', location: '', manager: '', notes: '' }); setShowWarehouseModal(true); }} className="apple-button-primary">
               <Plus size={14} /> {t.add}
             </button>
@@ -62,7 +63,7 @@ export default function WarehousesTab({
                     {depoKalemleri.length} {currentLanguage === 'tr' ? 'kalem' : 'items'}
                   </span>
                   <span className="text-[11px] text-gray-400">
-                    {toplamAdet.toLocaleString('tr-TR')} {currentLanguage === 'tr' ? 'adet' : 'units'}
+                    {toplamAdet.toLocaleString('tr-TR')} {oc(currentLanguage).adet}
                   </span>
                 </div>
               </div>
@@ -94,11 +95,11 @@ export default function WarehousesTab({
                   </div>
                   <div className="bg-gray-50 rounded-xl p-3 text-center">
                     <p className="text-xl font-bold text-[#1D1D1F]">{toplamAdet.toLocaleString('tr-TR')}</p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Toplam Adet' : 'Total Units'}</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">{oc(currentLanguage).toplam_adet}</p>
                   </div>
                   <div className="bg-gray-50 rounded-xl p-3 text-center">
                     <p className="text-xl font-bold text-green-600">{toplamDeger > 0 ? formatTRY(toplamDeger) : '—'}</p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Stok Değeri' : 'Stock Value'}</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">{oc(currentLanguage).stok_degeri}</p>
                   </div>
                 </div>
 
@@ -141,7 +142,7 @@ export default function WarehousesTab({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowWarehouseModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Depo Tanımı' : 'Warehouse'} — {editingWarehouse ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : t.add}</h3>
+                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Depo Tanımı' : 'Warehouse'} — {editingWarehouse ? (oc(currentLanguage).duzenle) : t.add}</h3>
                 <button onClick={() => setShowWarehouseModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
@@ -149,7 +150,7 @@ export default function WarehousesTab({
                   { label: currentLanguage === 'tr' ? 'Depo Adı' : 'Warehouse Name', key: 'name', placeholder: 'Ana Depo' },
                   { label: t.location, key: 'location', placeholder: 'İstanbul' },
                   { label: currentLanguage === 'tr' ? 'Sorumlu' : 'Manager', key: 'manager', placeholder: 'Ahmet Yılmaz' },
-                  { label: currentLanguage === 'tr' ? 'Not' : 'Notes', key: 'notes', placeholder: '...' },
+                  { label: oc(currentLanguage).not, key: 'notes', placeholder: '...' },
                 ].map(f => (
                   <div key={f.key}>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>

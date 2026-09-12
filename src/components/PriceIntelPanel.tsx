@@ -4,6 +4,7 @@ import { authedFetch } from '../lib/dbClient';
 import { suggestPricing, maxBuyPrice } from '../lib/pricingEngine';
 import type { InventoryItem } from '../types';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 interface Props {
   inventory: InventoryItem[];
@@ -153,7 +154,7 @@ export default function PriceIntelPanel({ inventory, currentLanguage, toast }: P
               </button>
             </div>
             <div className="grid grid-cols-2 gap-3 mt-3">
-              <div className="bg-gray-50 rounded-xl p-3"><div className="text-[11px] text-[#86868B]">{tr ? 'Maliyet' : 'Cost'}</div><div className="text-lg font-bold text-[#1D1D1F]">{ftl(cost)}</div></div>
+              <div className="bg-gray-50 rounded-xl p-3"><div className="text-[11px] text-[#86868B]">{oc(tr).maliyet}</div><div className="text-lg font-bold text-[#1D1D1F]">{ftl(cost)}</div></div>
               <div className="bg-gray-50 rounded-xl p-3"><div className="text-[11px] text-[#86868B]">{tr ? 'Mevcut Satış (Retail)' : 'Current Sell'}</div><div className="text-lg font-bold text-[#1D1D1F]">{ftl(currentSell)} {currentSell > 0 && <span className="text-xs text-gray-400">(%{Math.round(((currentSell - cost) / currentSell) * 100)})</span>}</div></div>
             </div>
           </div>
@@ -183,7 +184,7 @@ export default function PriceIntelPanel({ inventory, currentLanguage, toast }: P
               <input type="number" value={manualPrice} onChange={e => setManualPrice(e.target.value)} onKeyDown={e => e.key === 'Enter' && addManual()}
                 aria-label={tr ? 'Manuel rakip fiyat' : 'Manual competitor price'}
                 placeholder={tr ? 'Manuel rakip fiyat ekle...' : 'Add competitor price...'} className="apple-input flex-1 text-sm" />
-              <button onClick={addManual} className="apple-button-secondary px-3 py-2 text-sm flex items-center gap-1"><Plus className="w-3.5 h-3.5" />{tr ? 'Ekle' : 'Add'}</button>
+              <button onClick={addManual} className="apple-button-secondary px-3 py-2 text-sm flex items-center gap-1"><Plus className="w-3.5 h-3.5" />{oc(tr).ekle}</button>
             </div>
           </div>
 
@@ -207,7 +208,7 @@ export default function PriceIntelPanel({ inventory, currentLanguage, toast }: P
                   </div>
                   <div className="text-right">
                     <div className="text-lg font-bold text-brand">{ftl(s.price)}</div>
-                    <div className={`text-[10px] ${s.marginPct < 0 ? 'text-red-500' : 'text-green-600'}`}>{tr ? 'marj' : 'margin'} %{s.marginPct.toFixed(0)}</div>
+                    <div className={`text-[10px] ${s.marginPct < 0 ? 'text-red-500' : 'text-green-600'}`}>{oc(tr).marj_2} %{s.marginPct.toFixed(0)}</div>
                   </div>
                 </div>
               ))}

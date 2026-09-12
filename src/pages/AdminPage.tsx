@@ -22,6 +22,7 @@ import type { Lead, Order, InventoryItem, InventoryMovement, Employee } from '..
 import { tlYaz, kisaTutar } from '../utils/currency';
 import { basHarf } from '../utils/buyukHarf';
 import { zamanDate, zamanMs, tarihSaatYaz } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -167,14 +168,14 @@ export default function AdminPage({
     <div className="lg:hidden overflow-x-auto scrollbar-none">
       <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
         {([
-          { id: 'overview', label: currentLanguage==='tr'?'Genel Bakış':'Overview', icon: BarChart3 },
-          { id: 'users', label: currentLanguage==='tr'?'Kullanıcılar':'Users', icon: Users },
+          { id: 'overview', label: oc(currentLanguage).genel_bakis, icon: BarChart3 },
+          { id: 'users', label: oc(currentLanguage).kullanicilar, icon: Users },
           { id: 'access', label: currentLanguage==='tr'?'Erişim Yönetimi':'Access Control', icon: Shield },
           { id: 'auditlog', label: currentLanguage==='tr'?'Audit Log':'Audit Log', icon: FileText },
           { id: 'system', label: currentLanguage==='tr'?'Sistem Durumu':'System Status', icon: Activity },
           { id: 'company', label: currentLanguage==='tr'?'Şirket Ayarları':'Company Settings', icon: Building2 },
           { id: 'evrak', label: currentLanguage==='tr'?'Evrak Tasarımı':'Document Design', icon: FileText },
-          ...(isSuperAdmin ? [{ id: 'tenants' as const, label: currentLanguage==='tr'?'Müşteri Yönetimi':'Customer Mgmt', icon: Building2 }] : []),
+          ...(isSuperAdmin ? [{ id: 'tenants' as const, label: oc(currentLanguage).musteri_yonetimi, icon: Building2 }] : []),
         ] as const).map(tab => {
           const Icon = tab.icon;
           return (
@@ -193,8 +194,8 @@ export default function AdminPage({
         {/* Department performance KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: currentLanguage==='tr'?'Toplam Sipariş':'Total Orders', value: String(orders.length), color: 'text-brand', icon: Package, tab: 'orders' },
-            { label: currentLanguage==='tr'?'Aktif Müşteri':'Active Customers', value: String(new Set(orders.map(o=>o.customerName).filter(Boolean)).size), color: 'text-blue-600', icon: Users, tab: 'crm' },
+            { label: oc(currentLanguage).toplam_siparis, value: String(orders.length), color: 'text-brand', icon: Package, tab: 'orders' },
+            { label: oc(currentLanguage).aktif_musteri, value: String(new Set(orders.map(o=>o.customerName).filter(Boolean)).size), color: 'text-blue-600', icon: Users, tab: 'crm' },
             { label: currentLanguage==='tr'?'Envanter':'Inventory Items', value: String(inventory.length), color: 'text-purple-600', icon: List, tab: 'inventory' },
           ].map((kpi,i) => {
             const Icon = kpi.icon;
@@ -218,7 +219,7 @@ export default function AdminPage({
             return (
               <div className="apple-card p-4 cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('reports')}>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-gray-500 font-medium">{currentLanguage==='tr'?'Toplam Ciro':'Total Revenue'}</span>
+                  <span className="text-xs text-gray-500 font-medium">{oc(currentLanguage).toplam_ciro}</span>
                   <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5" onClick={e => e.stopPropagation()}>
                     {(['TRY','USD','EUR'] as const).map(c => (
                       <button key={c} onClick={() => setKpiCurrency(c)}
@@ -240,9 +241,9 @@ export default function AdminPage({
             <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Departman Performansı':'Department Performance'}</h3>
             <div className="space-y-3">
               {[
-                { name: currentLanguage==='tr'?'CRM & Satış':'CRM & Sales', value: orders.length, max: Math.max(orders.length, 1), color: 'bg-brand', unit: currentLanguage==='tr'?'sipariş':'orders' },
-                { name: currentLanguage==='tr'?'Envanter':'Inventory', value: inventory.filter(i=>i.stockLevel>i.lowStockThreshold).length, max: Math.max(inventory.length,1), color: 'bg-blue-500', unit: currentLanguage==='tr'?'aktif ürün':'active items' },
-                { name: currentLanguage==='tr'?'Muhasebe':'Accounting', value: orders.length > 0 ? Math.round((orders.filter(o => o.status === 'Delivered').length / orders.length) * 100) : 0, max: 100, color: 'bg-green-500', unit: '%' },
+                { name: oc(currentLanguage).crm_satis, value: orders.length, max: Math.max(orders.length, 1), color: 'bg-brand', unit: oc(currentLanguage).siparis },
+                { name: oc(currentLanguage).envanter, value: inventory.filter(i=>i.stockLevel>i.lowStockThreshold).length, max: Math.max(inventory.length,1), color: 'bg-blue-500', unit: currentLanguage==='tr'?'aktif ürün':'active items' },
+                { name: oc(currentLanguage).muhasebe, value: orders.length > 0 ? Math.round((orders.filter(o => o.status === 'Delivered').length / orders.length) * 100) : 0, max: 100, color: 'bg-green-500', unit: '%' },
               ].map((dept,i) => (
                 <div key={i}>
                   <div className="flex items-center justify-between text-sm mb-1">
@@ -283,9 +284,9 @@ export default function AdminPage({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  <th className="text-left py-2 px-3 text-gray-500 font-medium">{currentLanguage==='tr'?'Müşteri':'Customer'}</th>
-                  <th className="text-right py-2 px-3 text-gray-500 font-medium">{currentLanguage==='tr'?'Tutar':'Amount'}</th>
-                  <th className="text-center py-2 px-3 text-gray-500 font-medium hidden sm:table-cell">{currentLanguage==='tr'?'Durum':'Status'}</th>
+                  <th className="text-left py-2 px-3 text-gray-500 font-medium">{oc(currentLanguage).musteri}</th>
+                  <th className="text-right py-2 px-3 text-gray-500 font-medium">{oc(currentLanguage).tutar}</th>
+                  <th className="text-center py-2 px-3 text-gray-500 font-medium hidden sm:table-cell">{oc(currentLanguage).durum}</th>
                 </tr>
               </thead>
               <tbody>
@@ -312,17 +313,17 @@ export default function AdminPage({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-bold text-gray-800">{currentLanguage==='tr'?'Kullanıcı Yönetimi':'User Management'}</h3>
-              <p className="text-xs text-gray-400 mt-0.5">{firestoreUsers.length} {currentLanguage==='tr'?'kullanıcı':'users'}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{firestoreUsers.length} {oc(currentLanguage).kullanici}</p>
             </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-[560px] w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  <th className="text-left py-2 px-3 text-gray-500 font-medium">{currentLanguage==='tr'?'Kullanıcı':'User'}</th>
+                  <th className="text-left py-2 px-3 text-gray-500 font-medium">{oc(currentLanguage).kullanici_2}</th>
                   <th className="text-left py-2 px-3 text-gray-500 font-medium hidden sm:table-cell">E-posta</th>
-                  <th className="text-center py-2 px-3 text-gray-500 font-medium">{currentLanguage==='tr'?'Rol':'Role'}</th>
-                  <th className="text-center py-2 px-3 text-gray-500 font-medium">{currentLanguage==='tr'?'İşlem':'Action'}</th>
+                  <th className="text-center py-2 px-3 text-gray-500 font-medium">{oc(currentLanguage).rol}</th>
+                  <th className="text-center py-2 px-3 text-gray-500 font-medium">{oc(currentLanguage).islem}</th>
                 </tr>
               </thead>
               <tbody>
@@ -376,7 +377,7 @@ export default function AdminPage({
                           }}
                           className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors"
                         >
-                          {currentLanguage === 'tr' ? 'Sil' : 'Delete'}
+                          {oc(currentLanguage).sil}
                         </button>
                       )}
                       {u.id === user?.uid && (
@@ -386,7 +387,7 @@ export default function AdminPage({
                         onClick={() => setAcikKullanici(acikKullanici === u.id ? null : u.id as string)}
                         className="ml-1 text-[10px] font-bold px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
                       >
-                        {acikKullanici === u.id ? (currentLanguage==='tr'?'Gizle':'Hide') : (currentLanguage==='tr'?'Göster':'Show')}
+                        {acikKullanici === u.id ? (oc(currentLanguage).gizle) : (currentLanguage==='tr'?'Göster':'Show')}
                       </button>
                     </td>
                   </tr>
@@ -399,8 +400,8 @@ export default function AdminPage({
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px]">
                           <div><span className="text-gray-400 font-bold uppercase block">UID</span><span className="font-mono text-gray-600 break-all">{u.id as string}</span></div>
                           <div><span className="text-gray-400 font-bold uppercase block">{currentLanguage==='tr'?'Ad':'Name'}</span><span className="text-gray-600">{(u.displayName as string)||'—'}</span></div>
-                          <div><span className="text-gray-400 font-bold uppercase block">{currentLanguage==='tr'?'Durum':'Status'}</span><span className="text-gray-600">{(u.status as string)||'—'}</span></div>
-                          <div><span className="text-gray-400 font-bold uppercase block">{currentLanguage==='tr'?'Firma':'Company'}</span><span className="font-mono text-gray-600 break-all">{(u.companyId as string)||'—'}</span></div>
+                          <div><span className="text-gray-400 font-bold uppercase block">{oc(currentLanguage).durum}</span><span className="text-gray-600">{(u.status as string)||'—'}</span></div>
+                          <div><span className="text-gray-400 font-bold uppercase block">{oc(currentLanguage).firma}</span><span className="font-mono text-gray-600 break-all">{(u.companyId as string)||'—'}</span></div>
                         </div>
                       </td>
                     </tr>
@@ -458,7 +459,7 @@ export default function AdminPage({
               }}
               className="apple-button-primary text-sm px-5 disabled:opacity-40 whitespace-nowrap"
             >
-              {yeniKullaniciMesgul ? '…' : (currentLanguage==='tr'?'Oluştur':'Create')}
+              {yeniKullaniciMesgul ? '…' : (oc(currentLanguage).olustur)}
             </button>
           </div>
           {yeniKullaniciDurum && (
@@ -469,7 +470,7 @@ export default function AdminPage({
                   <code className="flex-1 bg-white rounded-lg px-2 py-1 text-[10px] break-all border border-green-100">{yeniKullaniciDurum.link}</code>
                   <button onClick={() => { void navigator.clipboard.writeText(yeniKullaniciDurum.link!); }}
                     className="text-[10px] font-bold px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 transition-colors shrink-0">
-                    {currentLanguage==='tr'?'Kopyala':'Copy'}
+                    {oc(currentLanguage).kopyala}
                   </button>
                 </div>
               )}
@@ -675,9 +676,9 @@ export default function AdminPage({
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50">
                     <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase">{tr571?'Zaman':'Time'}</th>
-                    <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase hidden sm:table-cell">{tr571?'Kullanıcı':'User'}</th>
+                    <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase hidden sm:table-cell">{oc(tr571).kullanici_2}</th>
                     <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase">{tr571?'Aksiyon':'Action'}</th>
-                    <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase hidden md:table-cell">{tr571?'Detay':'Detail'}</th>
+                    <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase hidden md:table-cell">{oc(tr571).detay}</th>
                     <th className="text-left py-2 px-3 text-[10px] font-bold text-gray-400 uppercase hidden lg:table-cell">{tr571?'IP / Cihaz':'IP / Device'}</th>
                   </tr>
                 </thead>
@@ -749,7 +750,7 @@ export default function AdminPage({
             className="apple-button-secondary flex items-center gap-2 text-xs"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${healthLoading ? 'animate-spin' : ''}`} />
-            {currentLanguage === 'tr' ? 'Yenile' : 'Refresh'}
+            {oc(currentLanguage).yenile}
           </button>
         </div>
 
@@ -759,7 +760,7 @@ export default function AdminPage({
             {
               name: 'PostgreSQL',
               ok: healthData ? (healthData.postgres ?? healthData.firebase) : null,
-              status: !healthData ? (currentLanguage==='tr' ? 'Bekleniyor' : 'Pending') : (healthData.postgres ?? healthData.firebase) ? (currentLanguage==='tr' ? 'Aktif' : 'Active') : (currentLanguage==='tr' ? 'Bağlantı Hatası' : 'Connection Error'),
+              status: !healthData ? (oc(currentLanguage).bekleniyor) : (healthData.postgres ?? healthData.firebase) ? (oc(currentLanguage).aktif) : (currentLanguage==='tr' ? 'Bağlantı Hatası' : 'Connection Error'),
               desc: currentLanguage==='tr' ? 'Gerçek zamanlı veritabanı (kendi sunucumuz)' : 'Real-time database (self-hosted)',
               optional: false,
               settingsTab: null as string|null,
@@ -775,7 +776,7 @@ export default function AdminPage({
             {
               name: 'TCMB Kur API',
               ok: !!exchangeRates as boolean|null,
-              status: exchangeRates ? (currentLanguage==='tr' ? 'Bağlı' : 'Connected') : (currentLanguage==='tr' ? 'Bekleniyor' : 'Pending'),
+              status: exchangeRates ? (oc(currentLanguage).bagli) : (oc(currentLanguage).bekleniyor),
               // Kurun KENDİSİNİ gösteren etiket: `|| 0` kur gelmeden "1 USD = ₺0.00"
               // gibi sahte kesinlik üretiyordu. Geçerli kur yoksa rakam HİÇ basılmaz.
               desc: (exchangeRates?.USD && isFinite(exchangeRates.USD) && exchangeRates.USD > 0)
@@ -795,7 +796,7 @@ export default function AdminPage({
             {
               name: 'Resend (E-posta)',
               ok: healthData ? (healthData.resend ? true : null) : null,
-              status: !healthData ? '…' : healthData.resend ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'Yapılandırılmamış' : 'Not Configured'),
+              status: !healthData ? '…' : healthData.resend ? (oc(currentLanguage).yapilandirildi) : (oc(currentLanguage).yapilandirilmamis),
               desc: currentLanguage==='tr' ? 'Haftalık rapor & davet emaili' : 'Weekly report & invite emails',
               optional: true,
               settingsTab: 'settings' as string|null,
@@ -803,7 +804,7 @@ export default function AdminPage({
             {
               name: 'WhatsApp (Twilio)',
               ok: healthData ? (healthData.whatsapp ? true : null) : null,
-              status: !healthData ? '…' : healthData.whatsapp ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'Yapılandırılmamış' : 'Not Configured'),
+              status: !healthData ? '…' : healthData.whatsapp ? (oc(currentLanguage).yapilandirildi) : (oc(currentLanguage).yapilandirilmamis),
               desc: currentLanguage==='tr' ? 'Kargo bildirim mesajları' : 'Shipping notification messages',
               optional: true,
               settingsTab: 'settings' as string|null,
@@ -811,7 +812,7 @@ export default function AdminPage({
             {
               name: 'İyzico (Ödeme)',
               ok: healthData ? (healthData.iyzico ? true : null) : null,
-              status: !healthData ? '…' : healthData.iyzico ? (currentLanguage==='tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage==='tr' ? 'Yapılandırılmamış' : 'Not Configured'),
+              status: !healthData ? '…' : healthData.iyzico ? (oc(currentLanguage).yapilandirildi) : (oc(currentLanguage).yapilandirilmamis),
               desc: currentLanguage==='tr' ? 'B2B ödeme entegrasyonu' : 'B2B payment integration',
               optional: true,
               settingsTab: 'settings' as string|null,
@@ -887,7 +888,7 @@ export default function AdminPage({
         {(() => {
           const tr600 = currentLanguage === 'tr';
           const integrations600 = [
-            { name: 'Shopify', connected: !!(healthData as {shopify?:boolean}|null)?.shopify, lastSync: tr600?'Entegrasyon':'Integration', icon: '🛒', desc: tr600?'E-ticaret entegrasyonu':'E-commerce integration' },
+            { name: 'Shopify', connected: !!(healthData as {shopify?:boolean}|null)?.shopify, lastSync: tr600?'Entegrasyon':'Integration', icon: '🛒', desc: oc(tr600).e_ticaret_entegrasyonu },
             { name: 'Mikro', connected: !!(mikroSettings as {connected?:boolean})?.connected, lastSync: (mikroSettings as {lastSync?:string})?.lastSync ? tarihSaatYaz((mikroSettings as {lastSync:string}).lastSync) : null, icon: '💼', desc: tr600?'ERP entegrasyonu (JumpBulut)':'ERP integration (JumpBulut)' },
             { name: 'Luca', connected: !!(lucaSettings as {connected?:boolean})?.connected, lastSync: (lucaSettings as {lastSync?:string})?.lastSync ? tarihSaatYaz((lucaSettings as {lastSync:string}).lastSync) : null, icon: '📒', desc: tr600?'Muhasebe entegrasyonu':'Accounting integration' },
             { name: 'Logo', connected: false, lastSync: null, icon: '🐯', desc: tr600?'Logo Tiger/Go ERP':'Logo Tiger/Go ERP' },
@@ -909,7 +910,7 @@ export default function AdminPage({
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-lg">{integ.icon}</span>
                       <p className="font-bold text-gray-800 text-sm">{integ.name}</p>
-                      <span className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full ${integ.connected?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}`}>{integ.connected?(tr600?'Bağlı':'Connected'):(tr600?'Bağlı Değil':'Not Connected')}</span>
+                      <span className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full ${integ.connected?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}`}>{integ.connected?(oc(tr600).bagli):(oc(tr600).bagli_degil)}</span>
                     </div>
                     <p className="text-xs text-gray-500">{integ.desc}</p>
                     {integ.lastSync&&<p className="text-[10px] text-gray-400 mt-1">{tr600?'Son sync:':'Last sync:'} {integ.lastSync}</p>}
@@ -928,7 +929,7 @@ export default function AdminPage({
             </h3>
             <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${clientErrors.length > 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
               {clientErrors.length > 0
-                ? `${clientErrors.length} ${currentLanguage === 'tr' ? 'kayıt' : 'records'}`
+                ? `${clientErrors.length} ${oc(currentLanguage).kayit}`
                 : (currentLanguage === 'tr' ? 'Temiz' : 'Clean')}
             </span>
           </div>
@@ -987,7 +988,7 @@ export default function AdminPage({
               <p className="text-xs text-gray-400 mb-3">{currentLanguage==='tr'?'PNG, JPG, SVG — maks 2MB':'PNG, JPG, SVG — max 2MB'}</p>
               <label className="cursor-pointer apple-button-primary">
                 <Upload className="w-3.5 h-3.5" />
-                {isUploadingLogo ? (currentLanguage==='tr'?'Yükleniyor...':'Uploading...') : (currentLanguage==='tr'?'Dosya Seç':'Choose File')}
+                {isUploadingLogo ? (currentLanguage==='tr'?'Yükleniyor...':'Uploading...') : (oc(currentLanguage).dosya_sec)}
                 <input type="file" accept="image/*" className="hidden" disabled={isUploadingLogo}
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
@@ -1018,12 +1019,12 @@ export default function AdminPage({
           <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Şirket Bilgileri':'Company Information'}</h3>
           <div className="space-y-3">
             {[
-              { label: currentLanguage==='tr'?'Şirket Adı':'Company Name', key: 'companyName', placeholder: 'CETPA A.Ş.' },
-              { label: currentLanguage==='tr'?'Vergi No':'Tax No', key: 'taxNo', placeholder: '1234567890' },
-              { label: currentLanguage==='tr'?'Vergi Dairesi':'Tax Office', key: 'taxOffice', placeholder: 'Kadıköy' },
-              { label: currentLanguage==='tr'?'Adres':'Address', key: 'address', placeholder: 'İstanbul, Türkiye' },
+              { label: oc(currentLanguage).sirket_adi, key: 'companyName', placeholder: 'CETPA A.Ş.' },
+              { label: oc(currentLanguage).vergi_no, key: 'taxNo', placeholder: '1234567890' },
+              { label: oc(currentLanguage).vergi_dairesi, key: 'taxOffice', placeholder: 'Kadıköy' },
+              { label: oc(currentLanguage).adres, key: 'address', placeholder: 'İstanbul, Türkiye' },
               { label: 'E-posta', key: 'email', placeholder: 'info@cetpa.com.tr' },
-              { label: currentLanguage==='tr'?'Telefon':'Phone', key: 'phone', placeholder: '+90 5xx xxx xx xx' },
+              { label: oc(currentLanguage).telefon, key: 'phone', placeholder: '+90 5xx xxx xx xx' },
               { label: currentLanguage==='tr'?'IBAN':'IBAN', key: 'iban', placeholder: 'TR00 0000 0000 0000 0000 0000 00' },
               { label: currentLanguage==='tr'?'Web Sitesi':'Website', key: 'website', placeholder: 'https://cetpa.com.tr' },
             ].map(f => (
@@ -1056,7 +1057,7 @@ export default function AdminPage({
                 try {
                   await setDoc(doc(db, 'settings', 'app'), { companySettings }, { merge: true });
                   logAuditAction('Ayar Değişikliği', 'Şirket ayarları kaydedildi');
-                  toast(currentLanguage==='tr'?'Ayarlar kaydedildi!':'Settings saved!', 'success');
+                  toast(oc(currentLanguage).ayarlar_kaydedildi, 'success');
                 } catch (error) {
                   handleFirestoreError(error, OperationType.WRITE, 'settings/app');
                   toast(currentLanguage==='tr'?'Hata oluştu!':'Error occurred!', 'error');
@@ -1064,7 +1065,7 @@ export default function AdminPage({
               }}
               className="apple-button-primary w-full mt-2"
             >
-              {currentLanguage==='tr'?'Kaydet':'Save'}
+              {oc(currentLanguage).kaydet}
             </button>
           </div>
         </div>

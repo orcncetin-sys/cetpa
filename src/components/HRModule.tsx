@@ -29,6 +29,7 @@ import { cn } from '../lib/utils';
 import MikroPushButton from './MikroPushButton';
 import { izinTalepPayload } from '../services/mikroEvrak';
 import { useMikroPersonel } from '../hooks/useMikroPersonel';
+import { oc } from '../i18n/ortak';
 
 // İzin türü → Mikro kodu eşlemesi mikroEvrak.ts'te (TEK KAYNAK, Faz 1)
 
@@ -232,25 +233,25 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
   };
 
   const t = {
-    employees: currentLanguage === 'tr' ? 'Çalışanlar' : 'Employees',
-    add: currentLanguage === 'tr' ? 'Ekle' : 'Add',
-    save: currentLanguage === 'tr' ? 'Kaydet' : 'Save',
-    cancel: currentLanguage === 'tr' ? 'İptal' : 'Cancel',
-    name: currentLanguage === 'tr' ? 'Ad Soyad' : 'Full Name',
-    position: currentLanguage === 'tr' ? 'Pozisyon' : 'Position',
-    department: currentLanguage === 'tr' ? 'Departman' : 'Department',
+    employees: oc(currentLanguage).calisanlar,
+    add: oc(currentLanguage).ekle,
+    save: oc(currentLanguage).kaydet,
+    cancel: oc(currentLanguage).iptal,
+    name: oc(currentLanguage).ad_soyad,
+    position: oc(currentLanguage).pozisyon,
+    department: oc(currentLanguage).departman,
     salary: currentLanguage === 'tr' ? 'Maaş' : 'Salary',
-    startDate: currentLanguage === 'tr' ? 'Başlangıç' : 'Start Date',
-    endDate: currentLanguage === 'tr' ? 'Bitiş' : 'End Date',
-    status: currentLanguage === 'tr' ? 'Durum' : 'Status',
-    noRecords: currentLanguage === 'tr' ? 'Kayıt bulunamadı.' : 'No records found.',
+    startDate: oc(currentLanguage).baslangic,
+    endDate: oc(currentLanguage).bitis,
+    status: oc(currentLanguage).durum,
+    noRecords: oc(currentLanguage).kayit_bulunamadi,
     confirmDelete: currentLanguage === 'tr' ? 'Bu kaydı silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this record?',
-    payroll: currentLanguage === 'tr' ? 'Bordro' : 'Payroll',
-    calculate: currentLanguage === 'tr' ? 'Hesapla' : 'Calculate',
-    netSalary: currentLanguage === 'tr' ? 'Net Maaş' : 'Net Salary',
+    payroll: oc(currentLanguage).bordro,
+    calculate: oc(currentLanguage).hesapla,
+    netSalary: oc(currentLanguage).net_maas,
     bonus: currentLanguage === 'tr' ? 'Prim/Ek' : 'Bonus/Extra',
     deduction: currentLanguage === 'tr' ? 'Kesinti' : 'Deduction',
-    month: currentLanguage === 'tr' ? 'Ay' : 'Month',
+    month: oc(currentLanguage).ay,
     year: currentLanguage === 'tr' ? 'Yıl' : 'Year',
   };
 
@@ -285,7 +286,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
     const ok = await confirmAction({
       title: currentLanguage === 'tr' ? 'Çalışanı Sil' : 'Delete Employee',
       message: t.confirmDelete,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -317,7 +318,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
   };
 
   const handleSaveEmployee = async () => {
-    if (!isAuthenticated) return showToast(currentLanguage === 'tr' ? 'Lütfen giriş yapın.' : 'Please login.', 'error');
+    if (!isAuthenticated) return showToast(oc(currentLanguage).lutfen_giris_yapin, 'error');
     if (!employeeForm.name?.trim()) return showToast(currentLanguage === 'tr' ? 'Lütfen isim girin.' : 'Please enter a name.', 'error');
     try {
       await addDoc(collection(db, 'employees'), {
@@ -338,8 +339,8 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
   };
 
   const handleSaveLeave = async () => {
-    if (!isAuthenticated) return showToast(currentLanguage === 'tr' ? 'Lütfen giriş yapın.' : 'Please login.', 'error');
-    if (!leaveForm.employeeId) return showToast(currentLanguage === 'tr' ? 'Lütfen çalışan seçin.' : 'Please select an employee.', 'error');
+    if (!isAuthenticated) return showToast(oc(currentLanguage).lutfen_giris_yapin, 'error');
+    if (!leaveForm.employeeId) return showToast(oc(currentLanguage).lutfen_calisan_secin, 'error');
     const emp = employees.find(e => e.id === leaveForm.employeeId);
     // Gün sayısını başlangıç/bitiş tarihinden hesapla (dahil); önce hep 1 kalıyordu.
     // Tarihlerden biri bos ise NaN uretilir - Date.parse(undefined)'in zaten
@@ -378,8 +379,8 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
   };
 
   const handleAddPayroll = async () => {
-    if (!isAuthenticated) return showToast(currentLanguage === 'tr' ? 'Lütfen giriş yapın.' : 'Please login.', 'error');
-    if (!payrollForm.employeeId) return showToast(currentLanguage === 'tr' ? 'Lütfen çalışan seçin.' : 'Please select an employee.', 'error');
+    if (!isAuthenticated) return showToast(oc(currentLanguage).lutfen_giris_yapin, 'error');
+    if (!payrollForm.employeeId) return showToast(oc(currentLanguage).lutfen_calisan_secin, 'error');
     const emp = employees.find(e => e.id === payrollForm.employeeId);
     
     // Calculate performance bonus
@@ -410,8 +411,8 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
   };
 
   const handleSaveTraining = async () => {
-    if (!isAuthenticated) return showToast(currentLanguage === 'tr' ? 'Lütfen giriş yapın.' : 'Please login.', 'error');
-    if (!trainingForm.employeeId) return showToast(currentLanguage === 'tr' ? 'Lütfen çalışan seçin.' : 'Please select an employee.', 'error');
+    if (!isAuthenticated) return showToast(oc(currentLanguage).lutfen_giris_yapin, 'error');
+    if (!trainingForm.employeeId) return showToast(oc(currentLanguage).lutfen_calisan_secin, 'error');
     const emp = employees.find(e => e.id === trainingForm.employeeId);
     try {
       if (editingTrainingId) {
@@ -440,8 +441,8 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
   };
 
   const handleSaveTravel = async () => {
-    if (!isAuthenticated) return showToast(currentLanguage === 'tr' ? 'Lütfen giriş yapın.' : 'Please login.', 'error');
-    if (!travelForm.employeeId) return showToast(currentLanguage === 'tr' ? 'Lütfen çalışan seçin.' : 'Please select an employee.', 'error');
+    if (!isAuthenticated) return showToast(oc(currentLanguage).lutfen_giris_yapin, 'error');
+    if (!travelForm.employeeId) return showToast(oc(currentLanguage).lutfen_calisan_secin, 'error');
     const emp = employees.find(e => e.id === travelForm.employeeId);
     try {
       if (editingTravelId) {
@@ -553,7 +554,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                       <SortHeader label={t.salary} sortKey="salary" currentSort={employeesSort} onSort={(k) => toggleSort(employeesSort, k, setEmployeesSort)} align="right" />
                       <SortHeader label={t.startDate} sortKey="startDate" currentSort={employeesSort} onSort={(k) => toggleSort(employeesSort, k, setEmployeesSort)} align="center" />
                       <SortHeader label={t.status} sortKey="status" currentSort={employeesSort} onSort={(k) => toggleSort(employeesSort, k, setEmployeesSort)} align="center" />
-                      <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'İşlemler' : 'Actions'}</th>
+                      <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{oc(currentLanguage).islemler}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -715,7 +716,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                       <SortHeader label={t.deduction} sortKey="deduction" currentSort={payrollSort} onSort={(k) => toggleSort(payrollSort, k, setPayrollSort)} align="right" />
                       <SortHeader label={t.netSalary} sortKey="netSalary" currentSort={payrollSort} onSort={(k) => toggleSort(payrollSort, k, setPayrollSort)} align="right" />
                       <SortHeader label={t.status} sortKey="status" currentSort={payrollSort} onSort={(k) => toggleSort(payrollSort, k, setPayrollSort)} align="center" />
-                      <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'İşlemler' : 'Actions'}</th>
+                      <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{oc(currentLanguage).islemler}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -739,7 +740,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                             {p.status === 'Taslak' && (
                               <button 
                                 onClick={async () => {
-                                  if (!isAuthenticated) return showToast(currentLanguage === 'tr' ? 'Lütfen giriş yapın.' : 'Please login.', 'error');
+                                  if (!isAuthenticated) return showToast(oc(currentLanguage).lutfen_giris_yapin, 'error');
                                   try {
                                     await updateDoc(doc(db, 'payrolls', p.id as string), { status: 'Ödendi' });
                                     showToast(currentLanguage === 'tr' ? 'Bordro ödendi olarak işaretlendi.' : 'Payroll marked as paid.');
@@ -758,7 +759,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                                 const ok = await confirmAction({
                                   title: currentLanguage === 'tr' ? 'Bordro Sil' : 'Delete Payroll',
                                   message: t.confirmDelete,
-                                  confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+                                  confirmLabel: oc(currentLanguage).sil,
                                   variant: 'danger',
                                 });
                                 if (!ok) return;
@@ -767,7 +768,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                                   showToast(currentLanguage === 'tr' ? 'Bordro silindi.' : 'Payroll deleted.');
                                 } catch (error) {
                                   logFirestoreError(error, OperationType.DELETE, `payrolls/${p.id}`);
-                                  showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+                                  showToast(oc(currentLanguage).hata_olustu_2, 'error');
                                 }
                               }}
                               className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
@@ -802,7 +803,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                   onClick={() => setShowLeaveModal(true)}
                   className="apple-button-primary"
                 >
-                  <Plus size={16} /> {currentLanguage === 'tr' ? 'Yeni İzin Talebi' : 'New Leave Request'}
+                  <Plus size={16} /> {oc(currentLanguage).yeni_izin_talebi}
                 </button>
              </div>
 
@@ -812,12 +813,12 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                    <thead>
                      <tr className="bg-gray-50 border-b border-gray-100">
                        <SortHeader label={t.name} sortKey="employeeName" currentSort={leaveSort} onSort={(k) => toggleSort(leaveSort, k, setLeaveSort)} />
-                       <SortHeader label={currentLanguage === 'tr' ? 'Tür' : 'Type'} sortKey="type" currentSort={leaveSort} onSort={(k) => toggleSort(leaveSort, k, setLeaveSort)} />
+                       <SortHeader label={oc(currentLanguage).tur} sortKey="type" currentSort={leaveSort} onSort={(k) => toggleSort(leaveSort, k, setLeaveSort)} />
                        <SortHeader label={currentLanguage === 'tr' ? 'Başlangıç' : 'Start'} sortKey="startDate" currentSort={leaveSort} onSort={(k) => toggleSort(leaveSort, k, setLeaveSort)} align="center" />
                        <SortHeader label={currentLanguage === 'tr' ? 'Bitiş' : 'End'} sortKey="endDate" currentSort={leaveSort} onSort={(k) => toggleSort(leaveSort, k, setLeaveSort)} align="center" />
-                       <SortHeader label={currentLanguage === 'tr' ? 'Gün' : 'Days'} sortKey="days" currentSort={leaveSort} onSort={(k) => toggleSort(leaveSort, k, setLeaveSort)} align="right" />
+                       <SortHeader label={oc(currentLanguage).gun_2} sortKey="days" currentSort={leaveSort} onSort={(k) => toggleSort(leaveSort, k, setLeaveSort)} align="right" />
                        <SortHeader label={t.status} sortKey="status" currentSort={leaveSort} onSort={(k) => toggleSort(leaveSort, k, setLeaveSort)} align="center" />
-                       <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'İşlemler' : 'Actions'}</th>
+                       <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{oc(currentLanguage).islemler}</th>
                      </tr>
                    </thead>
                    <tbody className="divide-y divide-gray-50">
@@ -865,14 +866,14 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                              <button
                                onClick={() => updateDoc(doc(db, 'leaveRequests', req.id as string), { status: 'Onaylandı', approvalStatus: 'Onaylandı' })}
                                className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
-                               title={currentLanguage === 'tr' ? 'Onayla' : 'Approve'}
+                               title={oc(currentLanguage).onayla}
                              >
                                <CheckCircle size={14} />
                              </button>
                              <button 
                                onClick={() => updateDoc(doc(db, 'leaveRequests', req.id as string), { status: 'Reddedildi', approvalStatus: 'Reddedildi' })}
                                className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                               title={currentLanguage === 'tr' ? 'Reddet' : 'Reject'}
+                               title={oc(currentLanguage).reddet}
                              >
                                <X size={14} />
                              </button>
@@ -893,7 +894,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                                  const ok = await confirmAction({
                                    title: currentLanguage === 'tr' ? 'İzin Sil' : 'Delete Leave',
                                    message: t.confirmDelete,
-                                   confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+                                   confirmLabel: oc(currentLanguage).sil,
                                    variant: 'danger',
                                  });
                                  if (!ok) return;
@@ -902,11 +903,11 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                                    showToast(currentLanguage === 'tr' ? 'İzin silindi.' : 'Leave deleted.');
                                  } catch (error) {
                                    logFirestoreError(error, OperationType.DELETE, `leaveRequests/${req.id}`);
-                                   showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+                                   showToast(oc(currentLanguage).hata_olustu_2, 'error');
                                  }
                                }}
                                className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                               title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
+                               title={oc(currentLanguage).sil}
                              >
                                <Trash2 size={14} />
                              </button>
@@ -948,7 +949,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                 />
               </div>
               <button onClick={() => setShowTrainingModal(true)} className="apple-button-primary">
-                <Plus size={16} /> {currentLanguage === 'tr' ? 'Yeni Eğitim' : 'New Training'}
+                <Plus size={16} /> {oc(currentLanguage).yeni_egitim}
               </button>
             </div>
 
@@ -958,11 +959,11 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
                       <SortHeader label={t.name} sortKey="employeeName" currentSort={trainingSort} onSort={(k) => toggleSort(trainingSort, k, setTrainingSort)} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Eğitim Adı' : 'Training Title'} sortKey="title" currentSort={trainingSort} onSort={(k) => toggleSort(trainingSort, k, setTrainingSort)} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Sağlayıcı' : 'Provider'} sortKey="provider" currentSort={trainingSort} onSort={(k) => toggleSort(trainingSort, k, setTrainingSort)} />
+                      <SortHeader label={oc(currentLanguage).egitim_adi} sortKey="title" currentSort={trainingSort} onSort={(k) => toggleSort(trainingSort, k, setTrainingSort)} />
+                      <SortHeader label={oc(currentLanguage).saglayici} sortKey="provider" currentSort={trainingSort} onSort={(k) => toggleSort(trainingSort, k, setTrainingSort)} />
                       <SortHeader label={t.status} sortKey="status" currentSort={trainingSort} onSort={(k) => toggleSort(trainingSort, k, setTrainingSort)} align="center" />
                       <SortHeader label={t.startDate} sortKey="date" currentSort={trainingSort} onSort={(k) => toggleSort(trainingSort, k, setTrainingSort)} align="center" />
-                      <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'İşlemler' : 'Actions'}</th>
+                      <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{oc(currentLanguage).islemler}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -999,7 +1000,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                                 const ok = await confirmAction({
                                   title: currentLanguage === 'tr' ? 'Eğitim Sil' : 'Delete Training',
                                   message: t.confirmDelete,
-                                  confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+                                  confirmLabel: oc(currentLanguage).sil,
                                   variant: 'danger',
                                 });
                                 if (!ok) return;
@@ -1008,11 +1009,11 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                                   showToast(currentLanguage === 'tr' ? 'Eğitim silindi.' : 'Training deleted.');
                                 } catch (error) {
                                   logFirestoreError(error, OperationType.DELETE, `trainings/${tr.id}`);
-                                  showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+                                  showToast(oc(currentLanguage).hata_olustu_2, 'error');
                                 }
                               }}
                               className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                              title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
+                              title={oc(currentLanguage).sil}
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1041,7 +1042,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                 />
               </div>
               <button onClick={() => setShowTravelModal(true)} className="apple-button-primary">
-                <Plus size={16} /> {currentLanguage === 'tr' ? 'Yeni Talep' : 'New Request'}
+                <Plus size={16} /> {oc(currentLanguage).yeni_talep}
               </button>
             </div>
 
@@ -1056,7 +1057,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                       <SortHeader label={t.endDate} sortKey="endDate" currentSort={travelSort} onSort={(k) => toggleSort(travelSort, k, setTravelSort)} align="center" />
                       <SortHeader label={currentLanguage === 'tr' ? 'Avans' : 'Advance'} sortKey="advanceAmount" currentSort={travelSort} onSort={(k) => toggleSort(travelSort, k, setTravelSort)} align="right" />
                       <SortHeader label={t.status} sortKey="status" currentSort={travelSort} onSort={(k) => toggleSort(travelSort, k, setTravelSort)} align="center" />
-                      <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'İşlemler' : 'Actions'}</th>
+                      <th className="py-3 px-5 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{oc(currentLanguage).islemler}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -1082,14 +1083,14 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                                 <button 
                                   onClick={() => updateDoc(doc(db, 'travelRequests', req.id), { status: 'Onaylandı', approvalStatus: 'Onaylandı' })}
                                   className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
-                                  title={currentLanguage === 'tr' ? 'Onayla' : 'Approve'}
+                                  title={oc(currentLanguage).onayla}
                                 >
                                   <CheckCircle size={14} />
                                 </button>
                                 <button 
                                   onClick={() => updateDoc(doc(db, 'travelRequests', req.id), { status: 'Reddedildi', approvalStatus: 'Reddedildi' })}
                                   className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                                  title={currentLanguage === 'tr' ? 'Reddet' : 'Reject'}
+                                  title={oc(currentLanguage).reddet}
                                 >
                                   <X size={14} />
                                 </button>
@@ -1112,7 +1113,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                                 const ok = await confirmAction({
                                   title: currentLanguage === 'tr' ? 'Talep Sil' : 'Delete Request',
                                   message: t.confirmDelete,
-                                  confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+                                  confirmLabel: oc(currentLanguage).sil,
                                   variant: 'danger',
                                 });
                                 if (!ok) return;
@@ -1121,11 +1122,11 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                                   showToast(currentLanguage === 'tr' ? 'Talep silindi.' : 'Request deleted.');
                                 } catch (error) {
                                   logFirestoreError(error, OperationType.DELETE, `travelRequests/${req.id}`);
-                                  showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+                                  showToast(oc(currentLanguage).hata_olustu_2, 'error');
                                 }
                               }}
                               className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                              title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
+                              title={oc(currentLanguage).sil}
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1148,7 +1149,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowEmployeeModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Çalışan' : 'New Employee'}</h3>
+                <h3 className="font-bold text-gray-800">{oc(currentLanguage).yeni_calisan}</h3>
                 <button onClick={() => setShowEmployeeModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
               </div>
               <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto scrollbar-none">
@@ -1231,7 +1232,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLeaveModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni İzin Talebi' : 'New Leave Request'}</h3>
+                <h3 className="font-bold text-gray-800">{oc(currentLanguage).yeni_izin_talebi}</h3>
                 <button onClick={() => setShowLeaveModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
               </div>
               <div className="p-6 space-y-4">
@@ -1242,7 +1243,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                     onChange={e => setLeaveForm({...leaveForm, employeeId: e.target.value})}
                     className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm"
                   >
-                    <option value="">{currentLanguage === 'tr' ? 'Çalışan Seçin' : 'Select Employee'}</option>
+                    <option value="">{oc(currentLanguage).calisan_secin}</option>
                     {employees.map(emp => (
                       <option key={emp.id} value={emp.id}>{emp.name}</option>
                     ))}
@@ -1285,7 +1286,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowPayrollModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Bordro Hesapla' : 'Calculate Payroll'}</h3>
+                <h3 className="font-bold text-gray-800">{oc(currentLanguage).bordro_hesapla}</h3>
                 <button onClick={() => setShowPayrollModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
               </div>
               <div className="p-6 space-y-4">
@@ -1299,7 +1300,7 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                     }}
                     className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm"
                   >
-                    <option value="">{currentLanguage === 'tr' ? 'Çalışan Seçin' : 'Select Employee'}</option>
+                    <option value="">{oc(currentLanguage).calisan_secin}</option>
                     {employees.map(emp => (
                       <option key={emp.id} value={emp.id}>{emp.name}</option>
                     ))}
@@ -1353,24 +1354,24 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowTrainingModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Eğitim' : 'New Training'}</h3>
+                <h3 className="font-bold text-gray-800">{oc(currentLanguage).yeni_egitim}</h3>
                 <button onClick={() => setShowTrainingModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
               </div>
               <div className="p-6 space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{t.employees}</label>
                   <select value={trainingForm.employeeId} onChange={e => setTrainingForm({...trainingForm, employeeId: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm">
-                    <option value="">{currentLanguage === 'tr' ? 'Çalışan Seçin' : 'Select Employee'}</option>
+                    <option value="">{oc(currentLanguage).calisan_secin}</option>
                     {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Eğitim Adı' : 'Training Title'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).egitim_adi}</label>
                   <input type="text" value={trainingForm.title} onChange={e => setTrainingForm({...trainingForm, title: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Sağlayıcı' : 'Provider'}</label>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).saglayici}</label>
                     <input type="text" value={trainingForm.provider} onChange={e => setTrainingForm({...trainingForm, provider: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                   </div>
                   <div>
@@ -1392,19 +1393,19 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowTravelModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Talep' : 'New Request'}</h3>
+                <h3 className="font-bold text-gray-800">{oc(currentLanguage).yeni_talep}</h3>
                 <button onClick={() => setShowTravelModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
               </div>
               <div className="p-6 space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{t.employees}</label>
                   <select value={travelForm.employeeId} onChange={e => setTravelForm({...travelForm, employeeId: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm">
-                    <option value="">{currentLanguage === 'tr' ? 'Çalışan Seçin' : 'Select Employee'}</option>
+                    <option value="">{oc(currentLanguage).calisan_secin}</option>
                     {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Varış Noktası' : 'Destination'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).varis_noktasi}</label>
                   <input type="text" value={travelForm.destination} onChange={e => setTravelForm({...travelForm, destination: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">

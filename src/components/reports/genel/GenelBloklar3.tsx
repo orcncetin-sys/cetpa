@@ -11,6 +11,7 @@
  */
 import { itemCostTRY, type ReportsCtx } from '../useReportsData';
 import { zamanDate, gunAnahtari } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'employees' | 'quotations' | 'inventoryMovements' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -71,9 +72,9 @@ export default function GenelBloklar3({ reportsTab, orders, inventory, employees
         const curr260 = filter260(last30, now260);
         const prev260 = filter260(prev30Start, last30);
         const metrics260 = [
-          { label: currentLanguage === 'tr' ? 'Ciro' : 'Revenue', curr: curr260.reduce((s, o) => s + (o.totalPrice || 0), 0), prev: prev260.reduce((s, o) => s + (o.totalPrice || 0), 0) },
-          { label: currentLanguage === 'tr' ? 'Sipariş Adedi' : 'Order Count', curr: curr260.length, prev: prev260.length },
-          { label: currentLanguage === 'tr' ? 'Müşteri Sayısı' : 'Customers', curr: new Set(curr260.map(o => o.customerName || '—')).size, prev: new Set(prev260.map(o => o.customerName || '—')).size },
+          { label: oc(currentLanguage).ciro, curr: curr260.reduce((s, o) => s + (o.totalPrice || 0), 0), prev: prev260.reduce((s, o) => s + (o.totalPrice || 0), 0) },
+          { label: oc(currentLanguage).siparis_adedi, curr: curr260.length, prev: prev260.length },
+          { label: oc(currentLanguage).musteri_sayisi, curr: new Set(curr260.map(o => o.customerName || '—')).size, prev: new Set(prev260.map(o => o.customerName || '—')).size },
           { label: 'AOV', curr: curr260.length > 0 ? Math.round(curr260.reduce((s, o) => s + (o.totalPrice || 0), 0) / curr260.length) : 0, prev: prev260.length > 0 ? Math.round(prev260.reduce((s, o) => s + (o.totalPrice || 0), 0) / prev260.length) : 0 },
         ];
         const scored = metrics260.map(m => ({

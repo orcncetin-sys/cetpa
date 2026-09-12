@@ -11,6 +11,7 @@ import {
   varsayilanSablon, SABLON_UYGULANIYOR, bankaBilgisiBasilir,
 } from '../utils/belgeSablonu';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 interface DocumentDesignerProps {
   currentLanguage: 'tr' | 'en';
@@ -351,7 +352,7 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
                   className="w-full bg-brand text-white py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-md active:scale-95 disabled:opacity-60"
                 >
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  {saving ? (tr ? 'Kaydediliyor...' : 'Saving...') : (tr ? 'Şablonu Kaydet' : 'Save Template')}
+                  {saving ? (oc(tr).kaydediliyor) : (oc(tr).sablonu_kaydet)}
                 </button>
               </div>
 
@@ -542,7 +543,7 @@ export default function DocumentDesigner({ currentLanguage }: DocumentDesignerPr
                   onClick={() => setDeleteConfirm(null)}
                   className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-bold transition-colors"
                 >
-                  {tr ? 'İptal' : 'Cancel'}
+                  {oc(tr).iptal}
                 </button>
               </div>
             </motion.div>

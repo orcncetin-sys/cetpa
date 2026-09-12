@@ -7,6 +7,7 @@ import { db } from '../firebase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { tlYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 interface CustomerRisk {
   id: string;
@@ -159,15 +160,15 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
   const chartData = useMemo(() => {
     const tr = currentLanguage === 'tr';
     const categories: Record<string, number> = {
-      [tr ? 'Düşük' : 'Low']: 0,
+      [oc(tr).dusuk]: 0,
       [tr ? 'Orta' : 'Mid']: 0,
-      [tr ? 'Yüksek' : 'High']: 0
+      [oc(tr).yuksek]: 0
     };
     effectiveRisks.forEach(r => {
       const score = Number(r.riskScore);
-      if (score < 40) categories[tr ? 'Düşük' : 'Low']++;
+      if (score < 40) categories[oc(tr).dusuk]++;
       else if (score < 70) categories[tr ? 'Orta' : 'Mid']++;
-      else categories[tr ? 'Yüksek' : 'High']++;
+      else categories[oc(tr).yuksek]++;
     });
     return Object.entries(categories).map(([name, value]) => ({ name, value }));
   }, [effectiveRisks, currentLanguage]);
@@ -323,7 +324,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
             <h3 className="font-bold text-gray-800">{tr ? 'Risk Dağılımı' : 'Risk Distribution'}</h3>
             {activeFilter !== 'all' && (
               <button onClick={() => setActiveFilter('all')} className="text-xs text-brand font-bold hover:underline">
-                {tr ? 'Temizle' : 'Clear'}
+                {oc(tr).temizle}
               </button>
             )}
           </div>
@@ -339,7 +340,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
                     <Cell
                       key={`cell-${index}`}
                       fill={
-                        entry.name === (tr ? 'Yüksek' : 'High') ? '#ef4444' :
+                        entry.name === (oc(tr).yuksek) ? '#ef4444' :
                         entry.name === (tr ? 'Orta' : 'Mid') ? '#f59e0b' : '#10b981'
                       }
                     />
@@ -357,7 +358,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
               {tr ? 'Müşteri Bazlı Detaylar' : 'Customer Details'}
               {activeFilter !== 'all' && (
                 <span className="ml-2 text-xs font-normal text-gray-400">
-                  ({filteredRisks.length} {tr ? 'kayıt' : 'records'})
+                  ({filteredRisks.length} {oc(tr).kayit})
                 </span>
               )}
             </h3>
@@ -373,11 +374,11 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
             <table className="min-w-[480px] w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <SortTh k="customerName" label={tr ? 'Müşteri' : 'Customer'} sort={riskSort} onSort={k => setRiskSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} />
-                  <SortTh k="currentBalance" label={`${tr?'Bakiye':'Balance'} (${activeCurrency})`} sort={riskSort} onSort={k => setRiskSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} align="right" />
+                  <SortTh k="customerName" label={oc(tr).musteri} sort={riskSort} onSort={k => setRiskSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} />
+                  <SortTh k="currentBalance" label={`${oc(tr).bakiye} (${activeCurrency})`} sort={riskSort} onSort={k => setRiskSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} align="right" />
                   <SortTh k="creditLimit" label={`${tr?'Limit':'Limit'} (${activeCurrency})`} sort={riskSort} onSort={k => setRiskSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} align="right" />
-                  <SortTh k="riskScore" label={tr?'Skor':'Score'} sort={riskSort} onSort={k => setRiskSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} align="center" />
-                  <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{tr?'İşlem':'Action'}</th>
+                  <SortTh k="riskScore" label={oc(tr).skor} sort={riskSort} onSort={k => setRiskSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} align="center" />
+                  <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(tr).islem}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -405,7 +406,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
                 }) : (
                   <tr>
                     <td colSpan={5} className="px-6 py-8 text-center text-gray-400 text-sm">
-                      {tr ? 'Kayıt bulunamadı.' : 'No records found.'}
+                      {oc(tr).kayit_bulunamadi}
                     </td>
                   </tr>
                 )}
@@ -425,7 +426,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
           <div className="flex items-center gap-2">
             <CurrencyToggle active={activeCurrency} onChange={setActiveCurrency} />
             <span className="bg-red-100 text-red-600 px-3 py-1 rounded-full text-xs font-bold">
-              {overdueOrders.length} {tr ? 'Sipariş' : 'Orders'}
+              {overdueOrders.length} {oc(tr).siparis_2}
             </span>
           </div>
         </div>
@@ -433,10 +434,10 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
           <table className="min-w-[560px] w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <SortTh k="shopifyOrderId" label={tr?'Sipariş ID':'Order ID'} sort={overdueSort} onSort={k => setOverdueSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} />
-                <SortTh k="customerName" label={tr?'Müşteri':'Customer'} sort={overdueSort} onSort={k => setOverdueSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} />
-                <SortTh k="totalPrice" label={`${tr?'Tutar':'Amount'} (${activeCurrency})`} sort={overdueSort} onSort={k => setOverdueSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} align="right" />
-                <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{tr?'Durum':'Status'}</th>
+                <SortTh k="shopifyOrderId" label={oc(tr).siparis_id} sort={overdueSort} onSort={k => setOverdueSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} />
+                <SortTh k="customerName" label={oc(tr).musteri} sort={overdueSort} onSort={k => setOverdueSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} />
+                <SortTh k="totalPrice" label={`${oc(tr).tutar} (${activeCurrency})`} sort={overdueSort} onSort={k => setOverdueSort(s => ({key:k, dir:s.key===k&&s.dir==='asc'?'desc':'asc'}))} align="right" />
+                <th className="px-4 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(tr).durum}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -447,7 +448,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
                   <td className="px-6 py-4 text-right font-mono">{formatAmount(order.totalPrice, activeCurrency, exchangeRates)}</td>
                   <td className="px-6 py-4 text-center">
                     <span className="px-2 py-1 rounded-full text-xs font-bold bg-red-50 text-red-600 border border-red-100">
-                      {tr ? 'Gecikmiş' : 'Overdue'}
+                      {oc(tr).gecikmis_2}
                     </span>
                   </td>
                 </tr>
@@ -465,7 +466,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
         {totalPages > 1 && (
           <div className="p-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50">
             <p className="text-sm text-gray-500">
-              {tr ? 'Toplam' : 'Total'} <span className="font-medium">{sortedOverdue.length}</span> {tr ? 'kayıttan' : 'records,'}{' '}
+              {oc(tr).toplam} <span className="font-medium">{sortedOverdue.length}</span> {tr ? 'kayıttan' : 'records,'}{' '}
               <span className="font-medium">{(currentPage - 1) * ordersPerPage + 1}–{Math.min(currentPage * ordersPerPage, overdueOrders.length)}</span> {tr ? 'gösteriliyor' : 'showing'}
             </p>
             <div className="flex gap-2">

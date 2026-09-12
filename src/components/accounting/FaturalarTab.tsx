@@ -9,6 +9,7 @@ import { type MikroFatura } from '../../hooks/useMikroFaturalar';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
 import { faturaTipiEtiketi } from '../../utils/durumEtiketi';
 import { paraYaz } from '../../utils/currency';
+import { oc } from '../../i18n/ortak';
 
 type InvoiceForm = {
   faturaNo: string; faturaTipi: 'e-fatura' | 'e-arsiv' | 'ihracat';
@@ -68,17 +69,17 @@ export default function FaturalarTab({
         <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-lg">{currentLanguage==='tr'?'Fatura Kes':'Create Invoice'}</h3>
+              <h3 className="font-bold text-lg">{oc(currentLanguage).fatura_kes}</h3>
               <button onClick={()=>setShowInvoiceModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100"><X className="w-4 h-4"/></button>
             </div>
             {/* Invoice type */}
             <div className="mb-4">
-              <label className="text-[10px] font-bold text-gray-500 uppercase mb-1.5 block">{currentLanguage==='tr'?'Fatura Türü':'Invoice Type'}</label>
+              <label className="text-[10px] font-bold text-gray-500 uppercase mb-1.5 block">{oc(currentLanguage).fatura_turu}</label>
               <div className="grid grid-cols-3 gap-2">
                 {([
-                  { v:'e-fatura', l:'e-Fatura', d:currentLanguage==='tr'?'Kayıtlı mükellef':'Registered taxpayer' },
+                  { v:'e-fatura', l:'e-Fatura', d:oc(currentLanguage).kayitli_mukellef },
                   { v:'e-arsiv', l:'e-Arşiv', d:currentLanguage==='tr'?'Bireysel / kayıtsız':'Individual / unregistered' },
-                  { v:'ihracat', l:currentLanguage==='tr'?'İhracat':'Export', d:currentLanguage==='tr'?'Yurt dışı':'International' },
+                  { v:'ihracat', l:oc(currentLanguage).ihracat, d:currentLanguage==='tr'?'Yurt dışı':'International' },
                 ] as const).map(tp => (
                   <button key={tp.v} type="button" onClick={()=>setInvoiceForm(f=>({...f,faturaTipi:tp.v}))}
                     className={`p-2.5 rounded-xl border text-left transition-all ${invoiceForm.faturaTipi===tp.v?'border-[#ff4000] bg-[#ff4000]/5':'border-gray-200 hover:border-gray-300'}`}>
@@ -90,20 +91,20 @@ export default function FaturalarTab({
             </div>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Fatura No':'Invoice No'}</label>
+                <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{oc(currentLanguage).fatura_no}</label>
                   <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.faturaNo} onChange={e=>setInvoiceForm(f=>({...f,faturaNo:e.target.value}))} placeholder="FTR-2026-001" /></div>
-                <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Tarih':'Date'}</label>
+                <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{oc(currentLanguage).tarih}</label>
                   <input type="date" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.date} onChange={e=>setInvoiceForm(f=>({...f,date:e.target.value}))} /></div>
               </div>
-              <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Müşteri Adı':'Customer Name'}</label>
+              <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{oc(currentLanguage).musteri_adi}</label>
                 <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.customerName} onChange={e=>setInvoiceForm(f=>({...f,customerName:e.target.value}))} /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Vergi No':'Tax ID'}</label>
                   <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.taxId} onChange={e=>setInvoiceForm(f=>({...f,taxId:e.target.value}))} /></div>
-                <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Vergi Dairesi':'Tax Office'}</label>
+                <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{oc(currentLanguage).vergi_dairesi}</label>
                   <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.taxOffice} onChange={e=>setInvoiceForm(f=>({...f,taxOffice:e.target.value}))} /></div>
               </div>
-              <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Adres':'Address'}</label>
+              <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{oc(currentLanguage).adres}</label>
                 <textarea rows={2} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000] resize-none" value={invoiceForm.address} onChange={e=>setInvoiceForm(f=>({...f,address:e.target.value}))} /></div>
               <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">KDV %</label>
                 <div className="flex gap-2">
@@ -116,15 +117,15 @@ export default function FaturalarTab({
               {invoiceSource && (
                 <div className="bg-gray-50 rounded-xl p-3 text-xs space-y-1">
                   <div className="flex justify-between"><span className="text-gray-500">{currentLanguage==='tr'?'Sipariş':'Order'}:</span><span className="font-semibold">#{(invoiceSource.id as string).slice(0,8)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">{currentLanguage==='tr'?'Matrah (KDV hariç)':'Net (excl. VAT)'}:</span><span className="font-semibold">{paraYaz((invoiceSource.totalPrice as number)/(1+invoiceForm.kdvOran/100))}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">{oc(currentLanguage).matrah_kdv_haric}:</span><span className="font-semibold">{paraYaz((invoiceSource.totalPrice as number)/(1+invoiceForm.kdvOran/100))}</span></div>
                   <div className="flex justify-between text-[#ff4000]"><span>KDV %{invoiceForm.kdvOran}:</span><span className="font-semibold">{paraYaz((invoiceSource.totalPrice as number)-(invoiceSource.totalPrice as number)/(1+invoiceForm.kdvOran/100))}</span></div>
-                  <div className="flex justify-between font-bold border-t border-gray-200 pt-1"><span>{currentLanguage==='tr'?'Toplam':'Total'}:</span><span>{paraYaz(invoiceSource.totalPrice)}</span></div>
+                  <div className="flex justify-between font-bold border-t border-gray-200 pt-1"><span>{oc(currentLanguage).toplam}:</span><span>{paraYaz(invoiceSource.totalPrice)}</span></div>
                 </div>
               )}
             </div>
             <div className="flex gap-2 mt-5">
               <button onClick={handleCreateInvoice} className="flex-1 bg-[#ff4000] hover:bg-[#cc3200] text-white py-2.5 rounded-xl text-sm font-bold transition-colors">{currentLanguage==='tr'?'Faturayı Kes':'Create Invoice'}</button>
-              <button onClick={()=>setShowInvoiceModal(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-bold transition-colors">{currentLanguage==='tr'?'İptal':'Cancel'}</button>
+              <button onClick={()=>setShowInvoiceModal(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-bold transition-colors">{oc(currentLanguage).iptal}</button>
             </div>
           </div>
         </div>
@@ -201,7 +202,7 @@ export default function FaturalarTab({
           {(['all','e-fatura','e-arsiv','ihracat'] as const).map(f => (
             <button key={f} onClick={()=>setInvoiceTypeFilter(f)}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${invoiceTypeFilter===f?'bg-[#ff4000] text-white':'text-gray-500 hover:text-gray-700'}`}>
-              {f==='all'?(currentLanguage==='tr'?'Tümü':'All'):f==='ihracat'?(currentLanguage==='tr'?'İhracat':'Export'):f}
+              {f==='all'?(oc(currentLanguage).tumu):f==='ihracat'?(oc(currentLanguage).ihracat):f}
             </button>
           ))}
         </div>
@@ -209,7 +210,7 @@ export default function FaturalarTab({
             Varsayılan 'cetpa', yani ekran eskisi gibi davranır. */}
         <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
           {([
-            ['hepsi', currentLanguage==='tr'?'Tümü':'All'],
+            ['hepsi', oc(currentLanguage).tumu],
             ['mikro', `Mikro (${mikroFaturaSatirlari.length})`],
             ['cetpa', `Cetpa (${invoices.length})`],
           ] as const).map(([k,l]) => (
@@ -256,14 +257,14 @@ export default function FaturalarTab({
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/60">
-                <SortHeader label={currentLanguage==='tr'?'Fatura No':'Invoice No'} sortKey="faturaNo" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
-                <SortHeader label={currentLanguage==='tr'?'Müşteri':'Customer'} sortKey="customerName" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
-                <SortHeader label={currentLanguage==='tr'?'Tür':'Type'} sortKey="faturaTipi" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
-                <SortHeader label={currentLanguage==='tr'?'Tarih':'Date'} sortKey="date" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="hidden md:table-cell" />
+                <SortHeader label={oc(currentLanguage).fatura_no} sortKey="faturaNo" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
+                <SortHeader label={oc(currentLanguage).musteri} sortKey="customerName" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
+                <SortHeader label={oc(currentLanguage).tur} sortKey="faturaTipi" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
+                <SortHeader label={oc(currentLanguage).tarih} sortKey="date" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="hidden md:table-cell" />
                 <SortHeader label="KDV %" sortKey="kdvOran" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
                 <SortHeader label={currentLanguage==='tr'?'Matrah':'Net'} sortKey="kdvHaric" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
-                <SortHeader label={currentLanguage==='tr'?'Toplam':'Total'} sortKey="totalPrice" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
-                <SortHeader label={currentLanguage==='tr'?'Durum':'Status'} sortKey="status" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
+                <SortHeader label={oc(currentLanguage).toplam} sortKey="totalPrice" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
+                <SortHeader label={oc(currentLanguage).durum} sortKey="status" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
                 {isAuthenticated && <th className="px-4 py-3"/>}
               </tr>
             </thead>
@@ -302,7 +303,7 @@ export default function FaturalarTab({
                             const ok = await confirmAction({
                               title: currentLanguage==='tr'?'Faturayı Sil':'Delete Invoice',
                               message: currentLanguage==='tr'?'Faturayı silmek istediğinize emin misiniz? Bu işlem geri alınamaz.':'Are you sure you want to delete this invoice? This cannot be undone.',
-                              confirmLabel: currentLanguage==='tr'?'Sil':'Delete',
+                              confirmLabel: oc(currentLanguage).sil,
                               variant: 'danger',
                             });
                             if (!ok) return;
@@ -343,13 +344,13 @@ export default function FaturalarTab({
                   <td className="px-4 py-3">
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-600">mikro</span>
                     <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${f.yon === 'gelen' ? 'bg-purple-100 text-purple-600' : 'bg-teal-100 text-teal-700'}`}>
-                      {f.yon === 'gelen' ? (currentLanguage==='tr'?'GELEN':'IN') : (currentLanguage==='tr'?'GİDEN':'OUT')}
+                      {f.yon === 'gelen' ? (oc(currentLanguage).gelen) : (oc(currentLanguage).giden)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{f.tarih || '—'}</td>
                   <td className="px-4 py-3 text-right text-gray-600">
                     {f.oranKarma
-                      ? <span title={currentLanguage==='tr'?'Faturada birden fazla KDV oranı var (ör. %10 + %20) — matrah/toplam KDV bunları içerir, tek oran gösterilemez':'Multiple VAT rates on this invoice — net/total reflect all rates, a single % cannot be shown'} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{currentLanguage==='tr'?'Karma':'Mixed'}</span>
+                      ? <span title={currentLanguage==='tr'?'Faturada birden fazla KDV oranı var (ör. %10 + %20) — matrah/toplam KDV bunları içerir, tek oran gösterilemez':'Multiple VAT rates on this invoice — net/total reflect all rates, a single % cannot be shown'} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{oc(currentLanguage).karma}</span>
                       : (f.oran !== null ? `%${f.oran}` : '—')}
                   </td>
                   <td className="px-4 py-3 text-right text-gray-600">{f.matrah ? formatTRY(f.matrah) : '—'}</td>

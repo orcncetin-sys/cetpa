@@ -42,6 +42,7 @@ import {
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx, brutMarj } from './useReportsData';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
+import { oc } from '../../i18n/ortak';
 
 export default function IKRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -53,7 +54,7 @@ export default function IKRapor(ctx: ReportsCtx) {
           {/* KPIs — ortak KpiCard/KpiGrid (ReportKit) ile tek tip */}
           <KpiGrid cols={3}>
             {([
-              { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Employees', value: hrStats.activeEmployees.toString(), icon: Users, accent: 'text-blue-600', accentBg: 'bg-blue-50', desc: currentLanguage==='tr'?'Toplam çalışan sayısı':'Total employee count', isMoney: false },
+              { label: oc(currentLanguage).aktif_calisan, value: hrStats.activeEmployees.toString(), icon: Users, accent: 'text-blue-600', accentBg: 'bg-blue-50', desc: currentLanguage==='tr'?'Toplam çalışan sayısı':'Total employee count', isMoney: false },
               { label: currentLanguage==='tr'?'Ödenen Maaş':'Paid Salary', value: formatInCurrency(hrStats.totalPayroll, revenueCurrency, exchangeRates ?? undefined), icon: CreditCard, accent: 'text-green-600', accentBg: 'bg-green-50', desc: currentLanguage==='tr'?'Toplam ödenen bordro':'Total paid payroll', isMoney: true },
               { label: currentLanguage==='tr'?'İzin Bekleyen':'Pending Leave', value: hrStats.pendingLeave.toString(), icon: Calendar, accent: 'text-orange-500', accentBg: 'bg-orange-50', desc: currentLanguage==='tr'?'Onay bekleyen talepler':'Requests awaiting approval', isMoney: false },
             ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string; desc: string; isMoney: boolean }[]).map((k,i) => (
@@ -120,8 +121,8 @@ export default function IKRapor(ctx: ReportsCtx) {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { label: currentLanguage==='tr'?'İK / Ciro Oranı':'HR Cost Ratio', value: `%${hrCostRatio}`, color: hrCostRatio <= 20 ? 'text-emerald-600' : hrCostRatio <= 40 ? 'text-amber-600' : 'text-red-500', desc: currentLanguage==='tr'?'Maaş/Toplam Ciro':'Payroll/Revenue' },
-                { label: currentLanguage==='tr'?'Gelir Çarpanı':'Revenue Multiplier', value: `${revenuePerPayroll}x`, color: 'text-blue-600', desc: currentLanguage==='tr'?'Ciro/Maaş Kütlesi':'Revenue/Payroll' },
-                { label: currentLanguage==='tr'?'Toplam Maaş':'Total Payroll', value: kisaTutar(totalPayrollHR, { fmt: 'K' }), color: 'text-gray-700', desc: currentLanguage==='tr'?'Aylık':'Monthly' },
+                { label: oc(currentLanguage).gelir_carpani, value: `${revenuePerPayroll}x`, color: 'text-blue-600', desc: currentLanguage==='tr'?'Ciro/Maaş Kütlesi':'Revenue/Payroll' },
+                { label: currentLanguage==='tr'?'Toplam Maaş':'Total Payroll', value: kisaTutar(totalPayrollHR, { fmt: 'K' }), color: 'text-gray-700', desc: oc(currentLanguage).aylik },
                 { label: currentLanguage==='tr'?'Çalışan Başı Sipariş':'Orders/Employee', value: String(avgOrdersPerEmp), color: 'text-purple-600', desc: currentLanguage==='tr'?'Toplam sipariş/aktif':'Total orders/active' },
               ].map(k => (
                 <div key={k.label} className="bg-gray-50 rounded-xl p-4 text-center">
@@ -177,7 +178,7 @@ export default function IKRapor(ctx: ReportsCtx) {
             </div>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wide mb-1">{currentLanguage === 'tr' ? 'Çalışan Başı Ciro' : 'Revenue / Employee'}</p>
+                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wide mb-1">{oc(currentLanguage).calisan_basi_ciro}</p>
                 <p className="text-2xl font-black text-gray-800">{fmtAna(revPerEmp188,'K',0)}</p>
               </div>
               <div className="bg-gray-50 rounded-xl p-4">
@@ -201,7 +202,7 @@ export default function IKRapor(ctx: ReportsCtx) {
                     <p className="text-[10px] text-purple-600">{fmtAna(t.rev,'K',0)} {currentLanguage === 'tr' ? 'hedef ciro' : 'target revenue'}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-lg font-black text-purple-700">{t.headcount} {currentLanguage === 'tr' ? 'kişi' : 'staff'}</p>
+                    <p className="text-lg font-black text-purple-700">{t.headcount} {oc(currentLanguage).kisi}</p>
                     <p className="text-[10px] text-purple-500">+{t.hires} {currentLanguage === 'tr' ? 'yeni işe alım' : 'new hires'}</p>
                   </div>
                 </div>
@@ -254,9 +255,9 @@ export default function IKRapor(ctx: ReportsCtx) {
                   <h4 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'👥 Kıdem Dağılımı':'👥 Tenure Distribution'}</h4>
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     {[
-                      { label: currentLanguage==='tr'?'Aktif':'Active', value: active.length, color: 'text-emerald-600' },
+                      { label: oc(currentLanguage).aktif, value: active.length, color: 'text-emerald-600' },
                       { label: currentLanguage==='tr'?'Ortalama Kıdem':'Avg Tenure', value: `${Math.floor(avgTenureMonths/12)}y ${avgTenureMonths%12}m`, color: 'text-blue-600' },
-                      { label: currentLanguage==='tr'?'Ayrılan':'Left', value: left.length, color: 'text-red-500' },
+                      { label: oc(currentLanguage).ayrilan, value: left.length, color: 'text-red-500' },
                       { label: currentLanguage==='tr'?'Devir Oranı':'Turnover', value: `%${turnoverRate}`, color: turnoverRate <= 15 ? 'text-emerald-600' : 'text-red-500' },
                     ].map(k => (
                       <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
@@ -280,7 +281,7 @@ export default function IKRapor(ctx: ReportsCtx) {
                 <div className="apple-card p-6">
                   <h4 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'💰 Departman Maaş Kütlesi':'💰 Payroll by Department'}</h4>
                   {deptList.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-8">{currentLanguage==='tr'?'Veri yok':'No data'}</p>
+                    <p className="text-sm text-gray-400 text-center py-8">{oc(currentLanguage).veri_yok_2}</p>
                   ) : (
                     <div className="space-y-3">
                       {deptList.map(([dept, total]) => (
@@ -336,7 +337,7 @@ export default function IKRapor(ctx: ReportsCtx) {
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   {[
                     { label: currentLanguage==='tr'?'Çalışan Başı Ciro':'Rev / Employee', value: kisaTutar(revPerEmp, { fmt: 'K', ondalik: 1 }), color: 'text-blue-600' },
-                    { label: currentLanguage==='tr'?'Gelir Çarpanı':'Revenue Multiplier', value: `${revenueMultiplier}x`, color: 'text-emerald-600' },
+                    { label: oc(currentLanguage).gelir_carpani, value: `${revenueMultiplier}x`, color: 'text-emerald-600' },
                     { label: currentLanguage==='tr'?'Aktif Çalışan':'Active Staff', value: String(activeEmps), color: 'text-gray-700' },
                   ].map(k => (
                     <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
@@ -399,7 +400,7 @@ export default function IKRapor(ctx: ReportsCtx) {
               })}
             </div>
             <div className="flex items-center gap-4 text-[10px] text-gray-500">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-400 inline-block" />{currentLanguage === 'tr' ? 'Ciro' : 'Revenue'}</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-400 inline-block" />{oc(currentLanguage).ciro}</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-300 inline-block" />{currentLanguage === 'tr' ? 'Maaş' : 'Payroll'}</span>
               <span className="ml-auto">{currentLanguage === 'tr' ? '%: Maaş/Ciro' : '%: Payroll/Revenue'}</span>
             </div>
@@ -415,7 +416,7 @@ export default function IKRapor(ctx: ReportsCtx) {
           if (!rep) continue;
           const emp = employees.find(e => e.name === rep || e.email === rep);
           const name = emp?.name ?? rep;
-          const dept = emp?.department ?? (currentLanguage === 'tr' ? 'Satış' : 'Sales');
+          const dept = emp?.department ?? (oc(currentLanguage).satis);
           if (!empRevMap[name]) empRevMap[name] = { name, rev: 0, orders: 0, dept };
           empRevMap[name].rev += o.totalPrice || 0;
           empRevMap[name].orders++;
@@ -437,7 +438,7 @@ export default function IKRapor(ctx: ReportsCtx) {
                         <span className="text-[10px] text-gray-400 ml-1.5">{e.dept}</span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
-                        <span className="text-[10px] text-gray-400">{e.orders} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
+                        <span className="text-[10px] text-gray-400">{e.orders} {oc(currentLanguage).siparis}</span>
                         <span className="text-[10px] font-bold text-gray-500">%{pct}</span>
                         <span className="text-xs font-bold text-gray-700">{fmtAna(e.rev,'K',0)}</span>
                       </div>
@@ -463,7 +464,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const deptDist: Record<string, { trained: number; total: number }> = {};
         for (const e of employees) {
           if (e.status !== 'Aktif') continue;
-          const dept = e.department || (currentLanguage === 'tr' ? 'Genel' : 'General');
+          const dept = e.department || (oc(currentLanguage).genel);
           if (!deptDist[dept]) deptDist[dept] = { trained: 0, total: 0 };
           deptDist[dept].total++;
           const m = e as unknown as EmpRec;
@@ -484,7 +485,7 @@ export default function IKRapor(ctx: ReportsCtx) {
             </div>
             <div className="grid grid-cols-3 gap-3 mb-4">
               {[
-                { label: currentLanguage === 'tr' ? 'Aktif Çalışan' : 'Active Employees', value: activeCount, color: 'text-gray-700' },
+                { label: oc(currentLanguage).aktif_calisan, value: activeCount, color: 'text-gray-700' },
                 { label: currentLanguage === 'tr' ? 'Sertifikalı' : 'Certified/Trained', value: trainedCount, color: 'text-emerald-600' },
                 { label: currentLanguage === 'tr' ? 'Eksik Kayıt' : 'Missing Records', value: activeCount - trainedCount, color: 'text-amber-600' },
               ].map(k => (
@@ -641,7 +642,7 @@ export default function IKRapor(ctx: ReportsCtx) {
                 <p className="text-3xl font-black text-emerald-700">{fmtAna(grossPerEmp,'K',0)}</p>
               </div>
               <div className="bg-blue-50 rounded-2xl p-4">
-                <p className="text-[10px] text-blue-700 font-bold uppercase tracking-wide mb-1">{currentLanguage === 'tr' ? 'Çalışan Başı Ciro' : 'Revenue / Employee'}</p>
+                <p className="text-[10px] text-blue-700 font-bold uppercase tracking-wide mb-1">{oc(currentLanguage).calisan_basi_ciro}</p>
                 <p className="text-3xl font-black text-blue-700">{fmtAna(revPerEmp253,'K',0)}</p>
               </div>
             </div>
@@ -759,7 +760,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const colors = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Departmana Göre Çalışan Sayısı' : 'Headcount by Department'}</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).departmana_gore_calisan_sayisi}</h3>
             <p className="text-xs text-gray-500 mb-4">Active employees: {total} across {depts.length} departments</p>
             <div className="space-y-2">
               {depts.map(([dept,count],i) => (
@@ -1093,7 +1094,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const colors366 = ['#6366f1','#3b82f6','#10b981','#f59e0b','#f97316','#8b5cf6','#ef4444'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Departmana Göre Çalışan Sayısı' : 'Headcount by Department'}</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).departmana_gore_calisan_sayisi}</h3>
             <p className="text-xs text-gray-500 mb-4">{totalHC} employees across {deptRows.length} departments</p>
             <div className="space-y-2">
               {deptRows.map((d, i) => (
@@ -1196,7 +1197,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const maxCount = Math.max(...rows.map(r => r[1].count), 1);
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Departmana Göre Çalışan Sayısı' : 'Headcount by Department'}</h3>
+            <h3 className="font-semibold text-sm mb-3">{oc(currentLanguage).departmana_gore_calisan_sayisi}</h3>
             <div className="space-y-2">
               {rows.map(([dept, d]) => (
                 <div key={dept} className="flex items-center gap-2">
@@ -1632,7 +1633,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         if(ratings.length<2) {
           return (
             <div className="apple-card p-4 mb-4">
-              <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'Performans Değerlendirmeleri' : 'Performance Ratings'}</h3>
+              <h3 className="font-semibold text-sm mb-1">{oc(currentLanguage).performans_degerlendirmeleri}</h3>
               <p className="text-sm text-gray-500">{employees.length} employees — no performance data yet</p>
             </div>
           );
@@ -1643,7 +1644,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Performans Değerlendirmeleri' : 'Performance Ratings'}</h3>
+              <h3 className="font-semibold text-sm">{oc(currentLanguage).performans_degerlendirmeleri}</h3>
               <span className="text-xs bg-yellow-100 text-yellow-700 rounded-full px-2 py-0.5">avg {avg.toFixed(1)}★</span>
             </div>
             <div className="space-y-1.5">

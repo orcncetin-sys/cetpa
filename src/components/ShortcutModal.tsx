@@ -2,6 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
 import type { Language } from '../translations';
+import { oc } from '../i18n/ortak';
 
 interface ShortcutModalProps {
   isOpen: boolean;
@@ -40,7 +41,7 @@ export default function ShortcutModal({ isOpen, onClose, currentLanguage }: Shor
           <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
             {[
               {
-                section: currentLanguage === 'tr' ? 'Genel' : 'General',
+                section: oc(currentLanguage).genel,
                 shortcuts: [
                   { keys: ['⌘', 'K'], desc: currentLanguage === 'tr' ? 'Global arama' : 'Global search' },
                   { keys: ['?'],       desc: currentLanguage === 'tr' ? 'Bu ekranı göster' : 'Show this screen' },
@@ -51,14 +52,14 @@ export default function ShortcutModal({ isOpen, onClose, currentLanguage }: Shor
                 section: currentLanguage === 'tr' ? 'Navigasyon' : 'Navigation',
                 shortcuts: [
                   { keys: ['D'],   desc: currentLanguage === 'tr' ? 'Dashboard' : 'Dashboard' },
-                  { keys: ['O'],   desc: currentLanguage === 'tr' ? 'Siparişler' : 'Orders' },
+                  { keys: ['O'],   desc: oc(currentLanguage).siparisler },
                   { keys: ['C'],   desc: 'CRM' },
-                  { keys: ['I'],   desc: currentLanguage === 'tr' ? 'Envanter' : 'Inventory' },
-                  { keys: ['R'],   desc: currentLanguage === 'tr' ? 'Raporlar' : 'Reports' },
+                  { keys: ['I'],   desc: oc(currentLanguage).envanter },
+                  { keys: ['R'],   desc: oc(currentLanguage).raporlar },
                 ],
               },
               {
-                section: currentLanguage === 'tr' ? 'Oluştur' : 'Create',
+                section: oc(currentLanguage).olustur,
                 shortcuts: [
                   { keys: ['N'], desc: currentLanguage === 'tr' ? 'Yeni sipariş / müşteri adayı (aktif sekme)' : 'New order / lead (active tab)' },
                 ],

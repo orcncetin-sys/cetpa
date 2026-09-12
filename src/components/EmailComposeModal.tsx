@@ -5,6 +5,7 @@ import { updateDoc, doc, authedFetch } from '../lib/dbClient';
 import { db } from '../firebase';
 import type { Lead } from '../types';
 import type { Language } from '../translations';
+import { oc } from '../i18n/ortak';
 
 export interface EmailComposeData {
   open: boolean;
@@ -64,7 +65,7 @@ export default function EmailComposeModal({
           {/* Fields */}
           <div className="p-5 space-y-3 flex-1">
             <div>
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{currentLanguage === 'tr' ? 'Alıcı' : 'To'}</label>
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{oc(currentLanguage).alici}</label>
               <input
                 readOnly
                 value={`${emailCompose.name} <${emailCompose.to}>`}
@@ -72,7 +73,7 @@ export default function EmailComposeModal({
               />
             </div>
             <div>
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{currentLanguage === 'tr' ? 'Konu' : 'Subject'}</label>
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{oc(currentLanguage).konu}</label>
               <input
                 value={emailCompose.subject}
                 onChange={e => setEmailCompose(c => ({ ...c, subject: e.target.value }))}
@@ -81,7 +82,7 @@ export default function EmailComposeModal({
               />
             </div>
             <div>
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{currentLanguage === 'tr' ? 'Mesaj' : 'Message'}</label>
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">{oc(currentLanguage).mesaj}</label>
               <textarea
                 value={emailCompose.body}
                 onChange={e => setEmailCompose(c => ({ ...c, body: e.target.value }))}
@@ -94,7 +95,7 @@ export default function EmailComposeModal({
           {/* Footer */}
           <div className="px-5 py-4 border-t border-gray-100 flex justify-end gap-2">
             <button onClick={() => setEmailCompose(e => ({ ...e, open: false }))} className="apple-button-secondary px-5">
-              {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+              {oc(currentLanguage).iptal}
             </button>
             <button
               disabled={emailSending || !emailCompose.subject || !emailCompose.body}
@@ -131,7 +132,7 @@ export default function EmailComposeModal({
               className="apple-button-primary px-6 disabled:opacity-50 flex items-center gap-2"
             >
               {emailSending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
-              {emailSending ? (currentLanguage === 'tr' ? 'Gönderiliyor…' : 'Sending…') : (currentLanguage === 'tr' ? 'Gönder' : 'Send')}
+              {emailSending ? (currentLanguage === 'tr' ? 'Gönderiliyor…' : 'Sending…') : (oc(currentLanguage).gonder)}
             </button>
           </div>
         </motion.div>

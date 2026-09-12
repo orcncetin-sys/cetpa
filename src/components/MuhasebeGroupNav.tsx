@@ -8,6 +8,7 @@
  * aynısı. Tek kaynak: burası.
  */
 import { BookOpen, FileText, Receipt } from 'lucide-react';
+import { oc } from '../i18n/ortak';
 
 export type MuhasebeGrupSekmesi = 'muhasebe' | 'ebelge' | 'vergi';
 
@@ -24,9 +25,9 @@ const AKTIF = 'shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl te
 export default function MuhasebeGroupNav({ aktif, currentLanguage, onNavigate }: Props) {
   const tr = currentLanguage === 'tr';
   const sekmeler = [
-    { id: 'muhasebe' as const, icon: BookOpen, label: tr ? 'Muhasebe & Finans' : 'Accounting & Finance' },
-    { id: 'ebelge'   as const, icon: FileText, label: tr ? 'E-Belge Merkezi'   : 'E-Document Hub' },
-    { id: 'vergi'    as const, icon: Receipt,  label: tr ? 'Vergi Takvimi'     : 'Tax Calendar' },
+    { id: 'muhasebe' as const, icon: BookOpen, label: oc(tr).muhasebe_finans },
+    { id: 'ebelge'   as const, icon: FileText, label: oc(tr).e_belge_merkezi },
+    { id: 'vergi'    as const, icon: Receipt,  label: oc(tr).vergi_takvimi },
   ];
 
   return (

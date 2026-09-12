@@ -3,6 +3,7 @@ import { Download, Search, Plus, Eye, Edit2, Trash2, X, Save } from 'lucide-reac
 import { type JournalEntry } from '../../types';
 import { formatInCurrency, paraYaz } from '../../utils/currency';
 import { SortHeader, exportCSV, HESAP_PLANI, type AccountingT } from './shared';
+import { oc } from '../../i18n/ortak';
 
 /**
  * Kur ETİKETİ ("1 USD = ₺41,20"). Kur yoksa RAKAM BASMAZ.
@@ -19,7 +20,7 @@ const kurEtiketi = (
 ): string => {
   const kur = exchangeRates?.[currency];
   if (!kur || !isFinite(kur) || kur <= 0) {
-    return currentLanguage === 'tr' ? 'Kur bekleniyor' : 'Rate pending';
+    return oc(currentLanguage).kur_bekleniyor;
   }
   return `1 ${currency} = ${paraYaz(kur)}`;
 };
@@ -92,7 +93,7 @@ export default function YevmiyeTab({
             />
           </div>
           <div className="flex items-center gap-1 bg-gray-50 rounded-xl px-3 py-2 mb-3 w-fit">
-            <span className="text-xs text-gray-400 font-medium mr-1">{currentLanguage === 'tr' ? 'Para Birimi:' : 'Currency:'}</span>
+            <span className="text-xs text-gray-400 font-medium mr-1">{oc(currentLanguage).para_birimi_2}</span>
             {(['TRY', 'USD', 'EUR'] as const).map(cur => (
               <button
                 key={cur}
@@ -202,8 +203,8 @@ export default function YevmiyeTab({
                     <td className="py-2.5 px-3 text-gray-500 text-xs hidden lg:table-cell">{e.kategori}</td>
                     <td className="py-2.5 px-3 text-center">
                       <div className="flex items-center justify-center gap-2">
-                        <button onClick={() => openEditJournal(e)} className="action-btn-view" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye size={13} /></button>
-                        <button onClick={() => openEditJournal(e)} className="action-btn-edit" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 size={13} /></button>
+                        <button onClick={() => openEditJournal(e)} className="action-btn-view" title={oc(currentLanguage).incele}><Eye size={13} /></button>
+                        <button onClick={() => openEditJournal(e)} className="action-btn-edit" title={oc(currentLanguage).duzenle}><Edit2 size={13} /></button>
                         <button onClick={() => deleteJournal(e.id)} className="action-btn-delete"><Trash2 size={13} /></button>
                       </div>
                     </td>

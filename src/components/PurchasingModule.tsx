@@ -19,6 +19,7 @@ import { pullCariFromMikro, syncSupplierToMikro, type MikroCariItem } from '../s
 import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
 import { kurCevir, paraYaz } from '../utils/currency';
 import { basHarf } from '../utils/buyukHarf';
+import { oc } from '../i18n/ortak';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 
@@ -293,11 +294,11 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     // yanlış alana yönlendiriyordu (ürün seçili olsa da tedarikçi boşsa mesaj
     // "ürün seçin" gibi okunuyordu). Önce tedarikçiyi kontrol et.
     if (!(newOrder.supplier ?? '').trim()) {
-      showValidationError(currentLanguage === 'tr' ? 'Lütfen tedarikçi adı girin.' : 'Please enter a supplier name.');
+      showValidationError(oc(currentLanguage).lutfen_tedarikci_adi_girin);
       return;
     }
     if (newOrder.items.length === 0) {
-      showValidationError(currentLanguage === 'tr' ? 'Lütfen en az bir ürün seçin.' : 'Please select at least one item.');
+      showValidationError(oc(currentLanguage).lutfen_en_az_bir_urun_secin);
       return;
     }
 
@@ -370,11 +371,11 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   const handleUpdateOrder = async () => {
     if (!editingOrder) return;
     if (!(newOrder.supplier ?? '').trim()) {
-      showValidationError(currentLanguage === 'tr' ? 'Lütfen tedarikçi adı girin.' : 'Please enter a supplier name.');
+      showValidationError(oc(currentLanguage).lutfen_tedarikci_adi_girin);
       return;
     }
     if (newOrder.items.length === 0) {
-      showValidationError(currentLanguage === 'tr' ? 'Lütfen en az bir ürün seçin.' : 'Please select at least one item.');
+      showValidationError(oc(currentLanguage).lutfen_en_az_bir_urun_secin);
       return;
     }
 
@@ -435,7 +436,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     const ok = await confirmAction({
       title: currentLanguage === 'tr' ? 'Siparişi Sil' : 'Delete Order',
       message: currentLanguage === 'tr' ? 'Bu siparişi silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this order?',
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -542,13 +543,13 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     criticalStock: currentLanguage === 'tr' ? 'Kritik Stok Uyarısı' : 'Critical Stock Alert',
     searchPlaceholder: currentLanguage === 'tr' ? 'Sipariş no veya tedarikçi ara...' : 'Search order no or supplier...',
     noOrders: currentLanguage === 'tr' ? 'Sipariş bulunamadı.' : 'No orders found.',
-    orderNo: currentLanguage === 'tr' ? 'Sipariş No' : 'Order No',
-    supplier: currentLanguage === 'tr' ? 'Tedarikçi' : 'Supplier',
-    date: currentLanguage === 'tr' ? 'Tarih' : 'Date',
-    status: currentLanguage === 'tr' ? 'Durum' : 'Status',
-    total: currentLanguage === 'tr' ? 'Toplam' : 'Total',
-    actions: currentLanguage === 'tr' ? 'İşlemler' : 'Actions',
-    eta: currentLanguage === 'tr' ? 'Son Tarih' : 'Due Date',
+    orderNo: oc(currentLanguage).siparis_no,
+    supplier: oc(currentLanguage).tedarikci,
+    date: oc(currentLanguage).tarih,
+    status: oc(currentLanguage).durum,
+    total: oc(currentLanguage).toplam,
+    actions: oc(currentLanguage).islemler,
+    eta: oc(currentLanguage).son_tarih,
   };
 
   // ── Phase 44: ETA badge helper ────────────────────────────────────────────
@@ -570,7 +571,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     );
     if (daysLeft === 0) return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
-        {currentLanguage === 'tr' ? 'Bugün' : 'Today'}
+        {oc(currentLanguage).bugun}
       </span>
     );
     return (
@@ -697,7 +698,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                   : "bg-gray-100 text-gray-500 hover:bg-gray-200"
               )}
             >
-              {status === 'All' ? (currentLanguage === 'tr' ? 'Tümü' : 'All') : status}
+              {status === 'All' ? (oc(currentLanguage).tumu) : status}
             </button>
           ))}
         </div>
@@ -789,7 +790,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                         <button 
                           onClick={() => handleUpdateStatus(order.id, 'Beklemede')}
                           className="p-2 hover:bg-orange-50 rounded-xl text-orange-600 transition-all"
-                          title={currentLanguage === 'tr' ? 'Onaya Gönder' : 'Submit for Approval'}
+                          title={oc(currentLanguage).onaya_gonder}
                         >
                           <Clock className="w-4 h-4" />
                         </button>
@@ -817,7 +818,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                           setViewingOrder(order);
                         }}
                         className="p-2 hover:bg-blue-50 rounded-xl text-blue-500 transition-all"
-                        title={currentLanguage === 'tr' ? 'İncele' : 'View'}
+                        title={oc(currentLanguage).incele}
                       >
                         <Eye className="w-4 h-4" />
                       </button>
@@ -835,14 +836,14 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                           setMikroSearchResults(null);
                         }}
                         className="p-2 hover:bg-gray-100 rounded-xl text-gray-500 transition-all"
-                        title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}
+                        title={oc(currentLanguage).duzenle}
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button 
                         onClick={() => handleDeleteOrder(order.id)}
                         className="p-2 hover:bg-red-50 rounded-xl text-red-500 transition-all"
-                        title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
+                        title={oc(currentLanguage).sil}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -884,7 +885,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                   <div>
                     <h2 className="text-xl font-bold text-[#1D1D1F]">
                       {viewingOrder ? (currentLanguage === 'tr' ? 'Sipariş Detayı' : 'Order Details') : 
-                       editingOrder ? (currentLanguage === 'tr' ? 'Siparişi Düzenle' : 'Edit Order') : 
+                       editingOrder ? (oc(currentLanguage).siparisi_duzenle) : 
                        t.newOrder}
                     </h2>
                     <p className="text-xs text-[#86868B]">
@@ -980,7 +981,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                                 className="w-full text-left px-3 py-2 rounded-xl hover:bg-emerald-50 text-sm flex items-center justify-between disabled:opacity-40"
                               >
                                 <span>{c.cari_unvan1} <span className="text-gray-400 text-xs">({c.cari_kod})</span></span>
-                                <span className="text-[9px] text-emerald-600 font-bold">{currentLanguage === 'tr' ? 'İçe Aktar' : 'Import'}</span>
+                                <span className="text-[9px] text-emerald-600 font-bold">{oc(currentLanguage).ice_aktar}</span>
                               </button>
                             ))}
                           </div>
@@ -1016,7 +1017,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                 {!viewingOrder && (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider ml-1">{currentLanguage === 'tr' ? 'Ürünler' : 'Products'}</label>
+                      <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider ml-1">{oc(currentLanguage).urunler}</label>
                       <span className="text-[10px] text-gray-400">{newOrder.items.length} {currentLanguage === 'tr' ? 'kalem seçildi' : 'items selected'}</span>
                     </div>
 
@@ -1066,8 +1067,8 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                     <table className="w-full text-left border-collapse">
                       <thead className="bg-gray-50/50">
                         <tr>
-                          <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</th>
-                          <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-24">{currentLanguage === 'tr' ? 'Miktar' : 'Qty'}</th>
+                          <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).urun}</th>
+                          <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-24">{oc(currentLanguage).miktar}</th>
                           <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-32">{currentLanguage === 'tr' ? 'Alış Fiyatı' : 'Cost'}</th>
                           <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right w-32">{t.total}</th>
                           <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-12"></th>
@@ -1117,7 +1118,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                       <tfoot className="bg-gray-50/30">
                         <tr>
                           <td colSpan={3} className="px-4 py-4 text-right text-xs font-bold text-gray-400 uppercase tracking-wider">
-                            {currentLanguage === 'tr' ? 'Genel Toplam' : 'Grand Total'}
+                            {oc(currentLanguage).genel_toplam_2}
                           </td>
                           <td className="px-4 py-4 text-right text-lg font-black text-brand">
                             {paraYaz(calculateTotal(newOrder.items))}
@@ -1131,7 +1132,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
 
                 {/* Notes */}
                 <div className="space-y-2">
-                  <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider ml-1">{currentLanguage === 'tr' ? 'Notlar' : 'Notes'}</label>
+                  <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider ml-1">{oc(currentLanguage).notlar}</label>
                   <textarea
                     placeholder={currentLanguage === 'tr' ? 'Sipariş notları...' : 'Order notes...'}
                     value={viewingOrder ? viewingOrder.notes : newOrder.notes}
@@ -1175,7 +1176,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                   }}
                   className="apple-button-secondary"
                 >
-                  {viewingOrder ? (currentLanguage === 'tr' ? 'Kapat' : 'Close') : (currentLanguage === 'tr' ? 'İptal' : 'Cancel')}
+                  {viewingOrder ? (oc(currentLanguage).kapat) : (oc(currentLanguage).iptal)}
                 </button>
                 {validationError && (
                   <span className="text-xs text-red-500 font-medium flex-1">{validationError}</span>
@@ -1195,10 +1196,10 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                         className="apple-button-primary px-12"
                       >
                         {editingOrder
-                          ? (currentLanguage === 'tr' ? 'Güncelle' : 'Update')
+                          ? (oc(currentLanguage).guncelle)
                           : isPrivileged
                             ? (currentLanguage === 'tr' ? 'Siparişi Oluştur' : 'Create Order')
-                            : (currentLanguage === 'tr' ? 'Onaya Gönder' : 'Submit for Approval')}
+                            : (oc(currentLanguage).onaya_gonder)}
                       </button>
                     </>
                   );

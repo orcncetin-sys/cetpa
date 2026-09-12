@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Search, Plus, Eye, Edit2, Trash2, X, Save } from 'lucide-react';
 import { type Warehouse, type WarehouseItem } from '../../types';
 import { SortHeader, type AccountingT } from './shared';
+import { oc } from '../../i18n/ortak';
 
 type StockForm = { productName: string; sku: string; quantity: number; warehouseId: string; category: string; notes: string };
 
@@ -116,13 +117,13 @@ export default function DepoTab({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowStockModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{t.depo} — {editingStock ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : t.add}</h3>
+                <h3 className="font-semibold text-gray-800">{t.depo} — {editingStock ? (oc(currentLanguage).duzenle) : t.add}</h3>
                 <button onClick={() => setShowStockModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{t.product}</label>
-                  <input type="text" value={stockForm.productName} onChange={e => setStockForm(prev => ({ ...prev, productName: e.target.value }))} placeholder={currentLanguage === 'tr' ? 'Ürün adı' : 'Product name'} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                  <input type="text" value={stockForm.productName} onChange={e => setStockForm(prev => ({ ...prev, productName: e.target.value }))} placeholder={oc(currentLanguage).urun_adi_2} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -144,11 +145,11 @@ export default function DepoTab({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Kategori' : 'Category'}</label>
-                  <input type="text" value={stockForm.category} onChange={e => setStockForm(prev => ({ ...prev, category: e.target.value }))} placeholder={currentLanguage === 'tr' ? 'Genel' : 'General'} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).kategori}</label>
+                  <input type="text" value={stockForm.category} onChange={e => setStockForm(prev => ({ ...prev, category: e.target.value }))} placeholder={oc(currentLanguage).genel} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Not' : 'Notes'}</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).not}</label>
                   <input type="text" value={stockForm.notes} onChange={e => setStockForm(prev => ({ ...prev, notes: e.target.value }))} placeholder="..." className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                 </div>
               </div>

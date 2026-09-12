@@ -30,6 +30,7 @@ import { zamanDate, gunFarki, gunAnahtari, bugunAnahtari, tarihYaz } from '../ut
 import { sortByCreatedAt } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
 import ModuleHeader from './ModuleHeader';
+import { oc } from '../i18n/ortak';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -296,7 +297,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
               </button>
             )}
             <button onClick={() => setShowAddInvoice(true)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-1.5">
-              <Plus className="w-3.5 h-3.5" />{tr ? 'Fatura Ekle' : 'Add Invoice'}
+              <Plus className="w-3.5 h-3.5" />{oc(tr).fatura_ekle}
             </button>
           </div>
         ) : undefined}
@@ -307,7 +308,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
         {[
           { label: tr ? 'Vadesi Geçmiş' : 'Overdue', v: fmtTRY(totalOverdue), sub: `${open.length} fatura`, color: 'text-red-600', bg: 'bg-red-50' },
           { label: tr ? 'Ort. Gecikme' : 'Avg Overdue', v: `${avgDaysOverdue}g`, sub: 'DSO proxy', color: avgDaysOverdue > 30 ? 'text-red-600' : 'text-orange-600', bg: 'bg-orange-50' },
-          { label: tr ? 'Tahsil Edilen' : 'Collected', v: fmtTRY(collected), sub: `${invoices.filter(i => i.status === 'Tahsil Edildi').length} fatura`, color: 'text-green-600', bg: 'bg-green-50' },
+          { label: oc(tr).tahsil_edilen, v: fmtTRY(collected), sub: `${invoices.filter(i => i.status === 'Tahsil Edildi').length} fatura`, color: 'text-green-600', bg: 'bg-green-50' },
           { label: tr ? 'Hukuki Takip' : 'Legal Track', v: invoices.filter(i => i.status === 'Hukuki').length, sub: '', color: 'text-purple-600', bg: 'bg-purple-50' },
         ].map(k => (
           <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
@@ -329,7 +330,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
               const pct = Math.round((b.amount / maxAmt) * 100);
               return (
                 <div key={bucket} className="text-center cursor-pointer" onClick={() => setFilterBucket(filterBucket === bucket ? 'all' : bucket)}>
-                  <div className={`text-xs font-bold mb-1 ${filterBucket === bucket ? 'text-brand' : 'text-gray-500'}`}>{bucket} {tr ? 'gün' : 'd'}</div>
+                  <div className={`text-xs font-bold mb-1 ${filterBucket === bucket ? 'text-brand' : 'text-gray-500'}`}>{bucket} {oc(tr).gun}</div>
                   <div className="h-12 bg-gray-100 rounded-lg relative overflow-hidden">
                     <div className={`absolute bottom-0 left-0 right-0 rounded-b-lg transition-all ${
                       bucket === '90+' ? 'bg-red-400' : bucket === '61-90' ? 'bg-orange-400' : bucket === '31-60' ? 'bg-amber-400' : 'bg-blue-400'
@@ -350,7 +351,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
           {(['all', 'Açık', 'İtiraz', 'Hukuki', 'Tahsil Edildi'] as const).map(s => (
             <button key={s} onClick={() => setFilterStatus(s)}
               className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${filterStatus === s ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
-              {s === 'all' ? (tr ? 'Tümü' : 'All') : s}
+              {s === 'all' ? (oc(tr).tumu) : s}
             </button>
           ))}
         </div>
@@ -380,7 +381,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
                     <button type="button"
                       onClick={() => setPolicyDraft(d => ({ ...d, levels: d.levels.filter((_, j) => j !== i) }))}
                       className="text-gray-400 hover:text-red-600 transition-colors p-1 -m-1 rounded-lg hover:bg-red-50"
-                      title={tr ? 'Seviyeyi sil' : 'Delete level'} aria-label={tr ? 'Seviyeyi sil' : 'Delete level'}>
+                      title={oc(tr).seviyeyi_sil} aria-label={oc(tr).seviyeyi_sil}>
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -398,14 +399,14 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
                       className="apple-input px-2 py-1.5 text-xs w-full" />
                   </div>
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">{tr ? 'Yöntem' : 'Method'}</p>
+                    <p className="text-xs text-gray-500 mb-1">{oc(tr).yontem}</p>
                     <select value={level.contactMethod}
                       onChange={e => setPolicyDraft(d => ({ ...d, levels: d.levels.map((l, j) => j === i ? { ...l, contactMethod: e.target.value as ContactMethod } : l) }))}
                       className="apple-input px-2 py-1.5 text-xs w-full">
                       <option value="email">Email</option>
                       <option value="whatsapp">WhatsApp</option>
-                      <option value="phone">{tr ? 'Telefon' : 'Phone'}</option>
-                      <option value="letter">{tr ? 'Mektup' : 'Letter'}</option>
+                      <option value="phone">{oc(tr).telefon}</option>
+                      <option value="letter">{oc(tr).mektup}</option>
                     </select>
                   </div>
                   <div>
@@ -427,7 +428,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
             </div>
             <div className="flex gap-2">
               <button onClick={savePolicy} className="apple-button-primary px-4 py-2 text-sm">{tr ? 'Politikayı Kaydet' : 'Save Policy'}</button>
-              <button onClick={() => setShowPolicyEditor(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr ? 'İptal' : 'Cancel'}</button>
+              <button onClick={() => setShowPolicyEditor(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr).iptal}</button>
             </div>
           </motion.div>
         )}
@@ -444,15 +445,15 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <input value={invoiceDraft.invoiceNo} onChange={e => setInvoiceDraft(d => ({ ...d, invoiceNo: e.target.value }))}
-                placeholder={tr ? 'Fatura No' : 'Invoice No'} className="apple-input px-3 py-2 text-sm" />
+                placeholder={oc(tr).fatura_no} className="apple-input px-3 py-2 text-sm" />
               <input value={invoiceDraft.customerName} onChange={e => setInvoiceDraft(d => ({ ...d, customerName: e.target.value }))}
-                placeholder={tr ? 'Müşteri Adı' : 'Customer Name'} className="apple-input px-3 py-2 text-sm" />
+                placeholder={oc(tr).musteri_adi} className="apple-input px-3 py-2 text-sm" />
               <input type="number" value={invoiceDraft.amount || ''} onChange={e => setInvoiceDraft(d => ({ ...d, amount: parseFloat(e.target.value) || 0 }))}
-                placeholder={tr ? 'Tutar (₺)' : 'Amount (₺)'} className="apple-input px-3 py-2 text-sm" />
+                placeholder={oc(tr).tutar_2} className="apple-input px-3 py-2 text-sm" />
               <input value={invoiceDraft.customerEmail ?? ''} onChange={e => setInvoiceDraft(d => ({ ...d, customerEmail: e.target.value }))}
                 placeholder="Email" className="apple-input px-3 py-2 text-sm" />
               <input value={invoiceDraft.customerPhone ?? ''} onChange={e => setInvoiceDraft(d => ({ ...d, customerPhone: e.target.value }))}
-                placeholder={tr ? 'Telefon' : 'Phone'} className="apple-input px-3 py-2 text-sm" />
+                placeholder={oc(tr).telefon} className="apple-input px-3 py-2 text-sm" />
               <div className="space-y-1">
                 <p className="text-xs text-gray-500">{tr ? 'Vade Tarihi' : 'Due Date'}</p>
                 <input type="date" value={invoiceDraft.dueDate} onChange={e => setInvoiceDraft(d => ({ ...d, dueDate: e.target.value }))}
@@ -460,8 +461,8 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={saveInvoice} className="apple-button-primary px-4 py-2 text-sm">{tr ? 'Ekle' : 'Add'}</button>
-              <button onClick={() => setShowAddInvoice(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr ? 'İptal' : 'Cancel'}</button>
+              <button onClick={saveInvoice} className="apple-button-primary px-4 py-2 text-sm">{oc(tr).ekle}</button>
+              <button onClick={() => setShowAddInvoice(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr).iptal}</button>
             </div>
           </motion.div>
         )}
@@ -494,7 +495,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
                   {days > 0 && (
                     <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
                       days > 60 ? 'bg-red-100 text-red-700' : days > 30 ? 'bg-orange-100 text-orange-700' : 'bg-amber-100 text-amber-700'
-                    }`}>{days}g {tr ? 'gecikmiş' : 'overdue'}</span>
+                    }`}>{days}g {oc(tr).gecikmis}</span>
                   )}
                   <p className="font-bold text-gray-900">{fmtTRY(inv.amount)}</p>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor[inv.status]}`}>{inv.status}</span>
@@ -527,7 +528,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
                               <button key={method} onClick={() => logContact(inv, method)}
                                 className="apple-button-secondary px-3 py-1.5 text-xs flex items-center gap-1.5">
                                 <Icon className="w-3.5 h-3.5" />
-                                {method === 'email' ? 'Email' : method === 'whatsapp' ? 'WhatsApp' : method === 'phone' ? (tr ? 'Telefon' : 'Call') : (tr ? 'Mektup' : 'Letter')}
+                                {method === 'email' ? 'Email' : method === 'whatsapp' ? 'WhatsApp' : method === 'phone' ? (tr ? 'Telefon' : 'Call') : (oc(tr).mektup)}
                               </button>
                             );
                           })}
@@ -589,7 +590,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
           </p>
           {isAuthenticated && (
             <button onClick={() => setShowAddInvoice(true)} className="apple-button-primary px-5 py-2 text-sm mx-auto flex items-center gap-2">
-              <Plus className="w-4 h-4" />{tr ? 'Fatura Ekle' : 'Add Invoice'}
+              <Plus className="w-4 h-4" />{oc(tr).fatura_ekle}
             </button>
           )}
         </div>

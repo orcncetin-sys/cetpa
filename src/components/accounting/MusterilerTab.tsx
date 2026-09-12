@@ -4,6 +4,7 @@ import { type Customer } from '../../types';
 import { paraYaz } from '../../utils/currency';
 import { SortHeader, exportCSV, type AccountingT } from './shared';
 import CariEkstrePanel from '../CariEkstrePanel';
+import { oc } from '../../i18n/ortak';
 
 type CustomerForm = {
   name: string; company: string; email: string; phone: string; address: string;
@@ -95,7 +96,7 @@ export default function MusterilerTab({
                     className="hidden md:table-cell"
                   />
                   <SortHeader
-                    label={currentLanguage === 'tr' ? 'Bakiye' : 'Balance'}
+                    label={oc(currentLanguage).bakiye}
                     sortKey="balance"
                     currentSort={{ key: musteriSortKey, direction: musteriSortDir }}
                     onSort={(key) => toggleMusteriSort(key as MusteriSortKey)}
@@ -164,8 +165,8 @@ export default function MusterilerTab({
                             </button>
                           );
                         })()}
-                        <button onClick={() => setEkstreMusteri(c)} title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri' : 'Account statement'} className="p-2.5 -m-1 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                        <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'} className="p-2.5 -m-1 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
+                        <button onClick={() => setEkstreMusteri(c)} title={oc(currentLanguage).cari_ekstre_hareketleri} className="p-2.5 -m-1 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
+                        <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} title={oc(currentLanguage).duzenle} className="p-2.5 -m-1 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                         <button onClick={() => deleteCustomer(c.id)} className="p-2.5 -m-1 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
                       </div>
                     </td>
@@ -182,7 +183,7 @@ export default function MusterilerTab({
             <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[88vh] flex flex-col shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="flex items-start justify-between p-5 border-b border-gray-100 shrink-0">
                 <div>
-                  <h3 className="font-bold text-[#1D1D1F]">{currentLanguage === 'tr' ? 'Cari Ekstre' : 'Account Statement'}</h3>
+                  <h3 className="font-bold text-[#1D1D1F]">{oc(currentLanguage).cari_ekstre}</h3>
                   <p className="text-xs text-gray-500 mt-0.5">{ekstreMusteri.name}</p>
                 </div>
                 <button onClick={() => setEkstreMusteri(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
@@ -221,7 +222,7 @@ export default function MusterilerTab({
                   { label: t.email, key: 'email', type: 'email', placeholder: 'ornek@sirket.com' },
                   { label: t.phone, key: 'phone', type: 'text', placeholder: '+90 555 000 0000' },
                   { label: t.address, key: 'address', type: 'text', placeholder: 'İstanbul, Türkiye' },
-                  { label: currentLanguage === 'tr' ? 'Vergi Dairesi' : 'Tax Office', key: 'taxOffice', type: 'text', placeholder: 'Boğaziçi V.D.' },
+                  { label: oc(currentLanguage).vergi_dairesi, key: 'taxOffice', type: 'text', placeholder: 'Boğaziçi V.D.' },
                   { label: t.taxNo, key: 'taxNo', type: 'text', placeholder: '1234567890' },
                   { label: t.notes2, key: 'notes', type: 'text', placeholder: '...' },
                 ].map(f => (
@@ -232,19 +233,19 @@ export default function MusterilerTab({
                 ))}
                 {/* Risk & Financial fields */}
                 <div className="pt-2 border-t border-gray-100">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">{currentLanguage === 'tr' ? 'Finansal & Risk' : 'Financial & Risk'}</p>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">{oc(currentLanguage).finansal_risk}</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Kredi Limiti (₺)' : 'Credit Limit (₺)'}</label>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).kredi_limiti}</label>
                       <input type="number" value={customerForm.creditLimit} onChange={e => setCustomerForm(prev => ({ ...prev, creditLimit: Number(e.target.value) }))} placeholder="500000" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Açık Bakiye (₺)' : 'Open Balance (₺)'}</label>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).acik_bakiye}</label>
                       <input type="number" value={customerForm.balance} onChange={e => setCustomerForm(prev => ({ ...prev, balance: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                     </div>
                   </div>
                   <div className="mt-3">
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">{currentLanguage === 'tr' ? 'Risk Grubu' : 'Risk Group'}</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">{oc(currentLanguage).risk_grubu}</label>
                     <div className="flex gap-2">
                       {(['Düşük', 'Orta', 'Yüksek'] as const).map(g => (
                         <button key={g} type="button"

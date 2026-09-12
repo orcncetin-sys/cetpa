@@ -5,6 +5,7 @@ import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { tarihYaz, tarihSaatYaz } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 type Carrier = 'DHL' | 'UPS' | 'FedEx' | 'Yurtiçi' | 'MNG' | 'Aras' | 'PTT';
 
@@ -43,10 +44,10 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
   const [savedTracks, setSavedTracks] = useState<any[]>([]);
 
   const statusLabels: Record<string, string> = {
-    pending: currentLanguage === 'tr' ? 'Bekliyor' : 'Pending',
-    in_transit: currentLanguage === 'tr' ? 'Yolda' : 'In Transit',
+    pending: oc(currentLanguage).bekliyor,
+    in_transit: oc(currentLanguage).yolda,
     out_for_delivery: currentLanguage === 'tr' ? 'Dağıtımda' : 'Out for Delivery',
-    delivered: currentLanguage === 'tr' ? 'Teslim Edildi' : 'Delivered',
+    delivered: oc(currentLanguage).teslim_edildi,
     exception: currentLanguage === 'tr' ? 'Problem' : 'Exception',
   };
 
@@ -183,7 +184,7 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
           >
             {trackLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
             {trackLoading
-              ? (currentLanguage === 'tr' ? 'Aranıyor...' : 'Searching...')
+              ? (oc(currentLanguage).araniyor)
               : (currentLanguage === 'tr' ? 'Takip Et' : 'Track')}
           </button>
         </div>
@@ -222,7 +223,7 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
               </div>
               <div className="text-right">
                 <p className={cn("text-[10px] uppercase tracking-widest font-bold mb-1", darkMode ? "text-white/60" : "text-gray-400")}>
-                  {currentLanguage === 'tr' ? 'Tahmini Teslimat' : 'Est. Delivery'}
+                  {oc(currentLanguage).tahmini_teslimat}
                 </p>
                 <p className={cn("text-sm font-bold", darkMode ? "text-white" : "text-[#1D1D1F]")}>
                   {trackResult.estimatedDelivery ? tarihYaz(trackResult.estimatedDelivery, { day: 'numeric', month: 'short', year: 'numeric' }, currentLanguage === 'tr' ? 'tr' : 'en') : '-'}

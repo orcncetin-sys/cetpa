@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { paraYaz } from '../utils/currency';
 import { tarihYaz } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
         {onBack && (
           <button onClick={onBack} className="py-2.5 -my-2.5 px-2 -mx-2 text-white/70 hover:text-white text-xs font-medium flex items-center gap-1">
             <ExternalLink className="w-3.5 h-3.5" />
-            {tr ? 'Kapat' : 'Close'}
+            {oc(tr).kapat}
           </button>
         )}
       </header>
@@ -124,7 +125,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
             <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase">{tr ? 'Sipariş No' : 'Order No'}</p>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr).siparis_no}</p>
                   <p className="font-bold text-lg text-brand">#{order.orderNo}</p>
                 </div>
                 <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
@@ -178,7 +179,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
             {/* Status timeline */}
             {!isCancelled && (
               <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                <p className="text-[10px] font-bold text-gray-400 uppercase mb-5">{tr ? 'Sipariş Durumu' : 'Order Status'}</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase mb-5">{oc(tr).siparis_durumu}</p>
                 <div className="space-y-0">
                   {STEPS.map((step, i) => {
                     const done   = i <= activeStep;
@@ -220,7 +221,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
             {isCancelled && (
               <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5 text-center">
                 <AlertCircle className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                <p className="font-bold text-gray-600">{tr ? 'Sipariş İptal Edildi' : 'Order Cancelled'}</p>
+                <p className="font-bold text-gray-600">{oc(tr).siparis_iptal_edildi}</p>
               </div>
             )}
 
@@ -250,7 +251,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
               className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-gray-200 text-gray-500 text-sm font-medium hover:bg-gray-50 transition-colors"
             >
               <RefreshCw className="w-4 h-4" />
-              {tr ? 'Yenile' : 'Refresh'}
+              {oc(tr).yenile}
             </button>
           </>
         )}

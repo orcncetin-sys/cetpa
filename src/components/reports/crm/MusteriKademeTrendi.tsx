@@ -6,6 +6,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanDate } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'orders' | 'currentLanguage' | 'fmtAna'>;
 
@@ -60,7 +61,7 @@ export default function MusteriKademeTrendi({ orders, currentLanguage, fmtAna }:
               <div className="flex items-center justify-between mb-2">
                 <div>
                   <p className={`text-xs font-bold ${cls.text}`}>{tier === 'Platinum' ? '💎' : tier === 'Gold' ? '⭐' : '🥈'} {tier}</p>
-                  <p className="text-[10px] text-gray-400">{tier === 'Platinum' ? `Top ${topN}` : tier === 'Silver' ? `Bottom ${botN}` : `Mid ${n228 - topN - botN}`} {currentLanguage === 'tr' ? 'müşteri' : 'customers'}</p>
+                  <p className="text-[10px] text-gray-400">{tier === 'Platinum' ? `Top ${topN}` : tier === 'Silver' ? `Bottom ${botN}` : `Mid ${n228 - topN - botN}`} {oc(currentLanguage).musteri_2}</p>
                 </div>
                 <div className="text-right">
                   <p className={`text-lg font-black ${cls.text}`}>{fmtAna(curr,'K',0)}</p>

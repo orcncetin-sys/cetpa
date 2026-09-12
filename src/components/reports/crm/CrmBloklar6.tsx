@@ -11,6 +11,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanDate, ayAnahtari, tarihYaz } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'inventory' | 'currentLanguage' | 'fmtAna'>;
 
@@ -177,7 +178,7 @@ export default function CrmBloklar6({ reportsTab, orders, quotations, inventory,
             </div>
             <div className="grid grid-cols-3 gap-2 text-center">
               {[
-                { label: currentLanguage === 'tr' ? 'Toplam Müşteri' : 'Total Customers', value: totalCusts237, color: 'text-gray-700' },
+                { label: oc(currentLanguage).toplam_musteri, value: totalCusts237, color: 'text-gray-700' },
                 { label: currentLanguage === 'tr' ? 'Tekrarlı Alım' : 'Repeat Buyers', value: repeatCusts, color: 'text-emerald-600' },
                 { label: currentLanguage === 'tr' ? 'Tek Alım' : 'One-time', value: totalCusts237 - repeatCusts, color: 'text-amber-600' },
               ].map(k => (
@@ -336,7 +337,7 @@ export default function CrmBloklar6({ reportsTab, orders, quotations, inventory,
                   <span className="text-xs font-bold text-blue-800 truncate">{op.catA}</span>
                   <span className="text-blue-400 text-xs shrink-0">→</span>
                   <span className="text-xs font-bold text-emerald-700 truncate">{op.catB}</span>
-                  <span className="text-[10px] text-gray-500 shrink-0 ml-auto">{op.count} {currentLanguage === 'tr' ? 'müşteri' : 'customers'}</span>
+                  <span className="text-[10px] text-gray-500 shrink-0 ml-auto">{op.count} {oc(currentLanguage).musteri_2}</span>
                 </div>
               ))}
             </div>

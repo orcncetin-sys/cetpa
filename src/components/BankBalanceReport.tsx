@@ -19,6 +19,7 @@ import { logFirestoreError, OperationType } from '../utils/firebase';
 import { paraYaz } from '../utils/currency';
 import { bugunAnahtari } from '../utils/zaman';
 import type { BankAccount, BankTransaction, BankReportPreset } from '../types';
+import { oc } from '../i18n/ortak';
 
 interface CostCenter { id: string; kod: string; ad: string }
 
@@ -89,7 +90,7 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
       const ref = await addDoc(collection(db, 'bankReportPresets'), { name: name.trim(), asOf, costCenterId: costCenterFilter || '', createdAt: serverTimestamp() });
       setPresets(p => [...p, { id: ref.id, name: name.trim(), asOf, costCenterId: costCenterFilter || '' }]);
       toast(tr ? 'Filtre kaydedildi.' : 'Preset saved.', 'success');
-    } catch { toast(tr ? 'Kaydedilemedi.' : 'Save failed.', 'error'); }
+    } catch { toast(oc(tr).kaydedilemedi_2, 'error'); }
   };
   const applyPreset = (p: BankReportPreset) => {
     if (p.asOf) setAsOf(p.asOf);
@@ -148,7 +149,7 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
       toast(tr ? 'Açılış bakiyesi kaydedildi.' : 'Opening balance saved.', 'success');
     } catch (e) {
       logFirestoreError(e as Error, OperationType.UPDATE, `bankAccounts/${acc.id}`);
-      toast(tr ? 'Kaydedilemedi.' : 'Save failed.', 'error');
+      toast(oc(tr).kaydedilemedi_2, 'error');
     }
   };
 
@@ -159,7 +160,7 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <h3 className="font-bold text-gray-900 flex items-center gap-2"><Landmark className="w-4 h-4 text-brand" />{tr ? 'Banka Bakiye Durum Raporu' : 'Bank Balance Report'}</h3>
         <div className="flex items-center gap-2 ml-auto flex-wrap">
-          <label className="text-xs font-bold text-gray-500">{tr ? 'Tarih' : 'Date'}:</label>
+          <label className="text-xs font-bold text-gray-500">{oc(tr).tarih}:</label>
           <input type="date" value={asOf} onChange={e => setAsOf(e.target.value)} className="apple-input text-sm px-3 py-1.5" />
           {costCenters.length > 0 && (
             <select value={costCenterFilter} onChange={e => setCostCenterFilter(e.target.value)} className="apple-input text-sm px-3 py-1.5" title={tr ? 'Maliyet merkezi' : 'Cost center'}>
@@ -167,7 +168,7 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
               {costCenters.map(c => <option key={c.id} value={c.id}>{c.kod} — {c.ad}</option>)}
             </select>
           )}
-          <button onClick={() => void load()} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title={tr ? 'Yenile' : 'Refresh'}><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
+          <button onClick={() => void load()} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title={oc(tr).yenile}><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
         </div>
       </div>
 
@@ -191,10 +192,10 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[10px] font-bold text-gray-400 uppercase border-b border-gray-100">
-                <th className="pb-2 pr-3">{tr ? 'Hesap' : 'Account'}</th>
+                <th className="pb-2 pr-3">{oc(tr).hesap}</th>
                 <th className="pb-2 pr-3 text-right">{tr ? 'Açılış' : 'Opening'}</th>
                 <th className="pb-2 pr-3 text-right">{tr ? 'Hareket' : 'Movement'}</th>
-                <th className="pb-2 pr-3 text-right">{tr ? 'Bakiye' : 'Balance'}</th>
+                <th className="pb-2 pr-3 text-right">{oc(tr).bakiye}</th>
                 <th className="pb-2 text-right">{tr ? 'TRY Karşılığı' : 'TRY Value'}</th>
               </tr>
             </thead>
@@ -214,7 +215,7 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
                         className="w-24 bg-gray-50 border-none rounded-lg px-2 py-1 text-xs text-right tabular-nums focus:ring-1 focus:ring-brand"
                       />
                       {openingDraft[acc.id] !== undefined && (
-                        <button onClick={() => void saveOpening(acc)} className="p-1 rounded text-emerald-500 hover:bg-emerald-50" title={tr ? 'Kaydet' : 'Save'}><Save className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => void saveOpening(acc)} className="p-1 rounded text-emerald-500 hover:bg-emerald-50" title={oc(tr).kaydet}><Save className="w-3.5 h-3.5" /></button>
                       )}
                     </div>
                   </td>

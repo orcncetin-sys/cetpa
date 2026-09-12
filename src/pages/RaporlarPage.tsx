@@ -18,6 +18,7 @@ import {
   type MonthlySummaryRow,
 } from '../utils/export';
 import type { Order, Lead, InventoryItem, Employee, Quotation, InventoryMovement } from '../types';
+import { oc } from '../i18n/ortak';
 
 type RecurringOrder = {
   id: string; templateName: string; customerName: string; totalPrice: number;
@@ -118,7 +119,7 @@ export default function RaporlarPage({
   }, [ordersProp, mikroFaturalar, cariAdMap]);
 
   if (!canAccess('reports')) {
-    return <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Raporlar' : 'Reports'} />;
+    return <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).raporlar} />;
   }
 
   return (
@@ -129,13 +130,13 @@ export default function RaporlarPage({
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Dışa Aktar:' : 'Export:'}</span>
         <button onClick={() => exportOrdersCSV(orders, currentLanguage)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors">
-          <Download className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Siparişler' : 'Orders'}
+          <Download className="w-3.5 h-3.5" /> {oc(currentLanguage).siparisler}
         </button>
         <button onClick={() => exportLeadsCSV(leads, currentLanguage)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors">
           <Download className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Müşteriler' : 'Leads'}
         </button>
         <button onClick={() => exportInventoryCSV(inventory, currentLanguage)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors">
-          <Download className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Envanter' : 'Inventory'}
+          <Download className="w-3.5 h-3.5" /> {oc(currentLanguage).envanter}
         </button>
         {/* Phase 63: Full Report PDF */}
         <button
@@ -160,7 +161,7 @@ export default function RaporlarPage({
                 autoTable(pdf, {
                   ...pdfTabloStili(),
                   startY: 56,
-                  head: [[tr63 ? 'Durum' : 'Status', tr63 ? 'Adet' : 'Count', tr63 ? 'Oran' : 'Share']],
+                  head: [[oc(tr63).durum, tr63 ? 'Adet' : 'Count', tr63 ? 'Oran' : 'Share']],
                   body: ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'].map(s => [
                     s, orders.filter(o => o.status === s).length,
                     `${orders.length > 0 ? Math.round((orders.filter(o => o.status === s).length / orders.length) * 100) : 0}%`
@@ -170,14 +171,14 @@ export default function RaporlarPage({
                 // Section 2: Top Customers
                 const finalY = (pdf as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
                 pdf.setFontSize(12); pdf.setFont('Roboto', 'bold');
-                pdf.text(tr63 ? 'En Yüksek Cirolu Müşteriler' : 'Top Customers by Revenue', 14, finalY);
+                pdf.text(oc(tr63).en_yuksek_cirolu_musteriler, 14, finalY);
                 const custMap: Record<string, number> = {};
                 for (const o of orders) { custMap[o.customerName] = (custMap[o.customerName] ?? 0) + (o.totalPrice || 0); }
                 const top5 = Object.entries(custMap).sort(([, a], [, b]) => b - a).slice(0, 5);
                 autoTable(pdf, {
                   ...pdfTabloStili(),
                   startY: finalY + 4,
-                  head: [[tr63 ? 'Müşteri' : 'Customer', tr63 ? 'Ciro' : 'Revenue', tr63 ? 'Pay' : 'Share']],
+                  head: [[oc(tr63).musteri, oc(tr63).ciro, oc(tr63).pay]],
                   body: top5.map(([name, rev]) => [name, paraYaz(rev, { ondalik: 0 }), `${totalRev > 0 ? Math.round((rev / totalRev) * 100) : 0}%`]),
                   styles: { font: 'Roboto', fontSize: 9 },
                 });
@@ -189,7 +190,7 @@ export default function RaporlarPage({
                 autoTable(pdf, {
                   ...pdfTabloStili(),
                   startY: finalY2 + 4,
-                  head: [['SKU', tr63 ? 'Ürün' : 'Product', tr63 ? 'Stok' : 'Stock', tr63 ? 'Min' : 'Min']],
+                  head: [['SKU', oc(tr63).urun, oc(tr63).stok, tr63 ? 'Min' : 'Min']],
                   body: lowStock.map(i => [i.sku, i.name, i.stockLevel ?? 0, i.lowStockThreshold ?? 5]),
                   styles: { font: 'Roboto', fontSize: 9 },
                 });
@@ -304,8 +305,8 @@ export default function RaporlarPage({
         const closedLeads570 = leads.filter(l => l.status === 'Closed Won' || l.status === 'Closed').length;
         const actLeadConv570 = totalLeads570 > 0 ? (closedLeads570 / totalLeads570) * 100 : 0;
         const kpis570 = [
-          { label: tr570 ? 'Aylık Ciro' : 'Monthly Revenue', actual: actRevenue570, target: p570Targets.revenue, fmt: (v: number) => fmtKpi(v, 'K', 1), key: 'revenue' as const, color: 'blue' },
-          { label: tr570 ? 'Sipariş Adedi' : 'Order Count', actual: actOrders570, target: p570Targets.orders, fmt: (v: number) => String(v), key: 'orders' as const, color: 'green' },
+          { label: oc(tr570).aylik_ciro, actual: actRevenue570, target: p570Targets.revenue, fmt: (v: number) => fmtKpi(v, 'K', 1), key: 'revenue' as const, color: 'blue' },
+          { label: oc(tr570).siparis_adedi, actual: actOrders570, target: p570Targets.orders, fmt: (v: number) => String(v), key: 'orders' as const, color: 'green' },
           { label: tr570 ? 'Ort. Sipariş Değeri' : 'Avg Order Value', actual: actAvgOrder570, target: p570Targets.avgOrderVal, fmt: (v: number) => fmtKpi(v, 'full', 0), key: 'avgOrderVal' as const, color: 'purple' },
           { label: tr570 ? 'Lead Dönüşüm %' : 'Lead Conv. %', actual: actLeadConv570, target: p570Targets.leadConv, fmt: (v: number) => v.toFixed(1) + '%', key: 'leadConv' as const, color: 'orange' },
         ];
@@ -387,7 +388,7 @@ export default function RaporlarPage({
               <h3 className="font-bold text-gray-900 text-sm">{tr603 ? '📈 İş Zekası Trend Analizi' : '📈 Business Intelligence Trends'}</h3>
               <div className="flex gap-2 flex-wrap">
                 <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-                  {([['revenue', tr603 ? 'Gelir' : 'Revenue'], ['orders', tr603 ? 'Sipariş' : 'Orders'], ['leads', 'Leads']] as const).map(([id, lbl]) => (
+                  {([['revenue', oc(tr603).gelir], ['orders', oc(tr603).siparis_2], ['leads', 'Leads']] as const).map(([id, lbl]) => (
                     <button key={id} onClick={() => setP603TrendMetric(id)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${p603TrendMetric === id ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>{lbl}</button>
                   ))}
                 </div>
@@ -503,10 +504,10 @@ export default function RaporlarPage({
         const stageMap: { [s: string]: number } = { Pending: 0, Processing: 0, Shipped: 0, Delivered: 0, Cancelled: 0 };
         orders.forEach(o => { if (stageMap[o.status] !== undefined) stageMap[o.status]++; });
         const pipeline631 = [
-          { stage: 'Pending',    label: tr631 ? 'Bekliyor'  : 'Pending',    color: 'bg-amber-400',  count: stageMap['Pending']    },
+          { stage: 'Pending',    label: oc(tr631).bekliyor,    color: 'bg-amber-400',  count: stageMap['Pending']    },
           { stage: 'Processing', label: tr631 ? 'İşlemde'  : 'Processing', color: 'bg-blue-500',   count: stageMap['Processing'] },
           { stage: 'Shipped',    label: tr631 ? 'Yolda'     : 'Shipped',    color: 'bg-indigo-500', count: stageMap['Shipped']    },
-          { stage: 'Delivered',  label: tr631 ? 'Teslim'    : 'Delivered',  color: 'bg-green-500',  count: stageMap['Delivered']  },
+          { stage: 'Delivered',  label: oc(tr631).teslim,  color: 'bg-green-500',  count: stageMap['Delivered']  },
         ].filter(s => s.count > 0 || s.stage === 'Processing');
         const total631 = pipeline631.reduce((s, p) => s + p.count, 0) || 1;
         const bottleneck631 = [...pipeline631].sort((a, b) => b.count - a.count)[0];
@@ -542,7 +543,7 @@ export default function RaporlarPage({
                   <div key={p.stage} className="space-y-1">
                     <div className="flex justify-between text-xs text-gray-600">
                       <span className="font-medium">{p.label}</span>
-                      <span className="font-bold">{p.count} {tr631 ? 'sipariş' : 'orders'} ({Math.round(p.count / total631 * 100)}%)</span>
+                      <span className="font-bold">{p.count} {oc(tr631).siparis} ({Math.round(p.count / total631 * 100)}%)</span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
                       <div className={`h-3 rounded-full ${p.color} transition-all`} style={{ width: `${Math.max(2, p.count / total631 * 100)}%` }} />
@@ -567,10 +568,10 @@ export default function RaporlarPage({
                 )}
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { label: tr631 ? 'Bekleyen' : 'Pending',    val: stageMap['Pending'],    col: 'text-amber-600'  },
+                    { label: oc(tr631).bekleyen,    val: stageMap['Pending'],    col: 'text-amber-600'  },
                     { label: tr631 ? 'İşlemde'  : 'Processing', val: stageMap['Processing'], col: 'text-blue-600'   },
                     { label: tr631 ? 'Yolda'    : 'Shipped',    val: stageMap['Shipped'],    col: 'text-indigo-600' },
-                    { label: tr631 ? 'Teslim'   : 'Delivered',  val: stageMap['Delivered'],  col: 'text-green-600'  },
+                    { label: oc(tr631).teslim,  val: stageMap['Delivered'],  col: 'text-green-600'  },
                   ].map(s => (
                     <div key={s.label} className="apple-card bg-gray-50 p-3 text-center">
                       <p className={`text-xl font-bold ${s.col}`}>{s.val}</p>
@@ -593,7 +594,7 @@ export default function RaporlarPage({
                   {pipeline631.map(p => (
                     <div key={p.stage} className={`flex items-center justify-between px-4 py-2.5 rounded-xl border text-sm ${p.stage === bottleneck631?.stage ? 'bg-amber-50 border-amber-300' : 'bg-gray-50 border-gray-200'}`}>
                       <span className="font-medium text-gray-700">{p.label}</span>
-                      <span className={`font-bold ${p.stage === bottleneck631?.stage ? 'text-amber-700' : 'text-gray-600'}`}>{p.count} {tr631 ? 'sipariş' : 'orders'}</span>
+                      <span className={`font-bold ${p.stage === bottleneck631?.stage ? 'text-amber-700' : 'text-gray-600'}`}>{p.count} {oc(tr631).siparis}</span>
                     </div>
                   ))}
                 </div>

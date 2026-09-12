@@ -6,6 +6,7 @@ import { db } from '../firebase';
 import { paraYaz } from '../utils/currency';
 import { bugunAnahtari } from '../utils/zaman';
 import { Building2, Plus, BarChart3, FileText, ArrowLeftRight, TrendingUp, TrendingDown, Minus, X } from 'lucide-react';
+import { oc } from '../i18n/ortak';
 
 interface HoldingModuleProps {
   currentLanguage: string;
@@ -240,7 +241,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
           <Plus className="w-4 h-4" />
           {view === 'entities' ? (tr ? 'Şirket Ekle' : 'Add Entity') :
            view === 'coa' ? (tr ? 'Hesap Ekle' : 'Add Account') :
-           view === 'intercompany' ? (tr ? 'İşlem Ekle' : 'Add Transaction') : ''}
+           view === 'intercompany' ? (oc(tr).islem_ekle) : ''}
         </button>
       </div>
 
@@ -265,7 +266,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
               <p className="text-2xl font-bold mt-1">{entities.length}</p>
             </div>
             <div className="apple-card p-4">
-              <p className="text-sm text-gray-500">{tr ? 'Aktif' : 'Active'}</p>
+              <p className="text-sm text-gray-500">{oc(tr).aktif}</p>
               <p className="text-2xl font-bold mt-1 text-green-600">{entities.filter(e=>e.active).length}</p>
             </div>
             <div className="apple-card p-4">
@@ -277,7 +278,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
           {/* Entity list */}
           <div className="apple-card overflow-hidden">
             {loading ? (
-              <div className="p-8 text-center text-gray-400">{tr ? 'Yükleniyor...' : 'Loading...'}</div>
+              <div className="p-8 text-center text-gray-400">{oc(tr).yukleniyor}</div>
             ) : entities.length === 0 ? (
               <div className="p-8 text-center text-gray-400">{tr ? 'Henüz şirket eklenmedi.' : 'No entities added yet.'}</div>
             ) : (
@@ -285,9 +286,9 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
                 <thead className="bg-gray-50 border-b border-gray-100">
                   <tr>
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Şirket' : 'Entity'}</th>
-                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Tür' : 'Type'}</th>
-                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Ülke' : 'Country'}</th>
-                    <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Sahiplik %' : 'Ownership %'}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{oc(tr).tur}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{oc(tr).ulke}</th>
+                    <th className="text-right p-3 font-medium text-gray-600">{oc(tr).sahiplik}</th>
                     <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Alacak (IC)' : 'Receivable (IC)'}</th>
                     <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Borç (IC)' : 'Payable (IC)'}</th>
                   </tr>
@@ -335,7 +336,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
           <div className="flex gap-2 flex-wrap">
             <button onClick={() => setSelectedEntityId(null)}
               className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${!selectedEntityId ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-              {tr ? 'Tümü' : 'All'}
+              {oc(tr).tumu}
             </button>
             {entities.map(e => (
               <button key={e.id} onClick={() => setSelectedEntityId(e.id)}
@@ -351,11 +352,11 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Kod' : 'Code'}</th>
+                  <th className="text-left p-3 font-medium text-gray-600">{oc(tr).kod}</th>
                   <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Hesap Adı' : 'Account Name'}</th>
-                  <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Tür' : 'Type'}</th>
+                  <th className="text-left p-3 font-medium text-gray-600">{oc(tr).tur}</th>
                   <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Şirket' : 'Entity'}</th>
-                  <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Bakiye' : 'Balance'}</th>
+                  <th className="text-right p-3 font-medium text-gray-600">{oc(tr).bakiye}</th>
                 </tr>
               </thead>
               <tbody>
@@ -410,7 +411,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
               <p className="text-2xl font-bold mt-1">{intercompany.filter(ic=>!ic.eliminated).length}</p>
             </div>
             <div className="apple-card p-4">
-              <p className="text-sm text-gray-500">{tr ? 'Elimine Edildi' : 'Eliminated'}</p>
+              <p className="text-sm text-gray-500">{oc(tr).elimine_edildi}</p>
               <p className="text-2xl font-bold mt-1 text-green-600">{intercompany.filter(ic=>ic.eliminated).length}</p>
             </div>
           </div>
@@ -419,13 +420,13 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Tarih' : 'Date'}</th>
-                  <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Gönderen' : 'From'}</th>
-                  <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Alıcı' : 'To'}</th>
-                  <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Tür' : 'Type'}</th>
-                  <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Açıklama' : 'Description'}</th>
-                  <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Tutar' : 'Amount'}</th>
-                  <th className="text-center p-3 font-medium text-gray-600">{tr ? 'Durum' : 'Status'}</th>
+                  <th className="text-left p-3 font-medium text-gray-600">{oc(tr).tarih}</th>
+                  <th className="text-left p-3 font-medium text-gray-600">{oc(tr).gonderen}</th>
+                  <th className="text-left p-3 font-medium text-gray-600">{oc(tr).alici}</th>
+                  <th className="text-left p-3 font-medium text-gray-600">{oc(tr).tur}</th>
+                  <th className="text-left p-3 font-medium text-gray-600">{oc(tr).aciklama}</th>
+                  <th className="text-right p-3 font-medium text-gray-600">{oc(tr).tutar}</th>
+                  <th className="text-center p-3 font-medium text-gray-600">{oc(tr).durum}</th>
                 </tr>
               </thead>
               <tbody>
@@ -455,7 +456,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
                       <td className="p-3 text-center">
                         <button onClick={() => toggleEliminate(ic)}
                           className={`px-2 py-0.5 rounded-full text-xs font-medium transition-all ${ic.eliminated ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'}`}>
-                          {ic.eliminated ? (tr ? 'Elimine Edildi' : 'Eliminated') : (tr ? 'Açık' : 'Open')}
+                          {ic.eliminated ? (oc(tr).elimine_edildi) : (oc(tr).acik)}
                         </button>
                       </td>
                     </tr>
@@ -479,7 +480,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
               { label: tr ? 'Toplam Varlık' : 'Total Assets', value: totalAssets, icon: TrendingUp, color: 'text-blue-600' },
               { label: tr ? 'Net Gelir' : 'Net Income', value: netIncome, icon: netPozitif === false ? TrendingDown : TrendingUp, color: netRenk },
               { label: tr ? 'Toplam Borç' : 'Total Liabilities', value: totalLiabilities, icon: Minus, color: 'text-red-500' },
-              { label: tr ? 'Özkaynak' : 'Equity', value: topla(totalEquity, netIncome), icon: Building2, color: 'text-purple-600' },
+              { label: oc(tr).ozkaynak, value: topla(totalEquity, netIncome), icon: Building2, color: 'text-purple-600' },
             ].map((m, i) => (
               <div key={i} className="apple-card p-4">
                 <div className="flex items-center justify-between mb-2">
@@ -521,7 +522,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
               <h3 className="font-semibold text-sm">{tr ? 'Konsolide Gelir Tablosu' : 'Consolidated P&L'}</h3>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">{tr ? 'Toplam Gelir' : 'Total Revenue'}</span>
+                  <span className="text-gray-600">{oc(tr).toplam_gelir}</span>
                   <span className="font-medium text-green-600">{fmt(totalRevenue)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
@@ -558,7 +559,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
                   <span className="font-medium text-red-500">{fmt(totalLiabilities)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">{tr ? 'Özkaynak' : 'Equity'}</span>
+                  <span className="text-gray-600">{oc(tr).ozkaynak}</span>
                   <span className="font-medium text-purple-600">{fmt(totalEquity)}</span>
                 </div>
                 <div className="border-t border-gray-100 pt-2 flex justify-between text-sm font-semibold">
@@ -620,14 +621,14 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
               <input className="apple-input w-full p-3 rounded-xl text-sm" placeholder={tr ? 'Şirket Adı *' : 'Entity Name *'} value={eForm.name} onChange={e=>setEForm(p=>({...p,name:e.target.value}))} />
               <input className="apple-input w-full p-3 rounded-xl text-sm" placeholder={tr ? 'Vergi No' : 'Tax ID'} value={eForm.taxId} onChange={e=>setEForm(p=>({...p,taxId:e.target.value}))} />
               <div className="grid grid-cols-2 gap-3">
-                <input className="apple-input w-full p-3 rounded-xl text-sm" placeholder={tr ? 'Ülke' : 'Country'} value={eForm.country} onChange={e=>setEForm(p=>({...p,country:e.target.value}))} />
+                <input className="apple-input w-full p-3 rounded-xl text-sm" placeholder={oc(tr).ulke} value={eForm.country} onChange={e=>setEForm(p=>({...p,country:e.target.value}))} />
                 <select className="apple-input w-full p-3 rounded-xl text-sm" value={eForm.currency} onChange={e=>setEForm(p=>({...p,currency:e.target.value}))}>
                   <option value="TRY">TRY</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option>
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">{tr ? 'Tür' : 'Type'}</label>
+                  <label className="text-xs text-gray-500 mb-1 block">{oc(tr).tur}</label>
                   <select className="apple-input w-full p-3 rounded-xl text-sm" value={eForm.entityType} onChange={e=>setEForm(p=>({...p,entityType:e.target.value as Entity['entityType']}))}>
                     <option value="subsidiary">Subsidiary</option>
                     <option value="affiliate">Affiliate</option>
@@ -635,14 +636,14 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">{tr ? 'Sahiplik %' : 'Ownership %'}</label>
+                  <label className="text-xs text-gray-500 mb-1 block">{oc(tr).sahiplik}</label>
                   <input type="number" min="1" max="100" className="apple-input w-full p-3 rounded-xl text-sm" value={eForm.ownership} onChange={e=>setEForm(p=>({...p,ownership:Number(e.target.value)}))} />
                 </div>
               </div>
             </div>
             <div className="flex gap-3">
-              <button onClick={() => setShowEntityForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{tr ? 'İptal' : 'Cancel'}</button>
-              <button onClick={addEntity} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{tr ? 'Kaydet' : 'Save'}</button>
+              <button onClick={() => setShowEntityForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{oc(tr).iptal}</button>
+              <button onClick={addEntity} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{oc(tr).kaydet}</button>
             </div>
           </div>
         </div>
@@ -669,15 +670,15 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
               </div>
               <input className="apple-input w-full p-3 rounded-xl text-sm" placeholder={tr ? 'Hesap Adı *' : 'Account Name *'} value={aForm.name} onChange={e=>setAForm(p=>({...p,name:e.target.value}))} />
               <div className="grid grid-cols-2 gap-3">
-                <input type="number" className="apple-input p-3 rounded-xl text-sm" placeholder={tr ? 'Bakiye' : 'Balance'} value={aForm.balance} onChange={e=>setAForm(p=>({...p,balance:Number(e.target.value)}))} />
+                <input type="number" className="apple-input p-3 rounded-xl text-sm" placeholder={oc(tr).bakiye} value={aForm.balance} onChange={e=>setAForm(p=>({...p,balance:Number(e.target.value)}))} />
                 <select className="apple-input p-3 rounded-xl text-sm" value={aForm.currency} onChange={e=>setAForm(p=>({...p,currency:e.target.value}))}>
                   <option value="TRY">TRY</option><option value="USD">USD</option><option value="EUR">EUR</option>
                 </select>
               </div>
             </div>
             <div className="flex gap-3">
-              <button onClick={() => setShowAccountForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{tr ? 'İptal' : 'Cancel'}</button>
-              <button onClick={addAccount} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{tr ? 'Kaydet' : 'Save'}</button>
+              <button onClick={() => setShowAccountForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{oc(tr).iptal}</button>
+              <button onClick={addAccount} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{oc(tr).kaydet}</button>
             </div>
           </div>
         </div>
@@ -706,9 +707,9 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
                 <option value="dividend">Dividend</option>
                 <option value="management_fee">Management Fee</option>
               </select>
-              <input className="apple-input w-full p-3 rounded-xl text-sm" placeholder={tr ? 'Açıklama' : 'Description'} value={icForm.description} onChange={e=>setICForm(p=>({...p,description:e.target.value}))} />
+              <input className="apple-input w-full p-3 rounded-xl text-sm" placeholder={oc(tr).aciklama} value={icForm.description} onChange={e=>setICForm(p=>({...p,description:e.target.value}))} />
               <div className="grid grid-cols-2 gap-3">
-                <input type="number" className="apple-input p-3 rounded-xl text-sm" placeholder={tr ? 'Tutar *' : 'Amount *'} value={icForm.amount || ''} onChange={e=>setICForm(p=>({...p,amount:Number(e.target.value)}))} />
+                <input type="number" className="apple-input p-3 rounded-xl text-sm" placeholder={oc(tr).tutar_3} value={icForm.amount || ''} onChange={e=>setICForm(p=>({...p,amount:Number(e.target.value)}))} />
                 <select className="apple-input p-3 rounded-xl text-sm" value={icForm.currency} onChange={e=>setICForm(p=>({...p,currency:e.target.value}))}>
                   <option value="TRY">TRY</option><option value="USD">USD</option><option value="EUR">EUR</option>
                 </select>
@@ -716,8 +717,8 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
               <input type="date" className="apple-input w-full p-3 rounded-xl text-sm" value={icForm.date} onChange={e=>setICForm(p=>({...p,date:e.target.value}))} />
             </div>
             <div className="flex gap-3">
-              <button onClick={() => setShowICForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{tr ? 'İptal' : 'Cancel'}</button>
-              <button onClick={addIC} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{tr ? 'Kaydet' : 'Save'}</button>
+              <button onClick={() => setShowICForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{oc(tr).iptal}</button>
+              <button onClick={addIC} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{oc(tr).kaydet}</button>
             </div>
           </div>
         </div>

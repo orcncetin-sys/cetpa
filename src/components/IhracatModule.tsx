@@ -6,6 +6,7 @@ import { useToast } from './Toast';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 import { Package, CreditCard, FileText, Plus, X, Ship
 } from 'lucide-react';
 
@@ -315,7 +316,7 @@ export default function IhracatModule({ currentLanguage, isAuthenticated, exchan
           </div>
         </div>
         <button onClick={() => setShowModal(true)} className="apple-button-primary flex items-center gap-2 shrink-0">
-          <Plus className="w-4 h-4" /> {currentLanguage === 'tr' ? 'Yeni Ekle' : 'Add New'}
+          <Plus className="w-4 h-4" /> {oc(currentLanguage).yeni_ekle}
         </button>
       </div>
 

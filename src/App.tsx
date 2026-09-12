@@ -500,6 +500,7 @@ const InventoryView = InventoryViewComponent;
 import UnauthorizedView from './components/UnauthorizedView';
 import ReadOnlyBanner from './components/ReadOnlyBanner';
 import { basHarf } from './utils/buyukHarf';
+import { oc } from './i18n/ortak';
 
 // ── Eski hash yönlendirmesi GÖÇÜ — Router mount olmadan ÖNCE ─────────────────
 // Path yönlendirmesine geçmeden önceki linkler/yer imleri `/#crm` biçimindeydi
@@ -3196,13 +3197,13 @@ function AppContent() {
     // düşmemek için) ama kullanıcıya YÜKSEK SESLE hangi satırların düşmediğini
     // söylüyoruz — sessiz yanlış stok, gürültülü eksik stoktan kötüdür.
         if (ordStk && !applied && (status === 'Shipped' || status === 'Delivered')) {
-          const hatalilar = await applyOrderStockMovement(ordStk, 'out', currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment');
+          const hatalilar = await applyOrderStockMovement(ordStk, 'out', oc(currentLanguage).sevkiyat);
           await updateDoc(doc(db, 'orders', orderId), { stockApplied: true });
           if (hatalilar.length) toast(currentLanguage === 'tr'
             ? `DİKKAT: ${hatalilar.length} ürünün stoğu düşürülemedi: ${hatalilar.join(', ')} — elle düzeltin.`
             : `WARNING: stock not decremented for ${hatalilar.length} item(s): ${hatalilar.join(', ')} — fix manually.`, 'error');
         } else if (ordStk && applied && status === 'Cancelled') {
-          const hatalilar = await applyOrderStockMovement(ordStk, 'in', currentLanguage === 'tr' ? 'Sipariş iptali' : 'Order cancelled');
+          const hatalilar = await applyOrderStockMovement(ordStk, 'in', oc(currentLanguage).siparis_iptali);
           await updateDoc(doc(db, 'orders', orderId), { stockApplied: false });
           if (hatalilar.length) toast(currentLanguage === 'tr'
             ? `DİKKAT: ${hatalilar.length} ürünün stoğu geri yüklenemedi: ${hatalilar.join(', ')} — elle düzeltin.`
@@ -3228,7 +3229,7 @@ function AppContent() {
             ).catch(() => {});
           } else if (status === 'Cancelled') {
             createNotification(
-              currentLanguage === 'tr' ? 'Sipariş İptal Edildi' : 'Order Cancelled',
+              oc(currentLanguage).siparis_iptal_edildi,
               `${ord.customerName} — #${ord.shopifyOrderId ?? orderId.slice(0, 8)}`,
               'warning'
             ).catch(() => {});
@@ -3580,7 +3581,7 @@ function AppContent() {
                           <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1.5">
                               <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>
-                                {currentLanguage === 'tr' ? 'Ad Soyad *' : 'Full Name *'}
+                                {oc(currentLanguage).ad_soyad_2}
                               </label>
                               <input
                                 type="text"
@@ -3593,7 +3594,7 @@ function AppContent() {
                             </div>
                             <div className="space-y-1.5">
                               <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>
-                                {currentLanguage === 'tr' ? 'Şirket' : 'Company'}
+                                {oc(currentLanguage).sirket}
                               </label>
                               <input
                                 type="text"
@@ -3620,7 +3621,7 @@ function AppContent() {
                             </div>
                             <div className="space-y-1.5">
                               <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>
-                                {currentLanguage === 'tr' ? 'Telefon' : 'Phone'}
+                                {oc(currentLanguage).telefon}
                               </label>
                               <input
                                 type="tel"
@@ -3670,7 +3671,7 @@ function AppContent() {
                           onClick={() => { setShowDemoForm(false); setDemoSubmitted(false); setDemoForm({ name: '', company: '', email: '', phone: '', message: '' }); }}
                           className={cn("px-8 py-3 rounded-2xl font-bold text-sm transition-all", darkMode ? "bg-white/10 text-white hover:bg-white/20" : "bg-black/5 text-[#1D1D1F] hover:bg-black/10")}
                         >
-                          {currentLanguage === 'tr' ? 'Kapat' : 'Close'}
+                          {oc(currentLanguage).kapat}
                         </button>
                       </div>
                     )}
@@ -3789,7 +3790,7 @@ function AppContent() {
                         {currentLanguage === 'tr' ? 'Sıfırlama bağlantısı e-postanıza gönderildi.' : 'Reset link sent to your email.'}
                       </p>
                       <button onClick={() => { setAuthMode('signin'); setResetSent(false); }} className="text-brand text-sm font-black hover:underline">
-                        {currentLanguage === 'tr' ? '← Giriş Yap' : '← Back to Sign In'}
+                        {oc(currentLanguage).giris_yap}
                       </button>
                     </div>
                   : <form onSubmit={handlePasswordReset} className="space-y-4">
@@ -3798,7 +3799,7 @@ function AppContent() {
                       </p>
                       <input type="email" value={emailLogin.email}
                         onChange={(e) => setEmailLogin(prev => ({ ...prev, email: e.target.value }))}
-                        placeholder={currentLanguage === 'tr' ? 'örnek@cetpa.com' : 'example@cetpa.com'}
+                        placeholder={oc(currentLanguage).ornek_cetpa_com}
                         className={cn("w-full rounded-2xl px-5 py-3.5 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-medium", darkMode ? "bg-white/5 border border-white/10 text-[#f5f5f7] placeholder-white/20" : "bg-gray-50/50 border border-gray-200 text-[#1D1D1F] placeholder-gray-400")}
                         autoComplete="email" autoFocus />
                       <button type="submit" disabled={isEmailLoginLoading}
@@ -3807,7 +3808,7 @@ function AppContent() {
                       </button>
                       <button type="button" onClick={() => { setAuthMode('signin'); setAuthError(null); }}
                         className={cn("w-full text-sm font-semibold", darkMode ? "text-white/65 hover:text-white/70" : "text-gray-400 hover:text-gray-600")}>
-                        {currentLanguage === 'tr' ? '← Giriş Yap' : '← Back to Sign In'}
+                        {oc(currentLanguage).giris_yap}
                       </button>
                     </form>
               )}
@@ -3835,7 +3836,7 @@ function AppContent() {
                   </button>
                   <p className={cn("text-[10px] text-center", darkMode ? "text-white/60" : "text-gray-400")}>
                     {currentLanguage === 'tr' ? 'Kayıt olarak ' : 'By registering you agree to our '}
-                    <span className="text-brand">{currentLanguage === 'tr' ? 'Kullanım Koşulları' : 'Terms of Service'}</span>
+                    <span className="text-brand">{oc(currentLanguage).kullanim_kosullari}</span>
                     {currentLanguage === 'tr' ? "'nı kabul etmiş olursunuz." : '.'}
                   </p>
                 </form>
@@ -3850,7 +3851,7 @@ function AppContent() {
                     </label>
                     <input type="email" value={emailLogin.email}
                       onChange={(e) => setEmailLogin(prev => ({ ...prev, email: e.target.value }))}
-                      placeholder={currentLanguage === 'tr' ? 'örnek@cetpa.com' : 'example@cetpa.com'}
+                      placeholder={oc(currentLanguage).ornek_cetpa_com}
                       className={cn("w-full rounded-xl px-4 py-3 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-medium", darkMode ? "bg-white/5 border border-white/10 text-[#f5f5f7] placeholder-white/20" : "bg-gray-50/50 border border-gray-200 text-[#1D1D1F] placeholder-gray-400")}
                       autoComplete="email" />
                   </div>
@@ -3953,27 +3954,27 @@ function AppContent() {
 
   // Tüm sekme/alt-modül id'leri için tek kaynak etiket lookup'ı (header + hata sınırı)
   const tabLabelOf = (id: string): string => (({
-    dashboard: currentT.dashboard, crm: currentLanguage === 'tr' ? 'CRM & Satış' : 'CRM & Sales',
+    dashboard: currentT.dashboard, crm: oc(currentLanguage).crm_satis,
     inventory: currentT.inventory, lojistik: currentLanguage === 'tr' ? 'Lojistik & Depo' : 'Logistics',
-    muhasebe: currentLanguage === 'tr' ? 'Muhasebe' : 'Accounting', 'satin-alma': currentLanguage === 'tr' ? 'Satın Alma' : 'Purchasing',
+    muhasebe: oc(currentLanguage).muhasebe, 'satin-alma': oc(currentLanguage).satin_alma,
     ik: currentLanguage === 'tr' ? 'İK' : 'HR', hukuk: currentLanguage === 'tr' ? 'Hukuk' : 'Legal',
-    proje: currentLanguage === 'tr' ? 'Projeler' : 'Projects', production: currentLanguage === 'tr' ? 'Üretim' : 'Production',
+    proje: oc(currentLanguage).projeler, production: oc(currentLanguage).uretim,
     kalite: currentLanguage === 'tr' ? 'Kalite' : 'Quality', kurumsal: currentLanguage === 'tr' ? 'Kurumsal' : 'Governance',
-    b2b: 'B2B Portal', risk: 'Risk', reports: currentT.reports, onaylar: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals',
-    admin: currentT.admin, settings: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings',
-    ebelge: currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub', vergi: currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar',
-    ihracat: currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export', lotseri: currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial',
-    bakim: currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance', sube: currentLanguage === 'tr' ? 'Şubeler' : 'Branches',
-    servis: currentLanguage === 'tr' ? 'Servis' : 'After-Sales Service', iade: currentLanguage === 'tr' ? 'İade & Değişim' : 'Returns (RMA)',
-    orders: currentLanguage === 'tr' ? 'Siparişler' : 'Orders', mesai: currentLanguage === 'tr' ? 'Mesai & Devam' : 'Time & Attendance',
+    b2b: 'B2B Portal', risk: 'Risk', reports: currentT.reports, onaylar: oc(currentLanguage).onaylar,
+    admin: currentT.admin, settings: oc(currentLanguage).ayarlar,
+    ebelge: oc(currentLanguage).e_belge_merkezi, vergi: oc(currentLanguage).vergi_takvimi,
+    ihracat: oc(currentLanguage).ithalat_ihracat, lotseri: oc(currentLanguage).lot_seri_takip,
+    bakim: oc(currentLanguage).bakim_onarim, sube: oc(currentLanguage).subeler,
+    servis: currentLanguage === 'tr' ? 'Servis' : 'After-Sales Service', iade: oc(currentLanguage).iade_degisim,
+    orders: oc(currentLanguage).siparisler, mesai: oc(currentLanguage).mesai_devam,
     selfservis: currentLanguage === 'tr' ? 'Self-Servis Portalı' : 'Self-Service Portal',
     cpq: currentLanguage === 'tr' ? 'CPQ Teklif' : 'CPQ Quote', dunning: currentLanguage === 'tr' ? 'Tahsilat Takip' : 'Dunning',
     finance: currentLanguage === 'tr' ? 'Finans Paneli' : 'Finance Panel', gelirtanima: currentLanguage === 'tr' ? 'IFRS 15 Gelir Tanıma' : 'IFRS 15 Rev. Rec.',
-    holding: currentLanguage === 'tr' ? 'Holding Yönetimi' : 'Holding', mobilewms: currentLanguage === 'tr' ? 'Mobil WMS' : 'Mobile WMS',
-    mrp: 'MRP II', muhtasar: currentLanguage === 'tr' ? 'Muhtasar' : 'Withholding', performans: currentLanguage === 'tr' ? 'Performans' : 'Performance',
-    territory: currentLanguage === 'tr' ? 'Satış Bölgeleri' : 'Territories',
-    analytics: currentLanguage === 'tr' ? 'Analitik' : 'Analytics',
-    'fiyat-istihbarat': currentLanguage === 'tr' ? 'Fiyat İstihbaratı' : 'Price Intel',
+    holding: currentLanguage === 'tr' ? 'Holding Yönetimi' : 'Holding', mobilewms: oc(currentLanguage).mobil_wms,
+    mrp: 'MRP II', muhtasar: currentLanguage === 'tr' ? 'Muhtasar' : 'Withholding', performans: oc(currentLanguage).performans,
+    territory: oc(currentLanguage).satis_bolgeleri,
+    analytics: oc(currentLanguage).analitik,
+    'fiyat-istihbarat': oc(currentLanguage).fiyat_istihbarati,
   } as Record<string, string>)[id] || id);
 
   return (
@@ -4237,23 +4238,23 @@ function AppContent() {
               <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2 h-full" style={{ gridAutoRows: 'minmax(0, 1fr)' }}>
                 {([
                   { id: 'dashboard', label: currentT.dashboard || 'Dashboard', icon: LayoutDashboard },
-                  { id: 'crm', label: currentLanguage === 'tr' ? 'CRM & Satış' : 'CRM & Sales', icon: Users },
+                  { id: 'crm', label: oc(currentLanguage).crm_satis, icon: Users },
                   { id: 'inventory', label: currentT.inventory, icon: List },
-                  { id: 'lojistik', label: currentLanguage === 'tr' ? 'Lojistik & Depo' : 'Logistics & Warehouse', icon: Truck },
-                  { id: 'muhasebe', label: currentLanguage === 'tr' ? 'Muhasebe & Finans' : 'Accounting & Finance', icon: BookOpen },
-                  { id: 'satin-alma', label: currentLanguage === 'tr' ? 'Satın Alma' : 'Purchasing', icon: ShoppingCart },
-                  { id: 'ik', label: currentLanguage === 'tr' ? 'İnsan Kaynakları' : 'Human Resources', icon: UserCheck },
-                  { id: 'hukuk', label: currentLanguage === 'tr' ? 'Hukuk & Uyum' : 'Legal & Compliance', icon: ShieldCheck },
-                  { id: 'proje', label: currentLanguage === 'tr' ? 'Proje Yönetimi' : 'Project Management', icon: TargetIcon },
+                  { id: 'lojistik', label: oc(currentLanguage).lojistik_depo, icon: Truck },
+                  { id: 'muhasebe', label: oc(currentLanguage).muhasebe_finans, icon: BookOpen },
+                  { id: 'satin-alma', label: oc(currentLanguage).satin_alma, icon: ShoppingCart },
+                  { id: 'ik', label: oc(currentLanguage).insan_kaynaklari, icon: UserCheck },
+                  { id: 'hukuk', label: oc(currentLanguage).hukuk_uyum, icon: ShieldCheck },
+                  { id: 'proje', label: oc(currentLanguage).proje_yonetimi, icon: TargetIcon },
                   { id: 'production', label: currentLanguage === 'tr' ? 'Üretim Yönetimi' : 'Production Management', icon: Factory },
-                  { id: 'kalite', label: currentLanguage === 'tr' ? 'Kalite Yönetimi' : 'Quality Management', icon: Award },
-                  { id: 'kurumsal', label: currentLanguage === 'tr' ? 'Kurumsal Yönetim' : 'Corporate Governance', icon: Building2 },
+                  { id: 'kalite', label: oc(currentLanguage).kalite_yonetimi, icon: Award },
+                  { id: 'kurumsal', label: oc(currentLanguage).kurumsal_yonetim, icon: Building2 },
                   { id: 'b2b', label: currentLanguage === 'tr' ? 'B2B Bayi Portalı' : 'B2B Dealer Portal', icon: ShoppingBag },
                   { id: 'risk', label: currentLanguage === 'tr' ? 'Risk & Uyarılar' : 'Risk & Alerts', icon: AlertTriangle },
                   { id: 'reports', label: currentT.reports, icon: BarChart3 },
-                  { id: 'onaylar', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals', icon: CheckCircle2 },
+                  { id: 'onaylar', label: oc(currentLanguage).onaylar, icon: CheckCircle2 },
                   ...(userRole === 'Admin' || isOwnerAdmin ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
-                  ...(userRole === 'Admin' || userRole === 'Manager' || isOwnerAdmin ? [{ id: 'settings', label: currentLanguage === 'tr' ? 'Ayarlar' : 'Settings', icon: Settings }] : [])
+                  ...(userRole === 'Admin' || userRole === 'Manager' || isOwnerAdmin ? [{ id: 'settings', label: oc(currentLanguage).ayarlar, icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
                   const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm', mesai:'ik', selfservis:'ik', territory:'crm', cpq:'crm', performans:'ik', dunning:'muhasebe', mrp:'inventory', holding:'muhasebe', muhtasar:'ik', mobilewms:'lojistik', gelirtanima:'muhasebe' };
                   const isActive = activeTab === tab.id || navChildOf[activeTab] === tab.id;
@@ -4394,36 +4395,36 @@ function AppContent() {
           };
           const tr = currentLanguage === 'tr';
           const sidebarGroups: SidebarGroup[] = [
-            { id: 'dashboard', label: tr ? 'Panel' : 'Dashboard', icon: LayoutDashboard },
+            { id: 'dashboard', label: oc(tr).panel, icon: LayoutDashboard },
             {
-              id: 'crm', label: tr ? 'CRM & Satış' : 'CRM & Sales', icon: Users,
+              id: 'crm', label: oc(tr).crm_satis, icon: Users,
               childIds: ['sube', 'servis', 'iade', 'orders', 'territory', 'cpq'],
               children: [
-                { label: tr ? 'Müşteri Adayları' : 'Leads',       subId: 'leads',       action: () => { setActiveTab('crm'); setCrmTab('leads'); } },
-                { label: tr ? 'Müşteriler' : 'Customers',          subId: 'musteriler',  action: () => { setActiveTab('crm'); setCrmTab('musteriler'); } },
-                { label: tr ? 'Siparişler' : 'Orders',             subId: 'orders',      action: () => setActiveTab('orders') },
-                { label: tr ? 'İade & Değişim' : 'Returns (RMA)', subId: 'iade',        action: () => setActiveTab('iade') }, // Phase 549
+                { label: oc(tr).musteri_adaylari,       subId: 'leads',       action: () => { setActiveTab('crm'); setCrmTab('leads'); } },
+                { label: oc(tr).musteriler,          subId: 'musteriler',  action: () => { setActiveTab('crm'); setCrmTab('musteriler'); } },
+                { label: oc(tr).siparisler,             subId: 'orders',      action: () => setActiveTab('orders') },
+                { label: oc(tr).iade_degisim, subId: 'iade',        action: () => setActiveTab('iade') }, // Phase 549
                 { label: tr ? 'Pipeline' : 'Pipeline',             subId: 'pipeline',    action: () => { setActiveTab('crm'); setCrmTab('pipeline'); } },
-                { label: tr ? 'Kampanyalar' : 'Campaigns',         subId: 'kampanya',    action: () => { setActiveTab('crm'); setCrmTab('kampanya'); } },
-                { label: tr ? 'Sözleşmeler' : 'Contracts',         subId: 'sozlesmeler', action: () => { setActiveTab('crm'); setCrmTab('sozlesmeler'); } },
+                { label: oc(tr).kampanyalar,         subId: 'kampanya',    action: () => { setActiveTab('crm'); setCrmTab('kampanya'); } },
+                { label: oc(tr).sozlesmeler,         subId: 'sozlesmeler', action: () => { setActiveTab('crm'); setCrmTab('sozlesmeler'); } },
                 { label: tr ? 'Destek Talepleri' : 'Support',      subId: 'tickets',     action: () => { setActiveTab('crm'); setCrmTab('tickets'); } },
-                { label: tr ? 'Hedefler' : 'Targets',              subId: 'hedefler',    action: () => { setActiveTab('crm'); setCrmTab('hedefler'); } },
-                { label: tr ? 'Komisyon' : 'Commission',           subId: 'komisyon',    action: () => { setActiveTab('crm'); setCrmTab('komisyon'); } },
-                { label: tr ? 'Satış Bölgeleri' : 'Territories',  subId: 'territory',   action: () => setActiveTab('territory') },
+                { label: oc(tr).hedefler,              subId: 'hedefler',    action: () => { setActiveTab('crm'); setCrmTab('hedefler'); } },
+                { label: oc(tr).komisyon,           subId: 'komisyon',    action: () => { setActiveTab('crm'); setCrmTab('komisyon'); } },
+                { label: oc(tr).satis_bolgeleri,  subId: 'territory',   action: () => setActiveTab('territory') },
                 { label: tr ? 'CPQ Teklif' : 'CPQ',               subId: 'cpq',         action: () => setActiveTab('cpq') },
-                { label: tr ? 'Şubeler' : 'Branches',              subId: 'sube',        action: () => setActiveTab('sube') },
+                { label: oc(tr).subeler,              subId: 'sube',        action: () => setActiveTab('sube') },
                 { label: tr ? 'Servis' : 'After-Sales',            subId: 'servis',      action: () => setActiveTab('servis') },
               ],
             },
             {
-              id: 'inventory', label: tr ? 'Envanter' : 'Inventory', icon: List,
+              id: 'inventory', label: oc(tr).envanter, icon: List,
               childIds: ['lotseri', 'bakim', 'mrp', 'fiyat-istihbarat'],
               children: [
                 { label: tr ? 'Stok Yönetimi' : 'Stock Management', subId: 'inventory', action: () => setActiveTab('inventory') },
                 { label: tr ? 'Lot / Seri Takip' : 'Lot/Serial',  subId: 'lotseri',   action: () => setActiveTab('lotseri') },
-                { label: tr ? 'Bakım-Onarım' : 'Maintenance',     subId: 'bakim',     action: () => setActiveTab('bakim') },
+                { label: oc(tr).bakim_onarim,     subId: 'bakim',     action: () => setActiveTab('bakim') },
                 { label: tr ? 'MRP II / Kapasite' : 'MRP II',     subId: 'mrp',       action: () => setActiveTab('mrp') },
-                { label: tr ? 'Fiyat İstihbaratı' : 'Price Intel', subId: 'fiyat-istihbarat', action: () => setActiveTab('fiyat-istihbarat') },
+                { label: oc(tr).fiyat_istihbarati, subId: 'fiyat-istihbarat', action: () => setActiveTab('fiyat-istihbarat') },
               ],
             },
             {
@@ -4432,18 +4433,18 @@ function AppContent() {
               children: [
                 { label: tr ? 'Sevkiyat' : 'Shipments',              subId: 'sevkiyat',        action: () => { setActiveTab('lojistik'); setLojistikTab('sevkiyat'); } },
                 { label: tr ? 'Kargo Takip' : 'Cargo Tracking',      subId: 'kargo_takip',     action: () => { setActiveTab('lojistik'); setLojistikTab('kargo_takip'); } },
-                { label: tr ? 'Depo' : 'Warehouse',                  subId: 'depo',             action: () => { setActiveTab('lojistik'); setLojistikTab('depo'); } },
+                { label: oc(tr).depo,                  subId: 'depo',             action: () => { setActiveTab('lojistik'); setLojistikTab('depo'); } },
                 { label: tr ? 'Bin / Lokasyon' : 'Bin / Location',   subId: 'wms',              action: () => { setActiveTab('lojistik'); setLojistikTab('wms'); } }, // Phase 554
                 { label: tr ? 'Transfer' : 'Transfer',               subId: 'transfer',         action: () => { setActiveTab('lojistik'); setLojistikTab('transfer'); } },
                 { label: tr ? 'QR Transfer' : 'QR Transfer',         subId: 'qr-transfer',      action: () => { setActiveTab('lojistik'); setLojistikTab('qr-transfer'); } },
                 { label: tr ? 'Giden İrsaliye' : 'Dispatch Notes',   subId: 'giden_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('giden_irsaliye'); } },
                 { label: tr ? 'Gelen İrsaliye' : 'Receiving',        subId: 'gelen_irsaliye',   action: () => { setActiveTab('lojistik'); setLojistikTab('gelen_irsaliye'); } },
-                { label: tr ? 'Tedarik Zinciri KPI' : 'Supply Chain KPI', subId: 'tedarik-kpi', action: () => { setActiveTab('lojistik'); setLojistikTab('tedarik-kpi'); } }, // Phase 576
+                { label: oc(tr).tedarik_zinciri_kpi, subId: 'tedarik-kpi', action: () => { setActiveTab('lojistik'); setLojistikTab('tedarik-kpi'); } }, // Phase 576
                 { label: tr ? 'Araç Takip' : 'Fleet Tracking', subId: 'arac-takip',         action: () => { setActiveTab('lojistik'); setLojistikTab('arac-takip'); } }, // Phase 593
-                { label: tr ? 'Canlı Sevkiyat' : 'Live Delivery', subId: 'canli',            action: () => { setActiveTab('lojistik'); setLojistikTab('canli'); } },
+                { label: oc(tr).canli_sevkiyat, subId: 'canli',            action: () => { setActiveTab('lojistik'); setLojistikTab('canli'); } },
                 { label: tr ? 'İhracat & Gümrük' : 'Export & Customs', subId: 'ihracat-gumruk', action: () => { setActiveTab('lojistik'); setLojistikTab('ihracat-gumruk'); } }, // Phase 622
-                { label: tr ? 'İthalat/İhracat' : 'Import/Export',   subId: 'ihracat',          action: () => setActiveTab('ihracat') },
-                { label: tr ? 'Mobil WMS' : 'Mobile WMS',           subId: 'mobilewms',        action: () => setActiveTab('mobilewms') },
+                { label: oc(tr).ithalat_ihracat,   subId: 'ihracat',          action: () => setActiveTab('ihracat') },
+                { label: oc(tr).mobil_wms,           subId: 'mobilewms',        action: () => setActiveTab('mobilewms') },
               ],
             },
             {
@@ -4463,17 +4464,17 @@ function AppContent() {
               })),
             },
             {
-              id: 'satin-alma', label: tr ? 'Satın Alma' : 'Purchasing', icon: ShoppingCart,
+              id: 'satin-alma', label: oc(tr).satin_alma, icon: ShoppingCart,
               children: [
-                { label: tr ? 'Satın Alma Siparişleri' : 'Purchase Orders', subId: 'pos',              action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('pos'); } },
-                { label: tr ? 'Tedarikçiler' : 'Suppliers',                  subId: 'suppliers',        action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('suppliers'); } },
+                { label: oc(tr).satin_alma_siparisleri, subId: 'pos',              action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('pos'); } },
+                { label: oc(tr).tedarikciler,                  subId: 'suppliers',        action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('suppliers'); } },
                 { label: tr ? 'Tedarikçi Performansı' : 'Supplier Score',   subId: 'scorecard',        action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('scorecard'); } },
-                { label: tr ? 'Ödeme Takvimi' : 'Payment Schedule',         subId: 'odeme-takvimi',    action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('odeme-takvimi'); } },
-                { label: tr ? 'Tedarikçi Portalı' : 'Supplier Portal',      subId: 'tedarikci-portal', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarikci-portal'); } }, // Phase 551
-                { label: tr ? 'Satın Alma Bütçesi' : 'Purchase Budget',     subId: 'satin-butce',      action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('satin-butce'); } }, // Phase 612
-                { label: tr ? 'Tedarik Zinciri Riski' : 'Supply Chain Risk', subId: 'tedarik-risk',   action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarik-risk'); } }, // Phase 627
+                { label: oc(tr).odeme_takvimi,         subId: 'odeme-takvimi',    action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('odeme-takvimi'); } },
+                { label: oc(tr).tedarikci_portali,      subId: 'tedarikci-portal', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarikci-portal'); } }, // Phase 551
+                { label: oc(tr).satin_alma_butcesi,     subId: 'satin-butce',      action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('satin-butce'); } }, // Phase 612
+                { label: oc(tr).tedarik_zinciri_riski, subId: 'tedarik-risk',   action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarik-risk'); } }, // Phase 627
                 // Muhasebe'den taşındı (2026-08-31 kullanıcı isteği).
-                { label: tr ? 'Fiyat Karşılaştırma' : 'Price Comparison',    subId: 'fiyat-karsilastirma', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('fiyat-karsilastirma'); } },
+                { label: oc(tr).fiyat_karsilastirma,    subId: 'fiyat-karsilastirma', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('fiyat-karsilastirma'); } },
               ],
             },
             {
@@ -4481,46 +4482,46 @@ function AppContent() {
               childIds: ['selfservis', 'muhtasar', 'performans', 'mesai'],
               children: [
                 { label: tr ? 'Çalışanlar & İK' : 'Employees & HR',         subId: 'ik-main',    action: () => setActiveTab('ik') },
-                { label: tr ? 'Mesai & Devam' : 'Time & Attendance',         subId: 'mesai',      action: () => setActiveTab('mesai') }, // Phase 552
-                { label: tr ? 'Performans Değerlendirme' : 'Performance Reviews', subId: 'performans', action: () => setActiveTab('performans') },
+                { label: oc(tr).mesai_devam,         subId: 'mesai',      action: () => setActiveTab('mesai') }, // Phase 552
+                { label: oc(tr).performans_degerlendirme, subId: 'performans', action: () => setActiveTab('performans') },
                 { label: tr ? 'Self-Servis Portalı' : 'Self-Service',        subId: 'selfservis', action: () => setActiveTab('selfservis') }, // Phase 553
                 { label: tr ? 'SGK e-Bildirge' : 'SGK e-Declaration',        subId: 'sgk-bildirge', action: () => setActiveTab('ik') }, // Phase 556 (renders in IK tab)
                 { label: tr ? 'Muhtasar & SGK' : 'Muhtasar & SGK',          subId: 'muhtasar',   action: () => setActiveTab('muhtasar') },
                 // Masraf Yönetimi İK'dan kaldırıldı — tek kanonik yer Muhasebe grubu (Phase 548 merge)
               ],
             },
-            { id: 'hukuk',    label: tr ? 'Hukuk & Uyum' : 'Legal & Compliance',  icon: ShieldCheck },
+            { id: 'hukuk',    label: oc(tr).hukuk_uyum,  icon: ShieldCheck },
             { id: 'proje',    label: tr ? 'Proje Yönetimi' : 'Projects',           icon: TargetIcon },
-            { id: 'production', label: tr ? 'Üretim' : 'Production',              icon: Factory },
+            { id: 'production', label: oc(tr).uretim,              icon: Factory },
             { id: 'kalite',   label: tr ? 'Kalite Yönetimi' : 'Quality',           icon: Award },
             { id: 'kurumsal', label: tr ? 'Kurumsal Yönetim' : 'Governance',       icon: Building2 },
             { id: 'b2b',      label: tr ? 'B2B Bayi Portalı' : 'B2B Portal',       icon: ShoppingBag },
             { id: 'risk',     label: tr ? 'Risk & Uyarılar' : 'Risk',              icon: AlertTriangle },
             {
-              id: 'reports', label: tr ? 'Raporlar' : 'Reports', icon: BarChart3,
+              id: 'reports', label: oc(tr).raporlar, icon: BarChart3,
               children: [
-                { label: tr ? 'Genel Bakış' : 'Overview',          subId: 'r-genel',    action: () => { setActiveTab('reports'); setAppReportsTab('genel'); } },
-                { label: tr ? 'CRM & Satış' : 'CRM & Sales',       subId: 'r-crm',      action: () => { setActiveTab('reports'); setAppReportsTab('crm'); } },
-                { label: tr ? 'Envanter' : 'Inventory',            subId: 'r-envanter', action: () => { setActiveTab('reports'); setAppReportsTab('envanter'); } },
-                { label: tr ? 'Lojistik' : 'Logistics',            subId: 'r-lojistik', action: () => { setActiveTab('reports'); setAppReportsTab('lojistik'); } },
+                { label: oc(tr).genel_bakis,          subId: 'r-genel',    action: () => { setActiveTab('reports'); setAppReportsTab('genel'); } },
+                { label: oc(tr).crm_satis,       subId: 'r-crm',      action: () => { setActiveTab('reports'); setAppReportsTab('crm'); } },
+                { label: oc(tr).envanter,            subId: 'r-envanter', action: () => { setActiveTab('reports'); setAppReportsTab('envanter'); } },
+                { label: oc(tr).lojistik,            subId: 'r-lojistik', action: () => { setActiveTab('reports'); setAppReportsTab('lojistik'); } },
                 { label: tr ? 'İnsan Kaynakları' : 'HR',           subId: 'r-ik',       action: () => { setActiveTab('reports'); setAppReportsTab('ik'); } },
                 { label: tr ? 'Ürün Performansı' : 'Products',     subId: 'r-urunler',  action: () => { setActiveTab('reports'); setAppReportsTab('urunler'); } },
-                { label: tr ? 'Analitik' : 'Analytics',            subId: 'r-analitik', action: () => { setActiveTab('reports'); setAppReportsTab('analitik'); } },
+                { label: oc(tr).analitik,            subId: 'r-analitik', action: () => { setActiveTab('reports'); setAppReportsTab('analitik'); } },
               ],
             },
-            { id: 'onaylar',   label: tr ? 'Onaylar' : 'Approvals',           icon: CheckCircle2 },
+            { id: 'onaylar',   label: oc(tr).onaylar,           icon: CheckCircle2 },
             ...(userRole === 'Admin' ? [{
               id: 'admin', label: tr ? 'Yönetim' : 'Admin', icon: Shield,
               children: [
-                { label: tr ? 'Genel Bakış' : 'Overview',    subId: 'a-overview', action: () => { setActiveTab('admin'); setAdminTab('overview'); } },
-                { label: tr ? 'Kullanıcılar' : 'Users',       subId: 'a-users',    action: () => { setActiveTab('admin'); setAdminTab('users'); } },
+                { label: oc(tr).genel_bakis,    subId: 'a-overview', action: () => { setActiveTab('admin'); setAdminTab('overview'); } },
+                { label: oc(tr).kullanicilar,       subId: 'a-users',    action: () => { setActiveTab('admin'); setAdminTab('users'); } },
                 { label: tr ? 'Erişim Kontrolü' : 'Access',  subId: 'a-access',   action: () => { setActiveTab('admin'); setAdminTab('access'); } },
                 { label: 'Audit Log',                          subId: 'a-audit',    action: () => { setActiveTab('admin'); setAdminTab('auditlog'); } },
                 { label: tr ? 'Şirket Bilgileri' : 'Company', subId: 'a-company',  action: () => { setActiveTab('admin'); setAdminTab('company'); } },
-                ...(isSuperAdmin ? [{ label: tr ? 'Müşteri Yönetimi' : 'Customer Mgmt', subId: 'a-tenants', action: () => { setActiveTab('admin'); setAdminTab('tenants'); } }] : []),
+                ...(isSuperAdmin ? [{ label: oc(tr).musteri_yonetimi, subId: 'a-tenants', action: () => { setActiveTab('admin'); setAdminTab('tenants'); } }] : []),
               ],
             }] as SidebarGroup[] : []),
-            ...((userRole === 'Admin' || userRole === 'Manager') ? [{ id: 'settings', label: tr ? 'Ayarlar' : 'Settings', icon: Settings }] as SidebarGroup[] : []),
+            ...((userRole === 'Admin' || userRole === 'Manager') ? [{ id: 'settings', label: oc(tr).ayarlar, icon: Settings }] as SidebarGroup[] : []),
           ].filter(g => canAccess(g.id));
 
           return (
@@ -4697,7 +4698,7 @@ function AppContent() {
               <div className="w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <MfaSettings currentLanguage={currentLanguage as 'tr' | 'en'} />
                 <button onClick={() => setShowMfaSettings(false)} className="mt-3 w-full apple-button-secondary justify-center py-2.5 text-sm">
-                  {currentLanguage === 'tr' ? 'Kapat' : 'Close'}
+                  {oc(currentLanguage).kapat}
                 </button>
               </div>
             </div>
@@ -4738,7 +4739,7 @@ function AppContent() {
                       <div className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
                         <span className="text-sm font-semibold text-gray-900 select-all">info@cetpa.com.tr</span>
                         <button onClick={copyKvkkContact} className="text-xs font-bold text-brand hover:underline whitespace-nowrap">
-                          {kvkkCopied ? (currentLanguage === 'tr' ? '✓ Kopyalandı' : '✓ Copied') : (currentLanguage === 'tr' ? 'Kopyala' : 'Copy')}
+                          {kvkkCopied ? (currentLanguage === 'tr' ? '✓ Kopyalandı' : '✓ Copied') : (oc(currentLanguage).kopyala)}
                         </button>
                       </div>
                       <a href="mailto:info@cetpa.com.tr?subject=KVKK%20Talebi" className="block text-xs text-brand hover:underline">
@@ -4746,7 +4747,7 @@ function AppContent() {
                       </a>
                     </div>
                     <button onClick={() => setKvkkConcern(false)} className="apple-button-secondary w-full py-3 text-sm font-bold">
-                      {currentLanguage === 'tr' ? '← Geri' : '← Back'}
+                      {oc(currentLanguage).geri}
                     </button>
                   </div>
                 ) : (
@@ -5335,12 +5336,12 @@ function AppContent() {
               )}
 
               {activeTab === 'ebelge' && (
-                !canAccess('ebelge') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'} /> : (
+                !canAccess('ebelge') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).e_belge_merkezi} /> : (
                   <>
                     {!hasFullAccess('ebelge') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                     <MuhasebeGroupNav aktif="ebelge" currentLanguage={currentLanguage} onNavigate={setActiveTab} />
                     <ModuleHeader
-                      title={currentLanguage === 'tr' ? 'E-Belge Merkezi' : 'E-Document Hub'}
+                      title={oc(currentLanguage).e_belge_merkezi}
                       subtitle={currentLanguage === 'tr' ? 'E-Fatura, E-Arşiv, E-İrsaliye ve E-SMM belge yönetimi' : 'E-Invoice, E-Archive, E-Waybill and E-SMM document management'}
                       icon={FileText}
                     />
@@ -5373,12 +5374,12 @@ function AppContent() {
               )}
 
               {activeTab === 'vergi' && (
-                !canAccess('vergi') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'} /> : (
+                !canAccess('vergi') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).vergi_takvimi} /> : (
                   <>
                     {!hasFullAccess('vergi') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                     <MuhasebeGroupNav aktif="vergi" currentLanguage={currentLanguage} onNavigate={setActiveTab} />
                     <ModuleHeader
-                      title={currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}
+                      title={oc(currentLanguage).vergi_takvimi}
                       subtitle={currentLanguage === 'tr' ? 'KDV, muhtasar, kurumlar vergisi ve diğer beyanname takvimleri' : 'VAT, withholding tax, corporate tax and other declaration schedules'}
                       icon={Receipt}
                     />
@@ -5501,7 +5502,7 @@ function AppContent() {
           {/* ── Bakım-Onarım ── */}
           {activeTab === 'bakim' && (
             <motion.div key="bakim" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('bakim') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance'} /> : (
+              {!canAccess('bakim') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).bakim_onarim} /> : (
                 <>
                   {!hasFullAccess('bakim') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                   {/* ── Üretim Group Nav ── */}
@@ -5509,15 +5510,15 @@ function AppContent() {
                     <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
                       <button onClick={() => setActiveTab('production')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                         <Factory className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Üretim Yönetimi' : 'Production'}
+                        {oc(currentLanguage).uretim_yonetimi}
                       </button>
                       <button onClick={() => setActiveTab('lotseri')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                         <Hash className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial'}
+                        {oc(currentLanguage).lot_seri_takip}
                       </button>
                       <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
                         <Wrench className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance'}
+                        {oc(currentLanguage).bakim_onarim}
                       </button>
                     </div>
                   </div>
@@ -5543,15 +5544,15 @@ function AppContent() {
                     <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
                       <button onClick={() => setActiveTab('crm')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                         <Users className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'CRM & Satış' : 'CRM & Sales'}
+                        {oc(currentLanguage).crm_satis}
                       </button>
                       <button onClick={() => setActiveTab('sube')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                         <GitBranch className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Şubeler' : 'Branches'}
+                        {oc(currentLanguage).subeler}
                       </button>
                       <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
                         <Headphones className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Servis' : 'Service'}
+                        {oc(currentLanguage).servis}
                       </button>
                     </div>
                   </div>
@@ -5569,7 +5570,7 @@ function AppContent() {
           {/* ── İthalat / İhracat ── */}
           {activeTab === 'ihracat' && (
             <motion.div key="ihracat" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('ihracat') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export'} /> : (
+              {!canAccess('ihracat') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).ithalat_ihracat} /> : (
                 <>
                   {!hasFullAccess('ihracat') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                   {/* ── Lojistik Group Nav ── */}
@@ -5577,11 +5578,11 @@ function AppContent() {
                     <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
                       <button onClick={() => setActiveTab('lojistik')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                         <Truck className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Lojistik & Depo' : 'Logistics & Warehouse'}
+                        {oc(currentLanguage).lojistik_depo}
                       </button>
                       <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
                         <Ship className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export'}
+                        {oc(currentLanguage).ithalat_ihracat}
                       </button>
                     </div>
                   </div>
@@ -5689,7 +5690,7 @@ function AppContent() {
           {/* ── Şube Yönetimi ── */}
           {activeTab === 'sube' && (
             <motion.div key="sube" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('sube') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Şube Yönetimi' : 'Branch Management'} /> : (
+              {!canAccess('sube') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).sube_yonetimi} /> : (
                 <>
                   {!hasFullAccess('sube') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                   {/* ── CRM Group Nav ── */}
@@ -5697,20 +5698,20 @@ function AppContent() {
                     <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
                       <button onClick={() => setActiveTab('crm')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                         <Users className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'CRM & Satış' : 'CRM & Sales'}
+                        {oc(currentLanguage).crm_satis}
                       </button>
                       <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
                         <GitBranch className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Şubeler' : 'Branches'}
+                        {oc(currentLanguage).subeler}
                       </button>
                       <button onClick={() => setActiveTab('servis')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                         <Headphones className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Servis' : 'Service'}
+                        {oc(currentLanguage).servis}
                       </button>
                     </div>
                   </div>
                   <ModuleHeader
-                    title={currentLanguage === 'tr' ? 'Şube Yönetimi' : 'Branch Management'}
+                    title={oc(currentLanguage).sube_yonetimi}
                     subtitle={currentLanguage === 'tr' ? 'Şubeler, şubeler arası transfer ve şube bazlı P&L analizi' : 'Branches, inter-branch transfers and branch P&L analysis'}
                     icon={GitBranch}
                   />
@@ -5722,7 +5723,7 @@ function AppContent() {
 
           {activeTab === 'lotseri' && (
             <motion.div key="lotseri" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('lotseri') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial'} /> : (
+              {!canAccess('lotseri') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).lot_seri_takip} /> : (
                 <>
                   {!hasFullAccess('lotseri') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                   {/* ── Üretim Group Nav ── */}
@@ -5730,15 +5731,15 @@ function AppContent() {
                     <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max">
                       <button onClick={() => setActiveTab('production')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                         <Factory className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Üretim Yönetimi' : 'Production'}
+                        {oc(currentLanguage).uretim_yonetimi}
                       </button>
                       <button className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-brand text-white shadow-sm whitespace-nowrap">
                         <Hash className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Lot/Seri Takip' : 'Lot/Serial'}
+                        {oc(currentLanguage).lot_seri_takip}
                       </button>
                       <button onClick={() => setActiveTab('bakim')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                         <Wrench className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Bakım-Onarım' : 'Maintenance'}
+                        {oc(currentLanguage).bakim_onarim}
                       </button>
                     </div>
                   </div>
@@ -5756,7 +5757,7 @@ function AppContent() {
           {/* ── Fiyat İstihbaratı ── */}
           {activeTab === 'fiyat-istihbarat' && (
             <motion.div key="fiyat-istihbarat" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              <React.Suspense fallback={<div className="p-8 text-center text-gray-400 text-sm">{currentLanguage === 'tr' ? 'Yükleniyor...' : 'Loading...'}</div>}>
+              <React.Suspense fallback={<div className="p-8 text-center text-gray-400 text-sm">{oc(currentLanguage).yukleniyor}</div>}>
                 <PriceIntelPanel inventory={inventory} currentLanguage={currentLanguage} toast={toast as (m: string, t?: 'success' | 'error' | 'info') => void} />
               </React.Suspense>
             </motion.div>

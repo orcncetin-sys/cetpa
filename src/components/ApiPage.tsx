@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { oc } from '../i18n/ortak';
 import {
   ArrowLeft,
   Database,
@@ -29,7 +30,7 @@ export default function ApiPage({ currentLanguage: lang, darkMode, onBack }: Pro
     // Sekme basligi — SPA'da genel sayfalar kendi basligini koymuyordu; tum
     // sayfalar "CETPA Cloud ERP — ..." gorunuyordu (a11y teshisi 2026-08-28).
     const onceki = document.title;
-    document.title = (lang === 'tr' ? 'API ve Entegrasyonlar' : 'API & Integrations') + ' — CETPA';
+    document.title = (oc(lang).api_ve_entegrasyonlar) + ' — CETPA';
     return () => { document.title = onceki; };
   }, [lang]);
   const isTR = lang === 'tr';
@@ -139,11 +140,11 @@ X-Cetpa-Signature: sha256=...
             className={`flex items-center gap-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg py-2.5 -my-2.5 ${darkMode ? 'text-white/60 hover:text-white' : 'text-black/60 hover:text-black'}`}
           >
             <ArrowLeft className="w-4 h-4" />
-            {isTR ? 'Geri' : 'Back'}
+            {oc(isTR).geri_2}
           </button>
           <div className="w-px h-4 bg-current opacity-20" />
           <span className="text-sm font-bold" style={{ color: 'var(--color-brand)' }}>CETPA</span>
-          <span className={`text-sm font-medium ${muted}`}>{isTR ? 'API ve Entegrasyonlar' : 'API & Integrations'}</span>
+          <span className={`text-sm font-medium ${muted}`}>{oc(isTR).api_ve_entegrasyonlar}</span>
         </div>
       </header>
 
@@ -152,7 +153,7 @@ X-Cetpa-Signature: sha256=...
           <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>
             {isTR ? "Türkiye'nin B2B Cloud ERP Platformu" : "Turkey's B2B Cloud ERP Platform"}
           </p>
-          <h1 className="text-4xl font-bold mb-4">{isTR ? 'API ve Entegrasyonlar' : 'API & Integrations'}</h1>
+          <h1 className="text-4xl font-bold mb-4">{oc(isTR).api_ve_entegrasyonlar}</h1>
           <p className={`leading-relaxed ${muted}`}>
             {isTR
               ? 'CETPA, işletmenizi mevcut araçlarınızdan koparmaz; onlarla konuşur. Amacımız köklü sistemlerinizi baştan değiştirmenizi istemek değil, Mikro, Logo, SAP veya Dynamics gibi zaten kullandığınız ERP altyapılarıyla, muhasebe programlarınızla ve pazaryeri hesaplarınızla CETPA arasında güvenilir bir köprü kurmaktır.'
@@ -237,7 +238,7 @@ X-Cetpa-Signature: sha256=...
         </div>
 
         <div className={`mt-12 pt-8 border-t ${border} text-center`}>
-          <p className={`text-xs ${muted}`}>© 2026 CETPA A.Ş. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
+          <p className={`text-xs ${muted}`}>© 2026 CETPA A.Ş. {oc(isTR).tum_haklari_saklidir}</p>
         </div>
       </main>
     </div>

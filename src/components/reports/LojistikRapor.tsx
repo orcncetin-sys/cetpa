@@ -42,6 +42,7 @@ import {
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
 import { KpiCard, KpiGrid } from './ReportKit';
+import { oc } from '../../i18n/ortak';
 
 export default function LojistikRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -56,9 +57,9 @@ export default function LojistikRapor(ctx: ReportsCtx) {
               konuyla ilgili olmalı"). Yerine sevkiyat bekleyen sipariş sayısı. */}
           <KpiGrid>
             {([
-              { label: currentLanguage==='tr'?'Toplam Sipariş':'Total Orders', value: String(totalOrders), icon: Package, accent: 'text-brand', accentBg: 'bg-brand/10', hint: currentLanguage==='tr'?'Seçili dönemdeki tüm siparişler':'All orders in range' },
-              { label: currentLanguage==='tr'?'Teslim Edilen':'Delivered', value: String(orders.filter(o=>o.status==='Delivered').length), hint: currentLanguage==='tr'?'Durumu "Teslim Edildi" olanlar':'Status = Delivered', icon: CheckCircle2, accent: 'text-green-600', accentBg: 'bg-green-50' },
-              { label: currentLanguage==='tr'?'Yolda':'In Transit', value: String(orders.filter(o=>o.status==='Shipped').length), hint: currentLanguage==='tr'?'Durumu "Kargoda" olanlar':'Status = Shipped', icon: Truck, accent: 'text-blue-600', accentBg: 'bg-blue-50' },
+              { label: oc(currentLanguage).toplam_siparis, value: String(totalOrders), icon: Package, accent: 'text-brand', accentBg: 'bg-brand/10', hint: currentLanguage==='tr'?'Seçili dönemdeki tüm siparişler':'All orders in range' },
+              { label: oc(currentLanguage).teslim_edilen, value: String(orders.filter(o=>o.status==='Delivered').length), hint: currentLanguage==='tr'?'Durumu "Teslim Edildi" olanlar':'Status = Delivered', icon: CheckCircle2, accent: 'text-green-600', accentBg: 'bg-green-50' },
+              { label: oc(currentLanguage).yolda, value: String(orders.filter(o=>o.status==='Shipped').length), hint: currentLanguage==='tr'?'Durumu "Kargoda" olanlar':'Status = Shipped', icon: Truck, accent: 'text-blue-600', accentBg: 'bg-blue-50' },
               { label: currentLanguage==='tr'?'Sevkiyat Bekleyen':'Awaiting Shipment', value: String(orders.filter(o=>o.status==='Pending'||o.status==='Processing').length), hint: currentLanguage==='tr'?'Bekliyor + Hazırlanıyor':'Pending + Processing', icon: Calendar, accent: 'text-orange-500', accentBg: 'bg-orange-50' },
             ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string; hint?: string }[]).map((k,i) => (
               // TIKLANABILIR + IPUCU (2026-09-04, kullanici istegi): KpiCard bunlari
@@ -72,7 +73,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
           </KpiGrid>
 
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Teslimat Performansı':'Delivery Performance'}</h3>
+            <h3 className="font-bold text-gray-800 mb-4">{oc(currentLanguage).teslimat_performansi}</h3>
             <div className="h-[280px]">
               <ResponsiveContainer width="100%" height="100%">
                 <RePieChart>
@@ -94,9 +95,9 @@ export default function LojistikRapor(ctx: ReportsCtx) {
                   <tr className="border-b border-gray-100">
                     {[
                       {k:'shopifyOrderId', label:currentLanguage==='tr'?'Sipariş':'Order', align:'text-left', cls:''},
-                      {k:'customerName', label:currentLanguage==='tr'?'Müşteri':'Customer', align:'text-left', cls:'hidden sm:table-cell'},
-                      {k:'shippingAddress', label:currentLanguage==='tr'?'Adres':'Address', align:'text-left', cls:'hidden md:table-cell'},
-                      {k:'status', label:currentLanguage==='tr'?'Durum':'Status', align:'text-center', cls:''},
+                      {k:'customerName', label:oc(currentLanguage).musteri, align:'text-left', cls:'hidden sm:table-cell'},
+                      {k:'shippingAddress', label:oc(currentLanguage).adres, align:'text-left', cls:'hidden md:table-cell'},
+                      {k:'status', label:oc(currentLanguage).durum, align:'text-center', cls:''},
                     ].map(({k,label,align,cls}) => {
                       const active = logisticsSummarySort.key === k;
                       return (
@@ -246,7 +247,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
                 <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '📦 Sipariş Teslim Süresi' : '📦 Order Lead Time'}</h3>
                 <div className="grid grid-cols-3 gap-3 mb-5">
                   {[
-                    { label: currentLanguage==='tr'?'Ortalama':'Average', value: `${avgLT}g`, color: avgLT <= 7 ? 'text-emerald-600' : avgLT <= 14 ? 'text-amber-600' : 'text-red-500' },
+                    { label: oc(currentLanguage).ortalama, value: `${avgLT}g`, color: avgLT <= 7 ? 'text-emerald-600' : avgLT <= 14 ? 'text-amber-600' : 'text-red-500' },
                     { label: currentLanguage==='tr'?'En Hızlı':'Fastest', value: `${minLT}g`, color: 'text-emerald-600' },
                     { label: currentLanguage==='tr'?'En Yavaş':'Slowest', value: `${maxLT}g`, color: 'text-red-500' },
                   ].map(k => (
@@ -263,7 +264,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
                         <div className={`w-full rounded-t-lg ${b.label === '0-3' ? 'bg-emerald-400' : b.label === '4-7' ? 'bg-blue-400' : b.label === '8-14' ? 'bg-amber-400' : 'bg-red-400'}`}
                           style={{ height: `${Math.max(Math.round((b.count / maxBucketCount) * 100), 4)}%` }} />
                       </div>
-                      <span className="text-[9px] text-gray-400">{b.label}{currentLanguage==='tr'?'g':'d'}</span>
+                      <span className="text-[9px] text-gray-400">{b.label}{oc(currentLanguage).g}</span>
                     </div>
                   ))}
                 </div>
@@ -298,8 +299,8 @@ export default function LojistikRapor(ctx: ReportsCtx) {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               {[
-                { label: currentLanguage === 'tr' ? 'Toplam' : 'Total', value: totalOrders195, color: 'text-gray-700' },
-                { label: currentLanguage === 'tr' ? 'Teslim' : 'Delivered', value: delivered, color: 'text-emerald-600' },
+                { label: oc(currentLanguage).toplam, value: totalOrders195, color: 'text-gray-700' },
+                { label: oc(currentLanguage).teslim, value: delivered, color: 'text-emerald-600' },
                 { label: currentLanguage === 'tr' ? 'Süreçte' : 'In Progress', value: inProgress + pending, color: 'text-blue-600' },
                 { label: currentLanguage === 'tr' ? 'İptal' : 'Cancelled', value: cancelled, color: 'text-red-500' },
               ].map(k => (
@@ -326,7 +327,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const custMap: Record<string, number> = {};
         for (const o of cancelled209) {
           const m = o as unknown as Record<string,unknown>;
-          const reason = (m.cancelReason as string) || (m.cancellationReason as string) || (currentLanguage === 'tr' ? 'Belirtilmemiş' : 'Not specified');
+          const reason = (m.cancelReason as string) || (m.cancellationReason as string) || (oc(currentLanguage).belirtilmemis);
           reasonMap[reason] = (reasonMap[reason] ?? 0) + 1;
           const cust = o.customerName || '—';
           custMap[cust] = (custMap[cust] ?? 0) + 1;
@@ -376,10 +377,10 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         const total212 = orders.length;
         const stages212 = [
-          { label: currentLanguage === 'tr' ? 'Toplam Sipariş' : 'Total Orders', count: total212, color: 'bg-gray-400' },
+          { label: oc(currentLanguage).toplam_siparis, count: total212, color: 'bg-gray-400' },
           { label: currentLanguage === 'tr' ? 'İşleniyor/Bekliyor' : 'Processing/Pending', count: orders.filter(o => o.status === 'Pending' || o.status === 'Processing').length, color: 'bg-blue-400' },
           { label: currentLanguage === 'tr' ? 'Kargoya Verildi' : 'Shipped', count: orders.filter(o => o.status === 'Shipped').length, color: 'bg-amber-400' },
-          { label: currentLanguage === 'tr' ? 'Teslim Edildi' : 'Delivered', count: orders.filter(o => o.status === 'Delivered').length, color: 'bg-emerald-400' },
+          { label: oc(currentLanguage).teslim_edildi, count: orders.filter(o => o.status === 'Delivered').length, color: 'bg-emerald-400' },
         ];
         return (
           <div className="apple-card p-6">
@@ -534,10 +535,10 @@ export default function LojistikRapor(ctx: ReportsCtx) {
                 return (
                   <div key={status} className={`rounded-xl p-4 ${isWarn ? 'bg-red-50 border border-red-100' : 'bg-gray-50'}`}>
                     <div className={`w-2 h-2 rounded-full ${info.color} mb-2`} />
-                    <p className={`text-2xl font-black ${isWarn ? 'text-red-600' : 'text-gray-700'}`}>{d.count > 0 ? avg : '—'}{d.count > 0 ? (currentLanguage === 'tr' ? 'g' : 'd') : ''}</p>
+                    <p className={`text-2xl font-black ${isWarn ? 'text-red-600' : 'text-gray-700'}`}>{d.count > 0 ? avg : '—'}{d.count > 0 ? (oc(currentLanguage).g) : ''}</p>
                     <p className="text-[10px] text-gray-600 font-medium mt-0.5">{info.label}</p>
-                    <p className="text-[9px] text-gray-400">{d.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</p>
-                    {isWarn && <p className="text-[9px] text-red-500 font-bold mt-1">{'⚠ >'}{info.warn}{currentLanguage === 'tr' ? 'g' : 'd'}</p>}
+                    <p className="text-[9px] text-gray-400">{d.count} {oc(currentLanguage).siparis}</p>
+                    {isWarn && <p className="text-[9px] text-red-500 font-bold mt-1">{'⚠ >'}{info.warn}{oc(currentLanguage).g}</p>}
                   </div>
                 );
               })}
@@ -563,10 +564,10 @@ export default function LojistikRapor(ctx: ReportsCtx) {
               <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '🚚 Lojistik Performans Özeti' : '🚚 Logistics Performance Summary'}</h3>
               <div className="grid grid-cols-4 gap-3">
                 {[
-                  { label: currentLanguage === 'tr' ? 'Toplam' : 'Total', value: total243, color: 'text-gray-700' },
-                  { label: currentLanguage === 'tr' ? 'Teslim' : 'Delivered', value: delivered243, color: 'text-emerald-600' },
-                  { label: currentLanguage === 'tr' ? 'Kargoda' : 'In Transit', value: inTransit243, color: 'text-blue-600' },
-                  { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Pending', value: pending243, color: 'text-amber-600' },
+                  { label: oc(currentLanguage).toplam, value: total243, color: 'text-gray-700' },
+                  { label: oc(currentLanguage).teslim, value: delivered243, color: 'text-emerald-600' },
+                  { label: oc(currentLanguage).kargoda, value: inTransit243, color: 'text-blue-600' },
+                  { label: oc(currentLanguage).bekleyen, value: pending243, color: 'text-amber-600' },
                 ].map(k => (
                   <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
                     <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
@@ -608,7 +609,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
               </div>
               <div className="bg-red-50 rounded-xl p-4 text-center">
                 <p className="text-2xl font-bold text-red-500">{deliveredOrders.length - onTime}</p>
-                <p className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'Gecikmeli' : 'Late'}</p>
+                <p className="text-[10px] text-gray-500">{oc(currentLanguage).gecikmeli}</p>
               </div>
             </div>
             <p className="text-[10px] text-gray-400 mt-3">{currentLanguage === 'tr' ? 'Benchmark: %95+ (dünya standartı)' : 'Benchmark: 95%+ (world class OTD)'}</p>
@@ -684,14 +685,14 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         if (aged.length === 0) {
           return (
             <div className="apple-card p-6">
-              <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Açık Sipariş Öncelik Sırası' : 'Open Order Priority Queue'}</h3>
+              <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).acik_siparis_oncelik_sirasi}</h3>
               <p className="text-xs text-green-600 text-center py-4">✅ No open orders pending fulfillment</p>
             </div>
           );
         }
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Açık Sipariş Öncelik Sırası' : 'Open Order Priority Queue'}</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).acik_siparis_oncelik_sirasi}</h3>
             <p className="text-xs text-gray-500 mb-4">Age-based prioritization of {aged.length} open orders</p>
             <div className="space-y-3">
               {buckets.map((b,i) => (
@@ -1114,7 +1115,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const maxS = Math.max(...statuses.map(s => s.count), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Sipariş Durumu Dağılımı' : 'Order Status Distribution'}</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).siparis_durumu_dagilimi}</h3>
             <p className="text-xs text-gray-500 mb-4">{currentLanguage === 'tr'
               ? `${orders.length} sipariş · anlık durum görünümü`
               : `${orders.length} total orders · current pipeline snapshot`}</p>
@@ -1509,7 +1510,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
                     <span className="text-gray-700 font-medium">{o.customer}</span>
                     <span className="ml-2 text-gray-400">{siparisDurumEtiketi(o.status, currentLanguage)}</span>
                   </div>
-                  <span className="font-bold ml-2" style={{color: o.days > 14 ? '#ef4444' : '#f59e0b'}}>{o.days}{currentLanguage === 'tr' ? 'g' : 'd'}</span>
+                  <span className="font-bold ml-2" style={{color: o.days > 14 ? '#ef4444' : '#f59e0b'}}>{o.days}{oc(currentLanguage).g}</span>
                 </div>
               ))}
             </div>
@@ -1677,7 +1678,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
           const rate = total > 0 ? Math.round((delivered/total)*100) : 0;
           return (
             <div className="apple-card p-4 mb-4">
-              <h3 className="font-semibold text-sm mb-1">{currentLanguage === 'tr' ? 'Teslimat Performansı' : 'Delivery Performance'}</h3>
+              <h3 className="font-semibold text-sm mb-1">{oc(currentLanguage).teslimat_performansi}</h3>
               <p className="text-3xl font-bold text-green-500">{rate}%</p>
               <p className="text-xs text-gray-500">{delivered}/{total} orders delivered</p>
             </div>

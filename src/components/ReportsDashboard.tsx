@@ -17,6 +17,7 @@ import React, { Suspense } from 'react';
 import { LayoutDashboard, List, Truck, UserCheck, Package, Users, BarChart3, Download, BarChart2 } from 'lucide-react';
 import ModuleHeader from './ModuleHeader';
 import { useReportsData, type ReportsProps } from './reports/useReportsData';
+import { oc } from '../i18n/ortak';
 
 const GenelRapor    = React.lazy(() => import('./reports/GenelRapor'));
 const CrmRapor      = React.lazy(() => import('./reports/CrmRapor'));
@@ -37,16 +38,16 @@ const ReportsDashboard = (props: ReportsProps) => {
 
   // Sekme çubuğu yapılandırması — saf UI, hesaplama katmanına ait değil.
   const subTabs = [
-    { id: 'genel', label: currentLanguage==='tr'?'Genel Bakış':'Overview', icon: LayoutDashboard },
-    { id: 'crm', label: currentLanguage==='tr'?'CRM & Satış':'CRM & Sales', icon: Users },
-    { id: 'envanter', label: currentLanguage==='tr'?'Envanter':'Inventory', icon: List },
-    { id: 'lojistik', label: currentLanguage==='tr'?'Lojistik':'Logistics', icon: Truck },
-    { id: 'ik', label: currentLanguage==='tr'?'İnsan Kaynakları':'Human Resources', icon: UserCheck },
+    { id: 'genel', label: oc(currentLanguage).genel_bakis, icon: LayoutDashboard },
+    { id: 'crm', label: oc(currentLanguage).crm_satis, icon: Users },
+    { id: 'envanter', label: oc(currentLanguage).envanter, icon: List },
+    { id: 'lojistik', label: oc(currentLanguage).lojistik, icon: Truck },
+    { id: 'ik', label: oc(currentLanguage).insan_kaynaklari, icon: UserCheck },
     { id: 'urunler', label: currentLanguage==='tr'?'Ürün Performansı':'Product Performance', icon: Package },
     // 'analitik' 2026-09-04: ayri "Analitik" ust sekmesi buraya tasindi; panelin
     // KENDISI RaporlarPage'de render ediliyor (leads prop'u orada mevcut), burada
     // yalniz sekme dugmesi var — bu yuzden asagidaki render zincirinde karsiligi YOK.
-    { id: 'analitik', label: currentLanguage==='tr'?'Analitik':'Analytics', icon: BarChart2 },
+    { id: 'analitik', label: oc(currentLanguage).analitik, icon: BarChart2 },
   ] as const;
 
   return (

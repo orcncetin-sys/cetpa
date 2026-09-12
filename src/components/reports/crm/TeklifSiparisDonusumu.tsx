@@ -6,6 +6,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanDate, tarihYaz } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'quotations' | 'currentLanguage' | 'fmtAna'>;
 
@@ -36,8 +37,8 @@ export default function TeklifSiparisDonusumu({ quotations, currentLanguage, fmt
         {[
           { label: currentLanguage==='tr'?'Toplam Teklif':'Total Quotes', value: String(total145), color: 'text-blue-600' },
           { label: currentLanguage==='tr'?'Dönüştürülen':'Converted', value: String(converted145), color: 'text-emerald-600' },
-          { label: currentLanguage==='tr'?'Dönüşüm Oranı':'Conversion Rate', value: `%${convRate}`, color: convRate >= 40 ? 'text-emerald-600' : 'text-amber-600' },
-          { label: currentLanguage==='tr'?'Bekleyen':'Pending', value: String(pending145), color: 'text-amber-600' },
+          { label: oc(currentLanguage).donusum_orani, value: `%${convRate}`, color: convRate >= 40 ? 'text-emerald-600' : 'text-amber-600' },
+          { label: oc(currentLanguage).bekleyen, value: String(pending145), color: 'text-amber-600' },
         ].map(k => (
           <div key={k.label} className="text-center">
             <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>

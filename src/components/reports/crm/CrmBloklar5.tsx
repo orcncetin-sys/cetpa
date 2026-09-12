@@ -11,6 +11,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanDate } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'quotations' | 'currentLanguage'>;
 
@@ -57,12 +58,12 @@ export default function CrmBloklar5({ reportsTab, quotations, currentLanguage }:
             </div>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-emerald-50 rounded-xl p-3 text-center">
-                <p className="text-xl font-bold text-emerald-600">{minDays} {currentLanguage === 'tr' ? 'gün' : 'd'}</p>
-                <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'En hızlı' : 'Fastest'}</p>
+                <p className="text-xl font-bold text-emerald-600">{minDays} {oc(currentLanguage).gun}</p>
+                <p className="text-[10px] text-gray-400">{oc(currentLanguage).en_hizli}</p>
               </div>
               <div className="bg-amber-50 rounded-xl p-3 text-center">
-                <p className="text-xl font-bold text-amber-600">{maxDays} {currentLanguage === 'tr' ? 'gün' : 'd'}</p>
-                <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'En yavaş' : 'Slowest'}</p>
+                <p className="text-xl font-bold text-amber-600">{maxDays} {oc(currentLanguage).gun}</p>
+                <p className="text-[10px] text-gray-400">{oc(currentLanguage).en_yavas}</p>
               </div>
             </div>
             <div className="flex items-end gap-2 h-16">

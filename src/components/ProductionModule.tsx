@@ -17,6 +17,7 @@ import {
 } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { tarihYaz, zamanMs } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell
@@ -1241,7 +1242,7 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
             >
               <option value="">{tr ? '— Stok kalemi seçin (opsiyonel) —' : '— Select inventory item (optional) —'}</option>
               {inventoryItems.map(i => (
-                <option key={i.id} value={i.id}>{i.name} {i.sku ? `(${i.sku})` : ''} — {tr ? 'Stok' : 'Stock'}: {i.quantity}</option>
+                <option key={i.id} value={i.id}>{i.name} {i.sku ? `(${i.sku})` : ''} — {oc(tr).stok}: {i.quantity}</option>
               ))}
             </select>
           </div>
@@ -1552,7 +1553,7 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
                   disabled={tersKayitLoading}
                   className="apple-button-secondary flex-1 py-2.5 text-sm font-semibold"
                 >
-                  {tr ? 'İptal' : 'Cancel'}
+                  {oc(tr).iptal}
                 </button>
                 <button
                   onClick={executeTersKayit}
@@ -1561,7 +1562,7 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
                   className="apple-button-primary flex-1 justify-center py-2.5 text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
                 >
                   {tersKayitLoading ? (
-                    <><Activity className="w-4 h-4 animate-spin" /> {tr ? 'Kaydediliyor...' : 'Saving...'}</>
+                    <><Activity className="w-4 h-4 animate-spin" /> {oc(tr).kaydediliyor}</>
                   ) : (
                     <><CheckCircle2 className="w-4 h-4" /> {tr ? 'Tamamla & Kaydet' : 'Complete & Post'}</>
                   )}

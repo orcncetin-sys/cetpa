@@ -14,6 +14,7 @@ import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import { paraYaz } from '../utils/currency';
 import { zamanDate, gunBasi, gunAnahtari } from '../utils/zaman';
 import type { Order, Lead, Employee } from '../types';
+import { oc } from '../i18n/ortak';
 
 const HRModule = React.lazy(() => import('../components/HRModule'));
 
@@ -85,11 +86,11 @@ export default function IKPage(props: Props) {
 
   return (
             <motion.div key="ik" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('ik') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'İnsan Kaynakları':'Human Resources'} /> : (
+              {!canAccess('ik') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).insan_kaynaklari} /> : (
                 <>
                   {!hasFullAccess('ik') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                   <ModuleHeader
-                    title={currentLanguage === 'tr' ? 'İnsan Kaynakları' : 'Human Resources'}
+                    title={oc(currentLanguage).insan_kaynaklari}
                     subtitle={currentLanguage === 'tr' ? 'Çalışan yönetimi, izin, seyahat, avans ve bordro' : 'Employee management, leave, travel, advance and payroll'}
                     icon={Users}
                   />
@@ -112,7 +113,7 @@ export default function IKPage(props: Props) {
                           </h3>
                           <div className="grid grid-cols-3 gap-3">
                             {[
-                              { label: currentLanguage === 'tr' ? 'Aktif' : 'Active',   count: aktif,   color: 'text-emerald-700', bg: 'bg-emerald-50'  },
+                              { label: oc(currentLanguage).aktif,   count: aktif,   color: 'text-emerald-700', bg: 'bg-emerald-50'  },
                               { label: currentLanguage === 'tr' ? 'İzinli' : 'On Leave', count: izinli,  color: 'text-amber-700',   bg: 'bg-amber-50'    },
                               { label: currentLanguage === 'tr' ? 'Ayrıldı' : 'Left',   count: ayrildi, color: 'text-gray-500',    bg: 'bg-gray-50'     },
                             ].map((s, i) => (
@@ -203,7 +204,7 @@ export default function IKPage(props: Props) {
                               {(['summary', 'detail'] as const).map(v => (
                                 <button key={v} onClick={() => setPayrollView(v)}
                                   className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-all ${payrollView === v ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400'}`}>
-                                  {v === 'summary' ? (currentLanguage === 'tr' ? 'Özet' : 'Summary') : (currentLanguage === 'tr' ? 'Detay' : 'Detail')}
+                                  {v === 'summary' ? (currentLanguage === 'tr' ? 'Özet' : 'Summary') : (oc(currentLanguage).detay)}
                                 </button>
                               ))}
                             </div>
@@ -214,8 +215,8 @@ export default function IKPage(props: Props) {
                           <div className="p-5">
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                               {[
-                                { label: currentLanguage === 'tr' ? 'Toplam Brüt' : 'Total Gross',  value: totals.gross, color: 'text-gray-800',    bg: 'bg-gray-50'   },
-                                { label: currentLanguage === 'tr' ? 'Toplam Net'  : 'Total Net',    value: totals.net,   color: 'text-emerald-700', bg: 'bg-emerald-50' },
+                                { label: oc(currentLanguage).toplam_brut,  value: totals.gross, color: 'text-gray-800',    bg: 'bg-gray-50'   },
+                                { label: oc(currentLanguage).toplam_net,    value: totals.net,   color: 'text-emerald-700', bg: 'bg-emerald-50' },
                                 { label: currentLanguage === 'tr' ? 'Vergi'       : 'Income Tax',   value: totals.tax,   color: 'text-red-600',     bg: 'bg-red-50'    },
                                 { label: currentLanguage === 'tr' ? 'İşveren Mlt' : 'Employer Cost', value: totals.cost, color: 'text-blue-700',    bg: 'bg-blue-50'   },
                               ].map((k, i) => (
@@ -235,9 +236,9 @@ export default function IKPage(props: Props) {
                               <thead>
                                 <tr className="bg-gray-50 border-b border-gray-100">
                                   {[
-                                    currentLanguage === 'tr' ? 'Çalışan' : 'Employee',
+                                    oc(currentLanguage).calisan,
                                     currentLanguage === 'tr' ? 'Departman' : 'Dept',
-                                    currentLanguage === 'tr' ? 'Brüt' : 'Gross',
+                                    oc(currentLanguage).brut,
                                     'SGK',
                                     currentLanguage === 'tr' ? 'Vergi' : 'Tax',
                                     currentLanguage === 'tr' ? 'Net' : 'Net',
@@ -262,7 +263,7 @@ export default function IKPage(props: Props) {
                               </tbody>
                               <tfoot>
                                 <tr className="bg-gray-50 border-t-2 border-gray-200 font-black text-[11px]">
-                                  <td colSpan={2} className="px-4 py-2.5 text-gray-600">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</td>
+                                  <td colSpan={2} className="px-4 py-2.5 text-gray-600">{oc(currentLanguage).toplam}</td>
                                   <td className="px-4 py-2.5 text-gray-800">{fmtKpi(totals.gross)}</td>
                                   <td className="px-4 py-2.5 text-red-500">—</td>
                                   <td className="px-4 py-2.5 text-red-500">{fmtKpi(totals.tax)}</td>
@@ -285,21 +286,21 @@ export default function IKPage(props: Props) {
                         <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'İzin Yönetimi' : 'Leave Management'}</h3>
                         {leaveRequests.filter(l => l.status === 'pending').length > 0 && (
                           <span className="bg-amber-400 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                            {leaveRequests.filter(l => l.status === 'pending').length} {currentLanguage === 'tr' ? 'bekliyor' : 'pending'}
+                            {leaveRequests.filter(l => l.status === 'pending').length} {oc(currentLanguage).bekliyor_3}
                           </span>
                         )}
                       </div>
                       <button onClick={() => setShowLeaveForm(v => !v)} className="text-[10px] font-bold text-brand hover:underline flex items-center gap-1">
-                        <Plus size={11} />{currentLanguage === 'tr' ? 'Talep Ekle' : 'Add Request'}
+                        <Plus size={11} />{oc(currentLanguage).talep_ekle}
                       </button>
                     </div>
 
                     {/* Stats strip */}
                     <div className="grid grid-cols-3 divide-x divide-gray-50 border-b border-gray-50">
                       {[
-                        { label: currentLanguage === 'tr' ? 'Bekliyor' : 'Pending',  count: leaveRequests.filter(l => l.status === 'pending').length,  color: 'text-amber-600' },
-                        { label: currentLanguage === 'tr' ? 'Onaylı'   : 'Approved', count: leaveRequests.filter(l => l.status === 'approved').length, color: 'text-emerald-600' },
-                        { label: currentLanguage === 'tr' ? 'Reddedildi' : 'Rejected', count: leaveRequests.filter(l => l.status === 'rejected').length, color: 'text-red-500' },
+                        { label: oc(currentLanguage).bekliyor,  count: leaveRequests.filter(l => l.status === 'pending').length,  color: 'text-amber-600' },
+                        { label: oc(currentLanguage).onayli, count: leaveRequests.filter(l => l.status === 'approved').length, color: 'text-emerald-600' },
+                        { label: oc(currentLanguage).reddedildi, count: leaveRequests.filter(l => l.status === 'rejected').length, color: 'text-red-500' },
                       ].map((s, i) => (
                         <div key={i} className="py-3 text-center">
                           <p className={`text-xl font-black ${s.color}`}>{s.count}</p>
@@ -314,13 +315,13 @@ export default function IKPage(props: Props) {
                         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                           <div className="p-4 bg-gray-50 border-b border-gray-100 space-y-3">
                             <div className="grid grid-cols-2 gap-3">
-                              <input className="apple-input text-sm" placeholder={currentLanguage === 'tr' ? 'Çalışan adı' : 'Employee name'}
+                              <input className="apple-input text-sm" placeholder={oc(currentLanguage).calisan_adi}
                                 value={leaveForm.employeeName} onChange={e => setLeaveForm(f => ({ ...f, employeeName: e.target.value }))} />
                               <select className="apple-input text-sm" value={leaveForm.type} onChange={e => setLeaveForm(f => ({ ...f, type: e.target.value as typeof leaveForm.type }))}>
                                 <option value="annual">{currentLanguage === 'tr' ? 'Yıllık İzin' : 'Annual Leave'}</option>
                                 <option value="sick">{currentLanguage === 'tr' ? 'Hastalık' : 'Sick Leave'}</option>
                                 <option value="unpaid">{currentLanguage === 'tr' ? 'Ücretsiz İzin' : 'Unpaid Leave'}</option>
-                                <option value="other">{currentLanguage === 'tr' ? 'Diğer' : 'Other'}</option>
+                                <option value="other">{oc(currentLanguage).diger}</option>
                               </select>
                               <div className="space-y-1">
                                 <label className="text-[10px] font-bold text-gray-400">{currentLanguage === 'tr' ? 'Başlangıç' : 'Start'}</label>
@@ -368,7 +369,7 @@ export default function IKPage(props: Props) {
                     ) : (
                       <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
                         {leaveRequests.map(lr => {
-                          const typeLabel = { annual: currentLanguage === 'tr' ? 'Yıllık' : 'Annual', sick: currentLanguage === 'tr' ? 'Hastalık' : 'Sick', unpaid: currentLanguage === 'tr' ? 'Ücretsiz' : 'Unpaid', other: currentLanguage === 'tr' ? 'Diğer' : 'Other' }[lr.type] || lr.type;
+                          const typeLabel = { annual: currentLanguage === 'tr' ? 'Yıllık' : 'Annual', sick: oc(currentLanguage).hastalik, unpaid: oc(currentLanguage).ucretsiz, other: oc(currentLanguage).diger }[lr.type] || lr.type;
                           return (
                             <div key={lr.id} className="flex items-center gap-3 px-5 py-3">
                               <div className="flex-1 min-w-0">
@@ -379,7 +380,7 @@ export default function IKPage(props: Props) {
                                 <div className="flex items-center gap-1.5 flex-shrink-0">
                                   <button onClick={async () => {
                                     await updateDoc(doc(db, 'leaveRequests', lr.id), { status: 'approved' });
-                                    toast(currentLanguage === 'tr' ? 'Onaylandı.' : 'Approved.', 'success');
+                                    toast(oc(currentLanguage).onaylandi_2, 'success');
                                     // Onaylanan izni Mikro'ya da gönder. Faz 1 (2026-09-04): eskiden `type`
                                     // hiç geçilmiyordu → her izin Mikro'ya YILLIK (0) yazılıyordu; `days || 1`
                                     // gün bilinmiyorsa 1 uyduruyordu; payload hatası sessiz yutuluyordu.
@@ -399,11 +400,11 @@ export default function IKPage(props: Props) {
                                     }
                                   }}
                                     className="text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors">
-                                    {currentLanguage === 'tr' ? 'Onayla' : 'Approve'}
+                                    {oc(currentLanguage).onayla}
                                   </button>
                                   <button onClick={async () => { await updateDoc(doc(db, 'leaveRequests', lr.id), { status: 'rejected' }); }}
                                     className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors">
-                                    {currentLanguage === 'tr' ? 'Reddet' : 'Reject'}
+                                    {oc(currentLanguage).reddet}
                                   </button>
                                 </div>
                               ) : (
@@ -414,7 +415,7 @@ export default function IKPage(props: Props) {
                                 }`}>
                                   {lr.status === 'approved' ? (currentLanguage === 'tr' ? '✓ Onaylı' : '✓ Approved')
                                     : lr.status === 'rejected' ? (currentLanguage === 'tr' ? '✗ Reddedildi' : '✗ Rejected')
-                                    : (currentLanguage === 'tr' ? '⏳ Bekliyor' : '⏳ Pending')}
+                                    : (oc(currentLanguage).bekliyor_2)}
                                 </span>
                               )}
                             </div>
@@ -430,7 +431,7 @@ export default function IKPage(props: Props) {
                     type DeptStat = { dept: string; count: number; totalSalary: number; active: number };
                     const deptMap: Record<string, DeptStat> = {};
                     for (const emp of employees) {
-                      const dept = emp.department || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+                      const dept = emp.department || (oc(currentLanguage).diger);
                       if (!deptMap[dept]) deptMap[dept] = { dept, count: 0, totalSalary: 0, active: 0 };
                       deptMap[dept].count++;
                       deptMap[dept].totalSalary += emp.salary || 0;
@@ -462,7 +463,7 @@ export default function IKPage(props: Props) {
                                 </div>
                               </div>
                               <div className="flex items-center gap-3 flex-shrink-0 text-right">
-                                <span className="text-xs font-bold text-gray-700">{d.count} {currentLanguage === 'tr' ? 'kişi' : 'staff'}</span>
+                                <span className="text-xs font-bold text-gray-700">{d.count} {oc(currentLanguage).kisi}</span>
                                 <span className="text-[10px] text-gray-400">{fmtKpi(d.totalSalary,'K',0)}</span>
                                 {d.active < d.count && <span className="text-[9px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">{d.count - d.active} {currentLanguage === 'tr' ? 'pasif' : 'inactive'}</span>}
                               </div>
@@ -500,7 +501,7 @@ export default function IKPage(props: Props) {
                         </div>
                         <div className="divide-y divide-gray-50">
                           {current.map(l => {
-                            const typeLabel = { annual: currentLanguage === 'tr' ? 'Yıllık' : 'Annual', sick: currentLanguage === 'tr' ? 'Hastalık' : 'Sick', unpaid: currentLanguage === 'tr' ? 'Ücretsiz' : 'Unpaid', other: currentLanguage === 'tr' ? 'Diğer' : 'Other' }[l.type] || l.type;
+                            const typeLabel = { annual: currentLanguage === 'tr' ? 'Yıllık' : 'Annual', sick: oc(currentLanguage).hastalik, unpaid: oc(currentLanguage).ucretsiz, other: oc(currentLanguage).diger }[l.type] || l.type;
                             const izinBas = gunBasi(l.startDate), izinBit = gunBasi(l.endDate);
                             const isNow = !!izinBas && !!izinBit && izinBas <= today138 && izinBit >= today138;
                             return (
@@ -512,7 +513,7 @@ export default function IKPage(props: Props) {
                                   </div>
                                   <p className="text-[10px] text-gray-400">{typeLabel} · {l.startDate} → {l.endDate}</p>
                                 </div>
-                                <span className="text-xs font-bold text-gray-600 flex-shrink-0">{l.days} {currentLanguage === 'tr' ? 'gün' : 'd'}</span>
+                                <span className="text-xs font-bold text-gray-600 flex-shrink-0">{l.days} {oc(currentLanguage).gun}</span>
                               </div>
                             );
                           })}
@@ -539,7 +540,7 @@ export default function IKPage(props: Props) {
                     const kpis572 = [
                       { label: tr572?'Atanan Sipariş':'Assigned Orders', val: empOrders, max: Math.max(...employees.map(e => orders.filter(o => o.assignedTo===e.id||o.assignedTo===e.email).length), 1), unit: '', color: 'blue' },
                       { label: tr572?'Müşteri Adayı':'Assigned Leads', val: empLeads, max: Math.max(...employees.map(e => leads.filter(l => l.assignedTo===e.email||l.assignedTo===e.name).length), 1), unit: '', color: 'purple' },
-                      { label: tr572?'Dönüşüm Oranı':'Conversion Rate', val: convRate, max: 100, unit: '%', color: 'emerald' },
+                      { label: oc(tr572).donusum_orani, val: convRate, max: 100, unit: '%', color: 'emerald' },
                       { label: tr572?'Devam Oranı':'Attendance Rate', val: attendancePct || 100, max: 100, unit: '%', color: 'amber' },
                     ];
 
@@ -675,8 +676,8 @@ export default function IKPage(props: Props) {
                         {/* Summary cards */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-100">
                           {[
-                            { label: tr556 ? 'Toplam Brüt' : 'Total Gross',        val: totals.gross,           color: 'text-gray-800' },
-                            { label: tr556 ? 'SGK Matrahı' : 'SGK Base',           val: totals.sgkBase,         color: 'text-teal-700' },
+                            { label: oc(tr556).toplam_brut,        val: totals.gross,           color: 'text-gray-800' },
+                            { label: oc(tr556).sgk_matrahi,           val: totals.sgkBase,         color: 'text-teal-700' },
                             { label: tr556 ? 'İşçi SGK+İşsizlik' : 'Employee SGK', val: totals.sgkEmp + totals.unempEmp, color: 'text-red-600' },
                             { label: tr556 ? 'İşveren SGK+İşsizlik' : 'Employer SGK', val: totals.totalEmployerSgk, color: 'text-blue-700' },
                           ].map(k => (
@@ -689,9 +690,9 @@ export default function IKPage(props: Props) {
 
                         {/* Period + totals info */}
                         <div className="px-5 py-3 bg-teal-50 border-b border-teal-100 flex flex-wrap gap-4 text-xs text-teal-800">
-                          <span className="font-bold">{tr556 ? 'Dönem:' : 'Period:'} {periodLabel}</span>
+                          <span className="font-bold">{oc(tr556).donem_2} {periodLabel}</span>
                           <span>·</span>
-                          <span>{activeEmps.length} {tr556 ? 'Aktif Çalışan' : 'Active Employees'}</span>
+                          <span>{activeEmps.length} {oc(tr556).aktif_calisan}</span>
                           <span>·</span>
                           <span>{tr556 ? 'SGK İşçi: %14 | İşsizlik İşçi: %1 | SGK İşveren: %20,5 | İşsizlik İşveren: %2' : 'SGK Emp: 14% | Unemp Emp: 1% | SGK Empl: 20.5% | Unemp Empl: 2%'}</span>
                         </div>
@@ -702,15 +703,15 @@ export default function IKPage(props: Props) {
                             <thead>
                               <tr className="bg-gray-50 border-b border-gray-100">
                                 {[
-                                  tr556?'Çalışan':'Employee',
+                                  oc(tr556).calisan,
                                   tr556?'Departman':'Dept',
-                                  tr556?'Brüt':'Gross',
-                                  tr556?'SGK Matrahı':'SGK Base',
+                                  oc(tr556).brut,
+                                  oc(tr556).sgk_matrahi,
                                   tr556?'SGK İşçi':'SGK Emp',
                                   tr556?'İşsizlik İşçi':'Unemp Emp',
                                   tr556?'SGK İşveren':'SGK Empl',
                                   tr556?'İşsizlik İşveren':'Unemp Empl',
-                                  tr556?'Damga':'Stamp',
+                                  oc(tr556).damga,
                                   tr556?'Net':'Net',
                                 ].map(h => (
                                   <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
@@ -735,7 +736,7 @@ export default function IKPage(props: Props) {
                             </tbody>
                             <tfoot>
                               <tr className="bg-gray-50 border-t-2 border-gray-200 font-bold">
-                                <td className="px-3 py-2.5 text-gray-700 text-[10px] uppercase" colSpan={2}>{tr556 ? 'TOPLAM' : 'TOTAL'}</td>
+                                <td className="px-3 py-2.5 text-gray-700 text-[10px] uppercase" colSpan={2}>{oc(tr556).toplam_2}</td>
                                 <td className="px-3 py-2.5 text-gray-800 font-mono">{totals.gross.toLocaleString('tr-TR')}</td>
                                 <td className="px-3 py-2.5 text-teal-700 font-mono">{totals.sgkBase.toLocaleString('tr-TR')}</td>
                                 <td className="px-3 py-2.5 text-red-500 font-mono">−{totals.sgkEmp.toLocaleString('tr-TR')}</td>
@@ -845,8 +846,8 @@ export default function IKPage(props: Props) {
                           </div>
                         </div>
                         <div className="grid grid-cols-3 gap-3">
-                          <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr616?'Aktif':'Active'}</p><p className="text-xl font-black text-blue-600">{activeEmps}</p></div>
-                          <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr616?'Ayrılan':'Left'}</p><p className="text-xl font-black text-red-600">{leftEmps}</p></div>
+                          <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr616).aktif}</p><p className="text-xl font-black text-blue-600">{activeEmps}</p></div>
+                          <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr616).ayrilan}</p><p className="text-xl font-black text-red-600">{leftEmps}</p></div>
                           <div className={`rounded-xl p-3 ${turnoverRate>15?'bg-red-50':turnoverRate>8?'bg-amber-50':'bg-emerald-50'}`}><p className="text-[10px] font-bold text-gray-400 uppercase">{tr616?'Devir Oranı':'Turnover Rate'}</p><p className={`text-xl font-black ${turnoverRate>15?'text-red-600':turnoverRate>8?'text-amber-600':'text-emerald-600'}`}>%{turnoverRate.toFixed(1)}</p></div>
                         </div>
                         <div className="space-y-2">
@@ -894,7 +895,7 @@ export default function IKPage(props: Props) {
                         <div className="overflow-x-auto">
                           <table className="min-w-[560px] w-full text-xs">
                             <thead><tr className="border-b border-gray-100 bg-gray-50">
-                              {['#',tr629?'Çalışan':'Employee',tr629?'Departman':'Dept',tr629?'Sipariş':'Orders',tr629?'Ciro':'Revenue'].map(h=>(
+                              {['#',oc(tr629).calisan,tr629?'Departman':'Dept',oc(tr629).siparis_2,oc(tr629).ciro].map(h=>(
                                 <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                               ))}
                             </tr></thead>
@@ -945,8 +946,8 @@ export default function IKPage(props: Props) {
                           <div><h3 className="font-bold text-gray-900 text-sm">💰 {tr636?'SGK/Net Bordro Hesaplama':'SGK/Net Payroll Calculator'}</h3>
                           <p className="text-xs text-gray-400">{tr636?'SGK işçi/işveren payı, gelir vergisi ve net maaş hesabı (2024 dilimleri)':'SGK employee/employer share, income tax and net salary (2024 brackets)'}</p></div>
                           <div className="flex items-center gap-2">
-                            <div className="apple-input px-3 py-1.5 text-xs flex items-center gap-1.5"><span className="text-gray-400">{tr636?'Dönem:':'Period:'}</span><input type="month" value={p636Month} onChange={e=>setP636Month(e.target.value)} className="bg-transparent focus:outline-none text-xs" /></div>
-                            <button onClick={calcPayroll} className="apple-button-primary text-xs px-4 py-1.5 flex items-center gap-1.5">⚡ {tr636?'Hesapla':'Calculate'}</button>
+                            <div className="apple-input px-3 py-1.5 text-xs flex items-center gap-1.5"><span className="text-gray-400">{oc(tr636).donem_2}</span><input type="month" value={p636Month} onChange={e=>setP636Month(e.target.value)} className="bg-transparent focus:outline-none text-xs" /></div>
+                            <button onClick={calcPayroll} className="apple-button-primary text-xs px-4 py-1.5 flex items-center gap-1.5">⚡ {oc(tr636).hesapla}</button>
                           </div>
                         </div>
                         {p636Calculated && p636Payrolls.length > 0 && (
@@ -954,13 +955,13 @@ export default function IKPage(props: Props) {
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                               <div className="bg-gray-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Brüt Toplam':'Total Gross'}</p><p className="text-lg font-black text-gray-800">{paraYaz(totalGross, { ondalik: 0 })}</p></div>
                               <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Net Toplam':'Total Net'}</p><p className="text-lg font-black text-emerald-600">{paraYaz(totalNet, { ondalik: 0 })}</p></div>
-                              <div className="bg-orange-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'İşveren SGK':'Employer SGK'}</p><p className="text-lg font-black text-orange-600">{paraYaz(totalSgkEmployer, { ondalik: 0 })}</p></div>
-                              <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr636?'Toplam Maliyet':'Total Cost'}</p><p className="text-lg font-black text-red-600">{paraYaz(totalCost, { ondalik: 0 })}</p></div>
+                              <div className="bg-orange-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr636).isveren_sgk}</p><p className="text-lg font-black text-orange-600">{paraYaz(totalSgkEmployer, { ondalik: 0 })}</p></div>
+                              <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr636).toplam_maliyet}</p><p className="text-lg font-black text-red-600">{paraYaz(totalCost, { ondalik: 0 })}</p></div>
                             </div>
                             <div className="overflow-x-auto">
                               <table className="min-w-[560px] w-full text-xs">
                                 <thead><tr className="border-b border-gray-100 bg-gray-50">
-                                  {[tr636?'Çalışan':'Employee',tr636?'Pozisyon':'Position',tr636?'Brüt':'Gross',tr636?'SGK İşçi':'SGK Emp.',tr636?'Gelir Vergisi':'Inc. Tax',tr636?'Damga':'Stamp',tr636?'Net':'Net'].map(h=>(
+                                  {[oc(tr636).calisan,oc(tr636).pozisyon,oc(tr636).brut,tr636?'SGK İşçi':'SGK Emp.',tr636?'Gelir Vergisi':'Inc. Tax',oc(tr636).damga,tr636?'Net':'Net'].map(h=>(
                                     <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                   ))}
                                 </tr></thead>

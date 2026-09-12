@@ -23,6 +23,7 @@ import SkuMappingPanel from '../components/SkuMappingPanel';
 import MarketplacePanel from '../components/MarketplacePanel';
 import type { WebhookConfig } from '../types';
 import type { UserSubscription, SubscriptionPlan, BillingCycle } from '../types/subscription';
+import { oc } from '../i18n/ortak';
 
 type ClassValue = string | null | undefined | boolean | ClassValue[];
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
@@ -136,10 +137,10 @@ export default function SettingsPage({
               </div>
               <div className="flex-1">
                 <h3 className="font-bold text-sm">Shopify</h3>
-                <p className="text-[11px] text-[#86868B]">{currentLanguage === 'tr' ? 'E-ticaret entegrasyonu' : 'E-commerce integration'}</p>
+                <p className="text-[11px] text-[#86868B]">{oc(currentLanguage).e_ticaret_entegrasyonu}</p>
               </div>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${companySettings?.shopify_access_token ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-                {companySettings?.shopify_access_token ? (currentLanguage === 'tr' ? 'Bağlı' : 'Connected') : (currentLanguage === 'tr' ? 'Bağlı Değil' : 'Not Connected')}
+                {companySettings?.shopify_access_token ? (oc(currentLanguage).bagli) : (oc(currentLanguage).bagli_degil)}
               </span>
             </div>
             {[
@@ -168,7 +169,7 @@ export default function SettingsPage({
                   const r = await authFetch('/api/shopify/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accessToken: token, storeUrl: companySettings?.shopify_store_url || '' }) });
                   const d = await r.json();
                   if (d.error) throw new Error(d.error);
-                  toast(`${currentLanguage === 'tr' ? 'Senkronize edildi' : 'Synced'} — ${d.products?.length ?? 0} ${currentLanguage === 'tr' ? 'ürün' : 'products'}, ${d.orders?.length ?? 0} ${currentLanguage === 'tr' ? 'sipariş' : 'orders'}`, 'success');
+                  toast(`${currentLanguage === 'tr' ? 'Senkronize edildi' : 'Synced'} — ${d.products?.length ?? 0} ${currentLanguage === 'tr' ? 'ürün' : 'products'}, ${d.orders?.length ?? 0} ${oc(currentLanguage).siparis}`, 'success');
                 } catch (e) { toast(e instanceof Error ? e.message : 'Sync hatası', 'error'); }
               }}
               className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold transition-colors"
@@ -269,7 +270,7 @@ export default function SettingsPage({
                       onClick={async () => { try { await updateDoc(doc(db, 'webhookConfigs', wh.id), { enabled: !wh.enabled }); } catch { toast('Error', 'error'); } }}
                       className={`text-[9px] font-bold px-2 py-1 rounded-lg transition-colors ${wh.enabled ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
                     >
-                      {wh.enabled ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') : (currentLanguage === 'tr' ? 'Pasif' : 'Inactive')}
+                      {wh.enabled ? (oc(currentLanguage).aktif) : (oc(currentLanguage).pasif)}
                     </button>
                     <button onClick={async () => { if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return; try { await deleteDoc(doc(db, 'webhookConfigs', wh.id)); } catch { toast('Error', 'error'); } }} className="text-gray-300 hover:text-red-400 transition-colors">
                       <X size={14} />
@@ -312,7 +313,7 @@ export default function SettingsPage({
               }}
               className="apple-button-primary text-xs px-5 disabled:opacity-40"
             >
-              {webhookSaving ? '…' : (currentLanguage === 'tr' ? 'Ekle' : 'Add')}
+              {webhookSaving ? '…' : (oc(currentLanguage).ekle)}
             </button>
           </div>
         </div>
@@ -396,7 +397,7 @@ export default function SettingsPage({
             </div>
           </div>
           {[
-            { key: 'apiKey',      label: currentLanguage === 'tr' ? 'API Anahtarı' : 'API Key',        placeholder: 're_...', isSecret: true  },
+            { key: 'apiKey',      label: oc(currentLanguage).api_anahtari,        placeholder: 're_...', isSecret: true  },
             { key: 'fromAddress', label: currentLanguage === 'tr' ? 'Gönderen Adres' : 'From Address', placeholder: 'siparis@cetpa.com.tr', isSecret: false },
           ].map(f => (
             <div key={f.key} className="space-y-0.5">
@@ -422,11 +423,11 @@ export default function SettingsPage({
             <p className="text-[11px] text-gray-400">{currentLanguage === 'tr' ? 'AI Asistan, lead skorlama ve analiz için Google Gemini API anahtarı.' : 'Google Gemini API key for AI Assistant, lead scoring and analysis.'}</p>
           </div>
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${geminiApiKeySetting ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-500'}`}>
-            {geminiApiKeySetting ? (currentLanguage === 'tr' ? 'Yapılandırıldı' : 'Configured') : (currentLanguage === 'tr' ? 'Eksik' : 'Missing')}
+            {geminiApiKeySetting ? (oc(currentLanguage).yapilandirildi) : (currentLanguage === 'tr' ? 'Eksik' : 'Missing')}
           </span>
         </div>
         <div className="space-y-0.5">
-          <label className="text-[10px] font-bold text-gray-400 uppercase">{currentLanguage === 'tr' ? 'API Anahtarı' : 'API Key'}</label>
+          <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(currentLanguage).api_anahtari}</label>
           <input
             type="password"
             placeholder="AIza..."
@@ -448,7 +449,7 @@ export default function SettingsPage({
                 //  görünür ama yenilemede eski değere döner = "kaydetmiyor sanırım".)
                 handleFirestoreError(e, OperationType.WRITE, 'settings/aiConfig');
                 const msg = e instanceof Error ? e.message : String(e);
-                toast((currentLanguage === 'tr' ? 'Kaydedilemedi: ' : 'Save failed: ') + msg, 'error');
+                toast((oc(currentLanguage).kaydedilemedi) + msg, 'error');
               } finally {
                 setSavingGeminiKey(false);
               }
@@ -457,7 +458,7 @@ export default function SettingsPage({
             className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2 rounded-full transition-colors disabled:opacity-50"
           >
             {savingGeminiKey ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
-            {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
+            {oc(currentLanguage).kaydet}
           </button>
           <button
             onClick={async () => {
@@ -514,7 +515,7 @@ export default function SettingsPage({
             await setDoc(doc(db, 'settings', 'app'), { companySettings }, { merge: true });
             logAuditAction('Ayar Değişikliği', 'Şirket ayarları kaydedildi');
             setSettingsSaved(true);
-            toast(currentLanguage === 'tr' ? 'Ayarlar kaydedildi!' : 'Settings saved!', 'success');
+            toast(oc(currentLanguage).ayarlar_kaydedildi, 'success');
             setTimeout(() => setSettingsSaved(false), 2500);
           } catch (error) {
             console.error('[Settings save error]', error);
@@ -529,9 +530,9 @@ export default function SettingsPage({
         } disabled:opacity-60 disabled:cursor-not-allowed`}
       >
         {savingSettings
-          ? (currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…')
+          ? (oc(currentLanguage).kaydediliyor_2)
           : settingsSaved
-            ? (currentLanguage === 'tr' ? '✓ Kaydedildi' : '✓ Saved')
+            ? (oc(currentLanguage).kaydedildi)
             : (currentLanguage === 'tr' ? 'Ayarları Kaydet' : 'Save Settings')
         }
       </button>
@@ -565,8 +566,8 @@ export default function SettingsPage({
         </div>
         <div className="space-y-2 text-sm">
           {[
-            { label: currentLanguage === 'tr' ? 'Kullanıcı' : 'User', value: user?.email || '—' },
-            { label: currentLanguage === 'tr' ? 'Rol' : 'Role', value: userRole },
+            { label: oc(currentLanguage).kullanici_2, value: user?.email || '—' },
+            { label: oc(currentLanguage).rol, value: userRole },
             { label: 'UID', value: user?.uid?.slice(0, 16) + '...' || '—' },
             { label: currentLanguage === 'tr' ? 'Giriş Yöntemi' : 'Sign-in Method', value: user?.providerData?.[0]?.providerId || 'anonymous' },
           ].map(row => (
@@ -655,8 +656,8 @@ export default function SettingsPage({
       {(() => {
         const tr641 = currentLanguage === 'tr';
         const entityOptions: { k: 'all' | 'orders' | 'inventory' | 'leads' | 'muhasebe'; l: string }[] = [
-          { k: 'all',       l: tr641 ? 'Tümü'      : 'All'      },
-          { k: 'orders',    l: tr641 ? 'Siparişler' : 'Orders'   },
+          { k: 'all',       l: oc(tr641).tumu      },
+          { k: 'orders',    l: oc(tr641).siparisler   },
           { k: 'inventory', l: tr641 ? 'Stok'       : 'Inventory'},
           { k: 'leads',     l: tr641 ? 'CRM'        : 'CRM'      },
           { k: 'muhasebe',  l: tr641 ? 'Muhasebe'   : 'Finance'  },

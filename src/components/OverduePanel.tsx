@@ -6,6 +6,7 @@ import { paraYaz } from '../utils/currency';
 import { CreditCard, X, CheckCircle2 } from 'lucide-react';
 import type { Order } from '../types';
 import type { Language } from '../translations';
+import { oc } from '../i18n/ortak';
 
 interface OverduePanelProps {
   isOpen: boolean;
@@ -68,7 +69,7 @@ export default function OverduePanel({
                 {currentLanguage === 'tr' ? 'Vadesi Geçmiş Ödemeler' : 'Overdue Payments'}
               </h3>
               <p className="text-xs text-gray-400">
-                {overdueList.length} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {paraYaz(totalOwed, { ondalik: 0 })} {currentLanguage === 'tr' ? 'toplam' : 'total'}
+                {overdueList.length} {oc(currentLanguage).siparis} · {paraYaz(totalOwed, { ondalik: 0 })} {oc(currentLanguage).toplam_3}
               </p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
@@ -96,7 +97,7 @@ export default function OverduePanel({
                       <div className="flex items-center gap-2 mb-1">
                         <p className="font-bold text-sm text-gray-900 truncate">{order.customerName}</p>
                         <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${isOld ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                          {age}{currentLanguage === 'tr' ? 'g' : 'd'}
+                          {age}{oc(currentLanguage).g}
                         </span>
                       </div>
                       <p className="text-[10px] text-gray-400">{gorunenSiparisNo(order)} · {siparisDurumEtiketi(order.status, currentLanguage)}</p>
@@ -122,7 +123,7 @@ export default function OverduePanel({
           {/* Footer total */}
           {overdueList.length > 0 && (
             <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/80 flex items-center justify-between">
-              <span className="text-sm font-bold text-gray-500">{currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total Receivable'}</span>
+              <span className="text-sm font-bold text-gray-500">{oc(currentLanguage).toplam_alacak}</span>
               <span className="text-lg font-black text-red-600">{paraYaz(totalOwed, { ondalik: 0 })}</span>
             </div>
           )}

@@ -11,6 +11,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanDate, ayAnahtari } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'currentLanguage' | 'fmtAna'>;
 
@@ -42,7 +43,7 @@ export default function CrmBloklar1({ reportsTab, orders, currentLanguage, fmtAn
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🌟 Bu Ayin Yeni Müşterileri' : '🌟 New Customers This Month'}</h3>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">{newThisMonth.length} {currentLanguage==='tr'?'yeni':'new'}</span>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">{newThisMonth.length} {oc(currentLanguage).yeni_2}</span>
             </div>
             <div className="space-y-2">
               {newThisMonth.slice(0, 6).map((c, i) => (
@@ -52,7 +53,7 @@ export default function CrmBloklar1({ reportsTab, orders, currentLanguage, fmtAn
                     <span className="text-xs font-medium text-gray-800 truncate">{c.name}</span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 ml-2">
-                    <span className="text-[10px] text-gray-400">{c.orders} {currentLanguage==='tr'?'sip.':'ord.'}</span>
+                    <span className="text-[10px] text-gray-400">{c.orders} {oc(currentLanguage).sip}</span>
                     <span className="text-xs font-bold text-emerald-600">{fmtAna(c.revenue)}</span>
                   </div>
                 </div>
@@ -109,7 +110,7 @@ export default function CrmBloklar1({ reportsTab, orders, currentLanguage, fmtAn
               })}
             </div>
             <div className="flex items-center gap-4 pt-3 border-t border-gray-50">
-              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-brand flex-shrink-0" /><span className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'Yeni' : 'New'}</span></div>
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-brand flex-shrink-0" /><span className="text-[10px] text-gray-500">{oc(currentLanguage).yeni}</span></div>
               <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-brand/40 flex-shrink-0" /><span className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'Geri Dönen' : 'Returning'}</span></div>
             </div>
           </div>

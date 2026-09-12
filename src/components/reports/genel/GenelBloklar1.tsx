@@ -12,6 +12,7 @@
 import { itemCostTRY, brutMarj, type ReportsCtx } from '../useReportsData';
 import { paraYaz } from '../../../utils/currency';
 import { ayAnahtari, zamanDate, tarihYaz } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -71,7 +72,7 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
               })}
             </div>
             <div className="flex items-center gap-4 text-[10px] text-gray-500">
-              <span className="flex items-center gap-1"><span className="w-3 h-2 bg-emerald-400 rounded-sm inline-block" />{currentLanguage==='tr'?'Brüt Kâr':'Gross Profit'}</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-2 bg-emerald-400 rounded-sm inline-block" />{oc(currentLanguage).brut_kar}</span>
               <span className="flex items-center gap-1"><span className="w-3 h-2 bg-blue-100 rounded-sm inline-block" />{currentLanguage==='tr'?'Maliyet':'COGS'}</span>
             </div>
           </div>
@@ -233,16 +234,16 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⏳ Ortalama Sipariş Teslim Süresi' : '⏳ Avg Order Cycle Time'}</h3>
-              <span className="text-2xl font-black text-blue-600">{avgCycle} {currentLanguage === 'tr' ? 'gün' : 'd'}</span>
+              <span className="text-2xl font-black text-blue-600">{avgCycle} {oc(currentLanguage).gun}</span>
             </div>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-emerald-50 rounded-xl p-3 text-center">
-                <p className="text-xl font-bold text-emerald-600">{minCycle} {currentLanguage === 'tr' ? 'gün' : 'd'}</p>
-                <p className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'En hızlı' : 'Fastest'}</p>
+                <p className="text-xl font-bold text-emerald-600">{minCycle} {oc(currentLanguage).gun}</p>
+                <p className="text-[10px] text-gray-500">{oc(currentLanguage).en_hizli}</p>
               </div>
               <div className="bg-red-50 rounded-xl p-3 text-center">
-                <p className="text-xl font-bold text-red-500">{maxCycle} {currentLanguage === 'tr' ? 'gün' : 'd'}</p>
-                <p className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'En yavaş' : 'Slowest'}</p>
+                <p className="text-xl font-bold text-red-500">{maxCycle} {oc(currentLanguage).gun}</p>
+                <p className="text-[10px] text-gray-500">{oc(currentLanguage).en_yavas}</p>
               </div>
             </div>
             <div className="flex items-end gap-2 h-16">
@@ -374,7 +375,7 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
                   <div key={t.label} className={`rounded-2xl p-4 ${margin >= 30 ? 'bg-emerald-50' : margin >= 15 ? 'bg-amber-50' : 'bg-red-50'}`}>
                     <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 mb-1">{t.label}</p>
                     <p className={`text-3xl font-black ${margin >= 30 ? 'text-emerald-600' : margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>%{margin}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{t.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {fmtAna(t.rev,'K',0)}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">{t.count} {oc(currentLanguage).siparis} · {fmtAna(t.rev,'K',0)}</p>
                   </div>
                 );
               })}
@@ -421,8 +422,8 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
               })}
             </div>
             <div className="flex items-center gap-4 text-[10px] text-gray-500">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-300 inline-block" />{currentLanguage === 'tr' ? 'Ciro' : 'Revenue'}</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-300 inline-block" />{currentLanguage === 'tr' ? 'Sipariş Adedi' : 'Order Count'}</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-300 inline-block" />{oc(currentLanguage).ciro}</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-300 inline-block" />{oc(currentLanguage).siparis_adedi}</span>
             </div>
           </div>
         );
@@ -453,12 +454,12 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🏦 İşletme Sermayesi Analizi' : '🏦 Working Capital Analysis'}</h3>
               <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${workingCapital >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
-                {workingCapital >= 0 ? (currentLanguage === 'tr' ? 'Sağlıklı' : 'Healthy') : (currentLanguage === 'tr' ? 'Risk' : 'Risk')}
+                {workingCapital >= 0 ? (oc(currentLanguage).saglikli) : (currentLanguage === 'tr' ? 'Risk' : 'Risk')}
               </span>
             </div>
             <div className="grid grid-cols-3 gap-3 mb-4">
               {[
-                { label: currentLanguage === 'tr' ? 'Dönen Varlıklar' : 'Current Assets', value: `₺${(currentAssets/1000).toFixed(0)}K`, color: 'text-emerald-600', sub: currentLanguage === 'tr' ? 'Stok + Alacak' : 'Inventory + AR' },
+                { label: oc(currentLanguage).donen_varliklar, value: `₺${(currentAssets/1000).toFixed(0)}K`, color: 'text-emerald-600', sub: currentLanguage === 'tr' ? 'Stok + Alacak' : 'Inventory + AR' },
                 { label: currentLanguage === 'tr' ? 'Kısa Vade Borç' : 'Current Liabilities', value: `₺${(currentLiabilities/1000).toFixed(0)}K`, color: 'text-red-500', sub: currentLanguage === 'tr' ? 'Borç tahmini' : 'AP estimate' },
                 { label: currentLanguage === 'tr' ? 'Net Sermaye' : 'Net Working Capital', value: `₺${(workingCapital/1000).toFixed(0)}K`, color: workingCapital >= 0 ? 'text-emerald-600' : 'text-red-500', sub: currentLanguage === 'tr' ? 'Cari Oran: ' + currentRatio : 'Current Ratio: ' + currentRatio },
               ].map(k => (
@@ -534,7 +535,7 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
                   <div key={p.name} className="flex items-center gap-2 text-xs">
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS_217[i] }} />
                     <span className="text-gray-700 truncate flex-1">{p.name}</span>
-                    <span className="text-gray-400 shrink-0">{p.qty} {currentLanguage === 'tr' ? 'adet' : 'units'}</span>
+                    <span className="text-gray-400 shrink-0">{p.qty} {oc(currentLanguage).adet}</span>
                     <span className="font-bold text-gray-700 shrink-0">%{pct}</span>
                   </div>
                 );

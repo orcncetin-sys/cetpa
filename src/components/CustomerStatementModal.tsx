@@ -5,6 +5,7 @@ import { cn } from '../lib/utils';
 import { paraYaz } from '../utils/currency';
 import { zamanMs, tarihYaz } from '../utils/zaman';
 import type { Lead, Order } from '../types';
+import { oc } from '../i18n/ortak';
 
 interface CustomerStatementModalProps {
   leadId: string;
@@ -52,8 +53,8 @@ export default function CustomerStatementModal({
         {/* KPI strip */}
         <div className="grid grid-cols-3 gap-px bg-gray-100 shrink-0">
           {[
-            { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Total Revenue', value: totalRev, color: 'text-gray-900' },
-            { label: currentLanguage === 'tr' ? 'Tahsil Edilen' : 'Collected', value: paidRev, color: 'text-emerald-600' },
+            { label: oc(currentLanguage).toplam_ciro, value: totalRev, color: 'text-gray-900' },
+            { label: oc(currentLanguage).tahsil_edilen, value: paidRev, color: 'text-emerald-600' },
             { label: currentLanguage === 'tr' ? 'Alacak' : 'Outstanding', value: unpaidRev, color: unpaidRev > 0 ? 'text-red-600' : 'text-gray-400' },
           ].map(k => (
             <div key={k.label} className="bg-white px-5 py-4">
@@ -74,10 +75,10 @@ export default function CustomerStatementModal({
               <thead className="bg-gray-50 sticky top-0">
                 <tr>
                   <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Sipariş' : 'Order'}</th>
-                  <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</th>
-                  <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</th>
-                  <th className="px-5 py-3 text-right text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Tutar' : 'Amount'}</th>
-                  <th className="px-5 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Ödeme' : 'Payment'}</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).tarih}</th>
+                  <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).durum}</th>
+                  <th className="px-5 py-3 text-right text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).tutar}</th>
+                  <th className="px-5 py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).odeme}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -101,7 +102,7 @@ export default function CustomerStatementModal({
                       <td className="px-5 py-3 text-right font-bold text-gray-900">{paraYaz(o.totalPrice)}</td>
                       <td className="px-5 py-3 text-center">
                         <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", o.paid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-50 text-amber-600')}>
-                          {o.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Bekliyor' : '⏳ Pending')}
+                          {o.paid ? (oc(currentLanguage).odendi_2) : (oc(currentLanguage).bekliyor_2)}
                         </span>
                       </td>
                     </tr>
@@ -127,7 +128,7 @@ export default function CustomerStatementModal({
             {currentLanguage === 'tr' ? 'PDF İndir' : 'Download PDF'}
           </button>
           <button onClick={onClose} className="apple-button-primary text-sm px-5">
-            {currentLanguage === 'tr' ? 'Kapat' : 'Close'}
+            {oc(currentLanguage).kapat}
           </button>
         </div>
       </motion.div>

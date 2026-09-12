@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { CheckCircle2 } from 'lucide-react';
 import type { Order } from '../types';
+import { oc } from '../i18n/ortak';
 
 interface DeliveryNoteModalProps {
   order: Order;
@@ -54,7 +55,7 @@ export default function DeliveryNoteModal({
             onClick={onClose}
             className="flex-1 apple-button-secondary"
           >
-            {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+            {oc(currentLanguage).iptal}
           </button>
           <button
             onClick={onConfirm}

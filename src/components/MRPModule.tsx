@@ -30,6 +30,7 @@ import { uretimTalepPayload, satinAlmaTalepPayload } from '../services/mikroEvra
 import { sortByCreatedAt, byField } from '../utils/fsSort';
 import ModuleHeader from './ModuleHeader';
 import { gunAnahtari, tarihYaz } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -358,7 +359,7 @@ export default function MRPModule({
                   <input value={wcDraft.code} onChange={e => setWcDraft(d => ({ ...d, code: e.target.value }))}
                     placeholder={tr ? 'Kod (ör: WC-01)' : 'Code (e.g. WC-01)'} className="apple-input px-3 py-2 text-sm" />
                   <input value={wcDraft.description} onChange={e => setWcDraft(d => ({ ...d, description: e.target.value }))}
-                    placeholder={tr ? 'Açıklama' : 'Description'} className="apple-input px-3 py-2 text-sm" />
+                    placeholder={oc(tr).aciklama} className="apple-input px-3 py-2 text-sm" />
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-gray-500">{tr ? 'Kapasite (saat/gün)' : 'Capacity (h/day)'}</label>
                     <input type="number" min={1} max={24} value={wcDraft.capacityHoursPerDay}
@@ -384,7 +385,7 @@ export default function MRPModule({
                       className="apple-input px-3 py-2 text-sm" />
                   </div>
                   <div className="flex items-center gap-2">
-                    <label className="text-xs text-gray-500">{tr ? 'Renk' : 'Color'}</label>
+                    <label className="text-xs text-gray-500">{oc(tr).renk}</label>
                     <div className="flex gap-1.5 flex-wrap">
                       {WC_COLORS.map(c => (
                         <button key={c} onClick={() => setWcDraft(d => ({ ...d, color: c }))}
@@ -395,8 +396,8 @@ export default function MRPModule({
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={saveWC} className="apple-button-primary px-4 py-2 text-sm">{editingWCId ? (tr ? 'Güncelle' : 'Update') : (tr ? 'Ekle' : 'Add')}</button>
-                  <button onClick={() => setShowWCForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr ? 'İptal' : 'Cancel'}</button>
+                  <button onClick={saveWC} className="apple-button-primary px-4 py-2 text-sm">{editingWCId ? (oc(tr).guncelle) : (oc(tr).ekle)}</button>
+                  <button onClick={() => setShowWCForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr).iptal}</button>
                 </div>
               </motion.div>
             )}
@@ -429,7 +430,7 @@ export default function MRPModule({
                   {/* Utilization bar */}
                   <div>
                     <div className="flex justify-between text-xs mb-1">
-                      <span className="text-gray-500">{tr ? 'Kullanım' : 'Utilization'}</span>
+                      <span className="text-gray-500">{oc(tr).kullanim}</span>
                       <span className={`font-bold ${util > 100 ? 'text-red-600' : util > 80 ? 'text-amber-600' : 'text-green-600'}`}>{util}%</span>
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -492,11 +493,11 @@ export default function MRPModule({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <input value={routingDraft.productName} onChange={e => setRoutingDraft(d => ({ ...d, productName: e.target.value }))}
-                    placeholder={tr ? 'Ürün adı' : 'Product name'} className="apple-input px-3 py-2 text-sm" />
+                    placeholder={oc(tr).urun_adi_2} className="apple-input px-3 py-2 text-sm" />
                   <input value={routingDraft.productSku} onChange={e => setRoutingDraft(d => ({ ...d, productSku: e.target.value }))}
                     placeholder="SKU" className="apple-input px-3 py-2 text-sm" />
                   <textarea value={routingDraft.notes} onChange={e => setRoutingDraft(d => ({ ...d, notes: e.target.value }))}
-                    placeholder={tr ? 'Notlar' : 'Notes'} className="apple-input px-3 py-2 text-sm col-span-2 resize-none" rows={2} />
+                    placeholder={oc(tr).notlar} className="apple-input px-3 py-2 text-sm col-span-2 resize-none" rows={2} />
                 </div>
 
                 {/* Routing steps */}
@@ -546,8 +547,8 @@ export default function MRPModule({
                 </div>
 
                 <div className="flex gap-2">
-                  <button onClick={saveRouting} className="apple-button-primary px-4 py-2 text-sm">{editingRoutingId ? (tr ? 'Güncelle' : 'Update') : (tr ? 'Kaydet' : 'Save')}</button>
-                  <button onClick={() => setShowRoutingForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr ? 'İptal' : 'Cancel'}</button>
+                  <button onClick={saveRouting} className="apple-button-primary px-4 py-2 text-sm">{editingRoutingId ? (oc(tr).guncelle) : (oc(tr).kaydet)}</button>
+                  <button onClick={() => setShowRoutingForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr).iptal}</button>
                 </div>
               </motion.div>
             )}
@@ -604,7 +605,7 @@ export default function MRPModule({
               {[7, 14, 30, 60].map(d => (
                 <button key={d} onClick={() => setHorizonDays(d)}
                   className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${horizonDays === d ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
-                  {d}{tr ? 'g' : 'd'}
+                  {d}{oc(tr).g}
                 </button>
               ))}
             </div>
@@ -645,8 +646,8 @@ export default function MRPModule({
                       )}
                     </div>
                     <div className="flex justify-between text-xs text-gray-400 mt-1">
-                      <span>{tr ? 'Planlanan:' : 'Planned:'} {fmtH(load.plannedHours)}</span>
-                      <span>{tr ? 'Mevcut:' : 'Available:'} {fmtH(load.availableHours)} ({horizonDays}{tr ? 'g' : 'd'})</span>
+                      <span>{oc(tr).planlanan_2} {fmtH(load.plannedHours)}</span>
+                      <span>{tr ? 'Mevcut:' : 'Available:'} {fmtH(load.availableHours)} ({horizonDays}{oc(tr).g})</span>
                     </div>
                     {load.orders.length > 0 && (
                       <p className="text-[10px] text-gray-400 mt-1">

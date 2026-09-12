@@ -6,6 +6,7 @@ import { zamanMs, tarihYaz } from '../utils/zaman';
 import { odemeTakipli, gorunenSiparisNo } from '../utils/siparis';
 import { tlYaz } from '../utils/currency';
 import { toplaBilinen, tahsilatOrani } from '../utils/para';
+import { oc } from '../i18n/ortak';
 
 interface Order {
   id?: string;
@@ -126,9 +127,9 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   };
 
   const kpis = [
-    { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Total Revenue', value: cvt(combinedRevenue), icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: currentLanguage === 'tr' ? 'Toplam Maliyet' : 'Total Cost',  value: cvt(combinedCost),    icon: TrendingDown, color: 'text-red-500',   bg: 'bg-red-50'   },
-    { label: currentLanguage === 'tr' ? 'Net Kâr' : 'Net Profit',          value: cvt(combinedProfit),       icon: TrendingUp,   color: 'text-blue-600', bg: 'bg-blue-50'  },
+    { label: oc(currentLanguage).toplam_ciro, value: cvt(combinedRevenue), icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
+    { label: oc(currentLanguage).toplam_maliyet,  value: cvt(combinedCost),    icon: TrendingDown, color: 'text-red-500',   bg: 'bg-red-50'   },
+    { label: oc(currentLanguage).net_kar,          value: cvt(combinedProfit),       icon: TrendingUp,   color: 'text-blue-600', bg: 'bg-blue-50'  },
   ];
 
   // Phase 98: Unpaid revenue analytics
@@ -152,7 +153,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   const clampedScore = Math.min(100, Math.max(0, healthScore));
   const scoreColor = clampedScore >= 70 ? 'text-emerald-600' : clampedScore >= 40 ? 'text-amber-600' : 'text-red-500';
   const scoreLabel = clampedScore >= 70
-    ? (currentLanguage === 'tr' ? 'Sağlıklı' : 'Healthy')
+    ? (oc(currentLanguage).saglikli)
     : clampedScore >= 40
     ? (currentLanguage === 'tr' ? 'Orta' : 'Moderate')
     : (currentLanguage === 'tr' ? 'Dikkat' : 'Attention');
@@ -199,7 +200,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
         <div className="grid grid-cols-3 gap-3">
           {[
             { label: currentLanguage === 'tr' ? 'Tahsilat' : 'Collection', value: collectionRate, unit: '%', weight: 40 },
-            { label: currentLanguage === 'tr' ? 'Kâr Marjı' : 'Margin', value: marginPct, unit: '%', weight: 40 },
+            { label: oc(currentLanguage).kar_marji, value: marginPct, unit: '%', weight: 40 },
             { label: currentLanguage === 'tr' ? 'Teslimat' : 'Delivery', value: deliveryRate, unit: '%', weight: 20 },
           ].map(m => (
             <div key={m.label} className="text-center">
@@ -341,7 +342,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
         {[
           { label: currentLanguage === 'tr' ? 'Faturalı Sipariş' : 'Invoiced Orders',   value: orders.filter(o => o.hasInvoice).length + mikroGiden.length,  icon: CheckCircle2, color: 'text-green-600' },
           { label: currentLanguage === 'tr' ? 'Faturasız Sipariş' : 'Uninvoiced',        value: orders.filter(o => !o.hasInvoice).length,             icon: AlertCircle,  color: 'text-orange-500' },
-          { label: currentLanguage === 'tr' ? 'Toplam Sipariş' : 'Total Orders',          value: orders.length + mikroGiden.length,                    icon: FileText,     color: 'text-blue-600' },
+          { label: oc(currentLanguage).toplam_siparis,          value: orders.length + mikroGiden.length,                    icon: FileText,     color: 'text-blue-600' },
         ].map((s, i) => {
           const Icon = s.icon;
           return (
@@ -442,11 +443,11 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-sm bg-brand flex-shrink-0" />
-                  <span className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu hafta' : 'This week'}</span>
+                  <span className="text-[10px] text-gray-400">{oc(currentLanguage).bu_hafta}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-sm bg-blue-300 flex-shrink-0" />
-                  <span className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Beklenen' : 'Expected'}</span>
+                  <span className="text-[10px] text-gray-400">{oc(currentLanguage).beklenen}</span>
                 </div>
               </div>
             </div>
@@ -464,7 +465,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
         {recentOrders.length === 0 ? (
           <div className="p-12 text-center">
             <FileText className="mx-auto mb-3 text-gray-300" size={40} />
-            <p className="text-gray-400 text-sm">{currentLanguage === 'tr' ? 'Henüz sipariş verisi yok.' : 'No order data yet.'}</p>
+            <p className="text-gray-400 text-sm">{oc(currentLanguage).henuz_siparis_verisi_yok}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -473,10 +474,10 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                 <tr className="bg-gray-50 border-b border-gray-100">
                   {[
                     {k:'shopifyOrderId', label: currentLanguage==='tr'?'Sipariş No':'Order #', align:'text-left', cls:''},
-                    {k:'customerName', label: currentLanguage==='tr'?'Müşteri':'Customer', align:'text-left', cls:'hidden sm:table-cell'},
-                    {k:'totalPrice', label: currentLanguage==='tr'?'Tutar':'Amount', align:'text-right', cls:''},
-                    {k:'status', label: currentLanguage==='tr'?'Durum':'Status', align:'text-center', cls:''},
-                    {k:'date', label: currentLanguage==='tr'?'Tarih':'Date', align:'text-center', cls:'hidden md:table-cell'},
+                    {k:'customerName', label: oc(currentLanguage).musteri, align:'text-left', cls:'hidden sm:table-cell'},
+                    {k:'totalPrice', label: oc(currentLanguage).tutar, align:'text-right', cls:''},
+                    {k:'status', label: oc(currentLanguage).durum, align:'text-center', cls:''},
+                    {k:'date', label: oc(currentLanguage).tarih, align:'text-center', cls:'hidden md:table-cell'},
                   ].map(({k, label, align, cls}) => {
                     const active = sort.key === k;
                     return (

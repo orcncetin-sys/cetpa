@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { PUBLIC_PATHS } from '../lib/publicPaths';
 import { ArrowLeft, Heart, Zap, Eye, Trophy, MapPin, Clock, Mail } from 'lucide-react';
+import { oc } from '../i18n/ortak';
 
 interface Props {
   currentLanguage: 'tr' | 'en';
@@ -15,7 +16,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
     // Sekme basligi — SPA'da genel sayfalar kendi basligini koymuyordu; tum
     // sayfalar "CETPA Cloud ERP — ..." gorunuyordu (a11y teshisi 2026-08-28).
     const onceki = document.title;
-    document.title = (lang === 'tr' ? 'Kariyer' : 'Careers') + ' — CETPA';
+    document.title = (oc(lang).kariyer) + ' — CETPA';
     return () => { document.title = onceki; };
   }, [lang]);
   const isTR = lang === 'tr';
@@ -66,17 +67,17 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
             className={`flex items-center gap-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg py-2.5 -my-2.5 ${darkMode ? 'text-white/60 hover:text-white' : 'text-black/60 hover:text-black'}`}
           >
             <ArrowLeft className="w-4 h-4" />
-            {isTR ? 'Geri' : 'Back'}
+            {oc(isTR).geri_2}
           </button>
           <div className="w-px h-4 bg-current opacity-20" />
           <span className="text-sm font-bold" style={{ color: 'var(--color-brand)' }}>CETPA</span>
-          <span className={`text-sm font-medium ${muted}`}>{isTR ? 'Kariyer' : 'Careers'}</span>
+          <span className={`text-sm font-medium ${muted}`}>{oc(isTR).kariyer}</span>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-16">
         <div className="mb-12">
-          <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>{isTR ? 'Kariyer' : 'Careers'}</p>
+          <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>{oc(isTR).kariyer}</p>
           <h1 className="text-4xl font-bold mb-4">{isTR ? 'CETPA\'da Kariyer' : 'Careers at CETPA'}</h1>
           <p className={`leading-relaxed ${muted}`}>
             {isTR
@@ -139,7 +140,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
                   style={{ backgroundColor: 'var(--color-brand)' }} /* metin rengi: text-white sinifi */
                 >
                   <Mail className="w-3.5 h-3.5" />
-                  {isTR ? 'Başvur' : 'Apply'}
+                  {oc(isTR).basvur}
                 </a>
               </div>
             ))}
@@ -185,7 +186,7 @@ export default function CareerPage({ currentLanguage: lang, darkMode, onBack }: 
         </div>
 
         <div className={`mt-12 pt-8 border-t ${border} text-center`}>
-          <p className={`text-xs ${muted}`}>© 2026 CETPA A.Ş. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
+          <p className={`text-xs ${muted}`}>© 2026 CETPA A.Ş. {oc(isTR).tum_haklari_saklidir}</p>
         </div>
       </main>
     </div>

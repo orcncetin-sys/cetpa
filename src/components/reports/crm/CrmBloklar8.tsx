@@ -12,6 +12,7 @@
 import type { ReportsCtx } from '../useReportsData';
 import { paraYaz } from '../../../utils/currency';
 import { zamanDate, zamanMs, ayAnahtari } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'currentLanguage' | 'fmtAna'>;
 
@@ -482,7 +483,7 @@ export default function CrmBloklar8({ reportsTab, orders, quotations, currentLan
         const maxGap = Math.max(...gaps.map(g => g.avgGap), 1);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Siparişler Arası Ortalama Gün' : 'Avg Days Between Orders'}</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).siparisler_arasi_ortalama_gun}</h3>
             <p className="text-xs text-gray-500 mb-4">Repeat customer purchase cadence — shorter gap = higher loyalty</p>
             <div className="space-y-2">
               {gaps.map((g, i) => (

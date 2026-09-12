@@ -6,6 +6,7 @@ import { paraYaz } from '../utils/currency';
 const BarcodeScanner = React.lazy(() => import('./BarcodeScanner'));
 import CustomerCombobox from './CustomerCombobox';
 import type { Lead, InventoryItem, Order, OrderLineItem } from '../types';
+import { oc } from '../i18n/ortak';
 
 interface AddOrderModalProps {
   isOpen: boolean;
@@ -225,7 +226,7 @@ export default function AddOrderModal({
                     <div className="flex items-center gap-2">
                       <button type="button" onClick={() => setIsOrderScannerOpen(true)}
                         className="text-gray-500 text-xs font-bold flex items-center gap-1 hover:text-brand hover:underline transition-colors">
-                        <Scan className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Tara' : 'Scan'}
+                        <Scan className="w-3.5 h-3.5" /> {oc(currentLanguage).tara}
                       </button>
                       <button type="button" onClick={() => setShowProductPicker(!showProductPicker)}
                         className="text-brand text-xs font-bold flex items-center gap-1 hover:underline">
@@ -240,7 +241,7 @@ export default function AddOrderModal({
                   isOpen={isOrderScannerOpen}
                   onClose={() => setIsOrderScannerOpen(false)}
                   currentLanguage={currentLanguage}
-                  title={currentLanguage === 'tr' ? 'Ürün Barkodu Tara' : 'Scan Product Barcode'}
+                  title={oc(currentLanguage).urun_barkodu_tara}
                   onScan={(barcode) => {
                   const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || (i as unknown as { barcode?: string }).barcode === barcode || i.name.toLowerCase().includes(barcode.toLowerCase()));
                   if (match) handleAddLineItem(match);
@@ -377,7 +378,7 @@ export default function AddOrderModal({
                 {branchNames.length > 0 && (
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold text-gray-500 uppercase">
-                      {currentLanguage === 'tr' ? 'Şube' : 'Branch'}
+                      {oc(currentLanguage).sube}
                     </label>
                     <select
                       value={(newOrder as any).subeAdi || ''}
@@ -412,12 +413,12 @@ export default function AddOrderModal({
                 {newOrder.faturali && (
                   <div className="space-y-3">
                     <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase mb-1.5 block">{currentLanguage === 'tr' ? 'Fatura Türü' : 'Invoice Type'}</label>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase mb-1.5 block">{oc(currentLanguage).fatura_turu}</label>
                       <div className="grid grid-cols-3 gap-2">
                         {([
-                          { value: 'e-fatura', label: 'e-Fatura', desc: currentLanguage==='tr'?'Kayıtlı mükellef':'Registered taxpayer' },
+                          { value: 'e-fatura', label: 'e-Fatura', desc: oc(currentLanguage).kayitli_mukellef },
                           { value: 'e-arsiv', label: 'e-Arşiv', desc: currentLanguage==='tr'?'Kayıtsız / bireysel':'Unregistered / individual' },
-                          { value: 'ihracat', label: currentLanguage==='tr'?'İhracat':'Export', desc: currentLanguage==='tr'?'Yurt dışı satış':'International sale' },
+                          { value: 'ihracat', label: oc(currentLanguage).ihracat, desc: currentLanguage==='tr'?'Yurt dışı satış':'International sale' },
                         ] as const).map(type => (
                           <button key={type.value} type="button"
                             onClick={() => setNewOrder(prev => ({ ...prev, faturaTipi: type.value } as any))}
@@ -469,7 +470,7 @@ export default function AddOrderModal({
                     {orderLineItems.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-gray-200 space-y-0.5 text-xs text-gray-500">
                         <div className="flex justify-between">
-                          <span>{currentLanguage === 'tr' ? 'Matrah (KDV hariç)' : 'Net (excl. VAT)'}</span>
+                          <span>{oc(currentLanguage).matrah_kdv_haric}</span>
                           <span className="font-semibold">{paraYaz(computedTotal / (1 + (newOrder.kdvOran || 0) / 100))}</span>
                         </div>
                         <div className="flex justify-between text-brand">
@@ -477,7 +478,7 @@ export default function AddOrderModal({
                           <span className="font-semibold">{paraYaz(computedTotal - computedTotal / (1 + (newOrder.kdvOran || 0) / 100))}</span>
                         </div>
                         <div className="flex justify-between font-bold text-gray-800 pt-0.5">
-                          <span>{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</span>
+                          <span>{oc(currentLanguage).toplam}</span>
                           <span>{paraYaz(computedTotal)}</span>
                         </div>
                       </div>

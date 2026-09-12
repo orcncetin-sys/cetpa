@@ -2,6 +2,7 @@ import { motion } from 'motion/react';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { formatInCurrency, paraYaz } from '../../utils/currency';
 import { formatTRY, type AccountingT } from './shared';
+import { oc } from '../../i18n/ortak';
 
 /**
  * Kur ETİKETİ ("1 USD = ₺41,20"). Kur yoksa RAKAM BASMAZ.
@@ -18,7 +19,7 @@ const kurEtiketi = (
 ): string => {
   const kur = exchangeRates?.[currency];
   if (!kur || !isFinite(kur) || kur <= 0) {
-    return currentLanguage === 'tr' ? 'Kur bekleniyor' : 'Rate pending';
+    return oc(currentLanguage).kur_bekleniyor;
   }
   return `1 ${currency} = ${paraYaz(kur)}`;
 };
@@ -102,7 +103,7 @@ export default function GelirGiderTab({
       </div>
       {/* Currency switcher + KPI Cards */}
       <div className="flex items-center gap-1 apple-card px-3 py-2 w-fit">
-        <span className="text-xs text-gray-400 font-medium mr-1">{currentLanguage === 'tr' ? 'Para Birimi:' : 'Currency:'}</span>
+        <span className="text-xs text-gray-400 font-medium mr-1">{oc(currentLanguage).para_birimi_2}</span>
         {(['TRY', 'USD', 'EUR'] as const).map(cur => (
           <button
             key={cur}
@@ -149,7 +150,7 @@ export default function GelirGiderTab({
           <div className={`text-2xl font-bold ${netKar >= 0 ? 'text-green-600' : 'text-red-600'}`}>
             {formatInCurrency(netKar, gelirCurrency, exchangeRates)}
           </div>
-          <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{currentLanguage === 'tr' ? 'Detay için tıkla' : 'Click for details'}</div>
+          <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{oc(currentLanguage).detay_icin_tikla}</div>
         </button>
       </div>
       {/* Bar Chart */}

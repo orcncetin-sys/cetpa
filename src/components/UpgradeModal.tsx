@@ -2,6 +2,7 @@ import { motion } from 'motion/react';
 import { Lock, ArrowRight, Check, Zap } from 'lucide-react';
 import { PLANS, getPlanConfig, type SubscriptionPlan, type UserSubscription } from '../types/subscription';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 interface UpgradeModalProps {
   isOpen: boolean;
@@ -42,9 +43,9 @@ export default function UpgradeModal({
     requiredPlan: lang === 'tr' ? 'Gereken Plan' : 'Required Plan',
     upgrade: lang === 'tr' ? 'Hemen Yükselt' : 'Upgrade Now',
     viewAll: lang === 'tr' ? 'Tüm Planları Gör' : 'View All Plans',
-    cancel: lang === 'tr' ? 'Vazgeç' : 'Cancel',
+    cancel: oc(lang).vazgec,
     includes: lang === 'tr' ? 'Bu plan şunları içerir:' : 'This plan includes:',
-    perMonth: lang === 'tr' ? '/ay' : '/mo',
+    perMonth: oc(lang).ay_3,
   };
 
   return (

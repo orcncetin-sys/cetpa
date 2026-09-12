@@ -6,6 +6,7 @@ import { doc, setDoc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { paraYaz } from '../utils/currency';
 import { bugunAnahtari } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 interface OnboardingFlowProps {
   currentLanguage: 'tr' | 'en';
@@ -38,7 +39,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
     { icon: Sparkles, title: lang === 'tr' ? 'Hoş Geldiniz!' : 'Welcome!' },
     { icon: Building2, title: lang === 'tr' ? 'Şirket Bilgileri' : 'Company Info' },
     { icon: Rocket, title: lang === 'tr' ? 'Plan Seçimi' : 'Choose Plan' },
-    { icon: Plug, title: lang === 'tr' ? 'Entegrasyon & Kurulum' : 'Integration & Setup' },
+    { icon: Plug, title: oc(lang).entegrasyon_kurulum },
     { icon: Check, title: lang === 'tr' ? 'Hazırsınız!' : 'You\'re Ready!' },
   ];
 
@@ -298,7 +299,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
               <div className="space-y-5">
                 <div>
                   <label className="block text-xs font-bold text-white/65 uppercase tracking-wider mb-2">
-                    {lang === 'tr' ? 'Şirket Adı' : 'Company Name'}
+                    {oc(lang).sirket_adi}
                   </label>
                   <input
                     type="text"
@@ -352,14 +353,14 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
 
               <div className="flex justify-between mt-8">
                 <button onClick={() => setStep(0)} className="text-white/65 hover:text-white/70 text-sm font-medium transition-colors">
-                  {lang === 'tr' ? '← Geri' : '← Back'}
+                  {oc(lang).geri}
                 </button>
                 <button
                   onClick={() => setStep(2)}
                   disabled={!companyName.trim()}
                   className="bg-[#ff4000] hover:bg-[#ff4000]/90 active:scale-[0.98] text-white font-bold py-3 px-8 rounded-2xl transition-all shadow-lg shadow-[#ff4000]/30 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
                 >
-                  {lang === 'tr' ? 'Devam' : 'Continue'} <ArrowRight className="w-4 h-4" />
+                  {oc(lang).devam} <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </motion.div>
@@ -409,7 +410,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
                       )}
                     </div>
                     <p className="text-white/60 text-xs">
-                      {paraYaz(plan.monthlyPrice, { ondalik: 0 })}/{lang === 'tr' ? 'ay' : 'mo'} · {plan.maxUsers} {lang === 'tr' ? 'kullanıcı' : 'users'}
+                      {paraYaz(plan.monthlyPrice, { ondalik: 0 })}/{oc(lang).ay_2} · {plan.maxUsers} {oc(lang).kullanici}
                     </p>
                     <p className="text-[#ff4000]/70 text-[10px] font-bold mt-1">
                       {plan.modulesAllowed.length} {lang === 'tr' ? 'modül dahil' : 'modules included'}
@@ -420,13 +421,13 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
 
               <div className="flex justify-between mt-8">
                 <button onClick={() => setStep(1)} className="text-white/65 hover:text-white/70 text-sm font-medium transition-colors">
-                  {lang === 'tr' ? '← Geri' : '← Back'}
+                  {oc(lang).geri}
                 </button>
                 <button
                   onClick={() => setStep(3)}
                   className="bg-[#ff4000] hover:bg-[#ff4000]/90 active:scale-[0.98] text-white font-bold py-3 px-8 rounded-2xl transition-all shadow-lg shadow-[#ff4000]/30 inline-flex items-center gap-2"
                 >
-                  {lang === 'tr' ? 'Devam' : 'Continue'} <ArrowRight className="w-4 h-4" />
+                  {oc(lang).devam} <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </motion.div>
@@ -436,7 +437,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
           {step === 3 && (
             <motion.div key="erp" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
               className="bg-white/[0.06] backdrop-blur-2xl border border-white/10 rounded-3xl p-8 sm:p-10">
-              <h2 className="text-2xl font-black text-white mb-1">{lang === 'tr' ? 'Entegrasyon & Kurulum' : 'Integration & Setup'}</h2>
+              <h2 className="text-2xl font-black text-white mb-1">{oc(lang).entegrasyon_kurulum}</h2>
               <p className="text-white/50 text-sm mb-6">{lang === 'tr' ? 'Muhasebe entegrasyonunuzu ve dağıtım modelinizi seçin.' : 'Choose your accounting integration and deployment model.'}</p>
 
               {/* ERP seçimi */}
@@ -490,7 +491,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
 
               <div className="flex justify-between mt-4">
                 <button onClick={() => setStep(2)} className="text-white/65 hover:text-white/70 text-sm font-medium transition-colors">
-                  {lang === 'tr' ? '← Geri' : '← Back'}
+                  {oc(lang).geri}
                 </button>
                 <button onClick={() => setStep(4)}
                   className="bg-[#ff4000] hover:bg-[#ff4000]/90 active:scale-[0.98] text-white font-bold py-3 px-8 rounded-2xl transition-all shadow-lg shadow-[#ff4000]/30 inline-flex items-center gap-2">

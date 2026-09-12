@@ -13,6 +13,7 @@ import {
 } from '../lib/dbClient';
 import { paraYaz } from '../utils/currency';
 import { zamanDate, gunFarki, bugunAnahtari, tarihYaz } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -872,7 +873,7 @@ export default function SabitKiymetModule({
                   <table className="w-full min-w-[640px]">
                     <thead className="bg-[#F5F5F7] border-b border-gray-200">
                       <tr>
-                        {[L('varlikAd'), tr ? 'Dönem' : 'Period', L('yillikAmort'), L('birikmisSalinma'), L('netDegerDefter'), tr ? 'Tarih' : 'Date'].map((h, i) => (
+                        {[L('varlikAd'), oc(tr).donem, L('yillikAmort'), L('birikmisSalinma'), L('netDegerDefter'), oc(tr).tarih].map((h, i) => (
                           <th key={i} className={cn('px-4 py-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider', i > 1 ? 'text-right' : 'text-left')}>{h}</th>
                         ))}
                       </tr>
@@ -1170,7 +1171,7 @@ export default function SabitKiymetModule({
                       const v = varliklar.find(x => x.id === e.target.value);
                       setBakimForm(f => ({ ...f, varlikId: e.target.value, varlikAd: v?.ad ?? '' }));
                     }}>
-                    <option value="">{tr ? '— Seçiniz —' : '— Select —'}</option>
+                    <option value="">{oc(tr).seciniz_2}</option>
                     {varliklar.map(v => <option key={v.id} value={v.id}>{v.ad} ({v.demirbasNo})</option>)}
                   </select>
                 </div>
@@ -1243,7 +1244,7 @@ export default function SabitKiymetModule({
                       const v = varliklar.find(x => x.id === e.target.value);
                       setSigortaForm(f => ({ ...f, varlikId: e.target.value, varlikAd: v?.ad ?? '' }));
                     }}>
-                    <option value="">{tr ? '— Seçiniz —' : '— Select —'}</option>
+                    <option value="">{oc(tr).seciniz_2}</option>
                     {varliklar.map(v => <option key={v.id} value={v.id}>{v.ad} ({v.demirbasNo})</option>)}
                   </select>
                 </div>

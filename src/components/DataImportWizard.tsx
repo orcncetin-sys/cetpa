@@ -10,6 +10,7 @@ import {
   getDocs,
 } from '../lib/dbClient';
 import { db } from '../firebase';
+import { oc } from '../i18n/ortak';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -546,7 +547,7 @@ export default function DataImportWizard({
                   disabled={!canProceedStep1}
                   className="apple-button-primary flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {lang === 'tr' ? 'Devam' : 'Continue'}
+                  {oc(lang).devam}
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
@@ -647,7 +648,7 @@ export default function DataImportWizard({
                   onClick={() => setStep(1)}
                   className="apple-button-secondary text-sm"
                 >
-                  {lang === 'tr' ? '← Geri' : '← Back'}
+                  {oc(lang).geri}
                 </button>
                 <button
                   onClick={() => setStep(3)}
@@ -696,7 +697,7 @@ export default function DataImportWizard({
                     )}
                   </p>
                   <button onClick={handleClose} className="apple-button-primary mt-2">
-                    {lang === 'tr' ? 'Kapat' : 'Close'}
+                    {oc(lang).kapat}
                   </button>
                 </div>
               ) : (
@@ -774,7 +775,7 @@ export default function DataImportWizard({
                       disabled={importing}
                       className="apple-button-secondary text-sm disabled:opacity-40"
                     >
-                      {lang === 'tr' ? '← Geri' : '← Back'}
+                      {oc(lang).geri}
                     </button>
                     <button
                       onClick={handleImport}

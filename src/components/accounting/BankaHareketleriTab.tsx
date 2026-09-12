@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import { Landmark, Settings, RefreshCw, BookOpen, Save } from 'lucide-react';
 import { formatCurrency, type AccountingT } from './shared';
+import { oc } from '../../i18n/ortak';
 
 interface BankaHareketleriTabProps {
   t: AccountingT;
@@ -97,7 +98,7 @@ export default function BankaHareketleriTab({
                 <input type="text" value={mikroEndpoint} onChange={e => setMikroEndpoint(e.target.value)} placeholder="https://jumpbulutapigw.mikro.com.tr/..." className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000] font-mono text-[11px]" />
               </div>
               <button onClick={async () => { setErpConfigSaving('mikro'); try { await saveMikroConfig(); } finally { setErpConfigSaving(null); } }} disabled={erpConfigSaving !== null} className="apple-button-primary w-full justify-center disabled:opacity-50">
-                <Save size={14} /> {erpConfigSaving === 'mikro' ? (currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…') : (currentLanguage === 'tr' ? 'Mikro Ayarlarını Kaydet' : 'Save Mikro Settings')}
+                <Save size={14} /> {erpConfigSaving === 'mikro' ? (oc(currentLanguage).kaydediliyor_2) : (currentLanguage === 'tr' ? 'Mikro Ayarlarını Kaydet' : 'Save Mikro Settings')}
               </button>
               {mikroEnabled && <p className="text-[10px] text-amber-600">{currentLanguage === 'tr' ? 'Mikro aktif edilince Luca otomatik kapanır (karşılıklı dışlama).' : 'Enabling Mikro disables Luca (mutual exclusion).'}</p>}
             </div>
@@ -125,7 +126,7 @@ export default function BankaHareketleriTab({
                 </div>
               </div>
               <button onClick={async () => { setErpConfigSaving('luca'); try { await saveLucaConfig(); } finally { setErpConfigSaving(null); } }} disabled={erpConfigSaving !== null} className="apple-button-primary w-full justify-center disabled:opacity-50">
-                <Save size={14} /> {erpConfigSaving === 'luca' ? (currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…') : (currentLanguage === 'tr' ? 'Luca Ayarlarını Kaydet' : 'Save Luca Settings')}
+                <Save size={14} /> {erpConfigSaving === 'luca' ? (oc(currentLanguage).kaydediliyor_2) : (currentLanguage === 'tr' ? 'Luca Ayarlarını Kaydet' : 'Save Luca Settings')}
               </button>
               {lucaEnabled && <p className="text-[10px] text-amber-600">{currentLanguage === 'tr' ? 'Luca aktif edilince Mikro otomatik kapanır.' : 'Enabling Luca disables Mikro.'}</p>}
             </div>
@@ -136,12 +137,12 @@ export default function BankaHareketleriTab({
           <table className="apple-table mt-4">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/60 sticky top-0">
-                <th className="px-4 py-3 text-left">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</th>
-                <th className="px-4 py-3 text-left">{currentLanguage === 'tr' ? 'Banka' : 'Bank'}</th>
-                <th className="px-4 py-3 text-left">{currentLanguage === 'tr' ? 'Açıklama' : 'Description'}</th>
-                <th className="px-4 py-3 text-right">{currentLanguage === 'tr' ? 'Borç' : 'Debit'}</th>
-                <th className="px-4 py-3 text-right">{currentLanguage === 'tr' ? 'Alacak' : 'Credit'}</th>
-                <th className="px-4 py-3 text-center">{currentLanguage === 'tr' ? 'Döviz' : 'Currency'}</th>
+                <th className="px-4 py-3 text-left">{oc(currentLanguage).tarih}</th>
+                <th className="px-4 py-3 text-left">{oc(currentLanguage).banka}</th>
+                <th className="px-4 py-3 text-left">{oc(currentLanguage).aciklama}</th>
+                <th className="px-4 py-3 text-right">{oc(currentLanguage).borc}</th>
+                <th className="px-4 py-3 text-right">{oc(currentLanguage).alacak}</th>
+                <th className="px-4 py-3 text-center">{oc(currentLanguage).doviz}</th>
               </tr>
             </thead>
             <tbody>

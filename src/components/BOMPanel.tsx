@@ -25,6 +25,7 @@ import { confirmAction } from '../lib/confirm';
 import MikroPushButton from './MikroPushButton';
 import { recetePayload } from '../services/mikroEvrak';
 import { useMikroUretimReceteleri } from '../hooks/useMikroUretimReceteleri';
+import { oc } from '../i18n/ortak';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -165,7 +166,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
       message: tr
         ? 'Bu BOM\'u silmek istediğinize emin misiniz? Bu işlem geri alınamaz.'
         : 'Are you sure you want to delete this BOM? This cannot be undone.',
-      confirmLabel: tr ? 'Sil' : 'Delete',
+      confirmLabel: oc(tr).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -244,7 +245,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
           {bomSourceTab === 'cetpa' && (
             <button onClick={openNew} className="flex items-center gap-1.5 py-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors">
               <Plus className="w-3.5 h-3.5" />
-              {tr ? 'Yeni Reçete' : 'New BOM'}
+              {oc(tr).yeni_recete}
             </button>
           )}
         </div>
@@ -353,10 +354,10 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
                   <table className="w-full text-xs">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-2 text-left font-bold text-gray-400 uppercase text-[10px]">{tr ? 'Bileşen' : 'Component'}</th>
+                        <th className="px-4 py-2 text-left font-bold text-gray-400 uppercase text-[10px]">{oc(tr).bilesen}</th>
                         <th className="px-4 py-2 text-left font-bold text-gray-400 uppercase text-[10px]">SKU</th>
                         <th className="px-4 py-2 text-right font-bold text-gray-400 uppercase text-[10px]">{tr ? 'Miktar/Birim' : 'Qty/Unit'}</th>
-                        <th className="px-4 py-2 text-right font-bold text-gray-400 uppercase text-[10px]">{tr ? 'Stok' : 'Stock'}</th>
+                        <th className="px-4 py-2 text-right font-bold text-gray-400 uppercase text-[10px]">{oc(tr).stok}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -393,7 +394,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl space-y-5 p-6">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-base text-gray-900">
-                {editing ? (tr ? 'Reçeteyi Düzenle' : 'Edit BOM') : (tr ? 'Yeni Reçete' : 'New BOM')}
+                {editing ? (tr ? 'Reçeteyi Düzenle' : 'Edit BOM') : (oc(tr).yeni_recete)}
               </h3>
               <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
@@ -401,7 +402,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
             {/* Product info */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr ? 'Ürün Adı' : 'Product Name'} *</label>
+                <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr).urun_adi} *</label>
                 <input
                   value={form.productName}
                   onChange={e => setForm(f => ({ ...f, productName: e.target.value }))}
@@ -419,7 +420,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
                 />
               </div>
               <div>
-                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr ? 'Birim' : 'Unit'}</label>
+                <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr).birim}</label>
                 <select
                   value={form.unit}
                   onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
@@ -429,7 +430,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
                 </select>
               </div>
               <div>
-                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr ? 'Açıklama' : 'Description'}</label>
+                <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr).aciklama}</label>
                 <input
                   value={form.description}
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
@@ -444,7 +445,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-gray-600 uppercase">{tr ? 'Bileşenler' : 'Components'}</h4>
                 <button onClick={addComponent} className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-bold">
-                  <Plus className="w-3.5 h-3.5" /> {tr ? 'Ekle' : 'Add'}
+                  <Plus className="w-3.5 h-3.5" /> {oc(tr).ekle}
                 </button>
               </div>
 
@@ -502,7 +503,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
                     </div>
                     <div className="flex gap-2">
                       <div className="flex-1">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase">{tr ? 'Miktar' : 'Qty'}</label>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr).miktar}</label>
                         <input
                           type="number" min={0.001} step={0.001}
                           value={comp.quantity}
@@ -511,7 +512,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
                         />
                       </div>
                       <div className="w-20">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase">{tr ? 'Birim' : 'Unit'}</label>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr).birim}</label>
                         <select
                           value={comp.unit}
                           onChange={e => updateComponent(i, { unit: e.target.value })}
@@ -529,7 +530,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
             {/* Actions */}
             <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
               <button onClick={() => setShowForm(false)} className="px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-bold hover:bg-gray-50">
-                {tr ? 'İptal' : 'Cancel'}
+                {oc(tr).iptal}
               </button>
               <button
                 onClick={handleSave}
@@ -537,7 +538,7 @@ export default function BOMPanel({ currentLanguage = 'tr' }: BOMPanelProps) {
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition-colors disabled:opacity-40"
               >
                 {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : null}
-                {saving ? (tr ? 'Kaydediliyor…' : 'Saving…') : (tr ? 'Kaydet' : 'Save')}
+                {saving ? (oc(tr).kaydediliyor_2) : (oc(tr).kaydet)}
               </button>
             </div>
           </div>

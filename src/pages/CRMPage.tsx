@@ -38,6 +38,7 @@ const MutabakatPanel  = React.lazy(() => import('../components/MutabakatPanel'))
 const DealerCommissionPanel = React.lazy(() => import('../components/DealerCommissionPanel'));
 import B2BPortal from '../components/B2BPortal';
 import { oncelikEtiketi } from '../utils/durumEtiketi';
+import { oc } from '../i18n/ortak';
 import type {
   Lead, Order, Employee, InventoryItem,
   LeadActivity, VoiceNote, Warehouse,
@@ -493,17 +494,17 @@ export default function CRMPage({
               <div className="lg:hidden overflow-x-auto scrollbar-none -mx-3 px-3">
                 <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max mb-2">
                   {[
-                    { id: 'leads', label: currentLanguage === 'tr' ? 'Müşteri Adayları' : 'Leads', icon: Users },
-                    { id: 'musteriler', label: currentLanguage === 'tr' ? 'Müşteriler' : 'Customers', icon: UserCheck },
-                    { id: 'siparisler', label: currentLanguage === 'tr' ? 'Siparişler' : 'Orders', icon: Package },
+                    { id: 'leads', label: oc(currentLanguage).musteri_adaylari, icon: Users },
+                    { id: 'musteriler', label: oc(currentLanguage).musteriler, icon: UserCheck },
+                    { id: 'siparisler', label: oc(currentLanguage).siparisler, icon: Package },
                     { id: 'b2b', label: 'B2B Portal', icon: Globe },
-                    { id: 'komisyon', label: currentLanguage === 'tr' ? 'Komisyon' : 'Commission', icon: TrendingUp },
+                    { id: 'komisyon', label: oc(currentLanguage).komisyon, icon: TrendingUp },
                     { id: 'tickets', label: currentLanguage === 'tr' ? 'Destek' : 'Support', icon: MessageSquare },
-                    { id: 'kampanya', label: currentLanguage === 'tr' ? 'Kampanyalar' : 'Campaigns', icon: Mail },
-                    { id: 'sozlesmeler', label: currentLanguage === 'tr' ? 'Sözleşmeler' : 'Contracts', icon: FileText },
+                    { id: 'kampanya', label: oc(currentLanguage).kampanyalar, icon: Mail },
+                    { id: 'sozlesmeler', label: oc(currentLanguage).sozlesmeler, icon: FileText },
                     { id: 'fiyat-onay', label: currentLanguage === 'tr' ? 'Fiyat Onayı' : 'Price Approvals', icon: Tag },
                     { id: 'pipeline', label: currentLanguage === 'tr' ? 'Pipeline' : 'Pipeline', icon: Kanban },
-                    { id: 'hedefler', label: currentLanguage === 'tr' ? 'Hedefler' : 'Targets', icon: TargetIcon },
+                    { id: 'hedefler', label: oc(currentLanguage).hedefler, icon: TargetIcon },
                   ].map(tab => {
                     const Icon = tab.icon;
                     return (
@@ -516,11 +517,11 @@ export default function CRMPage({
                   <div className="w-px h-5 bg-gray-200 self-center mx-0.5 shrink-0" />
                   <button onClick={() => setActiveTab('sube')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                     <GitBranch size={13} />
-                    <span>{currentLanguage === 'tr' ? 'Şubeler' : 'Branches'}</span>
+                    <span>{oc(currentLanguage).subeler}</span>
                   </button>
                   <button onClick={() => setActiveTab('servis')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                     <Headphones size={13} />
-                    <span>{currentLanguage === 'tr' ? 'Servis' : 'Service'}</span>
+                    <span>{oc(currentLanguage).servis}</span>
                   </button>
                 </div>
               </div>
@@ -694,9 +695,9 @@ export default function CRMPage({
                   {/* Ticket stats */}
                   <div className="grid grid-cols-3 gap-4">
                     {[
-                      { label: currentLanguage === 'tr' ? 'Açık' : 'Open',          value: supportTickets.filter(t => t.status === 'open').length,        color: 'text-red-600',     bg: 'bg-red-50'     },
-                      { label: currentLanguage === 'tr' ? 'İşlemde' : 'In Progress', value: supportTickets.filter(t => t.status === 'in_progress').length,  color: 'text-amber-600',   bg: 'bg-amber-50'   },
-                      { label: currentLanguage === 'tr' ? 'Çözüldü' : 'Resolved',   value: supportTickets.filter(t => t.status === 'resolved').length,      color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                      { label: oc(currentLanguage).acik,          value: supportTickets.filter(t => t.status === 'open').length,        color: 'text-red-600',     bg: 'bg-red-50'     },
+                      { label: oc(currentLanguage).islemde, value: supportTickets.filter(t => t.status === 'in_progress').length,  color: 'text-amber-600',   bg: 'bg-amber-50'   },
+                      { label: oc(currentLanguage).cozuldu,   value: supportTickets.filter(t => t.status === 'resolved').length,      color: 'text-emerald-600', bg: 'bg-emerald-50' },
                     ].map((s, i) => (
                       <div key={i} className={`apple-card p-4 ${s.bg} text-center`}>
                         <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
@@ -720,7 +721,7 @@ export default function CRMPage({
                             />
                             <input
                               className="apple-input w-full"
-                              placeholder={currentLanguage === 'tr' ? 'Müşteri adı' : 'Customer name'}
+                              placeholder={oc(currentLanguage).musteri_adi_2}
                               value={ticketForm.customerName}
                               onChange={e => setTicketForm(f => ({ ...f, customerName: e.target.value }))}
                             />
@@ -733,7 +734,7 @@ export default function CRMPage({
                           />
                           <div className="flex items-center gap-3">
                             <div className="flex items-center gap-2">
-                              <label className="text-xs font-bold text-gray-500">{currentLanguage === 'tr' ? 'Öncelik' : 'Priority'}:</label>
+                              <label className="text-xs font-bold text-gray-500">{oc(currentLanguage).oncelik}:</label>
                               {(['low', 'medium', 'high'] as const).map(p => (
                                 <button
                                   key={p}
@@ -746,15 +747,15 @@ export default function CRMPage({
                                       : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                                   }`}
                                 >
-                                  {p === 'high' ? (currentLanguage === 'tr' ? 'Yüksek' : 'High')
-                                    : p === 'medium' ? (currentLanguage === 'tr' ? 'Orta' : 'Medium')
-                                    : (currentLanguage === 'tr' ? 'Düşük' : 'Low')}
+                                  {p === 'high' ? (oc(currentLanguage).yuksek)
+                                    : p === 'medium' ? (oc(currentLanguage).orta)
+                                    : (oc(currentLanguage).dusuk)}
                                 </button>
                               ))}
                             </div>
                             <div className="ml-auto flex gap-2">
                               <button onClick={() => setShowTicketForm(false)} className="apple-button-secondary px-4 text-sm">
-                                {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                                {oc(currentLanguage).iptal}
                               </button>
                               <button
                                 disabled={!ticketForm.title || !ticketForm.customerName}
@@ -772,7 +773,7 @@ export default function CRMPage({
                                 }}
                                 className="apple-button-primary px-6 text-sm disabled:opacity-50"
                               >
-                                {currentLanguage === 'tr' ? 'Oluştur' : 'Create'}
+                                {oc(currentLanguage).olustur}
                               </button>
                             </div>
                           </div>
@@ -801,10 +802,10 @@ export default function CRMPage({
                           ? 'bg-blue-50 text-blue-600'
                           : 'bg-emerald-50 text-emerald-700';
                         const statusLabel = ticket.status === 'open'
-                          ? (currentLanguage === 'tr' ? 'Açık' : 'Open')
+                          ? (oc(currentLanguage).acik)
                           : ticket.status === 'in_progress'
-                          ? (currentLanguage === 'tr' ? 'İşlemde' : 'In Progress')
-                          : (currentLanguage === 'tr' ? 'Çözüldü' : 'Resolved');
+                          ? (oc(currentLanguage).islemde)
+                          : (oc(currentLanguage).cozuldu);
                         return (
                           <div key={ticket.id} className="bg-white border border-gray-100 rounded-xl p-4 flex items-start gap-4 shadow-sm hover:shadow-md transition-shadow">
                             <div className={`p-2 rounded-xl flex-shrink-0 ${ticket.priority === 'high' ? 'bg-red-50' : ticket.priority === 'medium' ? 'bg-amber-50' : 'bg-gray-50'}`}>
@@ -892,7 +893,7 @@ export default function CRMPage({
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Konu' : 'Subject'}</label>
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).konu}</label>
                       <input
                         className="apple-input w-full"
                         placeholder={currentLanguage === 'tr' ? 'E-posta konusu...' : 'Email subject...'}
@@ -901,7 +902,7 @@ export default function CRMPage({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Mesaj' : 'Message'}</label>
+                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).mesaj}</label>
                       <textarea
                         className="apple-input w-full min-h-[120px] resize-y"
                         placeholder={currentLanguage === 'tr' ? 'Mesaj içeriği... {{isim}} ile kişiselleştirebilirsiniz.' : 'Message body... Use {{name}} to personalize.'}
@@ -984,7 +985,7 @@ export default function CRMPage({
                       >
                         <Mail className="w-4 h-4" />
                         {campaignSending
-                          ? (currentLanguage === 'tr' ? 'Gönderiliyor...' : 'Sending...')
+                          ? (oc(currentLanguage).gonderiliyor)
                           : (currentLanguage === 'tr' ? 'Kampanya Gönder' : 'Send Campaign')}
                       </button>
                     </div>
@@ -1028,8 +1029,8 @@ export default function CRMPage({
                             setP606Draft({name:'',sentDate:'',recipients:'',opens:'',clicks:'',conversions:''});
                             setP606ShowForm(false); setP606EditId(null);
                             toast(tr606?(p606EditId?'Kampanya güncellendi.':'Kampanya eklendi.'):(p606EditId?'Campaign updated.':'Campaign added.'),'success');
-                          } catch(e){ toast((tr606?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                        }} className="apple-button-primary text-xs px-6">{tr606?'Kaydet':'Save'}</button>
+                          } catch(e){ toast((oc(tr606).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
+                        }} className="apple-button-primary text-xs px-6">{oc(tr606).kaydet}</button>
                       </div>
                     )}
                     {p606Campaigns.length > 0 && (
@@ -1050,7 +1051,7 @@ export default function CRMPage({
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs min-w-[560px]">
                             <thead><tr className="border-b border-gray-100 bg-gray-50">
-                              {[tr606?'Kampanya':'Campaign',tr606?'Tarih':'Date',tr606?'Alıcı':'Recip.',tr606?'Açma %':'Open %',tr606?'Tıklama %':'Click %',tr606?'Dönüşüm':'Conv.'].map(h=>(
+                              {[tr606?'Kampanya':'Campaign',oc(tr606).tarih,tr606?'Alıcı':'Recip.',tr606?'Açma %':'Open %',tr606?'Tıklama %':'Click %',oc(tr606).donusum].map(h=>(
                                 <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                               ))}
                               <th className="px-3 py-2 w-8"></th>
@@ -1068,8 +1069,8 @@ export default function CRMPage({
                                     <td className="px-3 py-2.5 font-bold text-amber-600">%{cr}</td>
                                     <td className="px-3 py-2.5 font-bold text-purple-600">{c.conversions}</td>
                                     <td className="px-3 py-2.5 text-right"><div className="flex items-center justify-end gap-2">
-                                      <button type="button" onClick={()=>{setP606Draft({name:c.name,sentDate:c.sentDate,recipients:String(c.recipients),opens:String(c.opens),clicks:String(c.clicks),conversions:String(c.conversions)});setP606EditId(c.id);setP606ShowForm(true);}} title={tr606?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                      <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'campaignMetrics',c.id));}catch(e){toast((tr606?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="p-2 -m-2 text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                      <button type="button" onClick={()=>{setP606Draft({name:c.name,sentDate:c.sentDate,recipients:String(c.recipients),opens:String(c.opens),clicks:String(c.clicks),conversions:String(c.conversions)});setP606EditId(c.id);setP606ShowForm(true);}} title={oc(tr606).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                      <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'campaignMetrics',c.id));}catch(e){toast((oc(tr606).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="p-2 -m-2 text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                     </div></td>
                                   </tr>
                                 );
@@ -1090,12 +1091,12 @@ export default function CRMPage({
               {activeTab === 'crm' && crmTab === 'sozlesmeler' && (
                 <div className="space-y-4">
                   <ModuleHeader
-                    title={currentLanguage === 'tr' ? 'Sözleşme Yönetimi' : 'Contract Management'}
+                    title={oc(currentLanguage).sozlesme_yonetimi}
                     subtitle={currentLanguage === 'tr' ? 'Müşteri sözleşmelerini takip edin.' : 'Track customer contracts and renewals.'}
                     icon={FileText}
                     actionButton={
                       <button onClick={() => setShowContractForm(v => !v)} className="apple-button-primary flex items-center gap-2">
-                        <Plus className="w-4 h-4" />{currentLanguage === 'tr' ? 'Yeni Sözleşme' : 'New Contract'}
+                        <Plus className="w-4 h-4" />{oc(currentLanguage).yeni_sozlesme}
                       </button>
                     }
                   />
@@ -1126,25 +1127,25 @@ export default function CRMPage({
                     {showContractForm && (
                       <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                         <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-3 shadow-sm">
-                          <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Sözleşme' : 'New Contract'}</h3>
+                          <h3 className="font-bold text-gray-800">{oc(currentLanguage).yeni_sozlesme}</h3>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <input className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Müşteri adı' : 'Customer name'}
+                            <input className="apple-input w-full" placeholder={oc(currentLanguage).musteri_adi_2}
                               value={contractForm.customerName} onChange={e => setContractForm(f => ({ ...f, customerName: e.target.value }))} />
                             <input className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Sözleşme başlığı' : 'Contract title'}
                               value={contractForm.title} onChange={e => setContractForm(f => ({ ...f, title: e.target.value }))} />
                             <input type="number" className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Sözleşme değeri (₺)' : 'Contract value (₺)'}
                               value={contractForm.value || ''} onChange={e => setContractForm(f => ({ ...f, value: Number(e.target.value) }))} />
                             <select className="apple-input w-full" value={contractForm.status} onChange={e => setContractForm(f => ({ ...f, status: e.target.value }))}>
-                              <option value="active">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</option>
-                              <option value="draft">{currentLanguage === 'tr' ? 'Taslak' : 'Draft'}</option>
-                              <option value="expired">{currentLanguage === 'tr' ? 'Süresi Doldu' : 'Expired'}</option>
+                              <option value="active">{oc(currentLanguage).aktif}</option>
+                              <option value="draft">{oc(currentLanguage).taslak}</option>
+                              <option value="expired">{oc(currentLanguage).suresi_doldu}</option>
                             </select>
                             <div className="space-y-1">
-                              <label className="text-[10px] font-bold text-gray-400">{currentLanguage === 'tr' ? 'Başlangıç' : 'Start Date'}</label>
+                              <label className="text-[10px] font-bold text-gray-400">{oc(currentLanguage).baslangic}</label>
                               <input type="date" className="apple-input w-full" value={contractForm.startDate} onChange={e => setContractForm(f => ({ ...f, startDate: e.target.value }))} />
                             </div>
                             <div className="space-y-1">
-                              <label className="text-[10px] font-bold text-gray-400">{currentLanguage === 'tr' ? 'Bitiş' : 'End Date'}</label>
+                              <label className="text-[10px] font-bold text-gray-400">{oc(currentLanguage).bitis}</label>
                               <input type="date" className="apple-input w-full" value={contractForm.endDate} onChange={e => setContractForm(f => ({ ...f, endDate: e.target.value }))} />
                             </div>
                           </div>
@@ -1153,7 +1154,7 @@ export default function CRMPage({
                             <label htmlFor="autoRenew116" className="text-xs font-semibold text-gray-700">{currentLanguage === 'tr' ? 'Otomatik yenileme' : 'Auto-renew'}</label>
                           </div>
                           <div className="flex justify-end gap-2 pt-1">
-                            <button onClick={() => setShowContractForm(false)} className="apple-button-secondary px-4 text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                            <button onClick={() => setShowContractForm(false)} className="apple-button-secondary px-4 text-sm">{oc(currentLanguage).iptal}</button>
                             <button
                               disabled={!contractForm.customerName || !contractForm.title}
                               onClick={async () => {
@@ -1167,7 +1168,7 @@ export default function CRMPage({
                               }}
                               className="apple-button-primary px-6 text-sm disabled:opacity-50"
                             >
-                              {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
+                              {oc(currentLanguage).kaydet}
                             </button>
                           </div>
                         </div>
@@ -1206,9 +1207,9 @@ export default function CRMPage({
                                 : c.status === 'expired' ? 'bg-red-100 text-red-700'
                                 : 'bg-gray-100 text-gray-600'
                               }`}>
-                                {c.status === 'active' ? (currentLanguage === 'tr' ? 'Aktif' : 'Active')
-                                  : c.status === 'expired' ? (currentLanguage === 'tr' ? 'Süresi Doldu' : 'Expired')
-                                  : (currentLanguage === 'tr' ? 'Taslak' : 'Draft')}
+                                {c.status === 'active' ? (oc(currentLanguage).aktif)
+                                  : c.status === 'expired' ? (oc(currentLanguage).suresi_doldu)
+                                  : (oc(currentLanguage).taslak)}
                               </span>
                               {c.autoRenew && <span className="text-[9px] text-blue-500 font-semibold">↻ {currentLanguage === 'tr' ? 'Oto-Yenileme' : 'Auto-Renew'}</span>}
                             </div>
@@ -1229,7 +1230,7 @@ export default function CRMPage({
                     icon={Tag}
                     actionButton={
                       <button onClick={() => setShowPriceOverrideForm(v => !v)} className="apple-button-primary flex items-center gap-2">
-                        <Plus className="w-4 h-4" />{currentLanguage === 'tr' ? 'Yeni Talep' : 'New Request'}
+                        <Plus className="w-4 h-4" />{oc(currentLanguage).yeni_talep}
                       </button>
                     }
                   />
@@ -1244,9 +1245,9 @@ export default function CRMPage({
                       <div className="space-y-3">
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           {[
-                            { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Pending',   value: String(pending.length),  color: 'text-amber-600',   bg: 'bg-amber-50',   isMoney: false },
-                            { label: currentLanguage === 'tr' ? 'Onaylı' : 'Approved',    value: String(approved.length), color: 'text-emerald-600', bg: 'bg-emerald-50', isMoney: false },
-                            { label: currentLanguage === 'tr' ? 'Reddedilen' : 'Rejected', value: String(rejected.length), color: 'text-red-600',     bg: 'bg-red-50',     isMoney: false },
+                            { label: oc(currentLanguage).bekleyen,   value: String(pending.length),  color: 'text-amber-600',   bg: 'bg-amber-50',   isMoney: false },
+                            { label: oc(currentLanguage).onayli,    value: String(approved.length), color: 'text-emerald-600', bg: 'bg-emerald-50', isMoney: false },
+                            { label: oc(currentLanguage).reddedilen, value: String(rejected.length), color: 'text-red-600',     bg: 'bg-red-50',     isMoney: false },
                             { label: currentLanguage === 'tr' ? 'Toplam İndirim' : 'Total Discount', value: fmtKpi(totalDiscount), color: 'text-brand', bg: 'bg-brand/5', isMoney: true },
                           ].map(k => (
                             <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
@@ -1270,8 +1271,8 @@ export default function CRMPage({
                         <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm space-y-3">
                           <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Fiyat Onay Talebi' : 'New Price Override Request'}</h3>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <input className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Müşteri adı' : 'Customer name'} value={priceOverrideForm.customerName} onChange={e => setPriceOverrideForm(f => ({ ...f, customerName: e.target.value }))} />
-                            <input className="apple-input w-full" placeholder={currentLanguage === 'tr' ? 'Ürün adı' : 'Product name'} value={priceOverrideForm.productName} onChange={e => setPriceOverrideForm(f => ({ ...f, productName: e.target.value }))} />
+                            <input className="apple-input w-full" placeholder={oc(currentLanguage).musteri_adi_2} value={priceOverrideForm.customerName} onChange={e => setPriceOverrideForm(f => ({ ...f, customerName: e.target.value }))} />
+                            <input className="apple-input w-full" placeholder={oc(currentLanguage).urun_adi_2} value={priceOverrideForm.productName} onChange={e => setPriceOverrideForm(f => ({ ...f, productName: e.target.value }))} />
                             <div>
                               <label className="text-[10px] text-gray-400 font-semibold uppercase mb-1 block">
                                 {currentLanguage === 'tr' ? 'Standart Fiyat' : 'Standard Price'}
@@ -1302,7 +1303,7 @@ export default function CRMPage({
                             </p>
                           )}
                           <div className="flex gap-2 justify-end">
-                            <button onClick={() => setShowPriceOverrideForm(false)} className="apple-button-secondary">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                            <button onClick={() => setShowPriceOverrideForm(false)} className="apple-button-secondary">{oc(currentLanguage).iptal}</button>
                             <button className="apple-button-primary" onClick={async () => {
                               if (!priceOverrideForm.customerName || !priceOverrideForm.productName) return;
                               try {
@@ -1314,7 +1315,7 @@ export default function CRMPage({
                                 setPriceOverrideForm({ customerName: '', productName: '', standardPrice: 0, requestedPrice: 0, reason: '' });
                                 setShowPriceOverrideForm(false);
                                 toast(currentLanguage === 'tr' ? 'Talep oluşturuldu.' : 'Request submitted.', 'success');
-                              } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error'); }
+                              } catch { toast(oc(currentLanguage).hata_olustu_2, 'error'); }
                             }}>{currentLanguage === 'tr' ? 'Talep Oluştur' : 'Submit Request'}</button>
                           </div>
                         </div>
@@ -1342,9 +1343,9 @@ export default function CRMPage({
                                   : p.status === 'approved' ? 'bg-emerald-100 text-emerald-700'
                                   : 'bg-red-100 text-red-700'
                                 }`}>
-                                  {p.status === 'pending' ? (currentLanguage === 'tr' ? 'Bekliyor' : 'Pending')
-                                    : p.status === 'approved' ? (currentLanguage === 'tr' ? 'Onaylı' : 'Approved')
-                                    : (currentLanguage === 'tr' ? 'Reddedildi' : 'Rejected')}
+                                  {p.status === 'pending' ? (oc(currentLanguage).bekliyor)
+                                    : p.status === 'approved' ? (oc(currentLanguage).onayli)
+                                    : (oc(currentLanguage).reddedildi)}
                                 </span>
                               </div>
                               <p className="text-xs text-gray-500">{p.customerName} · {p.requestedBy}</p>
@@ -1359,12 +1360,12 @@ export default function CRMPage({
                             </div>
                             {p.status === 'pending' && (
                               <div className="flex gap-1 flex-shrink-0">
-                                <button onClick={async () => { await updateDoc(doc(db, 'priceOverrides', p.id), { status: 'approved' }); toast(currentLanguage === 'tr' ? 'Onaylandı.' : 'Approved.', 'success'); }}
-                                  className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title={currentLanguage === 'tr' ? 'Onayla' : 'Approve'}>
+                                <button onClick={async () => { await updateDoc(doc(db, 'priceOverrides', p.id), { status: 'approved' }); toast(oc(currentLanguage).onaylandi_2, 'success'); }}
+                                  className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title={oc(currentLanguage).onayla}>
                                   <Check size={14} />
                                 </button>
                                 <button onClick={async () => { await updateDoc(doc(db, 'priceOverrides', p.id), { status: 'rejected' }); toast(currentLanguage === 'tr' ? 'Reddedildi.' : 'Rejected.', 'error'); }}
-                                  className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors" title={currentLanguage === 'tr' ? 'Reddet' : 'Reject'}>
+                                  className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors" title={oc(currentLanguage).reddet}>
                                   <X size={14} />
                                 </button>
                               </div>
@@ -1380,7 +1381,7 @@ export default function CRMPage({
               {/* ── Phase 141: Sales Pipeline Kanban Board ── */}
               {activeTab === 'crm' && crmTab === 'pipeline' && (() => {
                 const stages: { key: Lead['status']; label: string; color: string; bg: string; border: string }[] = [
-                  { key: 'New',       label: currentLanguage === 'tr' ? 'Yeni'         : 'New',       color: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200' },
+                  { key: 'New',       label: oc(currentLanguage).yeni,       color: 'text-blue-600',   bg: 'bg-blue-50',   border: 'border-blue-200' },
                   { key: 'Contacted', label: currentLanguage === 'tr' ? 'İletişim'     : 'Contacted', color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200' },
                   { key: 'Qualified', label: currentLanguage === 'tr' ? 'Nitelikli'    : 'Qualified', color: 'text-amber-600',  bg: 'bg-amber-50',  border: 'border-amber-200' },
                   { key: 'Closed',    label: currentLanguage === 'tr' ? 'Kapandı'      : 'Closed',    color: 'text-emerald-600',bg: 'bg-emerald-50',border: 'border-emerald-200' },
@@ -1534,7 +1535,7 @@ export default function CRMPage({
                     {/* ── Bu Ay Card ─────────────────────────────────────── */}
                     <div className="apple-card p-6">
                       <div className="flex items-center justify-between mb-3">
-                        <p className="text-sm font-semibold text-gray-700">{currentLanguage === 'tr' ? 'Bu Ay' : 'This Month'}</p>
+                        <p className="text-sm font-semibold text-gray-700">{oc(currentLanguage).bu_ay}</p>
                         <div className="flex items-center gap-2">
                           {/* Currency toggle — embedded in the card */}
                           <KpiCurrencyToggle />
@@ -1551,13 +1552,13 @@ export default function CRMPage({
                             }}
                             className="apple-input text-lg font-bold w-48 px-3 py-1.5" placeholder="0" />
                           <button onClick={() => { const v = Number(targetDraft); saveMonthlyTarget(thisMonthKey, v); setIsEditingTarget(false); }}
-                            className="apple-button-primary text-xs px-4 py-1.5">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
-                          <button onClick={() => setIsEditingTarget(false)} className="text-sm text-gray-400 hover:text-gray-600">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                            className="apple-button-primary text-xs px-4 py-1.5">{oc(currentLanguage).kaydet}</button>
+                          <button onClick={() => setIsEditingTarget(false)} className="text-sm text-gray-400 hover:text-gray-600">{oc(currentLanguage).iptal}</button>
                         </div>
                       ) : (
                         <div className="flex items-end gap-3 mb-4">
                           <span className="text-3xl font-bold text-gray-900">{fmtKpi(thisMonthActual)}</span>
-                          <span className="text-gray-400 mb-1">/ {monthlyTarget > 0 ? fmtKpi(monthlyTarget) : <span className="italic text-gray-300">{currentLanguage === 'tr' ? 'Hedef yok' : 'No target'}</span>}</span>
+                          <span className="text-gray-400 mb-1">/ {monthlyTarget > 0 ? fmtKpi(monthlyTarget) : <span className="italic text-gray-300">{oc(currentLanguage).hedef_yok}</span>}</span>
                         </div>
                       )}
                       <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
@@ -1574,7 +1575,7 @@ export default function CRMPage({
                               <div key={r.rep}>
                                 <div className="flex items-center justify-between text-xs mb-0.5">
                                   <span className="font-medium text-gray-800 flex items-center gap-1">{i === 0 && '🏆'}{r.rep}</span>
-                                  <span className="text-gray-500">{fmtKpi(r.actual)} · {r.deals} {currentLanguage==='tr'?'sipariş':'orders'}</span>
+                                  <span className="text-gray-500">{fmtKpi(r.actual)} · {r.deals} {oc(currentLanguage).siparis}</span>
                                 </div>
                                 <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                                   <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : pct >= 70 ? 'bg-amber-400' : 'bg-brand'}`} style={{ width: `${pct}%` }} />
@@ -1594,7 +1595,7 @@ export default function CRMPage({
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       {[
-                        { label: currentLanguage === 'tr' ? '12 Ay Ciro' : '12-Mo Revenue', value: fmtKpi(totalActual12,'K',1), sub: `${months.filter(m => (revenueByMonth[m.key] || 0) > 0).length} ${currentLanguage === 'tr' ? 'aktif ay' : 'active months'}`, color: 'text-emerald-600', icon: '📈' },
+                        { label: oc(currentLanguage)._12_ay_ciro, value: fmtKpi(totalActual12,'K',1), sub: `${months.filter(m => (revenueByMonth[m.key] || 0) > 0).length} ${currentLanguage === 'tr' ? 'aktif ay' : 'active months'}`, color: 'text-emerald-600', icon: '📈' },
                         { label: currentLanguage === 'tr' ? 'Ort. Başarı' : 'Avg. Attainment', value: `%${avg12Pct}`, sub: `${monthsWithTarget} ${currentLanguage === 'tr' ? 'hedefli ay' : 'months w/ target'}`, color: avg12Pct >= 100 ? 'text-emerald-600' : avg12Pct >= 70 ? 'text-amber-600' : 'text-red-500', icon: '🎯' },
                         { label: currentLanguage === 'tr' ? 'Hedef Tutturan' : 'Target Hit', value: `${hitCount}/${monthsWithTarget}`, sub: currentLanguage === 'tr' ? 'ay' : 'months', color: 'text-blue-600', icon: '✅' },
                         { label: currentLanguage === 'tr' ? 'En İyi Ay' : 'Best Month', value: best12 ? `%${best12.pct}` : '—', sub: best12 ? months.find(m => m.key === best12.key)?.label || '' : currentLanguage === 'tr' ? 'veri yok' : 'no data', color: 'text-purple-600', icon: '🏆' },
@@ -1653,13 +1654,13 @@ export default function CRMPage({
                         <table className="w-full text-xs min-w-[560px]">
                           <thead>
                             <tr className="bg-gray-50 text-gray-500 uppercase tracking-wider">
-                              <th className="text-left px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Ay' : 'Month'}</th>
-                              <th className="text-right px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Hedef' : 'Target'}</th>
-                              <th className="text-right px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Gerçekleşen' : 'Actual'}</th>
+                              <th className="text-left px-4 py-2.5 font-semibold">{oc(currentLanguage).ay}</th>
+                              <th className="text-right px-4 py-2.5 font-semibold">{oc(currentLanguage).hedef}</th>
+                              <th className="text-right px-4 py-2.5 font-semibold">{oc(currentLanguage).gerceklesen}</th>
                               <th className="text-right px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Fark' : 'Gap'}</th>
                               <th className="text-right px-4 py-2.5 font-semibold">%</th>
-                              <th className="text-right px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Sipariş' : 'Orders'}</th>
-                              <th className="px-4 py-2.5 font-semibold">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</th>
+                              <th className="text-right px-4 py-2.5 font-semibold">{oc(currentLanguage).siparis_2}</th>
+                              <th className="px-4 py-2.5 font-semibold">{oc(currentLanguage).durum}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-50">
@@ -1696,13 +1697,13 @@ export default function CRMPage({
                                           placeholder="0"
                                         />
                                         <button onClick={e => { e.stopPropagation(); saveMonthlyTarget(m.key, Number(editingMonthDraft)); setEditingMonthKey(null); }}
-                                          className="bg-brand text-white rounded-lg px-2 py-1 text-[10px] font-bold whitespace-nowrap">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                                          className="bg-brand text-white rounded-lg px-2 py-1 text-[10px] font-bold whitespace-nowrap">{oc(currentLanguage).kaydet}</button>
                                         <button onClick={e => { e.stopPropagation(); setEditingMonthKey(null); }}
                                           className="text-gray-400 hover:text-gray-600 text-[10px]">✕</button>
                                       </div>
                                     ) : (
                                       <span className={`${target > 0 ? 'text-gray-700' : 'text-gray-300 italic'}`}>
-                                        {target > 0 ? fmtKpi(target) : (currentLanguage === 'tr' ? 'Hedef yok' : 'No target')}
+                                        {target > 0 ? fmtKpi(target) : (oc(currentLanguage).hedef_yok)}
                                       </span>
                                     )}
                                   </td>
@@ -2029,7 +2030,7 @@ export default function CRMPage({
                         const tsMs = zamanMs(a.date);
                         const daysAgo = tsMs === null ? null : Math.floor((Date.now() - tsMs) / 86400000);
                         const timeLabel = daysAgo === null ? '—'
-                          : daysAgo === 0 ? (currentLanguage === 'tr' ? 'Bugün' : 'Today')
+                          : daysAgo === 0 ? (oc(currentLanguage).bugun)
                           : daysAgo === 1 ? (currentLanguage === 'tr' ? 'Dün' : 'Yesterday')
                           : `${daysAgo}${currentLanguage === 'tr' ? ' gün önce' : 'd ago'}`;
                         return (
@@ -2092,10 +2093,10 @@ export default function CRMPage({
                       <span className="text-[10px] text-[#86868B] font-semibold uppercase mr-1">{currentLanguage === 'tr' ? 'Sırala:' : 'Sort:'}</span>
                       {[
                         { key: 'name', label: 'A–Z' },
-                        { key: 'score', label: currentLanguage === 'tr' ? 'Skor' : 'Score' },
-                        { key: 'company', label: currentLanguage === 'tr' ? 'Şirket' : 'Company' },
-                        { key: 'status', label: currentLanguage === 'tr' ? 'Durum' : 'Status' },
-                        { key: 'createdAt', label: currentLanguage === 'tr' ? 'Tarih' : 'Date' },
+                        { key: 'score', label: oc(currentLanguage).skor },
+                        { key: 'company', label: oc(currentLanguage).sirket },
+                        { key: 'status', label: oc(currentLanguage).durum },
+                        { key: 'createdAt', label: oc(currentLanguage).tarih },
                       ].map(opt => (
                         <button key={opt.key}
                           onClick={() => toggleSort(crmSort, opt.key, setCrmSort)}
@@ -2204,8 +2205,8 @@ export default function CRMPage({
                                   if (ageD < 1) return null;
                                   const ageColor = ageD <= 7 ? 'bg-emerald-50 text-emerald-600' : ageD <= 30 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-500';
                                   const ageLabel = ageD < 30
-                                    ? `${ageD}${currentLanguage === 'tr' ? 'g' : 'd'}`
-                                    : `${Math.round(ageD / 30)}${currentLanguage === 'tr' ? 'a' : 'm'}`;
+                                    ? `${ageD}${oc(currentLanguage).g}`
+                                    : `${Math.round(ageD / 30)}${oc(currentLanguage).a}`;
                                   return (
                                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${ageColor}`} title={`Lead created ${ageD} days ago`}>
                                       {ageLabel}
@@ -2250,7 +2251,7 @@ export default function CRMPage({
                                             // Sessiz-başarısızlık taraması (2026-08-31): yazma
                                             // (ör. RBAC 403) sessizce yutuluyordu — kullanıcı
                                             // durumu değişti sanıyordu.
-                                            toast(currentLanguage === 'tr' ? 'Durum güncellenemedi (yetki?).' : 'Status update failed.', 'error');
+                                            toast(oc(currentLanguage).durum_guncellenemedi_yetki, 'error');
                                           }
                                           setP544QuickStatus(null);
                                         }}
@@ -2291,8 +2292,8 @@ export default function CRMPage({
                                 const label527 = days527 === 1
                                   ? (currentLanguage === 'tr' ? '1g' : '1d')
                                   : days527 <= 30
-                                    ? `${days527}${currentLanguage === 'tr' ? 'g' : 'd'}`
-                                    : `${Math.round(days527/30)}${currentLanguage === 'tr' ? 'a' : 'm'}`;
+                                    ? `${days527}${oc(currentLanguage).g}`
+                                    : `${Math.round(days527/30)}${oc(currentLanguage).a}`;
                                 return (
                                   <span
                                     className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${color527}`}
@@ -2605,7 +2606,7 @@ export default function CRMPage({
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs min-w-[560px]">
                         <thead><tr className="border-b border-gray-100 bg-gray-50">
-                          {[tr581?'Temsilci':'Rep', tr581?'Lead':'Leads', tr581?'Kapatılan':'Won', tr581?'Dönüşüm':'Conv.', tr581?'Gelir':'Revenue'].map(h=>(
+                          {[oc(tr581).temsilci, oc(tr581).lead, tr581?'Kapatılan':'Won', oc(tr581).donusum, oc(tr581).gelir].map(h=>(
                             <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                           ))}
                         </tr></thead>
@@ -2744,7 +2745,7 @@ export default function CRMPage({
                 if (customers601.length===0) return null;
                 // Segment by RFM
                 const getSegment = (c: typeof customers601[number]) => {
-                  if (c.revenue>50000&&c.orders>=5&&c.recencyDays<=30) return {label:tr601?'Şampiyon':'Champion', cls:'bg-emerald-100 text-emerald-700'};
+                  if (c.revenue>50000&&c.orders>=5&&c.recencyDays<=30) return {label:oc(tr601).sampiyon, cls:'bg-emerald-100 text-emerald-700'};
                   if (c.revenue>20000&&c.recencyDays<=60) return {label:tr601?'Sadık Müşteri':'Loyal', cls:'bg-blue-100 text-blue-700'};
                   if (c.recencyDays>180) return {label:tr601?'Kayıp Risk':'At Risk', cls:'bg-red-100 text-red-600'};
                   if (c.orders===1) return {label:tr601?'Yeni Müşteri':'New', cls:'bg-purple-100 text-purple-700'};
@@ -2765,7 +2766,7 @@ export default function CRMPage({
                     <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                       <h3 className="font-bold text-gray-900 text-sm">{tr601?'🎯 Müşteri Segmentasyon Analizi':'🎯 Customer Segmentation'}</h3>
                       <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-                        {([['rfm',tr601?'RFM Segmentler':'RFM Segments'],['revenue',tr601?'Gelir Dilimi':'Revenue Tier'],['type',tr601?'Müşteri Tipi':'Customer Type']] as const).map(([id,label])=>(
+                        {([['rfm',tr601?'RFM Segmentler':'RFM Segments'],['revenue',tr601?'Gelir Dilimi':'Revenue Tier'],['type',oc(tr601).musteri_tipi]] as const).map(([id,label])=>(
                           <button key={id} onClick={()=>setP601Segment(id)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${p601Segment===id?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{label}</button>
                         ))}
                       </div>
@@ -2830,7 +2831,7 @@ export default function CRMPage({
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <h3 className="font-bold text-gray-900 text-sm">🎯 {tr613?'Müşteri Portföy Analizi':'Customer Portfolio Analysis'}</h3>
                       <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-                        {([{k:'revenue',l:tr613?'Ciro':'Revenue'},{k:'orders',l:tr613?'Sipariş':'Orders'},{k:'risk',l:tr613?'Risk':'Risk'}] as {k:'revenue'|'orders'|'risk';l:string}[]).map(t=>(
+                        {([{k:'revenue',l:oc(tr613).ciro},{k:'orders',l:oc(tr613).siparis_2},{k:'risk',l:tr613?'Risk':'Risk'}] as {k:'revenue'|'orders'|'risk';l:string}[]).map(t=>(
                           <button key={t.k} onClick={()=>setP613Metric(t.k)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${p613Metric===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
                         ))}
                       </div>
@@ -2843,7 +2844,7 @@ export default function CRMPage({
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs min-w-[560px]">
                         <thead><tr className="border-b border-gray-100 bg-gray-50">
-                          {['#',tr613?'Müşteri':'Customer',tr613?'Tip':'Type',tr613?'Ciro':'Revenue',tr613?'Sipariş':'Orders',tr613?'Pay':'Share'].map(h=>(
+                          {['#',oc(tr613).musteri,oc(tr613).tip,oc(tr613).ciro,oc(tr613).siparis_2,oc(tr613).pay].map(h=>(
                             <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                           ))}
                         </tr></thead>
@@ -2885,7 +2886,7 @@ export default function CRMPage({
                 const methodMap:{[k:string]:number} = {};
                 paidOrders.forEach(o=>{ const m=o.paymentMethod||'other'; methodMap[m]=(methodMap[m]||0)+1; });
                 const methodRows = Object.entries(methodMap).sort((a,b)=>b[1]-a[1]);
-                const methodLabels:{[k:string]:string} = {cash:tr626?'Nakit':'Cash',bank_transfer:tr626?'Banka Transferi':'Bank Transfer',credit_card:tr626?'Kredi Kartı':'Credit Card',check:tr626?'Çek':'Check',other:tr626?'Diğer':'Other'};
+                const methodLabels:{[k:string]:string} = {cash:oc(tr626).nakit,bank_transfer:tr626?'Banka Transferi':'Bank Transfer',credit_card:oc(tr626).kredi_karti,check:oc(tr626).cek,other:oc(tr626).diger};
                 if (paidOrders.length===0&&unpaidOrders.length===0) return null;
                 return (
                   <div className="apple-card p-5 space-y-4">
@@ -2899,7 +2900,7 @@ export default function CRMPage({
                     </div>
                     <div className="grid grid-cols-3 gap-3">
                       <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr626?'Ödeme Oranı':'Pay Rate'}</p><p className="text-xl font-black text-emerald-600">%{payRate.toFixed(1)}</p></div>
-                      <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr626?'Ödendi':'Paid'}</p><p className="text-xl font-black text-blue-600">{paidOrders.length}</p></div>
+                      <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr626).odendi}</p><p className="text-xl font-black text-blue-600">{paidOrders.length}</p></div>
                       <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr626?'Ödenmedi':'Unpaid'}</p><p className="text-xl font-black text-red-600">{unpaidOrders.length}</p></div>
                     </div>
                     {methodRows.length>0 && (
@@ -2953,7 +2954,7 @@ export default function CRMPage({
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs min-w-[560px]">
                         <thead><tr className="border-b border-gray-100 bg-gray-50">
-                          {[tr604?'Temsilci':'Rep', tr604?'Ciro':'Revenue', tr604?'Komisyon':'Commission'].map(h=>(
+                          {[oc(tr604).temsilci, oc(tr604).ciro, oc(tr604).komisyon].map(h=>(
                             <th key={h} className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                           ))}
                         </tr></thead>
@@ -2966,7 +2967,7 @@ export default function CRMPage({
                             </tr>
                           ))}
                           <tr className="border-t-2 border-gray-200 bg-gray-50">
-                            <td className="px-4 py-2 font-bold text-gray-700">{tr604?'Toplam':'Total'}</td>
+                            <td className="px-4 py-2 font-bold text-gray-700">{oc(tr604).toplam}</td>
                             <td className="px-4 py-2 font-bold font-mono text-gray-700">{paraYaz(commList.reduce((s,r)=>s+r.rev,0), { ondalik: 0 })}</td>
                             <td className="px-4 py-2 font-bold font-mono text-emerald-700">{paraYaz(commList.reduce((s,r)=>s+r.comm,0), { ondalik: 0 })}</td>
                           </tr>
@@ -2998,14 +2999,14 @@ export default function CRMPage({
                 const filtered633 = p633Segment==='all'?scored:scored.filter(x=>x.seg===p633Segment);
                 const segCounts = {champions:scored.filter(x=>x.seg==='champions').length,loyal:scored.filter(x=>x.seg==='loyal').length,'at-risk':scored.filter(x=>x.seg==='at-risk').length,lost:scored.filter(x=>x.seg==='lost').length};
                 const segCls:{[k:string]:string}={champions:'bg-amber-100 text-amber-700',loyal:'bg-emerald-100 text-emerald-700','at-risk':'bg-orange-100 text-orange-700',lost:'bg-red-100 text-red-700'};
-                const segLabel:{[k:string]:string}={champions:tr633?'Şampiyon':'Champion',loyal:tr633?'Sadık':'Loyal','at-risk':tr633?'Risk Altında':'At Risk',lost:tr633?'Kayıp':'Lost'};
+                const segLabel:{[k:string]:string}={champions:oc(tr633).sampiyon,loyal:tr633?'Sadık':'Loyal','at-risk':tr633?'Risk Altında':'At Risk',lost:tr633?'Kayıp':'Lost'};
                 return (
                   <div className="apple-card p-5 space-y-4">
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div><h3 className="font-bold text-gray-900 text-sm">🎯 {tr633?'RFM Müşteri Segmentasyonu':'RFM Customer Segmentation'}</h3>
                       <p className="text-xs text-gray-400">{tr633?'Recency · Frequency · Monetary değerlerine göre segmentasyon':'Segments customers by recency, frequency & monetary value'}</p></div>
                       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 flex-wrap">
-                        {([{k:'all',l:tr633?'Tümü':'All'},{k:'champions',l:segLabel.champions},{k:'loyal',l:segLabel.loyal},{k:'at-risk',l:segLabel['at-risk']},{k:'lost',l:segLabel.lost}] as {k:'all'|'champions'|'loyal'|'at-risk'|'lost';l:string}[]).map(t=>(
+                        {([{k:'all',l:oc(tr633).tumu},{k:'champions',l:segLabel.champions},{k:'loyal',l:segLabel.loyal},{k:'at-risk',l:segLabel['at-risk']},{k:'lost',l:segLabel.lost}] as {k:'all'|'champions'|'loyal'|'at-risk'|'lost';l:string}[]).map(t=>(
                           <button key={t.k} onClick={()=>setP633Segment(t.k)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${p633Segment===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}{t.k!=='all'?` (${segCounts[t.k as keyof typeof segCounts]})`:''}</button>
                         ))}
                       </div>
@@ -3019,7 +3020,7 @@ export default function CRMPage({
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs min-w-[560px]">
                           <thead><tr className="border-b border-gray-100 bg-gray-50">
-                            {[tr633?'Müşteri':'Customer','R','F','M',tr633?'Toplam':'Total',tr633?'Segment':'Segment'].map(h=>(
+                            {[oc(tr633).musteri,'R','F','M',oc(tr633).toplam,tr633?'Segment':'Segment'].map(h=>(
                               <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                             ))}
                           </tr></thead>
@@ -3088,7 +3089,7 @@ export default function CRMPage({
                           className="apple-button-secondary flex items-center gap-2 text-blue-700 hover:bg-blue-50"
                           title={selectedLead.phone}>
                           <Phone className="w-4 h-4" />
-                          {currentLanguage === 'tr' ? 'Ara' : 'Call'}
+                          {oc(currentLanguage).ara_2}
                         </a>
                       )}
                       {/* Phase 100: In-App Email Compose */}
@@ -3188,7 +3189,7 @@ export default function CRMPage({
                           onClick={() => openConfirm({
                             title: currentLanguage === 'tr' ? 'Aday Yeniden Aç?' : 'Reopen Lead?',
                             message: currentLanguage === 'tr' ? `"${selectedLead.name}" adayını yeniden açmak istiyor musunuz?` : `Reopen lead "${selectedLead.name}"?`,
-                            confirmLabel: currentLanguage === 'tr' ? 'Yeniden Aç' : 'Reopen',
+                            confirmLabel: oc(currentLanguage).yeniden_ac,
                             onConfirm: async () => {
                               try {
                                 await updateDoc(doc(db, 'leads', selectedLead.id), { status: 'Qualified', updatedAt: serverTimestamp() });
@@ -3200,7 +3201,7 @@ export default function CRMPage({
                           className="apple-button-secondary text-amber-700 hover:bg-amber-50"
                         >
                           <RefreshCw className="w-4 h-4" />
-                          {currentLanguage === 'tr' ? 'Yeniden Aç' : 'Reopen'}
+                          {oc(currentLanguage).yeniden_ac}
                         </button>
                       )}
                       {/* Phase 83: pre-fill order form from lead */}
@@ -3349,7 +3350,7 @@ export default function CRMPage({
                           <div className="grid grid-cols-3 gap-2 mb-3">
                             {[
                               { label: currentLanguage === 'tr' ? 'Toplam Ciro' : 'Lifetime Revenue', value: fmt(totalRev), color: 'text-gray-800' },
-                              { label: currentLanguage === 'tr' ? 'Ödenen' : 'Paid',   value: fmt(paidRev),   color: 'text-emerald-700' },
+                              { label: oc(currentLanguage).odenen,   value: fmt(paidRev),   color: 'text-emerald-700' },
                               { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Unpaid', value: fmt(unpaidRev), color: unpaidRev > 0 ? 'text-amber-600' : 'text-gray-400' },
                             ].map((s, i) => (
                               <div key={i} className="bg-gray-50 rounded-xl px-3 py-2.5">
@@ -3467,9 +3468,9 @@ export default function CRMPage({
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                           {[
                             { label: currentLanguage === 'tr' ? 'Bu Ay Satış' : 'Monthly Sales', value: paraYaz(actualSales, { ondalik: 0 }), color: 'text-gray-900' },
-                            { label: currentLanguage === 'tr' ? 'Hedef' : 'Target', value: paraYaz(targetAmount, { ondalik: 0 }), color: 'text-gray-500' },
+                            { label: oc(currentLanguage).hedef, value: paraYaz(targetAmount, { ondalik: 0 }), color: 'text-gray-500' },
                             { label: currentLanguage === 'tr' ? 'Gerçekleşme' : 'Achievement', value: `${achievementRate.toFixed(1)}%`, color: achievementRate >= 100 ? 'text-emerald-600' : 'text-amber-600' },
-                            { label: currentLanguage === 'tr' ? 'Komisyon' : 'Commission', value: paraYaz(commissionEarned, { ondalik: 0 }), color: 'text-violet-700' },
+                            { label: oc(currentLanguage).komisyon, value: paraYaz(commissionEarned, { ondalik: 0 }), color: 'text-violet-700' },
                           ].map((s, i) => (
                             <div key={i} className="bg-gray-50 rounded-xl p-3">
                               <p className={`text-base font-black ${s.color}`}>{s.value}</p>
@@ -3528,7 +3529,7 @@ export default function CRMPage({
                                   className="apple-input flex-1 text-sm py-1.5"
                                 />
                                 <button onClick={() => void searchMikroForLead()} disabled={mikroLinkSearching || !mikroLinkQuery.trim()} className="apple-button-secondary text-xs px-3 py-1.5 disabled:opacity-50 shrink-0">
-                                  {mikroLinkSearching ? (currentLanguage === 'tr' ? 'Aranıyor...' : 'Searching...') : (currentLanguage === 'tr' ? 'Ara' : 'Search')}
+                                  {mikroLinkSearching ? (oc(currentLanguage).araniyor) : (currentLanguage === 'tr' ? 'Ara' : 'Search')}
                                 </button>
                               </div>
                               {mikroLinkResults && (
@@ -3660,7 +3661,7 @@ export default function CRMPage({
           {/* ── Phase 549: İade & Değişim (RMA) ──────────────────────────────────── */}
           {activeTab === 'iade' && (() => {
             const tr549 = currentLanguage === 'tr';
-            const reasons549 = [tr549?'Hasarlı Ürün':'Damaged Product', tr549?'Yanlış Ürün':'Wrong Product', tr549?'Beklentileri Karşılamıyor':'Unmet Expectations', tr549?'Fikir Değişikliği':'Changed Mind', tr549?'Diğer':'Other'];
+            const reasons549 = [oc(tr549).hasarli_urun, tr549?'Yanlış Ürün':'Wrong Product', tr549?'Beklentileri Karşılamıyor':'Unmet Expectations', tr549?'Fikir Değişikliği':'Changed Mind', oc(tr549).diger];
             const pending549 = p549Iadeler.filter(r=>r.status==='Bekliyor');
             const approved549 = p549Iadeler.filter(r=>r.status==='Onaylandı');
             const done549 = p549Iadeler.filter(r=>r.status==='Tamamlandı');
@@ -3680,10 +3681,10 @@ export default function CRMPage({
                 />
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
-                    { label: tr549?'Bekleyen':'Pending',    v: pending549.length,  color:'text-orange-600', bg:'bg-orange-50' },
-                    { label: tr549?'Onaylanan':'Approved',  v: approved549.length, color:'text-emerald-600',bg:'bg-emerald-50' },
+                    { label: oc(tr549).bekleyen,    v: pending549.length,  color:'text-orange-600', bg:'bg-orange-50' },
+                    { label: oc(tr549).onaylanan,  v: approved549.length, color:'text-emerald-600',bg:'bg-emerald-50' },
                     { label: tr549?'Tamamlanan':'Done',     v: done549.length,     color:'text-blue-600',   bg:'bg-blue-50' },
-                    { label: tr549?'Toplam':'Total',        v: p549Iadeler.length, color:'text-gray-600',   bg:'bg-gray-50' },
+                    { label: oc(tr549).toplam,        v: p549Iadeler.length, color:'text-gray-600',   bg:'bg-gray-50' },
                   ].map(k=>(
                     <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
                       <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
@@ -3696,7 +3697,7 @@ export default function CRMPage({
                   <div className="apple-card p-5 border-2 border-brand/20 space-y-3">
                     <h4 className="font-bold text-gray-800">{tr549?'Yeni İade Talebi':'New Return Request'}</h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <input value={p549Draft.customerName} onChange={e=>setP549Draft(d=>({...d,customerName:e.target.value}))} placeholder={tr549?'Müşteri Adı':'Customer Name'} className="apple-input px-3 py-2 text-sm" />
+                      <input value={p549Draft.customerName} onChange={e=>setP549Draft(d=>({...d,customerName:e.target.value}))} placeholder={oc(tr549).musteri_adi} className="apple-input px-3 py-2 text-sm" />
                       <input value={p549Draft.orderId} onChange={e=>setP549Draft(d=>({...d,orderId:e.target.value}))} placeholder={tr549?'Sipariş ID (opsiyonel)':'Order ID (optional)'} className="apple-input px-3 py-2 text-sm" />
                       <input value={p549Draft.items} onChange={e=>setP549Draft(d=>({...d,items:e.target.value}))} placeholder={tr549?'İade Edilecek Ürünler':'Items to Return'} className="apple-input px-3 py-2 text-sm" />
                       <select value={p549Draft.reason} onChange={e=>setP549Draft(d=>({...d,reason:e.target.value}))} className="apple-input px-3 py-2 text-sm">
@@ -3705,15 +3706,15 @@ export default function CRMPage({
                       <select value={p549Draft.condition} onChange={e=>setP549Draft(d=>({...d,condition:e.target.value as typeof p549Draft.condition}))} className="apple-input px-3 py-2 text-sm">
                         {(['Hasarlı','Sağlam','Kısmen Hasarlı'] as const).map(c=><option key={c}>{c}</option>)}
                       </select>
-                      <input value={p549Draft.notes} onChange={e=>setP549Draft(d=>({...d,notes:e.target.value}))} placeholder={tr549?'Notlar':'Notes'} className="apple-input px-3 py-2 text-sm" />
+                      <input value={p549Draft.notes} onChange={e=>setP549Draft(d=>({...d,notes:e.target.value}))} placeholder={oc(tr549).notlar} className="apple-input px-3 py-2 text-sm" />
                     </div>
                     <div className="flex gap-2">
                       <button onClick={async()=>{
                         if(!p549Draft.customerName||!p549Draft.items) return;
                         await addDoc(collection(db,'rmaRequests'),{...p549Draft,decision:'Bekliyor',status:'Bekliyor',createdAt:serverTimestamp()});
-                        setP549Form(false); setP549Draft({orderId:'',customerName:'',items:'',reason:tr549?'Hasarlı Ürün':'Damaged Product',condition:'Hasarlı',notes:''});
+                        setP549Form(false); setP549Draft({orderId:'',customerName:'',items:'',reason:oc(tr549).hasarli_urun,condition:'Hasarlı',notes:''});
                       }} className="apple-button-primary px-4 py-2 text-sm">{tr549?'Talebi Oluştur':'Create Request'}</button>
-                      <button onClick={()=>setP549Form(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr549?'İptal':'Cancel'}</button>
+                      <button onClick={()=>setP549Form(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr549).iptal}</button>
                     </div>
                   </div>
                 )}
@@ -3722,19 +3723,19 @@ export default function CRMPage({
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-[560px]">
                       <thead><tr className="border-b border-gray-100 bg-gray-50/60">
-                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{tr549?'Müşteri':'Customer'}</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{oc(tr549).musteri}</th>
                         <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden md:table-cell">{tr549?'Ürünler':'Items'}</th>
-                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{tr549?'Neden':'Reason'}</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{oc(tr549).neden}</th>
                         <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr549?'Karar':'Decision'}</th>
-                        <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr549?'Durum':'Status'}</th>
-                        {hasFullAccess('crm') && <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr549?'İşlem':'Action'}</th>}
+                        <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{oc(tr549).durum}</th>
+                        {hasFullAccess('crm') && <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{oc(tr549).islem}</th>}
                       </tr></thead>
                       <tbody>
                         {p549Iadeler.map(r=>(
                           <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
                             <td className="px-4 py-2.5">
                               <p className="font-medium text-gray-800">{r.customerName}</p>
-                              {r.orderId && <p className="text-xs text-gray-400">{tr549?'Sipariş:':'Order:'} {r.orderId.slice(0,8)}</p>}
+                              {r.orderId && <p className="text-xs text-gray-400">{oc(tr549).siparis_3} {r.orderId.slice(0,8)}</p>}
                             </td>
                             <td className="px-4 py-2.5 text-gray-600 text-xs hidden md:table-cell">{r.items}</td>
                             <td className="px-4 py-2.5 text-gray-500 text-xs hidden sm:table-cell">{r.reason}</td>
@@ -3742,7 +3743,7 @@ export default function CRMPage({
                               {r.status === 'Bekliyor' && hasFullAccess('crm') ? (
                                 <select defaultValue={r.decision} onChange={e=>updateDoc(doc(db,'rmaRequests',r.id),{decision:e.target.value})}
                                   className="text-[10px] font-bold px-2 py-0.5 rounded-full border-0 bg-gray-100 text-gray-700">
-                                  {[tr549?'Bekliyor':'Pending',tr549?'İade':'Refund',tr549?'Değişim':'Exchange',tr549?'Kredi Notu':'Credit Note'].map(d=><option key={d}>{d}</option>)}
+                                  {[oc(tr549).bekliyor,tr549?'İade':'Refund',tr549?'Değişim':'Exchange',tr549?'Kredi Notu':'Credit Note'].map(d=><option key={d}>{d}</option>)}
                                 </select>
                               ) : (
                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${decisionColor(r.decision)}`}>{r.decision}</span>
@@ -3755,12 +3756,12 @@ export default function CRMPage({
                               <td className="px-4 py-2.5 text-center">
                                 {r.status === 'Bekliyor' && (
                                   <div className="flex justify-center gap-1">
-                                    <button onClick={()=>updateDoc(doc(db,'rmaRequests',r.id),{status:'Onaylandı'})} className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-full hover:bg-emerald-200">{tr549?'Onayla':'Approve'}</button>
-                                    <button onClick={()=>updateDoc(doc(db,'rmaRequests',r.id),{status:'Reddedildi'})} className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-1 rounded-full hover:bg-red-200">{tr549?'Reddet':'Reject'}</button>
+                                    <button onClick={()=>updateDoc(doc(db,'rmaRequests',r.id),{status:'Onaylandı'})} className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-full hover:bg-emerald-200">{oc(tr549).onayla}</button>
+                                    <button onClick={()=>updateDoc(doc(db,'rmaRequests',r.id),{status:'Reddedildi'})} className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-1 rounded-full hover:bg-red-200">{oc(tr549).reddet}</button>
                                   </div>
                                 )}
                                 {r.status === 'Onaylandı' && (
-                                  <button onClick={()=>updateDoc(doc(db,'rmaRequests',r.id),{status:'Tamamlandı'})} className="text-[10px] bg-blue-100 text-blue-700 font-bold px-2 py-1 rounded-full hover:bg-blue-200">{tr549?'Tamamla':'Complete'}</button>
+                                  <button onClick={()=>updateDoc(doc(db,'rmaRequests',r.id),{status:'Tamamlandı'})} className="text-[10px] bg-blue-100 text-blue-700 font-bold px-2 py-1 rounded-full hover:bg-blue-200">{oc(tr549).tamamla}</button>
                                 )}
                               </td>
                             )}
@@ -3789,7 +3790,7 @@ export default function CRMPage({
               <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowStmtModal(null)} />
               <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl relative z-10 overflow-hidden">
                 <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                  <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Cari Ekstre' : 'Account Statement'}{stmtLead ? ` — ${stmtLead.name}` : ''}</h3>
+                  <h3 className="font-semibold text-gray-800">{oc(currentLanguage).cari_ekstre}{stmtLead ? ` — ${stmtLead.name}` : ''}</h3>
                   <button onClick={() => setShowStmtModal(null)} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} /></button>
                 </div>
                 <div className="p-5 max-h-[75vh] overflow-y-auto">

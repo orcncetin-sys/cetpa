@@ -11,6 +11,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanDate, ayAnahtari } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'currentLanguage' | 'fmtAna'>;
 
@@ -29,7 +30,7 @@ export default function CrmBloklar9({ reportsTab, orders, quotations, currentLan
         const colors370 = ['#6366f1','#10b981','#f59e0b','#3b82f6','#f97316','#8b5cf6'];
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Müşteri Segmentine Göre Ciro' : 'Revenue by Customer Segment'}</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).musteri_segmentine_gore_ciro}</h3>
             <p className="text-xs text-gray-500 mb-4">Total: {fmtAna(totalRev370,'full',0)}</p>
             <div className="space-y-2">
               {segs370.map((s, i) => (
@@ -264,7 +265,7 @@ export default function CrmBloklar9({ reportsTab, orders, quotations, currentLan
         return (
           <div className="apple-card p-4 mb-4">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-sm">{currentLanguage === 'tr' ? 'Siparişler Arası Ortalama Gün' : 'Avg Days Between Orders'}</h3>
+              <h3 className="font-semibold text-sm">{oc(currentLanguage).siparisler_arasi_ortalama_gun}</h3>
               <span className="text-xs bg-purple-100 text-purple-700 rounded-full px-2 py-0.5">{avg.toFixed(0)}d avg</span>
             </div>
             <div className="flex items-end gap-2 h-20 mb-1">

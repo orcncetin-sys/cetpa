@@ -30,6 +30,7 @@ import { exportOrderPDF } from '../utils/pdf';
 import { syncShopify } from '../services/shopifyService';
 import SortHeader from './SortHeader';
 import ModuleHeader from './ModuleHeader';
+import { oc } from '../i18n/ortak';
 
 // Lazy-loaded components (defined in App.tsx via React.lazy) — keep the same pattern
 const QuotationForm   = React.lazy(() => import('./QuotationForm'));
@@ -265,7 +266,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
             </button>
           ) : b2bTab === 'dealers' ? (
             <button onClick={() => { setEditingDealer(null); setDealerForm({ name: '', company: '', email: '', phone: '', taxId: '', creditLimit: 500000, priceTier: 'Dealer', paymentTerms: '30', address: '' }); setIsDealerModalOpen(true); }} className="apple-button-primary">
-              <Plus className="w-4 h-4" /> {currentLanguage === 'tr' ? 'Yeni Bayi' : 'New Dealer'}
+              <Plus className="w-4 h-4" /> {oc(currentLanguage).yeni_bayi}
             </button>
           ) : b2bTab === 'pricelists' && canManagePrices ? (
             <button onClick={() => setIsAddingPrice(true)} className="apple-button-primary">
@@ -296,20 +297,20 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
         <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
           <div className="apple-card p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-lg">{editingDealer ? (currentLanguage === 'tr' ? 'Bayi Düzenle' : 'Edit Dealer') : (currentLanguage === 'tr' ? 'Yeni Bayi' : 'New Dealer')}</h3>
+              <h3 className="font-bold text-lg">{editingDealer ? (currentLanguage === 'tr' ? 'Bayi Düzenle' : 'Edit Dealer') : (oc(currentLanguage).yeni_bayi)}</h3>
               <button onClick={() => setIsDealerModalOpen(false)} className="p-1.5 rounded-lg hover:bg-gray-100"><X className="w-4 h-4" /></button>
             </div>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{currentLanguage === 'tr' ? 'Ad Soyad' : 'Full Name'}</label>
+                <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{oc(currentLanguage).ad_soyad}</label>
                   <input className="apple-input w-full" value={dealerForm.name} onChange={e => setDealerForm(f => ({ ...f, name: e.target.value }))} placeholder="Ahmet Yılmaz" /></div>
-                <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{currentLanguage === 'tr' ? 'Firma' : 'Company'}</label>
+                <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{oc(currentLanguage).firma}</label>
                   <input className="apple-input w-full" value={dealerForm.company} onChange={e => setDealerForm(f => ({ ...f, company: e.target.value }))} placeholder="ABC Ticaret Ltd." /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs font-semibold text-gray-500 mb-1 block">E-posta</label>
                   <input className="apple-input w-full" type="email" value={dealerForm.email} onChange={e => setDealerForm(f => ({ ...f, email: e.target.value }))} placeholder="bayi@firma.com" /></div>
-                <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{currentLanguage === 'tr' ? 'Telefon' : 'Phone'}</label>
+                <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{oc(currentLanguage).telefon}</label>
                   <input className="apple-input w-full" value={dealerForm.phone} onChange={e => setDealerForm(f => ({ ...f, phone: e.target.value }))} placeholder="+90 555 000 00 00" /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -324,17 +325,17 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                   </select></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{currentLanguage === 'tr' ? 'Kredi Limiti (₺)' : 'Credit Limit (₺)'}</label>
+                <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{oc(currentLanguage).kredi_limiti}</label>
                   <input className="apple-input w-full" type="number" value={dealerForm.creditLimit} onChange={e => setDealerForm(f => ({ ...f, creditLimit: Number(e.target.value) }))} /></div>
                 <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{currentLanguage === 'tr' ? 'Ödeme Vadesi (gün)' : 'Payment Terms (days)'}</label>
                   <input className="apple-input w-full" type="number" value={dealerForm.paymentTerms} onChange={e => setDealerForm(f => ({ ...f, paymentTerms: e.target.value }))} /></div>
               </div>
-              <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{currentLanguage === 'tr' ? 'Adres' : 'Address'}</label>
+              <div><label className="text-xs font-semibold text-gray-500 mb-1 block">{oc(currentLanguage).adres}</label>
                 <textarea className="apple-input w-full resize-none" rows={2} value={dealerForm.address} onChange={e => setDealerForm(f => ({ ...f, address: e.target.value }))} /></div>
             </div>
             <div className="flex gap-2 mt-5">
-              <button onClick={handleSaveDealer} className="apple-button-primary flex-1 justify-center">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
-              <button onClick={() => setIsDealerModalOpen(false)} className="apple-button-secondary flex-1 justify-center">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+              <button onClick={handleSaveDealer} className="apple-button-primary flex-1 justify-center">{oc(currentLanguage).kaydet}</button>
+              <button onClick={() => setIsDealerModalOpen(false)} className="apple-button-secondary flex-1 justify-center">{oc(currentLanguage).iptal}</button>
             </div>
           </div>
         </div>
@@ -380,7 +381,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
             return (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="apple-card p-4"><p className="text-2xl font-bold text-brand">{dealers.length}</p><p className="text-xs text-gray-500 mt-1">{currentLanguage === 'tr' ? 'Toplam Bayi' : 'Total Dealers'}</p></div>
-                <div className="apple-card p-4"><p className="text-2xl font-bold text-green-600">{dealers.filter(d => d.status === 'Active').length}</p><p className="text-xs text-gray-500 mt-1">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</p></div>
+                <div className="apple-card p-4"><p className="text-2xl font-bold text-green-600">{dealers.filter(d => d.status === 'Active').length}</p><p className="text-xs text-gray-500 mt-1">{oc(currentLanguage).aktif}</p></div>
                 <div className="apple-card p-4 flex flex-col gap-2">
                   <div className="flex items-center justify-between"><p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Toplam Kredi' : 'Total Credit'}</p><CurrencyToggle /></div>
                   <p className="text-2xl font-bold text-blue-600">{dcFormat(totalCredit)}</p>
@@ -424,11 +425,11 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                 <thead><tr>
                   <SortHeader label={currentLanguage === 'tr' ? 'Bayi / Firma' : 'Dealer / Company'} sortKey="name" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} />
                   <SortHeader label="E-posta" sortKey="email" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} />
-                  <SortHeader label={currentLanguage === 'tr' ? 'Telefon' : 'Phone'} sortKey="phone" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="hidden md:table-cell" />
+                  <SortHeader label={oc(currentLanguage).telefon} sortKey="phone" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="hidden md:table-cell" />
                   <SortHeader label={currentLanguage === 'tr' ? 'Kademe' : 'Tier'} sortKey="priceTier" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="hidden sm:table-cell" />
-                  <SortHeader label={currentLanguage === 'tr' ? 'Kredi Limiti' : 'Credit Limit'} sortKey="creditLimit" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="hidden lg:table-cell" />
+                  <SortHeader label={oc(currentLanguage).kredi_limiti_2} sortKey="creditLimit" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="hidden lg:table-cell" />
                   <SortHeader label={currentLanguage === 'tr' ? 'Vade' : 'Terms'} sortKey="paymentTerms" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="hidden lg:table-cell" />
-                  <SortHeader label={currentLanguage === 'tr' ? 'Durum' : 'Status'} sortKey="status" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} />
+                  <SortHeader label={oc(currentLanguage).durum} sortKey="status" currentSort={sortConfigDealers} onSort={(key) => setSortConfigDealers(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} />
                   <th className="text-right px-4 py-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{currentLanguage === 'tr' ? 'İşlem' : 'Actions'}</th>
                 </tr></thead>
                 <tbody>
@@ -452,7 +453,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                   {filteredDealers.length === 0 && (
                     <tr><td colSpan={8} className="text-center py-12">
                       <div className="flex flex-col items-center gap-3">
-                        <p className="text-gray-400 text-sm">{dealers.length === 0 ? (currentLanguage === 'tr' ? 'Henüz bayi eklenmedi.' : 'No dealers yet.') : (currentLanguage === 'tr' ? 'Arama sonucu bulunamadı.' : 'No results found.')}</p>
+                        <p className="text-gray-400 text-sm">{dealers.length === 0 ? (currentLanguage === 'tr' ? 'Henüz bayi eklenmedi.' : 'No dealers yet.') : (oc(currentLanguage).arama_sonucu_bulunamadi)}</p>
                         {dealers.length === 0 && (<button onClick={() => { setEditingDealer(null); setDealerForm({ name: '', company: '', email: '', phone: '', taxId: '', creditLimit: 500000, priceTier: 'Dealer', paymentTerms: '30', address: '' }); setIsDealerModalOpen(true); }} className="apple-button-primary text-sm px-5 py-2 flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Bayi Ekle' : 'Add Dealer'}</button>)}
                       </div>
                     </td></tr>
@@ -474,7 +475,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                 <SortHeader label="Retail" sortKey="prices.Retail" currentSort={sortConfigPriceLists} onSort={(key) => setSortConfigPriceLists(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="text-right" />
                 <SortHeader label="B2B Standard" sortKey="prices.B2B Standard" currentSort={sortConfigPriceLists} onSort={(key) => setSortConfigPriceLists(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="text-right hidden sm:table-cell" />
                 <SortHeader label="B2B Premium" sortKey="prices.B2B Premium" currentSort={sortConfigPriceLists} onSort={(key) => setSortConfigPriceLists(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="text-right hidden sm:table-cell" />
-                <SortHeader label={currentLanguage === 'tr' ? 'Bayi' : 'Dealer'} sortKey="prices.Dealer" currentSort={sortConfigPriceLists} onSort={(key) => setSortConfigPriceLists(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="text-right" />
+                <SortHeader label={oc(currentLanguage).bayi} sortKey="prices.Dealer" currentSort={sortConfigPriceLists} onSort={(key) => setSortConfigPriceLists(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} className="text-right" />
                 <th className="text-right px-4 py-3 text-[10px] font-bold text-[#86868B] uppercase tracking-wider">{currentT.actions || 'İşlem'}</th>
               </tr></thead>
               <tbody>
@@ -547,10 +548,10 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                         <td className="py-2.5 px-2 text-xs text-[#86868B] hidden md:table-cell">{tarihYaz(q.createdAt)}</td>
                         <td className="py-2.5 px-2">
                           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={(e) => { e.stopPropagation(); setSelectedQuotation(q); }} className="p-1.5 rounded-lg hover:bg-blue-50 text-[#86868B] hover:text-blue-600 transition-colors" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye className="w-3.5 h-3.5" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); setSelectedQuotation(q); }} className="p-1.5 rounded-lg hover:bg-blue-50 text-[#86868B] hover:text-blue-600 transition-colors" title={oc(currentLanguage).incele}><Eye className="w-3.5 h-3.5" /></button>
                             <button onClick={(e) => { e.stopPropagation(); exportOrderPDF(q as unknown as Record<string, unknown>, currentT, 'teklif'); }} className="p-1.5 rounded-lg hover:bg-green-50 text-[#86868B] hover:text-green-600 transition-colors" title={currentT.download_pdf || 'PDF İndir'}><Download className="w-3.5 h-3.5" /></button>
-                            <button onClick={(e) => { e.stopPropagation(); setSelectedQuotation(q); setIsEditingQuotation(true); }} className="p-1.5 rounded-lg hover:bg-brand/10 text-[#86868B] hover:text-brand transition-colors" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 className="w-3.5 h-3.5" /></button>
-                            <button onClick={(e) => { e.stopPropagation(); void (async () => { if (!(await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en'))) return; try { await deleteDoc(doc(db, 'quotations', q.id)); } catch (error) { throwFirestoreError(error, OperationType.DELETE, `quotations/${q.id}`); } })(); }} className="p-1.5 rounded-lg hover:bg-red-50 text-[#86868B] hover:text-red-500 transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}><Trash2 className="w-3.5 h-3.5" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); setSelectedQuotation(q); setIsEditingQuotation(true); }} className="p-1.5 rounded-lg hover:bg-brand/10 text-[#86868B] hover:text-brand transition-colors" title={oc(currentLanguage).duzenle}><Edit2 className="w-3.5 h-3.5" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); void (async () => { if (!(await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en'))) return; try { await deleteDoc(doc(db, 'quotations', q.id)); } catch (error) { throwFirestoreError(error, OperationType.DELETE, `quotations/${q.id}`); } })(); }} className="p-1.5 rounded-lg hover:bg-red-50 text-[#86868B] hover:text-red-500 transition-colors" title={oc(currentLanguage).sil}><Trash2 className="w-3.5 h-3.5" /></button>
                           </div>
                         </td>
                       </tr>

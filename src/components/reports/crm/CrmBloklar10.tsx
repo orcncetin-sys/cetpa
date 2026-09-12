@@ -11,6 +11,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanDate, zamanMs, ayAnahtari, gunAnahtari } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'inventory' | 'currentLanguage' | 'fmtAna'>;
 
@@ -167,7 +168,7 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
         const palette = ['#ff4000','#3b82f6','#22c55e','#f59e0b','#8b5cf6'];
         return (
           <div className="apple-card p-4 mb-4">
-            <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'Müşteri Segmentine Göre Ciro' : 'Revenue by Customer Segment'}</h3>
+            <h3 className="font-semibold text-sm mb-3">{oc(currentLanguage).musteri_segmentine_gore_ciro}</h3>
             <div className="flex h-4 rounded-full overflow-hidden mb-3">
               {rows.map(([seg,d],i)=><div key={seg} style={{width:`${(d.revenue/totalRev)*100}%`,background:palette[i]}} title={seg} />)}
             </div>

@@ -21,6 +21,7 @@ import {
 } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; dir: 'asc' | 'desc' }; onSort: (key: string) => void; align?: 'left' | 'right' | 'center' }> = ({ label, sortKey, currentSort, onSort, align = 'left' }) => {
   const isActive = currentSort.key === sortKey;
@@ -103,9 +104,9 @@ const SortableTask: React.FC<{ task: Task; setModalConfig: React.Dispatch<React.
           task.priority === 'High' ? 'bg-red-100 text-red-600' :
           task.priority === 'Medium' ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'
         }`}>
-          {task.priority === 'High' ? (currentLanguage === 'tr' ? 'Yüksek' : 'High') :
-           task.priority === 'Medium' ? (currentLanguage === 'tr' ? 'Orta' : 'Medium') :
-           task.priority === 'Low' ? (currentLanguage === 'tr' ? 'Düşük' : 'Low') : task.priority}
+          {task.priority === 'High' ? (oc(currentLanguage).yuksek) :
+           task.priority === 'Medium' ? (oc(currentLanguage).orta) :
+           task.priority === 'Low' ? (oc(currentLanguage).dusuk) : task.priority}
         </span>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 backdrop-blur-sm p-1 rounded-lg shadow-sm border border-gray-100 absolute top-2 right-2">
           <button onClick={() => setModalConfig({ isOpen: true, type: 'task', mode: 'view', data: task })} className="p-1 hover:bg-blue-50 text-blue-500 rounded-md transition-colors"><Eye className="w-3 h-3" /></button>
@@ -266,7 +267,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
       }
     } catch (err) {
       logFirestoreError(err, modalConfig.mode === 'edit' ? OperationType.UPDATE : OperationType.CREATE, 'projects', auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -311,7 +312,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
       }
     } catch (err) {
       logFirestoreError(err, modalConfig.mode === 'edit' ? OperationType.UPDATE : OperationType.CREATE, 'tasks', auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -326,7 +327,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
       }
     } catch (err) {
       logFirestoreError(err, modalConfig.mode === 'edit' ? OperationType.UPDATE : OperationType.CREATE, 'resources', auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -339,10 +340,10 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
       if (type === 'project') {
         await Promise.allSettled(tasks.filter(t => t.projectId === id).map(t => deleteDoc(doc(db, 'tasks', t.id))));
       }
-      showToast(currentLanguage === 'tr' ? 'Kayıt başarıyla silindi.' : 'Record deleted successfully.');
+      showToast(oc(currentLanguage).kayit_basariyla_silindi);
     } catch (err) {
       logFirestoreError(err, OperationType.DELETE, `${type}s/${id}`, auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -385,27 +386,27 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
   };
 
   const t = {
-    projects: currentLanguage === 'tr' ? 'Projeler' : 'Projects',
-    tasks: currentLanguage === 'tr' ? 'Görevler' : 'Tasks',
+    projects: oc(currentLanguage).projeler,
+    tasks: oc(currentLanguage).gorevler,
     gantt: currentLanguage === 'tr' ? 'Takvim / Gantt' : 'Timeline / Gantt',
     resources: currentLanguage === 'tr' ? 'Kaynaklar' : 'Resources',
     calendar: currentLanguage === 'tr' ? 'Takvim' : 'Calendar',
-    add: currentLanguage === 'tr' ? 'Yeni Ekle' : 'Add New',
-    search: currentLanguage === 'tr' ? 'Ara...' : 'Search...',
-    status: currentLanguage === 'tr' ? 'Durum' : 'Status',
-    priority: currentLanguage === 'tr' ? 'Öncelik' : 'Priority',
+    add: oc(currentLanguage).yeni_ekle,
+    search: oc(currentLanguage).ara,
+    status: oc(currentLanguage).durum,
+    priority: oc(currentLanguage).oncelik,
     progress: currentLanguage === 'tr' ? 'İlerleme' : 'Progress',
-    budget: currentLanguage === 'tr' ? 'Bütçe' : 'Budget',
-    spent: currentLanguage === 'tr' ? 'Harcanan' : 'Spent',
-    manager: currentLanguage === 'tr' ? 'Yönetici' : 'Manager',
-    actions: currentLanguage === 'tr' ? 'İşlemler' : 'Actions',
+    budget: oc(currentLanguage).butce,
+    spent: oc(currentLanguage).harcanan,
+    manager: oc(currentLanguage).yonetici,
+    actions: oc(currentLanguage).islemler,
   };
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <ModuleHeader
-        title={currentLanguage === 'tr' ? 'Proje Yönetimi' : 'Project Management'}
+        title={oc(currentLanguage).proje_yonetimi}
         subtitle={currentLanguage === 'tr' ? 'Projeler, görevler ve kaynak planlama' : 'Projects, tasks and resource planning'}
         icon={Target}
         actionButton={
@@ -465,15 +466,15 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                 <p className="text-2xl font-bold text-blue-600">{projects.filter(p => p.status === 'Active').length}</p>
               </div>
               <div className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", projectFilter === 'Completed' ? 'bg-green-100' : 'bg-green-50')} onClick={() => setProjectFilter('Completed')}>
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Tamamlanan' : 'Completed'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).tamamlanan}</p>
                 <p className="text-2xl font-bold text-green-600">{projects.filter(p => p.status === 'Completed').length}</p>
               </div>
               <div className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", projectFilter === 'All' ? 'bg-orange-100' : 'bg-orange-50')} onClick={() => setProjectFilter('All')}>
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Tüm Projeler' : 'All Projects'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).tum_projeler}</p>
                 <p className="text-2xl font-bold text-orange-600">{projects.length}</p>
               </div>
               <div className="apple-card p-5 bg-purple-50 cursor-pointer hover:shadow-md transition-all" onClick={() => setProjectFilter('All')}>
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Toplam Bütçe' : 'Total Budget'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).toplam_butce}</p>
                 <p className="text-2xl font-bold text-purple-600">₺{(projects.reduce((sum, p) => sum + p.budget, 0) / 1000).toFixed(0)}K</p>
               </div>
             </div>
@@ -484,7 +485,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                 <table className="min-w-[560px] w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
-                      <SortHeader label={currentLanguage === 'tr' ? 'Proje Adı' : 'Project Name'} sortKey="name" currentSort={projectSort} onSort={(k) => toggleSort(projectSort, k, setProjectSort)} />
+                      <SortHeader label={oc(currentLanguage).proje_adi} sortKey="name" currentSort={projectSort} onSort={(k) => toggleSort(projectSort, k, setProjectSort)} />
                       <SortHeader label={currentLanguage === 'tr' ? 'Müşteri' : 'Client'} sortKey="client" currentSort={projectSort} onSort={(k) => toggleSort(projectSort, k, setProjectSort)} />
                       <SortHeader label={t.manager} sortKey="manager" currentSort={projectSort} onSort={(k) => toggleSort(projectSort, k, setProjectSort)} />
                       <SortHeader label={t.progress} sortKey="progress" currentSort={projectSort} onSort={(k) => toggleSort(projectSort, k, setProjectSort)} align="right" />
@@ -521,17 +522,17 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                             project.status === 'On-Hold' ? 'bg-orange-100 text-orange-600' : 
                             project.status === 'Completed' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'
                           }`}>
-                            {project.status === 'Active' ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') :
-                             project.status === 'Completed' ? (currentLanguage === 'tr' ? 'Tamamlandı' : 'Completed') :
-                             project.status === 'On-Hold' ? (currentLanguage === 'tr' ? 'Beklemede' : 'On-Hold') :
-                             project.status === 'Planning' ? (currentLanguage === 'tr' ? 'Planlama' : 'Planning') : project.status}
+                            {project.status === 'Active' ? (oc(currentLanguage).aktif) :
+                             project.status === 'Completed' ? (oc(currentLanguage).tamamlandi) :
+                             project.status === 'On-Hold' ? (oc(currentLanguage).beklemede) :
+                             project.status === 'Planning' ? (oc(currentLanguage).planlama) : project.status}
                           </span>
                         </td>
                         <td className="py-4 px-6 text-right">
                           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => setModalConfig({ isOpen: true, type: 'project', mode: 'view', data: project })} className="p-2 hover:bg-blue-50 text-blue-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye className="w-4 h-4" /></button>
-                            <button onClick={() => setModalConfig({ isOpen: true, type: 'project', mode: 'edit', data: project })} className="p-2 hover:bg-gray-200 text-gray-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 className="w-4 h-4" /></button>
-                            <button onClick={() => handleDelete(project.id, 'project')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}><Trash2 className="w-4 h-4" /></button>
+                            <button onClick={() => setModalConfig({ isOpen: true, type: 'project', mode: 'view', data: project })} className="p-2 hover:bg-blue-50 text-blue-500 rounded-xl transition-colors" title={oc(currentLanguage).incele}><Eye className="w-4 h-4" /></button>
+                            <button onClick={() => setModalConfig({ isOpen: true, type: 'project', mode: 'edit', data: project })} className="p-2 hover:bg-gray-200 text-gray-500 rounded-xl transition-colors" title={oc(currentLanguage).duzenle}><Edit2 className="w-4 h-4" /></button>
+                            <button onClick={() => handleDelete(project.id, 'project')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={oc(currentLanguage).sil}><Trash2 className="w-4 h-4" /></button>
                           </div>
                         </td>
                       </tr>
@@ -553,7 +554,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                 onChange={(e) => setSelectedProjectId(e.target.value)}
                 className="apple-input py-1 text-xs"
               >
-                <option value="All">{currentLanguage === 'tr' ? 'Tüm Projeler' : 'All Projects'}</option>
+                <option value="All">{oc(currentLanguage).tum_projeler}</option>
                 {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
@@ -564,9 +565,9 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                   <DroppableColumn 
                     key={column} 
                     column={
-                      column === 'Todo' ? (currentLanguage === 'tr' ? 'Yapılacak' : 'Todo') :
-                      column === 'In-Progress' ? (currentLanguage === 'tr' ? 'Devam Ediyor' : 'In-Progress') :
-                      column === 'Review' ? (currentLanguage === 'tr' ? 'İnceleme' : 'Review') :
+                      column === 'Todo' ? (oc(currentLanguage).yapilacak) :
+                      column === 'In-Progress' ? (oc(currentLanguage).devam_ediyor) :
+                      column === 'Review' ? (oc(currentLanguage).inceleme) :
                       column === 'Done' ? (currentLanguage === 'tr' ? 'Tamamlandı' : 'Done') : column
                     } 
                     tasks={tasks.filter(t => t.status === column && (selectedProjectId === 'All' || t.projectId === selectedProjectId))} 
@@ -583,18 +584,18 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
         {activeTab === 'gantt' && (
           <motion.div key="gantt" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="apple-card p-6">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="font-bold text-lg text-[#1D1D1F]">{currentLanguage === 'tr' ? 'Proje Zaman Çizelgesi' : 'Project Timeline'}</h3>
+              <h3 className="font-bold text-lg text-[#1D1D1F]">{oc(currentLanguage).proje_zaman_cizelgesi}</h3>
               <button 
                 onClick={() => setModalConfig({ isOpen: true, type: 'project', mode: 'add', data: null })}
                 className="apple-button-primary flex items-center gap-2 px-4 py-2 text-sm"
               >
-                <Plus className="w-4 h-4" /> {currentLanguage === 'tr' ? 'Proje Ekle' : 'Add Project'}
+                <Plus className="w-4 h-4" /> {oc(currentLanguage).proje_ekle}
               </button>
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-[#ff4000]"></span>
-                <span className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Tamamlanan' : 'Completed'}</span>
+                <span className="text-xs text-gray-500">{oc(currentLanguage).tamamlanan}</span>
                 <span className="w-3 h-3 rounded-full bg-gray-300 ml-4"></span>
-                <span className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Planlanan' : 'Planned'}</span>
+                <span className="text-xs text-gray-500">{oc(currentLanguage).planlanan}</span>
               </div>
             </div>
             <ResponsiveContainer width="100%" height={600}>
@@ -645,7 +646,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                 }} />
                 <Bar dataKey="duration" fill="#E5E7EB" radius={[0, 4, 4, 0]} barSize={15} />
                 <Bar dataKey={(d) => (d.duration * d.progress) / 100} fill="#ff4000" radius={[0, 4, 4, 0]} barSize={15} />
-                <ReferenceLine x={differenceInDays(new Date(), new Date(Math.min(...projects.map(p => parseISO(p.startDate).getTime()))))} stroke="#3B82F6" strokeDasharray="3 3" label={{ value: currentLanguage === 'tr' ? 'Bugün' : 'Today', position: 'top', fill: '#3B82F6', fontSize: 10 }} />
+                <ReferenceLine x={differenceInDays(new Date(), new Date(Math.min(...projects.map(p => parseISO(p.startDate).getTime()))))} stroke="#3B82F6" strokeDasharray="3 3" label={{ value: oc(currentLanguage).bugun, position: 'top', fill: '#3B82F6', fontSize: 10 }} />
               </ComposedChart>
             </ResponsiveContainer>
           </motion.div>
@@ -657,8 +658,8 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
             <table className="min-w-[560px] w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="py-3 px-6 text-left text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'İsim' : 'Name'}</th>
-                  <th className="py-3 px-6 text-left text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'Rol' : 'Role'}</th>
+                  <th className="py-3 px-6 text-left text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{oc(currentLanguage).isim}</th>
+                  <th className="py-3 px-6 text-left text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{oc(currentLanguage).rol}</th>
                   <th className="py-3 px-6 text-center text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'Aktif Görevler' : 'Active Tasks'}</th>
                   <th className="py-3 px-6 text-center text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{currentLanguage === 'tr' ? 'İş Yükü' : 'Workload'}</th>
                   <th className="py-3 px-6 text-right text-[10px] text-[#86868B] font-bold uppercase tracking-wider whitespace-nowrap">{t.actions}</th>
@@ -680,8 +681,8 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                     </td>
                     <td className="py-4 px-6 text-right">
                       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => setModalConfig({ isOpen: true, type: 'resource', mode: 'edit', data: resource })} className="p-2 hover:bg-gray-200 text-gray-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 className="w-4 h-4" /></button>
-                        <button onClick={() => handleDelete(resource.id, 'resource')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={() => setModalConfig({ isOpen: true, type: 'resource', mode: 'edit', data: resource })} className="p-2 hover:bg-gray-200 text-gray-500 rounded-xl transition-colors" title={oc(currentLanguage).duzenle}><Edit2 className="w-4 h-4" /></button>
+                        <button onClick={() => handleDelete(resource.id, 'resource')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={oc(currentLanguage).sil}><Trash2 className="w-4 h-4" /></button>
                       </div>
                     </td>
                   </tr>
@@ -700,11 +701,11 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                 <div className="flex gap-4">
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full bg-[#ff4000]" />
-                    <span className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Projeler' : 'Projects'}</span>
+                    <span className="text-xs text-gray-500">{oc(currentLanguage).projeler}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full bg-blue-500" />
-                    <span className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Görevler' : 'Tasks'}</span>
+                    <span className="text-xs text-gray-500">{oc(currentLanguage).gorevler}</span>
                   </div>
                 </div>
               </div>
@@ -757,7 +758,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl relative z-10 overflow-hidden">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="text-xl font-bold text-[#1D1D1F]">
-                  {modalConfig.mode === 'view' ? (currentLanguage === 'tr' ? 'İncele' : 'View') : modalConfig.mode === 'edit' ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : (currentLanguage === 'tr' ? 'Yeni Ekle' : 'Add New')}
+                  {modalConfig.mode === 'view' ? (oc(currentLanguage).incele) : modalConfig.mode === 'edit' ? (oc(currentLanguage).duzenle) : (oc(currentLanguage).yeni_ekle)}
                 </h3>
                 <button onClick={() => setModalConfig({ isOpen: false, type: null, mode: 'add', data: null })} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                   <X className="w-5 h-5 text-gray-500" />
@@ -769,7 +770,7 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                   {modalConfig.type === 'project' && (
                     <>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Proje Adı' : 'Project Name'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).proje_adi}</label>
                         <input name="name" defaultValue={(modalConfig.data as Project)?.name || ''} required className="apple-input w-full" />
                       </div>
                       <div className="grid grid-cols-2 gap-4">
@@ -778,36 +779,36 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                           <input name="client" defaultValue={(modalConfig.data as Project)?.client || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Yönetici' : 'Manager'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).yonetici}</label>
                           <input name="manager" defaultValue={(modalConfig.data as Project)?.manager || ''} required className="apple-input w-full" />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Başlangıç' : 'Start Date'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).baslangic}</label>
                           <input type="date" name="startDate" defaultValue={(modalConfig.data as Project)?.startDate || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Bitiş' : 'End Date'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).bitis}</label>
                           <input type="date" name="endDate" defaultValue={(modalConfig.data as Project)?.endDate || ''} required className="apple-input w-full" />
                         </div>
                       </div>
                       <div className="grid grid-cols-3 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).durum}</label>
                           <select name="status" defaultValue={(modalConfig.data as Project)?.status || 'Active'} className="apple-input w-full">
-                            <option value="Active">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</option>
-                            <option value="Completed">{currentLanguage === 'tr' ? 'Tamamlandı' : 'Completed'}</option>
-                            <option value="On-Hold">{currentLanguage === 'tr' ? 'Beklemede' : 'On-Hold'}</option>
-                            <option value="Planning">{currentLanguage === 'tr' ? 'Planlama' : 'Planning'}</option>
+                            <option value="Active">{oc(currentLanguage).aktif}</option>
+                            <option value="Completed">{oc(currentLanguage).tamamlandi}</option>
+                            <option value="On-Hold">{oc(currentLanguage).beklemede}</option>
+                            <option value="Planning">{oc(currentLanguage).planlama}</option>
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Öncelik' : 'Priority'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).oncelik}</label>
                           <select name="priority" defaultValue={(modalConfig.data as Project)?.priority || 'Medium'} className="apple-input w-full">
-                            <option value="High">{currentLanguage === 'tr' ? 'Yüksek' : 'High'}</option>
-                            <option value="Medium">{currentLanguage === 'tr' ? 'Orta' : 'Medium'}</option>
-                            <option value="Low">{currentLanguage === 'tr' ? 'Düşük' : 'Low'}</option>
+                            <option value="High">{oc(currentLanguage).yuksek}</option>
+                            <option value="Medium">{oc(currentLanguage).orta}</option>
+                            <option value="Low">{oc(currentLanguage).dusuk}</option>
                           </select>
                         </div>
                         <div>
@@ -817,11 +818,11 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Bütçe' : 'Budget'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).butce}</label>
                           <input type="number" name="budget" defaultValue={(modalConfig.data as Project)?.budget || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Harcanan' : 'Spent'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).harcanan}</label>
                           <input type="number" name="spent" defaultValue={(modalConfig.data as Project)?.spent || 0} required className="apple-input w-full" />
                         </div>
                       </div>
@@ -852,30 +853,30 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Başlangıç' : 'Start Date'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).baslangic}</label>
                           <input type="date" name="startDate" defaultValue={(modalConfig.data as Task)?.startDate || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Son Tarih' : 'Due Date'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).son_tarih}</label>
                           <input type="date" name="dueDate" defaultValue={(modalConfig.data as Task)?.dueDate || ''} required className="apple-input w-full" />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).durum}</label>
                           <select name="status" defaultValue={(modalConfig.data as Task)?.status || 'Todo'} className="apple-input w-full">
-                            <option value="Todo">{currentLanguage === 'tr' ? 'Yapılacak' : 'Todo'}</option>
-                            <option value="In-Progress">{currentLanguage === 'tr' ? 'Devam Ediyor' : 'In-Progress'}</option>
-                            <option value="Review">{currentLanguage === 'tr' ? 'İnceleme' : 'Review'}</option>
+                            <option value="Todo">{oc(currentLanguage).yapilacak}</option>
+                            <option value="In-Progress">{oc(currentLanguage).devam_ediyor}</option>
+                            <option value="Review">{oc(currentLanguage).inceleme}</option>
                             <option value="Done">{currentLanguage === 'tr' ? 'Tamamlandı' : 'Done'}</option>
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Öncelik' : 'Priority'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).oncelik}</label>
                           <select name="priority" defaultValue={(modalConfig.data as Task)?.priority || 'Medium'} className="apple-input w-full">
-                            <option value="High">{currentLanguage === 'tr' ? 'Yüksek' : 'High'}</option>
-                            <option value="Medium">{currentLanguage === 'tr' ? 'Orta' : 'Medium'}</option>
-                            <option value="Low">{currentLanguage === 'tr' ? 'Düşük' : 'Low'}</option>
+                            <option value="High">{oc(currentLanguage).yuksek}</option>
+                            <option value="Medium">{oc(currentLanguage).orta}</option>
+                            <option value="Low">{oc(currentLanguage).dusuk}</option>
                           </select>
                         </div>
                       </div>
@@ -886,11 +887,11 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
                     <>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'İsim' : 'Name'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).isim}</label>
                           <input name="name" defaultValue={(modalConfig.data as Resource)?.name || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Rol' : 'Role'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).rol}</label>
                           <input name="role" defaultValue={(modalConfig.data as Resource)?.role || ''} required className="apple-input w-full" />
                         </div>
                       </div>
@@ -914,11 +915,11 @@ const ProjectModule: React.FC<ProjectModuleProps> = ({ currentLanguage }) => {
 
                 <div className="pt-4 flex justify-end gap-3 border-t border-gray-100">
                   <button type="button" onClick={() => setModalConfig({ isOpen: false, type: null, mode: 'add', data: null })} className="px-6 py-2.5 rounded-xl text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">
-                    {modalConfig.mode === 'view' ? (currentLanguage === 'tr' ? 'Kapat' : 'Close') : (currentLanguage === 'tr' ? 'İptal' : 'Cancel')}
+                    {modalConfig.mode === 'view' ? (oc(currentLanguage).kapat) : (oc(currentLanguage).iptal)}
                   </button>
                   {modalConfig.mode !== 'view' && (
                     <button type="submit" className="apple-button-primary px-8 py-2.5">
-                      {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
+                      {oc(currentLanguage).kaydet}
                     </button>
                   )}
                 </div>

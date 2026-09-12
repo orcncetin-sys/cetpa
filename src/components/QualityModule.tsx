@@ -22,6 +22,7 @@ import {
 } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 interface QCRecord {
   id: string;
@@ -274,7 +275,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
       }
     } catch (err) {
       logFirestoreError(err, modalConfig.mode === 'edit' ? OperationType.UPDATE : OperationType.CREATE, 'qcRecords', auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -289,7 +290,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
       }
     } catch (err) {
       logFirestoreError(err, modalConfig.mode === 'edit' ? OperationType.UPDATE : OperationType.CREATE, 'complaints', auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -304,7 +305,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
       }
     } catch (err) {
       logFirestoreError(err, modalConfig.mode === 'edit' ? OperationType.UPDATE : OperationType.CREATE, 'auditItems', auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -381,7 +382,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
   };
 
   const handleDelete = async (id: string, type: 'qc' | 'complaint' | 'audit' | 'fmea' | 'pfmea' | 'ctpat' | 'kaizen' | '5s' | '8d') => {
-    if (!isAuthenticated) { showToast(currentLanguage === 'tr' ? 'Bu işlem için giriş gerekli.' : 'Login required.', 'error'); return; }
+    if (!isAuthenticated) { showToast(oc(currentLanguage).bu_islem_icin_giris_gerekli, 'error'); return; }
     const ok = await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en');
     if (!ok) return;
     try {
@@ -394,16 +395,16 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   type === 'kaizen' ? 'kaizenRecords' :
                   type === '5s' ? 'fiveSRecords' : 'eightDRecords';
       await deleteDoc(doc(db, col, id));
-      showToast(currentLanguage === 'tr' ? 'Kayıt başarıyla silindi.' : 'Record deleted successfully.');
+      showToast(oc(currentLanguage).kayit_basariyla_silindi);
     } catch (err) {
       logFirestoreError(err, OperationType.DELETE, `${type}s/${id}`, auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
   const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAuthenticated) { showToast(currentLanguage === 'tr' ? 'Bu işlem için giriş gerekli.' : 'Login required.', 'error'); return; }
+    if (!isAuthenticated) { showToast(oc(currentLanguage).bu_islem_icin_giris_gerekli, 'error'); return; }
     if (modalConfig.mode === 'view') {
       setModalConfig({ isOpen: false, type: null, mode: 'add', data: null });
       return;
@@ -454,18 +455,18 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
   };
 
   const t = {
-    qc: currentLanguage === 'tr' ? 'Kalite Kontrol' : 'Quality Control',
+    qc: oc(currentLanguage).kalite_kontrol,
     complaints: currentLanguage === 'tr' ? 'Şikayetler' : 'Complaints',
     audit: currentLanguage === 'tr' ? 'İç Denetim' : 'Internal Audit',
     kpi: currentLanguage === 'tr' ? 'Kalite KPI' : 'Quality KPI',
-    add: currentLanguage === 'tr' ? 'Yeni Ekle' : 'Add New',
-    search: currentLanguage === 'tr' ? 'Ara...' : 'Search...',
-    status: currentLanguage === 'tr' ? 'Durum' : 'Status',
-    defectRate: currentLanguage === 'tr' ? 'Hata Oranı' : 'Defect Rate',
-    pass: currentLanguage === 'tr' ? 'Uygun' : 'Pass',
-    fail: currentLanguage === 'tr' ? 'Hatalı' : 'Fail',
-    conditional: currentLanguage === 'tr' ? 'Şartlı Kabul' : 'Conditional',
-    actions: currentLanguage === 'tr' ? 'İşlemler' : 'Actions',
+    add: oc(currentLanguage).yeni_ekle,
+    search: oc(currentLanguage).ara,
+    status: oc(currentLanguage).durum,
+    defectRate: oc(currentLanguage).hata_orani,
+    pass: oc(currentLanguage).uygun,
+    fail: oc(currentLanguage).hatali,
+    conditional: oc(currentLanguage).sartli_kabul,
+    actions: oc(currentLanguage).islemler,
   };
 
   // Denetim Uyumluluk: audit sekmesindeki donut ile KPI şeridindeki kart AYNI
@@ -543,7 +544,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
 
       {/* Header */}
       <ModuleHeader
-        title={currentLanguage === 'tr' ? 'Kalite Yönetimi' : 'Quality Management'}
+        title={oc(currentLanguage).kalite_yonetimi}
         subtitle={currentLanguage === 'tr' ? 'Kalite kontrol, şikayet yönetimi ve denetim' : 'Quality control, complaint management and audit'}
         icon={ShieldCheck}
         actionButton={
@@ -615,7 +616,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <button className="apple-card p-5 bg-blue-50 cursor-pointer hover:shadow-md transition-all text-left" onClick={() => setActiveTab('qc')}>
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Toplam Denetim' : 'Total Audits'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).toplam_denetim}</p>
                 <p className="text-2xl font-bold text-blue-600">{qcRecords.length}</p>
               </button>
               <button className="apple-card p-5 bg-green-50 cursor-pointer hover:shadow-md transition-all text-left" onClick={() => setActiveTab('qc')}>
@@ -638,9 +639,9 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                 <table className="min-w-[560px] w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
-                      <SortHeader label={currentLanguage === 'tr' ? 'Tarih' : 'Date'} sortKey="date" currentSort={qcSort} onSort={(k) => toggleSort(qcSort, k, setQcSort)} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Ürün' : 'Product'} sortKey="productName" currentSort={qcSort} onSort={(k) => toggleSort(qcSort, k, setQcSort)} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Parti No' : 'Batch No'} sortKey="batchNo" currentSort={qcSort} onSort={(k) => toggleSort(qcSort, k, setQcSort)} />
+                      <SortHeader label={oc(currentLanguage).tarih} sortKey="date" currentSort={qcSort} onSort={(k) => toggleSort(qcSort, k, setQcSort)} />
+                      <SortHeader label={oc(currentLanguage).urun} sortKey="productName" currentSort={qcSort} onSort={(k) => toggleSort(qcSort, k, setQcSort)} />
+                      <SortHeader label={oc(currentLanguage).parti_no} sortKey="batchNo" currentSort={qcSort} onSort={(k) => toggleSort(qcSort, k, setQcSort)} />
                       <SortHeader label={currentLanguage === 'tr' ? 'Örneklem' : 'Sample'} sortKey="sampleSize" currentSort={qcSort} onSort={(k) => toggleSort(qcSort, k, setQcSort)} align="right" />
                       <SortHeader label={currentLanguage === 'tr' ? 'Hata' : 'Defect'} sortKey="defects" currentSort={qcSort} onSort={(k) => toggleSort(qcSort, k, setQcSort)} align="right" />
                       <SortHeader label={t.defectRate} sortKey="defectRate" currentSort={qcSort} onSort={(k) => toggleSort(qcSort, k, setQcSort)} align="right" />
@@ -669,9 +670,9 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                         </td>
                         <td className="py-4 px-6 text-right">
                           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => setModalConfig({ isOpen: true, type: 'qc', mode: 'view', data: record })} className="p-2 hover:bg-blue-50 text-blue-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye className="w-4 h-4" /></button>
-                            <button onClick={() => setModalConfig({ isOpen: true, type: 'qc', mode: 'edit', data: record })} className="p-2 hover:bg-gray-200 text-gray-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 className="w-4 h-4" /></button>
-                            <button onClick={() => handleDelete(record.id, 'qc')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}><Trash2 className="w-4 h-4" /></button>
+                            <button onClick={() => setModalConfig({ isOpen: true, type: 'qc', mode: 'view', data: record })} className="p-2 hover:bg-blue-50 text-blue-500 rounded-xl transition-colors" title={oc(currentLanguage).incele}><Eye className="w-4 h-4" /></button>
+                            <button onClick={() => setModalConfig({ isOpen: true, type: 'qc', mode: 'edit', data: record })} className="p-2 hover:bg-gray-200 text-gray-500 rounded-xl transition-colors" title={oc(currentLanguage).duzenle}><Edit2 className="w-4 h-4" /></button>
+                            <button onClick={() => handleDelete(record.id, 'qc')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={oc(currentLanguage).sil}><Trash2 className="w-4 h-4" /></button>
                           </div>
                         </td>
                       </tr>
@@ -699,8 +700,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   )}
                 >
                   {filter === 'All' ? (currentLanguage === 'tr' ? 'Tüm Şiddetler' : 'All Severities') : 
-                   filter === 'Critical' ? (currentLanguage === 'tr' ? 'Kritik' : 'Critical') :
-                   filter === 'Major' ? (currentLanguage === 'tr' ? 'Önemli' : 'Major') :
+                   filter === 'Critical' ? (oc(currentLanguage).kritik) :
+                   filter === 'Major' ? (oc(currentLanguage).onemli) :
                    filter === 'Minor' ? (currentLanguage === 'tr' ? 'Düşük' : 'Minor') : filter}
                 </button>
               ))}
@@ -726,19 +727,19 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                     item.severity === 'Critical' ? 'bg-red-100 text-red-600' :
                     item.severity === 'Major' ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'
                   }`}>
-                    {item.severity === 'Critical' ? (currentLanguage === 'tr' ? 'Kritik' : 'Critical') :
-                     item.severity === 'Major' ? (currentLanguage === 'tr' ? 'Önemli' : 'Major') :
+                    {item.severity === 'Critical' ? (oc(currentLanguage).kritik) :
+                     item.severity === 'Major' ? (oc(currentLanguage).onemli) :
                      item.severity === 'Minor' ? (currentLanguage === 'tr' ? 'Düşük' : 'Minor') : item.severity}
                   </span>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4 py-3 border-y border-gray-50">
                   <div>
-                    <p className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Kök Neden' : 'Root Cause'}</p>
+                    <p className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).kok_neden}</p>
                     <p className="text-sm font-semibold text-[#1D1D1F] truncate">{item.rootCause || '—'}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Düzeltici Faaliyet' : 'Corrective Action'}</p>
+                    <p className="text-[10px] font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).duzeltici_faaliyet}</p>
                     <p className="text-sm font-semibold text-green-600 truncate">{item.correctiveAction || '—'}</p>
                   </div>
                 </div>
@@ -753,10 +754,10 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                     item.status === 'Investigating' ? 'bg-blue-100 text-blue-600' : 
                     item.status === 'Closed' ? 'bg-gray-100 text-gray-600' : 'bg-orange-100 text-orange-600'
                   }`}>
-                    {item.status === 'Resolved' ? (currentLanguage === 'tr' ? 'Çözüldü' : 'Resolved') :
-                     item.status === 'Investigating' ? (currentLanguage === 'tr' ? 'İnceleniyor' : 'Investigating') :
-                     item.status === 'Closed' ? (currentLanguage === 'tr' ? 'Kapalı' : 'Closed') :
-                     item.status === 'Open' ? (currentLanguage === 'tr' ? 'Açık' : 'Open') : item.status}
+                    {item.status === 'Resolved' ? (oc(currentLanguage).cozuldu) :
+                     item.status === 'Investigating' ? (oc(currentLanguage).inceleniyor) :
+                     item.status === 'Closed' ? (oc(currentLanguage).kapali) :
+                     item.status === 'Open' ? (oc(currentLanguage).acik) : item.status}
                   </span>
                 </div>
               </div>
@@ -775,7 +776,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
           return (
           <motion.div key="audit" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="apple-card p-6 flex flex-col items-center justify-center text-center">
-              <h3 className="font-bold text-[#1D1D1F] mb-6">{currentLanguage === 'tr' ? 'Denetim Uyumluluk' : 'Audit Compliance'}</h3>
+              <h3 className="font-bold text-[#1D1D1F] mb-6">{oc(currentLanguage).denetim_uyumluluk}</h3>
               <div className="relative w-40 h-40">
                 <svg className="w-full h-full" viewBox="0 0 100 100">
                   <circle cx="50" cy="50" r="45" fill="none" stroke="#F5F5F7" strokeWidth="10" />
@@ -798,10 +799,10 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                 <h3 className="font-bold text-[#1D1D1F]">{currentLanguage === 'tr' ? 'Denetim Maddeleri' : 'Audit Items'}</h3>
                 <div className="flex gap-2">
                   <button onClick={() => toggleSort(auditSort, 'category', setAuditSort)} className={cn("text-[10px] font-bold px-2 py-1 rounded-lg transition-colors", auditSort.key === 'category' ? "bg-[#ff4000] text-white" : "bg-gray-100 text-gray-500")}>
-                    {currentLanguage === 'tr' ? 'Kategori' : 'Category'} {auditSort.key === 'category' && (auditSort.dir === 'asc' ? '↑' : '↓')}
+                    {oc(currentLanguage).kategori} {auditSort.key === 'category' && (auditSort.dir === 'asc' ? '↑' : '↓')}
                   </button>
                   <button onClick={() => toggleSort(auditSort, 'score', setAuditSort)} className={cn("text-[10px] font-bold px-2 py-1 rounded-lg transition-colors", auditSort.key === 'score' ? "bg-[#ff4000] text-white" : "bg-gray-100 text-gray-500")}>
-                    {currentLanguage === 'tr' ? 'Puan' : 'Score'} {auditSort.key === 'score' && (auditSort.dir === 'asc' ? '↑' : '↓')}
+                    {oc(currentLanguage).puan} {auditSort.key === 'score' && (auditSort.dir === 'asc' ? '↑' : '↓')}
                   </button>
                 </div>
               </div>
@@ -812,7 +813,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                       <div>
                         <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider">
                           {item.category === 'Documentation' ? (currentLanguage === 'tr' ? 'Dokümantasyon' : 'Documentation') :
-                           item.category === 'Process' ? (currentLanguage === 'tr' ? 'Süreç' : 'Process') :
+                           item.category === 'Process' ? (oc(currentLanguage).surec) :
                            item.category === 'Safety' ? (currentLanguage === 'tr' ? 'Güvenlik' : 'Safety') :
                            item.category === 'Training' ? (currentLanguage === 'tr' ? 'Eğitim' : 'Training') : item.category}
                         </p>
@@ -843,8 +844,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                 {/* KPI Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   {[
-                    { label: currentLanguage === 'tr' ? 'Denetim Uyumluluk' : 'Audit Compliance', value: denetimUyum != null ? `${denetimUyum}` : '—', icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50', tab: 'audit' },
-                    { label: currentLanguage === 'tr' ? 'Hata Oranı' : 'Defect Rate', value: `%${kpiData.defectRate}`, icon: Zap, color: 'text-red-600', bg: 'bg-red-50', tab: 'qc' },
+                    { label: oc(currentLanguage).denetim_uyumluluk, value: denetimUyum != null ? `${denetimUyum}` : '—', icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50', tab: 'audit' },
+                    { label: oc(currentLanguage).hata_orani, value: `%${kpiData.defectRate}`, icon: Zap, color: 'text-red-600', bg: 'bg-red-50', tab: 'qc' },
                     { label: currentLanguage === 'tr' ? 'Şikayet Endeksi' : 'Complaint Index', value: kpiData.complaintIndex, icon: AlertCircle, color: 'text-orange-600', bg: 'bg-orange-50', tab: 'complaints' },
                     { label: currentLanguage === 'tr' ? 'İlk Seferde Doğru' : 'First Pass Yield', value: `%${kpiData.firstPassYield}`, icon: Award, color: 'text-green-600', bg: 'bg-green-50', tab: 'qc' },
                   ].map((kpi, i) => (
@@ -913,14 +914,14 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                 className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", fmeaFilter === 'Pending' ? 'bg-orange-100' : 'bg-orange-50')}
                 onClick={() => setFmeaFilter('Pending')}
               >
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Aksiyon Bekleyen' : 'Pending Actions'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).aksiyon_bekleyen}</p>
                 <p className="text-2xl font-bold text-orange-600">{fmeaRecords.filter(r => r.rpn > 50 && r.rpn <= 100).length}</p>
               </div>
               <div 
                 className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", fmeaFilter === 'Low' ? 'bg-green-100' : 'bg-green-50')}
                 onClick={() => setFmeaFilter('Low')}
               >
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Düşük Risk' : 'Low Risk'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).dusuk_risk}</p>
                 <p className="text-2xl font-bold text-green-600">{fmeaRecords.filter(r => r.rpn <= 50).length}</p>
               </div>
             </div>
@@ -941,7 +942,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   onClick={() => setFmeaFilter('All')}
                   className="text-xs font-bold text-[#ff4000] hover:underline"
                 >
-                  {currentLanguage === 'tr' ? 'Filtreyi Temizle' : 'Clear Filter'}
+                  {oc(currentLanguage).filtreyi_temizle}
                 </button>
               )}
             </div>
@@ -950,8 +951,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
-                    <SortHeader label={currentLanguage === 'tr' ? 'Süreç' : 'Process'} sortKey="process" currentSort={fmeaSort} onSort={(k) => toggleSort(fmeaSort, k, setFmeaSort)} />
-                    <SortHeader label={currentLanguage === 'tr' ? 'Hata Modu' : 'Failure Mode'} sortKey="failureMode" currentSort={fmeaSort} onSort={(k) => toggleSort(fmeaSort, k, setFmeaSort)} />
+                    <SortHeader label={oc(currentLanguage).surec} sortKey="process" currentSort={fmeaSort} onSort={(k) => toggleSort(fmeaSort, k, setFmeaSort)} />
+                    <SortHeader label={oc(currentLanguage).hata_modu} sortKey="failureMode" currentSort={fmeaSort} onSort={(k) => toggleSort(fmeaSort, k, setFmeaSort)} />
                     <SortHeader label="RPN" sortKey="rpn" currentSort={fmeaSort} onSort={(k) => toggleSort(fmeaSort, k, setFmeaSort)} align="center" />
                     <th className="py-3 px-4 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider whitespace-nowrap">{t.actions}</th>
                   </tr>
@@ -1006,14 +1007,14 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                 className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", pfmeaFilter === 'Pending' ? 'bg-orange-100' : 'bg-orange-50')}
                 onClick={() => setPfmeaFilter('Pending')}
               >
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Aksiyon Bekleyen' : 'Pending Actions'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).aksiyon_bekleyen}</p>
                 <p className="text-2xl font-bold text-orange-600">{pfmeaRecords.filter(r => r.rpn > 50 && r.rpn <= 100).length}</p>
               </div>
               <div 
                 className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", pfmeaFilter === 'Low' ? 'bg-green-100' : 'bg-green-50')}
                 onClick={() => setPfmeaFilter('Low')}
               >
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Düşük Risk' : 'Low Risk'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).dusuk_risk}</p>
                 <p className="text-2xl font-bold text-green-600">{pfmeaRecords.filter(r => r.rpn <= 50).length}</p>
               </div>
             </div>
@@ -1034,7 +1035,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   onClick={() => setPfmeaFilter('All')}
                   className="text-xs font-bold text-[#ff4000] hover:underline"
                 >
-                  {currentLanguage === 'tr' ? 'Filtreyi Temizle' : 'Clear Filter'}
+                  {oc(currentLanguage).filtreyi_temizle}
                 </button>
               )}
             </div>
@@ -1043,8 +1044,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
-                    <SortHeader label={currentLanguage === 'tr' ? 'Süreç' : 'Process'} sortKey="process" currentSort={pfmeaSort} onSort={(k) => toggleSort(pfmeaSort, k, setPfmeaSort)} />
-                    <SortHeader label={currentLanguage === 'tr' ? 'Hata Modu' : 'Failure Mode'} sortKey="failureMode" currentSort={pfmeaSort} onSort={(k) => toggleSort(pfmeaSort, k, setPfmeaSort)} />
+                    <SortHeader label={oc(currentLanguage).surec} sortKey="process" currentSort={pfmeaSort} onSort={(k) => toggleSort(pfmeaSort, k, setPfmeaSort)} />
+                    <SortHeader label={oc(currentLanguage).hata_modu} sortKey="failureMode" currentSort={pfmeaSort} onSort={(k) => toggleSort(pfmeaSort, k, setPfmeaSort)} />
                     <SortHeader label="RPN" sortKey="rpn" currentSort={pfmeaSort} onSort={(k) => toggleSort(pfmeaSort, k, setPfmeaSort)} align="center" />
                     <th className="py-3 px-4 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider whitespace-nowrap">{t.actions}</th>
                   </tr>
@@ -1067,7 +1068,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                           <button 
                             onClick={() => handleAiSuggestion('fmea', record)}
                             className="p-2 hover:bg-purple-50 rounded-xl text-purple-400 hover:text-purple-600 transition-all"
-                            title={currentLanguage === 'tr' ? 'Gemini Önerisi' : 'Gemini Suggestion'}
+                            title={oc(currentLanguage).gemini_onerisi}
                           >
                             <Sparkles size={16} />
                           </button>
@@ -1099,14 +1100,14 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                 className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", ctpatFilter === 'Compliant' ? 'bg-green-100' : 'bg-green-50')}
                 onClick={() => setCtpatFilter('Compliant')}
               >
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Uyumlu' : 'Compliant'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).uyumlu}</p>
                 <p className="text-2xl font-bold text-green-600">{ctpatRecords.filter(r => r.status === 'Uyumlu').length}</p>
               </div>
               <div 
                 className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", ctpatFilter === 'Non-Compliant' ? 'bg-red-100' : 'bg-red-50')}
                 onClick={() => setCtpatFilter('Non-Compliant')}
               >
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Uyumsuz' : 'Non-Compliant'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).uyumsuz}</p>
                 <p className="text-2xl font-bold text-red-600">{ctpatRecords.filter(r => r.status === 'Uyumsuz').length}</p>
               </div>
               <div 
@@ -1134,7 +1135,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   onClick={() => setCtpatFilter('All')}
                   className="text-xs font-bold text-[#ff4000] hover:underline"
                 >
-                  {currentLanguage === 'tr' ? 'Filtreyi Temizle' : 'Clear Filter'}
+                  {oc(currentLanguage).filtreyi_temizle}
                 </button>
               )}
             </div>
@@ -1143,8 +1144,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
-                    <SortHeader label={currentLanguage === 'tr' ? 'Kontrol Noktası' : 'Control Point'} sortKey="point" currentSort={ctpatSort} onSort={(k) => toggleSort(ctpatSort, k, setCtpatSort)} />
-                    <SortHeader label={currentLanguage === 'tr' ? 'Durum' : 'Status'} sortKey="status" currentSort={ctpatSort} onSort={(k) => toggleSort(ctpatSort, k, setCtpatSort)} align="center" />
+                    <SortHeader label={oc(currentLanguage).kontrol_noktasi} sortKey="point" currentSort={ctpatSort} onSort={(k) => toggleSort(ctpatSort, k, setCtpatSort)} />
+                    <SortHeader label={oc(currentLanguage).durum} sortKey="status" currentSort={ctpatSort} onSort={(k) => toggleSort(ctpatSort, k, setCtpatSort)} align="center" />
                     <th className="py-3 px-4 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider whitespace-nowrap">{t.actions}</th>
                   </tr>
                 </thead>
@@ -1197,18 +1198,18 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                 className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", kaizenFilter === 'In Progress' ? 'bg-orange-100' : 'bg-orange-50')}
                 onClick={() => setKaizenFilter('In Progress')}
               >
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Devam Eden' : 'In Progress'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).devam_eden}</p>
                 <p className="text-2xl font-bold text-orange-600">{kaizenRecords.filter(r => r.status === 'Devam Ediyor').length}</p>
               </div>
               <div 
                 className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", kaizenFilter === 'Completed' ? 'bg-green-100' : 'bg-green-50')}
                 onClick={() => setKaizenFilter('Completed')}
               >
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Tamamlanan' : 'Completed'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).tamamlanan}</p>
                 <p className="text-2xl font-bold text-green-600">{kaizenRecords.filter(r => r.status === 'Tamamlandı').length}</p>
               </div>
               <div className="apple-card p-5 bg-purple-50">
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Sağlanan Tasarruf' : 'Savings'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).saglanan_tasarruf}</p>
                 <p className="text-2xl font-bold text-purple-600">{paraYaz(kaizenRecords.reduce((sum, r) => sum + (r.savings || 0), 0), { ondalik: 0 })}</p>
               </div>
             </div>
@@ -1229,7 +1230,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   onClick={() => setKaizenFilter('All')}
                   className="text-xs font-bold text-[#ff4000] hover:underline"
                 >
-                  {currentLanguage === 'tr' ? 'Filtreyi Temizle' : 'Clear Filter'}
+                  {oc(currentLanguage).filtreyi_temizle}
                 </button>
               )}
             </div>
@@ -1239,8 +1240,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
                     <SortHeader label={currentLanguage === 'tr' ? 'Problem' : 'Problem'} sortKey="problem" currentSort={kaizenSort} onSort={(k) => toggleSort(kaizenSort, k, setKaizenSort)} />
-                    <SortHeader label={currentLanguage === 'tr' ? 'Sorumlu' : 'Responsible'} sortKey="responsible" currentSort={kaizenSort} onSort={(k) => toggleSort(kaizenSort, k, setKaizenSort)} />
-                    <SortHeader label={currentLanguage === 'tr' ? 'Durum' : 'Status'} sortKey="status" currentSort={kaizenSort} onSort={(k) => toggleSort(kaizenSort, k, setKaizenSort)} align="center" />
+                    <SortHeader label={oc(currentLanguage).sorumlu} sortKey="responsible" currentSort={kaizenSort} onSort={(k) => toggleSort(kaizenSort, k, setKaizenSort)} />
+                    <SortHeader label={oc(currentLanguage).durum} sortKey="status" currentSort={kaizenSort} onSort={(k) => toggleSort(kaizenSort, k, setKaizenSort)} align="center" />
                     <th className="py-3 px-4 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider whitespace-nowrap">{t.actions}</th>
                   </tr>
                 </thead>
@@ -1285,7 +1286,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                 className={cn("apple-card p-5 cursor-pointer hover:shadow-md transition-all", fiveSFilter === 'All' ? 'bg-blue-100' : 'bg-blue-50')}
                 onClick={() => setFiveSFilter('All')}
               >
-                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{currentLanguage === 'tr' ? 'Toplam Denetim' : 'Total Audits'}</p>
+                <p className="text-xs font-bold text-[#86868B] uppercase tracking-wider mb-1">{oc(currentLanguage).toplam_denetim}</p>
                 <p className="text-2xl font-bold text-blue-600">{fiveSRecords.length}</p>
               </div>
               <div className="apple-card p-5 bg-green-50">
@@ -1324,7 +1325,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   onClick={() => setFiveSFilter('All')}
                   className="text-xs font-bold text-[#ff4000] hover:underline"
                 >
-                  {currentLanguage === 'tr' ? 'Filtreyi Temizle' : 'Clear Filter'}
+                  {oc(currentLanguage).filtreyi_temizle}
                 </button>
               )}
             </div>
@@ -1333,9 +1334,9 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
               <table className="min-w-[560px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
-                    <SortHeader label={currentLanguage === 'tr' ? 'Alan' : 'Area'} sortKey="area" currentSort={fiveSSort} onSort={(k) => toggleSort(fiveSSort, k, setFiveSSort)} />
-                    <SortHeader label={currentLanguage === 'tr' ? 'Puan' : 'Score'} sortKey="score" currentSort={fiveSSort} onSort={(k) => toggleSort(fiveSSort, k, setFiveSSort)} align="center" />
-                    <SortHeader label={currentLanguage === 'tr' ? 'Denetçi' : 'Inspector'} sortKey="inspector" currentSort={fiveSSort} onSort={(k) => toggleSort(fiveSSort, k, setFiveSSort)} align="center" />
+                    <SortHeader label={oc(currentLanguage).alan} sortKey="area" currentSort={fiveSSort} onSort={(k) => toggleSort(fiveSSort, k, setFiveSSort)} />
+                    <SortHeader label={oc(currentLanguage).puan} sortKey="score" currentSort={fiveSSort} onSort={(k) => toggleSort(fiveSSort, k, setFiveSSort)} align="center" />
+                    <SortHeader label={oc(currentLanguage).denetci} sortKey="inspector" currentSort={fiveSSort} onSort={(k) => toggleSort(fiveSSort, k, setFiveSSort)} align="center" />
                     <th className="py-3 px-4 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider whitespace-nowrap">{t.actions}</th>
                   </tr>
                 </thead>
@@ -1416,7 +1417,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   onClick={() => setEightDFilter('All')}
                   className="text-xs font-bold text-[#ff4000] hover:underline"
                 >
-                  {currentLanguage === 'tr' ? 'Filtreyi Temizle' : 'Clear Filter'}
+                  {oc(currentLanguage).filtreyi_temizle}
                 </button>
               )}
             </div>
@@ -1426,8 +1427,8 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                 <thead>
                   <tr className="border-b border-gray-100 text-[#86868B] font-bold uppercase tracking-wider">
                     <SortHeader label={currentLanguage === 'tr' ? 'Problem' : 'Problem'} sortKey="problem" currentSort={eightDSort} onSort={(k) => toggleSort(eightDSort, k, setEightDSort)} />
-                    <SortHeader label={currentLanguage === 'tr' ? 'Sorumlu' : 'Responsible'} sortKey="responsible" currentSort={eightDSort} onSort={(k) => toggleSort(eightDSort, k, setEightDSort)} />
-                    <SortHeader label={currentLanguage === 'tr' ? 'Aşama' : 'Stage'} sortKey="stage" currentSort={eightDSort} onSort={(k) => toggleSort(eightDSort, k, setEightDSort)} align="center" />
+                    <SortHeader label={oc(currentLanguage).sorumlu} sortKey="responsible" currentSort={eightDSort} onSort={(k) => toggleSort(eightDSort, k, setEightDSort)} />
+                    <SortHeader label={oc(currentLanguage).asama} sortKey="stage" currentSort={eightDSort} onSort={(k) => toggleSort(eightDSort, k, setEightDSort)} align="center" />
                     <th className="py-3 px-4 text-right text-[10px] font-bold text-[#86868B] uppercase tracking-wider whitespace-nowrap">{t.actions}</th>
                   </tr>
                 </thead>
@@ -1449,7 +1450,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                           <button 
                             onClick={() => handleAiSuggestion('8d', record)}
                             className="p-2 hover:bg-purple-50 rounded-xl text-purple-400 hover:text-purple-600 transition-all"
-                            title={currentLanguage === 'tr' ? 'Gemini Önerisi' : 'Gemini Suggestion'}
+                            title={oc(currentLanguage).gemini_onerisi}
                           >
                             <Sparkles size={16} />
                           </button>
@@ -1522,7 +1523,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl relative z-10 overflow-hidden">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="text-xl font-bold text-[#1D1D1F]">
-                  {modalConfig.mode === 'view' ? (currentLanguage === 'tr' ? 'İncele' : 'View') : modalConfig.mode === 'edit' ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : (currentLanguage === 'tr' ? 'Yeni Ekle' : 'Add New')}
+                  {modalConfig.mode === 'view' ? (oc(currentLanguage).incele) : modalConfig.mode === 'edit' ? (oc(currentLanguage).duzenle) : (oc(currentLanguage).yeni_ekle)}
                 </h3>
                 <button onClick={() => setModalConfig({ isOpen: false, type: null, mode: 'add', data: null })} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                   <X className="w-5 h-5 text-gray-500" />
@@ -1535,21 +1536,21 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                     <>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).tarih}</label>
                           <input type="date" name="date" defaultValue={(modalConfig.data as QCRecord)?.date || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Ürün Adı' : 'Product Name'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).urun_adi}</label>
                           <input name="productName" defaultValue={(modalConfig.data as QCRecord)?.productName || ''} required className="apple-input w-full" />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Parti No' : 'Batch No'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).parti_no}</label>
                           <input name="batchNo" defaultValue={(modalConfig.data as QCRecord)?.batchNo || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Denetçi' : 'Inspector'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).denetci}</label>
                           <input name="inspector" defaultValue={(modalConfig.data as QCRecord)?.inspector || ''} required className="apple-input w-full" />
                         </div>
                       </div>
@@ -1563,16 +1564,16 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                           <input type="number" name="defects" defaultValue={(modalConfig.data as QCRecord)?.defects || 0} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).durum}</label>
                           <select name="status" defaultValue={(modalConfig.data as QCRecord)?.status || 'Pass'} className="apple-input w-full">
-                            <option value="Pass">{currentLanguage === 'tr' ? 'Uygun' : 'Pass'}</option>
-                            <option value="Conditional">{currentLanguage === 'tr' ? 'Şartlı Kabul' : 'Conditional'}</option>
-                            <option value="Fail">{currentLanguage === 'tr' ? 'Hatalı' : 'Fail'}</option>
+                            <option value="Pass">{oc(currentLanguage).uygun}</option>
+                            <option value="Conditional">{oc(currentLanguage).sartli_kabul}</option>
+                            <option value="Fail">{oc(currentLanguage).hatali}</option>
                           </select>
                         </div>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Notlar' : 'Notes'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).notlar}</label>
                         <textarea name="notes" defaultValue={(modalConfig.data as QCRecord)?.notes || ''} rows={3} className="apple-input w-full" />
                       </div>
                     </>
@@ -1582,21 +1583,21 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                     <>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).tarih}</label>
                           <input type="date" name="date" defaultValue={(modalConfig.data as Complaint)?.date || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Müşteri' : 'Customer'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).musteri}</label>
                           <input name="customer" defaultValue={(modalConfig.data as Complaint)?.customer || ''} required className="apple-input w-full" />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).urun}</label>
                           <input name="product" defaultValue={(modalConfig.data as Complaint)?.product || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Konu' : 'Subject'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).konu}</label>
                           <input name="subject" defaultValue={(modalConfig.data as Complaint)?.subject || ''} required className="apple-input w-full" />
                         </div>
                       </div>
@@ -1604,27 +1605,27 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                         <div>
                           <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Önem Derecesi' : 'Severity'}</label>
                           <select name="severity" defaultValue={(modalConfig.data as Complaint)?.severity || 'Minor'} className="apple-input w-full">
-                            <option value="Critical">{currentLanguage === 'tr' ? 'Kritik' : 'Critical'}</option>
-                            <option value="Major">{currentLanguage === 'tr' ? 'Önemli' : 'Major'}</option>
+                            <option value="Critical">{oc(currentLanguage).kritik}</option>
+                            <option value="Major">{oc(currentLanguage).onemli}</option>
                             <option value="Minor">{currentLanguage === 'tr' ? 'Düşük' : 'Minor'}</option>
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).durum}</label>
                           <select name="status" defaultValue={(modalConfig.data as Complaint)?.status || 'Open'} className="apple-input w-full">
-                            <option value="Open">{currentLanguage === 'tr' ? 'Açık' : 'Open'}</option>
-                            <option value="Investigating">{currentLanguage === 'tr' ? 'İnceleniyor' : 'Investigating'}</option>
-                            <option value="Resolved">{currentLanguage === 'tr' ? 'Çözüldü' : 'Resolved'}</option>
-                            <option value="Closed">{currentLanguage === 'tr' ? 'Kapalı' : 'Closed'}</option>
+                            <option value="Open">{oc(currentLanguage).acik}</option>
+                            <option value="Investigating">{oc(currentLanguage).inceleniyor}</option>
+                            <option value="Resolved">{oc(currentLanguage).cozuldu}</option>
+                            <option value="Closed">{oc(currentLanguage).kapali}</option>
                           </select>
                         </div>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Kök Neden' : 'Root Cause'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).kok_neden}</label>
                         <input name="rootCause" defaultValue={(modalConfig.data as Complaint)?.rootCause || ''} className="apple-input w-full" />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Düzeltici Faaliyet' : 'Corrective Action'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).duzeltici_faaliyet}</label>
                         <input name="correctiveAction" defaultValue={(modalConfig.data as Complaint)?.correctiveAction || ''} className="apple-input w-full" />
                       </div>
                     </>
@@ -1634,7 +1635,7 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                     <>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Kategori' : 'Category'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).kategori}</label>
                           <input name="category" defaultValue={(modalConfig.data as AuditItem)?.category || ''} required className="apple-input w-full" />
                         </div>
                         <div>
@@ -1643,11 +1644,11 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                         </div>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Başlık' : 'Title'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).baslik}</label>
                         <input name="title" defaultValue={(modalConfig.data as AuditItem)?.title || ''} required className="apple-input w-full" />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Notlar' : 'Notes'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).notlar}</label>
                         <textarea name="notes" defaultValue={(modalConfig.data as AuditItem)?.notes || ''} rows={3} className="apple-input w-full" />
                       </div>
                     </>
@@ -1657,11 +1658,11 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                     <>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Süreç' : 'Process'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).surec}</label>
                           <input name="process" defaultValue={(modalConfig.data as FMEARecord)?.process || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Hata Modu' : 'Failure Mode'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).hata_modu}</label>
                           <input name="failureMode" defaultValue={(modalConfig.data as FMEARecord)?.failureMode || ''} required className="apple-input w-full" />
                         </div>
                       </div>
@@ -1676,11 +1677,11 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                     <>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Süreç' : 'Process'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).surec}</label>
                           <input name="process" defaultValue={(modalConfig.data as PFMEARecord)?.process || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Hata Modu' : 'Failure Mode'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).hata_modu}</label>
                           <input name="failureMode" defaultValue={(modalConfig.data as PFMEARecord)?.failureMode || ''} required className="apple-input w-full" />
                         </div>
                       </div>
@@ -1694,14 +1695,14 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                   {modalConfig.type === 'ctpat' && (
                     <>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Kontrol Noktası' : 'Control Point'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).kontrol_noktasi}</label>
                         <input name="point" defaultValue={(modalConfig.data as CTPATRecord)?.point || ''} required className="apple-input w-full" />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).durum}</label>
                         <select name="status" defaultValue={(modalConfig.data as CTPATRecord)?.status || 'Uyumlu'} className="apple-input w-full">
-                          <option value="Uyumlu">{currentLanguage === 'tr' ? 'Uyumlu' : 'Compliant'}</option>
-                          <option value="Uyumsuz">{currentLanguage === 'tr' ? 'Uyumsuz' : 'Non-Compliant'}</option>
+                          <option value="Uyumlu">{oc(currentLanguage).uyumlu}</option>
+                          <option value="Uyumsuz">{oc(currentLanguage).uyumsuz}</option>
                           <option value="İnceleniyor">{currentLanguage === 'tr' ? 'İnceleniyor' : 'Under Review'}</option>
                         </select>
                       </div>
@@ -1716,19 +1717,19 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Sorumlu' : 'Responsible'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).sorumlu}</label>
                           <input name="responsible" defaultValue={(modalConfig.data as KaizenRecord)?.responsible || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).durum}</label>
                           <select name="status" defaultValue={(modalConfig.data as KaizenRecord)?.status || 'Devam Ediyor'} className="apple-input w-full">
                             <option value="Devam Ediyor">{currentLanguage === 'tr' ? 'Devam Ediyor' : 'In Progress'}</option>
-                            <option value="Tamamlandı">{currentLanguage === 'tr' ? 'Tamamlandı' : 'Completed'}</option>
+                            <option value="Tamamlandı">{oc(currentLanguage).tamamlandi}</option>
                           </select>
                         </div>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Sağlanan Tasarruf' : 'Savings'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).saglanan_tasarruf}</label>
                         <input type="number" name="savings" defaultValue={(modalConfig.data as KaizenRecord)?.savings || ''} className="apple-input w-full" />
                       </div>
                     </>
@@ -1738,16 +1739,16 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                     <>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Alan' : 'Area'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).alan}</label>
                           <input name="area" defaultValue={(modalConfig.data as FiveSRecord)?.area || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Puan' : 'Score'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).puan}</label>
                           <input type="number" step="0.1" name="score" defaultValue={(modalConfig.data as FiveSRecord)?.score || ''} required className="apple-input w-full" />
                         </div>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Denetçi' : 'Inspector'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).denetci}</label>
                         <input name="inspector" defaultValue={(modalConfig.data as FiveSRecord)?.inspector || ''} required className="apple-input w-full" />
                       </div>
                     </>
@@ -1761,11 +1762,11 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Sorumlu' : 'Responsible'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).sorumlu}</label>
                           <input name="responsible" defaultValue={(modalConfig.data as EightDRecord)?.responsible || ''} required className="apple-input w-full" />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Aşama' : 'Stage'}</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).asama}</label>
                           <input name="stage" defaultValue={(modalConfig.data as EightDRecord)?.stage || ''} required className="apple-input w-full" />
                         </div>
                       </div>
@@ -1775,11 +1776,11 @@ const QualityModule: React.FC<QualityModuleProps> = ({ currentLanguage, isAuthen
 
                 <div className="pt-4 flex justify-end gap-3 border-t border-gray-100">
                   <button type="button" onClick={() => setModalConfig({ isOpen: false, type: null, mode: 'add', data: null })} className="px-6 py-2.5 rounded-xl text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">
-                    {modalConfig.mode === 'view' ? (currentLanguage === 'tr' ? 'Kapat' : 'Close') : (currentLanguage === 'tr' ? 'İptal' : 'Cancel')}
+                    {modalConfig.mode === 'view' ? (oc(currentLanguage).kapat) : (oc(currentLanguage).iptal)}
                   </button>
                   {modalConfig.mode !== 'view' && (
                     <button type="submit" className="apple-button-primary px-8 py-2.5">
-                      {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
+                      {oc(currentLanguage).kaydet}
                     </button>
                   )}
                 </div>

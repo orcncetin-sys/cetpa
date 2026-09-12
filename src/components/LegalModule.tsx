@@ -24,6 +24,7 @@ import {
 import { cn } from '../lib/utils';
 import { sortByCreatedAt, byField } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 const SortHeader: React.FC<{ label: string; sortKey: string; currentSort: { key: string; direction: 'asc' | 'desc' } | null; onSort: (key: string) => void }> = ({ label, sortKey, currentSort, onSort }) => (
   <th 
@@ -140,7 +141,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
       setShowApprovalForm(false);
     } catch (err) {
       logFirestoreError(err, OperationType.CREATE, 'approvalRequests', auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     } finally { setUploading(false); }
   };
 
@@ -169,7 +170,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
     const ok = await confirmAction({
       title: currentLanguage === 'tr' ? 'Belgeyi Sil' : 'Delete Document',
       message: currentLanguage === 'tr' ? 'Bu belgeyi kalıcı olarak silmek istediğinize emin misiniz?' : 'Are you sure you want to permanently delete this document?',
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -268,7 +269,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
       }
     } catch (err) {
       logFirestoreError(err, modalConfig.mode === 'edit' ? OperationType.UPDATE : OperationType.CREATE, 'contracts', auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -283,7 +284,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
       }
     } catch (err) {
       logFirestoreError(err, modalConfig.mode === 'edit' ? OperationType.UPDATE : OperationType.CREATE, 'legalCases', auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -298,7 +299,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
       }
     } catch (err) {
       logFirestoreError(err, modalConfig.mode === 'edit' ? OperationType.UPDATE : OperationType.CREATE, 'complianceItems', auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -307,10 +308,10 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
     try {
       const col = type === 'contract' ? 'contracts' : type === 'case' ? 'legalCases' : 'complianceItems';
       await deleteDoc(doc(db, col, id));
-      showToast(currentLanguage === 'tr' ? 'Kayıt başarıyla silindi.' : 'Record deleted successfully.');
+      showToast(oc(currentLanguage).kayit_basariyla_silindi);
     } catch (err) {
       logFirestoreError(err, OperationType.DELETE, `${type}s/${id}`, auth.currentUser?.uid);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu' : 'Error occurred', 'error');
+      showToast(oc(currentLanguage).hata_olustu, 'error');
     }
   };
 
@@ -343,14 +344,14 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
   };
 
   const t = {
-    contracts: currentLanguage === 'tr' ? 'Sözleşmeler' : 'Contracts',
+    contracts: oc(currentLanguage).sozlesmeler,
     cases: currentLanguage === 'tr' ? 'Dava & İtirazlar' : 'Cases & Objections',
     compliance: currentLanguage === 'tr' ? 'Uyum & KVKK' : 'Compliance & GDPR',
     documents: currentLanguage === 'tr' ? 'Belgeler' : 'Documents',
-    add: currentLanguage === 'tr' ? 'Ekle' : 'Add',
-    search: currentLanguage === 'tr' ? 'Ara...' : 'Search...',
-    status: currentLanguage === 'tr' ? 'Durum' : 'Status',
-    actions: currentLanguage === 'tr' ? 'İşlemler' : 'Actions',
+    add: oc(currentLanguage).ekle,
+    search: oc(currentLanguage).ara,
+    status: oc(currentLanguage).durum,
+    actions: oc(currentLanguage).islemler,
   };
 
   // KPIs — null-guard (undefined value/amount crash engeli).
@@ -366,7 +367,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
           { id: 'cases', label: t.cases, icon: Scale, count: cases.length },
           { id: 'compliance', label: t.compliance, icon: ShieldCheck, count: compliance.length },
           { id: 'documents', label: t.documents, icon: Folder, count: legalDocs.length },
-          { id: 'approvals', label: currentLanguage === 'tr' ? 'Onaylar' : 'Approvals', icon: CheckSquare, count: approvals.filter(a => a.status === 'Bekliyor').length },
+          { id: 'approvals', label: oc(currentLanguage).onaylar, icon: CheckSquare, count: approvals.filter(a => a.status === 'Bekliyor').length },
         ].map(tab => (
           <button
             key={tab.id}
@@ -393,14 +394,14 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <button className="apple-card p-6 flex flex-col justify-between cursor-pointer group text-left" onClick={() => { setActiveTab('contracts'); setContractsFilter('Tümü'); setSearchQuery(''); }}>
                 <div className="flex justify-between items-start mb-4">
-                  <p className="text-sm font-semibold text-[#86868B]">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</p>
+                  <p className="text-sm font-semibold text-[#86868B]">{oc(currentLanguage).toplam}</p>
                   <FileText className="w-5 h-5 text-blue-500" />
                 </div>
                 <p className="text-3xl font-bold text-[#1D1D1F]">{contracts.length}</p>
               </button>
               <button className="apple-card p-6 flex flex-col justify-between cursor-pointer group text-left" onClick={() => { setActiveTab('contracts'); setContractsFilter('Aktif'); setSearchQuery(''); }}>
                 <div className="flex justify-between items-start mb-4">
-                  <p className="text-sm font-semibold text-[#86868B]">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</p>
+                  <p className="text-sm font-semibold text-[#86868B]">{oc(currentLanguage).aktif}</p>
                   <CheckCircle2 className="w-5 h-5 text-green-500" />
                 </div>
                 <p className="text-3xl font-bold text-[#1D1D1F]">{contracts.filter(c => c.status === 'Aktif').length}</p>
@@ -445,10 +446,10 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                   <thead>
                     <tr className="border-b border-gray-100">
                       <SortHeader label={currentLanguage === 'tr' ? 'No' : 'No'} sortKey="no" currentSort={sortConfig} onSort={handleSort} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Başlık' : 'Title'} sortKey="title" currentSort={sortConfig} onSort={handleSort} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Taraf' : 'Party'} sortKey="party" currentSort={sortConfig} onSort={handleSort} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Bitiş' : 'End Date'} sortKey="endDate" currentSort={sortConfig} onSort={handleSort} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Değer' : 'Value'} sortKey="value" currentSort={sortConfig} onSort={handleSort} />
+                      <SortHeader label={oc(currentLanguage).baslik} sortKey="title" currentSort={sortConfig} onSort={handleSort} />
+                      <SortHeader label={oc(currentLanguage).taraf} sortKey="party" currentSort={sortConfig} onSort={handleSort} />
+                      <SortHeader label={oc(currentLanguage).bitis} sortKey="endDate" currentSort={sortConfig} onSort={handleSort} />
+                      <SortHeader label={oc(currentLanguage).deger} sortKey="value" currentSort={sortConfig} onSort={handleSort} />
                       <SortHeader label={t.status} sortKey="status" currentSort={sortConfig} onSort={handleSort} />
                       <th className="py-4 px-6 text-right"></th>
                     </tr>
@@ -476,9 +477,9 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                         </td>
                         <td className="py-4 px-6 text-right">
                           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => setModalConfig({ isOpen: true, type: 'contract', mode: 'view', data: contract })} className="p-2 hover:bg-blue-50 text-blue-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye className="w-4 h-4" /></button>
-                            <button onClick={() => setModalConfig({ isOpen: true, type: 'contract', mode: 'edit', data: contract })} className="p-2 hover:bg-gray-200 text-gray-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 className="w-4 h-4" /></button>
-                            <button onClick={() => handleDelete(contract.id, 'contract')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}><Trash2 className="w-4 h-4" /></button>
+                            <button onClick={() => setModalConfig({ isOpen: true, type: 'contract', mode: 'view', data: contract })} className="p-2 hover:bg-blue-50 text-blue-500 rounded-xl transition-colors" title={oc(currentLanguage).incele}><Eye className="w-4 h-4" /></button>
+                            <button onClick={() => setModalConfig({ isOpen: true, type: 'contract', mode: 'edit', data: contract })} className="p-2 hover:bg-gray-200 text-gray-500 rounded-xl transition-colors" title={oc(currentLanguage).duzenle}><Edit2 className="w-4 h-4" /></button>
+                            <button onClick={() => handleDelete(contract.id, 'contract')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={oc(currentLanguage).sil}><Trash2 className="w-4 h-4" /></button>
                           </div>
                         </td>
                       </tr>
@@ -511,14 +512,14 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
               </div>
               <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm flex flex-col justify-between cursor-pointer hover:border-[#ff4000] transition-colors group" onClick={() => { setActiveTab('cases'); setCasesFilter('Kazanılan'); setSearchQuery(''); }}>
                 <div className="flex justify-between items-start mb-4">
-                  <p className="text-sm font-semibold text-[#86868B]">{currentLanguage === 'tr' ? 'Kazanılan' : 'Won'}</p>
+                  <p className="text-sm font-semibold text-[#86868B]">{oc(currentLanguage).kazanilan}</p>
                   <CheckCircle2 className="w-5 h-5 text-green-500" />
                 </div>
                 <p className="text-3xl font-bold text-[#1D1D1F]">{cases.filter(c => c.status === 'Kazanılan').length}</p>
               </div>
               <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm flex flex-col justify-between cursor-pointer hover:border-[#ff4000] transition-colors group" onClick={() => setActiveTab('cases')}>
                 <div className="flex justify-between items-start mb-4">
-                  <p className="text-sm font-semibold text-[#86868B]">{currentLanguage === 'tr' ? 'Toplam Değer' : 'Total Value'}</p>
+                  <p className="text-sm font-semibold text-[#86868B]">{oc(currentLanguage).toplam_deger}</p>
                   <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#ff4000] transition-colors" />
                 </div>
                 <p className="text-3xl font-bold text-[#1D1D1F]">{paraYaz(totalCasesValue, { ondalik: 0 })}</p>
@@ -547,10 +548,10 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                   <thead>
                     <tr className="border-b border-gray-100">
                       <SortHeader label="No" sortKey="no" currentSort={sortConfig} onSort={handleSort} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Başlık' : 'Title'} sortKey="title" currentSort={sortConfig} onSort={handleSort} />
+                      <SortHeader label={oc(currentLanguage).baslik} sortKey="title" currentSort={sortConfig} onSort={handleSort} />
                       <SortHeader label={currentLanguage === 'tr' ? 'Mahkeme' : 'court'} sortKey="court" currentSort={sortConfig} onSort={handleSort} />
                       <SortHeader label={currentLanguage === 'tr' ? 'Duruşma' : 'Hearing'} sortKey="nextHearing" currentSort={sortConfig} onSort={handleSort} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Tutar' : 'Amount'} sortKey="amount" currentSort={sortConfig} onSort={handleSort} />
+                      <SortHeader label={oc(currentLanguage).tutar} sortKey="amount" currentSort={sortConfig} onSort={handleSort} />
                       <SortHeader label={t.status} sortKey="status" currentSort={sortConfig} onSort={handleSort} />
                       <th className="py-4 px-6 text-right"></th>
                     </tr>
@@ -584,9 +585,9 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                         </td>
                         <td className="py-4 px-6 text-right">
                           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => setModalConfig({ isOpen: true, type: 'case', mode: 'view', data: item })} className="p-2 hover:bg-blue-50 text-blue-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye className="w-4 h-4" /></button>
-                            <button onClick={() => setModalConfig({ isOpen: true, type: 'case', mode: 'edit', data: item })} className="p-2 hover:bg-gray-100 text-gray-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 className="w-4 h-4" /></button>
-                            <button onClick={() => handleDelete(item.id, 'case')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}><Trash2 className="w-4 h-4" /></button>
+                            <button onClick={() => setModalConfig({ isOpen: true, type: 'case', mode: 'view', data: item })} className="p-2 hover:bg-blue-50 text-blue-500 rounded-xl transition-colors" title={oc(currentLanguage).incele}><Eye className="w-4 h-4" /></button>
+                            <button onClick={() => setModalConfig({ isOpen: true, type: 'case', mode: 'edit', data: item })} className="p-2 hover:bg-gray-100 text-gray-500 rounded-xl transition-colors" title={oc(currentLanguage).duzenle}><Edit2 className="w-4 h-4" /></button>
+                            <button onClick={() => handleDelete(item.id, 'case')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={oc(currentLanguage).sil}><Trash2 className="w-4 h-4" /></button>
                           </div>
                         </td>
                       </tr>
@@ -677,7 +678,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                             }}
                             className="apple-button-primary text-xs whitespace-nowrap"
                           >
-                            {kvkkReqDone ? (tr ? '✓ Kaydedildi' : '✓ Saved') : (tr ? 'Talep Oluştur' : 'Create Request')}
+                            {kvkkReqDone ? (oc(tr).kaydedildi) : (tr ? 'Talep Oluştur' : 'Create Request')}
                           </button>
                         </div>
                         <p className="text-[10px] text-gray-400 mt-2">{tr
@@ -708,7 +709,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                                       <p className="text-[10px] text-gray-500">
                                         {r.type}
                                         {d && ` · ${tarihYaz(r.createdAt)}`}
-                                        {gun !== null && ` · ${gun} ${tr ? 'gün' : 'd'}`}
+                                        {gun !== null && ` · ${gun} ${oc(tr).gun}`}
                                         {gecikti && (tr ? ' · SÜRE AŞILDI' : ' · OVERDUE')}
                                       </p>
                                     </div>
@@ -750,7 +751,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                 />
               </div>
               <button onClick={() => setModalConfig({ isOpen: true, type: 'compliance', mode: 'add', data: null })} className="apple-button-primary flex items-center justify-center gap-2 px-6 py-3 rounded-2xl">
-                <Plus className="w-5 h-5" /> {currentLanguage === 'tr' ? 'Yeni Ekle' : 'Add New'}
+                <Plus className="w-5 h-5" /> {oc(currentLanguage).yeni_ekle}
               </button>
             </div>
 
@@ -765,9 +766,9 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                 <table className="min-w-[560px] w-full text-sm text-left">
                   <thead>
                     <tr className="border-b border-gray-100">
-                      <SortHeader label={currentLanguage === 'tr' ? 'Başlık' : 'Title'} sortKey="title" currentSort={sortConfig} onSort={handleSort} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Sorumlu' : 'Responsible'} sortKey="responsible" currentSort={sortConfig} onSort={handleSort} />
-                      <SortHeader label={currentLanguage === 'tr' ? 'Tarih' : 'Date'} sortKey="nextDate" currentSort={sortConfig} onSort={handleSort} />
+                      <SortHeader label={oc(currentLanguage).baslik} sortKey="title" currentSort={sortConfig} onSort={handleSort} />
+                      <SortHeader label={oc(currentLanguage).sorumlu} sortKey="responsible" currentSort={sortConfig} onSort={handleSort} />
+                      <SortHeader label={oc(currentLanguage).tarih} sortKey="nextDate" currentSort={sortConfig} onSort={handleSort} />
                       <SortHeader label={t.status} sortKey="status" currentSort={sortConfig} onSort={handleSort} />
                       <th className="py-4 px-6 text-right"></th>
                     </tr>
@@ -804,9 +805,9 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                         </td>
                         <td className="py-4 px-6 text-right">
                           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => setModalConfig({ isOpen: true, type: 'compliance', mode: 'view', data: item })} className="p-2 hover:bg-blue-50 text-blue-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye className="w-4 h-4" /></button>
-                            <button onClick={() => setModalConfig({ isOpen: true, type: 'compliance', mode: 'edit', data: item })} className="p-2 hover:bg-gray-100 text-gray-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 className="w-4 h-4" /></button>
-                            <button onClick={() => handleDelete(item.id, 'compliance')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}><Trash2 className="w-4 h-4" /></button>
+                            <button onClick={() => setModalConfig({ isOpen: true, type: 'compliance', mode: 'view', data: item })} className="p-2 hover:bg-blue-50 text-blue-500 rounded-xl transition-colors" title={oc(currentLanguage).incele}><Eye className="w-4 h-4" /></button>
+                            <button onClick={() => setModalConfig({ isOpen: true, type: 'compliance', mode: 'edit', data: item })} className="p-2 hover:bg-gray-100 text-gray-500 rounded-xl transition-colors" title={oc(currentLanguage).duzenle}><Edit2 className="w-4 h-4" /></button>
+                            <button onClick={() => handleDelete(item.id, 'compliance')} className="p-2 hover:bg-red-50 text-red-500 rounded-xl transition-colors" title={oc(currentLanguage).sil}><Trash2 className="w-4 h-4" /></button>
                           </div>
                         </td>
                       </tr>
@@ -833,7 +834,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                   <option value="Sözleşme Şablonları">{currentLanguage === 'tr' ? 'Sözleşme Şablonları' : 'Contract Templates'}</option>
                   <option value="Hukuki Yazışmalar">{currentLanguage === 'tr' ? 'Hukuki Yazışmalar' : 'Legal Correspondence'}</option>
                   <option value="Mahkeme Belgeleri">{currentLanguage === 'tr' ? 'Mahkeme Belgeleri' : 'Court Documents'}</option>
-                  <option value="Diğer">{currentLanguage === 'tr' ? 'Diğer' : 'Other'}</option>
+                  <option value="Diğer">{oc(currentLanguage).diger}</option>
                 </select>
                 <input type="file" ref={docUploadRef} className="hidden" onChange={e => handleDocUpload(e, docUploadCategory)} />
                 <button onClick={() => docUploadRef.current?.click()} disabled={uploading} className="apple-button-primary flex items-center gap-2 px-5 py-2.5 disabled:opacity-60">
@@ -873,15 +874,15 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                       <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-4">
                         {document.fileUrl && (
                           <a href={document.fileUrl} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 font-bold text-[11px] hover:bg-blue-100 transition-colors">
-                            {currentLanguage === 'tr' ? 'Görüntüle' : 'View'}
+                            {oc(currentLanguage).goruntule}
                           </a>
                         )}
                         {document.fileUrl && (
                           <a href={document.fileUrl} download={document.fileName || document.title} className="px-3 py-1.5 rounded-lg bg-[#ff4000]/10 text-[#ff4000] font-bold text-[11px] hover:bg-[#ff4000]/20 transition-colors">
-                            {currentLanguage === 'tr' ? 'İndir' : 'Download'}
+                            {oc(currentLanguage).indir}
                           </a>
                         )}
-                        <button onClick={() => handleDeleteDoc(document.id)} className="p-2 hover:bg-red-50 text-red-400 hover:text-red-600 rounded-xl transition-colors" title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}>
+                        <button onClick={() => handleDeleteDoc(document.id)} className="p-2 hover:bg-red-50 text-red-400 hover:text-red-600 rounded-xl transition-colors" title={oc(currentLanguage).sil}>
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -898,10 +899,10 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
             {/* KPI Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {([
-                { label: currentLanguage === 'tr' ? 'Bekliyor' : 'Pending', count: approvals.filter(a => a.status === 'Bekliyor').length, color: 'text-orange-600', bg: 'bg-orange-50', icon: Clock },
-                { label: currentLanguage === 'tr' ? 'Onaylandı' : 'Approved', count: approvals.filter(a => a.status === 'Onaylandı').length, color: 'text-green-600', bg: 'bg-green-50', icon: CheckCircle2 },
-                { label: currentLanguage === 'tr' ? 'Reddedildi' : 'Rejected', count: approvals.filter(a => a.status === 'Reddedildi').length, color: 'text-red-600', bg: 'bg-red-50', icon: ThumbsDown },
-                { label: currentLanguage === 'tr' ? 'İncelemede' : 'Under Review', count: approvals.filter(a => a.status === 'İncelemede').length, color: 'text-blue-600', bg: 'bg-blue-50', icon: Eye },
+                { label: oc(currentLanguage).bekliyor, count: approvals.filter(a => a.status === 'Bekliyor').length, color: 'text-orange-600', bg: 'bg-orange-50', icon: Clock },
+                { label: oc(currentLanguage).onaylandi, count: approvals.filter(a => a.status === 'Onaylandı').length, color: 'text-green-600', bg: 'bg-green-50', icon: CheckCircle2 },
+                { label: oc(currentLanguage).reddedildi, count: approvals.filter(a => a.status === 'Reddedildi').length, color: 'text-red-600', bg: 'bg-red-50', icon: ThumbsDown },
+                { label: oc(currentLanguage).incelemede, count: approvals.filter(a => a.status === 'İncelemede').length, color: 'text-blue-600', bg: 'bg-blue-50', icon: Eye },
               ] as const).map(kpi => (
                 <div key={kpi.label} className="apple-card p-5">
                   <div className="flex justify-between items-start mb-3">
@@ -923,7 +924,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                 ))}
               </div>
               <button onClick={() => setShowApprovalForm(v => !v)} className="apple-button-primary flex items-center gap-2 px-5 py-2.5">
-                <Plus className="w-4 h-4" /> {currentLanguage === 'tr' ? 'Yeni Talep' : 'New Request'}
+                <Plus className="w-4 h-4" /> {oc(currentLanguage).yeni_talep}
               </button>
             </div>
 
@@ -946,27 +947,27 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Açıklama' : 'Description'}</label>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).aciklama}</label>
                     <textarea value={approvalForm.description} onChange={e => setApprovalForm(p => ({ ...p, description: e.target.value }))} rows={3} className="apple-input w-full resize-none" placeholder={currentLanguage === 'tr' ? 'Detay açıklaması...' : 'Detailed description...'} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Kategori' : 'Category'}</label>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).kategori}</label>
                       <select value={approvalForm.category} onChange={e => setApprovalForm(p => ({ ...p, category: e.target.value as ApprovalRequest['category'] }))} className="apple-input w-full">
-                        <option value="Sözleşme">{currentLanguage === 'tr' ? 'Sözleşme' : 'Contract'}</option>
+                        <option value="Sözleşme">{oc(currentLanguage).sozlesme}</option>
                         <option value="Belge">{currentLanguage === 'tr' ? 'Belge' : 'Document'}</option>
                         <option value="Hukuki">{currentLanguage === 'tr' ? 'Hukuki' : 'Legal'}</option>
                         <option value="Uyum">{currentLanguage === 'tr' ? 'Uyum' : 'Compliance'}</option>
-                        <option value="Diğer">{currentLanguage === 'tr' ? 'Diğer' : 'Other'}</option>
+                        <option value="Diğer">{oc(currentLanguage).diger}</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Aciliyet' : 'Urgency'}</label>
                       <select value={approvalForm.urgency} onChange={e => setApprovalForm(p => ({ ...p, urgency: e.target.value as ApprovalRequest['urgency'] }))} className="apple-input w-full">
-                        <option value="Düşük">{currentLanguage === 'tr' ? 'Düşük' : 'Low'}</option>
-                        <option value="Orta">{currentLanguage === 'tr' ? 'Orta' : 'Medium'}</option>
-                        <option value="Yüksek">{currentLanguage === 'tr' ? 'Yüksek' : 'High'}</option>
-                        <option value="Kritik">{currentLanguage === 'tr' ? 'Kritik' : 'Critical'}</option>
+                        <option value="Düşük">{oc(currentLanguage).dusuk}</option>
+                        <option value="Orta">{oc(currentLanguage).orta}</option>
+                        <option value="Yüksek">{oc(currentLanguage).yuksek}</option>
+                        <option value="Kritik">{oc(currentLanguage).kritik}</option>
                       </select>
                     </div>
                   </div>
@@ -987,10 +988,10 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                   </div>
                   <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                     <button type="button" onClick={() => { setShowApprovalForm(false); setApprovalFile(null); }} className="px-6 py-2.5 rounded-xl text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">
-                      {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                      {oc(currentLanguage).iptal}
                     </button>
                     <button type="submit" disabled={uploading} className="apple-button-primary px-8 py-2.5 disabled:opacity-60">
-                      {uploading ? (currentLanguage === 'tr' ? 'Gönderiliyor...' : 'Sending...') : (currentLanguage === 'tr' ? 'Talep Gönder' : 'Submit Request')}
+                      {uploading ? (oc(currentLanguage).gonderiliyor) : (currentLanguage === 'tr' ? 'Talep Gönder' : 'Submit Request')}
                     </button>
                   </div>
                 </form>
@@ -1058,10 +1059,10 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                               </button>
                             )}
                             <button onClick={() => handleApprovalAction(approval.id, 'Reddedildi')} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-red-50 text-red-500 text-xs font-bold hover:bg-red-100 transition-colors">
-                              <ThumbsDown className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Reddet' : 'Reject'}
+                              <ThumbsDown className="w-3.5 h-3.5" /> {oc(currentLanguage).reddet}
                             </button>
                             <button onClick={() => handleApprovalAction(approval.id, 'Onaylandı')} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-green-50 text-green-600 text-xs font-bold hover:bg-green-100 transition-colors">
-                              <ThumbsUp className="w-3.5 h-3.5" /> {currentLanguage === 'tr' ? 'Onayla' : 'Approve'}
+                              <ThumbsUp className="w-3.5 h-3.5" /> {oc(currentLanguage).onayla}
                             </button>
                           </div>
                         </div>
@@ -1083,7 +1084,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl relative z-10 overflow-hidden">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="text-xl font-bold text-[#1D1D1F]">
-                  {modalConfig.data ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : (currentLanguage === 'tr' ? 'Yeni Ekle' : 'Add New')}
+                  {modalConfig.data ? (oc(currentLanguage).duzenle) : (oc(currentLanguage).yeni_ekle)}
                 </h3>
                 <button onClick={() => setModalConfig({ isOpen: false, type: null, mode: 'add', data: null })} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                   <X className="w-5 h-5 text-gray-500" />
@@ -1099,35 +1100,35 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                         <input name="no" defaultValue={(modalConfig.data as Contract)?.no || ''} required className="apple-input w-full" />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Tür' : 'Type'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).tur}</label>
                         <input name="type" defaultValue={(modalConfig.data as Contract)?.type || ''} required className="apple-input w-full" />
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Başlık' : 'Title'}</label>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).baslik}</label>
                       <input name="title" defaultValue={(modalConfig.data as Contract)?.title || ''} required className="apple-input w-full" />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Taraf' : 'Party'}</label>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).taraf}</label>
                       <input name="party" defaultValue={(modalConfig.data as Contract)?.party || ''} required className="apple-input w-full" />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Başlangıç' : 'Start Date'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).baslangic}</label>
                         <input type="date" name="startDate" defaultValue={(modalConfig.data as Contract)?.startDate || ''} required className="apple-input w-full" />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Bitiş' : 'End Date'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).bitis}</label>
                         <input type="date" name="endDate" defaultValue={(modalConfig.data as Contract)?.endDate || ''} required className="apple-input w-full" />
                       </div>
                     </div>
                     <div className="grid grid-cols-3 gap-4">
                       <div className="col-span-2">
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Değer' : 'Value'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).deger}</label>
                         <input type="number" name="value" defaultValue={(modalConfig.data as Contract)?.value || ''} required className="apple-input w-full" />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Para Birimi' : 'Currency'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).para_birimi}</label>
                         <select name="currency" defaultValue={(modalConfig.data as Contract)?.currency || 'TRY'} className="apple-input w-full">
                           <option value="TRY">TRY</option>
                           <option value="USD">USD</option>
@@ -1136,12 +1137,12 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).durum}</label>
                       <select name="status" defaultValue={(modalConfig.data as Contract)?.status || 'Aktif'} className="apple-input w-full">
-                        <option value="Aktif">{currentLanguage === 'tr' ? 'Aktif' : 'Active'}</option>
+                        <option value="Aktif">{oc(currentLanguage).aktif}</option>
                         <option value="Yenileme Bekliyor">{currentLanguage === 'tr' ? 'Yenileme Bekliyor' : 'Renewal Pending'}</option>
                         <option value="Süresi Dolan">{currentLanguage === 'tr' ? 'Süresi Dolan' : 'Expired'}</option>
-                        <option value="Taslak">{currentLanguage === 'tr' ? 'Taslak' : 'Draft'}</option>
+                        <option value="Taslak">{oc(currentLanguage).taslak}</option>
                       </select>
                     </div>
                     <div>
@@ -1159,7 +1160,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                         <input name="no" defaultValue={(modalConfig.data as LegalCase)?.no || ''} required className="apple-input w-full" />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Tür' : 'Type'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).tur}</label>
                         <select name="type" defaultValue={(modalConfig.data as LegalCase)?.type || 'İcra'} className="apple-input w-full">
                           <option value="İcra">{currentLanguage === 'tr' ? 'İcra' : 'Execution'}</option>
                           <option value="Ceza">{currentLanguage === 'tr' ? 'Ceza' : 'Criminal'}</option>
@@ -1169,7 +1170,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Başlık' : 'Title'}</label>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).baslik}</label>
                       <input name="title" defaultValue={(modalConfig.data as LegalCase)?.title || ''} required className="apple-input w-full" />
                     </div>
                     <div>
@@ -1203,21 +1204,21 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Tutar' : 'Amount'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).tutar}</label>
                         <input type="number" name="amount" defaultValue={(modalConfig.data as LegalCase)?.amount || ''} required className="apple-input w-full" />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).durum}</label>
                         <select name="status" defaultValue={(modalConfig.data as LegalCase)?.status || 'Devam Ediyor'} className="apple-input w-full">
                           <option value="Devam Ediyor">{currentLanguage === 'tr' ? 'Devam Ediyor' : 'Ongoing'}</option>
-                          <option value="Kazanılan">{currentLanguage === 'tr' ? 'Kazanılan' : 'Won'}</option>
+                          <option value="Kazanılan">{oc(currentLanguage).kazanilan}</option>
                           <option value="Kaybedilen">{currentLanguage === 'tr' ? 'Kaybedilen' : 'Lost'}</option>
                           <option value="Temyiz">{currentLanguage === 'tr' ? 'Temyiz' : 'Appeal'}</option>
                         </select>
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Açıklama' : 'Description'}</label>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).aciklama}</label>
                       <textarea name="description" defaultValue={(modalConfig.data as LegalCase)?.description || ''} rows={3} className="apple-input w-full resize-none" />
                     </div>
                   </>
@@ -1265,13 +1266,13 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                                 {document.fileUrl && (
                                   <a href={document.fileUrl} target="_blank" rel="noopener noreferrer"
                                     className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 font-bold text-[11px] hover:bg-blue-100 transition-colors">
-                                    {currentLanguage === 'tr' ? 'Görüntüle' : 'View'}
+                                    {oc(currentLanguage).goruntule}
                                   </a>
                                 )}
                                 {document.fileUrl && (
                                   <a href={document.fileUrl} download={document.fileName || document.title}
                                     className="px-3 py-1.5 rounded-lg bg-[#ff4000]/10 text-[#ff4000] font-bold text-[11px] hover:bg-[#ff4000]/20 transition-colors">
-                                    {currentLanguage === 'tr' ? 'İndir' : 'Download'}
+                                    {oc(currentLanguage).indir}
                                   </a>
                                 )}
                               </div>
@@ -1286,16 +1287,16 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                 {modalConfig.type === 'compliance' && (
                   <>
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Başlık' : 'Title'}</label>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).baslik}</label>
                       <input name="title" defaultValue={(modalConfig.data as ComplianceItem)?.title || ''} required className="apple-input w-full" />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Sorumlu' : 'Responsible'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).sorumlu}</label>
                         <input name="responsible" defaultValue={(modalConfig.data as ComplianceItem)?.responsible || ''} required className="apple-input w-full" />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Sonraki Tarih' : 'Next Date'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).sonraki_tarih}</label>
                         <input type="date" name="nextDate" defaultValue={(modalConfig.data as ComplianceItem)?.nextDate || ''} required className="apple-input w-full" />
                       </div>
                     </div>
@@ -1308,17 +1309,17 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).durum}</label>
                         <select name="status" defaultValue={(modalConfig.data as ComplianceItem)?.status || 'Uyumlu'} className="apple-input w-full">
-                          <option value="Uyumlu">{currentLanguage === 'tr' ? 'Uyumlu' : 'Compliant'}</option>
-                          <option value="Uyumsuz">{currentLanguage === 'tr' ? 'Uyumsuz' : 'Non-Compliant'}</option>
-                          <option value="İncelemede">{currentLanguage === 'tr' ? 'İncelemede' : 'Under Review'}</option>
+                          <option value="Uyumlu">{oc(currentLanguage).uyumlu}</option>
+                          <option value="Uyumsuz">{oc(currentLanguage).uyumsuz}</option>
+                          <option value="İncelemede">{oc(currentLanguage).incelemede}</option>
                           <option value="Planlı">{currentLanguage === 'tr' ? 'Planlı' : 'Planned'}</option>
                         </select>
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{currentLanguage === 'tr' ? 'Açıklama' : 'Description'}</label>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{oc(currentLanguage).aciklama}</label>
                       <textarea name="description" defaultValue={(modalConfig.data as ComplianceItem)?.description || ''} rows={3} className="apple-input w-full resize-none" />
                     </div>
                   </>
@@ -1326,10 +1327,10 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
 
                 <div className="pt-4 flex justify-end gap-3 border-t border-gray-100">
                   <button type="button" onClick={() => setModalConfig({ isOpen: false, type: null, mode: 'add', data: null })} className="px-6 py-2.5 rounded-xl text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">
-                    {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                    {oc(currentLanguage).iptal}
                   </button>
                   <button type="submit" className="apple-button-primary px-8 py-2.5">
-                    {currentLanguage === 'tr' ? 'Kaydet' : 'Save'}
+                    {oc(currentLanguage).kaydet}
                   </button>
                 </div>
               </form>

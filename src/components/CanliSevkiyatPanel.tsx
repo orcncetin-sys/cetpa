@@ -10,6 +10,7 @@ import { birlesikAraclar } from '../utils/filo';
 import { zamanDate } from '../utils/zaman';
 import { KONUM_ARAC_ANAHTARI, KONUM_OLAYI } from '../hooks/useKonumYayini';
 import { useToast } from './Toast';
+import { oc } from '../i18n/ortak';
 
 /**
  * CanliSevkiyatPanel — sevkiyatın canlı durumu (Getir/Yemeksepeti düzeni).
@@ -358,11 +359,11 @@ export default function CanliSevkiyatPanel({
                   }
                   return (
                     <div className="flex gap-2 shrink-0">
-                      <a href={`tel:${tel}`} aria-label={tr ? 'Ara' : 'Call'}
+                      <a href={`tel:${tel}`} aria-label={oc(tr).ara_2}
                         className="w-9 h-9 rounded-full bg-brand text-white flex items-center justify-center">
                         <Phone className="w-4 h-4" />
                       </a>
-                      <a href={`sms:${tel}`} aria-label={tr ? 'Mesaj' : 'Message'}
+                      <a href={`sms:${tel}`} aria-label={oc(tr).mesaj}
                         className="w-9 h-9 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center">
                         <MessageSquare className="w-4 h-4" />
                       </a>

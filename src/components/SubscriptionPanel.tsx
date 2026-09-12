@@ -14,6 +14,7 @@ import {
   isTrialActive,
 } from '../types/subscription';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 interface SubscriptionPanelProps {
   currentLanguage: 'tr' | 'en';
@@ -65,23 +66,23 @@ export default function SubscriptionPanel({
     title: lang === 'tr' ? 'Abonelik Yönetimi' : 'Subscription Management',
     currentPlan: lang === 'tr' ? 'Mevcut Plan' : 'Current Plan',
     trial: lang === 'tr' ? 'Deneme Sürümü' : 'Trial',
-    active: lang === 'tr' ? 'Aktif' : 'Active',
+    active: oc(lang).aktif,
     daysLeft: lang === 'tr' ? 'gün kaldı' : 'days remaining',
     billingCycle: lang === 'tr' ? 'Fatura Dönemi' : 'Billing Cycle',
-    monthly: lang === 'tr' ? 'Aylık' : 'Monthly',
-    yearly: lang === 'tr' ? 'Yıllık' : 'Yearly',
+    monthly: oc(lang).aylik,
+    yearly: oc(lang).yillik,
     nextBill: lang === 'tr' ? 'Sonraki Fatura' : 'Next Billing',
-    users: lang === 'tr' ? 'Kullanıcılar' : 'Users',
+    users: oc(lang).kullanicilar,
     upgrade: lang === 'tr' ? 'Planı Yükselt' : 'Upgrade Plan',
     changePlan: lang === 'tr' ? 'Plan Değiştir' : 'Change Plan',
     cancel: lang === 'tr' ? 'Aboneliği İptal Et' : 'Cancel Subscription',
-    paymentHistory: lang === 'tr' ? 'Ödeme Geçmişi' : 'Payment History',
-    date: lang === 'tr' ? 'Tarih' : 'Date',
-    amount: lang === 'tr' ? 'Tutar' : 'Amount',
-    status: lang === 'tr' ? 'Durum' : 'Status',
+    paymentHistory: oc(lang).odeme_gecmisi,
+    date: oc(lang).tarih,
+    amount: oc(lang).tutar,
+    status: oc(lang).durum,
     invoice: lang === 'tr' ? 'Fatura' : 'Invoice',
-    paid: lang === 'tr' ? 'Ödendi' : 'Paid',
-    download: lang === 'tr' ? 'İndir' : 'Download',
+    paid: oc(lang).odendi,
+    download: oc(lang).indir,
     noPayments: lang === 'tr' ? 'Henüz ödeme yok' : 'No payments yet',
     cancelTitle: lang === 'tr' ? 'Ayrılmak istediğinize emin misiniz?' : 'Are you sure you want to leave?',
     cancelSubtitle: lang === 'tr'
@@ -162,7 +163,7 @@ export default function SubscriptionPanel({
               <p className="text-3xl font-black">
                 {formatPrice(subscription.cycle === 'monthly' ? (plan?.monthlyPrice || 0) : Math.round((plan?.yearlyPrice || 0) / 12), lang)}
               </p>
-              <p className="text-white/50 text-xs">/{lang === 'tr' ? 'ay' : 'mo'}</p>
+              <p className="text-white/50 text-xs">/{oc(lang).ay_2}</p>
             </div>
           </div>
         </div>
@@ -274,7 +275,7 @@ export default function SubscriptionPanel({
                       onClick={() => setCancelStep(1)}
                       className="w-full py-3 rounded-2xl font-bold text-sm bg-red-500 hover:bg-red-600 text-white transition-all"
                     >
-                      {lang === 'tr' ? 'Devam Et' : 'Continue'}
+                      {oc(lang).devam_et}
                     </button>
                     <button
                       onClick={() => setShowCancelFlow(false)}
@@ -310,7 +311,7 @@ export default function SubscriptionPanel({
                       disabled={!cancelReason}
                       className="w-full py-3 rounded-2xl font-bold text-sm bg-red-500 hover:bg-red-600 text-white transition-all disabled:opacity-40"
                     >
-                      {lang === 'tr' ? 'Devam Et' : 'Continue'}
+                      {oc(lang).devam_et}
                     </button>
                     <button
                       onClick={() => setShowCancelFlow(false)}

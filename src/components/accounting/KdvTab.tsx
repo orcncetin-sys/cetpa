@@ -2,6 +2,7 @@ import { motion } from 'motion/react';
 import { Search, FileText } from 'lucide-react';
 import { type JournalEntry } from '../../types';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
+import { oc } from '../../i18n/ortak';
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type KdvSortKey = 'ay' | 'hesaplanan' | 'indirilecek' | 'odenecek' | 'oran' | 'matrah' | 'kdv';
@@ -173,7 +174,7 @@ export default function KdvTab({
                 })
                 .map(([oran, data]) => (
                   <tr key={oran} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-2.5 px-3"><span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">{oran === 'karma' ? (currentLanguage === 'tr' ? 'Karma' : 'Mixed') : `%${oran}`}</span></td>
+                    <td className="py-2.5 px-3"><span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">{oran === 'karma' ? (oc(currentLanguage).karma) : `%${oran}`}</span></td>
                     <td className="py-2.5 px-3 text-right text-gray-700 font-medium">{formatTRY(data.matrah)}</td>
                     <td className="py-2.5 px-3 text-right font-semibold text-[#ff4000]">{formatTRY(data.kdv)}</td>
                   </tr>

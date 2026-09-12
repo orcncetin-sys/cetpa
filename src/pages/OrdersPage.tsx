@@ -47,6 +47,7 @@ import { faturaTipiEtiketi, siparisDurumEtiketi } from '../utils/durumEtiketi';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz } from '../utils/belgeSablonu';
 import { siparisStokPlani, stokGecisi, ATLANMA_SEBEBI } from '../utils/siparisStok';
 import { satirTutari } from '../utils/para';
+import { oc } from '../i18n/ortak';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -75,7 +76,7 @@ function OrderStatusTimeline({ status, lang = 'tr' }: { status: string; lang?: s
   return (
     <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-4">
-        {isTR ? 'Sipariş Durumu' : 'Order Status'}
+        {oc(isTR).siparis_durumu}
       </p>
       {isCancelled ? (
         <div className="flex items-center gap-3">
@@ -83,7 +84,7 @@ function OrderStatusTimeline({ status, lang = 'tr' }: { status: string; lang?: s
             <X className="w-5 h-5 text-red-500" />
           </div>
           <div>
-            <p className="font-bold text-red-600 text-sm">{isTR ? 'Sipariş İptal Edildi' : 'Order Cancelled'}</p>
+            <p className="font-bold text-red-600 text-sm">{oc(isTR).siparis_iptal_edildi}</p>
             <p className="text-[11px] text-red-400">{isTR ? 'Bu sipariş iptal edilmiştir.' : 'This order has been cancelled.'}</p>
           </div>
         </div>
@@ -393,15 +394,15 @@ export default function OrdersPage({
       // söylüyoruz — sessiz yanlış stok, gürültülü eksik stoktan kötüdür.
       const gecis = stokGecisi(status, applied);   // 'out' | 'in' | null — saf, testli (siparisStok.ts)
       if (ord && gecis === 'out') {
-        const hatalilar = await applyOrderStock(ord, 'out', currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment');
+        const hatalilar = await applyOrderStock(ord, 'out', oc(currentLanguage).sevkiyat);
         await updateDoc(doc(db, 'orders', orderId), { stockApplied: true });
-        if (hatalilar.length) createNotification(currentLanguage === 'tr' ? 'Stok Uyarısı' : 'Stock Warning', currentLanguage === 'tr'
+        if (hatalilar.length) createNotification(oc(currentLanguage).stok_uyarisi, currentLanguage === 'tr'
           ? `DİKKAT: ${hatalilar.length} ürünün stoğu düşürülemedi: ${hatalilar.join(', ')} — elle düzeltin.`
           : `WARNING: stock not decremented for ${hatalilar.length} item(s): ${hatalilar.join(', ')} — fix manually.`, 'warning');
       } else if (ord && gecis === 'in') {
-        const hatalilar = await applyOrderStock(ord, 'in', currentLanguage === 'tr' ? 'Sipariş iptali' : 'Order cancelled');
+        const hatalilar = await applyOrderStock(ord, 'in', oc(currentLanguage).siparis_iptali);
         await updateDoc(doc(db, 'orders', orderId), { stockApplied: false });
-        if (hatalilar.length) createNotification(currentLanguage === 'tr' ? 'Stok Uyarısı' : 'Stock Warning', currentLanguage === 'tr'
+        if (hatalilar.length) createNotification(oc(currentLanguage).stok_uyarisi, currentLanguage === 'tr'
           ? `DİKKAT: ${hatalilar.length} ürünün stoğu geri yüklenemedi: ${hatalilar.join(', ')} — elle düzeltin.`
           : `WARNING: stock not restored for ${hatalilar.length} item(s): ${hatalilar.join(', ')} — fix manually.`, 'warning');
       }
@@ -544,10 +545,10 @@ export default function OrdersPage({
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
                       { label: currentLanguage === 'tr' ? 'Teslimat Oranı' : 'Fulfillment Rate', value: `${fulfillRate}%`, color: fulfillRate >= 80 ? 'text-emerald-600' : fulfillRate >= 60 ? 'text-amber-600' : 'text-red-600', bg: 'bg-white', sub: `${delivered522} / ${total522}` },
-                      { label: currentLanguage === 'tr' ? 'Bekleyen' : 'Pending', value: pending522.toString(), color: pending522 > 0 ? 'text-amber-600' : 'text-gray-400', bg: 'bg-white', sub: null },
+                      { label: oc(currentLanguage).bekleyen, value: pending522.toString(), color: pending522 > 0 ? 'text-amber-600' : 'text-gray-400', bg: 'bg-white', sub: null },
                       { label: currentLanguage === 'tr' ? 'Hazırlanıyor/Kargoda' : 'In Progress', value: inProgress522.toString(), color: inProgress522 > 0 ? 'text-blue-600' : 'text-gray-400', bg: 'bg-white', sub: null },
                       { label: currentLanguage === 'tr' ? 'Alacak Toplam' : 'Outstanding', value: kisaTutar(unpaidTotal, { fmt: unpaidTotal >= 1e6 ? 'M' : 'K', ondalik: 1 }), color: unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600', bg: unpaidTotal > 0 ? 'bg-red-50' : 'bg-white',
-                        sub: unpaidOrders.length > 0 ? `${unpaidOrders.length} ${currentLanguage==='tr'?'sipariş':'orders'}` : null },
+                        sub: unpaidOrders.length > 0 ? `${unpaidOrders.length} ${oc(currentLanguage).siparis}` : null },
                     ].map((k, i) => (
                       <div key={i} className={cn("rounded-xl border border-gray-100 shadow-sm px-4 py-3", k.bg)}>
                         <p className={cn("text-xl font-black", k.color)}>{k.value}</p>
@@ -596,7 +597,7 @@ export default function OrdersPage({
                           {currentLanguage === 'tr' ? 'Alacak Yaşlandırma Raporu' : 'Invoice Aging Report'}
                         </span>
                         <span className={cn("text-[10px] font-black px-2 py-0.5 rounded-full", hasOld ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700")}>
-                          {unpaid521.length} {currentLanguage === 'tr' ? 'açık' : 'open'}
+                          {unpaid521.length} {oc(currentLanguage).acik_2}
                         </span>
                       </div>
                       <ChevronDown className={cn("w-4 h-4 text-gray-400 transition-transform", showInvoiceAging && "rotate-180")} />
@@ -694,7 +695,7 @@ export default function OrdersPage({
                           autoTable(pdf, {
                             ...pdfTabloStili(),
                             startY: govdeY,
-                            head: [['#', currentLanguage==='tr'?'Müşteri':'Customer', currentLanguage==='tr'?'Durum':'Status', currentLanguage==='tr'?'Tutar':'Amount']],
+                            head: [['#', oc(currentLanguage).musteri, oc(currentLanguage).durum, oc(currentLanguage).tutar]],
                             // Para 2 ondalik: locale verilse de ondalik verilmezse
                             // tarayici 3 haneye kadar basabiliyor.
                             body: sel.map(o => [gorunenSiparisNo(o), o.customerName, o.status,
@@ -762,19 +763,19 @@ export default function OrdersPage({
                           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                             <div className="p-4 bg-gray-50 border-b border-gray-100 space-y-3">
                               <div className="grid grid-cols-2 gap-3">
-                                <input className="apple-input text-sm" placeholder={currentLanguage === 'tr' ? 'Şablon adı' : 'Template name'}
+                                <input className="apple-input text-sm" placeholder={oc(currentLanguage).sablon_adi}
                                   value={recurringForm.templateName} onChange={e => setRecurringForm(f => ({ ...f, templateName: e.target.value }))} />
-                                <input className="apple-input text-sm" placeholder={currentLanguage === 'tr' ? 'Müşteri adı' : 'Customer name'}
+                                <input className="apple-input text-sm" placeholder={oc(currentLanguage).musteri_adi_2}
                                   value={recurringForm.customerName} onChange={e => setRecurringForm(f => ({ ...f, customerName: e.target.value }))} />
                                 <div className="relative">
                                   <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">₺</span>
-                                  <input type="number" className="apple-input text-sm pl-6 w-full" placeholder={currentLanguage === 'tr' ? 'Tutar' : 'Amount'}
+                                  <input type="number" className="apple-input text-sm pl-6 w-full" placeholder={oc(currentLanguage).tutar}
                                     value={recurringForm.totalPrice || ''} onChange={e => setRecurringForm(f => ({ ...f, totalPrice: Number(e.target.value) }))} />
                                 </div>
                                 <select className="apple-input text-sm" value={recurringForm.frequency} onChange={e => setRecurringForm(f => ({ ...f, frequency: e.target.value as typeof recurringForm.frequency }))}>
-                                  <option value="weekly">{currentLanguage === 'tr' ? 'Haftalık' : 'Weekly'}</option>
-                                  <option value="monthly">{currentLanguage === 'tr' ? 'Aylık' : 'Monthly'}</option>
-                                  <option value="quarterly">{currentLanguage === 'tr' ? '3 Aylık' : 'Quarterly'}</option>
+                                  <option value="weekly">{oc(currentLanguage).haftalik}</option>
+                                  <option value="monthly">{oc(currentLanguage).aylik}</option>
+                                  <option value="quarterly">{oc(currentLanguage)._3_aylik}</option>
                                 </select>
                               </div>
                               <div className="flex items-center gap-2">
@@ -790,7 +791,7 @@ export default function OrdersPage({
                                     toast(currentLanguage === 'tr' ? 'Şablon eklendi.' : 'Template added.', 'success');
                                   }}
                                   className="apple-button-primary text-xs px-4 ml-auto disabled:opacity-50"
-                                >{currentLanguage === 'tr' ? 'Ekle' : 'Add'}</button>
+                                >{oc(currentLanguage).ekle}</button>
                               </div>
                             </div>
                           </motion.div>
@@ -815,9 +816,9 @@ export default function OrdersPage({
                                   <p className="text-[10px] text-gray-400">{r.customerName} · {fmtKpi(r.totalPrice)}</p>
                                 </div>
                                 <span className="text-[10px] text-gray-500 flex-shrink-0">
-                                  {r.frequency === 'weekly' ? (currentLanguage === 'tr' ? 'Haftalık' : 'Weekly')
-                                    : r.frequency === 'monthly' ? (currentLanguage === 'tr' ? 'Aylık' : 'Monthly')
-                                    : (currentLanguage === 'tr' ? '3 Aylık' : 'Quarterly')}
+                                  {r.frequency === 'weekly' ? (oc(currentLanguage).haftalik)
+                                    : r.frequency === 'monthly' ? (oc(currentLanguage).aylik)
+                                    : (oc(currentLanguage)._3_aylik)}
                                 </span>
                                 {due && (
                                   <span className={`text-[10px] font-bold flex-shrink-0 ${overdue ? 'text-red-600' : 'text-gray-500'}`}>
@@ -830,7 +831,7 @@ export default function OrdersPage({
                                   }}
                                   className={`text-[9px] font-bold px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${r.active ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-700' : 'bg-gray-100 text-gray-500 hover:bg-emerald-100 hover:text-emerald-700'}`}
                                 >
-                                  {r.active ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') : (currentLanguage === 'tr' ? 'Pasif' : 'Paused')}
+                                  {r.active ? (oc(currentLanguage).aktif) : (currentLanguage === 'tr' ? 'Pasif' : 'Paused')}
                                 </button>
                               </div>
                             );
@@ -905,7 +906,7 @@ export default function OrdersPage({
               {/* ── Phase 501: Date Range Quick Filter ── */}
               <div className="flex flex-wrap gap-1.5 items-center">
                 <span className={cn("text-[10px] font-semibold uppercase tracking-wider", darkMode ? "text-white/65" : "text-gray-400")}>
-                  {currentLanguage === 'tr' ? 'Dönem' : 'Period'}:
+                  {oc(currentLanguage).donem}:
                 </span>
                 {([
                   { v: 'all',     tr: 'Tümü',       en: 'All Time' },
@@ -1131,7 +1132,7 @@ export default function OrdersPage({
                               </div>
                             </td>
                             <td className="px-6 py-4 text-gray-500">
-                              {(() => { const d = siparisTarih(order); return d ? tarihYaz(d) : (currentLanguage === 'tr' ? 'Tarih yok' : 'Unknown Date'); })()}
+                              {(() => { const d = siparisTarih(order); return d ? tarihYaz(d) : (oc(currentLanguage).tarih_yok); })()}
                             </td>
                             <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                               {/* Phase 534: days in current status */}
@@ -1145,7 +1146,7 @@ export default function OrdersPage({
                                   <span className={cn("block text-[8px] font-bold mb-1 px-1.5 py-0.5 rounded-full w-fit",
                                     warn534 ? "bg-red-50 text-red-400" : "bg-gray-100 text-gray-400"
                                   )}>
-                                    {days534}{currentLanguage === 'tr' ? 'g' : 'd'}
+                                    {days534}{oc(currentLanguage).g}
                                   </span>
                                 );
                               })()}
@@ -1213,25 +1214,25 @@ export default function OrdersPage({
                                 {odemeTakipli(order) ? (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleToggleOrderPaid(order); }}
-                                  title={order.paid ? (currentLanguage === 'tr' ? 'Ödendi — tıkla: ödenmedi yap' : 'Paid — click to mark unpaid') : (currentLanguage === 'tr' ? 'Ödenmedi — tıkla: ödendi yap' : 'Unpaid — click to mark paid')}
+                                  title={order.paid ? (oc(currentLanguage).odendi_tikla_odenmedi_yap) : (currentLanguage === 'tr' ? 'Ödenmedi — tıkla: ödendi yap' : 'Unpaid — click to mark paid')}
                                   className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full transition-colors ${order.paid ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}
                                 >
-                                  {order.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
+                                  {order.paid ? (oc(currentLanguage).odendi_2) : (oc(currentLanguage).odenmedi)}
                                 </button>
                                 ) : (
                                   <span className="text-[9px] font-medium text-gray-400"
-                                    title={currentLanguage === 'tr' ? 'Tahsilat durumu Mikro cari hesapta izlenir — sipariş türevi bilmez' : 'Collection tracked in Mikro AR ledger'}>
+                                    title={oc(currentLanguage).tahsilat_durumu_mikro_cari_hesapta_izlenir_sipar}>
                                     {currentLanguage === 'tr' ? 'Tahsilat: Mikro cari' : 'AR: Mikro ledger'}
                                   </span>
                                 )}
                                 {/* Phase 535: payment method micro-badge */}
                                 {order.paid && order.paymentMethod && (() => {
                                   const pmLabels: Record<string, string> = {
-                                    cash: currentLanguage === 'tr' ? 'Nakit' : 'Cash',
+                                    cash: oc(currentLanguage).nakit,
                                     bank_transfer: currentLanguage === 'tr' ? 'EFT' : 'Transfer',
                                     credit_card: currentLanguage === 'tr' ? 'Kart' : 'Card',
-                                    check: currentLanguage === 'tr' ? 'Çek' : 'Check',
-                                    other: currentLanguage === 'tr' ? 'Diğer' : 'Other',
+                                    check: oc(currentLanguage).cek,
+                                    other: oc(currentLanguage).diger,
                                   };
                                   return (
                                     <span className="text-[8px] font-semibold px-1 py-0.5 rounded bg-gray-100 text-gray-500">
@@ -1257,7 +1258,7 @@ export default function OrdersPage({
                                   <button
                                     onClick={() => setActiveTab('muhasebe')}
                                     className="text-xs font-bold px-2 py-1 bg-brand/10 text-brand hover:bg-brand hover:text-white rounded-lg transition-all flex items-center gap-1"
-                                    title={currentLanguage==='tr'?'Fatura Kes':'Create Invoice'}
+                                    title={oc(currentLanguage).fatura_kes}
                                   >
                                     <FileText className="w-3.5 h-3.5"/>
                                     {currentLanguage==='tr'?'Fatura Kes':'Invoice'}
@@ -1323,10 +1324,10 @@ export default function OrdersPage({
                                     <thead>
                                       <tr className="bg-gray-50 border-b border-gray-100">
                                         <th className="text-left px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">SKU</th>
-                                        <th className="text-left px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</th>
-                                        <th className="text-right px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Adet' : 'Qty'}</th>
-                                        <th className="text-right px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Birim Fiyat' : 'Unit Price'}</th>
-                                        <th className="text-right px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</th>
+                                        <th className="text-left px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).urun}</th>
+                                        <th className="text-right px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).adet_2}</th>
+                                        <th className="text-right px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).birim_fiyat}</th>
+                                        <th className="text-right px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).toplam}</th>
                                       </tr>
                                     </thead>
                                     <tbody>
@@ -1342,7 +1343,7 @@ export default function OrdersPage({
                                     </tbody>
                                     <tfoot>
                                       <tr className="bg-gray-50">
-                                        <td colSpan={4} className="px-4 py-2 text-right text-[10px] font-bold text-gray-500 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Genel Toplam' : 'Grand Total'}</td>
+                                        <td colSpan={4} className="px-4 py-2 text-right text-[10px] font-bold text-gray-500 uppercase tracking-wider">{oc(currentLanguage).genel_toplam_2}</td>
                                         <td className="px-4 py-2 text-right font-black text-brand">{paraYaz(order.totalPrice)}</td>
                                       </tr>
                                     </tfoot>
@@ -1384,7 +1385,7 @@ export default function OrdersPage({
                     </div>
                     <div className="flex justify-between items-end">
                       <div className="text-xs text-gray-400">
-                        {(() => { const d = siparisTarih(order); return d ? tarihYaz(d) : (currentLanguage === 'tr' ? 'Tarih yok' : 'Unknown Date'); })()}
+                        {(() => { const d = siparisTarih(order); return d ? tarihYaz(d) : (oc(currentLanguage).tarih_yok); })()}
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-brand">{paraYaz(order.totalPrice)}</p>
@@ -1430,10 +1431,10 @@ export default function OrdersPage({
                 {p575ShowForm && (
                   <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr575?'Sipariş ID':'Order ID'} value={p575Draft.orderId} onChange={e=>setP575Draft(d=>({...d,orderId:e.target.value}))} />
-                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr575?'Müşteri Adı':'Customer Name'} value={p575Draft.customerName} onChange={e=>setP575Draft(d=>({...d,customerName:e.target.value}))} />
-                      <input className="apple-input px-3 py-2 text-sm col-span-2" placeholder={tr575?'İade Nedeni':'Return Reason'} value={p575Draft.reason} onChange={e=>setP575Draft(d=>({...d,reason:e.target.value}))} />
-                      <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr575?'Tutar (₺)':'Amount (₺)'} value={p575Draft.amount} onChange={e=>setP575Draft(d=>({...d,amount:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr575).siparis_id} value={p575Draft.orderId} onChange={e=>setP575Draft(d=>({...d,orderId:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr575).musteri_adi} value={p575Draft.customerName} onChange={e=>setP575Draft(d=>({...d,customerName:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm col-span-2" placeholder={oc(tr575).iade_nedeni} value={p575Draft.reason} onChange={e=>setP575Draft(d=>({...d,reason:e.target.value}))} />
+                      <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr575).tutar_2} value={p575Draft.amount} onChange={e=>setP575Draft(d=>({...d,amount:e.target.value}))} />
                     </div>
                     <div className="flex gap-2">
                       <button onClick={async ()=>{
@@ -1445,9 +1446,9 @@ export default function OrdersPage({
                           setP575Draft({orderId:'',customerName:'',reason:'',amount:''});
                           setP575ShowForm(false); setP575EditId(null);
                           toast(tr575?(p575EditId?'İade güncellendi.':'İade talebi oluşturuldu.'):(p575EditId?'Return updated.':'Return request created.'),'success');
-                        } catch(e){ toast((tr575?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                      }} className="apple-button-primary text-sm px-4 py-1.5">{tr575?'Kaydet':'Save'}</button>
-                      <button onClick={()=>{setP575ShowForm(false);setP575EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{tr575?'İptal':'Cancel'}</button>
+                        } catch(e){ toast((oc(tr575).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
+                      }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr575).kaydet}</button>
+                      <button onClick={()=>{setP575ShowForm(false);setP575EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{oc(tr575).iptal}</button>
                     </div>
                   </div>
                 )}
@@ -1457,7 +1458,7 @@ export default function OrdersPage({
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead><tr className="border-b border-gray-100 bg-gray-50">
-                        {[tr575?'Müşteri':'Customer', tr575?'Sipariş ID':'Order ID', tr575?'Neden':'Reason', tr575?'Tutar':'Amount', tr575?'Durum':'Status'].map(h=>(
+                        {[oc(tr575).musteri, oc(tr575).siparis_id, oc(tr575).neden, oc(tr575).tutar, oc(tr575).durum].map(h=>(
                           <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                         ))}
                       </tr></thead>
@@ -1470,13 +1471,13 @@ export default function OrdersPage({
                             <td className="px-3 py-2.5 font-bold font-mono text-gray-700">{r.amount>0?paraYaz(r.amount):'—'}</td>
                             <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">
-                              <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'salesReturns',r.id),{status:e.target.value});}catch(err){toast((tr575?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors575[r.status]}`}>
+                              <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'salesReturns',r.id),{status:e.target.value});}catch(err){toast((oc(tr575).guncellenemedi)+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors575[r.status]}`}>
                                 {(['Bekliyor','Onaylandı','Reddedildi','Tamamlandı'] as const).map(s=>(
                                   <option key={s} value={s}>{s}</option>
                                 ))}
                               </select>
-                              <button type="button" onClick={()=>{setP575Draft({orderId:r.orderId,customerName:r.customerName,reason:r.reason,amount:String(r.amount)});setP575EditId(r.id);setP575ShowForm(true);}} title={tr575?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                              <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'salesReturns',r.id));}catch(e){toast((tr575?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                              <button type="button" onClick={()=>{setP575Draft({orderId:r.orderId,customerName:r.customerName,reason:r.reason,amount:String(r.amount)});setP575EditId(r.id);setP575ShowForm(true);}} title={oc(tr575).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                              <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'salesReturns',r.id));}catch(e){toast((oc(tr575).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                               </div>
                             </td>
                           </tr>
@@ -1507,10 +1508,10 @@ export default function OrdersPage({
                 {p583ShowForm && (
                   <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr583?'Müşteri':'Customer'} value={p583Draft.customerName} onChange={e=>setP583Draft(d=>({...d,customerName:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr583).musteri} value={p583Draft.customerName} onChange={e=>setP583Draft(d=>({...d,customerName:e.target.value}))} />
                       <input className="apple-input px-3 py-2 text-sm" placeholder={tr583?'Ürün Adı':'Product'} value={p583Draft.productName} onChange={e=>setP583Draft(d=>({...d,productName:e.target.value}))} />
-                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr583?'Seri No':'Serial No'} value={p583Draft.serialNo} onChange={e=>setP583Draft(d=>({...d,serialNo:e.target.value}))} />
-                      <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={tr583?'Garanti Bitiş':'Warranty End'} value={p583Draft.warrantyEnd} onChange={e=>setP583Draft(d=>({...d,warrantyEnd:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr583).seri_no} value={p583Draft.serialNo} onChange={e=>setP583Draft(d=>({...d,serialNo:e.target.value}))} />
+                      <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr583).garanti_bitis} value={p583Draft.warrantyEnd} onChange={e=>setP583Draft(d=>({...d,warrantyEnd:e.target.value}))} />
                       <select className="apple-input px-3 py-2 text-sm" value={p583Draft.priority} onChange={e=>setP583Draft(d=>({...d,priority:e.target.value as 'Düşük'|'Orta'|'Yüksek'}))}>
                         <option value="Düşük">{tr583?'Düşük Öncelik':'Low Priority'}</option>
                         <option value="Orta">{tr583?'Orta Öncelik':'Medium Priority'}</option>
@@ -1528,9 +1529,9 @@ export default function OrdersPage({
                           setP583Draft({customerName:'',productName:'',serialNo:'',warrantyEnd:'',description:'',priority:'Orta'});
                           setP583ShowForm(false); setP583EditId(null);
                           toast(tr583?(p583EditId?'Talep güncellendi.':'Servis talebi oluşturuldu.'):(p583EditId?'Request updated.':'Service request created.'),'success');
-                        } catch(e){ toast((tr583?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                      }} className="apple-button-primary text-sm px-4 py-1.5">{tr583?'Kaydet':'Save'}</button>
-                      <button onClick={()=>{setP583ShowForm(false);setP583EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{tr583?'İptal':'Cancel'}</button>
+                        } catch(e){ toast((oc(tr583).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
+                      }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr583).kaydet}</button>
+                      <button onClick={()=>{setP583ShowForm(false);setP583EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{oc(tr583).iptal}</button>
                     </div>
                   </div>
                 )}
@@ -1549,11 +1550,11 @@ export default function OrdersPage({
                           <p className="text-xs text-gray-600 mt-1 line-clamp-1">{r.description}</p>
                         </div>
                         <div className="ml-3 flex items-center gap-2 shrink-0">
-                        <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'serviceRequests',r.id),{status:e.target.value});}catch(err){toast((tr583?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className="text-[10px] font-bold bg-transparent border-0 cursor-pointer">
+                        <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'serviceRequests',r.id),{status:e.target.value});}catch(err){toast((oc(tr583).guncellenemedi)+(err instanceof Error?err.message:String(err)),'error');}}} className="text-[10px] font-bold bg-transparent border-0 cursor-pointer">
                           <option>Açık</option><option>İşlemde</option><option>Kapatıldı</option>
                         </select>
-                        <button type="button" onClick={()=>{setP583Draft({customerName:r.customerName,productName:r.productName,serialNo:r.serialNo||'',warrantyEnd:r.warrantyEnd||'',description:r.description,priority:r.priority});setP583EditId(r.id);setP583ShowForm(true);}} title={tr583?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                        <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'serviceRequests',r.id));}catch(e){toast((tr583?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                        <button type="button" onClick={()=>{setP583Draft({customerName:r.customerName,productName:r.productName,serialNo:r.serialNo||'',warrantyEnd:r.warrantyEnd||'',description:r.description,priority:r.priority});setP583EditId(r.id);setP583ShowForm(true);}} title={oc(tr583).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                        <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'serviceRequests',r.id));}catch(e){toast((oc(tr583).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                         </div>
                       </div>
                     ))}
@@ -1587,8 +1588,8 @@ export default function OrdersPage({
                 {p609ShowForm && (
                   <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      <input className="apple-input col-span-2" placeholder={tr609?'Müşteri':'Customer'} value={p609Draft.customer} onChange={e=>setP609Draft(d=>({...d,customer:e.target.value}))}/>
-                      <input className="apple-input col-span-2" placeholder={tr609?'Konu':'Subject'} value={p609Draft.subject} onChange={e=>setP609Draft(d=>({...d,subject:e.target.value}))}/>
+                      <input className="apple-input col-span-2" placeholder={oc(tr609).musteri} value={p609Draft.customer} onChange={e=>setP609Draft(d=>({...d,customer:e.target.value}))}/>
+                      <input className="apple-input col-span-2" placeholder={oc(tr609).konu} value={p609Draft.subject} onChange={e=>setP609Draft(d=>({...d,subject:e.target.value}))}/>
                       <select value={p609Draft.priority} onChange={e=>setP609Draft(d=>({...d,priority:e.target.value as typeof d.priority}))} className="apple-input">
                         {['Düşük','Orta','Yüksek','Kritik'].map(p=><option key={p}>{p}</option>)}
                       </select>
@@ -1603,13 +1604,13 @@ export default function OrdersPage({
                         setP609Draft({customer:'',subject:'',priority:'Orta',slaHours:'24'});
                         setP609ShowForm(false); setP609EditId(null);
                         toast(tr609?(p609EditId?'Bilet güncellendi.':'Bilet açıldı.'):(p609EditId?'Ticket updated.':'Ticket created.'),'success');
-                      } catch(e){ toast((tr609?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
+                      } catch(e){ toast((oc(tr609).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
                     }} className="apple-button-primary text-xs px-6">{tr609?'Aç':'Create'}</button>
                   </div>
                 )}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
-                    {label:tr609?'Açık':'Open',val:openTickets.length,color:'text-blue-600',bg:'bg-blue-50'},
+                    {label:oc(tr609).acik,val:openTickets.length,color:'text-blue-600',bg:'bg-blue-50'},
                     {label:tr609?'SLA İhlali':'SLA Breach',val:slaBreached,color:'text-red-600',bg:'bg-red-50'},
                     {label:tr609?'Çözülen':'Resolved',val:resolvedTickets.length,color:'text-emerald-600',bg:'bg-emerald-50'},
                     {label:tr609?'Müşteri Skoru':'Sat. Score',val:avgSatScore,color:'text-amber-600',bg:'bg-amber-50'},
@@ -1628,13 +1629,13 @@ export default function OrdersPage({
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${priorityColor[t.priority]}`}>{t.priority}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-semibold text-gray-800 truncate">{t.customer} — {t.subject}</p>
-                            <p className="text-[10px] text-gray-400">{hoursOpen===null?'—':`${Math.round(hoursOpen)}h`} {tr609?'açık':'open'} · SLA: {t.slaHours}h{!slaOk?' ⚠️':''}</p>
+                            <p className="text-[10px] text-gray-400">{hoursOpen===null?'—':`${Math.round(hoursOpen)}h`} {oc(tr609).acik_2} · SLA: {t.slaHours}h{!slaOk?' ⚠️':''}</p>
                           </div>
-                          <select value={t.status} onChange={async e=>{try{await updateDoc(doc(db,'helpdeskTickets',t.id),{status:e.target.value,...(['Çözüldü','Kapatıldı'].includes(e.target.value)?{resolvedAt:new Date().toISOString()}:{})});}catch(err){toast((tr609?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white shrink-0">
+                          <select value={t.status} onChange={async e=>{try{await updateDoc(doc(db,'helpdeskTickets',t.id),{status:e.target.value,...(['Çözüldü','Kapatıldı'].includes(e.target.value)?{resolvedAt:new Date().toISOString()}:{})});}catch(err){toast((oc(tr609).guncellenemedi)+(err instanceof Error?err.message:String(err)),'error');}}} className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white shrink-0">
                             {['Açık','İşlemde','Çözüldü','Kapatıldı'].map(s=><option key={s}>{s}</option>)}
                           </select>
-                          <button type="button" onClick={()=>{setP609Draft({customer:t.customer,subject:t.subject,priority:t.priority,slaHours:String(t.slaHours)});setP609EditId(t.id);setP609ShowForm(true);}} title={tr609?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors shrink-0"><Edit2 className="w-3.5 h-3.5"/></button>
-                          <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'helpdeskTickets',t.id));}catch(e){toast((tr609?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
+                          <button type="button" onClick={()=>{setP609Draft({customer:t.customer,subject:t.subject,priority:t.priority,slaHours:String(t.slaHours)});setP609EditId(t.id);setP609ShowForm(true);}} title={oc(tr609).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors shrink-0"><Edit2 className="w-3.5 h-3.5"/></button>
+                          <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'helpdeskTickets',t.id));}catch(e){toast((oc(tr609).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
                         </div>
                       );
                     })}
@@ -1654,20 +1655,20 @@ export default function OrdersPage({
               <div className="apple-card p-5 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h3 className="font-bold text-gray-900 text-sm">📋 {tr621?'Talep Yönetimi':'Demand Management'}</h3>
-                  <button onClick={()=>setP621ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr621?'Talep Ekle':'Add Request'}</button>
+                  <button onClick={()=>setP621ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{oc(tr621).talep_ekle}</button>
                 </div>
                 {pending621>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-amber-700">{pending621} {tr621?'bekleyen talep':'pending request(s)'}</div>}
                 {p621ShowForm && (
                   <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                      <input className="apple-input col-span-2 md:col-span-1" placeholder={tr621?'Ürün Adı':'Product Name'} value={p621Draft.productName} onChange={e=>setP621Draft(d=>({...d,productName:e.target.value}))}/>
+                      <input className="apple-input col-span-2 md:col-span-1" placeholder={oc(tr621).urun_adi} value={p621Draft.productName} onChange={e=>setP621Draft(d=>({...d,productName:e.target.value}))}/>
                       <input className="apple-input" placeholder="SKU" value={p621Draft.sku} onChange={e=>setP621Draft(d=>({...d,sku:e.target.value}))}/>
-                      <input type="number" className="apple-input" placeholder={tr621?'Miktar':'Qty'} value={p621Draft.requestedQty} onChange={e=>setP621Draft(d=>({...d,requestedQty:e.target.value}))}/>
+                      <input type="number" className="apple-input" placeholder={oc(tr621).miktar} value={p621Draft.requestedQty} onChange={e=>setP621Draft(d=>({...d,requestedQty:e.target.value}))}/>
                       <input className="apple-input" placeholder={tr621?'Talep Eden':'Requested By'} value={p621Draft.requestedBy} onChange={e=>setP621Draft(d=>({...d,requestedBy:e.target.value}))}/>
                       <select value={p621Draft.priority} onChange={e=>setP621Draft(d=>({...d,priority:e.target.value as typeof d.priority}))} className="apple-input">
                         {['Düşük','Orta','Yüksek'].map(p=><option key={p}>{p}</option>)}
                       </select>
-                      <input className="apple-input col-span-2 md:col-span-1" placeholder={tr621?'Notlar':'Notes'} value={p621Draft.notes} onChange={e=>setP621Draft(d=>({...d,notes:e.target.value}))}/>
+                      <input className="apple-input col-span-2 md:col-span-1" placeholder={oc(tr621).notlar} value={p621Draft.notes} onChange={e=>setP621Draft(d=>({...d,notes:e.target.value}))}/>
                     </div>
                     <button onClick={async ()=>{
                       if(!p621Draft.productName||!p621Draft.requestedQty) return;
@@ -1675,7 +1676,7 @@ export default function OrdersPage({
                       setP621Draft(d=>({...d,productName:'',sku:'',requestedQty:'',requestedBy:'',notes:''}));
                       setP621ShowForm(false);
                       toast(tr621?'Talep oluşturuldu.':'Request created.','success');
-                    }} className="apple-button-primary text-xs px-6">{tr621?'Oluştur':'Create'}</button>
+                    }} className="apple-button-primary text-xs px-6">{oc(tr621).olustur}</button>
                   </div>
                 )}
                 {p621Demands.length > 0 && (
@@ -1684,7 +1685,7 @@ export default function OrdersPage({
                       <div key={d.id} className="flex items-center gap-3 border border-gray-100 rounded-xl px-4 py-2.5">
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-semibold text-gray-800">{d.productName} {d.sku&&<span className="text-gray-400 font-normal">({d.sku})</span>}</p>
-                          <p className="text-[10px] text-gray-400">{d.requestedBy} · {d.requestedQty} {tr621?'adet':'units'} · {d.priority}</p>
+                          <p className="text-[10px] text-gray-400">{d.requestedBy} · {d.requestedQty} {oc(tr621).adet} · {d.priority}</p>
                         </div>
                         <select value={d.status} onChange={async e=>{try{await updateDoc(doc(db,'demandRequests',d.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 shrink-0 ${statusCls[d.status]}`}>
                           {['Bekliyor','Onaylandı','Reddedildi','Sipariş Verildi'].map(s=><option key={s}>{s}</option>)}
@@ -1750,7 +1751,7 @@ export default function OrdersPage({
                           {iyzicoLinkLoading[selectedOrder.id]
                             ? <RefreshCw className="w-4 h-4 animate-spin"/>
                             : <CreditCard className="w-4 h-4"/>}
-                          {currentLanguage === 'tr' ? 'Ödeme Linki' : 'Payment Link'}
+                          {oc(currentLanguage).odeme_linki}
                         </button>
                       ) : (
                         <a
@@ -1830,15 +1831,15 @@ export default function OrdersPage({
                               // 283'e dayanabiliyor; Durum satiri (finalY+10) sonradan cizilen banda
                               // gomuluyordu (inceleme buldu). Gorunur geometri degismez, yalniz esik.
                               margin: { bottom: PDF_ALT_BANT_YUKSEKLIK + 20 },
-                              head: [[ currentLanguage === 'tr' ? 'Ürün' : 'Product', 'SKU', currentLanguage === 'tr' ? 'Adet' : 'Qty', currentLanguage === 'tr' ? 'Birim Fiyat' : 'Unit Price', currentLanguage === 'tr' ? 'Toplam' : 'Total' ]],
+                              head: [[ oc(currentLanguage).urun, 'SKU', oc(currentLanguage).adet_2, oc(currentLanguage).birim_fiyat, oc(currentLanguage).toplam ]],
                               body: lineItems505.map(li => [ li.name || li.title || '', li.sku || '', li.quantity, paraYaz(li.price), paraYaz(satirTutari(li.price, li.quantity)) ]),
-                              foot: [[{ content: currentLanguage === 'tr' ? 'TOPLAM' : 'TOTAL', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, paraYaz(o.totalPrice)]],
+                              foot: [[{ content: oc(currentLanguage).toplam_2, colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, paraYaz(o.totalPrice)]],
                               footStyles: { fillColor: PDF_RENK.light, fontStyle: 'bold', fontSize: 10 },
                             });
                           } else {
                             const y505 = govdeY505 + 20;
                             doc505.setFontSize(10); doc505.setTextColor(30,30,30);
-                            doc505.text(`${currentLanguage === 'tr' ? 'Toplam Tutar' : 'Total Amount'}: ${paraYaz(o.totalPrice)}`, 14, y505);
+                            doc505.text(`${oc(currentLanguage).toplam_tutar}: ${paraYaz(o.totalPrice)}`, 14, y505);
                           }
                           const finalY505 = (doc505 as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 80;
                           doc505.setFontSize(8); doc505.setTextColor(150,150,150);
@@ -1854,7 +1855,7 @@ export default function OrdersPage({
                                 : (currentLanguage === 'tr' ? 'Ödeme Bekleniyor' : 'Payment Pending'))
                             : null;
                           doc505.text(
-                            `${currentLanguage === 'tr' ? 'Durum' : 'Status'}: ${durum505}${odeme505 ? ` · ${odeme505}` : ''}`,
+                            `${oc(currentLanguage).durum}: ${durum505}${odeme505 ? ` · ${odeme505}` : ''}`,
                             14, finalY505 + 10);
 
                           // Banka + alt bilgi ORTAK cizicide — sigmiyorsa yeni sayfa acar.
@@ -1892,7 +1893,7 @@ export default function OrdersPage({
                         title={currentLanguage === 'tr' ? 'Sevkiyat oluştur' : 'Create shipment'}
                       >
                         <Truck className="w-4 h-4" />
-                        {currentLanguage === 'tr' ? 'Sevkiyat' : 'Shipment'}
+                        {oc(currentLanguage).sevkiyat}
                       </button>
                       {/* Copy public tracking link */}
                       <button
@@ -1900,7 +1901,7 @@ export default function OrdersPage({
                           const url = `${window.location.origin}/?track=${selectedOrder.id}`;
                           navigator.clipboard.writeText(url).then(() =>
                             toast(currentLanguage === 'tr' ? 'Takip linki kopyalandı ✓' : 'Tracking link copied ✓', 'success')
-                          ).catch(() => toast(currentLanguage === 'tr' ? 'Kopyalanamadı — tarayıcı pano iznini engelledi.' : 'Copy failed — clipboard blocked.', 'error'));
+                          ).catch(() => toast(oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'));
                         }}
                         className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors"
                         title={currentLanguage === 'tr' ? 'Müşteri takip linkini kopyala' : 'Copy customer tracking link'}
@@ -1928,7 +1929,7 @@ export default function OrdersPage({
                             : `📦 *Order Summary*\nOrder: ${gorunenSiparisNo(o)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}\n${o.trackingNumber ? `Tracking: ${o.trackingNumber}\n` : ''}Link: ${trackUrl}`;
                           navigator.clipboard.writeText(summary).then(() =>
                             toast(currentLanguage === 'tr' ? 'Sipariş özeti kopyalandı ✓' : 'Order summary copied ✓', 'success')
-                          ).catch(() => toast(currentLanguage === 'tr' ? 'Kopyalanamadı — tarayıcı pano iznini engelledi.' : 'Copy failed — clipboard blocked.', 'error'));
+                          ).catch(() => toast(oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'));
                         }}
                         className="bg-white hover:bg-green-50 text-gray-700 hover:text-green-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-green-200 transition-colors"
                         title={currentLanguage === 'tr' ? 'WhatsApp özeti kopyala' : 'Copy summary (WhatsApp-ready)'}
@@ -1956,7 +1957,7 @@ export default function OrdersPage({
                               : `Dear ${o.customerName},\n\nPayment of ${amt} for Order ${gorunenSiparisNo(o)} has not yet been received.\n\nPlease arrange payment at your earliest convenience.\n\nBest regards,\nCETPA`;
                             navigator.clipboard.writeText(msg).then(() =>
                               toast(currentLanguage === 'tr' ? 'Ödeme hatırlatması kopyalandı ✓' : 'Payment reminder copied ✓', 'success')
-                            ).catch(() => toast(currentLanguage === 'tr' ? 'Kopyalanamadı — tarayıcı pano iznini engelledi.' : 'Copy failed — clipboard blocked.', 'error'));
+                            ).catch(() => toast(oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'));
                           }}
                           className="bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-amber-200 transition-colors"
                           title={currentLanguage === 'tr' ? 'Ödeme hatırlatma mesajını kopyala' : 'Copy payment reminder message'}
@@ -1997,7 +1998,7 @@ export default function OrdersPage({
                                 </div>
                                 <div className="space-y-2.5 text-sm">
                                   <div className="flex justify-between">
-                                    <span className="text-gray-500">{currentLanguage === 'tr' ? 'Gelir' : 'Revenue'}</span>
+                                    <span className="text-gray-500">{oc(currentLanguage).gelir}</span>
                                     <span className="font-bold text-emerald-600">{paraYaz(revenue)}</span>
                                   </div>
                                   <div className="flex justify-between">
@@ -2006,11 +2007,11 @@ export default function OrdersPage({
                                   </div>
                                   <div className="h-px bg-gray-100" />
                                   <div className="flex justify-between">
-                                    <span className="font-bold">{currentLanguage === 'tr' ? 'Brüt Kâr' : 'Gross Profit'}</span>
+                                    <span className="font-bold">{oc(currentLanguage).brut_kar}</span>
                                     <span className={cn("font-black", gp >= 0 ? "text-emerald-600" : "text-red-600")}>{paraYaz(gp)}</span>
                                   </div>
                                   <div className="flex justify-between">
-                                    <span className="text-gray-500">{currentLanguage === 'tr' ? 'Kâr Marjı' : 'Margin'}</span>
+                                    <span className="text-gray-500">{oc(currentLanguage).kar_marji}</span>
                                     <span className={cn("font-bold px-2 py-0.5 rounded-full text-xs", margin >= 30 ? "bg-emerald-100 text-emerald-700" : margin >= 10 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700")}>
                                       %{margin.toFixed(1)}
                                     </span>
@@ -2062,12 +2063,12 @@ export default function OrdersPage({
                             ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
                             : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
                         }`}
-                        title={selectedOrder.paid ? (currentLanguage === 'tr' ? 'Ödendi — tıkla: ödenmedi yap' : 'Paid — click to mark unpaid') : (currentLanguage === 'tr' ? 'Bekliyor — tıkla: ödendi yap' : 'Pending — click to mark paid')}
+                        title={selectedOrder.paid ? (oc(currentLanguage).odendi_tikla_odenmedi_yap) : (currentLanguage === 'tr' ? 'Bekliyor — tıkla: ödendi yap' : 'Pending — click to mark paid')}
                       >
                         <CreditCard className="w-4 h-4" />
                         {selectedOrder.paid
-                          ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid')
-                          : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
+                          ? (oc(currentLanguage).odendi_2)
+                          : (oc(currentLanguage).odenmedi)}
                       </button>
                       )}
                       <button onClick={() => openConfirm({
@@ -2134,18 +2135,18 @@ export default function OrdersPage({
                       {/* Phase 95: Payment status + estimated delivery in detail grid */}
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">
-                          {currentLanguage === 'tr' ? 'Ödeme' : 'Payment'}
+                          {oc(currentLanguage).odeme}
                         </span>
                         {odemeTakipli(selectedOrder) ? (
                         <button
                           onClick={() => handleToggleOrderPaid(selectedOrder)}
                           className={`mt-0.5 text-xs font-bold px-2.5 py-1 rounded-full transition-colors ${selectedOrder.paid ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}
                         >
-                          {selectedOrder.paid ? (currentLanguage === 'tr' ? '✓ Ödendi' : '✓ Paid') : (currentLanguage === 'tr' ? '⏳ Ödenmedi' : '⏳ Unpaid')}
+                          {selectedOrder.paid ? (oc(currentLanguage).odendi_2) : (oc(currentLanguage).odenmedi)}
                         </button>
                         ) : (
                           <span className="mt-0.5 inline-block text-xs font-medium text-gray-400"
-                            title={currentLanguage === 'tr' ? 'Tahsilat durumu Mikro cari hesapta izlenir — sipariş türevi bilmez' : 'Collection tracked in Mikro AR ledger'}>
+                            title={oc(currentLanguage).tahsilat_durumu_mikro_cari_hesapta_izlenir_sipar}>
                             {currentLanguage === 'tr' ? 'Tahsilat: Mikro cari hesapta' : 'AR: in Mikro ledger'}
                           </span>
                         )}
@@ -2158,7 +2159,7 @@ export default function OrdersPage({
                         return (
                           <div>
                             <span className="text-gray-500 block text-[10px] uppercase font-bold">
-                              {currentLanguage === 'tr' ? 'Tahmini Teslimat' : 'Est. Delivery'}
+                              {oc(currentLanguage).tahmini_teslimat}
                             </span>
                             <span className={`font-medium text-sm flex items-center gap-1.5 mt-0.5 ${isOverdue ? 'text-red-600' : 'text-gray-800'}`}>
                               {isOverdue && <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />}
@@ -2174,7 +2175,7 @@ export default function OrdersPage({
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="font-bold">{currentT.notes}</h3>
-                      {orderNoteSaved && <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />{currentLanguage === 'tr' ? 'Kaydedildi' : 'Saved'}</span>}
+                      {orderNoteSaved && <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />{oc(currentLanguage).kaydedildi_2}</span>}
                     </div>
                     <textarea
                       value={orderNoteText}
@@ -2184,7 +2185,7 @@ export default function OrdersPage({
                       placeholder={currentT.no_notes_available}
                       className="w-full text-sm text-gray-700 bg-gray-50 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand/20 resize-none leading-relaxed"
                     />
-                    {orderNoteSaving && <p className="text-[10px] text-gray-400 mt-1">{currentLanguage === 'tr' ? 'Kaydediliyor…' : 'Saving…'}</p>}
+                    {orderNoteSaving && <p className="text-[10px] text-gray-400 mt-1">{oc(currentLanguage).kaydediliyor_2}</p>}
                   </div>
 
                   {/* ── Phase 101: Order Activity Timeline ── */}
@@ -2307,7 +2308,7 @@ export default function OrdersPage({
                             </div>
                             <div className="flex-1 max-w-[120px]">
                               <div className="flex items-center justify-between mb-1">
-                                <span className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Marj' : 'Margin'}</span>
+                                <span className="text-[10px] text-gray-400">{oc(currentLanguage).marj}</span>
                                 <span className={`text-sm font-black ${gpColor}`}>{gpPct}%</span>
                               </div>
                               <div className="w-full bg-gray-200 rounded-full h-2">
@@ -2328,7 +2329,7 @@ export default function OrdersPage({
           {activeTab === 'lojistik' && (
             <motion.div key="lojistik" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
               <ModuleHeader 
-                title={currentLanguage === 'tr' ? 'Lojistik & Depo' : 'Logistics & Warehouse'} 
+                title={oc(currentLanguage).lojistik_depo} 
                 subtitle={currentLanguage === 'tr' ? 'Sevkiyatlar, depo yönetimi ve transferler' : 'Shipments, warehouse management and transfers'}
                 icon={Truck}
               />
@@ -2338,12 +2339,12 @@ export default function OrdersPage({
                   {[
                     { id: 'sevkiyat', label: currentLanguage === 'tr' ? 'Sevkiyatlar' : 'Shipments', icon: Truck },
                     { id: 'kargo_takip', label: currentLanguage === 'tr' ? 'Kargo Takip' : 'Tracking', icon: Navigation },
-                    { id: 'depo', label: currentLanguage === 'tr' ? 'Depo' : 'Warehouse', icon: Building2 },
+                    { id: 'depo', label: oc(currentLanguage).depo, icon: Building2 },
                     { id: 'wms', label: currentLanguage === 'tr' ? 'Bin/Lokasyon' : 'Bin/Location', icon: MapPin },
                     { id: 'transfer', label: currentLanguage === 'tr' ? 'Depolar Arası' : 'Transfer', icon: ArrowRightLeft },
                     { id: 'qr-transfer', label: currentLanguage === 'tr' ? 'QR Transfer' : 'QR Transfer', icon: QrCode },
                     { id: 'arac-takip', label: currentLanguage === 'tr' ? 'Araç Takip' : 'Vehicles', icon: Truck },
-                    { id: 'canli', label: currentLanguage === 'tr' ? 'Canlı Sevkiyat' : 'Live Delivery', icon: Navigation },
+                    { id: 'canli', label: oc(currentLanguage).canli_sevkiyat, icon: Navigation },
                     { id: 'giden_irsaliye', label: currentLanguage === 'tr' ? 'Giden İrsaliye' : 'Outgoing', icon: FileUp },
                     { id: 'gelen_irsaliye', label: currentLanguage === 'tr' ? 'Gelen İrsaliye' : 'Incoming', icon: FileDown },
                   ].map(tab => {
@@ -2358,7 +2359,7 @@ export default function OrdersPage({
                   <div className="w-px h-5 bg-gray-200 self-center mx-0.5 shrink-0" />
                   <button onClick={() => setActiveTab('ihracat')} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 transition-all whitespace-nowrap">
                     <Ship size={13} />
-                    <span>{currentLanguage === 'tr' ? 'İthalat/İhracat' : 'Import/Export'}</span>
+                    <span>{oc(currentLanguage).ithalat_ihracat}</span>
                   </button>
                 </div>
               </div>
@@ -2394,7 +2395,7 @@ export default function OrdersPage({
                   // `(a || b || tr554) ? 'Depo' : 'Warehouse'` diye çözülüyordu,
                   // yani depo adı GRUP BAŞLIĞINDA HİÇ kullanılmıyor, tüm binler
                   // tek bir 'Depo' başlığı altında toplanıyordu.
-                  const key = b.warehouseName || b.warehouseId || (tr554 ? 'Depo' : 'Warehouse');
+                  const key = b.warehouseName || b.warehouseId || (oc(tr554).depo);
                   if (!acc[key]) acc[key] = [];
                   acc[key].push(b);
                   return acc;
@@ -2437,18 +2438,18 @@ export default function OrdersPage({
                             <h4 className="font-bold text-gray-800 text-sm">{tr554 ? 'Yeni Lokasyon' : 'New Bin Location'}</h4>
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                               <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Depo' : 'Warehouse'}</label>
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr554).depo}</label>
                                 <select className="apple-input text-sm w-full" value={p554Draft.warehouseId}
                                   onChange={e => {
                                     const wh = warehouses.find(w => w.id === e.target.value);
                                     setP554Draft(d => ({ ...d, warehouseId: e.target.value, warehouseName: wh?.name || '' } as typeof d));
                                   }}>
-                                  <option value="">{tr554 ? 'Depo seçin' : 'Select warehouse'}</option>
+                                  <option value="">{oc(tr554).depo_secin}</option>
                                   {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                                 </select>
                               </div>
                               <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Bin Kodu' : 'Bin Code'}</label>
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr554).bin_kodu}</label>
                                 <input className="apple-input text-sm w-full" placeholder="A1-03" value={p554Draft.binCode}
                                   onChange={e => setP554Draft(d => ({ ...d, binCode: e.target.value }))} />
                               </div>
@@ -2483,12 +2484,12 @@ export default function OrdersPage({
                                 </datalist>
                               </div>
                               <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Ürün Adı' : 'Product Name'}</label>
-                                <input className="apple-input text-sm w-full" placeholder={tr554 ? 'Ürün adı' : 'Product name'} value={p554Draft.productName}
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr554).urun_adi}</label>
+                                <input className="apple-input text-sm w-full" placeholder={oc(tr554).urun_adi_2} value={p554Draft.productName}
                                   onChange={e => setP554Draft(d => ({ ...d, productName: e.target.value }))} />
                               </div>
                               <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Miktar' : 'Qty'}</label>
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr554).miktar}</label>
                                 <input type="number" min="0" className="apple-input text-sm w-full" placeholder="0" value={p554Draft.quantity}
                                   onChange={e => setP554Draft(d => ({ ...d, quantity: e.target.value }))} />
                               </div>
@@ -2501,7 +2502,7 @@ export default function OrdersPage({
                             <input className="apple-input text-sm w-full" placeholder={tr554 ? 'Not (opsiyonel)' : 'Notes (optional)'} value={p554Draft.notes}
                               onChange={e => setP554Draft(d => ({ ...d, notes: e.target.value }))} />
                             <div className="flex gap-2 justify-end">
-                              <button onClick={() => setP554AddForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr554 ? 'İptal' : 'Cancel'}</button>
+                              <button onClick={() => setP554AddForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr554).iptal}</button>
                               <button
                                 disabled={!p554Draft.warehouseId || !p554Draft.binCode}
                                 onClick={async () => {
@@ -2523,7 +2524,7 @@ export default function OrdersPage({
                                   toast(tr554 ? 'Lokasyon eklendi.' : 'Location added.', 'success');
                                 }}
                                 className="apple-button-primary px-5 py-2 text-sm disabled:opacity-50"
-                              >{tr554 ? 'Kaydet' : 'Save'}</button>
+                              >{oc(tr554).kaydet}</button>
                             </div>
                           </div>
                         </motion.div>
@@ -2556,7 +2557,7 @@ export default function OrdersPage({
                                 <table className="w-full text-sm">
                                   <thead>
                                     <tr className="border-b border-gray-100">
-                                      {[tr554?'Bin Kodu':'Bin Code', 'SKU', tr554?'Ürün':'Product', tr554?'Miktar':'Qty', tr554?'Min':'Min', tr554?'Son Sayım':'Last Count', ''].map(h => (
+                                      {[oc(tr554).bin_kodu, 'SKU', oc(tr554).urun, oc(tr554).miktar, tr554?'Min':'Min', tr554?'Son Sayım':'Last Count', ''].map(h => (
                                         <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                       ))}
                                     </tr>
@@ -2642,18 +2643,18 @@ export default function OrdersPage({
                   { label: tr576?'İptal Oranı':'Cancellation Rate', value: cancelRate, unit: '%', good: cancelRate <= 5, icon: '❌', invertGood: true },
                   { label: tr576?'Ort. İşlem Süresi':'Avg Processing Time', value: avgProcessDays, unit: tr576?' gün':' days', good: avgProcessDays <= 3, icon: '⏱', invertGood: true },
                   { label: tr576?'Düşük Stok Oranı':'Low Stock Ratio', value: lowStockRatio, unit: '%', good: lowStockRatio <= 10, icon: '⚠️', invertGood: true },
-                  { label: tr576?'Aktif Sipariş':'Active Orders', value: periodOrders.filter(o=>['Pending','Processing'].includes(o.status)).length, unit: '', good: true, icon: '📋' },
+                  { label: oc(tr576).aktif_siparis, value: periodOrders.filter(o=>['Pending','Processing'].includes(o.status)).length, unit: '', good: true, icon: '📋' },
                 ];
                 const cargoMap576: Record<string, number> = {};
                 periodOrders.forEach(o => {
-                  const c = o.cargoCompany || (tr576?'Bilinmiyor':'Unknown');
+                  const c = o.cargoCompany || (oc(tr576).bilinmiyor);
                   cargoMap576[c] = (cargoMap576[c]||0) + 1;
                 });
                 const cargos576 = Object.entries(cargoMap576).sort((a,b)=>b[1]-a[1]).slice(0,5);
                 return (
                   <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                     <div className="flex items-center justify-between flex-wrap gap-3">
-                      <ModuleHeader title={tr576?'Tedarik Zinciri KPI':'Supply Chain KPI'} subtitle={tr576?'Sipariş, teslimat ve stok performans göstergeleri.':'Order, delivery and inventory performance indicators.'} icon={TrendingUp} />
+                      <ModuleHeader title={oc(tr576).tedarik_zinciri_kpi} subtitle={tr576?'Sipariş, teslimat ve stok performans göstergeleri.':'Order, delivery and inventory performance indicators.'} icon={TrendingUp} />
                       <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
                         {(['7d','30d','90d'] as const).map(p=>(
                           <button key={p} onClick={()=>setP576Period(p)}
@@ -2746,7 +2747,7 @@ export default function OrdersPage({
                       <div className="apple-card p-5 space-y-3">
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Plaka':'Plate'} value={p593Draft.plate} onChange={e=>setP593Draft(d=>({...d,plate:e.target.value.toUpperCase()}))} />
-                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Sürücü':'Driver'} value={p593Draft.driver} onChange={e=>setP593Draft(d=>({...d,driver:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr593).surucu} value={p593Draft.driver} onChange={e=>setP593Draft(d=>({...d,driver:e.target.value}))} />
                           <input className="apple-input px-3 py-2 text-sm" type="tel" placeholder={tr593?'Sürücü Telefonu':'Driver Phone'} value={p593Draft.driverPhone} onChange={e=>setP593Draft(d=>({...d,driverPhone:e.target.value}))} />
                           <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Marka/Model':'Model'} value={p593Draft.model} onChange={e=>setP593Draft(d=>({...d,model:e.target.value}))} />
                           <select className="apple-input px-3 py-2 text-sm" value={p593Draft.fuel} onChange={e=>setP593Draft(d=>({...d,fuel:e.target.value as typeof d.fuel}))}>
@@ -2754,7 +2755,7 @@ export default function OrdersPage({
                           </select>
                           <input type="number" className="apple-input px-3 py-2 text-sm" placeholder="KM" value={p593Draft.km} onChange={e=>setP593Draft(d=>({...d,km:e.target.value}))} />
                           <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Son Bakım':'Last Service'} value={p593Draft.lastService} onChange={e=>setP593Draft(d=>({...d,lastService:e.target.value}))} />
-                          <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Sonraki Bakım':'Next Service'} value={p593Draft.nextService} onChange={e=>setP593Draft(d=>({...d,nextService:e.target.value}))} />
+                          <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr593).sonraki_bakim} value={p593Draft.nextService} onChange={e=>setP593Draft(d=>({...d,nextService:e.target.value}))} />
                         </div>
                         <div className="flex gap-2">
                           <button onClick={async ()=>{
@@ -2772,8 +2773,8 @@ export default function OrdersPage({
                               const msg = e instanceof Error && e.message ? e.message : (tr593?'Araç kaydedilemedi.':'Failed to save vehicle.');
                               toast(msg,'error');
                             }
-                          }} className="apple-button-primary text-sm px-4 py-1.5">{tr593?'Kaydet':'Save'}</button>
-                          <button onClick={()=>setP593ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr593?'İptal':'Cancel'}</button>
+                          }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr593).kaydet}</button>
+                          <button onClick={()=>setP593ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{oc(tr593).iptal}</button>
                         </div>
                       </div>
                     )}
@@ -2795,13 +2796,13 @@ export default function OrdersPage({
                                 </select>
                               </div>
                               <div className="grid grid-cols-2 gap-2 text-xs">
-                                <div><p className="text-gray-400">{tr593?'Sürücü':'Driver'}</p><p className="font-medium text-gray-700">{v.driver||'—'}</p></div>
+                                <div><p className="text-gray-400">{oc(tr593).surucu}</p><p className="font-medium text-gray-700">{v.driver||'—'}</p></div>
                                 <div><p className="text-gray-400">KM</p><p className="font-medium text-gray-700">{v.km?.toLocaleString()||'—'}</p></div>
-                                {v.nextService&&<div className="col-span-2"><p className="text-gray-400">{tr593?'Sonraki Bakım':'Next Service'}</p><p className={`font-medium ${isDue?'text-amber-600 font-bold':'text-gray-700'}`}>{v.nextService} {isDue?'⚠️':''}</p></div>}
+                                {v.nextService&&<div className="col-span-2"><p className="text-gray-400">{oc(tr593).sonraki_bakim}</p><p className={`font-medium ${isDue?'text-amber-600 font-bold':'text-gray-700'}`}>{v.nextService} {isDue?'⚠️':''}</p></div>}
                               </div>
                               <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
                                 <button onClick={()=>setLocationQrModal({type:'vehicle',id:v.id,name:v.plate,subtitle:v.driver||v.model})} className="flex-1 text-[11px] font-bold px-2 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700 transition-colors flex items-center justify-center gap-1.5">
-                                  <QrCode className="w-3.5 h-3.5" />{tr593?'QR Etiketi':'QR Label'}
+                                  <QrCode className="w-3.5 h-3.5" />{oc(tr593).qr_etiketi}
                                 </button>
                                 {hasFullAccess('lojistik')&&(
                                   <button onClick={async()=>{ if(!await confirmDelete(v.plate,currentLanguage))return; try{ await deleteDoc(doc(db,'vehicles',v.id)); }catch(err){ console.error('[vehicle delete]',err); } }} className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors">
@@ -2856,20 +2857,20 @@ export default function OrdersPage({
                     <div className="grid grid-cols-3 gap-4">
                       <div className="apple-card p-4 bg-blue-50"><p className="text-xs text-gray-500">{tr622?'Toplam Sevkiyat':'Total Shipments'}</p><p className="text-2xl font-black text-blue-600">{p622Shipments.length}</p></div>
                       <div className="apple-card p-4 bg-amber-50"><p className="text-xs text-gray-500">{tr622?'Yolda/Gümrük':'In Transit'}</p><p className="text-2xl font-black text-amber-600">{inTransit}</p></div>
-                      <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{tr622?'Toplam Değer':'Total Value'}</p><p className="text-lg font-black text-emerald-600">{paraYaz(totalValue, { birim: 'USD', ondalik: 0 })}</p></div>
+                      <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{oc(tr622).toplam_deger}</p><p className="text-lg font-black text-emerald-600">{paraYaz(totalValue, { birim: 'USD', ondalik: 0 })}</p></div>
                     </div>
                     {p622ShowForm && (
                       <div className="apple-card p-5 space-y-3">
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                           <input className="apple-input" placeholder={tr622?'Sipariş Ref':'Order Ref'} value={p622Draft.orderRef} onChange={e=>setP622Draft(d=>({...d,orderRef:e.target.value}))}/>
-                          <input className="apple-input" placeholder={tr622?'Destinasyon':'Destination'} value={p622Draft.destination} onChange={e=>setP622Draft(d=>({...d,destination:e.target.value}))}/>
+                          <input className="apple-input" placeholder={oc(tr622).destinasyon} value={p622Draft.destination} onChange={e=>setP622Draft(d=>({...d,destination:e.target.value}))}/>
                           <select value={p622Draft.incoterm} onChange={e=>setP622Draft(d=>({...d,incoterm:e.target.value as typeof d.incoterm}))} className="apple-input">
                             {['EXW','FOB','CIF','DDP'].map(i=><option key={i}>{i}</option>)}
                           </select>
                           <select value={p622Draft.currency} onChange={e=>setP622Draft(d=>({...d,currency:e.target.value as typeof d.currency}))} className="apple-input">
                             {['USD','EUR','TRY'].map(c=><option key={c}>{c}</option>)}
                           </select>
-                          <input type="number" className="apple-input" placeholder={tr622?'Değer':'Value'} value={p622Draft.value} onChange={e=>setP622Draft(d=>({...d,value:e.target.value}))}/>
+                          <input type="number" className="apple-input" placeholder={oc(tr622).deger} value={p622Draft.value} onChange={e=>setP622Draft(d=>({...d,value:e.target.value}))}/>
                           <select value={p622Draft.status} onChange={e=>setP622Draft(d=>({...d,status:e.target.value as typeof d.status}))} className="apple-input">
                             {['Hazırlanıyor','Gümrükte','Yolda','Teslim Edildi'].map(s=><option key={s}>{s}</option>)}
                           </select>
@@ -2885,15 +2886,15 @@ export default function OrdersPage({
                             setP622Draft(d=>({...d,orderRef:'',destination:'',value:'',customsRef:''}));
                             setP622ShowForm(false); setP622EditId(null);
                             toast(tr622?(p622EditId?'Sevkiyat güncellendi.':'Sevkiyat eklendi.'):(p622EditId?'Shipment updated.':'Shipment added.'),'success');
-                          } catch(e){ toast((tr622?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                        }} className="apple-button-primary text-xs px-6">{tr622?'Kaydet':'Save'}</button>
+                          } catch(e){ toast((oc(tr622).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
+                        }} className="apple-button-primary text-xs px-6">{oc(tr622).kaydet}</button>
                       </div>
                     )}
                     {p622Shipments.length > 0 && (
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead><tr className="border-b border-gray-100 bg-gray-50">
-                            {[tr622?'Ref':'Ref',tr622?'Destinasyon':'Destination','Incoterm',tr622?'Değer':'Value',tr622?'Durum':'Status',tr622?'Tarih':'Date'].map(h=>(
+                            {[tr622?'Ref':'Ref',oc(tr622).destinasyon,'Incoterm',oc(tr622).deger,oc(tr622).durum,oc(tr622).tarih].map(h=>(
                               <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                             ))}
                             <th className="px-3 py-2 w-8"></th>
@@ -2908,8 +2909,8 @@ export default function OrdersPage({
                                 <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor[sh.status]}`}>{sh.status}</span></td>
                                 <td className="px-3 py-2.5 text-gray-500">{tarihYaz(sh.exportDate)}</td>
                                 <td className="px-3 py-2.5 text-right"><div className="flex items-center justify-end gap-2">
-                                  <button type="button" onClick={()=>{setP622Draft({orderRef:sh.orderRef,destination:sh.destination,incoterm:sh.incoterm,currency:sh.currency,value:String(sh.value),status:sh.status,exportDate:sh.exportDate,customsRef:sh.customsRef||''});setP622EditId(sh.id);setP622ShowForm(true);}} title={tr622?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'exportShipments',sh.id));}catch(e){toast((tr622?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={()=>{setP622Draft({orderRef:sh.orderRef,destination:sh.destination,incoterm:sh.incoterm,currency:sh.currency,value:String(sh.value),status:sh.status,exportDate:sh.exportDate,customsRef:sh.customsRef||''});setP622EditId(sh.id);setP622ShowForm(true);}} title={oc(tr622).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'exportShipments',sh.id));}catch(e){toast((oc(tr622).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                 </div></td>
                               </tr>
                             ))}
@@ -2933,10 +2934,10 @@ export default function OrdersPage({
                   o.status === 'Shipped' && gunAnahtari(o.createdAt ?? o.syncedAt) === bugun60);
                 const pending = orders.filter(o => o.status === 'Processing');
                 const stats = [
-                  { label: currentLanguage === 'tr' ? 'Kargoda' : 'In Transit',      value: shipped.length,     color: 'text-blue-700',    bg: 'bg-blue-50',    icon: Truck        },
+                  { label: oc(currentLanguage).kargoda,      value: shipped.length,     color: 'text-blue-700',    bg: 'bg-blue-50',    icon: Truck        },
                   { label: currentLanguage === 'tr' ? 'Bugün Gönderildi' : 'Shipped Today', value: todayShipped.length, color: 'text-purple-700', bg: 'bg-purple-50', icon: Package     },
                   { label: currentLanguage === 'tr' ? 'Hazırlanıyor' : 'Preparing',   value: pending.length,     color: 'text-amber-700',   bg: 'bg-amber-50',   icon: Clock        },
-                  { label: currentLanguage === 'tr' ? 'Teslim Edildi' : 'Delivered',  value: delivered.length,   color: 'text-emerald-700', bg: 'bg-emerald-50', icon: CheckCircle2 },
+                  { label: oc(currentLanguage).teslim_edildi,  value: delivered.length,   color: 'text-emerald-700', bg: 'bg-emerald-50', icon: CheckCircle2 },
                 ];
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
@@ -3005,7 +3006,7 @@ export default function OrdersPage({
                     <div className="grid grid-cols-3 gap-3">
                       {[
                         { label: currentLanguage === 'tr' ? 'Zamanında' : 'On-Time',      value: onTimeCount,             color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                        { label: currentLanguage === 'tr' ? 'Gecikmeli'  : 'Late',         value: lateCount,               color: 'text-red-500',     bg: 'bg-red-50'     },
+                        { label: oc(currentLanguage).gecikmeli,         value: lateCount,               color: 'text-red-500',     bg: 'bg-red-50'     },
                         { label: currentLanguage === 'tr' ? 'Ort. Gün'   : 'Avg Days',     value: avgDays.toFixed(1),      color: 'text-blue-600',    bg: 'bg-blue-50'    },
                       ].map((m, i) => (
                         <div key={i} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : m.bg)}>
@@ -3317,7 +3318,7 @@ export default function OrdersPage({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReturnModal({ open: false, order: null })} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'İade Oluştur' : 'Create Return'} — #{returnModal.order.id.slice(0, 6)}</h3>
+                <h3 className="font-semibold text-gray-800">{oc(currentLanguage).iade_olustur} — #{returnModal.order.id.slice(0, 6)}</h3>
                 <button onClick={() => setReturnModal({ open: false, order: null })} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 flex-1 overflow-y-auto">
@@ -3335,7 +3336,7 @@ export default function OrdersPage({
                 </div>
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setReturnModal({ open: false, order: null })} className="apple-button-secondary text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                <button onClick={() => setReturnModal({ open: false, order: null })} className="apple-button-secondary text-sm">{oc(currentLanguage).iptal}</button>
                 <button
                   disabled={!returnReason.trim()}
                   onClick={async () => {
@@ -3365,7 +3366,7 @@ export default function OrdersPage({
                     } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
                   }}
                   className="apple-button-primary text-sm disabled:opacity-50"
-                >{currentLanguage === 'tr' ? 'İade Oluştur' : 'Create Return'}</button>
+                >{oc(currentLanguage).iade_olustur}</button>
               </div>
             </motion.div>
           </div>
@@ -3384,7 +3385,7 @@ export default function OrdersPage({
               </div>
               <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Müşteri' : 'Customer'}</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).musteri}</label>
                   <CustomerCombobox
                     leads={leads}
                     value={newShipment.customerName ?? ''}
@@ -3399,10 +3400,10 @@ export default function OrdersPage({
                   />
                 </div>
                 {[
-                  { k: 'destination', label: currentLanguage === 'tr' ? 'Varış Noktası' : 'Destination' },
-                  { k: 'driver', label: currentLanguage === 'tr' ? 'Sürücü' : 'Driver' },
+                  { k: 'destination', label: oc(currentLanguage).varis_noktasi },
+                  { k: 'driver', label: oc(currentLanguage).surucu },
                   { k: 'cargoFirm', label: currentLanguage === 'tr' ? 'Kargo Firması' : 'Cargo Firm' },
-                  { k: 'trackingNo', label: currentLanguage === 'tr' ? 'Takip No' : 'Tracking No' },
+                  { k: 'trackingNo', label: oc(currentLanguage).takip_no },
                 ].map(f => (
                   <div key={f.k}>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
@@ -3411,11 +3412,11 @@ export default function OrdersPage({
                 ))}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).tarih}</label>
                     <input type="date" className="apple-input w-full text-sm" value={newShipment.date ?? ''} onChange={e => setNewShipment(s => ({ ...s, date: e.target.value }))} />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).durum}</label>
                     <select className="apple-input w-full text-sm" value={newShipment.status ?? 'Pending'} onChange={e => setNewShipment(s => ({ ...s, status: e.target.value as Shipment['status'] }))}>
                       {(['Pending', 'In Transit', 'Delivered', 'Cancelled'] as const).map(st => <option key={st} value={st}>{st}</option>)}
                     </select>
@@ -3423,7 +3424,7 @@ export default function OrdersPage({
                 </div>
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} className="apple-button-secondary text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                <button onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} className="apple-button-secondary text-sm">{oc(currentLanguage).iptal}</button>
                 <button
                   disabled={!newShipment.customerName}
                   onClick={async () => {
@@ -3439,7 +3440,7 @@ export default function OrdersPage({
                     } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
                   }}
                   className="apple-button-primary text-sm disabled:opacity-50"
-                >{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                >{oc(currentLanguage).kaydet}</button>
               </div>
             </motion.div>
           </div>
@@ -3461,13 +3462,13 @@ export default function OrdersPage({
                 <textarea className="apple-input w-full text-sm resize-none" rows={4} placeholder={currentLanguage === 'tr' ? 'Teslim alan, tarih, not...' : 'Received by, date, note...'} value={deliveryNoteText} onChange={e => setDeliveryNoteText(e.target.value)} />
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setDeliveryNoteOrder(null)} className="apple-button-secondary text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                <button onClick={() => setDeliveryNoteOrder(null)} className="apple-button-secondary text-sm">{oc(currentLanguage).iptal}</button>
                 <button
                   onClick={async () => {
                     const o = deliveryNoteOrder;
                     try {
                       await updateDoc(doc(db, 'orders', o.id), { status: 'Delivered', deliveryNote: deliveryNoteText, deliveredAt: serverTimestamp(), updatedAt: serverTimestamp() });
-                      createNotification(currentLanguage === 'tr' ? 'Teslim Edildi' : 'Delivered', `#${o.id.slice(0, 6)}`, 'info');
+                      createNotification(oc(currentLanguage).teslim_edildi, `#${o.id.slice(0, 6)}`, 'info');
                       toast(currentLanguage === 'tr' ? 'Teslimat kaydedildi.' : 'Delivery saved.', 'success');
                       setDeliveryNoteOrder(null);
                     } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
@@ -3487,16 +3488,16 @@ export default function OrdersPage({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsEditingOrder(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Siparişi Düzenle' : 'Edit Order'}</h3>
+                <h3 className="font-semibold text-gray-800">{oc(currentLanguage).siparisi_duzenle}</h3>
                 <button onClick={() => setIsEditingOrder(false)} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 flex-1 overflow-y-auto">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Müşteri' : 'Customer'}</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).musteri}</label>
                   <input type="text" className="apple-input w-full text-sm" value={(editingOrderData.customerName as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, customerName: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Teslimat Adresi' : 'Shipping Address'}</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).teslimat_adresi}</label>
                   <input type="text" className="apple-input w-full text-sm" value={(editingOrderData.shippingAddress as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, shippingAddress: e.target.value }))} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -3505,7 +3506,7 @@ export default function OrdersPage({
                     <input type="number" className="apple-input w-full text-sm" value={(editingOrderData.totalPrice as number) ?? 0} onChange={e => setEditingOrderData(d => ({ ...d, totalPrice: Number(e.target.value) }))} />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).durum}</label>
                     <select className="apple-input w-full text-sm" value={(editingOrderData.status as string) ?? 'Pending'} onChange={e => setEditingOrderData(d => ({ ...d, status: e.target.value as Order['status'] }))}>
                       {(['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'] as const).map(st => <option key={st} value={st}>{st}</option>)}
                     </select>
@@ -3513,7 +3514,7 @@ export default function OrdersPage({
                 </div>
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setIsEditingOrder(false)} className="apple-button-secondary text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                <button onClick={() => setIsEditingOrder(false)} className="apple-button-secondary text-sm">{oc(currentLanguage).iptal}</button>
                 <button
                   onClick={async () => {
                     if (!selectedOrder) return;
@@ -3525,7 +3526,7 @@ export default function OrdersPage({
                     } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
                   }}
                   className="apple-button-primary text-sm"
-                >{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                >{oc(currentLanguage).kaydet}</button>
               </div>
             </motion.div>
           </div>
@@ -3539,7 +3540,7 @@ export default function OrdersPage({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowQuickShipment(null)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Hızlı Sevkiyat' : 'Quick Shipment'}</h3>
+                <h3 className="font-semibold text-gray-800">{oc(currentLanguage).hizli_sevkiyat}</h3>
                 <button onClick={() => setShowQuickShipment(null)} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-2 text-sm text-gray-600">
@@ -3548,7 +3549,7 @@ export default function OrdersPage({
                 <p className="text-xs text-gray-400">{showQuickShipment.shippingAddress}</p>
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
-                <button onClick={() => setShowQuickShipment(null)} className="apple-button-secondary text-sm">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                <button onClick={() => setShowQuickShipment(null)} className="apple-button-secondary text-sm">{oc(currentLanguage).iptal}</button>
                 <button
                   onClick={async () => {
                     const o = showQuickShipment;
@@ -3565,7 +3566,7 @@ export default function OrdersPage({
                     } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
                   }}
                   className="apple-button-primary text-sm"
-                >{currentLanguage === 'tr' ? 'Oluştur' : 'Create'}</button>
+                >{oc(currentLanguage).olustur}</button>
               </div>
             </motion.div>
           </div>

@@ -9,6 +9,7 @@ import Papa from 'papaparse';
 import { gorunenSiparisNo, odemeTakipli } from './siparis';
 import { gunAnahtari, bugunAnahtari } from './zaman';
 import type { Order, Lead, InventoryItem } from '../types';
+import { oc } from '../i18n/ortak';
 
 // ── Generic download helper ───────────────────────────────────────────────────
 
@@ -30,23 +31,23 @@ function downloadCSV(csv: string, filename: string): void {
 export function exportOrdersCSV(orders: Order[], lang: string = 'tr'): void {
   const tr = lang === 'tr';
   const rows = orders.map(o => ({
-    [tr ? 'Sipariş No'         : 'Order No']:        gorunenSiparisNo(o),
-    [tr ? 'Müşteri'            : 'Customer']:         o.customerName,
-    [tr ? 'Müşteri Tipi'       : 'Customer Type']:   o.customerType ?? '',
-    [tr ? 'Durum'              : 'Status']:           o.status,
+    [oc(tr).siparis_no]:        gorunenSiparisNo(o),
+    [oc(tr).musteri]:         o.customerName,
+    [oc(tr).musteri_tipi]:   o.customerType ?? '',
+    [oc(tr).durum]:           o.status,
     // Mikro faturasından türetilen siparişte `paid` yokluğu 'ödenmedi' DEĞİL 'bilinmiyor'
     // (siparis.ts odemeTakipli). CSV eskiden hepsini 'Bekliyor' yazıyordu — ₺17,6M sahte
     // alacak arızasının dışa aktarım yüzeyi.
-    [tr ? 'Ödeme Durumu'       : 'Payment Status']:  !odemeTakipli(o) ? (tr ? 'Bilinmiyor (Mikro)' : 'Unknown (Mikro)') : o.paid ? (tr ? 'Ödendi' : 'Paid') : (tr ? 'Bekliyor' : 'Unpaid'),
+    [tr ? 'Ödeme Durumu'       : 'Payment Status']:  !odemeTakipli(o) ? (tr ? 'Bilinmiyor (Mikro)' : 'Unknown (Mikro)') : o.paid ? (oc(tr).odendi) : (tr ? 'Bekliyor' : 'Unpaid'),
     [tr ? 'Toplam (₺)'         : 'Total (₺)']:       o.totalPrice,
-    [tr ? 'Fatura Tipi'        : 'Invoice Type']:    o.faturaTipi ?? (o.faturali ? 'e-fatura' : ''),
+    [oc(tr).fatura_tipi]:    o.faturaTipi ?? (o.faturali ? 'e-fatura' : ''),
     [tr ? 'KDV %'              : 'VAT %']:           o.kdvOran ?? '',   // bilinmiyorsa BOŞ hücre, 0 değil (satır 94 dersi — yarım kalmıştı)
     [tr ? 'Kargo No'           : 'Tracking No']:     o.trackingNumber ?? '',
     [tr ? 'Kargo Firması'      : 'Carrier']:         o.cargoCompany ?? '',
-    [tr ? 'Teslimat Adresi'    : 'Shipping Address']:o.shippingAddress ?? '',
-    [tr ? 'Oluşturulma'        : 'Created']:
+    [oc(tr).teslimat_adresi]:o.shippingAddress ?? '',
+    [oc(tr).olusturulma]:
       gunAnahtari(o.createdAt) ?? '',   // yerel gün; bilinmiyorsa BOŞ hücre (bugün DEĞİL)
-    [tr ? 'Notlar'             : 'Notes']:           o.notes ?? '',
+    [oc(tr).notlar]:           o.notes ?? '',
   }));
 
   const csv = Papa.unparse(rows);
@@ -59,15 +60,15 @@ export function exportLeadsCSV(leads: Lead[], lang: string = 'tr'): void {
   const tr = lang === 'tr';
   const rows = leads.map(l => ({
     [tr ? 'Ad Soyad'           : 'Name']:            l.name,
-    [tr ? 'Şirket'             : 'Company']:         l.company,
-    [tr ? 'Durum'              : 'Status']:          l.status,
-    [tr ? 'E-posta'            : 'Email']:           l.email ?? '',
-    [tr ? 'Telefon'            : 'Phone']:           l.phone ?? '',
-    [tr ? 'Kredi Limiti (₺)'  : 'Credit Limit (₺)']:l.creditLimit ?? '',   // limit girilmemiş ≠ limit 0
+    [oc(tr).sirket]:         l.company,
+    [oc(tr).durum]:          l.status,
+    [oc(tr).e_posta]:           l.email ?? '',
+    [oc(tr).telefon]:           l.phone ?? '',
+    [oc(tr).kredi_limiti]:l.creditLimit ?? '',   // limit girilmemiş ≠ limit 0
     [tr ? 'Ödeme Vadesi'       : 'Payment Terms']:   l.paymentTerms ?? '',
     [tr ? 'Atanan'             : 'Assigned To']:     l.assignedTo ?? '',
     [tr ? 'AI Skoru'           : 'AI Score']:        l.score ?? '',
-    [tr ? 'Oluşturulma'        : 'Created']:
+    [oc(tr).olusturulma]:
       gunAnahtari(l.createdAt) ?? '',   // yerel gün; bilinmiyorsa BOŞ hücre (bugün DEĞİL)
   }));
 
@@ -80,21 +81,21 @@ export function exportLeadsCSV(leads: Lead[], lang: string = 'tr'): void {
 export function exportInventoryCSV(inventory: InventoryItem[], lang: string = 'tr'): void {
   const tr = lang === 'tr';
   const rows = inventory.map(i => ({
-    [tr ? 'Ürün Adı'           : 'Product Name']:    i.name,
+    [oc(tr).urun_adi]:    i.name,
     [tr ? 'SKU'                : 'SKU']:             i.sku,
-    [tr ? 'Kategori'           : 'Category']:        i.category ?? '',
+    [oc(tr).kategori]:        i.category ?? '',
     // BOS ALAN 0 DEGIL, BOS HUCRE (2026-09-04 denetimi): `?? 0` yuzunden
     // "fiyat tanimli degil" ile "fiyati 0 TL" Excel'de ayirt edilemiyordu —
     // dis sisteme/musteriye giden dosyada bedava urun gibi gorunuyordu.
     // Bos hucre, hesap tablosunda toplama da girmez.
-    [tr ? 'Stok'               : 'Stock']:           i.stockLevel ?? '',
+    [oc(tr).stok]:           i.stockLevel ?? '',
     [tr ? 'Min. Stok'          : 'Min. Stock']:      i.lowStockThreshold ?? '',
     [tr ? 'Fiyat - Perakende (₺)': 'Retail (₺)']:   i.prices?.['Retail']       ?? i.price ?? '',
     [tr ? 'Fiyat - B2B Std (₺)': 'B2B Std (₺)']:   i.prices?.['B2B Standard'] ?? '',
     [tr ? 'Fiyat - B2B Prem (₺)':'B2B Prem (₺)']:  i.prices?.['B2B Premium']  ?? '',
     [tr ? 'Fiyat - Bayi (₺)'  : 'Dealer (₺)']:      i.prices?.['Dealer']       ?? '',
-    [tr ? 'Depo'               : 'Warehouse']:       i.warehouseId ?? '',
-    [tr ? 'Tedarikçi'          : 'Supplier']:        i.supplier ?? '',
+    [oc(tr).depo]:       i.warehouseId ?? '',
+    [oc(tr).tedarikci]:        i.supplier ?? '',
   }));
 
   const csv = Papa.unparse(rows);
@@ -119,12 +120,12 @@ export function exportStockMovementsCSV(movements: StockMovementRow[], lang: str
   const rows = movements.map(m => {
     const tsStr = gunAnahtari(m.timestamp) ?? '';   // yerel gün; bilinmiyorsa BOŞ hücre
     return {
-      [tr ? 'Ürün'         : 'Product']:    m.productName,
-      [tr ? 'Tür'          : 'Type']:       m.type === 'in' ? (tr ? 'Giriş' : 'In') : m.type === 'out' ? (tr ? 'Çıkış' : 'Out') : (tr ? 'Düzeltme' : 'Adjustment'),
+      [oc(tr).urun]:    m.productName,
+      [oc(tr).tur]:       m.type === 'in' ? (oc(tr).giris) : m.type === 'out' ? (oc(tr).cikis) : (tr ? 'Düzeltme' : 'Adjustment'),
       [tr ? 'Miktar'       : 'Quantity']:   m.quantity,
-      [tr ? 'Sebep'        : 'Reason']:     m.reason ?? '',
-      [tr ? 'Notlar'       : 'Notes']:      m.notes ?? '',
-      [tr ? 'Tarih'        : 'Date']:       tsStr,
+      [oc(tr).sebep]:     m.reason ?? '',
+      [oc(tr).notlar]:      m.notes ?? '',
+      [oc(tr).tarih]:       tsStr,
     };
   });
   const csv = Papa.unparse(rows);
@@ -161,14 +162,14 @@ export interface MonthlySummaryRow {
 export function exportMonthlySummaryCSV(rows: MonthlySummaryRow[], lang: string = 'tr'): void {
   const tr = lang === 'tr';
   const mapped = rows.map(r => ({
-    [tr ? 'Ay'               : 'Month']:            r.month,
+    [oc(tr).ay]:            r.month,
     [tr ? 'Sipariş Sayısı'   : 'Order Count']:      r.orderCount,
     // 2 ONDALIK ZORUNLU: ham sayi yazilinca hem gereksiz basamak hem de
     // KAYAN NOKTA HATASI CSV'ye siziyordu — canli ciktida "1174042.1400000001"
     // gorundu (2026-08-22). Para her zaman 2 hane.
     [tr ? 'Ciro (₺)'        : 'Revenue (₺)']:      Number(r.revenue.toFixed(2)),
     [tr ? 'Yeni Müşteri'     : 'New Leads']:         r.newLeads,
-    [tr ? 'Teslim Edilen'    : 'Delivered']:         r.delivered,
+    [oc(tr).teslim_edilen]:         r.delivered,
   }));
   const csv = Papa.unparse(mapped);
   downloadCSV(csv, `CETPA_Aylik_Ozet_${bugunAnahtari()}.csv`);

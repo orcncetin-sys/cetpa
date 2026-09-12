@@ -26,6 +26,7 @@ import SonSenkronRozeti from '../components/SonSenkronRozeti';
 import type { Order, Lead, InventoryItem, Shipment } from '../types';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
+import { oc } from '../i18n/ortak';
 
 // KUR YEDEGI KALDIRILDI (2026-08-26) — burada `const FX_FALLBACK = { USD: 38,
 // EUR: 41 }` duruyordu. Canli kur gelmedigi her an TL tutarlar 2024'ten kalma
@@ -343,7 +344,7 @@ export default function DashboardPage(props: Props) {
                     <p className="text-xs font-semibold text-gray-500 mt-1">{kpi.label}</p>
                     <p className="text-[10px] text-gray-400 mt-0.5">{kpi.sub}</p>
                     <p className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
-                      <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'Detaya git' : 'View details'}
+                      <ChevronRight className="w-3 h-3" />{oc(currentLanguage).detaya_git}
                     </p>
                   </button>
                 ))}
@@ -448,7 +449,7 @@ export default function DashboardPage(props: Props) {
                         );
                       })()}
                       <button onClick={() => setActiveTab('reports')} className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
-                        <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'Detaya git' : 'View details'}
+                        <ChevronRight className="w-3 h-3" />{oc(currentLanguage).detaya_git}
                       </button>
                     </div>
                   );
@@ -542,7 +543,7 @@ export default function DashboardPage(props: Props) {
                       },
                       {
                         icon: AlertTriangle,
-                        label: currentLanguage === 'tr' ? 'Düşük Stok' : 'Low Stock',
+                        label: oc(currentLanguage).dusuk_stok,
                         value: lowStockCount,
                         color: lowStockCount > 0 ? 'text-red-600' : 'text-gray-400',
                         bg:   lowStockCount > 0 ? 'bg-red-50' : 'bg-gray-50',
@@ -699,7 +700,7 @@ export default function DashboardPage(props: Props) {
                         onClick={() => setActiveTab('vergi')}
                         className="text-[10px] font-bold text-amber-600 hover:text-amber-800 transition-colors flex items-center gap-0.5"
                       >
-                        {currentLanguage === 'tr' ? 'Tümü' : 'All'} <ChevronRight className="w-3 h-3" />
+                        {oc(currentLanguage).tumu} <ChevronRight className="w-3 h-3" />
                       </button>
                     </div>
                     <div className="space-y-2">
@@ -723,7 +724,7 @@ export default function DashboardPage(props: Props) {
                               'shrink-0 ml-2 text-[10px] font-black px-2 py-0.5 rounded-full',
                               isCritical ? 'bg-red-200 text-red-800' : isUrgent ? 'bg-orange-200 text-orange-800' : 'bg-amber-100 text-amber-700'
                             )}>
-                              {days === null ? '—' : days === 0 ? (currentLanguage === 'tr' ? 'Bugün!' : 'Today!') : `${days}g`}
+                              {days === null ? '—' : days === 0 ? (oc(currentLanguage).bugun_2) : `${days}g`}
                             </span>
                           </div>
                         );
@@ -833,8 +834,8 @@ export default function DashboardPage(props: Props) {
                               placeholder="0"
                             />
                             <button onClick={() => { const v = Number(targetDraft); const mk = bugunAnahtari().slice(0, 7); saveMonthlyTarget(mk, v); setIsEditingTarget(false); }}
-                              className="text-[10px] bg-brand text-white px-2 py-1 rounded-lg font-bold">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
-                            <button onClick={() => setIsEditingTarget(false)} className="text-[10px] text-gray-400 hover:text-gray-600">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                              className="text-[10px] bg-brand text-white px-2 py-1 rounded-lg font-bold">{oc(currentLanguage).kaydet}</button>
+                            <button onClick={() => setIsEditingTarget(false)} className="text-[10px] text-gray-400 hover:text-gray-600">{oc(currentLanguage).iptal}</button>
                           </div>
                         ) : (
                           <button onClick={() => { setTargetDraft(String(monthlyTarget)); setIsEditingTarget(true); }}
@@ -1025,7 +1026,7 @@ export default function DashboardPage(props: Props) {
                           </button>
                         )}
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.level === 'danger' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
-                          {a.level === 'danger' ? (currentLanguage === 'tr' ? 'Kritik' : 'Critical') : (currentLanguage === 'tr' ? 'Uyarı' : 'Warning')}
+                          {a.level === 'danger' ? (oc(currentLanguage).kritik) : (oc(currentLanguage).uyari)}
                         </span>
                       </div>
                     ))}
@@ -1062,7 +1063,7 @@ export default function DashboardPage(props: Props) {
                       {[
                         { label: currentLanguage === 'tr' ? 'Bugün Ciro' : "Today's Revenue", val: todayRevenue, color: 'text-gray-800' },
                         { label: currentLanguage === 'tr' ? 'Bugün Tahsil' : 'Collected Today', val: todayPaid, color: 'text-emerald-600' },
-                        { label: currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total Receivable', val: totalUnpaid, color: 'text-amber-600' },
+                        { label: oc(currentLanguage).toplam_alacak, val: totalUnpaid, color: 'text-amber-600' },
                       ].map(c => (
                         <div key={c.label} className="text-center bg-gray-50 rounded-xl p-3">
                           <p className={`text-base font-bold ${c.color}`}>{fmtKpi(c.val)}</p>
@@ -1164,14 +1165,14 @@ export default function DashboardPage(props: Props) {
                         onClick={() => setShipmentsExpanded(e => !e)}
                         className="text-[10px] font-bold text-gray-400 hover:text-brand transition-colors flex items-center gap-1"
                       >
-                        {shipmentsExpanded ? (currentLanguage === 'tr' ? 'Gizle' : 'Hide') : (currentLanguage === 'tr' ? 'Detaylar' : 'Details')}
+                        {shipmentsExpanded ? (oc(currentLanguage).gizle) : (currentLanguage === 'tr' ? 'Detaylar' : 'Details')}
                         <ChevronDown className={cn("w-3 h-3 transition-transform", shipmentsExpanded && "rotate-180")} />
                       </button>
                     </div>
                     <div className="grid grid-cols-3 gap-3 mb-3">
                       {[
-                        { label: currentLanguage === 'tr' ? 'Yolda'     : 'In Transit',   value: inTransit,  color: 'text-blue-600',    bg: 'bg-blue-50' },
-                        { label: currentLanguage === 'tr' ? 'Bekliyor'  : 'Pending',       value: pending539, color: 'text-amber-600',   bg: 'bg-amber-50' },
+                        { label: oc(currentLanguage).yolda,   value: inTransit,  color: 'text-blue-600',    bg: 'bg-blue-50' },
+                        { label: oc(currentLanguage).bekliyor,       value: pending539, color: 'text-amber-600',   bg: 'bg-amber-50' },
                         { label: currentLanguage === 'tr' ? 'Bugün Teslim' : 'Del. Today', value: delivToday, color: 'text-emerald-600', bg: 'bg-emerald-50' },
                       ].map(c => (
                         <div key={c.label} className={`text-center rounded-xl p-3 ${c.bg}`}>
@@ -1227,7 +1228,7 @@ export default function DashboardPage(props: Props) {
                       <div className="flex items-center gap-1 mt-1.5">
                         <span className={`w-1.5 h-1.5 rounded-full ${gibConnected ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`} />
                         <span className={`text-[10px] font-semibold ${gibConnected ? 'text-green-600' : 'text-red-500'}`}>
-                          {gibConnected ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') : (currentLanguage === 'tr' ? 'Bağlı Değil' : 'Disconnected')}
+                          {gibConnected ? (oc(currentLanguage).aktif) : (currentLanguage === 'tr' ? 'Bağlı Değil' : 'Disconnected')}
                         </span>
                       </div>
                     </button>
@@ -1255,7 +1256,7 @@ export default function DashboardPage(props: Props) {
                         <div className="w-7 h-7 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
                           <Receipt className="w-3.5 h-3.5 text-amber-600" />
                         </div>
-                        <span className="text-xs font-bold text-gray-500 uppercase truncate">{currentLanguage === 'tr' ? 'Vergi Takvimi' : 'Tax Calendar'}</span>
+                        <span className="text-xs font-bold text-gray-500 uppercase truncate">{oc(currentLanguage).vergi_takvimi}</span>
                       </div>
                       <p className="text-xl font-bold text-gray-900 mt-auto">
                         {currentLanguage === 'tr' ? 'Beyanname Takibi' : 'Declaration Tracking'}
@@ -1398,7 +1399,7 @@ export default function DashboardPage(props: Props) {
                   <div className={cn("rounded-2xl border p-5 space-y-3", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between">
                       <h3 className={cn("text-[10px] font-bold uppercase tracking-wider", darkMode ? "text-white/50" : "text-gray-400")}>
-                        {currentLanguage === 'tr' ? 'Sipariş Durumu' : 'Order Status'}
+                        {oc(currentLanguage).siparis_durumu}
                       </h3>
                       <button onClick={() => setActiveTab('orders')} className="text-[10px] font-semibold text-brand hover:underline">
                         {currentLanguage === 'tr' ? 'Tümünü gör' : 'View all'}
@@ -1469,7 +1470,7 @@ export default function DashboardPage(props: Props) {
                       <div className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-sm bg-gray-300 flex-shrink-0" />
                         <div>
-                          <p className="text-xs font-bold text-gray-600">{currentLanguage === 'tr' ? 'Perakende' : 'Retail'} — {retailPct}%</p>
+                          <p className="text-xs font-bold text-gray-600">{oc(currentLanguage).perakende} — {retailPct}%</p>
                           <p className="text-[10px] text-gray-400">{fmtKpi(retailRev)}</p>
                         </div>
                       </div>
@@ -1484,8 +1485,8 @@ export default function DashboardPage(props: Props) {
                 const ct106 = (o: Order) => (o.customerType as unknown as string) || '';
                 const segs: Seg[] = [
                   { label: 'B2B',                                             color: '#3b82f6', rev: orders.filter(o => ct106(o) === 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0) },
-                  { label: currentLanguage === 'tr' ? 'Bayi' : 'Dealer',      color: '#ff4000', rev: orders.filter(o => ct106(o) === 'Dealer').reduce((s, o) => s + (o.totalPrice || 0), 0) },
-                  { label: currentLanguage === 'tr' ? 'Perakende' : 'Retail', color: '#6b7280', rev: orders.filter(o => { const c = ct106(o); return !c || (c !== 'B2B' && c !== 'Dealer'); }).reduce((s, o) => s + (o.totalPrice || 0), 0) },
+                  { label: oc(currentLanguage).bayi,      color: '#ff4000', rev: orders.filter(o => ct106(o) === 'Dealer').reduce((s, o) => s + (o.totalPrice || 0), 0) },
+                  { label: oc(currentLanguage).perakende, color: '#6b7280', rev: orders.filter(o => { const c = ct106(o); return !c || (c !== 'B2B' && c !== 'Dealer'); }).reduce((s, o) => s + (o.totalPrice || 0), 0) },
                 ];
                 const total106 = segs.reduce((s, seg) => s + seg.rev, 0);
                 if (total106 === 0) return null;
@@ -1605,12 +1606,12 @@ export default function DashboardPage(props: Props) {
                               <div className="flex items-center gap-2">
                                 <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: barColor }} />
                                 <p className="text-sm font-bold text-gray-800">{s.type}</p>
-                                <span className="text-[10px] text-gray-400">{s.orderCount} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
+                                <span className="text-[10px] text-gray-400">{s.orderCount} {oc(currentLanguage).siparis}</span>
                               </div>
                               <div className="flex items-center gap-3 text-xs">
                                 <span className="text-gray-500">{fmtKpi(s.revenue,'K',1)}</span>
                                 <span className={`font-bold ${s.margin >= 30 ? 'text-emerald-600' : s.margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>
-                                  %{s.margin} {currentLanguage === 'tr' ? 'marj' : 'margin'}
+                                  %{s.margin} {oc(currentLanguage).marj_2}
                                 </span>
                               </div>
                             </div>
@@ -1651,9 +1652,9 @@ export default function DashboardPage(props: Props) {
                     { label: currentLanguage === 'tr' ? 'Kalite Yönetimi' : 'Quality', tab: 'kalite', icon: Activity, color: '#ff4000' },
                     { label: currentLanguage === 'tr' ? 'Hukuk & Uyum' : 'Legal', tab: 'hukuk', icon: ShieldCheck, color: '#3b82f6' },
                     { label: currentLanguage === 'tr' ? 'Proje Yönetimi' : 'Projects', tab: 'proje', icon: TargetIcon, color: '#8b5cf6' },
-                    { label: currentLanguage === 'tr' ? 'Satın Alma' : 'Purchasing', tab: 'satin-alma', icon: ShoppingCart, color: '#10b981' },
+                    { label: oc(currentLanguage).satin_alma, tab: 'satin-alma', icon: ShoppingCart, color: '#10b981' },
                     { label: dashT.new_order, tab: 'orders', icon: Package, color: '#f59e0b' },
-                    { label: currentLanguage === 'tr' ? 'Lojistik' : 'Logistics', tab: 'lojistik', icon: Truck, color: '#06b6d4' },
+                    { label: oc(currentLanguage).lojistik, tab: 'lojistik', icon: Truck, color: '#06b6d4' },
                     { label: currentLanguage === 'en' ? 'Accounting' : 'Muhasebe', tab: 'muhasebe', icon: BookOpen, color: '#ec4899' },
                     { label: dashT.reports, tab: 'reports', icon: BarChart3, color: '#ef4444' },
                   ].map((a, i) => (
@@ -1696,7 +1697,7 @@ export default function DashboardPage(props: Props) {
                     key: `stock-${i.id}`,
                     icon: AlertTriangle, color: 'text-red-600' as const, bg: 'bg-red-50' as const,
                     title: currentLanguage === 'tr' ? `Düşük stok: ${i.name}` : `Low stock: ${i.name}`,
-                    sub: `${i.stockLevel ?? 0} / ${i.lowStockThreshold ?? 5} ${currentLanguage === 'tr' ? 'adet' : 'units'}`,
+                    sub: `${i.stockLevel ?? 0} / ${i.lowStockThreshold ?? 5} ${oc(currentLanguage).adet}`,
                     onClick: () => setActiveTab('inventory'),
                   })),
                 ];
@@ -1840,8 +1841,8 @@ export default function DashboardPage(props: Props) {
                         return [
                         { label: currentLanguage === 'tr' ? 'Maliyet Değeri' : 'Cost Value',   value: fmtKpi(costValue),   color: 'text-gray-800',    sub: currentLanguage === 'tr' ? 'stok maliyeti' : 'at cost' },
                         { label: currentLanguage === 'tr' ? 'Satış Değeri'  : 'Retail Value',  value: fmtKpi(retailValue),  color: 'text-emerald-700', sub: currentLanguage === 'tr' ? 'tavsiye fiyat' : 'at retail' },
-                        { label: currentLanguage === 'tr' ? 'Brüt Marj'     : 'Gross Margin',  value: `${margin}%`,  color: margin >= 30 ? 'text-emerald-600' : margin >= 15 ? 'text-amber-600' : 'text-red-600', sub: currentLanguage === 'tr' ? 'teorik oran' : 'theoretical' },
-                        { label: currentLanguage === 'tr' ? 'Toplam Adet'   : 'Total Units',   value: totalUnits.toLocaleString('tr-TR'), color: 'text-blue-700', sub: currentLanguage === 'tr' ? 'stokta' : 'in stock' },
+                        { label: oc(currentLanguage).brut_marj,  value: `${margin}%`,  color: margin >= 30 ? 'text-emerald-600' : margin >= 15 ? 'text-amber-600' : 'text-red-600', sub: currentLanguage === 'tr' ? 'teorik oran' : 'theoretical' },
+                        { label: oc(currentLanguage).toplam_adet,   value: totalUnits.toLocaleString('tr-TR'), color: 'text-blue-700', sub: currentLanguage === 'tr' ? 'stokta' : 'in stock' },
                         ].map((stat, i) => (
                           <div key={i} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : "bg-gray-50")}>
                             <p className={`text-lg font-black ${stat.color}`}>{stat.value}</p>
@@ -1901,8 +1902,8 @@ export default function DashboardPage(props: Props) {
                           {currentLanguage === 'tr' ? '6 Aylık Ciro Trendi' : '6-Month Revenue Trend'}
                         </h3>
                         <div className="flex items-center gap-3 text-[10px] text-gray-400">
-                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-brand inline-block" />{currentLanguage === 'tr' ? 'Ciro' : 'Revenue'}</span>
-                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-300 inline-block" />{currentLanguage === 'tr' ? 'Sipariş' : 'Orders'}</span>
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-brand inline-block" />{oc(currentLanguage).ciro}</span>
+                          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-300 inline-block" />{oc(currentLanguage).siparis_2}</span>
                         </div>
                       </div>
                       <div className="flex items-center gap-4 mb-3">
@@ -1935,8 +1936,8 @@ export default function DashboardPage(props: Props) {
                           <Tooltip
                             formatter={sayiBicimleyici((value, name) =>
                               name === 'revenue'
-                                ? [paraYaz(value, { ondalik: 0 }), currentLanguage === 'tr' ? 'Ciro' : 'Revenue']
-                                : [value, currentLanguage === 'tr' ? 'Sipariş' : 'Orders']
+                                ? [paraYaz(value, { ondalik: 0 }), oc(currentLanguage).ciro]
+                                : [value, oc(currentLanguage).siparis_2]
                             )}
                             contentStyle={{ fontSize: 11, borderRadius: 10, border: '1px solid #f0f0f0' }}
                           />
@@ -1967,7 +1968,7 @@ export default function DashboardPage(props: Props) {
                                   style={{ width: `${Math.round((p.revenue / maxRevTop) * 100)}%` }}
                                 />
                               </div>
-                              <p className="text-[10px] text-gray-400">{p.count} {currentLanguage === 'tr' ? 'adet' : 'units'}</p>
+                              <p className="text-[10px] text-gray-400">{p.count} {oc(currentLanguage).adet}</p>
                             </div>
                           ))}
                         </div>
@@ -2104,7 +2105,7 @@ export default function DashboardPage(props: Props) {
                   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
-                        {currentLanguage === 'tr' ? 'En Yüksek Cirolu Müşteriler' : 'Top Customers by Revenue'}
+                        {oc(currentLanguage).en_yuksek_cirolu_musteriler}
                       </h3>
                       <button onClick={() => setActiveTab('reports')} className="text-[10px] font-semibold text-brand hover:underline">
                         {currentLanguage === 'tr' ? 'Raporlara git' : 'Open Reports'}
@@ -2122,7 +2123,7 @@ export default function DashboardPage(props: Props) {
                                 {c.name}
                               </span>
                               <div className="flex items-center gap-2 flex-shrink-0">
-                                <span className="text-[10px] text-gray-400">{c.orders} {currentLanguage === 'tr' ? 'sip.' : 'ord.'}</span>
+                                <span className="text-[10px] text-gray-400">{c.orders} {oc(currentLanguage).sip}</span>
                                 <span className="text-[10px] font-bold text-gray-700">
                                   {fmtKpi(c.revenue)}
                                 </span>
@@ -2235,7 +2236,7 @@ export default function DashboardPage(props: Props) {
                       if (uid) setDoc(doc(db, 'userPrefs', uid), { recentlyViewed: [] }, { merge: true }).catch(() => {});
                     }}
                       className="text-[10px] text-gray-400 hover:text-gray-600 px-2 py-1.5 ml-auto self-center transition-colors">
-                      {currentLanguage === 'tr' ? 'Temizle' : 'Clear'}
+                      {oc(currentLanguage).temizle}
                     </button>
                   </div>
                 </div>
@@ -2267,10 +2268,10 @@ export default function DashboardPage(props: Props) {
                       <input className="apple-input px-3 py-2 text-sm col-span-2" placeholder={tr595?'Görev başlığı...':'Task title...'} value={p595Draft.title} onChange={e=>setP595Draft(d=>({...d,title:e.target.value}))} />
                       <input type="date" className="apple-input px-3 py-2 text-sm" value={p595Draft.dueDate} onChange={e=>setP595Draft(d=>({...d,dueDate:e.target.value}))} />
                       <select className="apple-input px-3 py-2 text-sm" value={p595Draft.priority} onChange={e=>setP595Draft(d=>({...d,priority:e.target.value as typeof d.priority}))}>
-                        <option value="Düşük">{tr595?'Düşük':'Low'}</option>
-                        <option value="Orta">{tr595?'Orta':'Medium'}</option>
-                        <option value="Yüksek">{tr595?'Yüksek':'High'}</option>
-                        <option value="Kritik">{tr595?'Kritik':'Critical'}</option>
+                        <option value="Düşük">{oc(tr595).dusuk}</option>
+                        <option value="Orta">{oc(tr595).orta}</option>
+                        <option value="Yüksek">{oc(tr595).yuksek}</option>
+                        <option value="Kritik">{oc(tr595).kritik}</option>
                       </select>
                       <input className="apple-input px-3 py-2 text-sm" placeholder={tr595?'Atanan kişi':'Assigned to'} value={p595Draft.assignedTo} onChange={e=>setP595Draft(d=>({...d,assignedTo:e.target.value}))} />
                       <input className="apple-input px-3 py-2 text-sm" placeholder={tr595?'Modül (ör. CRM, Stok)':'Module (e.g. CRM, Stock)'} value={p595Draft.module} onChange={e=>setP595Draft(d=>({...d,module:e.target.value}))} />
@@ -2281,8 +2282,8 @@ export default function DashboardPage(props: Props) {
                         try { await addDoc(collection(db,'workflowTasks'),{title:p595Draft.title,dueDate:p595Draft.dueDate||today595,assignedTo:p595Draft.assignedTo,module:p595Draft.module,priority:p595Draft.priority,done:false,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Görev eklendi ✓' : 'Task added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Görev eklenemedi.' : 'Failed to add task.', 'error');}
                         setP595Draft({title:'',dueDate:'',assignedTo:'',module:'',priority:'Orta'});
                         setP595ShowForm(false);
-                      }} className="apple-button-primary text-sm px-4 py-1.5">{tr595?'Kaydet':'Save'}</button>
-                      <button onClick={()=>setP595ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr595?'İptal':'Cancel'}</button>
+                      }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr595).kaydet}</button>
+                      <button onClick={()=>setP595ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{oc(tr595).iptal}</button>
                     </div>
                   </div>
                 )}
@@ -2310,7 +2311,7 @@ export default function DashboardPage(props: Props) {
                     ))}
                     {p595Tasks.filter(t=>t.done).length>0&&(
                       <p className="text-xs text-gray-400 text-center pt-1">✓ {p595Tasks.filter(t=>t.done).length} {tr595?'tamamlanan görev':'completed task(s)'} &nbsp;
-                        <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;p595Tasks.filter(t=>t.done).forEach(t=>deleteDoc(doc(db,'workflowTasks',t.id)));}} className="text-red-400 hover:text-red-600">{tr595?'Temizle':'Clear'}</button>
+                        <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;p595Tasks.filter(t=>t.done).forEach(t=>deleteDoc(doc(db,'workflowTasks',t.id)));}} className="text-red-400 hover:text-red-600">{oc(tr595).temizle}</button>
                       </p>
                     )}
                   </div>

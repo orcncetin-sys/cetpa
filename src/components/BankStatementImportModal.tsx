@@ -21,6 +21,7 @@ import { X, Upload, Check, AlertCircle, Landmark } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, query, where, serverTimestamp } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
+import { oc } from '../i18n/ortak';
 
 interface CostCenter { id: string; kod: string; ad: string }
 
@@ -161,9 +162,9 @@ export default function BankStatementImportModal({ isOpen, onClose, currentLangu
 
   const fieldLabels: Record<FieldKey, string> = {
     date: tr ? 'Tarih *' : 'Date *',
-    amount: tr ? 'Tutar *' : 'Amount *',
-    description: tr ? 'Açıklama' : 'Description',
-    balance: tr ? 'Bakiye' : 'Balance',
+    amount: oc(tr).tutar_3,
+    description: oc(tr).aciklama,
+    balance: oc(tr).bakiye,
     reference: tr ? 'Referans' : 'Reference',
   };
 
@@ -233,9 +234,9 @@ export default function BankStatementImportModal({ isOpen, onClose, currentLangu
               <div className="border border-gray-100 rounded-xl overflow-hidden text-xs">
                 <table className="w-full">
                   <thead className="bg-gray-50 text-gray-400"><tr>
-                    <th className="px-2 py-1.5 text-left">{tr ? 'Tarih' : 'Date'}</th>
-                    <th className="px-2 py-1.5 text-left">{tr ? 'Açıklama' : 'Description'}</th>
-                    <th className="px-2 py-1.5 text-right">{tr ? 'Tutar' : 'Amount'}</th>
+                    <th className="px-2 py-1.5 text-left">{oc(tr).tarih}</th>
+                    <th className="px-2 py-1.5 text-left">{oc(tr).aciklama}</th>
+                    <th className="px-2 py-1.5 text-right">{oc(tr).tutar}</th>
                   </tr></thead>
                   <tbody className="divide-y divide-gray-50">
                     {preview.map((p, i) => (
@@ -259,7 +260,7 @@ export default function BankStatementImportModal({ isOpen, onClose, currentLangu
           )}
 
           <button onClick={() => void handleImport()} disabled={!canImport} className="apple-button-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-40">
-            {importing ? '…' : <><Check className="w-4 h-4" />{tr ? 'İçe Aktar' : 'Import'}</>}
+            {importing ? '…' : <><Check className="w-4 h-4" />{oc(tr).ice_aktar}</>}
           </button>
         </div>
       </motion.div>

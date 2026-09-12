@@ -17,6 +17,7 @@ import { collection, doc, onSnapshot, query, addDoc, serverTimestamp } from '../
 import { byField } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
 import { TOP_LEVEL_TABS } from '../lib/topLevelTabs';
+import { oc } from '../i18n/ortak';
 
 // Pazarlama rakamı SABİT YAZILMAZ — 2026-08-31 code-review: '26' sabiti, seti
 // genişleten diff'te güncellenmeyi unutup bayatladı (set 41 olmuştu). Artık
@@ -287,7 +288,7 @@ function CellIcon({ val, isTR }: { val: string; isTR: boolean }) {
     <span className="flex flex-col items-center gap-0.5">
       <Minus aria-hidden="true" className="w-4 h-4 text-amber-600 dark:text-amber-500 mx-auto" />
       {/* amber-500 beyaz zeminde ~2.15:1 idi (9px metin, AA=4.5:1); amber-700 ~4.9:1 */}
-      <span className="text-[9px] font-semibold text-amber-700 dark:text-amber-500">{isTR ? 'Kısmi' : 'Partial'}</span>
+      <span className="text-[9px] font-semibold text-amber-700 dark:text-amber-500">{oc(isTR).kismi}</span>
     </span>
   );
 }
@@ -449,7 +450,7 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
                 {
                   labelTR: 'Verimlilik artışı',
                   labelEN: 'Productivity gain',
-                  value:   `${paraYaz(productivityGain, { ondalik: 0 })} / ${isTR ? 'ay' : 'mo'}`,
+                  value:   `${paraYaz(productivityGain, { ondalik: 0 })} / ${oc(isTR).ay_2}`,
                   accent:  false,
                   citationTR: 'Varsayım: çalışan başına aylık %12 getiri',
                   citationEN: 'Assumption: 12% ROI per employee per month',
@@ -512,7 +513,7 @@ function RoiSection({ isTR, d, darkMode, onTryClick }: SectionProps & { onTryCli
                 onClick={onTryClick}
                 className="w-full mt-2 flex items-center justify-center gap-2 bg-brand hover:bg-brand/90 text-white font-bold text-sm px-6 py-4 rounded-2xl transition-all duration-200 shadow-lg shadow-brand/25 hover:scale-[1.02] active:scale-[0.98]"
               >
-                {isTR ? '14 Gün Ücretsiz Dene' : 'Start 14-Day Free Trial'}
+                {oc(isTR)._14_gun_ucretsiz_dene}
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -770,8 +771,8 @@ function InnovationSection({ isTR, darkMode, d, onTryClick, isLoggedIn, onDashbo
                 d('border-white/15 text-white/60 hover:text-white/65 hover:bg-white/6',
                   'border-black/12 text-black/65 hover:text-black/55 hover:bg-black/5')
               )}
-              title={paused ? (isTR ? 'Oynat' : 'Play') : (isTR ? 'Duraklat' : 'Pause')}
-              aria-label={paused ? (isTR ? 'Oynat' : 'Play') : (isTR ? 'Duraklat' : 'Pause')}
+              title={paused ? (oc(isTR).oynat) : (oc(isTR).duraklat)}
+              aria-label={paused ? (oc(isTR).oynat) : (oc(isTR).duraklat)}
               aria-pressed={!paused}
             >
               {paused
@@ -1075,7 +1076,7 @@ function AccountantPartnerSection({ isTR, d }: SectionProps) {
                   type="submit"
                   className="px-6 py-3 rounded-xl bg-brand text-white font-bold text-sm hover:bg-orange-500 transition-all shadow-md shadow-brand/25 active:scale-95 whitespace-nowrap"
                 >
-                  {isTR ? 'Başvur' : 'Apply'}
+                  {oc(isTR).basvur}
                 </button>
               </form>
             ) : (
@@ -1158,8 +1159,8 @@ export default function LandingPage({
     { icon: LayoutDashboard, title: isTR ? 'Akıllı Dashboard' : 'Smart Dashboard',        desc: isTR ? 'Gerçek zamanlı KPI\'lar, AI önerileri ve tek ekranda işletme özeti.' : 'Real-time KPIs, AI insights and business summary on one screen.' },
     { icon: Users,           title: isTR ? 'Gelişmiş CRM' : 'Advanced CRM',               desc: isTR ? 'Lead skorlaması, AI destekli tahminler ve müşteri portföy yönetimi.' : 'Lead scoring, AI-powered predictions and customer portfolio management.' },
     { icon: Package,         title: isTR ? 'Stok & Depo' : 'Stock & Warehouse',           desc: isTR ? 'Çok depolu yönetim, barkod okuma, kritik stok uyarıları.' : 'Multi-warehouse management, barcode scanning, critical stock alerts.' },
-    { icon: Truck,           title: isTR ? 'Lojistik & Kargo' : 'Logistics & Cargo',      desc: isTR ? 'Akıllı rotalama, kargo takibi ve teslim performans analizi.' : 'Smart routing, cargo tracking and delivery performance analytics.' },
-    { icon: Landmark,        title: isTR ? 'Finans & Muhasebe' : 'Finance & Accounting',  desc: isTR ? 'e-Fatura, Mikro/Luca sync, ödeme takibi ve nakit akışı.' : 'e-Invoice, Mikro/Luca sync, payment tracking and cash flow.' },
+    { icon: Truck,           title: oc(isTR).lojistik_kargo,      desc: isTR ? 'Akıllı rotalama, kargo takibi ve teslim performans analizi.' : 'Smart routing, cargo tracking and delivery performance analytics.' },
+    { icon: Landmark,        title: oc(isTR).finans_muhasebe,  desc: isTR ? 'e-Fatura, Mikro/Luca sync, ödeme takibi ve nakit akışı.' : 'e-Invoice, Mikro/Luca sync, payment tracking and cash flow.' },
     { icon: Activity,        title: isTR ? 'Üretim Planlama' : 'Production Planning',     desc: isTR ? 'İş emirleri, BOM yönetimi, kapasite planlaması ve OEE takibi.' : 'Work orders, BOM management, capacity planning and OEE tracking.' },
     { icon: Briefcase,       title: isTR ? 'İK & Bordro' : 'HR & Payroll',                desc: isTR ? 'Dijital personel dosyaları, izin yönetimi, otomatik bordro.' : 'Digital personnel files, leave management, automated payroll.' },
     { icon: Scale,           title: isTR ? 'Hukuk & Risk' : 'Legal & Risk',               desc: isTR ? 'Sözleşme takibi, finansal risk skoru ve hukuki süreç yönetimi.' : 'Contract tracking, financial risk scoring and legal process management.' },
@@ -1209,7 +1210,7 @@ export default function LandingPage({
       features: isTR
         ? ['Özel Geliştirme', 'Yerinde Kurulum', 'Özel API Entegrasyonları', 'Dedicated Sunucu', 'VIP Hesap Yöneticisi', 'Sözleşmeyle Belirlenen SLA']
         : ['Custom Development', 'On-premise Setup', 'Custom API Integrations', 'Dedicated Server', 'VIP Account Manager', 'Contract-Defined SLA'],
-      highlight: false, cta: isTR ? 'Teklif Al' : 'Get Quote',
+      highlight: false, cta: oc(isTR).teklif_al,
     },
   ];
   const [firestorePricing, setFirestorePricing] = useState<typeof staticPricingPlans | null>(null);
@@ -1343,12 +1344,12 @@ export default function LandingPage({
               <img src="/cetpalogo.avif" alt="CETPA" className="h-7 w-auto object-contain flex-shrink-0" />
               <div className="hidden md:flex items-center gap-5">
                 {[
-                  { id: 'innovation', label: isTR ? 'Ürünler'       : 'Products'    },
-                  { id: 'how',        label: isTR ? 'Nasıl Çalışır' : 'How It Works' },
-                  { id: 'features',   label: isTR ? 'Özellikler'    : 'Features'    },
-                  { id: 'pricing',    label: isTR ? 'Fiyatlar'      : 'Pricing'     },
-                  { id: 'solutions',  label: isTR ? 'Sektörler'     : 'Industries'  },
-                  { id: 'partners',   label: isTR ? 'Ortaklar'      : 'Partners'    },
+                  { id: 'innovation', label: oc(isTR).urunler    },
+                  { id: 'how',        label: oc(isTR).nasil_calisir },
+                  { id: 'features',   label: oc(isTR).ozellikler    },
+                  { id: 'pricing',    label: oc(isTR).fiyatlar     },
+                  { id: 'solutions',  label: oc(isTR).sektorler  },
+                  { id: 'partners',   label: oc(isTR).ortaklar    },
                 ].map(({ id, label }) => (
                   <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}
                     className={cn('text-[13px] font-medium whitespace-nowrap transition-colors shrink-0', d('text-white/55 hover:text-white', 'text-black/55 hover:text-black'))}>
@@ -1383,12 +1384,12 @@ export default function LandingPage({
                 <div className={cn('absolute right-0 top-12 z-50 min-w-44 rounded-2xl border shadow-xl py-2',
                   d('bg-[#0c0c12] border-white/10', 'bg-white border-black/10'))}>
                   {[
-                    { id: 'innovation', label: isTR ? 'Ürünler'       : 'Products'    },
-                    { id: 'how',        label: isTR ? 'Nasıl Çalışır' : 'How It Works' },
-                    { id: 'features',   label: isTR ? 'Özellikler'    : 'Features'    },
-                    { id: 'pricing',    label: isTR ? 'Fiyatlar'      : 'Pricing'     },
-                    { id: 'solutions',  label: isTR ? 'Sektörler'     : 'Industries'  },
-                    { id: 'partners',   label: isTR ? 'Ortaklar'      : 'Partners'    },
+                    { id: 'innovation', label: oc(isTR).urunler    },
+                    { id: 'how',        label: oc(isTR).nasil_calisir },
+                    { id: 'features',   label: oc(isTR).ozellikler    },
+                    { id: 'pricing',    label: oc(isTR).fiyatlar     },
+                    { id: 'solutions',  label: oc(isTR).sektorler  },
+                    { id: 'partners',   label: oc(isTR).ortaklar    },
                   ].map(({ id, label }) => (
                     <button key={id}
                       onClick={e => {
@@ -1473,14 +1474,14 @@ export default function LandingPage({
             className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6">
             <button onClick={isLoggedIn ? onDashboardClick : onTryClick}
               className="group w-full sm:w-auto px-8 py-4 rounded-2xl bg-brand text-white font-bold text-base shadow-2xl shadow-brand/30 hover:bg-orange-500 hover:scale-[1.03] transition-all active:scale-95 flex items-center justify-center gap-3">
-              {isLoggedIn ? (isTR ? 'Panele Git' : 'Go to Dashboard') : (isTR ? 'Ücretsiz Başla' : 'Start for Free')}
+              {isLoggedIn ? (isTR ? 'Panele Git' : 'Go to Dashboard') : (oc(isTR).ucretsiz_basla)}
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
             <button onClick={() => document.getElementById('demo')?.scrollIntoView({ behavior: 'smooth' })}
               className={cn('w-full sm:w-auto px-8 py-4 rounded-2xl font-bold text-base border transition-all flex items-center justify-center gap-2.5 hover:scale-[1.02]',
                 d('border-white/12 bg-white/5 text-white hover:bg-white/10', 'border-black/12 bg-white text-black hover:bg-gray-50 shadow-sm'))}>
               <Play className="w-4 h-4" />
-              {isTR ? 'Demo Talep Et' : 'Request Demo'}
+              {oc(isTR).demo_talep_et}
             </button>
           </motion.div>
 
@@ -1584,7 +1585,7 @@ export default function LandingPage({
                 <Package style={{ width: 18, height: 18 }} className="text-brand" />
               </div>
               <div>
-                <p className="text-[9px] font-bold opacity-40 uppercase tracking-widest">{isTR ? 'Aktif Sipariş' : 'Active Orders'}</p>
+                <p className="text-[9px] font-bold opacity-40 uppercase tracking-widest">{oc(isTR).aktif_siparis}</p>
                 <p className="text-base font-black leading-tight mt-0.5">1,247</p>
                 <p className="text-[9px] text-brand font-bold mt-0.5">↑ 34 {isTR ? 'bugün eklendi' : 'added today'}</p>
               </div>
@@ -1677,7 +1678,7 @@ export default function LandingPage({
         <SparkleField count={8} color={brand} />
         <div className="w-full max-w-5xl mx-auto px-6 relative z-10">
           <div className="text-center mb-20">
-            <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{isTR ? 'Nasıl Çalışır' : 'How It Works'}</p>
+            <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{oc(isTR).nasil_calisir}</p>
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
               {isTR ? 'Üç adımda dijital dönüşüm' : 'Three steps to digital transformation'}
             </h2>
@@ -1711,7 +1712,7 @@ export default function LandingPage({
       {/* ── Spotlight: CRM & Sales ────────────────────────────────────────── */}
       <SpotlightSection
         isTR={isTR} darkMode={darkMode} d={d}
-        eyebrow={isTR ? 'CRM & Satış' : 'CRM & Sales'}
+        eyebrow={oc(isTR).crm_satis}
         title={isTR ? 'Müşterilerinizi merkeze alın' : 'Put your customers at the center'}
         desc={isTR
           ? 'AI destekli lead skorlaması, müşteri portföy yönetimi ve satış tahminleri ile satış ekibinizin performansını artırın. B2B ilişkilerini güçlendirin, fırsatları kaçırmayın.'
@@ -1731,7 +1732,7 @@ export default function LandingPage({
       {/* ── Spotlight: Finance & Accounting ──────────────────────────────── */}
       <SpotlightSection
         isTR={isTR} darkMode={darkMode} d={d}
-        eyebrow={isTR ? 'Finans & Muhasebe' : 'Finance & Accounting'}
+        eyebrow={oc(isTR).finans_muhasebe}
         title={isTR ? 'Finansal operasyonlarınızı otomatikleştirin' : 'Automate your financial operations'}
         desc={isTR
           ? 'e-Fatura, Mikro ERP ve Luca entegrasyonu ile muhasebe süreçlerinizi otomatize edin. Nakit akışını anlık takip edin, ay sonu kapanışını saatlere indirin.'
@@ -1781,7 +1782,7 @@ export default function LandingPage({
       {/* ── Spotlight: Logistics ─────────────────────────────────────────── */}
       <SpotlightSection
         isTR={isTR} darkMode={darkMode} d={d}
-        eyebrow={isTR ? 'Lojistik & Depo' : 'Logistics & Warehouse'}
+        eyebrow={oc(isTR).lojistik_depo}
         title={isTR ? 'Tedarik zincirinizi görünür kılın' : 'Make your supply chain visible'}
         desc={isTR
           ? 'Çok depolu stok yönetimi, akıllı kargo rotalama ve gerçek zamanlı teslimat takibi ile lojistik operasyonlarınızı optimize edin. Kargo firmalarıyla doğrudan entegrasyon.'
@@ -1823,7 +1824,7 @@ export default function LandingPage({
               </button>
             </div>
             <div className="absolute bottom-4 right-4 bg-black/70 text-white text-xs font-bold px-3 py-1.5 rounded-xl backdrop-blur-sm flex items-center gap-1.5">
-              <Play className="w-3 h-3" /> {isTR ? 'Demo Talep Et' : 'Request Demo'}
+              <Play className="w-3 h-3" /> {oc(isTR).demo_talep_et}
             </div>
           </motion.div>
 
@@ -1860,7 +1861,7 @@ export default function LandingPage({
             </h2>
             <div className="inline-flex items-center gap-3 mt-6">
               <span className={cn('text-sm font-semibold', !pricingAnnual && d('text-white/70', 'text-black/70'))}>
-                {isTR ? 'Aylık' : 'Monthly'}
+                {oc(isTR).aylik}
               </span>
               <button onClick={() => setPricingAnnual(v => !v)}
                 role="switch" aria-checked={pricingAnnual}
@@ -1902,10 +1903,10 @@ export default function LandingPage({
                     {price !== null ? (
                       <div className="flex items-baseline gap-1">
                         <span className="text-4xl font-black">{paraYaz(price, { birim: isTR ? 'TRY' : 'USD', ondalik: Number.isInteger(Number(price)) ? 0 : 2 })}</span>
-                        <span className={cn('text-sm', d('text-white/65', 'text-black/70'))}>{isTR ? '/ay' : '/mo'}</span>
+                        <span className={cn('text-sm', d('text-white/65', 'text-black/70'))}>{oc(isTR).ay_3}</span>
                       </div>
                     ) : (
-                      <span className="text-3xl font-black">{isTR ? 'Teklif Al' : 'Get Quote'}</span>
+                      <span className="text-3xl font-black">{oc(isTR).teklif_al}</span>
                     )}
                     {pricingAnnual && price !== null && (
                       <p className="text-xs text-brand mt-1 font-semibold">{isTR ? 'Yıllık fatura ile' : 'Billed annually'}</p>
@@ -1942,7 +1943,7 @@ export default function LandingPage({
       <section id="solutions" className="py-32">
         <div className="w-full max-w-6xl mx-auto px-6">
           <div className="text-center mb-16">
-            <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{isTR ? 'Sektörler' : 'Industries'}</p>
+            <p className="text-xs font-bold uppercase tracking-widest text-brand mb-3">{oc(isTR).sektorler}</p>
             <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
               {isTR ? 'Her sektöre özel çözüm' : 'Custom solutions for every industry'}
             </h2>
@@ -2037,15 +2038,15 @@ export default function LandingPage({
               { n:'02', label: isTR ? 'CRM & Satış Yönetimi'         : 'CRM & Sales Management',     icon:'🤝' },
               { n:'03', label: isTR ? 'Sipariş & Fatura Yönetimi'    : 'Order & Invoice Management',  icon:'📦' },
               { n:'04', label: isTR ? 'Envanter & Depo'              : 'Inventory & Warehouse',       icon:'📋' },
-              { n:'05', label: isTR ? 'Muhasebe & Finans'            : 'Accounting & Finance',        icon:'💰' },
-              { n:'06', label: isTR ? 'Lojistik & Kargo'             : 'Logistics & Cargo',           icon:'🚛' },
+              { n:'05', label: oc(isTR).muhasebe_finans,        icon:'💰' },
+              { n:'06', label: oc(isTR).lojistik_kargo,           icon:'🚛' },
               { n:'07', label: isTR ? 'Satın Alma & Tedarik'         : 'Purchasing & Procurement',    icon:'🛒' },
               { n:'08', label: isTR ? 'B2B & Bayi Portalı'           : 'B2B & Dealer Portal',         icon:'🏪' },
               { n:'09', label: isTR ? 'Üretim & BOM'                 : 'Production & BOM',            icon:'🏭' },
-              { n:'10', label: isTR ? 'İnsan Kaynakları'             : 'Human Resources',             icon:'👥' },
-              { n:'11', label: isTR ? 'Hukuk & Uyum'                 : 'Legal & Compliance',          icon:'⚖️' },
-              { n:'12', label: isTR ? 'Kalite Kontrol'               : 'Quality Control',             icon:'✅' },
-              { n:'13', label: isTR ? 'Proje Yönetimi'               : 'Project Management',          icon:'📐' },
+              { n:'10', label: oc(isTR).insan_kaynaklari,             icon:'👥' },
+              { n:'11', label: oc(isTR).hukuk_uyum,          icon:'⚖️' },
+              { n:'12', label: oc(isTR).kalite_kontrol,             icon:'✅' },
+              { n:'13', label: oc(isTR).proje_yonetimi,          icon:'📐' },
               { n:'14', label: isTR ? 'Risk Yönetimi'                : 'Risk Management',             icon:'🛡️' },
               { n:'15', label: isTR ? 'Kurumsal Yönetişim'           : 'Corporate Governance',        icon:'🏛️' },
               { n:'16', label: isTR ? 'Raporlar & BI'                : 'Reports & BI',                icon:'📈' },
@@ -2098,7 +2099,7 @@ export default function LandingPage({
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                 <button onClick={isLoggedIn ? onDashboardClick : onTryClick}
                   className="group w-full sm:w-auto px-10 py-5 rounded-2xl bg-brand text-white font-black text-lg shadow-2xl shadow-brand/40 hover:bg-orange-500 hover:scale-105 transition-all active:scale-95 flex items-center justify-center gap-3">
-                  {isTR ? 'Ücretsiz Başla' : 'Start for Free'}
+                  {oc(isTR).ucretsiz_basla}
                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </button>
                 <a href="mailto:info@cetpa.com.tr"
@@ -2129,19 +2130,19 @@ export default function LandingPage({
             </div>
             {/* ── Product column ── */}
             <div>
-              <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/55', 'text-black/60'))}>{isTR ? 'Ürün' : 'Product'}</p>
+              <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/55', 'text-black/60'))}>{oc(isTR).urun}</p>
               <div className="space-y-3">
                 <button onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
-                  {isTR ? 'Özellikler' : 'Features'}
+                  {oc(isTR).ozellikler}
                 </button>
                 <button onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })}
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
-                  {isTR ? 'Fiyatlar' : 'Pricing'}
+                  {oc(isTR).fiyatlar}
                 </button>
                 <button onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })}
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
-                  {isTR ? 'Nasıl Çalışır' : 'How It Works'}
+                  {oc(isTR).nasil_calisir}
                 </button>
                 <Link to={PUBLIC_PATHS.developers}
                   className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
@@ -2152,15 +2153,15 @@ export default function LandingPage({
 
             {/* ── Company column ── */}
             <div>
-              <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/55', 'text-black/60'))}>{isTR ? 'Şirket' : 'Company'}</p>
+              <p className={cn('text-xs font-black uppercase tracking-wider mb-4', d('text-white/55', 'text-black/60'))}>{oc(isTR).sirket}</p>
               <div className="space-y-3">
                 <button onClick={() => document.getElementById('solutions')?.scrollIntoView({ behavior: 'smooth' })}
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
-                  {isTR ? 'Sektörler' : 'Industries'}
+                  {oc(isTR).sektorler}
                 </button>
                 <Link to={PUBLIC_PATHS.careers}
                   className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
-                  {isTR ? 'Kariyer' : 'Careers'}
+                  {oc(isTR).kariyer}
                 </Link>
                 <Link to={PUBLIC_PATHS.blog}
                   className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
@@ -2179,11 +2180,11 @@ export default function LandingPage({
               <div className="space-y-3">
                 <Link to={PUBLIC_PATHS.privacy}
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
-                  {isTR ? 'Gizlilik Politikası' : 'Privacy Policy'}
+                  {oc(isTR).gizlilik_politikasi}
                 </Link>
                 <Link to={PUBLIC_PATHS.terms}
                   className={cn('block text-xs transition-colors cursor-pointer', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
-                  {isTR ? 'Kullanım Koşulları' : 'Terms of Service'}
+                  {oc(isTR).kullanim_kosullari}
                 </Link>
                 <a href="mailto:info@cetpa.com.tr"
                   className={cn('block text-xs transition-colors', d('text-white/60 hover:text-white', 'text-black/65 hover:text-black'))}>
@@ -2195,7 +2196,7 @@ export default function LandingPage({
 
           {/* ── Bottom bar ── */}
           <div className={cn('pt-8 border-t flex flex-col sm:flex-row items-center justify-between gap-4', d('border-white/6', 'border-black/6'))}>
-            <p className={cn('text-xs', d('text-white/55', 'text-black/60'))}>© 2026 CETPA A.Ş. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
+            <p className={cn('text-xs', d('text-white/55', 'text-black/60'))}>© 2026 CETPA A.Ş. {oc(isTR).tum_haklari_saklidir}</p>
             <div className="flex items-center gap-1.5">
               <span className={cn('text-xs', d('text-white/55', 'text-black/60'))}>
                 {isTR ? 'CETPA tarafından' : 'Made by CETPA with'}

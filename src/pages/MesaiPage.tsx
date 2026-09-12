@@ -12,6 +12,7 @@ import { db } from '../firebase';
 import { collection, addDoc, serverTimestamp } from '../lib/dbClient';
 import ModuleHeader from '../components/ModuleHeader';
 import { bugunAnahtari } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 /** IKPage.tsx'teki AttendanceRecord ile birebir aynı tanım (App'in timeAttendance kaydı). */
 export interface AttendanceRecord { id: string; employeeName: string; employeeId?: string; date: string; checkIn: string; checkOut: string; totalHours: number; status: 'Normal' | 'Geç Giriş' | 'Erken Çıkış' | 'Devamsız' | 'İzinli' }
@@ -56,13 +57,13 @@ export default function MesaiPage({
         icon={Clock}
         actionButton={hasFullAccess('ik') ? (
           <button onClick={()=>setP552AddForm(f=>!f)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-1.5">
-            <Plus className="w-3.5 h-3.5" />{tr552?'Kayıt Ekle':'Add Record'}
+            <Plus className="w-3.5 h-3.5" />{oc(tr552).kayit_ekle}
           </button>
         ) : undefined}
       />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: tr552?'Toplam Kayıt':'Total Records',  v: String(p552Records.length), color:'text-blue-600',   bg:'bg-blue-50' },
+          { label: oc(tr552).toplam_kayit,  v: String(p552Records.length), color:'text-blue-600',   bg:'bg-blue-50' },
           { label: tr552?'Ort. Çalışma':'Avg Hours/Day', v: `${avgHours}h`,              color:'text-emerald-600',bg:'bg-emerald-50' },
           { label: tr552?'Geç Giriş':'Late Arrivals',    v: String(lateCount),           color:'text-orange-600', bg:'bg-orange-50' },
           { label: tr552?'Devamsız':'Absent',            v: String(absentCount),         color:'text-red-600',    bg:'bg-red-50' },
@@ -77,14 +78,14 @@ export default function MesaiPage({
         <div className="apple-card p-5 border-2 border-brand/20 space-y-3">
           <h4 className="font-bold text-gray-800">{tr552?'Yeni Mesai Kaydı':'New Attendance Record'}</h4>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <input value={p552Draft.employeeName} onChange={e=>setP552Draft(d=>({...d,employeeName:e.target.value}))} placeholder={tr552?'Çalışan Adı':'Employee Name'} className="apple-input px-3 py-2 text-sm" />
+            <input value={p552Draft.employeeName} onChange={e=>setP552Draft(d=>({...d,employeeName:e.target.value}))} placeholder={oc(tr552).calisan_adi_2} className="apple-input px-3 py-2 text-sm" />
             <input type="date" value={p552Draft.date} onChange={e=>setP552Draft(d=>({...d,date:e.target.value}))} className="apple-input px-3 py-2 text-sm" />
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 shrink-0">{tr552?'Giriş':'In'}</label>
+              <label className="text-xs text-gray-500 shrink-0">{oc(tr552).giris}</label>
               <input type="time" value={p552Draft.checkIn} onChange={e=>setP552Draft(d=>({...d,checkIn:e.target.value}))} className="apple-input px-3 py-2 text-sm flex-1" />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 shrink-0">{tr552?'Çıkış':'Out'}</label>
+              <label className="text-xs text-gray-500 shrink-0">{oc(tr552).cikis}</label>
               <input type="time" value={p552Draft.checkOut} onChange={e=>setP552Draft(d=>({...d,checkOut:e.target.value}))} className="apple-input px-3 py-2 text-sm flex-1" />
             </div>
           </div>
@@ -95,8 +96,8 @@ export default function MesaiPage({
               const status = statusFor(p552Draft.checkIn);
               await addDoc(collection(db,'timeAttendance'),{...p552Draft,totalHours:hours,status,createdAt:serverTimestamp()});
               setP552AddForm(false); setP552Draft({employeeName:'',date:today552,checkIn:'09:00',checkOut:'18:00'});
-            }} className="apple-button-primary px-4 py-2 text-sm">{tr552?'Kaydet':'Save'}</button>
-            <button onClick={()=>setP552AddForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr552?'İptal':'Cancel'}</button>
+            }} className="apple-button-primary px-4 py-2 text-sm">{oc(tr552).kaydet}</button>
+            <button onClick={()=>setP552AddForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr552).iptal}</button>
           </div>
         </div>
       )}
@@ -104,12 +105,12 @@ export default function MesaiPage({
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 bg-gray-50/60">
-              <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{tr552?'Çalışan':'Employee'}</th>
-              <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{tr552?'Tarih':'Date'}</th>
+              <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{oc(tr552).calisan}</th>
+              <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{oc(tr552).tarih}</th>
               <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr552?'Giriş':'Check-In'}</th>
               <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr552?'Çıkış':'Check-Out'}</th>
               <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr552?'Saat':'Hours'}</th>
-              <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr552?'Durum':'Status'}</th>
+              <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{oc(tr552).durum}</th>
             </tr></thead>
             <tbody>
               {p552Records.map(r=>{

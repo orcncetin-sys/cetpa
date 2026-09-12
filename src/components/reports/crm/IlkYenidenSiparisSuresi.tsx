@@ -6,6 +6,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanMs } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'orders' | 'currentLanguage'>;
 
@@ -49,11 +50,11 @@ export default function IlkYenidenSiparisSuresi({ orders, currentLanguage }: Pro
     <div className="apple-card p-6">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🔄 İlk Yeniden Sipariş Süresi' : '🔄 Days to First Reorder'}</h3>
-        <span className="text-xl font-black text-blue-600">{avgDays252}d {currentLanguage === 'tr' ? 'ort.' : 'avg'}</span>
+        <span className="text-xl font-black text-blue-600">{avgDays252}d {oc(currentLanguage).ort}</span>
       </div>
       <div className="grid grid-cols-3 gap-3 mb-4">
         {[
-          { label: currentLanguage === 'tr' ? 'Ortalama' : 'Average', value: `${avgDays252}d`, color: 'text-blue-600' },
+          { label: oc(currentLanguage).ortalama, value: `${avgDays252}d`, color: 'text-blue-600' },
           { label: currentLanguage === 'tr' ? 'Medyan' : 'Median', value: `${medianDays252}d`, color: 'text-gray-700' },
           { label: currentLanguage === 'tr' ? '≤30 gün tekrar' : '≤30d reorder', value: `${fast252}`, color: 'text-emerald-600' },
         ].map(k => (

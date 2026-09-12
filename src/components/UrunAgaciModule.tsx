@@ -25,6 +25,7 @@ import { confirmDelete } from '../lib/confirm';
 import { Plus, X, Save, Trash2, Pencil, Layers, AlertTriangle, Search } from 'lucide-react';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { auth } from '../firebase';
+import { oc } from '../i18n/ortak';
 
 export interface BomBilesen {
   inventoryId: string;
@@ -204,10 +205,10 @@ export default function UrunAgaciModule({ currentLanguage, isAuthenticated, inve
                 </div>
                 {isAuthenticated && (
                   <div className="flex gap-1 flex-shrink-0">
-                    <button onClick={() => duzenle(a)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title={tr ? 'Düzenle' : 'Edit'}>
+                    <button onClick={() => duzenle(a)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title={oc(tr).duzenle}>
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => sil(a)} className="p-1.5 rounded-lg hover:bg-red-50 text-red-400" title={tr ? 'Sil' : 'Delete'}>
+                    <button onClick={() => sil(a)} className="p-1.5 rounded-lg hover:bg-red-50 text-red-400" title={oc(tr).sil}>
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -286,7 +287,7 @@ export default function UrunAgaciModule({ currentLanguage, isAuthenticated, inve
                     {tr ? 'Bileşenler * (1 mamul için)' : 'Components * (per 1 unit)'}
                   </label>
                   <button onClick={bilesenEkle} className="apple-button-secondary text-xs px-3 py-1 flex items-center gap-1">
-                    <Plus className="w-3 h-3" />{tr ? 'Bileşen' : 'Component'}
+                    <Plus className="w-3 h-3" />{oc(tr).bilesen}
                   </button>
                 </div>
 
@@ -328,7 +329,7 @@ export default function UrunAgaciModule({ currentLanguage, isAuthenticated, inve
                             onChange={e => bilesenGuncelle(ix, { quantity: Number(e.target.value) })}
                             className="apple-input w-20 text-sm flex-shrink-0" placeholder={tr ? 'Mik.' : 'Qty'} />
                           <input value={c.unit} onChange={e => bilesenGuncelle(ix, { unit: e.target.value })}
-                            className="apple-input w-20 text-sm flex-shrink-0" placeholder={tr ? 'Birim' : 'Unit'} />
+                            className="apple-input w-20 text-sm flex-shrink-0" placeholder={oc(tr).birim} />
                           <button onClick={() => bilesenSil(ix)} className="p-2 rounded-lg hover:bg-red-50 text-red-400 flex-shrink-0">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -342,12 +343,12 @@ export default function UrunAgaciModule({ currentLanguage, isAuthenticated, inve
 
             <div className="flex gap-2 mt-5">
               <button onClick={() => setModalAcik(false)} className="apple-button-secondary flex-1 text-sm">
-                {tr ? 'Vazgeç' : 'Cancel'}
+                {oc(tr).vazgec}
               </button>
               <button onClick={kaydet}
                 disabled={kaydediliyor || !form.productSku.trim() || form.components.length === 0}
                 className="apple-button-primary flex-1 text-sm flex items-center justify-center gap-1.5 disabled:opacity-50">
-                <Save className="w-4 h-4" />{kaydediliyor ? (tr ? 'Kaydediliyor…' : 'Saving…') : (tr ? 'Kaydet' : 'Save')}
+                <Save className="w-4 h-4" />{kaydediliyor ? (oc(tr).kaydediliyor_2) : (oc(tr).kaydet)}
               </button>
             </div>
           </div>

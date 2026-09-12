@@ -20,6 +20,7 @@ import { odemeTakipli, siparisTarih } from '../../../utils/siparis';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from '../ReportKit';
 import { paraYaz } from '../../../utils/currency';
 import { zamanDate } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentT' | 'currentLanguage' | 'onNavigate' | 'recurringOrders' | 'fmtAna' | 'totalOrders' | 'revenueSymbol' | 'revenueFormatted' | 'avgOrderFormatted' | 'lowStockItems' | 'trendData' | 'categoryChartData' | 'COLORS' | 'revenueCurrency' | 'setRevenueCurrency'>;
 
@@ -47,7 +48,7 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                 accentBg={kpi.accentBg}
                 action={kpi.money ? <KpiCurrencyToggle value={revenueCurrency} onChange={setRevenueCurrency} /> : undefined}
                 onClick={() => onNavigate?.(kpi.tab)}
-                linkHint={currentLanguage === 'tr' ? 'Detaya git' : 'View details'}
+                linkHint={oc(currentLanguage).detaya_git}
               />
             ))}
           </KpiGrid>
@@ -157,7 +158,7 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                   <div key={i} className="flex-1 flex flex-col items-center gap-1 group">
                     <div className="w-full flex flex-col justify-end" style={{ height: '80px' }}>
                       <div className={`w-full rounded-t-lg ${colors[i]}`} style={{ height: `${Math.max(h, 3)}%` }}
-                        title={`${b.count} ${currentLanguage==='tr'?'sipariş':'orders'} · ${paraYaz(b.total, { ondalik: 0 })}`} />
+                        title={`${b.count} ${oc(currentLanguage).siparis} · ${paraYaz(b.total, { ondalik: 0 })}`} />
                     </div>
                     <span className="text-[8px] text-gray-400 text-center leading-tight">{b.label}</span>
                     <span className="text-[9px] font-bold text-gray-600">{b.count}</span>
@@ -215,7 +216,7 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                 { label: 'DIO', desc: currentLanguage === 'tr' ? 'Stok Elde Tutma Süresi' : 'Days Inventory Outstanding', value: dio, color: dio === null ? 'text-gray-400' : dio > 60 ? 'text-red-500' : dio > 30 ? 'text-amber-500' : 'text-emerald-600', sub: currentLanguage === 'tr' ? `₺${(inventoryVal185/1000).toFixed(0)}K stok` : `₺${(inventoryVal185/1000).toFixed(0)}K inventory` },
               ].map(k => (
                 <div key={k.label} className="bg-gray-50 rounded-xl p-4">
-                  <p className={`text-3xl font-black ${k.color}`}>{k.value === null ? '—' : <>{k.value}<span className="text-sm font-medium text-gray-400 ml-1">{currentLanguage === 'tr' ? 'gün' : 'd'}</span></>}</p>
+                  <p className={`text-3xl font-black ${k.color}`}>{k.value === null ? '—' : <>{k.value}<span className="text-sm font-medium text-gray-400 ml-1">{oc(currentLanguage).gun}</span></>}</p>
                   <p className="text-[11px] text-gray-700 font-semibold mt-1">{k.label} · {k.desc}</p>
                   <p className="text-[10px] text-gray-400">{k.sub}</p>
                 </div>
@@ -314,7 +315,7 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                           <div
                             className={`w-full rounded-t-lg transition-all duration-500 ${d.revenue === maxRev147 ? 'bg-brand' : 'bg-brand/30 hover:bg-brand/60'}`}
                             style={{ height: `${Math.max(h, 2)}%` }}
-                            title={`${paraYaz(d.revenue, { ondalik: 0 })} · ${d.orders} ${currentLanguage==='tr'?'sipariş':'orders'}`}
+                            title={`${paraYaz(d.revenue, { ondalik: 0 })} · ${d.orders} ${oc(currentLanguage).siparis}`}
                           />
                         </div>
                         <span className={`text-[10px] font-semibold ${d.revenue === maxRev147 ? 'text-brand' : 'text-gray-400'}`}>{d.day}</span>
@@ -371,7 +372,7 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                           <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                             <div className={`h-full rounded-full ${cls}`} style={{ width: `${Math.min((d / 45) * 100, 100)}%` }} />
                           </div>
-                          <p className="text-[10px] text-gray-400 mt-0.5">{currentLanguage==='tr'?'Stok':'Stock'}: {item.stockLevel} · {currentLanguage==='tr'?'Günlük':'Daily'}: {item.dailyUsage.toFixed(1)}</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">{oc(currentLanguage).stok}: {item.stockLevel} · {currentLanguage==='tr'?'Günlük':'Daily'}: {item.dailyUsage.toFixed(1)}</p>
                         </div>
                       </div>
                     );

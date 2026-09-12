@@ -42,6 +42,7 @@ import {
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
+import { oc } from '../../i18n/ortak';
 
 export default function EnvanterRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -54,8 +55,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           <KpiGrid>
             {([
               { label: currentLanguage==='tr'?'Toplam Ürün':'Total Products', value: String(inventory.length), icon: Package, accent: 'text-blue-600', accentBg: 'bg-blue-50', isMoney: false },
-              { label: currentLanguage==='tr'?'Düşük Stok':'Low Stock', value: String(lowStockItems), icon: AlertCircle, accent: 'text-orange-500', accentBg: 'bg-orange-50', isMoney: false },
-              { label: currentLanguage==='tr'?'Toplam Stok Değeri':'Total Stock Value', value: formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates ?? undefined), icon: CreditCard, accent: 'text-green-600', accentBg: 'bg-green-50', isMoney: true },
+              { label: oc(currentLanguage).dusuk_stok, value: String(lowStockItems), icon: AlertCircle, accent: 'text-orange-500', accentBg: 'bg-orange-50', isMoney: false },
+              { label: oc(currentLanguage).toplam_stok_degeri, value: formatInCurrency(totalInventoryValueTRY, revenueCurrency, exchangeRates ?? undefined), icon: CreditCard, accent: 'text-green-600', accentBg: 'bg-green-50', isMoney: true },
               { label: currentLanguage==='tr'?'Kategori Sayısı':'Categories', value: String(Object.keys(categoryData).length), icon: List, accent: 'text-purple-600', accentBg: 'bg-purple-50', isMoney: false },
             ] as { label: string; value: string; icon: React.ElementType; accent: string; accentBg: string; isMoney: boolean }[]).map((k,i) => (
               <KpiCard key={i} index={i} label={k.label} value={k.value} icon={k.icon} accent={k.accent} accentBg={k.accentBg}
@@ -96,7 +97,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                       <p className="text-xs text-gray-400">{item.sku}</p>
                     </div>
                     <div className="text-right ml-3">
-                      <p className="text-sm font-bold text-red-500">{item.stockLevel} {currentLanguage==='tr'?'adet':'units'}</p>
+                      <p className="text-sm font-bold text-red-500">{item.stockLevel} {oc(currentLanguage).adet}</p>
                       <p className="text-[10px] text-gray-400">Min: {item.lowStockThreshold}</p>
                     </div>
                   </div>
@@ -107,16 +108,16 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
 
           {/* Tüm Envanter Tablosu */}
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Envanter Özeti':'Inventory Summary'}</h3>
+            <h3 className="font-bold text-gray-800 mb-4">{oc(currentLanguage).envanter_ozeti}</h3>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100">
                     {[
-                      {k:'name', label:currentLanguage==='tr'?'Ürün':'Product', align:'text-left', cls:''},
-                      {k:'category', label:currentLanguage==='tr'?'Kategori':'Category', align:'text-left', cls:'hidden sm:table-cell'},
-                      {k:'stockLevel', label:currentLanguage==='tr'?'Stok':'Stock', align:'text-right', cls:''},
-                      {k:'value', label:currentLanguage==='tr'?'Değer':'Value', align:'text-right', cls:'hidden md:table-cell'},
+                      {k:'name', label:oc(currentLanguage).urun, align:'text-left', cls:''},
+                      {k:'category', label:oc(currentLanguage).kategori, align:'text-left', cls:'hidden sm:table-cell'},
+                      {k:'stockLevel', label:oc(currentLanguage).stok, align:'text-right', cls:''},
+                      {k:'value', label:oc(currentLanguage).deger, align:'text-right', cls:'hidden md:table-cell'},
                     ].map(({k,label,align,cls}) => {
                       const active = invSummarySort.key === k;
                       return (
@@ -125,7 +126,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                         </th>
                       );
                     })}
-                    <th className="text-center py-2 px-3 text-gray-500 font-medium text-xs">{currentLanguage==='tr'?'Durum':'Status'}</th>
+                    <th className="text-center py-2 px-3 text-gray-500 font-medium text-xs">{oc(currentLanguage).durum}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -150,7 +151,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                       <td className="py-2.5 px-3 text-right text-gray-500 text-xs hidden md:table-cell">{fmtAna(item.stockLevel*(item.prices?.['Retail']||0))}</td>
                       <td className="py-2.5 px-3 text-center">
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.stockLevel <= item.lowStockThreshold ? 'bg-red-100 text-red-600' : item.stockLevel <= item.lowStockThreshold*2 ? 'bg-yellow-100 text-yellow-600' : 'bg-green-100 text-green-600'}`}>
-                          {item.stockLevel <= item.lowStockThreshold ? (currentLanguage==='tr'?'Kritik':'Critical') : item.stockLevel <= item.lowStockThreshold*2 ? (currentLanguage==='tr'?'Düşük':'Low') : (currentLanguage==='tr'?'Normal':'Normal')}
+                          {item.stockLevel <= item.lowStockThreshold ? (oc(currentLanguage).kritik) : item.stockLevel <= item.lowStockThreshold*2 ? (oc(currentLanguage).dusuk) : (currentLanguage==='tr'?'Normal':'Normal')}
                         </span>
                       </td>
                     </tr>
@@ -189,11 +190,11 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                        <th className="text-left py-2 px-3">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</th>
+                        <th className="text-left py-2 px-3">{oc(currentLanguage).urun}</th>
                         <th className="text-right py-2 px-3">{currentLanguage === 'tr' ? 'Adet' : 'Units'}</th>
-                        <th className="text-right py-2 px-3 hidden sm:table-cell">{currentLanguage === 'tr' ? 'Ciro' : 'Revenue'}</th>
+                        <th className="text-right py-2 px-3 hidden sm:table-cell">{oc(currentLanguage).ciro}</th>
                         <th className="text-right py-2 px-3 hidden md:table-cell">{currentLanguage === 'tr' ? 'Maliyet' : 'COGS'}</th>
-                        <th className="text-right py-2 px-3">{currentLanguage === 'tr' ? 'Marj' : 'Margin'}</th>
+                        <th className="text-right py-2 px-3">{oc(currentLanguage).marj}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -248,7 +249,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-2">
                           <p className="text-xs font-bold text-gray-800">{c.category}</p>
-                          <span className="text-[9px] text-gray-400">{c.items} {currentLanguage === 'tr' ? 'ürün' : 'items'}</span>
+                          <span className="text-[9px] text-gray-400">{c.items} {oc(currentLanguage).urun_2}</span>
                         </div>
                         <div className="flex items-center gap-3 text-xs">
                           <span className="text-gray-500">{fmtAna(c.stockValue,'K',1)}</span>
@@ -263,7 +264,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                 </div>
                 <div className="mt-4 pt-3 border-t border-gray-100 flex justify-between text-xs font-bold text-gray-600">
                   <span>{cats.length} {currentLanguage === 'tr' ? 'kategori' : 'categories'}</span>
-                  <span>{currentLanguage === 'tr' ? 'Toplam Stok Değeri' : 'Total Stock Value'}: {fmtAna(totalStockVal,'K',1)}</span>
+                  <span>{oc(currentLanguage).toplam_stok_degeri}: {fmtAna(totalStockVal,'K',1)}</span>
                 </div>
               </div>
             );
@@ -301,12 +302,12 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-100">
-                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Ürün':'Product'}</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500">{oc(currentLanguage).urun}</th>
                         <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500">SKU</th>
-                        <th className="text-right py-2 px-3 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Stok':'Stock'}</th>
+                        <th className="text-right py-2 px-3 text-xs font-semibold text-gray-500">{oc(currentLanguage).stok}</th>
                         <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Son Kullanma':'Expiry'}</th>
                         <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Kalan Gün':'Days Left'}</th>
-                        <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Durum':'Status'}</th>
+                        <th className="text-center py-2 px-3 text-xs font-semibold text-gray-500">{oc(currentLanguage).durum}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -317,9 +318,9 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                         const badge = isExpired
                           ? { label: currentLanguage==='tr'?'Süresi Geçti':'Expired', cls: 'bg-red-100 text-red-700' }
                           : isCritical
-                            ? { label: currentLanguage==='tr'?'Kritik':'Critical', cls: 'bg-orange-100 text-orange-700' }
+                            ? { label: oc(currentLanguage).kritik, cls: 'bg-orange-100 text-orange-700' }
                             : isWarn
-                              ? { label: currentLanguage==='tr'?'Uyarı':'Warning', cls: 'bg-amber-100 text-amber-700' }
+                              ? { label: oc(currentLanguage).uyari, cls: 'bg-amber-100 text-amber-700' }
                               : { label: currentLanguage==='tr'?'Normal':'OK', cls: 'bg-emerald-100 text-emerald-700' };
                         return (
                           <tr key={item.id} className={`hover:bg-gray-50 ${isExpired ? 'bg-red-50/40' : ''}`}>
@@ -377,7 +378,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-0.5">
                             <span className="text-xs font-medium text-gray-800 truncate">{s.name}</span>
-                            <span className="text-xs text-gray-500 ml-2 shrink-0 tabular-nums">{s.unitsSold} {currentLanguage==='tr'?'adet':'units'}</span>
+                            <span className="text-xs text-gray-500 ml-2 shrink-0 tabular-nums">{s.unitsSold} {oc(currentLanguage).adet}</span>
                           </div>
                           <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                             <div className={`h-full rounded-full ${tier === 'A' ? 'bg-emerald-400' : tier === 'B' ? 'bg-blue-400' : 'bg-gray-300'}`} style={{ width: `${w}%` }} />
@@ -396,7 +397,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           {inventory.length > 0 && orders.length > 0 && (() => {
             const catMap: Record<string, { totalCOGS: number; avgStock: number; turnover: number }> = {};
             for (const i of inventory) {
-              const cat = i.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other'); // parantez: önce tüm kategoriler 'Diğer'e çöküyordu
+              const cat = i.category || (oc(currentLanguage).diger); // parantez: önce tüm kategoriler 'Diğer'e çöküyordu
               if (!catMap[cat]) catMap[cat] = { totalCOGS: 0, avgStock: 0, turnover: 0 };
               catMap[cat].avgStock += (i.stockLevel ?? 0) * itemCostTRY(i, exchangeRates);
             }
@@ -404,7 +405,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
               if (o.status === 'Cancelled') continue;
               for (const li of (o.lineItems || [])) {
                 const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-                const cat = inv?.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+                const cat = inv?.category || (oc(currentLanguage).diger);
                 if (!catMap[cat]) catMap[cat] = { totalCOGS: 0, avgStock: 0, turnover: 0 };
                 catMap[cat].totalCOGS += (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
               }
@@ -556,7 +557,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                 <div key={item.name} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
                   <span className="text-xs font-medium text-gray-800 truncate">{item.name}</span>
                   <div className="flex items-center gap-3 shrink-0 ml-2">
-                    <span className="text-xs text-gray-500">{item.qty} {currentLanguage==='tr'?'adet':'units'}</span>
+                    <span className="text-xs text-gray-500">{item.qty} {oc(currentLanguage).adet}</span>
                     <span className="text-xs font-bold text-red-500">-{fmtAna(item.value,'full',0)}</span>
                   </div>
                 </div>
@@ -618,7 +619,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
               <table className="w-full text-xs">
                 <thead>
                   <tr>
-                    <th className="text-left text-gray-500 font-medium pb-2 pr-3">{currentLanguage === 'tr' ? 'Kategori' : 'Category'}</th>
+                    <th className="text-left text-gray-500 font-medium pb-2 pr-3">{oc(currentLanguage).kategori}</th>
                     {months182.map(m => <th key={m.label} className="text-center text-gray-500 font-medium pb-2 px-1 min-w-[44px]">{m.label}</th>)}
                   </tr>
                 </thead>
@@ -644,7 +645,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                 { cls: 'bg-emerald-400', label: '25-40%' },
                 { cls: 'bg-amber-300', label: '15-25%' },
                 { cls: 'bg-red-300', label: '<15%' },
-                { cls: 'bg-gray-50 border border-gray-200', label: currentLanguage === 'tr' ? 'Veri yok' : 'No data' },
+                { cls: 'bg-gray-50 border border-gray-200', label: oc(currentLanguage).veri_yok_2 },
               ].map(l => (
                 <div key={l.label} className="flex items-center gap-1">
                   <span className={`w-3 h-3 rounded-sm ${l.cls}`} />
@@ -659,7 +660,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
       {reportsTab === 'envanter' && inventory.length > 0 && (() => {
         const suppMap183: Record<string, { value: number; items: number }> = {};
         for (const item of inventory) {
-          const supp = item.supplier?.trim() || (currentLanguage === 'tr' ? 'Bilinmiyor' : 'Unknown');
+          const supp = item.supplier?.trim() || (oc(currentLanguage).bilinmiyor);
           const val = itemCostTRY(item, exchangeRates) * (item.stockLevel ?? 0);
           if (!suppMap183[supp]) suppMap183[supp] = { value: 0, items: 0 };
           suppMap183[supp].value += val;
@@ -679,7 +680,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
             <div className="flex items-center justify-between mb-1">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🔗 Tedarikçi Konsantrasyon Riski' : '🔗 Supplier Concentration Risk'}</h3>
               <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${riskLevel === 'high' ? 'bg-red-100 text-red-700' : riskLevel === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                {riskLevel === 'high' ? (currentLanguage === 'tr' ? 'Yüksek Risk' : 'High Risk') : riskLevel === 'medium' ? (currentLanguage === 'tr' ? 'Orta Risk' : 'Med Risk') : (currentLanguage === 'tr' ? 'Düşük Risk' : 'Low Risk')}
+                {riskLevel === 'high' ? (oc(currentLanguage).yuksek_risk) : riskLevel === 'medium' ? (oc(currentLanguage).orta_risk) : (oc(currentLanguage).dusuk_risk)}
               </span>
             </div>
             <p className="text-[10px] text-gray-400 mb-4">{currentLanguage === 'tr' ? 'Stok değerine göre tedarikçi dağılımı' : 'Supplier distribution by inventory value'}</p>
@@ -701,7 +702,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                     <div className="flex items-center justify-between mb-0.5">
                       <span className="text-xs font-medium text-gray-700 truncate">{s.name}</span>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
-                        <span className="text-[10px] text-gray-400">{s.items} {currentLanguage === 'tr' ? 'ürün' : 'items'}</span>
+                        <span className="text-[10px] text-gray-400">{s.items} {oc(currentLanguage).urun_2}</span>
                         <span className="text-xs font-bold text-gray-700">%{pct}</span>
                       </div>
                     </div>
@@ -921,7 +922,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                 <div key={item.name} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
                   <div>
                     <p className="text-xs font-medium text-gray-800">{item.name}</p>
-                    <p className="text-[10px] text-gray-400">{item.category} · {item.stock} {currentLanguage === 'tr' ? 'adet' : 'units'}</p>
+                    <p className="text-[10px] text-gray-400">{item.category} · {item.stock} {oc(currentLanguage).adet}</p>
                   </div>
                   <span className="text-xs font-bold text-orange-600 shrink-0 ml-2">{fmtAna(item.value,'full',0)}</span>
                 </div>
@@ -978,11 +979,11 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-gray-400 text-[10px]">
-                    <th className="text-left pb-2">{currentLanguage === 'tr' ? 'Ürün' : 'Product'}</th>
-                    <th className="text-center pb-2">{currentLanguage === 'tr' ? 'Stok' : 'Stock'}</th>
+                    <th className="text-left pb-2">{oc(currentLanguage).urun}</th>
+                    <th className="text-center pb-2">{oc(currentLanguage).stok}</th>
                     <th className="text-center pb-2">{currentLanguage === 'tr' ? 'Yeni. Noktası' : 'Reorder Pt'}</th>
                     <th className="text-center pb-2">{currentLanguage === 'tr' ? 'Günlük Talep' : 'Daily Demand'}</th>
-                    <th className="text-center pb-2">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</th>
+                    <th className="text-center pb-2">{oc(currentLanguage).durum}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1074,7 +1075,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           if (o.status === 'Cancelled') continue;
           for (const li of (o.lineItems ?? [])) {
             const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-            const cat = inv?.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+            const cat = inv?.category || (oc(currentLanguage).diger);
             catRev206[cat] = (catRev206[cat] ?? 0) + li.price * li.quantity;
           }
         }
@@ -1150,7 +1151,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                     <div className="flex items-center justify-between mb-0.5">
                       <span className="text-xs font-medium text-gray-700">{tier}</span>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
-                        <span className="text-[10px] text-gray-400">{d.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · %{pct}</span>
+                        <span className="text-[10px] text-gray-400">{d.count} {oc(currentLanguage).siparis} · %{pct}</span>
                         <span className="text-xs font-bold text-gray-700">{fmtAna(d.rev,'K',0)}</span>
                       </div>
                     </div>
@@ -1192,10 +1193,10 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                 <div key={item.name} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
                   <div>
                     <p className="text-xs font-medium text-gray-800">{item.name}</p>
-                    <p className="text-[10px] text-gray-400">{item.stock} {currentLanguage === 'tr' ? 'adet' : 'units'} · {fmtAna(item.value,'full',0)}</p>
+                    <p className="text-[10px] text-gray-400">{item.stock} {oc(currentLanguage).adet} · {fmtAna(item.value,'full',0)}</p>
                   </div>
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ml-2 ${item.daysLeft <= 0 ? 'bg-red-200 text-red-800' : item.daysLeft <= 30 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                    {item.daysLeft <= 0 ? (currentLanguage === 'tr' ? 'Süresi Doldu' : 'Expired') : `${item.daysLeft}d`}
+                    {item.daysLeft <= 0 ? (oc(currentLanguage).suresi_doldu) : `${item.daysLeft}d`}
                   </span>
                 </div>
               ))}
@@ -1217,13 +1218,13 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
             if (!od || od < cutoff227) continue;
             for (const li of (o.lineItems ?? [])) {
               const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-              const cat = inv?.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+              const cat = inv?.category || (oc(currentLanguage).diger);
               catSales[cat] = (catSales[cat] ?? 0) + (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
             }
           } catch { /* skip */ }
         }
         for (const i of inventory) {
-          const cat = i.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+          const cat = i.category || (oc(currentLanguage).diger);
           catCost[cat] = (catCost[cat] ?? 0) + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0);
         }
         const cats227 = Object.keys({ ...catSales, ...catCost });
@@ -1363,7 +1364,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                   <div className="flex items-center justify-between mb-0.5">
                     <span className="text-xs font-medium text-gray-700 truncate">{c.cat}</span>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className="text-[10px] text-gray-400">{c.actual} / {c.projected} {currentLanguage === 'tr' ? 'adet' : 'units'}</span>
+                      <span className="text-[10px] text-gray-400">{c.actual} / {c.projected} {oc(currentLanguage).adet}</span>
                       {c.accuracy !== null && <span className={`text-xs font-bold ${c.accuracy >= 80 ? 'text-emerald-600' : c.accuracy >= 60 ? 'text-amber-600' : 'text-red-500'}`}>%{c.accuracy}</span>}
                     </div>
                   </div>
@@ -1411,9 +1412,9 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
             </div>
             <div className="grid grid-cols-3 gap-3 mb-4">
               {[
-                { label: currentLanguage === 'tr' ? 'Sağlıklı' : 'Healthy', value: excellent, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                { label: oc(currentLanguage).saglikli, value: excellent, color: 'text-emerald-600', bg: 'bg-emerald-50' },
                 { label: currentLanguage === 'tr' ? 'Dikkat' : 'Warning', value: warning, color: 'text-amber-600', bg: 'bg-amber-50' },
-                { label: currentLanguage === 'tr' ? 'Kritik' : 'Critical', value: critical, color: 'text-red-600', bg: 'bg-red-50' },
+                { label: oc(currentLanguage).kritik, value: critical, color: 'text-red-600', bg: 'bg-red-50' },
               ].map(k => (
                 <div key={k.label} className={`${k.bg} rounded-xl p-3 text-center`}>
                   <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
@@ -1525,7 +1526,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                     <div className="flex items-center justify-between mb-0.5">
                       <div className="min-w-0 flex-1">
                         <span className="text-xs font-medium text-gray-800 truncate block">{s.name}</span>
-                        <span className="text-[10px] text-gray-400">{s.sku} · {s.qty} {currentLanguage === 'tr' ? 'adet' : 'units'}</span>
+                        <span className="text-[10px] text-gray-400">{s.sku} · {s.qty} {oc(currentLanguage).adet}</span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
                         <span className="text-[10px] text-gray-400">%{pct}</span>
@@ -1708,7 +1709,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         if (risky.length === 0) {
           return (
             <div className="apple-card p-6">
-              <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stok Değer Düşüklüğü Riski' : 'Inventory Write-Down Risk'}</h3>
+              <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).stok_deger_dusuklugu_riski}</h3>
               <p className="text-xs text-gray-500 mt-2 text-center py-4">✅ No inventory expiring within 180 days</p>
             </div>
           );
@@ -1716,7 +1717,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const totalRisk = risky.reduce((s,r)=>s+r.value,0);
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stok Değer Düşüklüğü Riski' : 'Inventory Write-Down Risk'}</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).stok_deger_dusuklugu_riski}</h3>
             <p className="text-xs text-gray-500 mb-3">Items expiring within 180 days — potential write-down: {fmtAna(totalRisk,'full',0)}</p>
             <div className="space-y-2">
               {risky.map((r,i) => (
@@ -1834,14 +1835,14 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         if (lowStockItems.length === 0) {
           return (
             <div className="apple-card p-6">
-              <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stoksuz Kalma Sıklığı İzleyici' : 'Stockout Frequency Monitor'}</h3>
+              <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).stoksuz_kalma_sikligi_izleyici}</h3>
               <p className="text-xs text-green-600 text-center py-4">✅ No items currently at or below reorder threshold</p>
             </div>
           );
         }
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Stoksuz Kalma Sıklığı İzleyici' : 'Stockout Frequency Monitor'}</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).stoksuz_kalma_sikligi_izleyici}</h3>
             <p className="text-xs text-gray-500 mb-3">Items at/below threshold sorted by movement frequency</p>
             <div className="space-y-2">
               {lowStockItems.map((item,i) => (
@@ -2476,7 +2477,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         if (marginData.length < 2) return null;
         return (
           <div className="apple-card p-6">
-            <h3 className="font-bold text-gray-800 mb-1">{currentLanguage === 'tr' ? 'Düşük Marjlı Ürünler' : 'Low Margin Products'}</h3>
+            <h3 className="font-bold text-gray-800 mb-1">{oc(currentLanguage).dusuk_marjli_urunler}</h3>
             <p className="text-xs text-gray-500 mb-4">Items with gross margin below 40% — review pricing or costs</p>
             <div className="space-y-2">
               {marginData.map((d, i) => (

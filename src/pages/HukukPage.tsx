@@ -15,6 +15,7 @@ import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ModuleHeader from '../components/ModuleHeader';
 import LegalModule from '../components/LegalModule';
 import { bugunAnahtari, gunAnahtari } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 /** App.tsx'teki p597Contracts state'inin eleman tipiyle birebir aynı tanım. */
 export interface P597Contract { id: string; customerName: string; totalValue: number; startDate: string; endDate: string; recognized: number }
@@ -36,11 +37,11 @@ export default function HukukPage({
 }: Props) {
   return (
     <motion.div key="hukuk" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-      {!canAccess('hukuk') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Hukuk & Uyum':'Legal & Compliance'} /> : (
+      {!canAccess('hukuk') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).hukuk_uyum} /> : (
         <>
           {!hasFullAccess('hukuk') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
           <ModuleHeader 
-            title={currentLanguage === 'tr' ? 'Hukuk & Uyum' : 'Legal & Compliance'} 
+            title={oc(currentLanguage).hukuk_uyum} 
             subtitle={currentLanguage === 'tr' ? 'Sözleşmeler, davalar ve KVKK uyum süreçleri' : 'Contracts, cases and GDPR compliance processes'}
             icon={Scale}
           />

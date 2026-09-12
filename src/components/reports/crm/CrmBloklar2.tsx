@@ -11,6 +11,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanDate, ayAnahtari } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'currentLanguage' | 'fmtAna'>;
 
@@ -54,7 +55,7 @@ export default function CrmBloklar2({ reportsTab, orders, inventory, currentLang
                   <span className={`text-xs font-bold tabular-nums shrink-0 w-10 text-right ${c.discPct >= 20 ? 'text-red-600' : c.discPct >= 10 ? 'text-amber-600' : 'text-emerald-600'}`}>
                     %{c.discPct}
                   </span>
-                  <span className="text-[10px] text-gray-400 shrink-0">{c.orders} {currentLanguage==='tr'?'sip.':'ord.'}</span>
+                  <span className="text-[10px] text-gray-400 shrink-0">{c.orders} {oc(currentLanguage).sip}</span>
                 </div>
               ))}
             </div>
@@ -141,7 +142,7 @@ export default function CrmBloklar2({ reportsTab, orders, inventory, currentLang
                   <div key={tier.label} className={`rounded-2xl border p-4 ${tier.bg} ${tier.border}`}>
                     <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${tier.color}`}>{tier.label}</p>
                     <p className={`text-2xl font-black ${tier.color}`}>{tier.customers.length}</p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">{currentLanguage==='tr'?'müşteri':'customers'}</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">{oc(currentLanguage).musteri_2}</p>
                     <p className={`text-sm font-bold mt-2 ${tier.color}`}>{fmtAna(tierLTV,'K',1)}</p>
                     <p className="text-[10px] text-gray-500">{currentLanguage==='tr'?'toplam ciro':'total revenue'}</p>
                     {tier.customers.length > 0 && (
@@ -149,7 +150,7 @@ export default function CrmBloklar2({ reportsTab, orders, inventory, currentLang
                         {tier.customers.slice(0, 3).map(c => (
                           <p key={c.name} className="text-[10px] text-gray-600 truncate">{c.name}</p>
                         ))}
-                        {tier.customers.length > 3 && <p className="text-[10px] text-gray-400">+{tier.customers.length - 3} {currentLanguage==='tr'?'daha':'more'}</p>}
+                        {tier.customers.length > 3 && <p className="text-[10px] text-gray-400">+{tier.customers.length - 3} {oc(currentLanguage).daha}</p>}
                       </div>
                     )}
                   </div>

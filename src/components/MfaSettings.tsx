@@ -10,6 +10,7 @@ import { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { ShieldCheck, ShieldOff, Loader2, X, KeyRound } from 'lucide-react';
 import { getMfaStatus, startEnrollment, finishEnrollment, disableMfa, verifyLogin } from '../lib/mfa';
+import { oc } from '../i18n/ortak';
 
 // ── 2FA kurulum/yönetim (kullanıcı kendi hesabı) ─────────────────────────────
 export function MfaSettings({ currentLanguage }: { currentLanguage: 'tr' | 'en' }) {
@@ -109,7 +110,7 @@ export function MfaSettings({ currentLanguage }: { currentLanguage: 'tr' | 'en' 
             </button>
           </div>
           <button onClick={() => { setStep('idle'); setCode(''); setErr(null); }} className="text-[11px] text-gray-400 hover:underline">
-            {tr ? 'İptal' : 'Cancel'}
+            {oc(tr).iptal}
           </button>
         </div>
       )}
@@ -130,7 +131,7 @@ export function MfaSettings({ currentLanguage }: { currentLanguage: 'tr' | 'en' 
             </button>
           </div>
           <button onClick={() => { setStep('idle'); setCode(''); setErr(null); }} className="text-[11px] text-gray-400 hover:underline">
-            {tr ? 'Vazgeç' : 'Cancel'}
+            {oc(tr).vazgec}
           </button>
         </div>
       )}

@@ -18,6 +18,7 @@ import AIInlineNudge from '../components/AIInlineNudge';
 import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import type { LabelItem } from '../components/LabelSheetModal';
 import type { InventoryItem, Order, Warehouse, InventoryMovement, Consignment, StockDiscrepancy } from '../types';
+import { oc } from '../i18n/ortak';
 
 const InventoryView = React.lazy(() => import('../components/InventoryView'));
 
@@ -161,7 +162,7 @@ export default function InventoryPage(props: Props) {
                       bu bant o eksikligi gorunur kilar. Kur gelince kendiliginden kaybolur. */}
                   <KurUyarisi inventory={inventory} exchangeRates={exchangeRates} currentLanguage={currentLanguage} className="mb-2" />
                   <div className="flex items-center justify-between mb-1">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Envanter Özeti' : 'Inventory Summary'}</p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).envanter_ozeti}</p>
                     <div className="flex items-center gap-2">
                       {/* Phase 507: Quick Stock Count button */}
                       <button
@@ -177,10 +178,10 @@ export default function InventoryPage(props: Props) {
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
-                      { label: currentLanguage === 'tr' ? 'Toplam SKU' : 'Total SKUs',       value: totalSKUs.toString(),  icon: '📋', color: 'text-gray-800',    bg: 'bg-white' },
-                      { label: currentLanguage === 'tr' ? 'Stok Değeri' : 'Stock Value',     value: fmtKpi(stockVal), icon: '💰', color: 'text-blue-700', bg: 'bg-blue-50' },
+                      { label: oc(currentLanguage).toplam_sku,       value: totalSKUs.toString(),  icon: '📋', color: 'text-gray-800',    bg: 'bg-white' },
+                      { label: oc(currentLanguage).stok_degeri,     value: fmtKpi(stockVal), icon: '💰', color: 'text-blue-700', bg: 'bg-blue-50' },
                       { label: currentLanguage === 'tr' ? 'Stok Dışı' : 'Out of Stock',      value: outOfStock.toString(), icon: '⚠️', color: outOfStock > 0 ? 'text-red-600' : 'text-emerald-700', bg: outOfStock > 0 ? 'bg-red-50' : 'bg-emerald-50' },
-                      { label: currentLanguage === 'tr' ? 'Ort. Marj' : 'Avg Margin',        value: avgMarginPct != null ? `${avgMarginPct}%` : `${totalUnits.toLocaleString()} ${currentLanguage==='tr'?'birim':'units'}`, icon: avgMarginPct != null ? '📊' : '📦', color: avgMarginPct != null ? (avgMarginPct >= 40 ? 'text-emerald-700' : avgMarginPct >= 20 ? 'text-amber-700' : 'text-red-600') : 'text-purple-700', bg: 'bg-white' },
+                      { label: currentLanguage === 'tr' ? 'Ort. Marj' : 'Avg Margin',        value: avgMarginPct != null ? `${avgMarginPct}%` : `${totalUnits.toLocaleString()} ${oc(currentLanguage).birim_2}`, icon: avgMarginPct != null ? '📊' : '📦', color: avgMarginPct != null ? (avgMarginPct >= 40 ? 'text-emerald-700' : avgMarginPct >= 20 ? 'text-amber-700' : 'text-red-600') : 'text-purple-700', bg: 'bg-white' },
                     ].map((s, i) => (
                       <div key={i} className={`rounded-xl border border-gray-100 shadow-sm px-4 py-3 ${s.bg}`}>
                         <div className="flex items-center gap-2 mb-1">
@@ -253,7 +254,7 @@ export default function InventoryPage(props: Props) {
               {inventory.length > 0 && (() => {
                 const catMap: Record<string, { units: number; value: number }> = {};
                 for (const item of inventory) {
-                  const cat = item.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+                  const cat = item.category || (oc(currentLanguage).diger);
                   catMap[cat] = catMap[cat] || { units: 0, value: 0 };
                   catMap[cat].units += item.stockLevel ?? 0;
                   catMap[cat].value += (item.prices?.['Retail'] ?? item.price ?? 0) * (item.stockLevel ?? 0);
@@ -296,7 +297,7 @@ export default function InventoryPage(props: Props) {
                               ))}
                             </Pie>
                             <Tooltip
-                              formatter={sayiBicimleyici((v) => [paraYaz(v, { ondalik: 0 }), currentLanguage === 'tr' ? 'Değer' : 'Value'])}
+                              formatter={sayiBicimleyici((v) => [paraYaz(v, { ondalik: 0 }), oc(currentLanguage).deger])}
                               contentStyle={{ fontSize: 11, borderRadius: 8 }}
                             />
                           </RePieChart>
@@ -429,7 +430,7 @@ export default function InventoryPage(props: Props) {
                   <div className="apple-card p-6 border border-amber-100">
                     <div className="flex items-center gap-2 mb-4">
                       <AlertCircle className="w-4 h-4 text-amber-500" />
-                      <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Düşük Marjlı Ürünler' : 'Low Margin Products'}</h3>
+                      <h3 className="font-bold text-gray-800">{oc(currentLanguage).dusuk_marjli_urunler}</h3>
                       <span className="ml-auto text-xs text-amber-600 font-semibold bg-amber-50 px-2 py-0.5 rounded-full">
                         {lowMarginItems.length} {currentLanguage==='tr'?'ürün %'+threshold157+' altında':'products below '+threshold157+'%'}
                       </span>
@@ -438,10 +439,10 @@ export default function InventoryPage(props: Props) {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-gray-100">
-                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Ürün':'Product'}</th>
-                            <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Maliyet':'Cost'}</th>
+                            <th className="text-left py-2 px-2 text-xs font-semibold text-gray-500">{oc(currentLanguage).urun}</th>
+                            <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500">{oc(currentLanguage).maliyet}</th>
                             <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Satış':'Price'}</th>
-                            <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500">{currentLanguage==='tr'?'Marj':'Margin'}</th>
+                            <th className="text-right py-2 px-2 text-xs font-semibold text-gray-500">{oc(currentLanguage).marj}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
@@ -502,7 +503,7 @@ export default function InventoryPage(props: Props) {
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="border-b border-blue-100">
-                            {['SKU', tr561?'Ürün':'Product', tr561?'Stok':'Stock', tr561?'Talep':'Demand', tr561?'Açık':'Shortage', tr561?'Öneri':'Suggestion'].map(h => (
+                            {['SKU', oc(tr561).urun, oc(tr561).stok, oc(tr561).talep, tr561?'Açık':'Shortage', tr561?'Öneri':'Suggestion'].map(h => (
                               <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-blue-400 uppercase">{h}</th>
                             ))}
                           </tr>
@@ -574,7 +575,7 @@ export default function InventoryPage(props: Props) {
                             <table className="w-full text-xs">
                               <thead>
                                 <tr className="bg-purple-50 border-b border-purple-100">
-                                  {['SKU', tr562?'Ürün':'Product', tr562?'Stok':'Total Stock', tr562?'Rezerve':'Reserved', tr562?'Kullanılabilir':'Available'].map(h => (
+                                  {['SKU', oc(tr562).urun, tr562?'Stok':'Total Stock', tr562?'Rezerve':'Reserved', tr562?'Kullanılabilir':'Available'].map(h => (
                                     <th key={h} className="py-2 px-4 text-left text-[10px] font-bold text-purple-400 uppercase">{h}</th>
                                   ))}
                                 </tr>
@@ -655,7 +656,7 @@ export default function InventoryPage(props: Props) {
                           {(['margin','cost','name'] as const).map(s => (
                             <button key={s} onClick={() => setP568SortBy(s)}
                               className={`text-[10px] font-bold px-2 py-0.5 rounded-md transition-all ${p568SortBy===s?'bg-white shadow-sm text-gray-800':'text-gray-400'}`}>
-                              {s==='margin'?'%'+tr568?'Marj':'Margin':s==='cost'?(tr568?'Maliyet':'Cost'):(tr568?'İsim':'Name')}
+                              {s==='margin'?'%'+oc(tr568).marj:s==='cost'?(oc(tr568).maliyet):(oc(tr568).isim)}
                             </button>
                           ))}
                         </div>
@@ -670,10 +671,10 @@ export default function InventoryPage(props: Props) {
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="border-b border-gray-100 bg-gray-50">
-                            {[tr568?'Ürün':'Product', 'SKU', tr568?'Alış Maliyeti':'Purchase Cost',
+                            {[oc(tr568).urun, 'SKU', tr568?'Alış Maliyeti':'Purchase Cost',
                               `${tr568?'Genel Gider':'Overhead'} (%${p568Overhead})`,
-                              tr568?'Toplam Maliyet':'Total Cost', tr568?'Satış Fiyatı':'Sell Price',
-                              tr568?'Brüt Marj':'Gross Margin', tr568?'Markup':'Markup'].map(h => (
+                              oc(tr568).toplam_maliyet, tr568?'Satış Fiyatı':'Sell Price',
+                              oc(tr568).brut_marj, tr568?'Markup':'Markup'].map(h => (
                               <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase whitespace-nowrap">{h}</th>
                             ))}
                           </tr>
@@ -732,7 +733,7 @@ export default function InventoryPage(props: Props) {
                 };
                 const catGroups574: Record<string,{count:number;qty:number;value:number}> = {};
                 inventory.forEach(item => {
-                  const cat = item.category || (tr574?'Genel':'General');
+                  const cat = item.category || (oc(tr574).genel);
                   if (!catGroups574[cat]) catGroups574[cat] = {count:0,qty:0,value:0};
                   catGroups574[cat].count++;
                   catGroups574[cat].qty += item.stockLevel||0;
@@ -756,8 +757,8 @@ export default function InventoryPage(props: Props) {
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                       {[
-                        {label:tr574?'Toplam Değer':'Total Value', val:paraYaz(totalValue574, { ondalik: 0 }), color:'text-blue-700'},
-                        {label:tr574?'Toplam SKU':'Total SKUs', val:String(inventory.length), color:'text-gray-700'},
+                        {label:oc(tr574).toplam_deger, val:paraYaz(totalValue574, { ondalik: 0 }), color:'text-blue-700'},
+                        {label:oc(tr574).toplam_sku, val:String(inventory.length), color:'text-gray-700'},
                         {label:tr574?'Toplam Stok':'Total Stock', val:inventory.reduce((s,i)=>s+(i.stockLevel||0),0).toLocaleString(), color:'text-gray-700'},
                         {label:tr574?'Düşük Stok Değeri':'Low-Stock Value', val:paraYaz(lowStockValue, { ondalik: 0 }), color:'text-amber-600'},
                       ].map(k=>(
@@ -817,11 +818,11 @@ export default function InventoryPage(props: Props) {
                       <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                           <input className="apple-input px-3 py-2 text-sm" placeholder="SKU" value={p579Draft.sku} onChange={e=>setP579Draft(d=>({...d,sku:e.target.value}))} />
-                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr579?'Ürün Adı':'Product Name'} value={p579Draft.productName} onChange={e=>setP579Draft(d=>({...d,productName:e.target.value}))} />
-                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr579?'Lot No':'Batch No'} value={p579Draft.batchNo} onChange={e=>setP579Draft(d=>({...d,batchNo:e.target.value}))} />
-                          <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={tr579?'SKT':'Expiry'} value={p579Draft.expiryDate} onChange={e=>setP579Draft(d=>({...d,expiryDate:e.target.value}))} />
-                          <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr579?'Miktar':'Qty'} value={p579Draft.qty} onChange={e=>setP579Draft(d=>({...d,qty:e.target.value}))} />
-                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr579?'Lokasyon':'Location'} value={p579Draft.location} onChange={e=>setP579Draft(d=>({...d,location:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr579).urun_adi} value={p579Draft.productName} onChange={e=>setP579Draft(d=>({...d,productName:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr579).lot_no} value={p579Draft.batchNo} onChange={e=>setP579Draft(d=>({...d,batchNo:e.target.value}))} />
+                          <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr579).skt} value={p579Draft.expiryDate} onChange={e=>setP579Draft(d=>({...d,expiryDate:e.target.value}))} />
+                          <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr579).miktar} value={p579Draft.qty} onChange={e=>setP579Draft(d=>({...d,qty:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr579).lokasyon} value={p579Draft.location} onChange={e=>setP579Draft(d=>({...d,location:e.target.value}))} />
                         </div>
                         <div className="flex gap-2">
                           <button onClick={async ()=>{
@@ -832,9 +833,9 @@ export default function InventoryPage(props: Props) {
                               else { await addDoc(collection(db,'stockBatches'),{...payload,status:'Aktif',createdAt:serverTimestamp()}); }
                               setP579Draft({sku:'',productName:'',batchNo:'',expiryDate:'',qty:'',location:''});
                               setP579ShowForm(false); setP579EditId(null);
-                            } catch(e){ toast((tr579?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                          }} className="apple-button-primary text-sm px-4 py-1.5">{tr579?'Kaydet':'Save'}</button>
-                          <button onClick={()=>{setP579ShowForm(false);setP579EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{tr579?'İptal':'Cancel'}</button>
+                            } catch(e){ toast((oc(tr579).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
+                          }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr579).kaydet}</button>
+                          <button onClick={()=>{setP579ShowForm(false);setP579EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{oc(tr579).iptal}</button>
                         </div>
                       </div>
                     )}
@@ -845,13 +846,13 @@ export default function InventoryPage(props: Props) {
                     {filteredBatches.length === 0 ? (
                       <div className="text-center py-8">
                         <p className="text-gray-300 text-4xl mb-2">🏷️</p>
-                        <p className="text-gray-400 text-sm">{p579Batches.length===0?(tr579?'"Lot Ekle" ile takip başlatın.':'Click "Add Batch" to start tracking.'):(tr579?'Arama sonucu bulunamadı.':'No results found.')}</p>
+                        <p className="text-gray-400 text-sm">{p579Batches.length===0?(tr579?'"Lot Ekle" ile takip başlatın.':'Click "Add Batch" to start tracking.'):(oc(tr579).arama_sonucu_bulunamadi)}</p>
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead><tr className="border-b border-gray-100 bg-gray-50">
-                            {['SKU', tr579?'Ürün':'Product', tr579?'Lot No':'Batch No', tr579?'SKT':'Expiry', tr579?'Miktar':'Qty', tr579?'Lokasyon':'Location', tr579?'Durum':'Status'].map(h=>(
+                            {['SKU', oc(tr579).urun, oc(tr579).lot_no, oc(tr579).skt, oc(tr579).miktar, oc(tr579).lokasyon, oc(tr579).durum].map(h=>(
                               <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                             ))}
                           </tr></thead>
@@ -869,13 +870,13 @@ export default function InventoryPage(props: Props) {
                                   <td className="px-3 py-2.5 text-gray-400">{b.location||'—'}</td>
                                   <td className="px-3 py-2.5">
                                     <div className="flex items-center gap-2">
-                                    <select value={b.status} onChange={async e=>{try{await updateDoc(doc(db,'stockBatches',b.id),{status:e.target.value});}catch(err){toast((tr579?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors579[b.status]}`}>
-                                      <option value="Aktif">{tr579?'Aktif':'Active'}</option>
+                                    <select value={b.status} onChange={async e=>{try{await updateDoc(doc(db,'stockBatches',b.id),{status:e.target.value});}catch(err){toast((oc(tr579).guncellenemedi)+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors579[b.status]}`}>
+                                      <option value="Aktif">{oc(tr579).aktif}</option>
                                       <option value="Karantina">{tr579?'Karantina':'Quarantine'}</option>
                                       <option value="Kullanıldı">{tr579?'Kullanıldı':'Used'}</option>
                                     </select>
-                                    <button type="button" onClick={()=>{setP579Draft({sku:b.sku,productName:b.productName,batchNo:b.batchNo,expiryDate:b.expiryDate||'',qty:String(b.qty),location:b.location||''});setP579EditId(b.id);setP579ShowForm(true);}} title={tr579?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                    <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'stockBatches',b.id));}catch(e){toast((tr579?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                    <button type="button" onClick={()=>{setP579Draft({sku:b.sku,productName:b.productName,batchNo:b.batchNo,expiryDate:b.expiryDate||'',qty:String(b.qty),location:b.location||''});setP579EditId(b.id);setP579ShowForm(true);}} title={oc(tr579).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                    <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'stockBatches',b.id));}catch(e){toast((oc(tr579).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                     </div>
                                   </td>
                                 </tr>
@@ -907,7 +908,7 @@ export default function InventoryPage(props: Props) {
                           // KALICI oturum: reload'da devam edebilmek için (2026-07-21)
                           try { const ref=await addDoc(collection(db,'stockCountSessions'),{items,startedAt:serverTimestamp()}); setP584SessionId(ref.id); } catch { /* çevrimdışı — oturum yerel sürer */ }
                         }} className="apple-button-primary text-sm flex items-center gap-2">
-                          <RefreshCw className="w-4 h-4"/>{tr584?'Sayım Başlat':'Start Count'}
+                          <RefreshCw className="w-4 h-4"/>{oc(tr584).sayim_baslat}
                         </button>
                       )}
                     </div>
@@ -927,7 +928,7 @@ export default function InventoryPage(props: Props) {
                     <div className="overflow-y-auto max-h-64">
                       <table className="w-full text-xs">
                         <thead><tr className="border-b border-gray-100 bg-gray-50 sticky top-0">
-                          {['SKU', tr584?'Ürün':'Product', tr584?'Sistem':'System', tr584?'Sayım':'Count', tr584?'Fark':'Variance'].map(h=>(
+                          {['SKU', oc(tr584).urun, tr584?'Sistem':'System', tr584?'Sayım':'Count', oc(tr584).fark].map(h=>(
                             <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                           ))}
                         </tr></thead>
@@ -988,10 +989,10 @@ export default function InventoryPage(props: Props) {
                     {p588ShowForm && (
                       <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Tedarikçi':'Supplier'} value={p588Draft.supplierName} onChange={e=>setP588Draft(d=>({...d,supplierName:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr588).tedarikci} value={p588Draft.supplierName} onChange={e=>setP588Draft(d=>({...d,supplierName:e.target.value}))} />
                           <input className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Ürün Adı':'Product'} value={p588Draft.productName} onChange={e=>setP588Draft(d=>({...d,productName:e.target.value}))} />
                           <input className="apple-input px-3 py-2 text-sm" placeholder="SKU" value={p588Draft.sku} onChange={e=>setP588Draft(d=>({...d,sku:e.target.value}))} />
-                          <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Miktar':'Qty'} value={p588Draft.qty} onChange={e=>setP588Draft(d=>({...d,qty:e.target.value}))} />
+                          <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr588).miktar} value={p588Draft.qty} onChange={e=>setP588Draft(d=>({...d,qty:e.target.value}))} />
                           <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Anlaşma Fiyatı (₺)':'Agreed Price (₺)'} value={p588Draft.agreedPrice} onChange={e=>setP588Draft(d=>({...d,agreedPrice:e.target.value}))} />
                           <input className="apple-input px-3 py-2 text-sm" placeholder={tr588?'Lokasyon Kodu':'Location Code'} value={p588Draft.locationCode} onChange={e=>setP588Draft(d=>({...d,locationCode:e.target.value}))} />
                         </div>
@@ -1004,9 +1005,9 @@ export default function InventoryPage(props: Props) {
                               else { await addDoc(collection(db,'supplierConsignments'),{...payload,status:'Depoda',createdAt:serverTimestamp()}); }
                               setP588Draft({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:bugunAnahtari()});
                               setP588ShowForm(false); setP588EditId(null);
-                            } catch(e){ toast((tr588?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                          }} className="apple-button-primary text-sm px-4 py-1.5">{tr588?'Kaydet':'Save'}</button>
-                          <button onClick={()=>{setP588ShowForm(false);setP588EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{tr588?'İptal':'Cancel'}</button>
+                            } catch(e){ toast((oc(tr588).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
+                          }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr588).kaydet}</button>
+                          <button onClick={()=>{setP588ShowForm(false);setP588EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{oc(tr588).iptal}</button>
                         </div>
                       </div>
                     )}
@@ -1016,7 +1017,7 @@ export default function InventoryPage(props: Props) {
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead><tr className="border-b border-gray-100 bg-gray-50">
-                            {[tr588?'Tedarikçi':'Supplier', tr588?'Ürün':'Product', 'SKU', tr588?'Miktar':'Qty', tr588?'Değer':'Value', tr588?'Durum':'Status'].map(h=>(
+                            {[oc(tr588).tedarikci, oc(tr588).urun, 'SKU', oc(tr588).miktar, oc(tr588).deger, oc(tr588).durum].map(h=>(
                               <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                             ))}
                           </tr></thead>
@@ -1030,11 +1031,11 @@ export default function InventoryPage(props: Props) {
                                 <td className="px-3 py-2.5 font-bold font-mono text-blue-700">{fmtKpi(c.qty*c.agreedPrice)}</td>
                                 <td className="px-3 py-2.5">
                                   <div className="flex items-center gap-2">
-                                  <select value={c.status} onChange={async e=>{try{await updateDoc(doc(db,'supplierConsignments',c.id),{status:e.target.value});}catch(err){toast((tr588?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors588[c.status]}`}>
+                                  <select value={c.status} onChange={async e=>{try{await updateDoc(doc(db,'supplierConsignments',c.id),{status:e.target.value});}catch(err){toast((oc(tr588).guncellenemedi)+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors588[c.status]}`}>
                                     <option>Depoda</option><option>Satıldı</option><option>İade Edildi</option>
                                   </select>
-                                  <button type="button" onClick={()=>{setP588Draft({supplierName:c.supplierName,productName:c.productName,sku:c.sku,qty:String(c.qty),agreedPrice:String(c.agreedPrice),locationCode:c.locationCode||'',startDate:c.startDate});setP588EditId(c.id);setP588ShowForm(true);}} title={tr588?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'supplierConsignments',c.id));}catch(e){toast((tr588?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={()=>{setP588Draft({supplierName:c.supplierName,productName:c.productName,sku:c.sku,qty:String(c.qty),agreedPrice:String(c.agreedPrice),locationCode:c.locationCode||'',startDate:c.startDate});setP588EditId(c.id);setP588ShowForm(true);}} title={oc(tr588).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'supplierConsignments',c.id));}catch(e){toast((oc(tr588).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                   </div>
                                 </td>
                               </tr>
@@ -1071,7 +1072,7 @@ export default function InventoryPage(props: Props) {
                 return (
                   <div className="apple-card p-5">
                     <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                      <h3 className="font-bold text-gray-900 text-sm">🔄 {tr611?'Stok Devir Hızı':'Inventory Turnover'}</h3>
+                      <h3 className="font-bold text-gray-900 text-sm">🔄 {oc(tr611).stok_devir_hizi}</h3>
                       <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
                         {([{k:'30d',l:tr611?'30g':'30d'},{k:'90d',l:tr611?'90g':'90d'},{k:'180d',l:tr611?'180g':'180d'}] as {k:'30d'|'90d'|'180d';l:string}[]).map(t=>(
                           <button key={t.k} onClick={()=>setP611Period(t.k)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${p611Period===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
@@ -1081,7 +1082,7 @@ export default function InventoryPage(props: Props) {
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead><tr className="border-b border-gray-100 bg-gray-50">
-                          {[tr611?'Ürün':'Product','SKU',tr611?'Mevcut':'Stock',tr611?`Satış (${p611Period})`:`Sales (${p611Period})`,tr611?'Devir Hızı':'Turnover'].map(h=>(
+                          {[oc(tr611).urun,'SKU',tr611?'Mevcut':'Stock',tr611?`Satış (${p611Period})`:`Sales (${p611Period})`,tr611?'Devir Hızı':'Turnover'].map(h=>(
                             <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                           ))}
                         </tr></thead>
@@ -1127,10 +1128,10 @@ export default function InventoryPage(props: Props) {
                     {p642ShowForm && (
                       <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                         <div className="grid grid-cols-2 gap-2">
-                          <input className="apple-input" placeholder={tr642?'Ürün Adı':'Product Name'} value={p642Draft.productName} onChange={e=>setP642Draft(d=>({...d,productName:e.target.value}))}/>
+                          <input className="apple-input" placeholder={oc(tr642).urun_adi} value={p642Draft.productName} onChange={e=>setP642Draft(d=>({...d,productName:e.target.value}))}/>
                           <input className="apple-input" placeholder="SKU" value={p642Draft.sku} onChange={e=>setP642Draft(d=>({...d,sku:e.target.value}))}/>
-                          <input className="apple-input" placeholder={tr642?'Seri No':'Serial No'} value={p642Draft.serialNo} onChange={e=>setP642Draft(d=>({...d,serialNo:e.target.value}))}/>
-                          <input className="apple-input" placeholder={tr642?'Müşteri':'Customer'} value={p642Draft.customerName} onChange={e=>setP642Draft(d=>({...d,customerName:e.target.value}))}/>
+                          <input className="apple-input" placeholder={oc(tr642).seri_no} value={p642Draft.serialNo} onChange={e=>setP642Draft(d=>({...d,serialNo:e.target.value}))}/>
+                          <input className="apple-input" placeholder={oc(tr642).musteri} value={p642Draft.customerName} onChange={e=>setP642Draft(d=>({...d,customerName:e.target.value}))}/>
                           <input type="date" className="apple-input" value={p642Draft.purchaseDate} onChange={e=>setP642Draft(d=>({...d,purchaseDate:e.target.value}))}/>
                           <input type="number" className="apple-input" placeholder={tr642?'Garanti (ay)':'Warranty (months)'} value={p642Draft.warrantyMonths} onChange={e=>setP642Draft(d=>({...d,warrantyMonths:e.target.value}))}/>
                         </div>
@@ -1141,8 +1142,8 @@ export default function InventoryPage(props: Props) {
                             setP642Draft({productName:'',sku:'',serialNo:'',customerName:'',purchaseDate:bugunAnahtari(),warrantyMonths:'12'});
                             setP642ShowForm(false);
                             toast(tr642?'Garanti kaydı oluşturuldu.':'Warranty record created.','success');
-                          }} className="apple-button-primary text-xs px-6">{tr642?'Kaydet':'Save'}</button>
-                          <button onClick={()=>setP642ShowForm(false)} className="apple-button-secondary text-xs px-4">{tr642?'İptal':'Cancel'}</button>
+                          }} className="apple-button-primary text-xs px-6">{oc(tr642).kaydet}</button>
+                          <button onClick={()=>setP642ShowForm(false)} className="apple-button-secondary text-xs px-4">{oc(tr642).iptal}</button>
                         </div>
                       </div>
                     )}
@@ -1150,7 +1151,7 @@ export default function InventoryPage(props: Props) {
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead><tr className="border-b border-gray-100 bg-gray-50">
-                            {[tr642?'Ürün':'Product','SKU',tr642?'Seri No':'Serial',tr642?'Müşteri':'Customer',tr642?'Satın Alma':'Purchase',tr642?'Bitiş':'Expiry',tr642?'Durum':'Status'].map(h=>(
+                            {[oc(tr642).urun,'SKU',tr642?'Seri No':'Serial',oc(tr642).musteri,tr642?'Satın Alma':'Purchase',tr642?'Bitiş':'Expiry',oc(tr642).durum].map(h=>(
                               <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                             ))}
                           </tr></thead>
@@ -1221,7 +1222,7 @@ export default function InventoryPage(props: Props) {
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead><tr className="border-b border-gray-100 bg-gray-50">
-                            {['SKU',tr644?'Ürün':'Product',tr644?'Talep':'Demand',tr644?'Eldeki':'On Hand',tr644?'Net':'Net',tr644?'Tedarik Et':'Procure',tr644?'Durum':'Status'].map(h=>(
+                            {['SKU',oc(tr644).urun,oc(tr644).talep,tr644?'Eldeki':'On Hand',tr644?'Net':'Net',tr644?'Tedarik Et':'Procure',oc(tr644).durum].map(h=>(
                               <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                             ))}
                           </tr></thead>

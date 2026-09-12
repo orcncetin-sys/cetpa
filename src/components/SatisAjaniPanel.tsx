@@ -10,6 +10,7 @@ import { ThinkingOrb } from 'thinking-orbs';
 import { authFetch } from '../services/authFetch';
 import { eslesir } from '../utils/arama';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 interface Oneri {
   sku: string; urunAdi: string; oneriTipi: 'yeniden-siparis' | 'capraz-satis';
@@ -93,7 +94,7 @@ export default function SatisAjaniPanel({ currentLanguage, aiOnayli, musteriler 
         </p>
       )}
       {sonuc && !sonuc.success && (
-        <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{sonuc.error || (tr ? 'Öneri üretilemedi.' : 'Failed.')}</div>
+        <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{sonuc.error || (oc(tr).oneri_uretilemedi)}</div>
       )}
       {sonuc?.success && sonuc.bos && <p className="text-xs text-gray-500">{sonuc.mesaj}</p>}
       {sonuc?.success && sonuc.oneriler && (

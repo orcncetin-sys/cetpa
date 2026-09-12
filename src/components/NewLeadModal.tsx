@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { z } from 'zod';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Clock } from 'lucide-react';
+import { oc } from '../i18n/ortak';
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 const NewLeadSchema = z.object({
@@ -110,10 +111,10 @@ export default function NewLeadModal({ isOpen, isScoring, fromOrder, currentLang
               <Field label={currentT.company}        field="company" placeholder="ABC Ticaret A.Ş." />
               <Field label={currentT.email}          field="email"   type="email" placeholder="ornek@sirket.com" />
               <Field label={currentT.phone}          field="phone"   placeholder="+90 555 000 0000" />
-              <Field label={lang === 'tr' ? 'Adres' : 'Address'} field="address" placeholder={lang === 'tr' ? 'İstanbul, Türkiye' : 'Istanbul, Turkey'} />
+              <Field label={oc(lang).adres} field="address" placeholder={lang === 'tr' ? 'İstanbul, Türkiye' : 'Istanbul, Turkey'} />
               <div className="grid grid-cols-2 gap-3">
-                <Field label={lang === 'tr' ? 'Vergi Dairesi' : 'Tax Office'} field="taxOffice" placeholder="Boğaziçi V.D." />
-                <Field label={lang === 'tr' ? 'Vergi No' : 'Tax No'}           field="taxId"     placeholder="1234567890" />
+                <Field label={oc(lang).vergi_dairesi} field="taxOffice" placeholder="Boğaziçi V.D." />
+                <Field label={oc(lang).vergi_no}           field="taxId"     placeholder="1234567890" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <Field label={lang === 'tr' ? 'Sektör' : 'Sector'} field="sector" placeholder={lang === 'tr' ? 'Teknoloji' : 'Technology'} />
@@ -128,7 +129,7 @@ export default function NewLeadModal({ isOpen, isScoring, fromOrder, currentLang
               </div>
               <div className="pt-2 border-t border-gray-100 flex gap-3">
                 <button type="button" onClick={close} className="apple-button-secondary flex-1">
-                  {lang === 'tr' ? 'İptal' : 'Cancel'}
+                  {oc(lang).iptal}
                 </button>
                 <button disabled={isScoring} type="submit" className="apple-button-primary flex-1 flex items-center justify-center gap-2">
                   {isScoring

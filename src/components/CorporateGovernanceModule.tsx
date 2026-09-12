@@ -15,6 +15,7 @@ import ModuleHeader from './ModuleHeader';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { cn } from '../lib/utils';
 import { sortByCreatedAt, byField } from '../utils/fsSort';
+import { oc } from '../i18n/ortak';
 
 import { 
   BoardMeeting, 
@@ -86,7 +87,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
   const askDelete = async (title: string, message: string, run: () => Promise<void>) => {
     const ok = await confirmAction({
       title, message,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete',
+      confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -188,7 +189,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
       setBoardForm({ title: '', date: format(new Date(), 'yyyy-MM-dd'), location: '', attendees: '', decisions: '', status: 'Planlandı' });
     } catch (error) {
       console.error(error);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+      showToast(oc(currentLanguage).hata_olustu_2, 'error');
     }
   };
 
@@ -221,7 +222,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
       setShareholderForm({ name: '', shareCount: 0, sharePercentage: 0, type: 'Gerçek Kişi', contact: '' });
     } catch (error) {
       console.error(error);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+      showToast(oc(currentLanguage).hata_olustu_2, 'error');
     }
   };
 
@@ -236,7 +237,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
       setAssemblyForm({ title: '', date: format(new Date(), 'yyyy-MM-dd'), type: 'Olağan', decisions: '', attendees: '' });
     } catch (error) {
       console.error(error);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+      showToast(oc(currentLanguage).hata_olustu_2, 'error');
     }
   };
 
@@ -251,7 +252,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
       setContractForm({ title: '', party: '', date: format(new Date(), 'yyyy-MM-dd'), expiryDate: '', type: 'Hizmet', status: 'Aktif' });
     } catch (error) {
       console.error(error);
-      showToast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error occurred.', 'error');
+      showToast(oc(currentLanguage).hata_olustu_2, 'error');
     }
   };
 
@@ -259,15 +260,15 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
     { id: 'board', label: currentLanguage === 'tr' ? 'Yönetim Kurulu' : 'Board of Directors', icon: Gavel },
     { id: 'assembly', label: currentLanguage === 'tr' ? 'Genel Kurul' : 'General Assembly', icon: Users },
     { id: 'shareholders', label: currentLanguage === 'tr' ? 'Pay Sahipleri' : 'Shareholders', icon: UserPlus },
-    { id: 'contracts', label: currentLanguage === 'tr' ? 'Sözleşmeler' : 'Contracts', icon: FileText },
-    { id: 'legal', label: currentLanguage === 'tr' ? 'Hukuk & Uyum' : 'Legal & Compliance', icon: Scale },
+    { id: 'contracts', label: oc(currentLanguage).sozlesmeler, icon: FileText },
+    { id: 'legal', label: oc(currentLanguage).hukuk_uyum, icon: Scale },
   ];
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <ModuleHeader
-        title={currentLanguage === 'tr' ? 'Kurumsal Yönetim' : 'Corporate Governance'}
+        title={oc(currentLanguage).kurumsal_yonetim}
         subtitle={currentLanguage === 'tr' ? 'A.Ş. yönetim süreçleri, toplantılar ve paydaş yönetimi' : 'Joint-stock company management, meetings, and stakeholder management'}
         icon={Briefcase}
         actionButton={
@@ -276,7 +277,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input 
                 type="text" 
-                placeholder={currentLanguage === 'tr' ? 'Ara...' : 'Search...'}
+                placeholder={oc(currentLanguage).ara}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#ff4000]/20 outline-none w-full sm:w-64 transition-all"
@@ -299,7 +300,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
             )}
             {isAuthenticated && activeTab === 'contracts' && (
               <button onClick={() => setShowContractModal(true)} className="apple-button-primary">
-                <Plus size={18} /> {currentLanguage === 'tr' ? 'Yeni Sözleşme' : 'New Contract'}
+                <Plus size={18} /> {oc(currentLanguage).yeni_sozlesme}
               </button>
             )}
           </div>
@@ -354,9 +355,9 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                     meeting.status === 'Tamamlandı' ? 'bg-green-50 text-green-600' :
                     meeting.status === 'İptal' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
                   }`}>
-                    {meeting.status === 'Tamamlandı' ? (currentLanguage === 'tr' ? 'Tamamlandı' : 'Completed') :
+                    {meeting.status === 'Tamamlandı' ? (oc(currentLanguage).tamamlandi) :
                      meeting.status === 'İptal' ? (currentLanguage === 'tr' ? 'İptal' : 'Cancelled') :
-                     (currentLanguage === 'tr' ? 'Planlandı' : 'Planned')}
+                     (oc(currentLanguage).planlandi)}
                   </span>
                 </div>
                 <div>
@@ -364,7 +365,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                   <p className="text-xs text-gray-500">{meeting.date} • {meeting.location}</p>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Kararlar' : 'Decisions'}</p>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).kararlar}</p>
                   <p className="text-sm text-gray-600 line-clamp-3">{meeting.decisions}</p>
                 </div>
                 <div className="pt-4 border-t border-gray-50 flex justify-between items-center">
@@ -386,7 +387,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                             setShowBoardModal(true);
                           }}
                           className="p-2 hover:bg-blue-50 rounded-xl text-gray-400 hover:text-blue-600 transition-all"
-                          title={currentLanguage === 'tr' ? 'İncele' : 'View'}
+                          title={oc(currentLanguage).incele}
                         >
                           <Eye size={16} />
                         </button>
@@ -404,7 +405,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                             setShowBoardModal(true);
                           }}
                           className="p-2 hover:bg-gray-50 rounded-xl text-gray-400 hover:text-blue-600 transition-all"
-                          title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}
+                          title={oc(currentLanguage).duzenle}
                         >
                           <Edit2 size={16} />
                         </button>
@@ -414,11 +415,11 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                             currentLanguage === 'tr' ? 'Bu toplantı kaydını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this meeting record?',
                             async () => {
                               await deleteDoc(doc(db, 'boardMeetings', meeting.id));
-                              showToast(currentLanguage === 'tr' ? 'Silindi' : 'Deleted');
+                              showToast(oc(currentLanguage).silindi);
                             },
                           ); }}
                           className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
-                          title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
+                          title={oc(currentLanguage).sil}
                         ><Trash2 size={16} /></button>
                       </>
                     )}
@@ -456,11 +457,11 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
             <table className="min-w-[560px] w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
-                  <SortHeader label={currentLanguage === 'tr' ? 'Ad Soyad / Ünvan' : 'Name / Title'} sortKey="name" />
-                  <SortHeader label={currentLanguage === 'tr' ? 'Tür' : 'Type'} sortKey="type" />
-                  <SortHeader label={currentLanguage === 'tr' ? 'Pay Adedi' : 'Share Count'} sortKey="shareCount" align="right" />
+                  <SortHeader label={oc(currentLanguage).ad_soyad_unvan} sortKey="name" />
+                  <SortHeader label={oc(currentLanguage).tur} sortKey="type" />
+                  <SortHeader label={oc(currentLanguage).pay_adedi} sortKey="shareCount" align="right" />
                   <SortHeader label={currentLanguage === 'tr' ? 'Pay Oranı' : 'Share %'} sortKey="sharePercentage" align="right" />
-                  <th className="text-center py-4 px-6 font-bold text-gray-500 uppercase tracking-wider text-[10px]">{currentLanguage === 'tr' ? 'İşlemler' : 'Actions'}</th>
+                  <th className="text-center py-4 px-6 font-bold text-gray-500 uppercase tracking-wider text-[10px]">{oc(currentLanguage).islemler}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -489,8 +490,8 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                     <td className="py-4 px-6 font-bold text-gray-900">{sh.name}</td>
                     <td className="py-4 px-6">
                       <span className="px-2 py-1 bg-gray-100 rounded-lg text-[10px] font-bold text-gray-600">
-                        {sh.type === 'Gerçek Kişi' ? (currentLanguage === 'tr' ? 'Gerçek Kişi' : 'Natural Person') :
-                         sh.type === 'Tüzel Kişi' ? (currentLanguage === 'tr' ? 'Tüzel Kişi' : 'Legal Entity') : sh.type}
+                        {sh.type === 'Gerçek Kişi' ? (oc(currentLanguage).gercek_kisi) :
+                         sh.type === 'Tüzel Kişi' ? (oc(currentLanguage).tuzel_kisi) : sh.type}
                       </span>
                     </td>
                     <td className="py-4 px-6 text-right font-mono">{sh.shareCount.toLocaleString()}</td>
@@ -511,7 +512,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                               setShowShareholderModal(true);
                             }}
                             className="p-2 hover:bg-blue-50 rounded-xl text-blue-600 transition-all"
-                            title={currentLanguage === 'tr' ? 'İncele' : 'View'}
+                            title={oc(currentLanguage).incele}
                           >
                             <Eye size={16} />
                           </button>
@@ -528,7 +529,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                               setShowShareholderModal(true);
                             }}
                             className="p-2 hover:bg-gray-100 rounded-xl text-gray-600 transition-all"
-                            title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}
+                            title={oc(currentLanguage).duzenle}
                           >
                             <Edit2 size={16} />
                           </button>
@@ -538,11 +539,11 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                               currentLanguage === 'tr' ? 'Bu ortağı silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this shareholder?',
                               async () => {
                                 await deleteDoc(doc(db, 'shareholders', sh.id));
-                                showToast(currentLanguage === 'tr' ? 'Silindi' : 'Deleted');
+                                showToast(oc(currentLanguage).silindi);
                               },
                             ); }}
                             className="p-2 hover:bg-red-50 rounded-xl text-red-600 transition-all"
-                            title={currentLanguage === 'tr' ? 'Sil' : 'Delete'}
+                            title={oc(currentLanguage).sil}
                           ><Trash2 size={16} /></button>
                         </div>
                       )}
@@ -567,7 +568,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                 <p className="text-gray-500 max-w-md mx-auto mb-8">{currentLanguage === 'tr' ? 'Olağan ve olağanüstü genel kurul toplantı tutanakları, hazirun cetvelleri ve alınan kararlar.' : 'Ordinary and extraordinary general assembly minutes, attendee lists, and resolutions.'}</p>
                 {isAuthenticated && (
                   <button onClick={() => setShowAssemblyModal(true)} className="apple-button-primary px-8 py-3">
-                    {currentLanguage === 'tr' ? 'Kayıt Ekle' : 'Add Record'}
+                    {oc(currentLanguage).kayit_ekle}
                   </button>
                 )}
               </div>
@@ -582,7 +583,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                       <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${
                         meeting.type === 'Olağanüstü' ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'
                       }`}>
-                        {meeting.type === 'Olağanüstü' ? (currentLanguage === 'tr' ? 'Olağanüstü' : 'Extraordinary') : (currentLanguage === 'tr' ? 'Olağan' : 'Ordinary')}
+                        {meeting.type === 'Olağanüstü' ? (oc(currentLanguage).olaganustu) : (oc(currentLanguage).olagan)}
                       </span>
                     </div>
                     <div>
@@ -591,7 +592,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                     </div>
                     {meeting.decisions && (
                       <div className="space-y-1">
-                        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Kararlar' : 'Decisions'}</p>
+                        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).kararlar}</p>
                         <p className="text-sm text-gray-600 line-clamp-3">{meeting.decisions}</p>
                       </div>
                     )}
@@ -603,7 +604,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                             currentLanguage === 'tr' ? 'Bu genel kurul kaydını silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this assembly record?',
                             async () => {
                               await deleteDoc(doc(db, 'assemblyMeetings', meeting.id));
-                              showToast(currentLanguage === 'tr' ? 'Silindi' : 'Deleted');
+                              showToast(oc(currentLanguage).silindi);
                             },
                           ); }}
                           className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
@@ -624,9 +625,9 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                 <div className="w-20 h-20 bg-orange-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
                   <FileText className="w-10 h-10 text-[#ff4000]" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">{currentLanguage === 'tr' ? 'Sözleşme Yönetimi' : 'Contract Management'}</h3>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">{oc(currentLanguage).sozlesme_yonetimi}</h3>
                 <p className="text-gray-500 max-w-md mx-auto mb-8">{currentLanguage === 'tr' ? 'Şirket sözleşmeleri, gizlilik anlaşmaları ve hizmet sözleşmelerinin takibi.' : 'Tracking of company contracts, NDAs, and service agreements.'}</p>
-                {isAuthenticated && <button onClick={() => setShowContractModal(true)} className="apple-button-primary px-8 py-3">{currentLanguage === 'tr' ? 'Sözleşme Ekle' : 'Add Contract'}</button>}
+                {isAuthenticated && <button onClick={() => setShowContractModal(true)} className="apple-button-primary px-8 py-3">{oc(currentLanguage).sozlesme_ekle}</button>}
               </div>
             ) : (
               <div className="apple-card overflow-hidden">
@@ -634,13 +635,13 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                 <table className="min-w-[560px] w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
-                      <th className="py-4 px-6 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Sözleşme' : 'Contract'}</th>
-                      <th className="py-4 px-6 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Karşı Taraf' : 'Counterparty'}</th>
-                      <th className="py-4 px-6 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Tür' : 'Type'}</th>
+                      <th className="py-4 px-6 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).sozlesme}</th>
+                      <th className="py-4 px-6 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).karsi_taraf}</th>
+                      <th className="py-4 px-6 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).tur}</th>
                       <th className="py-4 px-6 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'İmza' : 'Signed'}</th>
                       <th className="py-4 px-6 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Bitiş' : 'Expiry'}</th>
-                      <th className="py-4 px-6 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</th>
-                      <th className="py-4 px-6 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'İşlemler' : 'Actions'}</th>
+                      <th className="py-4 px-6 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).durum}</th>
+                      <th className="py-4 px-6 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).islemler}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -650,10 +651,10 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                         <td className="py-4 px-6 text-gray-600">{c.party}</td>
                         <td className="py-4 px-6">
                           <span className="px-2 py-1 bg-gray-100 rounded-lg text-[10px] font-bold text-gray-600">
-                            {c.type === 'Hizmet' ? (currentLanguage === 'tr' ? 'Hizmet' : 'Service') :
+                            {c.type === 'Hizmet' ? (oc(currentLanguage).hizmet) :
                              c.type === 'Gizlilik' ? (currentLanguage === 'tr' ? 'Gizlilik' : 'NDA') :
-                             c.type === 'Satış' ? (currentLanguage === 'tr' ? 'Satış' : 'Sales') :
-                             c.type === 'Kira' ? (currentLanguage === 'tr' ? 'Kira' : 'Lease') : c.type}
+                             c.type === 'Satış' ? (oc(currentLanguage).satis) :
+                             c.type === 'Kira' ? (oc(currentLanguage).kira) : c.type}
                           </span>
                         </td>
                         <td className="py-4 px-6 text-gray-500 text-xs">{c.date}</td>
@@ -663,7 +664,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                             c.status === 'Aktif' ? 'bg-green-50 text-green-600' :
                             c.status === 'Süresi Dolmuş' ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500'
                           }`}>
-                            {c.status === 'Aktif' ? (currentLanguage === 'tr' ? 'Aktif' : 'Active') :
+                            {c.status === 'Aktif' ? (oc(currentLanguage).aktif) :
                              c.status === 'Süresi Dolmuş' ? (currentLanguage === 'tr' ? 'Süresi Dolmuş' : 'Expired') :
                              (currentLanguage === 'tr' ? 'İptal' : 'Cancelled')}
                           </span>
@@ -676,7 +677,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                                 currentLanguage === 'tr' ? 'Bu sözleşmeyi silmek istediğinize emin misiniz?' : 'Are you sure you want to delete this contract?',
                                 async () => {
                                   await deleteDoc(doc(db, 'contracts', c.id));
-                                  showToast(currentLanguage === 'tr' ? 'Silindi' : 'Deleted');
+                                  showToast(oc(currentLanguage).silindi);
                                 },
                               ); }}
                               className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
@@ -704,10 +705,10 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                 </div>
               </div>
               <button 
-                onClick={() => showToast(currentLanguage === 'tr' ? 'Dosya indiriliyor...' : 'Downloading file...')}
+                onClick={() => showToast(oc(currentLanguage).dosya_indiriliyor)}
                 className="w-full py-3 bg-gray-50 rounded-2xl text-sm font-bold text-gray-600 hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
               >
-                <Download size={16} /> {currentLanguage === 'tr' ? 'Görüntüle / İndir' : 'View / Download'}
+                <Download size={16} /> {oc(currentLanguage).goruntule_indir}
               </button>
             </div>
             <div className="apple-card p-6 border-l-4 border-l-purple-500">
@@ -719,10 +720,10 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                 </div>
               </div>
               <button 
-                onClick={() => showToast(currentLanguage === 'tr' ? 'Dosya indiriliyor...' : 'Downloading file...')}
+                onClick={() => showToast(oc(currentLanguage).dosya_indiriliyor)}
                 className="w-full py-3 bg-gray-50 rounded-2xl text-sm font-bold text-gray-600 hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
               >
-                <Download size={16} /> {currentLanguage === 'tr' ? 'Görüntüle / İndir' : 'View / Download'}
+                <Download size={16} /> {oc(currentLanguage).goruntule_indir}
               </button>
             </div>
           </motion.div>
@@ -741,12 +742,12 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
               </div>
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Toplantı Başlığı' : 'Meeting Title'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).toplanti_basligi}</label>
                   <input type="text" value={boardForm.title} onChange={e => setBoardForm({...boardForm, title: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</label>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).tarih}</label>
                     <input type="date" value={boardForm.date} onChange={e => setBoardForm({...boardForm, date: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                   </div>
                   <div>
@@ -759,13 +760,13 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                   <input type="text" placeholder="Örn: Ali Yılmaz, Ayşe Demir" value={boardForm.attendees} onChange={e => setBoardForm({...boardForm, attendees: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Alınan Kararlar' : 'Decisions'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).alinan_kararlar}</label>
                   <textarea value={boardForm.decisions} onChange={e => setBoardForm({...boardForm, decisions: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm h-32 resize-none" />
                 </div>
               </div>
               <div className="p-6 border-t border-gray-100 flex gap-3">
-                <button onClick={() => setShowBoardModal(false)} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
-                <button onClick={handleSaveBoardMeeting} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                <button onClick={() => setShowBoardModal(false)} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">{oc(currentLanguage).iptal}</button>
+                <button onClick={handleSaveBoardMeeting} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">{oc(currentLanguage).kaydet}</button>
               </div>
             </motion.div>
           </div>
@@ -781,12 +782,12 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
               </div>
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Ad Soyad / Ünvan' : 'Name / Title'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).ad_soyad_unvan}</label>
                   <input type="text" value={shareholderForm.name} onChange={e => setShareholderForm({...shareholderForm, name: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Pay Adedi' : 'Share Count'}</label>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).pay_adedi}</label>
                     <input type="number" value={shareholderForm.shareCount} onChange={e => setShareholderForm({...shareholderForm, shareCount: Number(e.target.value)})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                   </div>
                   <div>
@@ -795,16 +796,16 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Tür' : 'Type'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).tur}</label>
                   <select value={shareholderForm.type} onChange={e => setShareholderForm({...shareholderForm, type: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm">
-                    <option value="Gerçek Kişi">{currentLanguage === 'tr' ? 'Gerçek Kişi' : 'Natural Person'}</option>
-                    <option value="Tüzel Kişi">{currentLanguage === 'tr' ? 'Tüzel Kişi' : 'Legal Entity'}</option>
+                    <option value="Gerçek Kişi">{oc(currentLanguage).gercek_kisi}</option>
+                    <option value="Tüzel Kişi">{oc(currentLanguage).tuzel_kisi}</option>
                   </select>
                 </div>
               </div>
               <div className="p-6 border-t border-gray-100 flex gap-3">
-                <button onClick={() => setShowShareholderModal(false)} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
-                <button onClick={handleSaveShareholder} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                <button onClick={() => setShowShareholderModal(false)} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">{oc(currentLanguage).iptal}</button>
+                <button onClick={handleSaveShareholder} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">{oc(currentLanguage).kaydet}</button>
               </div>
             </motion.div>
           </div>
@@ -820,30 +821,30 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
               </div>
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Toplantı Başlığı' : 'Meeting Title'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).toplanti_basligi}</label>
                   <input type="text" value={assemblyForm.title} onChange={e => setAssemblyForm({...assemblyForm, title: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Tarih' : 'Date'}</label>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).tarih}</label>
                     <input type="date" value={assemblyForm.date} onChange={e => setAssemblyForm({...assemblyForm, date: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Tür' : 'Type'}</label>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).tur}</label>
                     <select value={assemblyForm.type} onChange={e => setAssemblyForm({...assemblyForm, type: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm">
-                      <option value="Olağan">{currentLanguage === 'tr' ? 'Olağan' : 'Ordinary'}</option>
-                      <option value="Olağanüstü">{currentLanguage === 'tr' ? 'Olağanüstü' : 'Extraordinary'}</option>
+                      <option value="Olağan">{oc(currentLanguage).olagan}</option>
+                      <option value="Olağanüstü">{oc(currentLanguage).olaganustu}</option>
                     </select>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Alınan Kararlar' : 'Decisions'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).alinan_kararlar}</label>
                   <textarea value={assemblyForm.decisions} onChange={e => setAssemblyForm({...assemblyForm, decisions: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm h-32 resize-none" />
                 </div>
               </div>
               <div className="p-6 border-t border-gray-100 flex gap-3">
-                <button onClick={() => setShowAssemblyModal(false)} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
-                <button onClick={handleSaveAssembly} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                <button onClick={() => setShowAssemblyModal(false)} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">{oc(currentLanguage).iptal}</button>
+                <button onClick={handleSaveAssembly} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">{oc(currentLanguage).kaydet}</button>
               </div>
             </motion.div>
           </div>
@@ -854,7 +855,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowContractModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yeni Sözleşme' : 'New Contract'}</h3>
+                <h3 className="font-bold text-gray-800">{oc(currentLanguage).yeni_sozlesme}</h3>
                 <button onClick={() => setShowContractModal(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-all"><X size={18} /></button>
               </div>
               <div className="p-6 space-y-4">
@@ -863,7 +864,7 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                   <input type="text" value={contractForm.title} onChange={e => setContractForm({...contractForm, title: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Karşı Taraf' : 'Counterparty'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).karsi_taraf}</label>
                   <input type="text" value={contractForm.party} onChange={e => setContractForm({...contractForm, party: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -877,18 +878,18 @@ export default function CorporateGovernanceModule({ currentLanguage, isAuthentic
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{currentLanguage === 'tr' ? 'Tür' : 'Type'}</label>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{oc(currentLanguage).tur}</label>
                   <select value={contractForm.type} onChange={e => setContractForm({...contractForm, type: e.target.value})} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-[#ff4000]/20 text-sm">
-                    <option value="Hizmet">{currentLanguage === 'tr' ? 'Hizmet' : 'Service'}</option>
+                    <option value="Hizmet">{oc(currentLanguage).hizmet}</option>
                     <option value="Gizlilik">{currentLanguage === 'tr' ? 'Gizlilik' : 'Confidentiality'}</option>
-                    <option value="Satış">{currentLanguage === 'tr' ? 'Satış' : 'Sales'}</option>
-                    <option value="Kira">{currentLanguage === 'tr' ? 'Kira' : 'Lease'}</option>
+                    <option value="Satış">{oc(currentLanguage).satis}</option>
+                    <option value="Kira">{oc(currentLanguage).kira}</option>
                   </select>
                 </div>
               </div>
               <div className="p-6 border-t border-gray-100 flex gap-3">
-                <button onClick={() => setShowContractModal(false)} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
-                <button onClick={handleSaveContract} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                <button onClick={() => setShowContractModal(false)} className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-50 transition-all">{oc(currentLanguage).iptal}</button>
+                <button onClick={handleSaveContract} className="apple-button-primary flex-1 justify-center py-3 rounded-2xl">{oc(currentLanguage).kaydet}</button>
               </div>
             </motion.div>
           </div>

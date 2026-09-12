@@ -25,6 +25,7 @@ import { byField } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
 import ModuleHeader from './ModuleHeader';
 import { useCountryList, useCitiesForCountry } from '../hooks/useWorldGeo';
+import { oc } from '../i18n/ortak';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -226,9 +227,9 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
                   className="apple-input px-3 py-2 text-sm w-full" />
               </div>
               <div>
-                <label htmlFor="territory-rep" className="sr-only">{tr ? 'Sorumlu Temsilci' : 'Assigned Rep'}</label>
+                <label htmlFor="territory-rep" className="sr-only">{oc(tr).sorumlu_temsilci}</label>
                 <input id="territory-rep" name="repName" value={draft.repName} onChange={e => setDraft(d => ({ ...d, repName: e.target.value }))}
-                  placeholder={tr ? 'Sorumlu Temsilci' : 'Assigned Rep'} className="apple-input px-3 py-2 text-sm w-full" />
+                  placeholder={oc(tr).sorumlu_temsilci} className="apple-input px-3 py-2 text-sm w-full" />
               </div>
               <div>
                 <label htmlFor="territory-rep-email" className="sr-only">{tr ? 'Temsilci e-posta' : 'Rep email'}</label>
@@ -236,7 +237,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
                   placeholder={tr ? 'Temsilci e-posta (opsiyonel)' : 'Rep email (optional)'} className="apple-input px-3 py-2 text-sm w-full" />
               </div>
               <div>
-                <label htmlFor="territory-country" className="sr-only">{tr ? 'Ülke' : 'Country'}</label>
+                <label htmlFor="territory-country" className="sr-only">{oc(tr).ulke}</label>
                 <select id="territory-country" name="countryCode" value={draft.countryCode || ''} onChange={e => { setDraft(d => ({ ...d, countryCode: e.target.value })); setCityPickerInput(''); }}
                   className="apple-input px-3 py-2 text-sm w-full">
                   <option value="">{tr ? 'Ülke seçin' : 'Select country'}</option>
@@ -244,7 +245,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
                 </select>
               </div>
               <div>
-                <label htmlFor="territory-quota" className="sr-only">{tr ? 'Yıllık Kota' : 'Annual Quota'}</label>
+                <label htmlFor="territory-quota" className="sr-only">{oc(tr).yillik_kota}</label>
                 <input id="territory-quota" name="revenueTarget" type="number" value={draft.revenueTarget || ''} onChange={e => setDraft(d => ({ ...d, revenueTarget: parseFloat(e.target.value) || 0 }))}
                   placeholder={tr ? 'Yıllık Kota (₺)' : 'Annual Quota (₺)'} className="apple-input px-3 py-2 text-sm w-full" />
               </div>
@@ -263,7 +264,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
                     {countryCities.map(c => <option key={c} value={c} />)}
                   </datalist>
                   <button type="button" onClick={() => addCityToDraft(cityPickerInput)} disabled={!cityPickerInput.trim()}
-                    className="apple-button-secondary px-3 py-2 text-sm disabled:opacity-40">{tr ? 'Ekle' : 'Add'}</button>
+                    className="apple-button-secondary px-3 py-2 text-sm disabled:opacity-40">{oc(tr).ekle}</button>
                 </div>
                 {draft.cities.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-2">
@@ -277,8 +278,8 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-gray-600">{tr ? 'Renk' : 'Color'}</span>
-                <div className="flex gap-1.5 flex-wrap" role="radiogroup" aria-label={tr ? 'Renk' : 'Color'}>
+                <span className="text-xs font-semibold text-gray-600">{oc(tr).renk}</span>
+                <div className="flex gap-1.5 flex-wrap" role="radiogroup" aria-label={oc(tr).renk}>
                   {TERRITORY_COLORS.map(c => (
                     <button key={c} type="button" role="radio" aria-checked={draft.color === c} aria-label={c} onClick={() => setDraft(d => ({ ...d, color: c }))}
                       className={`w-6 h-6 rounded-full transition-transform ${draft.color === c ? 'scale-125 ring-2 ring-offset-1 ring-gray-400' : ''}`}
@@ -287,7 +288,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
                 </div>
               </div>
               <div className="md:col-span-2">
-                <label htmlFor="territory-description" className="sr-only">{tr ? 'Açıklama' : 'Description'}</label>
+                <label htmlFor="territory-description" className="sr-only">{oc(tr).aciklama}</label>
                 <textarea id="territory-description" name="description" value={draft.description} onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
                   placeholder={tr ? 'Açıklama (opsiyonel)' : 'Description (optional)'}
                   className="apple-input px-3 py-2 text-sm w-full resize-none" rows={2} />
@@ -295,9 +296,9 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
             </div>
             <div className="flex gap-2">
               <button onClick={saveDraft} className="apple-button-primary px-4 py-2 text-sm">
-                {editingId ? (tr ? 'Güncelle' : 'Update') : (tr ? 'Oluştur' : 'Create')}
+                {editingId ? (oc(tr).guncelle) : (oc(tr).olustur)}
               </button>
-              <button onClick={() => setShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr ? 'İptal' : 'Cancel'}</button>
+              <button onClick={() => setShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr).iptal}</button>
             </div>
           </motion.div>
         )}
@@ -357,8 +358,8 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
               {/* Stats row */}
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { label: tr ? 'Sipariş' : 'Orders', v: stats.ordersCount, icon: BarChart2 },
-                  { label: tr ? 'Lead' : 'Leads', v: stats.leadsCount, icon: Target },
+                  { label: oc(tr).siparis_2, v: stats.ordersCount, icon: BarChart2 },
+                  { label: oc(tr).lead, v: stats.leadsCount, icon: Target },
                   { label: tr ? 'Şehir' : 'Cities', v: t.cities.length, icon: MapPin },
                 ].map(s => (
                   <div key={s.label} className="bg-gray-50 rounded-lg p-2 text-center">
@@ -393,7 +394,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="w-4 h-4 rounded-full" style={{ backgroundColor: selectedTerritory.color }} />
-                <h3 className="font-bold text-gray-900">{selectedTerritory.name} — {tr ? 'Detay' : 'Detail'}</h3>
+                <h3 className="font-bold text-gray-900">{selectedTerritory.name} — {oc(tr).detay}</h3>
               </div>
               <button onClick={() => setSelectedTerritoryId(null)}>
                 <X className="w-4 h-4 text-gray-400" />
@@ -409,7 +410,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
               </div>
               {selectedTerritory.revenueTarget > 0 && (
                 <div className="ml-auto text-right">
-                  <p className="text-xs text-blue-400">{tr ? 'Yıllık Kota' : 'Annual Quota'}</p>
+                  <p className="text-xs text-blue-400">{oc(tr).yillik_kota}</p>
                   <p className="font-bold text-blue-800">{paraYaz(selectedTerritory.revenueTarget, { ondalik: 0 })}</p>
                 </div>
               )}
@@ -439,7 +440,7 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
                       </div>
                     ))}
                     {terrLeads.length > 8 && (
-                      <p className="text-xs text-gray-400 text-center pt-2">+{terrLeads.length - 8} {tr ? 'daha' : 'more'}</p>
+                      <p className="text-xs text-gray-400 text-center pt-2">+{terrLeads.length - 8} {oc(tr).daha}</p>
                     )}
                   </div>
                 </div>

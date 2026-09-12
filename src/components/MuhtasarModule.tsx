@@ -3,6 +3,7 @@ import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from 
 import { db } from '../firebase';
 import { FileText, Download, Plus, X, Users, Calculator } from 'lucide-react';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 interface MuhtasarModuleProps {
   currentLanguage: string;
@@ -307,9 +308,9 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
   };
 
   const tabs = [
-    { id: 'payroll', label: tr ? 'Bordro' : 'Payroll', icon: Calculator },
+    { id: 'payroll', label: oc(tr).bordro, icon: Calculator },
     { id: 'declarations', label: tr ? 'Beyannameler' : 'Declarations', icon: FileText },
-    { id: 'employees', label: tr ? 'Çalışanlar' : 'Employees', icon: Users },
+    { id: 'employees', label: oc(tr).calisanlar, icon: Users },
   ] as const;
 
   if (!isAuthenticated) return <div className="p-8 text-center text-gray-500">{tr ? 'Lütfen giriş yapın.' : 'Please sign in.'}</div>;
@@ -355,7 +356,7 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
             <button onClick={generatePayroll} disabled={generating || employees.length === 0}
               className="apple-button-primary text-white px-4 py-2.5 rounded-full text-sm flex items-center gap-2 disabled:opacity-50">
               <Calculator className="w-4 h-4" />
-              {generating ? (tr ? 'Hesaplıyor...' : 'Calculating...') : (tr ? 'Bordro Hesapla' : 'Calculate Payroll')}
+              {generating ? (tr ? 'Hesaplıyor...' : 'Calculating...') : (oc(tr).bordro_hesapla)}
             </button>
             {periodEntries.length > 0 && (
               <>
@@ -375,10 +376,10 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
           {periodEntries.length > 0 && (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { label: tr ? 'Toplam Brüt' : 'Total Gross', value: totals.gross, color: 'text-gray-900' },
-                { label: tr ? 'Toplam Net' : 'Total Net', value: totals.net, color: 'text-blue-600' },
-                { label: tr ? 'Gelir Vergisi' : 'Income Tax', value: totals.incomeTax, color: 'text-orange-600' },
-                { label: tr ? 'İşveren SGK' : 'Employer SGK', value: totals.employerSgk + totals.employerUnemployment, color: 'text-red-500' },
+                { label: oc(tr).toplam_brut, value: totals.gross, color: 'text-gray-900' },
+                { label: oc(tr).toplam_net, value: totals.net, color: 'text-blue-600' },
+                { label: oc(tr).gelir_vergisi, value: totals.incomeTax, color: 'text-orange-600' },
+                { label: oc(tr).isveren_sgk, value: totals.employerSgk + totals.employerUnemployment, color: 'text-red-500' },
               ].map((m,i) => (
                 <div key={i} className="apple-card p-4">
                   <p className="text-sm text-gray-500">{m.label}</p>
@@ -421,13 +422,13 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
                 <table className="w-full text-sm min-w-[900px]">
                   <thead className="bg-gray-50 border-b border-gray-100">
                     <tr>
-                      <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Çalışan' : 'Employee'}</th>
-                      <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Brüt' : 'Gross'}</th>
+                      <th className="text-left p-3 font-medium text-gray-600">{oc(tr).calisan}</th>
+                      <th className="text-right p-3 font-medium text-gray-600">{oc(tr).brut}</th>
                       <th className="text-right p-3 font-medium text-gray-600">{tr ? 'SGK İşçi' : 'SGK Empl.'}</th>
                       <th className="text-right p-3 font-medium text-gray-600">{tr ? 'İşsizlik İşçi' : 'Unemp Empl.'}</th>
-                      <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Gelir Vergisi' : 'Income Tax'}</th>
+                      <th className="text-right p-3 font-medium text-gray-600">{oc(tr).gelir_vergisi}</th>
                       <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Damga Vergisi' : 'Stamp Tax'}</th>
-                      <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Net Maaş' : 'Net Salary'}</th>
+                      <th className="text-right p-3 font-medium text-gray-600">{oc(tr).net_maas}</th>
                       <th className="text-right p-3 font-medium text-gray-600">{tr ? 'SGK İşveren' : 'SGK Empr.'}</th>
                     </tr>
                   </thead>
@@ -452,7 +453,7 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
                   </tbody>
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr>
-                      <td className="p-3 font-semibold">{tr ? 'TOPLAM' : 'TOTAL'}</td>
+                      <td className="p-3 font-semibold">{oc(tr).toplam_2}</td>
                       <td className="p-3 text-right font-semibold">{fmt(totals.gross)}</td>
                       <td className="p-3 text-right font-semibold text-orange-600">({fmt(totals.employeeSgk)})</td>
                       <td className="p-3 text-right font-semibold text-orange-600">({fmt(totals.employeeUnemployment)})</td>
@@ -483,13 +484,13 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-100">
                   <tr>
-                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Dönem' : 'Period'}</th>
-                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Tür' : 'Type'}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{oc(tr).donem}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{oc(tr).tur}</th>
                     <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Vergi Tutarı' : 'Tax Amount'}</th>
                     <th className="text-right p-3 font-medium text-gray-600">{tr ? 'SGK Tutarı' : 'SGK Amount'}</th>
                     <th className="text-center p-3 font-medium text-gray-600">{tr ? 'Çalışan' : 'Employees'}</th>
-                    <th className="text-center p-3 font-medium text-gray-600">{tr ? 'Durum' : 'Status'}</th>
-                    <th className="text-right p-3 font-medium text-gray-600">{tr ? 'İşlemler' : 'Actions'}</th>
+                    <th className="text-center p-3 font-medium text-gray-600">{oc(tr).durum}</th>
+                    <th className="text-right p-3 font-medium text-gray-600">{oc(tr).islemler}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -506,10 +507,10 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
                       <td className="p-3 text-center">{d.employeeCount}</td>
                       <td className="p-3 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(d.status)}`}>
-                          {d.status === 'taslak' ? (tr ? 'Taslak' : 'Draft') :
+                          {d.status === 'taslak' ? (oc(tr).taslak) :
                            d.status === 'hazır' ? (tr ? 'Hazır' : 'Ready') :
                            d.status === 'gönderildi' ? (tr ? 'Gönderildi' : 'Submitted') :
-                           d.status === 'onaylandı' ? (tr ? 'Onaylandı' : 'Approved') : (tr ? 'Reddedildi' : 'Rejected')}
+                           d.status === 'onaylandı' ? (oc(tr).onaylandi) : (oc(tr).reddedildi)}
                         </span>
                       </td>
                       <td className="p-3">
@@ -529,7 +530,7 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
                           {d.status === 'gönderildi' && (
                             <button onClick={() => updateDeclarationStatus(d.id, 'onaylandı')}
                               className="px-2 py-1 rounded-lg bg-green-50 text-green-700 text-xs hover:bg-green-100">
-                              {tr ? 'Onayla' : 'Approve'}
+                              {oc(tr).onayla}
                             </button>
                           )}
                         </div>
@@ -548,7 +549,7 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
         <div className="space-y-4">
           <div className="apple-card overflow-hidden">
             {loading ? (
-              <div className="p-8 text-center text-gray-400">{tr ? 'Yükleniyor...' : 'Loading...'}</div>
+              <div className="p-8 text-center text-gray-400">{oc(tr).yukleniyor}</div>
             ) : employees.length === 0 ? (
               <div className="p-8 text-center text-gray-400">
                 <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
@@ -558,13 +559,13 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-100">
                   <tr>
-                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Çalışan' : 'Employee'}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{oc(tr).calisan}</th>
                     <th className="text-left p-3 font-medium text-gray-600">TC No</th>
-                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Departman' : 'Department'}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{oc(tr).departman}</th>
                     <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Brüt Maaş' : 'Gross'}</th>
-                    <th className="text-right p-3 font-medium text-gray-600">{tr ? 'SGK Matrahı' : 'SGK Base'}</th>
+                    <th className="text-right p-3 font-medium text-gray-600">{oc(tr).sgk_matrahi}</th>
                     <th className="text-center p-3 font-medium text-gray-600">{tr ? 'Çalışma Günü' : 'Work Days'}</th>
-                    <th className="text-center p-3 font-medium text-gray-600">{tr ? 'Tür' : 'Type'}</th>
+                    <th className="text-center p-3 font-medium text-gray-600">{oc(tr).tur}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -578,7 +579,7 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
                       <td className="p-3 text-center">{e.workDays}</td>
                       <td className="p-3 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs ${e.employmentType === 'tam' ? 'bg-blue-50 text-blue-700' : 'bg-yellow-50 text-yellow-700'}`}>
-                          {e.employmentType === 'tam' ? (tr ? 'Tam Zamanlı' : 'Full-time') : (tr ? 'Kısmi' : 'Part-time')}
+                          {e.employmentType === 'tam' ? (oc(tr).tam_zamanli) : (tr ? 'Kısmi' : 'Part-time')}
                         </span>
                       </td>
                     </tr>
@@ -595,16 +596,16 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">{tr ? 'Yeni Çalışan' : 'New Employee'}</h2>
+              <h2 className="text-lg font-semibold">{oc(tr).yeni_calisan}</h2>
               <button onClick={() => setShowEmpForm(false)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <input className="apple-input col-span-2 p-3 rounded-xl text-sm" placeholder={tr ? 'Ad Soyad *' : 'Full Name *'} value={eForm.name} onChange={e=>setEForm(p=>({...p,name:e.target.value}))} />
+              <input className="apple-input col-span-2 p-3 rounded-xl text-sm" placeholder={oc(tr).ad_soyad_2} value={eForm.name} onChange={e=>setEForm(p=>({...p,name:e.target.value}))} />
               <input className="apple-input p-3 rounded-xl text-sm font-mono" placeholder="TC Kimlik No *" value={eForm.tcNo} onChange={e=>setEForm(p=>({...p,tcNo:e.target.value}))} maxLength={11} />
               <input className="apple-input p-3 rounded-xl text-sm" placeholder={tr ? 'Sicil No' : 'Employee ID'} value={eForm.sicilNo} onChange={e=>setEForm(p=>({...p,sicilNo:e.target.value}))} />
-              <input className="apple-input p-3 rounded-xl text-sm" placeholder={tr ? 'Departman' : 'Department'} value={eForm.department} onChange={e=>setEForm(p=>({...p,department:e.target.value}))} />
+              <input className="apple-input p-3 rounded-xl text-sm" placeholder={oc(tr).departman} value={eForm.department} onChange={e=>setEForm(p=>({...p,department:e.target.value}))} />
               <select className="apple-input p-3 rounded-xl text-sm" value={eForm.employmentType} onChange={e=>setEForm(p=>({...p,employmentType:e.target.value as Employee['employmentType']}))}>
-                <option value="tam">{tr ? 'Tam Zamanlı' : 'Full-time'}</option>
+                <option value="tam">{oc(tr).tam_zamanli}</option>
                 <option value="kismi">{tr ? 'Kısmi Zamanlı' : 'Part-time'}</option>
               </select>
               <div>
@@ -626,8 +627,8 @@ export default function MuhtasarModule({ currentLanguage, isAuthenticated }: Muh
               <p className="mt-1">{tr ? 'SGK tavan: ' : 'SGK ceiling: '}{fmt(SGK_CEILING_MONTHLY)}</p>
             </div>
             <div className="flex gap-3">
-              <button onClick={() => setShowEmpForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{tr ? 'İptal' : 'Cancel'}</button>
-              <button onClick={addEmployee} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{tr ? 'Kaydet' : 'Save'}</button>
+              <button onClick={() => setShowEmpForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{oc(tr).iptal}</button>
+              <button onClick={addEmployee} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{oc(tr).kaydet}</button>
             </div>
           </div>
         </div>

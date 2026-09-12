@@ -12,6 +12,7 @@
 import { itemCostTRY, type ReportsCtx, brutMarj } from '../useReportsData';
 import { type Order } from '../../../types';
 import { zamanDate, tarihYaz } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'employees' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -38,13 +39,13 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📐 Gelir Konsantrasyon Endeksi (HHI)' : '📐 Revenue Concentration Index (HHI)'}</h3>
               <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${hhiLevel === 'high' ? 'bg-red-100 text-red-700' : hhiLevel === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                {hhiLevel === 'high' ? (currentLanguage === 'tr' ? 'Yüksek Risk' : 'High Risk') : hhiLevel === 'medium' ? (currentLanguage === 'tr' ? 'Orta Risk' : 'Med Risk') : (currentLanguage === 'tr' ? 'Düşük Risk' : 'Diversified')}
+                {hhiLevel === 'high' ? (oc(currentLanguage).yuksek_risk) : hhiLevel === 'medium' ? (oc(currentLanguage).orta_risk) : (currentLanguage === 'tr' ? 'Düşük Risk' : 'Diversified')}
               </span>
             </div>
             <div className="grid grid-cols-3 gap-3 mb-4">
               {[
                 { label: 'HHI', value: hhiRounded.toLocaleString(), color: hhiLevel === 'high' ? 'text-red-500' : hhiLevel === 'medium' ? 'text-amber-500' : 'text-emerald-600', desc: currentLanguage === 'tr' ? 'Herfindahl Endeksi' : 'Herfindahl Index' },
-                { label: currentLanguage === 'tr' ? 'Müşteri Sayısı' : 'Customers', value: String(custCount), color: 'text-blue-600', desc: currentLanguage === 'tr' ? 'Toplam aktif' : 'Total active' },
+                { label: oc(currentLanguage).musteri_sayisi, value: String(custCount), color: 'text-blue-600', desc: currentLanguage === 'tr' ? 'Toplam aktif' : 'Total active' },
                 { label: currentLanguage === 'tr' ? 'Müşteri Başı' : 'Avg per Customer', value: `₺${(avgRevPerCust/1000).toFixed(0)}K`, color: 'text-gray-700', desc: currentLanguage === 'tr' ? 'Ort. gelir' : 'Avg revenue' },
               ].map(k => (
                 <div key={k.label} className="bg-gray-50 rounded-xl p-3 text-center">
@@ -84,13 +85,13 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
             <div className="grid grid-cols-2 gap-4 mb-4">
               {[
                 { label: currentLanguage === 'tr' ? 'Sipariş Birikimi' : 'Order Backlog', count: backlogOrders.length, value: backlogValue, color: 'text-amber-600', bg: 'bg-amber-50', icon: '⏳' },
-                { label: currentLanguage === 'tr' ? 'Kargoda' : 'In Transit', count: shippedOrders.length, value: shippedValue, color: 'text-blue-600', bg: 'bg-blue-50', icon: '🚚' },
+                { label: oc(currentLanguage).kargoda, count: shippedOrders.length, value: shippedValue, color: 'text-blue-600', bg: 'bg-blue-50', icon: '🚚' },
               ].map(k => (
                 <div key={k.label} className={`${k.bg} rounded-2xl p-4`}>
                   <p className="text-xl mb-1">{k.icon}</p>
                   <p className={`text-2xl font-black ${k.color}`}>{fmtAna(k.value,'K',0)}</p>
                   <p className="text-xs text-gray-600 font-medium mt-1">{k.label}</p>
-                  <p className="text-[10px] text-gray-400">{k.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</p>
+                  <p className="text-[10px] text-gray-400">{k.count} {oc(currentLanguage).siparis}</p>
                 </div>
               ))}
             </div>
@@ -127,9 +128,9 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         // Pace = what we'd expect at current run rate by end of month
         const pace225 = dayOfMonth > 0 ? Math.round((mRevenue225 / dayOfMonth) * daysInMonth) : 0;
         const goals = [
-          { label: currentLanguage === 'tr' ? 'Aylık Ciro' : 'Monthly Revenue', current: mRevenue225, pace: pace225, icon: '💰', format: (v: number) => `₺${(v/1000).toFixed(0)}K` },
-          { label: currentLanguage === 'tr' ? 'Sipariş Adedi' : 'Order Count', current: mOrders225, pace: dayOfMonth > 0 ? Math.round((mOrders225 / dayOfMonth) * daysInMonth) : 0, icon: '📦', format: (v: number) => String(v) },
-          { label: currentLanguage === 'tr' ? 'Aktif Müşteri' : 'Active Customers', current: mNewCustomers225, pace: dayOfMonth > 0 ? Math.round((mNewCustomers225 / dayOfMonth) * daysInMonth) : 0, icon: '👥', format: (v: number) => String(v) },
+          { label: oc(currentLanguage).aylik_ciro, current: mRevenue225, pace: pace225, icon: '💰', format: (v: number) => `₺${(v/1000).toFixed(0)}K` },
+          { label: oc(currentLanguage).siparis_adedi, current: mOrders225, pace: dayOfMonth > 0 ? Math.round((mOrders225 / dayOfMonth) * daysInMonth) : 0, icon: '📦', format: (v: number) => String(v) },
+          { label: oc(currentLanguage).aktif_musteri, current: mNewCustomers225, pace: dayOfMonth > 0 ? Math.round((mNewCustomers225 / dayOfMonth) * daysInMonth) : 0, icon: '👥', format: (v: number) => String(v) },
         ];
         return (
           <div className="apple-card p-6">
@@ -223,7 +224,7 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-gray-50 rounded-xl p-3 text-center">
                 <p className="text-xl font-black text-gray-700">{fmtAna(lastWeek,'K',0)}</p>
-                <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu hafta' : 'This week'}</p>
+                <p className="text-[10px] text-gray-400">{oc(currentLanguage).bu_hafta}</p>
               </div>
               <div className="bg-blue-50 rounded-xl p-3 text-center">
                 <p className="text-xl font-black text-blue-600">{fmtAna(annualRunRate,'K',0)}</p>
@@ -271,7 +272,7 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🌉 Marj Köprü Analizi (MoM)' : '🌉 Margin Bridge Analysis (MoM)'}</h3>
               <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${marginChange >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
-                {marginChange >= 0 ? '+' : ''}{marginChange}pp {currentLanguage === 'tr' ? 'marj' : 'margin'}
+                {marginChange >= 0 ? '+' : ''}{marginChange}pp {oc(currentLanguage).marj_2}
               </span>
             </div>
             <div className="space-y-2">
@@ -365,8 +366,8 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         const aovGrowth245 = prevAOV > 0 ? Math.round(((currAOV - prevAOV) / prevAOV) * 100) : null;
         const kpis245 = [
           { icon: '💰', label: currentLanguage === 'tr' ? 'Bu Ay Ciro' : 'Month Revenue', value: `₺${(currRev/1000).toFixed(0)}K`, growth: revGrowth },
-          { icon: '📦', label: currentLanguage === 'tr' ? 'Sipariş' : 'Orders', value: String(currOrders.length), growth: prevOrders.length > 0 ? Math.round(((currOrders.length - prevOrders.length) / prevOrders.length) * 100) : null },
-          { icon: '👥', label: currentLanguage === 'tr' ? 'Aktif Müşteri' : 'Active Customers', value: String(currCusts), growth: custGrowth },
+          { icon: '📦', label: oc(currentLanguage).siparis_2, value: String(currOrders.length), growth: prevOrders.length > 0 ? Math.round(((currOrders.length - prevOrders.length) / prevOrders.length) * 100) : null },
+          { icon: '👥', label: oc(currentLanguage).aktif_musteri, value: String(currCusts), growth: custGrowth },
           { icon: '🛒', label: 'AOV', value: `₺${(currAOV/1000).toFixed(1)}K`, growth: aovGrowth245 },
         ];
         return (
@@ -401,7 +402,7 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
           const m = o as unknown as Record<string,unknown>;
-          const method = (m.paymentMethod as string) || (m.payment as string) || (currentLanguage === 'tr' ? 'Belirtilmemiş' : 'Not specified');
+          const method = (m.paymentMethod as string) || (m.payment as string) || (oc(currentLanguage).belirtilmemis);
           if (!methodMap[method]) methodMap[method] = { count: 0, rev: 0 };
           methodMap[method].count++;
           methodMap[method].rev += o.totalPrice || 0;
@@ -421,7 +422,7 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
                     <div className="flex items-center justify-between mb-0.5">
                       <span className="text-xs font-medium text-gray-700 capitalize">{method}</span>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
-                        <span className="text-[10px] text-gray-400">{d.count} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
+                        <span className="text-[10px] text-gray-400">{d.count} {oc(currentLanguage).siparis}</span>
                         <span className="text-[10px] font-bold text-gray-500">%{pct}</span>
                         <span className="text-xs font-bold text-gray-700">{fmtAna(d.rev,'K',0)}</span>
                       </div>

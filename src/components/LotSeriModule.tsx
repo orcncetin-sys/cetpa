@@ -5,6 +5,7 @@ import { Plus, Search, X, Save, AlertTriangle, Hash, CheckCircle2 } from 'lucide
 import CustomerCombobox from './CustomerCombobox';
 import type { Lead } from '../types';
 import { bugunAnahtari, gunAnahtari, tarihYaz } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 interface LotKaydi {
   id: string;
@@ -247,7 +248,7 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
                   <Hash className="w-3.5 h-3.5" />{tr ? 'Hareket Ekle' : 'Add Movement'}
                 </button>
                 <button onClick={() => setShowLotModal(true)} className="apple-button-primary flex items-center gap-1.5 text-sm">
-                  <Plus className="w-4 h-4" />{tr ? 'Lot Ekle' : 'Add Lot'}
+                  <Plus className="w-4 h-4" />{oc(tr).lot_ekle}
                 </button>
               </div>
             )}
@@ -256,12 +257,12 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
             <table className="w-full text-sm">
               <thead><tr className="border-b border-gray-100 text-xs text-gray-500 uppercase">
                 <th className="text-left py-2">{tr ? 'Lot No' : 'Lot No'}</th>
-                <th className="text-left py-2">{tr ? 'Ürün' : 'Product'}</th>
-                <th className="text-right py-2">{tr ? 'Miktar' : 'Qty'}</th>
+                <th className="text-left py-2">{oc(tr).urun}</th>
+                <th className="text-right py-2">{oc(tr).miktar}</th>
                 <th className="text-right py-2">{tr ? 'Kalan' : 'Remaining'}</th>
-                <th className="text-left py-2 hidden md:table-cell">{tr ? 'SKT' : 'Expiry'}</th>
+                <th className="text-left py-2 hidden md:table-cell">{oc(tr).skt}</th>
                 <th className="text-left py-2 hidden md:table-cell">{tr ? 'Giriş' : 'Received'}</th>
-                <th className="text-center py-2">{tr ? 'Durum' : 'Status'}</th>
+                <th className="text-center py-2">{oc(tr).durum}</th>
               </tr></thead>
               <tbody>
                 {filteredLot.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">{tr ? 'Lot kaydı yok' : 'No lots found'}</td></tr>}
@@ -306,19 +307,19 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
             <h3 className="font-bold text-gray-900">{tr ? 'Seri Numara Kayıtları' : 'Serial Number Records'}</h3>
             {isAuthenticated && (
               <button onClick={() => setShowSeriModal(true)} className="apple-button-primary flex items-center gap-1.5 text-sm">
-                <Plus className="w-4 h-4" />{tr ? 'Seri No Ekle' : 'Add Serial No'}
+                <Plus className="w-4 h-4" />{oc(tr).seri_no_ekle}
               </button>
             )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="border-b border-gray-100 text-xs text-gray-500 uppercase">
-                <th className="text-left py-2">{tr ? 'Seri No' : 'Serial No'}</th>
-                <th className="text-left py-2">{tr ? 'Ürün' : 'Product'}</th>
+                <th className="text-left py-2">{oc(tr).seri_no}</th>
+                <th className="text-left py-2">{oc(tr).urun}</th>
                 <th className="text-left py-2 hidden md:table-cell">{tr ? 'Lot No' : 'Lot No'}</th>
-                <th className="text-left py-2 hidden md:table-cell">{tr ? 'Müşteri' : 'Customer'}</th>
-                <th className="text-left py-2 hidden lg:table-cell">{tr ? 'Garanti Bitiş' : 'Warranty End'}</th>
-                <th className="text-center py-2">{tr ? 'Durum' : 'Status'}</th>
+                <th className="text-left py-2 hidden md:table-cell">{oc(tr).musteri}</th>
+                <th className="text-left py-2 hidden lg:table-cell">{oc(tr).garanti_bitis}</th>
+                <th className="text-center py-2">{oc(tr).durum}</th>
               </tr></thead>
               <tbody>
                 {filteredSeri.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">{tr ? 'Seri no kaydı yok' : 'No serial numbers found'}</td></tr>}
@@ -358,12 +359,12 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 text-xs text-gray-500 uppercase">
-              <th className="text-left py-2">{tr ? 'Tarih' : 'Date'}</th>
+              <th className="text-left py-2">{oc(tr).tarih}</th>
               <th className="text-left py-2">{tr ? 'Lot No' : 'Lot No'}</th>
-              <th className="text-left py-2">{tr ? 'Ürün' : 'Product'}</th>
-              <th className="text-left py-2">{tr ? 'Tip' : 'Type'}</th>
-              <th className="text-right py-2">{tr ? 'Miktar' : 'Qty'}</th>
-              <th className="text-left py-2 hidden md:table-cell">{tr ? 'Açıklama' : 'Description'}</th>
+              <th className="text-left py-2">{oc(tr).urun}</th>
+              <th className="text-left py-2">{oc(tr).tip}</th>
+              <th className="text-right py-2">{oc(tr).miktar}</th>
+              <th className="text-left py-2 hidden md:table-cell">{oc(tr).aciklama}</th>
             </tr></thead>
             <tbody>
               {hareketler.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">{tr ? 'Hareket yok' : 'No movements'}</td></tr>}
@@ -432,7 +433,7 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-lg">{tr ? 'Lot Ekle' : 'Add Lot'}</h3>
+              <h3 className="font-bold text-lg">{oc(tr).lot_ekle}</h3>
               <button onClick={() => setShowLotModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -447,8 +448,8 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
                 className="apple-input" />
               <input placeholder="SKU" value={lotForm.urunSku} onChange={e => setLotForm(p => ({ ...p, urunSku: e.target.value }))} className="apple-input" />
               <input type="number" placeholder={tr ? 'Miktar' : 'Quantity'} value={lotForm.miktar || ''} onChange={e => setLotForm(p => ({ ...p, miktar: Number(e.target.value) }))} className="apple-input" />
-              <input placeholder={tr ? 'Tedarikçi' : 'Supplier'} value={lotForm.tedarikci} onChange={e => setLotForm(p => ({ ...p, tedarikci: e.target.value }))} className="apple-input" />
-              <input placeholder={tr ? 'Depo' : 'Warehouse'} value={lotForm.depo} onChange={e => setLotForm(p => ({ ...p, depo: e.target.value }))} className="apple-input" />
+              <input placeholder={oc(tr).tedarikci} value={lotForm.tedarikci} onChange={e => setLotForm(p => ({ ...p, tedarikci: e.target.value }))} className="apple-input" />
+              <input placeholder={oc(tr).depo} value={lotForm.depo} onChange={e => setLotForm(p => ({ ...p, depo: e.target.value }))} className="apple-input" />
               <div className="space-y-1">
                 <label className="text-xs text-gray-500">{tr ? 'Üretim Tarihi' : 'Production Date'}</label>
                 <input type="date" value={lotForm.uretimTarihi} onChange={e => setLotForm(p => ({ ...p, uretimTarihi: e.target.value }))} className="apple-input" />
@@ -465,10 +466,10 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
                 <option>Aktif</option><option>Karantina</option>
               </select>
             </div>
-            <textarea placeholder={tr ? 'Notlar' : 'Notes'} value={lotForm.notlar} onChange={e => setLotForm(p => ({ ...p, notlar: e.target.value }))} className="apple-input resize-none w-full" rows={2} />
+            <textarea placeholder={oc(tr).notlar} value={lotForm.notlar} onChange={e => setLotForm(p => ({ ...p, notlar: e.target.value }))} className="apple-input resize-none w-full" rows={2} />
             <div className="flex gap-3 justify-end">
               <button onClick={() => setShowLotModal(false)} className="apple-button-secondary text-sm">İptal</button>
-              <button onClick={saveLot} disabled={isSubmitting} className="apple-button-primary flex items-center gap-2 text-sm"><Save className="w-4 h-4" />{tr ? 'Kaydet' : 'Save'}</button>
+              <button onClick={saveLot} disabled={isSubmitting} className="apple-button-primary flex items-center gap-2 text-sm"><Save className="w-4 h-4" />{oc(tr).kaydet}</button>
             </div>
           </div>
         </div>
@@ -479,7 +480,7 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-lg">{tr ? 'Seri No Ekle' : 'Add Serial No'}</h3>
+              <h3 className="font-bold text-lg">{oc(tr).seri_no_ekle}</h3>
               <button onClick={() => setShowSeriModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -508,13 +509,13 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
                 <input type="date" value={seriForm.satisDate} onChange={e => setSeriForm(p => ({ ...p, satisDate: e.target.value }))} className="apple-input" />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-gray-500">{tr ? 'Garanti Bitiş' : 'Warranty End'}</label>
+                <label className="text-xs text-gray-500">{oc(tr).garanti_bitis}</label>
                 <input type="date" value={seriForm.garantiBitis} onChange={e => setSeriForm(p => ({ ...p, garantiBitis: e.target.value }))} className="apple-input" />
               </div>
             </div>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setShowSeriModal(false)} className="apple-button-secondary text-sm">İptal</button>
-              <button onClick={saveSeri} disabled={isSubmitting} className="apple-button-primary text-sm">{tr ? 'Kaydet' : 'Save'}</button>
+              <button onClick={saveSeri} disabled={isSubmitting} className="apple-button-primary text-sm">{oc(tr).kaydet}</button>
             </div>
           </div>
         </div>
@@ -540,9 +541,9 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
                 <select value={hareketForm.tip} onChange={e => setHareketForm(p => ({ ...p, tip: e.target.value as LotHareketi['tip'] }))} className="apple-input">
                   <option>Giriş</option><option>Çıkış</option><option>Karantina</option><option>Transfer</option>
                 </select>
-                <input type="number" placeholder={tr ? 'Miktar' : 'Qty'} value={hareketForm.miktar || ''} onChange={e => setHareketForm(p => ({ ...p, miktar: Number(e.target.value) }))} className="apple-input" />
+                <input type="number" placeholder={oc(tr).miktar} value={hareketForm.miktar || ''} onChange={e => setHareketForm(p => ({ ...p, miktar: Number(e.target.value) }))} className="apple-input" />
               </div>
-              <input placeholder={tr ? 'Açıklama' : 'Description'} value={hareketForm.aciklama} onChange={e => setHareketForm(p => ({ ...p, aciklama: e.target.value }))} className="apple-input" />
+              <input placeholder={oc(tr).aciklama} value={hareketForm.aciklama} onChange={e => setHareketForm(p => ({ ...p, aciklama: e.target.value }))} className="apple-input" />
               <div className="grid grid-cols-2 gap-3">
                 <input placeholder={tr ? 'Belge No' : 'Doc No'} value={hareketForm.belgeNo} onChange={e => setHareketForm(p => ({ ...p, belgeNo: e.target.value }))} className="apple-input" />
                 <input type="date" value={hareketForm.tarih} onChange={e => setHareketForm(p => ({ ...p, tarih: e.target.value }))} className="apple-input" />
@@ -550,7 +551,7 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
             </div>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setShowHareketModal(false)} className="apple-button-secondary text-sm">İptal</button>
-              <button onClick={saveHareket} disabled={isSubmitting} className="apple-button-primary text-sm">{tr ? 'Kaydet' : 'Save'}</button>
+              <button onClick={saveHareket} disabled={isSubmitting} className="apple-button-primary text-sm">{oc(tr).kaydet}</button>
             </div>
           </div>
         </div>

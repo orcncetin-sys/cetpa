@@ -21,6 +21,7 @@ import {
 import { collection, getDocs, query, where, limit, Timestamp } from '../lib/dbClient';
 import { zamanDate, ayAnahtari, bugunAnahtari } from '../utils/zaman';
 import { auth, db } from '../firebase';
+import { oc } from '../i18n/ortak';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -281,7 +282,7 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
                     <span className="text-xs text-gray-700 font-medium truncate">{p.name}</span>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <span className="text-xs text-gray-400 tabular-nums">
-                        {p.units.toLocaleString('tr-TR')} {tr ? 'adet' : 'units'}
+                        {p.units.toLocaleString('tr-TR')} {oc(tr).adet}
                       </span>
                       {trendBadge(p.trend)}
                     </div>
@@ -334,7 +335,7 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
                     <span className="text-gray-700 font-medium truncate">{a.product}</span>
                     <div className="flex items-center gap-3 flex-shrink-0 text-[11px]">
                       <span className="text-gray-400">
-                        {tr ? 'Stok' : 'Stock'}:&nbsp;<b className="text-red-600">{a.currentStock}</b>
+                        {oc(tr).stok}:&nbsp;<b className="text-red-600">{a.currentStock}</b>
                       </span>
                       <span className="text-gray-400">
                         {tr ? 'Sipariş Et' : 'Reorder'}:&nbsp;<b className="text-emerald-600">{a.recommendedReorder}</b>

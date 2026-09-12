@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import { TrendingDown, TrendingUp, ArrowUpDown, Wallet, CheckCircle, AlertCircle, Search, Download } from 'lucide-react';
 import { SortHeader, formatTRY, exportCSV, type AccountingT } from './shared';
+import { oc } from '../../i18n/ortak';
 
 type MizanRow = { hesap: string; borc: number; alacak: number; borcBakiye: number; alacakBakiye: number };
 type MizanSortKey = 'hesap' | 'borc' | 'alacak' | 'borcBakiye' | 'alacakBakiye';
@@ -45,7 +46,7 @@ export default function MizanTab({
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {/* Toplam Borç */}
-        <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Toplamı — Hesap Detayı' : 'Total Debit — Account Detail', rows: mizanRows.filter(r => r.borc > 0).sort((a, b) => b.borc - a.borc).map(r => ({ label: r.hesap, value: formatConv(r.borc) })), total: formatConv(mizanTotals.borc) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Toplamı — Hesap Detayı' : 'Total Debit — Account Detail', rows: mizanRows.filter(r => r.borc > 0).sort((a, b) => b.borc - a.borc).map(r => ({ label: r.hesap, value: formatConv(r.borc) })), total: formatConv(mizanTotals.borc) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
+        <div onClick={() => setDrillDown({ title: oc(currentLanguage).borc_toplami_hesap_detayi, rows: mizanRows.filter(r => r.borc > 0).sort((a, b) => b.borc - a.borc).map(r => ({ label: r.hesap, value: formatConv(r.borc) })), total: formatConv(mizanTotals.borc) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: oc(currentLanguage).borc_toplami_hesap_detayi, rows: mizanRows.filter(r => r.borc > 0).sort((a, b) => b.borc - a.borc).map(r => ({ label: r.hesap, value: formatConv(r.borc) })), total: formatConv(mizanTotals.borc) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-red-100 flex items-center justify-center">
               <TrendingDown size={15} className="text-red-600" />
@@ -56,7 +57,7 @@ export default function MizanTab({
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.totalDebit}</p>
         </div>
         {/* Toplam Alacak */}
-        <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Toplamı — Hesap Detayı' : 'Total Credit — Account Detail', rows: mizanRows.filter(r => r.alacak > 0).sort((a, b) => b.alacak - a.alacak).map(r => ({ label: r.hesap, value: formatConv(r.alacak) })), total: formatConv(mizanTotals.alacak) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Toplamı — Hesap Detayı' : 'Total Credit — Account Detail', rows: mizanRows.filter(r => r.alacak > 0).sort((a, b) => b.alacak - a.alacak).map(r => ({ label: r.hesap, value: formatConv(r.alacak) })), total: formatConv(mizanTotals.alacak) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
+        <div onClick={() => setDrillDown({ title: oc(currentLanguage).alacak_toplami_hesap_detayi, rows: mizanRows.filter(r => r.alacak > 0).sort((a, b) => b.alacak - a.alacak).map(r => ({ label: r.hesap, value: formatConv(r.alacak) })), total: formatConv(mizanTotals.alacak) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: oc(currentLanguage).alacak_toplami_hesap_detayi, rows: mizanRows.filter(r => r.alacak > 0).sort((a, b) => b.alacak - a.alacak).map(r => ({ label: r.hesap, value: formatConv(r.alacak) })), total: formatConv(mizanTotals.alacak) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
               <TrendingUp size={15} className="text-green-600" />
@@ -67,7 +68,7 @@ export default function MizanTab({
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.totalCredit}</p>
         </div>
         {/* Borç Bakiyesi */}
-        <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Bakiyesi — Hesap Detayı' : 'Debit Balance — Account Detail', rows: mizanRows.filter(r => r.borcBakiye > 0).sort((a, b) => b.borcBakiye - a.borcBakiye).map(r => ({ label: r.hesap, value: formatConv(r.borcBakiye) })), total: formatConv(mizanTotals.borcBakiye) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Borç Bakiyesi — Hesap Detayı' : 'Debit Balance — Account Detail', rows: mizanRows.filter(r => r.borcBakiye > 0).sort((a, b) => b.borcBakiye - a.borcBakiye).map(r => ({ label: r.hesap, value: formatConv(r.borcBakiye) })), total: formatConv(mizanTotals.borcBakiye) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
+        <div onClick={() => setDrillDown({ title: oc(currentLanguage).borc_bakiyesi_hesap_detayi, rows: mizanRows.filter(r => r.borcBakiye > 0).sort((a, b) => b.borcBakiye - a.borcBakiye).map(r => ({ label: r.hesap, value: formatConv(r.borcBakiye) })), total: formatConv(mizanTotals.borcBakiye) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: oc(currentLanguage).borc_bakiyesi_hesap_detayi, rows: mizanRows.filter(r => r.borcBakiye > 0).sort((a, b) => b.borcBakiye - a.borcBakiye).map(r => ({ label: r.hesap, value: formatConv(r.borcBakiye) })), total: formatConv(mizanTotals.borcBakiye) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-red-50 flex items-center justify-center">
               <ArrowUpDown size={15} className="text-red-500" />
@@ -78,7 +79,7 @@ export default function MizanTab({
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.debitBalance}</p>
         </div>
         {/* Alacak Bakiyesi */}
-        <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Bakiyesi — Hesap Detayı' : 'Credit Balance — Account Detail', rows: mizanRows.filter(r => r.alacakBakiye > 0).sort((a, b) => b.alacakBakiye - a.alacakBakiye).map(r => ({ label: r.hesap, value: formatConv(r.alacakBakiye) })), total: formatConv(mizanTotals.alacakBakiye) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: currentLanguage === 'tr' ? 'Alacak Bakiyesi — Hesap Detayı' : 'Credit Balance — Account Detail', rows: mizanRows.filter(r => r.alacakBakiye > 0).sort((a, b) => b.alacakBakiye - a.alacakBakiye).map(r => ({ label: r.hesap, value: formatConv(r.alacakBakiye) })), total: formatConv(mizanTotals.alacakBakiye) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
+        <div onClick={() => setDrillDown({ title: oc(currentLanguage).alacak_bakiyesi_hesap_detayi, rows: mizanRows.filter(r => r.alacakBakiye > 0).sort((a, b) => b.alacakBakiye - a.alacakBakiye).map(r => ({ label: r.hesap, value: formatConv(r.alacakBakiye) })), total: formatConv(mizanTotals.alacakBakiye) })} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setDrillDown({ title: oc(currentLanguage).alacak_bakiyesi_hesap_detayi, rows: mizanRows.filter(r => r.alacakBakiye > 0).sort((a, b) => b.alacakBakiye - a.alacakBakiye).map(r => ({ label: r.hesap, value: formatConv(r.alacakBakiye) })), total: formatConv(mizanTotals.alacakBakiye) })} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-green-50 flex items-center justify-center">
               <Wallet size={15} className="text-green-500" />

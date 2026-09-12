@@ -21,6 +21,7 @@ import { SortHeader } from './accounting/shared';
 import { faturaEsle } from '../utils/faturaEsle';
 import { authFetch } from '../services/authFetch';
 import type { MikroFatura } from '../hooks/useMikroFaturalar';
+import { oc } from '../i18n/ortak';
 
 interface FiyatKarsilastirmaRow {
   sku: string; ad: string;
@@ -78,9 +79,9 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
       .then(json => {
         if (iptal) return;
         if (json.success) setFkRows(json.rows);
-        else setFkError(json.error || (currentLanguage === 'tr' ? 'Veri alınamadı.' : 'Failed to load.'));
+        else setFkError(json.error || (oc(currentLanguage).veri_alinamadi));
       })
-      .catch(() => { if (!iptal) setFkError(currentLanguage === 'tr' ? 'Veri alınamadı.' : 'Failed to load.'); })
+      .catch(() => { if (!iptal) setFkError(oc(currentLanguage).veri_alinamadi); })
       .finally(() => { if (!iptal) setFkLoading(false); });
     return () => { iptal = true; };
   }, [userRole, currentLanguage]);

@@ -5,6 +5,7 @@
  * Props: ReportsCtx'in tamamı DEĞİL — yalnız bu kartın gerçekten kullandığı alanlar.
  */
 import type { ReportsCtx } from '../useReportsData';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'orders' | 'inventory' | 'currentLanguage' | 'fmtAna'>;
 
@@ -63,7 +64,7 @@ export default function IskontoSizintiAnalizi({ orders, inventory, currentLangua
               <div key={name} className="flex items-center justify-between text-xs">
                 <span className="text-gray-700 truncate">{name}</span>
                 <div className="flex items-center gap-2 shrink-0 ml-2">
-                  <span className="text-[10px] text-gray-400">{d.orders} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
+                  <span className="text-[10px] text-gray-400">{d.orders} {oc(currentLanguage).siparis}</span>
                   <span className="font-bold text-red-500">-{fmtAna(d.discount,'K',0)}</span>
                 </div>
               </div>

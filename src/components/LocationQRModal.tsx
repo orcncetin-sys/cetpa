@@ -9,6 +9,7 @@ import { useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { X, Printer } from 'lucide-react';
 import { locationQrValue, type LocationType } from '../lib/locationQr';
+import { oc } from '../i18n/ortak';
 
 interface Props {
   isOpen: boolean;
@@ -45,7 +46,7 @@ export default function LocationQRModal({
       `}</style>
       <div className="apple-card w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto print:max-h-none print:overflow-visible">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold">{tr ? 'QR Etiketi' : 'QR Label'}</h3>
+          <h3 className="text-lg font-bold">{oc(tr).qr_etiketi}</h3>
           <button onClick={onClose} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400">
             <X className="w-4 h-4" />
           </button>
@@ -69,7 +70,7 @@ export default function LocationQRModal({
             {tr ? 'Yazdır' : 'Print'}
           </button>
           <button onClick={onClose} className="apple-button-secondary text-sm px-5">
-            {tr ? 'Kapat' : 'Close'}
+            {oc(tr).kapat}
           </button>
         </div>
       </div>

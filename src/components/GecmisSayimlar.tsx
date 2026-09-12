@@ -15,6 +15,7 @@ import { collection, onSnapshot } from '../lib/dbClient';
 import { db } from '../firebase';
 import { ClipboardList, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { zamanDate } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 interface SayimKalemi {
   productId?: string;
@@ -98,7 +99,7 @@ export default function GecmisSayimlar({ currentLanguage }: { currentLanguage: s
                     <div key={ix} className="flex items-center justify-between gap-2 text-[10px]">
                       <span className="text-gray-700 truncate">{i.productName ?? i.sku ?? '—'}</span>
                       <span className="text-gray-500 flex-shrink-0 tabular-nums">
-                        {tr ? 'sistem' : 'system'} {i.systemQty ?? '—'} → {tr ? 'sayılan' : 'counted'} {i.countedQty ?? '—'}
+                        {oc(tr).sistem} {i.systemQty ?? '—'} → {oc(tr).sayilan} {i.countedQty ?? '—'}
                         <span className={(i.variance ?? 0) > 0 ? 'text-emerald-600 ml-1.5 font-semibold' : 'text-red-500 ml-1.5 font-semibold'}>
                           {(i.variance ?? 0) > 0 ? '+' : ''}{i.variance ?? 0}
                         </span>

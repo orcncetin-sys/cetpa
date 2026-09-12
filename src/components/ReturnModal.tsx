@@ -6,6 +6,7 @@ import { db } from '../firebase';
 import { paraYaz } from '../utils/currency';
 import type { Order } from '../types';
 import type { Language } from '../translations';
+import { oc } from '../i18n/ortak';
 
 interface ReturnModalProps {
   order: Order | null;
@@ -56,7 +57,7 @@ export default function ReturnModal({
           </div>
           <div className="p-5 space-y-4">
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{currentLanguage === 'tr' ? 'İade Nedeni' : 'Return Reason'}</label>
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{oc(currentLanguage).iade_nedeni}</label>
               <select
                 value={returnReason}
                 onChange={e => setReturnReason(e.target.value)}
@@ -69,7 +70,7 @@ export default function ReturnModal({
                   currentLanguage === 'tr' ? 'Müşteri vazgeçti' : 'Customer changed mind',
                   currentLanguage === 'tr' ? 'Kalite sorunu' : 'Quality issue',
                   currentLanguage === 'tr' ? 'Geç teslimat' : 'Late delivery',
-                  currentLanguage === 'tr' ? 'Diğer' : 'Other',
+                  oc(currentLanguage).diger,
                 ].map(r => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
@@ -99,7 +100,7 @@ export default function ReturnModal({
           </div>
           <div className="p-5 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
             <button onClick={onClose} className="apple-button-secondary px-6">
-              {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+              {oc(currentLanguage).iptal}
             </button>
             <button
               disabled={!returnReason || returnSubmitting}
@@ -136,7 +137,7 @@ export default function ReturnModal({
               className="apple-button-primary px-8 flex items-center gap-2 disabled:opacity-50"
             >
               <RefreshCw className="w-4 h-4" />
-              {returnSubmitting ? (currentLanguage === 'tr' ? 'Kaydediliyor...' : 'Saving...') : (currentLanguage === 'tr' ? 'İade Talebi Oluştur' : 'Submit Return')}
+              {returnSubmitting ? (oc(currentLanguage).kaydediliyor) : (currentLanguage === 'tr' ? 'İade Talebi Oluştur' : 'Submit Return')}
             </button>
           </div>
         </motion.div>

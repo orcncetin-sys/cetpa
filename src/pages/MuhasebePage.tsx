@@ -30,6 +30,7 @@ import ModuleHeader from '../components/ModuleHeader';
 import type { Order, Employee, Warehouse, Supplier, InventoryItem, Lead } from '../types';
 import { faturaTipiEtiketi } from '../utils/durumEtiketi';
 import { zamanDate, zamanMs, ayAnahtari, gunAnahtari, gunBasi, bugunAnahtari, tarihYaz } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 const SabitKiymetModule    = React.lazy(() => import('../components/SabitKiymetModule'));
 const MaliyetMerkeziModule = React.lazy(() => import('../components/MaliyetMerkeziModule'));
@@ -319,11 +320,11 @@ export default function MuhasebePage(props: Props) {
 
   return (
             <motion.div key="muhasebe" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('muhasebe') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Muhasebe & Finans':'Accounting & Finance'} /> : (
+              {!canAccess('muhasebe') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).muhasebe_finans} /> : (
                 <>
                   {!hasFullAccess('muhasebe') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
                   <ModuleHeader
-                    title={currentLanguage === 'tr' ? 'Muhasebe & Finans' : 'Accounting & Finance'}
+                    title={oc(currentLanguage).muhasebe_finans}
                     subtitle={currentLanguage === 'tr' ? 'Finansal kayıtları, sabit kıymetler, maliyet merkezleri ve tahsilatları yönetin.' : 'Manage financial records, fixed assets, cost centers and collections.'}
                     icon={Calculator}
                   />
@@ -400,7 +401,7 @@ export default function MuhasebePage(props: Props) {
                             <p className="text-xs text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'Tahsil edilen KDV & KDV hariç ciro' : 'VAT collected & net revenue ex-VAT'}</p>
                           </div>
                           <div className="text-right">
-                            <p className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Toplam KDV' : 'Total VAT'}</p>
+                            <p className="text-xs text-gray-500">{oc(currentLanguage).toplam_kdv}</p>
                             <p className="text-2xl font-bold text-purple-600">{fmtKpi(totalKDV,'full',0)}</p>
                           </div>
                         </div>
@@ -478,7 +479,7 @@ export default function MuhasebePage(props: Props) {
                               </div>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                              <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Kritik':'Critical'}</p><p className="text-xl font-black text-red-600">{criticalCount}</p></div>
+                              <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr607).kritik}</p><p className="text-xl font-black text-red-600">{criticalCount}</p></div>
                               <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Açık Fatura':'Unpaid'}</p><p className="text-xl font-black text-amber-600">{withDays.length}</p></div>
                               <div className="bg-orange-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr607?'Toplam Bakiye':'Total O/S'}</p><p className="text-lg font-black text-orange-600">{paraYaz(totalUnpaid, { ondalik: 0 })}</p></div>
                             </div>
@@ -489,7 +490,7 @@ export default function MuhasebePage(props: Props) {
                                   <div key={o.id} className={`flex items-center justify-between border rounded-xl px-4 py-2.5 ${bucket.bg}`}>
                                     <div className="min-w-0 flex-1">
                                       <p className="text-xs font-semibold text-gray-800 truncate">{o.customerName}</p>
-                                      <p className="text-[10px] text-gray-400">{tr607?'Sipariş:':'Order:'} #{o.id.slice(-6)} · {o.daysPast}g</p>
+                                      <p className="text-[10px] text-gray-400">{oc(tr607).siparis_3} #{o.id.slice(-6)} · {o.daysPast}g</p>
                                     </div>
                                     <div className="flex items-center gap-3 shrink-0">
                                       <span className={`text-xs font-bold ${bucket.color}`}>{bucket.label}</span>
@@ -547,7 +548,7 @@ export default function MuhasebePage(props: Props) {
                               {[
                                 { label: currentLanguage === 'tr' ? 'Toplam Borç' : 'Total Payable', value: totalAP, color: 'text-red-600', bg: 'bg-red-50' },
                                 { label: currentLanguage === 'tr' ? 'Açık PO' : 'Open POs', value: openPOs.length, color: 'text-amber-600', bg: 'bg-amber-50', isCount: true },
-                                { label: currentLanguage === 'tr' ? 'Gecikmiş' : 'Overdue', value: apBuckets[2].orders.reduce((s, po) => s + po.totalAmount, 0), color: 'text-red-700', bg: 'bg-red-100' },
+                                { label: oc(currentLanguage).gecikmis_2, value: apBuckets[2].orders.reduce((s, po) => s + po.totalAmount, 0), color: 'text-red-700', bg: 'bg-red-100' },
                               ].map((k, i) => (
                                 <div key={i} className={`apple-card p-5 ${k.bg}`}>
                                   <div className="flex items-center justify-between mb-1">
@@ -653,7 +654,7 @@ export default function MuhasebePage(props: Props) {
                     <motion.div key="muhasebe-butce" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
                       {(() => {
                         const DEPTS = [
-                          { key: 'satis',    label: currentLanguage === 'tr' ? 'Satış' : 'Sales' },
+                          { key: 'satis',    label: oc(currentLanguage).satis },
                           { key: 'pazarlama',label: currentLanguage === 'tr' ? 'Pazarlama' : 'Marketing' },
                           { key: 'operasyon',label: currentLanguage === 'tr' ? 'Operasyon' : 'Operations' },
                           { key: 'ik',       label: currentLanguage === 'tr' ? 'İnsan Kaynakları' : 'HR' },
@@ -697,7 +698,7 @@ export default function MuhasebePage(props: Props) {
                             {/* Month picker + summary */}
                             <div className="flex flex-wrap items-center gap-4">
                               <div className="flex items-center gap-2">
-                                <label className="text-xs font-bold text-gray-500">{currentLanguage === 'tr' ? 'Dönem' : 'Period'}:</label>
+                                <label className="text-xs font-bold text-gray-500">{oc(currentLanguage).donem}:</label>
                                 <input
                                   type="month"
                                   value={budgetMonth}
@@ -717,11 +718,11 @@ export default function MuhasebePage(props: Props) {
                               )}
                               <div className="flex items-center gap-6 ml-auto">
                                 <div className="text-right">
-                                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Toplam Bütçe' : 'Total Budget'}</p>
+                                  <p className="text-[10px] text-gray-400">{oc(currentLanguage).toplam_butce}</p>
                                   <p className="text-sm font-black text-gray-800">{fmtButce(totalBudget)}</p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Gerçekleşen' : 'Actual'}</p>
+                                  <p className="text-[10px] text-gray-400">{oc(currentLanguage).gerceklesen}</p>
                                   <p className={`text-sm font-black ${totalActual > totalBudget ? 'text-red-600' : 'text-emerald-600'}`}>
                                     {fmtButce(totalActual)}
                                   </p>
@@ -774,7 +775,7 @@ export default function MuhasebePage(props: Props) {
                                       </div>
                                       <div className="flex justify-between mt-1">
                                         <span className="text-[10px] text-gray-400">
-                                          {currentLanguage === 'tr' ? 'Gerçekleşen' : 'Actual'}: {fmtButce(actual)}
+                                          {oc(currentLanguage).gerceklesen}: {fmtButce(actual)}
                                         </span>
                                         {over && (
                                           <span className="text-[10px] font-bold text-red-600">
@@ -827,7 +828,7 @@ export default function MuhasebePage(props: Props) {
                           <>
                             <div className="flex flex-wrap items-center gap-4">
                               <div className="flex items-center gap-2">
-                                <label className="text-xs font-bold text-gray-500">{currentLanguage === 'tr' ? 'Dönem' : 'Period'}:</label>
+                                <label className="text-xs font-bold text-gray-500">{oc(currentLanguage).donem}:</label>
                                 <input type="month" value={reconMonth} onChange={e => setReconMonth(e.target.value)} className="apple-input text-sm px-3 py-1.5" />
                               </div>
                               <button onClick={() => setShowBankImport(true)} className="apple-button-secondary text-sm px-4 py-1.5 flex items-center gap-1.5 ml-auto">
@@ -943,16 +944,16 @@ export default function MuhasebePage(props: Props) {
                             {expiringSoon>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-700">⚠️ {expiringSoon} {tr623?'L/C 30 gün içinde sona eriyor':'L/C expiring within 30 days'}</div>}
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                               <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Açık L/C':'Open L/C'}</p><p className="text-xl font-black text-emerald-600">{openLCs.length}</p></div>
-                              <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Toplam Değer':'Total Value'}</p><p className="text-base font-black text-blue-600">{paraYaz(totalValue623, { birim: 'USD' })}</p></div>
+                              <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr623).toplam_deger}</p><p className="text-base font-black text-blue-600">{paraYaz(totalValue623, { birim: 'USD' })}</p></div>
                               <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr623?'Sona Yakın':'Expiring Soon'}</p><p className="text-xl font-black text-amber-600">{expiringSoon}</p></div>
                             </div>
                             {p623ShowForm && (
                               <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                  <input className="apple-input" placeholder={tr623?'Banka':'Bank'} value={p623Draft.bank} onChange={e=>setP623Draft(d=>({...d,bank:e.target.value}))}/>
-                                  <input className="apple-input" placeholder={tr623?'Lehtar':'Beneficiary'} value={p623Draft.beneficiary} onChange={e=>setP623Draft(d=>({...d,beneficiary:e.target.value}))}/>
+                                  <input className="apple-input" placeholder={oc(tr623).banka} value={p623Draft.bank} onChange={e=>setP623Draft(d=>({...d,bank:e.target.value}))}/>
+                                  <input className="apple-input" placeholder={oc(tr623).lehtar} value={p623Draft.beneficiary} onChange={e=>setP623Draft(d=>({...d,beneficiary:e.target.value}))}/>
                                   <input className="apple-input" placeholder="Ref" value={p623Draft.ref} onChange={e=>setP623Draft(d=>({...d,ref:e.target.value}))}/>
-                                  <input type="number" className="apple-input" placeholder={tr623?'Tutar':'Amount'} value={p623Draft.amount} onChange={e=>setP623Draft(d=>({...d,amount:e.target.value}))}/>
+                                  <input type="number" className="apple-input" placeholder={oc(tr623).tutar} value={p623Draft.amount} onChange={e=>setP623Draft(d=>({...d,amount:e.target.value}))}/>
                                   <select value={p623Draft.currency} onChange={e=>setP623Draft(d=>({...d,currency:e.target.value as typeof d.currency}))} className="apple-input">{['USD','EUR'].map(c=><option key={c}>{c}</option>)}</select>
                                   <input type="date" className="apple-input" value={p623Draft.expiryDate} onChange={e=>setP623Draft(d=>({...d,expiryDate:e.target.value}))}/>
                                 </div>
@@ -962,12 +963,12 @@ export default function MuhasebePage(props: Props) {
                                   setP623Draft(d=>({...d,bank:'',beneficiary:'',amount:'',ref:'',expiryDate:''}));
                                   setP623ShowForm(false);
                                   toast(tr623?'L/C eklendi.':'L/C added.','success');
-                                }} className="apple-button-primary text-xs px-6">{tr623?'Kaydet':'Save'}</button>
+                                }} className="apple-button-primary text-xs px-6">{oc(tr623).kaydet}</button>
                               </div>
                             )}
                             {p623LCs.length > 0 && (
                               <div className="overflow-x-auto"><table className="w-full text-xs">
-                                <thead><tr className="border-b border-gray-100 bg-gray-50">{[tr623?'Banka':'Bank',tr623?'Lehtar':'Beneficiary','Ref',tr623?'Tutar':'Amount',tr623?'Vade':'Expiry',tr623?'Durum':'Status'].map(h=><th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>)}</tr></thead>
+                                <thead><tr className="border-b border-gray-100 bg-gray-50">{[oc(tr623).banka,oc(tr623).lehtar,'Ref',oc(tr623).tutar,tr623?'Vade':'Expiry',oc(tr623).durum].map(h=><th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>)}</tr></thead>
                                 <tbody className="divide-y divide-gray-50">
                                   {[...p623LCs].sort((a,b)=>a.expiryDate.localeCompare(b.expiryDate)).map(lc=>(
                                     <tr key={lc.id} className="hover:bg-gray-50/50">
@@ -1025,13 +1026,13 @@ export default function MuhasebePage(props: Props) {
                               <>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                   <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr638?'Tam Eşleşme':'Full Match'}</p><p className="text-xl font-black text-emerald-600">{totalMatched}</p></div>
-                                  <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr638?'Kısmi':'Partial'}</p><p className="text-xl font-black text-amber-600">{p638MatchResults.filter(r=>r.status==='Kısmi').length}</p></div>
-                                  <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr638?'Eşleşmedi':'Unmatched'}</p><p className="text-xl font-black text-red-600">{totalUnmatched}</p></div>
+                                  <div className="bg-amber-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr638).kismi}</p><p className="text-xl font-black text-amber-600">{p638MatchResults.filter(r=>r.status==='Kısmi').length}</p></div>
+                                  <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr638).eslesmedi}</p><p className="text-xl font-black text-red-600">{totalUnmatched}</p></div>
                                 </div>
                                 <div className="overflow-x-auto">
                                   <table className="w-full text-xs">
                                     <thead><tr className="border-b border-gray-100 bg-gray-50">
-                                      {[tr638?'Fatura No':'Invoice No',tr638?'Müşteri':'Customer',tr638?'Tutar':'Amount',tr638?'Eşleşen':'Matched','Güven','Durum'].map(h=>(
+                                      {[oc(tr638).fatura_no,oc(tr638).musteri,oc(tr638).tutar,oc(tr638).eslesen,'Güven','Durum'].map(h=>(
                                         <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                       ))}
                                     </tr></thead>
@@ -1151,7 +1152,7 @@ export default function MuhasebePage(props: Props) {
                             {/* Per-customer table */}
                             <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                               <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 grid grid-cols-6 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                                <span className="col-span-2">{currentLanguage === 'tr' ? 'Müşteri' : 'Customer'}</span>
+                                <span className="col-span-2">{oc(currentLanguage).musteri}</span>
                                 <span className="text-right">0–30</span>
                                 <span className="text-right">31–60</span>
                                 <span className="text-right">61–90</span>
@@ -1162,7 +1163,7 @@ export default function MuhasebePage(props: Props) {
                                   <div key={c.name} className="px-5 py-3 grid grid-cols-6 items-center hover:bg-gray-50/50 transition-all">
                                     <div className="col-span-2 min-w-0">
                                       <p className="text-xs font-bold text-gray-800 truncate">{c.name}</p>
-                                      <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}: {f131(c.total)} · {c.oldest}g</p>
+                                      <p className="text-[10px] text-gray-400">{oc(currentLanguage).toplam}: {f131(c.total)} · {c.oldest}g</p>
                                     </div>
                                     {[c.b0_30, c.b31_60, c.b61_90, c.b90p].map((v, i) => (
                                       <span key={i} className={`text-xs font-bold text-right ${v > 0 ? i === 0 ? 'text-emerald-600' : i === 1 ? 'text-amber-600' : i === 2 ? 'text-orange-600' : 'text-red-600' : 'text-gray-200'}`}>
@@ -1173,7 +1174,7 @@ export default function MuhasebePage(props: Props) {
                                 ))}
                               </div>
                               <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex justify-between text-xs font-bold">
-                                <span className="text-gray-500">{custs.length} {currentLanguage === 'tr' ? 'müşteri' : 'customers'}</span>
+                                <span className="text-gray-500">{custs.length} {oc(currentLanguage).musteri_2}</span>
                                 <span className="text-gray-800">{currentLanguage === 'tr' ? 'Toplam Alacak' : 'Total AR'}: {f131(totalAR)}</span>
                               </div>
                             </div>
@@ -1212,7 +1213,7 @@ export default function MuhasebePage(props: Props) {
                                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${escLevel.cls}`}>{escLevel.label}</span>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-xs font-medium text-gray-800 truncate">{o.customerName}</p>
-                                  <p className="text-[10px] text-gray-400">{o.daysOld}g {currentLanguage==='tr'?'gecikmiş':'overdue'}</p>
+                                  <p className="text-[10px] text-gray-400">{o.daysOld}g {oc(currentLanguage).gecikmis}</p>
                                 </div>
                                 <span className="text-xs font-bold text-red-600 shrink-0">{fmtKpi(o.totalPrice)}</span>
                               </div>
@@ -1268,7 +1269,7 @@ export default function MuhasebePage(props: Props) {
                             benchmark: currentLanguage === 'tr' ? 'İdeal: %30+' : 'Benchmark: 30%+',
                           },
                           {
-                            label: currentLanguage === 'tr' ? 'Cari Oran' : 'Current Ratio',
+                            label: oc(currentLanguage).cari_oran,
                             value: currentRatio !== null ? currentRatio.toFixed(2) : '—',
                             desc: currentLanguage === 'tr' ? 'Dönen varlıklar / Kısa vadeli borçlar' : 'Current assets / Current liabilities',
                             status: currentRatio === null ? 'neutral' : currentRatio >= 2 ? 'good' : currentRatio >= 1 ? 'warn' : 'bad',
@@ -1289,7 +1290,7 @@ export default function MuhasebePage(props: Props) {
                             benchmark: currentLanguage === 'tr' ? 'İdeal: 30 gün' : 'Benchmark: 30 days',
                           },
                           {
-                            label: currentLanguage === 'tr' ? 'Stok Devir Hızı' : 'Inventory Turnover',
+                            label: oc(currentLanguage).stok_devir_hizi,
                             value: inventoryTurnover !== null ? inventoryTurnover.toFixed(2) + 'x' : '—',
                             desc: currentLanguage === 'tr' ? 'Maliyet / Ortalama stok değeri' : 'COGS / Average inventory value',
                             status: inventoryTurnover === null ? 'neutral' : inventoryTurnover >= 6 ? 'good' : inventoryTurnover >= 3 ? 'warn' : 'bad',
@@ -1406,8 +1407,8 @@ export default function MuhasebePage(props: Props) {
                         {/* Summary KPIs */}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           {[
-                            { label: currentLanguage==='tr'?'Toplam Gelir':'Total Revenue', value: fmtPnl(ytdRevenue), color: 'text-blue-600', bg: 'bg-blue-50' },
-                            { label: currentLanguage==='tr'?'Brüt Marj':'Gross Margin', value: `%${grossMargin143.toFixed(1)}`, color: grossMargin143 >= 30 ? 'text-emerald-600' : 'text-amber-600', bg: grossMargin143 >= 30 ? 'bg-emerald-50' : 'bg-amber-50' },
+                            { label: oc(currentLanguage).toplam_gelir, value: fmtPnl(ytdRevenue), color: 'text-blue-600', bg: 'bg-blue-50' },
+                            { label: oc(currentLanguage).brut_marj, value: `%${grossMargin143.toFixed(1)}`, color: grossMargin143 >= 30 ? 'text-emerald-600' : 'text-amber-600', bg: grossMargin143 >= 30 ? 'bg-emerald-50' : 'bg-amber-50' },
                             { label: currentLanguage==='tr'?'Net Marj':'Net Margin', value: `%${netMargin143.toFixed(1)}`, color: netMargin143 >= 10 ? 'text-emerald-600' : 'text-amber-600', bg: netMargin143 >= 10 ? 'bg-emerald-50' : 'bg-amber-50' },
                           ].map(k => (
                             <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
@@ -1474,8 +1475,8 @@ export default function MuhasebePage(props: Props) {
                             })}
                           </div>
                           <div className="flex items-center gap-4 mt-3">
-                            <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-2 bg-blue-400 rounded-sm inline-block" />{currentLanguage==='tr'?'Gelir':'Revenue'}</span>
-                            <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-2 bg-emerald-400 rounded-sm inline-block" />{currentLanguage==='tr'?'Brüt Kâr':'Gross Profit'}</span>
+                            <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-2 bg-blue-400 rounded-sm inline-block" />{oc(currentLanguage).gelir}</span>
+                            <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-2 bg-emerald-400 rounded-sm inline-block" />{oc(currentLanguage).brut_kar}</span>
                           </div>
                         </div>
                       </motion.div>
@@ -1503,7 +1504,7 @@ export default function MuhasebePage(props: Props) {
                         <p className="text-xs text-gray-400 mb-5">{currentLanguage === 'tr' ? 'Sabit maliyet tahmini %12 SG&A üzerinden' : 'Fixed cost estimated at 12% SG&A of revenue'}</p>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
                           {[
-                            { label: currentLanguage==='tr'?'Brüt Marj':'Gross Margin', value: `%${(grossMarginBE*100).toFixed(1)}`, color: 'text-blue-600' },
+                            { label: oc(currentLanguage).brut_marj, value: `%${(grossMarginBE*100).toFixed(1)}`, color: 'text-blue-600' },
                             { label: currentLanguage==='tr'?'Tahmini Sabit Gider':'Est. Fixed Costs', value: paraYaz(estFixedCosts, { ondalik: 0 }), color: 'text-red-500' },
                             { label: currentLanguage==='tr'?'Başabaş Cirosu':'Break-Even Revenue', value: paraYaz(breakEvenRev, { ondalik: 0 }), color: 'text-amber-600' },
                             { label: currentLanguage==='tr'?'Güvenlik Marjı':'Safety Margin', value: `%${safetyMargin}`, color: safetyMargin >= 20 ? 'text-emerald-600' : 'text-red-500' },
@@ -1623,7 +1624,7 @@ export default function MuhasebePage(props: Props) {
                             <table className="w-full text-xs">
                               <thead>
                                 <tr className="bg-gray-50 border-b border-gray-100">
-                                  <th className="text-left px-4 py-3 text-[10px] font-bold text-gray-400 uppercase">{currentLanguage === 'tr' ? 'Dönem' : 'Period'}</th>
+                                  <th className="text-left px-4 py-3 text-[10px] font-bold text-gray-400 uppercase">{oc(currentLanguage).donem}</th>
                                   <th className="text-right px-4 py-3 text-[10px] font-bold text-emerald-500 uppercase">{currentLanguage === 'tr' ? 'Nakit Giriş' : 'Cash In'}</th>
                                   <th className="text-right px-4 py-3 text-[10px] font-bold text-red-500 uppercase">{currentLanguage === 'tr' ? 'Nakit Çıkış' : 'Cash Out'}</th>
                                   <th className="text-right px-4 py-3 text-[10px] font-bold text-blue-500 uppercase">{currentLanguage === 'tr' ? 'Net' : 'Net'}</th>
@@ -1639,7 +1640,7 @@ export default function MuhasebePage(props: Props) {
                                   </tr>
                                 ))}
                                 <tr className="bg-gray-50 border-t-2 border-gray-200">
-                                  <td className="px-4 py-3 font-bold text-gray-800 text-[11px] uppercase">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</td>
+                                  <td className="px-4 py-3 font-bold text-gray-800 text-[11px] uppercase">{oc(currentLanguage).toplam}</td>
                                   <td className="px-4 py-3 text-right font-bold text-emerald-600">{fCF(totalInflow)}</td>
                                   <td className="px-4 py-3 text-right font-bold text-red-500">{fCF(totalOutflow)}</td>
                                   <td className={`px-4 py-3 text-right font-bold text-base ${totalNet >= 0 ? 'text-blue-700' : 'text-red-600'}`}>{totalNet >= 0 ? '+' : '-'}{fCF(Math.abs(totalNet))}</td>
@@ -1702,7 +1703,7 @@ export default function MuhasebePage(props: Props) {
                     const toplamPasif547 = toplamBorç547 + ozkaynak547;
                     const fB = (v: number) => paraYaz(v, { ondalik: 0 });
                     const aktifRows = [
-                      { group: tr547?'Dönen Varlıklar':'Current Assets', items: [
+                      { group: oc(tr547).donen_varliklar, items: [
                         { label: tr547?'Kasa':'Cash on Hand',          v: kasa547 },
                         { label: tr547?'Bankalar':'Bank Accounts',      v: banka547 },
                         { label: tr547?'Ticari Alacaklar':'Trade AR',   v: ar547 },
@@ -1713,11 +1714,11 @@ export default function MuhasebePage(props: Props) {
                       ]},
                     ];
                     const pasifRows = [
-                      { group: tr547?'Kısa Vadeli Yükümlülükler':'Current Liabilities', items: [
-                        { label: tr547?'Ticari Borçlar':'Trade Payables', v: ap547 },
+                      { group: oc(tr547).kisa_vadeli_yukumlulukler, items: [
+                        { label: oc(tr547).ticari_borclar, v: ap547 },
                         { label: tr547?'KDV Borcu':'VAT Payable',         v: kdvBorc547 },
                       ]},
-                      { group: tr547?'Özkaynaklar':'Equity', items: [
+                      { group: oc(tr547).ozkaynaklar, items: [
                         { label: tr547?'Net Özkaynaklar':'Net Equity', v: ozkaynak547 },
                       ]},
                     ];
@@ -1740,7 +1741,7 @@ export default function MuhasebePage(props: Props) {
                             { label: tr547?'Toplam Aktif':'Total Assets',      v: toplamAktif547, color: 'text-blue-700',  bg: 'bg-blue-50' },
                             { label: tr547?'Toplam Pasif':'Total Liabilities + Equity', v: toplamPasif547, color: 'text-indigo-700', bg: 'bg-indigo-50' },
                             { label: tr547?'Toplam Borç':'Total Debt',         v: toplamBorç547, color: 'text-red-600',   bg: 'bg-red-50' },
-                            { label: tr547?'Özkaynaklar':'Equity',             v: ozkaynak547,   color: ozkaynak547>=0?'text-emerald-700':'text-red-600', bg: ozkaynak547>=0?'bg-emerald-50':'bg-red-50' },
+                            { label: oc(tr547).ozkaynaklar,             v: ozkaynak547,   color: ozkaynak547>=0?'text-emerald-700':'text-red-600', bg: ozkaynak547>=0?'bg-emerald-50':'bg-red-50' },
                           ].map(k => (
                             <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
                               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{k.label}</p>
@@ -1829,7 +1830,7 @@ export default function MuhasebePage(props: Props) {
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-2">
                           {[
                             { label: tr550?'Toplam Alacak':'Total AR',     v: mutRows.reduce((s,r)=>s+r.ar,0) + cariBalanceToplam.ar,      color:'text-blue-700',   bg:'bg-blue-50' },
-                            { label: tr550?'Tahsil Edilen':'Collected',     v: mutRows.reduce((s,r)=>s+r.paid,0),    color:'text-emerald-700', bg:'bg-emerald-50' },
+                            { label: oc(tr550).tahsil_edilen,     v: mutRows.reduce((s,r)=>s+r.paid,0),    color:'text-emerald-700', bg:'bg-emerald-50' },
                             { label: tr550?'Bakiye':'Open Balance',         v: mutRows.reduce((s,r)=>s+r.balance,0) + cariBalanceToplam.ar, color:'text-orange-700',  bg:'bg-orange-50' },
                           ].map(k=>(
                             <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
@@ -1842,11 +1843,11 @@ export default function MuhasebePage(props: Props) {
                           <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                               <thead><tr className="border-b border-gray-100 bg-gray-50/60">
-                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{tr550?'Müşteri':'Customer'}</th>
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{oc(tr550).musteri}</th>
                                 <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr550?'Toplam Borç':'Total Charged'}</th>
-                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr550?'Tahsil':'Collected'}</th>
-                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr550?'Bakiye':'Balance'}</th>
-                                <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr550?'Durum':'Status'}</th>
+                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{oc(tr550).tahsil}</th>
+                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{oc(tr550).bakiye}</th>
+                                <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{oc(tr550).durum}</th>
                               </tr></thead>
                               <tbody>
                                 {mutRows.slice(0,30).map((r,i)=>(
@@ -1857,7 +1858,7 @@ export default function MuhasebePage(props: Props) {
                                     <td className={`px-4 py-2.5 text-right font-bold tabular-nums ${r.balance>0?'text-orange-600':'text-emerald-600'}`}>{fM(r.balance)}</td>
                                     <td className="px-4 py-2.5 text-center">
                                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${r.balance<=0?'bg-emerald-100 text-emerald-700':r.balance/r.ar>0.5?'bg-red-100 text-red-700':'bg-orange-100 text-orange-700'}`}>
-                                        {r.balance<=0?(tr550?'Kapalı':'Closed'):r.balance/r.ar>0.5?(tr550?'Yüksek Bakiye':'High Balance'):(tr550?'Kısmi':'Partial')}
+                                        {r.balance<=0?(oc(tr550).kapali):r.balance/r.ar>0.5?(tr550?'Yüksek Bakiye':'High Balance'):(oc(tr550).kismi)}
                                       </span>
                                     </td>
                                   </tr>
@@ -1869,7 +1870,7 @@ export default function MuhasebePage(props: Props) {
                             <p className="text-center py-8 text-gray-400 text-sm">
                               {cariBalanceToplam.ar > 0
                                 ? (tr550 ? 'Sipariş bazlı detay yok — üstteki toplamlar Mikro cari bakiyelerinden.' : 'No order-level detail — totals above are from Mikro cari balances.')
-                                : (tr550 ? 'Henüz sipariş verisi yok.' : 'No order data yet.')}
+                                : (oc(tr550).henuz_siparis_verisi_yok)}
                             </p>
                           )}
                         </div>
@@ -1880,7 +1881,7 @@ export default function MuhasebePage(props: Props) {
                   {/* ── Phase 548: Masraf Yönetimi (Expense Management) ───────────────── */}
                   {muhasebeTab === 'masraf' && (() => {
                     const tr548 = currentLanguage === 'tr';
-                    const cats548 = [tr548?'Ulaşım':'Transportation', tr548?'Konaklama':'Accommodation', tr548?'Yemek':'Meals', tr548?'Temsil':'Entertainment', tr548?'Kırtasiye':'Office Supplies', tr548?'Diğer':'Other'];
+                    const cats548 = [oc(tr548).ulasim, tr548?'Konaklama':'Accommodation', tr548?'Yemek':'Meals', tr548?'Temsil':'Entertainment', tr548?'Kırtasiye':'Office Supplies', oc(tr548).diger];
                     const pending548 = p548Masraflar.filter(m=>m.status==='Bekliyor');
                     const approved548 = p548Masraflar.filter(m=>m.status==='Onaylandı');
                     // Karışık para birimlerini ₺'ye çevirerek topla (önce ham toplanıyordu).
@@ -1917,8 +1918,8 @@ export default function MuhasebePage(props: Props) {
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           {[
                             { label: tr548?'Bekleyen Talep':'Pending', v: pending548.length, sub: paraYaz(totalPending, { ondalik: 0 }), color:'text-orange-600', bg:'bg-orange-50' },
-                            { label: tr548?'Onaylanan':'Approved',     v: approved548.length, sub: paraYaz(totalApproved, { ondalik: 0 }), color:'text-emerald-600', bg:'bg-emerald-50' },
-                            { label: tr548?'Reddedilen':'Rejected',    v: p548Masraflar.filter(m=>m.status==='Reddedildi').length, sub:'', color:'text-red-500', bg:'bg-red-50' },
+                            { label: oc(tr548).onaylanan,     v: approved548.length, sub: paraYaz(totalApproved, { ondalik: 0 }), color:'text-emerald-600', bg:'bg-emerald-50' },
+                            { label: oc(tr548).reddedilen,    v: p548Masraflar.filter(m=>m.status==='Reddedildi').length, sub:'', color:'text-red-500', bg:'bg-red-50' },
                             { label: tr548?'Toplam Kayıt':'Total',     v: p548Masraflar.length, sub:'', color:'text-gray-600', bg:'bg-gray-50' },
                           ].map(k=>(
                             <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
@@ -1933,28 +1934,28 @@ export default function MuhasebePage(props: Props) {
                           <div className="apple-card p-5 border-2 border-brand/20 space-y-3">
                             <h4 className="font-bold text-gray-800">{tr548?'Yeni Masraf Talebi':'New Expense Claim'}</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                              <input value={p548Draft.employeeName} onChange={e=>setP548Draft(d=>({...d,employeeName:e.target.value}))} placeholder={tr548?'Çalışan Adı':'Employee Name'} className="apple-input px-3 py-2 text-sm" />
+                              <input value={p548Draft.employeeName} onChange={e=>setP548Draft(d=>({...d,employeeName:e.target.value}))} placeholder={oc(tr548).calisan_adi_2} className="apple-input px-3 py-2 text-sm" />
                               <select value={p548Draft.category} onChange={e=>setP548Draft(d=>({...d,category:e.target.value}))} className="apple-input px-3 py-2 text-sm">
                                 {cats548.map(c=><option key={c}>{c}</option>)}
                               </select>
                               <div className="flex gap-2">
-                                <input type="number" value={p548Draft.amount} onChange={e=>setP548Draft(d=>({...d,amount:e.target.value}))} placeholder={tr548?'Tutar':'Amount'} className="apple-input px-3 py-2 text-sm flex-1" />
+                                <input type="number" value={p548Draft.amount} onChange={e=>setP548Draft(d=>({...d,amount:e.target.value}))} placeholder={oc(tr548).tutar} className="apple-input px-3 py-2 text-sm flex-1" />
                                 <select value={p548Draft.currency} onChange={e=>setP548Draft(d=>({...d,currency:e.target.value}))} className="apple-input px-3 py-2 text-sm w-20">
                                   {['TRY','USD','EUR'].map(c=><option key={c}>{c}</option>)}
                                 </select>
                               </div>
                               <input type="date" value={p548Draft.date} onChange={e=>setP548Draft(d=>({...d,date:e.target.value}))} className="apple-input px-3 py-2 text-sm" />
-                              <input value={p548Draft.description} onChange={e=>setP548Draft(d=>({...d,description:e.target.value}))} placeholder={tr548?'Açıklama':'Description'} className="apple-input px-3 py-2 text-sm md:col-span-2" />
+                              <input value={p548Draft.description} onChange={e=>setP548Draft(d=>({...d,description:e.target.value}))} placeholder={oc(tr548).aciklama} className="apple-input px-3 py-2 text-sm md:col-span-2" />
                             </div>
                             <div className="flex gap-2">
                               <button onClick={async()=>{
                                 const amt=parseFloat(p548Draft.amount);
-                                if(!p548Draft.employeeName||!Number.isFinite(amt)||amt<=0){ toast(tr548?'Geçerli bir tutar girin.':'Enter a valid amount.','error'); return; }
+                                if(!p548Draft.employeeName||!Number.isFinite(amt)||amt<=0){ toast(oc(tr548).gecerli_bir_tutar_girin,'error'); return; }
                                 try{ await addDoc(collection(db,'masraflar'),{...p548Draft,amount:amt,status:'Bekliyor',createdAt:serverTimestamp()});
-                                setP548Form(false); setP548Draft({employeeName:'',category:tr548?'Ulaşım':'Transportation',amount:'',currency:'TRY',date:bugunAnahtari(),description:''}); }
+                                setP548Form(false); setP548Draft({employeeName:'',category:oc(tr548).ulasim,amount:'',currency:'TRY',date:bugunAnahtari(),description:''}); }
                                 catch(e){ console.error('[masraf save]',e); toast(tr548?'Kaydedilemedi.':'Could not save.','error'); }
-                              }} className="apple-button-primary px-4 py-2 text-sm">{tr548?'Kaydet':'Save'}</button>
-                              <button onClick={()=>setP548Form(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr548?'İptal':'Cancel'}</button>
+                              }} className="apple-button-primary px-4 py-2 text-sm">{oc(tr548).kaydet}</button>
+                              <button onClick={()=>setP548Form(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr548).iptal}</button>
                             </div>
                           </div>
                         )}
@@ -1963,12 +1964,12 @@ export default function MuhasebePage(props: Props) {
                           <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                               <thead><tr className="border-b border-gray-100 bg-gray-50/60">
-                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{tr548?'Çalışan':'Employee'}</th>
-                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{tr548?'Kategori':'Category'}</th>
-                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr548?'Tutar':'Amount'}</th>
-                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden md:table-cell">{tr548?'Tarih':'Date'}</th>
-                                <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr548?'Durum':'Status'}</th>
-                                {hasFullAccess('muhasebe') && <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr548?'İşlem':'Action'}</th>}
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">{oc(tr548).calisan}</th>
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{oc(tr548).kategori}</th>
+                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{oc(tr548).tutar}</th>
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden md:table-cell">{oc(tr548).tarih}</th>
+                                <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{oc(tr548).durum}</th>
+                                {hasFullAccess('muhasebe') && <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{oc(tr548).islem}</th>}
                               </tr></thead>
                               <tbody>
                                 {p548Masraflar.map(m=>(
@@ -1987,8 +1988,8 @@ export default function MuhasebePage(props: Props) {
                                       <td className="px-4 py-2.5 text-center">
                                         {m.status==='Bekliyor' && (
                                           <div className="flex justify-center gap-1">
-                                            <button onClick={async()=>{try{await updateDoc(doc(db,'masraflar',m.id),{status:'Onaylandı',approvedBy:user?.displayName||user?.email||''});}catch(e){console.error('[masraf approve]',e);toast(tr548?'İşlem başarısız.':'Failed.','error');}}} className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-full hover:bg-emerald-200 transition-colors">{tr548?'Onayla':'Approve'}</button>
-                                            <button onClick={async()=>{try{await updateDoc(doc(db,'masraflar',m.id),{status:'Reddedildi'});}catch(e){console.error('[masraf reject]',e);toast(tr548?'İşlem başarısız.':'Failed.','error');}}} className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-1 rounded-full hover:bg-red-200 transition-colors">{tr548?'Reddet':'Reject'}</button>
+                                            <button onClick={async()=>{try{await updateDoc(doc(db,'masraflar',m.id),{status:'Onaylandı',approvedBy:user?.displayName||user?.email||''});}catch(e){console.error('[masraf approve]',e);toast(tr548?'İşlem başarısız.':'Failed.','error');}}} className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-full hover:bg-emerald-200 transition-colors">{oc(tr548).onayla}</button>
+                                            <button onClick={async()=>{try{await updateDoc(doc(db,'masraflar',m.id),{status:'Reddedildi'});}catch(e){console.error('[masraf reject]',e);toast(tr548?'İşlem başarısız.':'Failed.','error');}}} className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-1 rounded-full hover:bg-red-200 transition-colors">{oc(tr548).reddet}</button>
                                           </div>
                                         )}
                                       </td>
@@ -2040,7 +2041,7 @@ export default function MuhasebePage(props: Props) {
                         <ModuleHeader title={tr555?'Ba/Bs Formu':'Ba/Bs Tax Form'} subtitle={tr555?'₺5.000 ve üzeri alım (Ba) ve satış (Bs) bildirimi — Logo/Mikro uyumlu':'Purchase (Ba) and sales (Bs) declarations ≥ ₺5,000 — Logo/Mikro compatible'} icon={FileText} />
                         {/* Period picker */}
                         <div className="flex items-center gap-3 flex-wrap">
-                          <label className="text-sm font-semibold text-gray-600">{tr555?'Dönem:':'Period:'}</label>
+                          <label className="text-sm font-semibold text-gray-600">{oc(tr555).donem_2}</label>
                           <input type="month" value={p555Period} onChange={e=>setP555Period(e.target.value)} className="apple-input px-3 py-2 text-sm" />
                           <div className="flex gap-3 text-sm text-gray-500">
                             <span className="font-bold text-rose-600">{baRows.length} Ba</span>
@@ -2057,8 +2058,8 @@ export default function MuhasebePage(props: Props) {
                             {baRows.length > 0 ? (
                               <table className="w-full text-sm">
                                 <thead><tr className="border-b border-gray-100">
-                                  <th className="py-1.5 text-left text-xs font-bold text-gray-400 uppercase">{tr555?'Tedarikçi':'Supplier'}</th>
-                                  <th className="py-1.5 text-right text-xs font-bold text-gray-400 uppercase">{tr555?'Tutar':'Amount'}</th>
+                                  <th className="py-1.5 text-left text-xs font-bold text-gray-400 uppercase">{oc(tr555).tedarikci}</th>
+                                  <th className="py-1.5 text-right text-xs font-bold text-gray-400 uppercase">{oc(tr555).tutar}</th>
                                 </tr></thead>
                                 <tbody>
                                   {baRows.map((r,i)=>(
@@ -2068,7 +2069,7 @@ export default function MuhasebePage(props: Props) {
                                     </tr>
                                   ))}
                                   <tr className="border-t-2 border-rose-200">
-                                    <td className="py-1.5 font-bold text-gray-800">{tr555?'Toplam':'Total'}</td>
+                                    <td className="py-1.5 font-bold text-gray-800">{oc(tr555).toplam}</td>
                                     <td className="py-1.5 text-right font-bold text-rose-700 tabular-nums">{fBabs(baRows.reduce((s,r)=>s+r.amount,0))}</td>
                                   </tr>
                                 </tbody>
@@ -2084,8 +2085,8 @@ export default function MuhasebePage(props: Props) {
                             {bsRows.length > 0 ? (
                               <table className="w-full text-sm">
                                 <thead><tr className="border-b border-gray-100">
-                                  <th className="py-1.5 text-left text-xs font-bold text-gray-400 uppercase">{tr555?'Müşteri':'Customer'}</th>
-                                  <th className="py-1.5 text-right text-xs font-bold text-gray-400 uppercase">{tr555?'Tutar':'Amount'}</th>
+                                  <th className="py-1.5 text-left text-xs font-bold text-gray-400 uppercase">{oc(tr555).musteri}</th>
+                                  <th className="py-1.5 text-right text-xs font-bold text-gray-400 uppercase">{oc(tr555).tutar}</th>
                                 </tr></thead>
                                 <tbody>
                                   {bsRows.map((r,i)=>(
@@ -2095,7 +2096,7 @@ export default function MuhasebePage(props: Props) {
                                     </tr>
                                   ))}
                                   <tr className="border-t-2 border-blue-200">
-                                    <td className="py-1.5 font-bold text-gray-800">{tr555?'Toplam':'Total'}</td>
+                                    <td className="py-1.5 font-bold text-gray-800">{oc(tr555).toplam}</td>
                                     <td className="py-1.5 text-right font-bold text-blue-700 tabular-nums">{fBabs(bsRows.reduce((s,r)=>s+r.amount,0))}</td>
                                   </tr>
                                 </tbody>
@@ -2157,7 +2158,7 @@ export default function MuhasebePage(props: Props) {
                         {/* 12-month KPIs */}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           {[
-                            { label:tr557?'12 Ay Ciro':'12-Mo Revenue', v:totalRev12, color:'text-blue-700',  bg:'bg-blue-50' },
+                            { label:oc(tr557)._12_ay_ciro, v:totalRev12, color:'text-blue-700',  bg:'bg-blue-50' },
                             { label:tr557?'12 Ay Gider':'12-Mo Expense', v:totalExp12, color:'text-red-600',   bg:'bg-red-50' },
                             { label:tr557?'12 Ay Net':'12-Mo Net',        v:totalProfit12, color:totalProfit12>=0?'text-emerald-700':'text-red-700', bg:totalProfit12>=0?'bg-emerald-50':'bg-red-50' },
                           ].map(k=>(
@@ -2176,11 +2177,11 @@ export default function MuhasebePage(props: Props) {
                           <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                               <thead><tr className="border-b border-gray-100">
-                                <th className="py-2 text-left text-xs font-bold text-gray-400 uppercase">{tr557?'Ay':'Month'}</th>
-                                <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr557?'Ciro':'Revenue'}</th>
+                                <th className="py-2 text-left text-xs font-bold text-gray-400 uppercase">{oc(tr557).ay}</th>
+                                <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{oc(tr557).ciro}</th>
                                 <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr557?'Gider':'Expense'}</th>
-                                <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr557?'Net Kâr':'Net Profit'}</th>
-                                <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr557?'Marj':'Margin'}</th>
+                                <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{oc(tr557).net_kar}</th>
+                                <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{oc(tr557).marj}</th>
                               </tr></thead>
                               <tbody>
                                 {months12.map((m,i)=>{
@@ -2298,8 +2299,8 @@ export default function MuhasebePage(props: Props) {
                             ))}
                           </div>
                           <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-brand/70 inline-block" />{tr558?'Tahsil':'Collected'}</span>
-                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-300/50 inline-block" />{tr558?'Ödenen':'Paid'}</span>
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-brand/70 inline-block" />{oc(tr558).tahsil}</span>
+                            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-300/50 inline-block" />{oc(tr558).odenen}</span>
                           </div>
                         </div>
 
@@ -2310,7 +2311,7 @@ export default function MuhasebePage(props: Props) {
                             <table className="w-full text-xs">
                               <thead>
                                 <tr className="border-b border-gray-100">
-                                  {[tr558?'Ay':'Month', tr558?'Tahsil Edilen KDV':'Collected', tr558?'Ödenen KDV':'Paid', tr558?'Net KDV':'Net'].map(h => (
+                                  {[oc(tr558).ay, tr558?'Tahsil Edilen KDV':'Collected', tr558?'Ödenen KDV':'Paid', tr558?'Net KDV':'Net'].map(h => (
                                     <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                   ))}
                                 </tr>
@@ -2329,7 +2330,7 @@ export default function MuhasebePage(props: Props) {
                               </tbody>
                               <tfoot>
                                 <tr className="border-t-2 border-gray-200 font-bold bg-gray-50">
-                                  <td className="px-3 py-2 text-[10px] uppercase text-gray-500">{tr558?'Toplam':'Total'}</td>
+                                  <td className="px-3 py-2 text-[10px] uppercase text-gray-500">{oc(tr558).toplam}</td>
                                   <td className="px-3 py-2 text-emerald-700 font-mono">{paraYaz(totCol)}</td>
                                   <td className="px-3 py-2 text-red-500 font-mono">{paraYaz(totPaid)}</td>
                                   <td className={`px-3 py-2 font-mono ${totNet>0?'text-amber-700':'text-blue-700'}`}>{paraYaz(totNet)}</td>
@@ -2348,7 +2349,7 @@ export default function MuhasebePage(props: Props) {
                                   return rank(b[0]) - rank(a[0]);
                                 }).map(([rate, total]) => (
                                   <div key={rate} className="bg-gray-50 rounded-xl px-3 py-2">
-                                    <p className="text-[10px] text-gray-400">{rate === 'bilinmiyor' ? (tr558?'Oran yok':'No rate') : rate === 'karma' ? (tr558?'Karma oran':'Mixed rate') : `%${rate} KDV`}</p>
+                                    <p className="text-[10px] text-gray-400">{rate === 'bilinmiyor' ? (oc(tr558).oran_yok) : rate === 'karma' ? (oc(tr558).karma_oran) : `%${rate} KDV`}</p>
                                     <p className="font-bold text-gray-800 text-sm">{paraYaz(total)}</p>
                                   </div>
                                 ))}
@@ -2420,9 +2421,9 @@ export default function MuhasebePage(props: Props) {
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           {[
                             { label: tr559?'Toplam Fatura':'Total Invoiced', val: totalInvoiced, color:'text-gray-800', bg:'bg-gray-50' },
-                            { label: tr559?'Tahsil Edilen':'Collected', val: totalPaid, color:'text-emerald-700', bg:'bg-emerald-50' },
+                            { label: oc(tr559).tahsil_edilen, val: totalPaid, color:'text-emerald-700', bg:'bg-emerald-50' },
                             { label: tr559?'Bekleyen Alacak':'Outstanding', val: outstanding, color: outstanding>0?'text-amber-700':'text-emerald-700', bg:'bg-amber-50' },
-                            { label: tr559?'Kredi Limiti':'Credit Limit', val: creditLimit, color: creditUtil>80?'text-red-600':'text-blue-700', bg: creditUtil>80?'bg-red-50':'bg-blue-50' },
+                            { label: oc(tr559).kredi_limiti_2, val: creditLimit, color: creditUtil>80?'text-red-600':'text-blue-700', bg: creditUtil>80?'bg-red-50':'bg-blue-50' },
                           ].map(k => (
                             <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
                               <p className="text-[10px] font-bold text-gray-400">{k.label}</p>
@@ -2465,7 +2466,7 @@ export default function MuhasebePage(props: Props) {
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="border-b border-gray-100">
-                                    {[tr559?'Tarih':'Date','#',tr559?'Durum':'Status',tr559?'Tutar':'Amount',tr559?'Ödeme':'Payment',tr559?'Bakiye':'Balance'].map(h => (
+                                    {[oc(tr559).tarih,'#',oc(tr559).durum,oc(tr559).tutar,oc(tr559).odeme,oc(tr559).bakiye].map(h => (
                                       <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                     ))}
                                   </tr>
@@ -2486,8 +2487,8 @@ export default function MuhasebePage(props: Props) {
                                       <td className="px-3 py-2 font-bold text-gray-800 font-mono">{paraYaz(row.totalPrice)}</td>
                                       <td className="px-3 py-2">
                                         {row.isPaid
-                                          ? <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">✓ {tr559?'Ödendi':'Paid'}</span>
-                                          : <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">⏳ {tr559?'Bekliyor':'Pending'}</span>
+                                          ? <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">✓ {oc(tr559).odendi}</span>
+                                          : <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">⏳ {oc(tr559).bekliyor}</span>
                                         }
                                       </td>
                                       <td className={`px-3 py-2 font-bold font-mono ${row.runBalance>0?'text-amber-700':'text-emerald-700'}`}>
@@ -2540,13 +2541,13 @@ export default function MuhasebePage(props: Props) {
                                     await updateDoc(doc(db, 'orders', o.id), { status: 'Processing' });
                                     toast(tr560?'Sipariş onaylandı.':'Order approved.', 'success');
                                   }} className="text-xs font-bold text-emerald-600 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-lg transition-colors">
-                                    {tr560?'Onayla':'Approve'}
+                                    {oc(tr560).onayla}
                                   </button>
                                   <button onClick={async () => {
                                     await updateDoc(doc(db, 'orders', o.id), { status: 'Cancelled' });
                                     toast(tr560?'Sipariş reddedildi.':'Order rejected.', 'error');
                                   }} className="text-xs font-bold text-red-600 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors">
-                                    {tr560?'Reddet':'Reject'}
+                                    {oc(tr560).reddet}
                                   </button>
                                 </div>
                               )}
@@ -2608,7 +2609,7 @@ export default function MuhasebePage(props: Props) {
                                   <p className="text-[11px] font-semibold text-gray-500 mb-1">{tr564?'Son gelen (alış) faturaları:':'Recent incoming invoices:'}</p>
                                   <table className="w-full text-xs">
                                     <thead><tr className="bg-gray-50 border-b border-gray-100">
-                                      {[tr564?'Tarih':'Date', tr564?'Cari':'Account', tr564?'Fatura No':'Invoice', tr564?'Tutar':'Amount'].map(h=>(
+                                      {[oc(tr564).tarih, tr564?'Cari':'Account', tr564?'Fatura No':'Invoice', oc(tr564).tutar].map(h=>(
                                         <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                       ))}
                                     </tr></thead>
@@ -2632,7 +2633,7 @@ export default function MuhasebePage(props: Props) {
                         {/* KPI strip */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           {[
-                            { label: tr564?'Toplam Sipariş':'Total Orders',  val: allBillable.length, color:'text-gray-700', bg:'bg-gray-50' },
+                            { label: oc(tr564).toplam_siparis,  val: allBillable.length, color:'text-gray-700', bg:'bg-gray-50' },
                             { label: tr564?'Fatura Eksik':'Missing Invoice', val: missingCount, color: missingCount>0?'text-red-600':'text-emerald-600', bg: missingCount>0?'bg-red-50':'bg-emerald-50' },
                             { label: tr564?'Fatura Bekliyor':'Invoice Pending', val: pendingCount, color:'text-amber-700', bg:'bg-amber-50' },
                             { label: tr564?'ERP Senkron':'ERP Synced', val: syncedCount, color:'text-emerald-700', bg:'bg-emerald-50' },
@@ -2648,9 +2649,9 @@ export default function MuhasebePage(props: Props) {
                         <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
                           {([
                             { id: 'missing', label: tr564?'Fatura Eksik':'Missing', count: missingCount },
-                            { id: 'pending', label: tr564?'Bekliyor':'Pending', count: pendingCount },
+                            { id: 'pending', label: oc(tr564).bekliyor, count: pendingCount },
                             { id: 'synced',  label: tr564?'Senkron':'Synced', count: syncedCount },
-                            { id: 'all',     label: tr564?'Tümü':'All', count: allBillable.length },
+                            { id: 'all',     label: oc(tr564).tumu, count: allBillable.length },
                           ] as const).map(f => (
                             <button key={f.id} onClick={() => setP564FaturaFilter(f.id)}
                               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${p564FaturaFilter===f.id?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>
@@ -2672,9 +2673,9 @@ export default function MuhasebePage(props: Props) {
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="bg-gray-50 border-b border-gray-100">
-                                    {[tr564?'Tarih':'Date', tr564?'Müşteri':'Customer', tr564?'Tutar':'Amount',
-                                      tr564?'Fatura Tipi':'Invoice Type', tr564?'Fatura No':'Invoice No',
-                                      tr564?'ERP Durumu':'ERP Status', ''].map(h => (
+                                    {[oc(tr564).tarih, oc(tr564).musteri, oc(tr564).tutar,
+                                      oc(tr564).fatura_tipi, oc(tr564).fatura_no,
+                                      oc(tr564).erp_durumu, ''].map(h => (
                                       <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase whitespace-nowrap">{h}</th>
                                     ))}
                                   </tr>
@@ -2702,9 +2703,9 @@ export default function MuhasebePage(props: Props) {
                                           {isSynced ? (
                                             <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">✓ {o.lucaSynced?'Luca':o.mikroSynced?'Mikro':'Sync'}</span>
                                           ) : hasFatura ? (
-                                            <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ {tr564?'Bekliyor':'Pending'}</span>
+                                            <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ {oc(tr564).bekliyor}</span>
                                           ) : (
-                                            <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">✗ {tr564?'Fatura Yok':'No Invoice'}</span>
+                                            <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">✗ {oc(tr564).fatura_yok}</span>
                                           )}
                                         </td>
                                         <td className="px-3 py-2.5">
@@ -2749,25 +2750,25 @@ export default function MuhasebePage(props: Props) {
                                   <button onClick={() => setP564DetayId(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X className="w-[18px] h-[18px]" /></button>
                                 </div>
                                 <div className="p-5 overflow-y-auto flex-1 min-h-0">
-                                  {satir564(tr564 ? 'Müşteri' : 'Customer', d.customerName)}
-                                  {d.customerEmail && satir564(tr564 ? 'E-posta' : 'Email', d.customerEmail)}
-                                  {d.shippingAddress && satir564(tr564 ? 'Adres' : 'Address', <span className="font-normal text-xs">{d.shippingAddress}</span>)}
-                                  {satir564(tr564 ? 'Tutar' : 'Amount', paraYaz(d.totalPrice))}
+                                  {satir564(oc(tr564).musteri, d.customerName)}
+                                  {d.customerEmail && satir564(oc(tr564).e_posta, d.customerEmail)}
+                                  {d.shippingAddress && satir564(oc(tr564).adres, <span className="font-normal text-xs">{d.shippingAddress}</span>)}
+                                  {satir564(oc(tr564).tutar, paraYaz(d.totalPrice))}
                                   {typeof d.kdvOran === 'number' && satir564('KDV', `%${d.kdvOran}${d.kdvTutari ? ` · ${paraYaz(d.kdvTutari)}` : ''}`)}
-                                  {d.faturaTipi && satir564(tr564 ? 'Fatura Türü' : 'Invoice Type', faturaTipiEtiketi(d.faturaTipi, currentLanguage))}
-                                  {satir564(tr564 ? 'Fatura No' : 'Invoice No', dInvoiceNo)}
+                                  {d.faturaTipi && satir564(oc(tr564).fatura_turu, faturaTipiEtiketi(d.faturaTipi, currentLanguage))}
+                                  {satir564(oc(tr564).fatura_no, dInvoiceNo)}
                                   {d.ettn && satir564('ETTN', <span className="font-mono text-[11px]">{d.ettn}</span>)}
                                   {d.irsaliyeNo && satir564(tr564 ? 'İrsaliye No' : 'Waybill No', d.irsaliyeNo)}
-                                  {satir564(tr564 ? 'ERP Durumu' : 'ERP Status', dSynced
+                                  {satir564(oc(tr564).erp_durumu, dSynced
                                     ? <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">✓ {d.lucaSynced?'Luca':'Mikro'}</span>
                                     : (d.hasInvoice || d.mikroFaturaNo || d.lucaFaturaNo)
-                                      ? <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ {tr564?'Bekliyor':'Pending'}</span>
-                                      : <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">✗ {tr564?'Fatura Yok':'No Invoice'}</span>)}
-                                  {satir564(tr564 ? 'Sipariş Durumu' : 'Order Status', d.status)}
-                                  {d.notes && satir564(tr564 ? 'Not' : 'Notes', <span className="font-normal text-xs">{d.notes}</span>)}
+                                      ? <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ {oc(tr564).bekliyor}</span>
+                                      : <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">✗ {oc(tr564).fatura_yok}</span>)}
+                                  {satir564(oc(tr564).siparis_durumu, d.status)}
+                                  {d.notes && satir564(oc(tr564).not, <span className="font-normal text-xs">{d.notes}</span>)}
                                   {!!d.lineItems?.length && (
                                     <div className="mt-3">
-                                      <p className="text-xs font-bold text-gray-500 mb-1.5">{tr564 ? 'Kalemler' : 'Line items'} · {d.lineItems.length}</p>
+                                      <p className="text-xs font-bold text-gray-500 mb-1.5">{oc(tr564).kalemler} · {d.lineItems.length}</p>
                                       <div className="space-y-1">
                                         {d.lineItems.map((li, i) => (
                                           <div key={li.id || i} className="flex items-center justify-between text-xs text-gray-600 py-1 border-b border-gray-50 last:border-0">
@@ -2836,7 +2837,7 @@ export default function MuhasebePage(props: Props) {
                             </div>
                           ))}
                         </div>
-                        <div className="text-xs text-gray-500">{tr630?'Toplam Bekleyen:':'Total Outstanding:'} <span className="font-bold text-red-600">{paraYaz(totalUnpaid, { ondalik: 0 })}</span> ({unpaidInvoiced.length} {tr630?'sipariş':'orders'})</div>
+                        <div className="text-xs text-gray-500">{tr630?'Toplam Bekleyen:':'Total Outstanding:'} <span className="font-bold text-red-600">{paraYaz(totalUnpaid, { ondalik: 0 })}</span> ({unpaidInvoiced.length} {oc(tr630).siparis})</div>
                       </div>
                     );
                   })()}
@@ -2912,7 +2913,7 @@ export default function MuhasebePage(props: Props) {
                           ))}
                         </div>
                         <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                          <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-blue-100 inline-block" />{tr565?'Gerçekleşen':'Actual'}</span>
+                          <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-blue-100 inline-block" />{oc(tr565).gerceklesen}</span>
                           <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-emerald-400 inline-block" />{tr565?'Tahmin':'Forecast'}</span>
                           <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-emerald-100 inline-block" />{tr565?'±%15 Aralık':'±15% Band'}</span>
                         </div>
@@ -2940,7 +2941,7 @@ export default function MuhasebePage(props: Props) {
                     // Profit centers: B2B vs Retail by customerType
                     const centers: Record<string, { revenue: number; cogs: number; count: number }> = {};
                     orders.filter(o => o.status !== 'Cancelled').forEach(o => {
-                      const key = o.customerType || (tr566 ? 'Diğer' : 'Other');
+                      const key = o.customerType || (oc(tr566).diger);
                       if (!centers[key]) centers[key] = { revenue: 0, cogs: 0, count: 0 };
                       centers[key].revenue += o.totalPrice || 0;
                       centers[key].cogs += (o.lineItems ?? []).reduce((s,li) => s+((li.costPrice??0)*li.quantity), 0);
@@ -2963,8 +2964,8 @@ export default function MuhasebePage(props: Props) {
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="border-b border-gray-100">
-                                {[tr566?'Kanal':'Channel', tr566?'Sipariş':'Orders', tr566?'Gelir':'Revenue',
-                                  'COGS', tr566?'Brüt Kâr':'Gross Profit', tr566?'Marj':'Margin'].map(h => (
+                                {[tr566?'Kanal':'Channel', oc(tr566).siparis_2, oc(tr566).gelir,
+                                  'COGS', oc(tr566).brut_kar, oc(tr566).marj].map(h => (
                                   <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                 ))}
                               </tr>
@@ -3023,7 +3024,7 @@ export default function MuhasebePage(props: Props) {
                         else { await addDoc(collection(db,'pricingRules'), { ...payload, active: true, createdAt: serverTimestamp() }); }
                         setP573Draft({ name: '', type: 'bulk', minQty: '', tierName: '', discountPct: '', active: true });
                         setP573ShowForm(false); setP573EditId(null);
-                      } catch(e){ toast((currentLanguage==='tr'?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
+                      } catch(e){ toast((oc(currentLanguage).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
                     };
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
@@ -3032,7 +3033,7 @@ export default function MuhasebePage(props: Props) {
                           icon={Tag}
                           actionButton={hasFullAccess('muhasebe') && (
                             <button onClick={()=>setP573ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm">
-                              <Plus className="w-4 h-4"/>{tr573?'Kural Ekle':'Add Rule'}
+                              <Plus className="w-4 h-4"/>{oc(tr573).kural_ekle}
                             </button>
                           )} />
 
@@ -3040,7 +3041,7 @@ export default function MuhasebePage(props: Props) {
                           <div className="apple-card p-5 space-y-4">
                             <h4 className="font-bold text-gray-800 text-sm">{tr573?'Yeni Fiyat Kuralı':'New Pricing Rule'}</h4>
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                              <input className="apple-input px-3 py-2 text-sm" placeholder={tr573?'Kural Adı':'Rule Name'} value={p573Draft.name} onChange={e=>setP573Draft(d=>({...d,name:e.target.value}))} />
+                              <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr573).kural_adi} value={p573Draft.name} onChange={e=>setP573Draft(d=>({...d,name:e.target.value}))} />
                               <select className="apple-input px-3 py-2 text-sm" value={p573Draft.type} onChange={e=>setP573Draft(d=>({...d,type:e.target.value as typeof d.type}))}>
                                 <option value="bulk">{typeLabels573['bulk']}</option>
                                 <option value="customer-tier">{typeLabels573['customer-tier']}</option>
@@ -3051,8 +3052,8 @@ export default function MuhasebePage(props: Props) {
                               {p573Draft.type==='customer-tier' && <input className="apple-input px-3 py-2 text-sm" placeholder={tr573?'Segment (B2B, Bayi...)':'Tier (B2B, Dealer...)'} value={p573Draft.tierName} onChange={e=>setP573Draft(d=>({...d,tierName:e.target.value}))} />}
                             </div>
                             <div className="flex gap-2">
-                              <button onClick={addRule573} className="apple-button-primary text-sm px-4 py-1.5">{tr573?'Kaydet':'Save'}</button>
-                              <button onClick={()=>setP573ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr573?'İptal':'Cancel'}</button>
+                              <button onClick={addRule573} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr573).kaydet}</button>
+                              <button onClick={()=>setP573ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{oc(tr573).iptal}</button>
                             </div>
                           </div>
                         )}
@@ -3067,7 +3068,7 @@ export default function MuhasebePage(props: Props) {
                           <div className="apple-card overflow-hidden"><div className="overflow-x-auto">
                             <table className="w-full text-sm min-w-[560px]">
                               <thead><tr className="border-b border-gray-100 bg-gray-50">
-                                {[tr573?'Kural Adı':'Rule Name', tr573?'Tür':'Type', tr573?'İndirim':'Discount', tr573?'Koşul':'Condition', tr573?'Durum':'Status', ''].map(h=>(
+                                {[oc(tr573).kural_adi, oc(tr573).tur, tr573?'İndirim':'Discount', tr573?'Koşul':'Condition', oc(tr573).durum, ''].map(h=>(
                                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                 ))}
                               </tr></thead>
@@ -3077,16 +3078,16 @@ export default function MuhasebePage(props: Props) {
                                     <td className="px-4 py-3 font-semibold text-gray-800">{r.name}</td>
                                     <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${typeColors573[r.type]}`}>{typeLabels573[r.type]}</span></td>
                                     <td className="px-4 py-3 text-emerald-700 font-bold">%{r.discountPct}</td>
-                                    <td className="px-4 py-3 text-gray-500 text-xs">{r.type==='bulk'&&r.minQty?`Min ${r.minQty} ${tr573?'adet':'units'}`:r.type==='customer-tier'&&r.tierName?r.tierName:tr573?'Genel':'General'}</td>
+                                    <td className="px-4 py-3 text-gray-500 text-xs">{r.type==='bulk'&&r.minQty?`Min ${r.minQty} ${oc(tr573).adet}`:r.type==='customer-tier'&&r.tierName?r.tierName:oc(tr573).genel}</td>
                                     <td className="px-4 py-3">
-                                      <button onClick={async ()=>{try{await updateDoc(doc(db,'pricingRules',r.id),{active:!r.active});}catch(e){toast((tr573?'Güncellenemedi: ':'Update failed: ')+(e instanceof Error?e.message:String(e)),'error');}}}
+                                      <button onClick={async ()=>{try{await updateDoc(doc(db,'pricingRules',r.id),{active:!r.active});}catch(e){toast((oc(tr573).guncellenemedi)+(e instanceof Error?e.message:String(e)),'error');}}}
                                         className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${r.active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-500'}`}>
-                                        {r.active?(tr573?'Aktif':'Active'):(tr573?'Pasif':'Inactive')}
+                                        {r.active?(oc(tr573).aktif):(oc(tr573).pasif)}
                                       </button>
                                     </td>
                                     <td className="px-4 py-3">
-                                      <button onClick={()=>{setP573Draft({name:r.name,type:r.type,minQty:r.minQty?String(r.minQty):'',tierName:r.tierName||'',discountPct:String(r.discountPct),active:r.active});setP573EditId(r.id);setP573ShowForm(true);}} className="text-blue-400 hover:text-blue-600 text-xs mr-2">{tr573?'Düzenle':'Edit'}</button>
-                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'pricingRules',r.id));}catch(e){toast((tr573?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} className="text-red-400 hover:text-red-600 text-xs">{tr573?'Sil':'Delete'}</button>
+                                      <button onClick={()=>{setP573Draft({name:r.name,type:r.type,minQty:r.minQty?String(r.minQty):'',tierName:r.tierName||'',discountPct:String(r.discountPct),active:r.active});setP573EditId(r.id);setP573ShowForm(true);}} className="text-blue-400 hover:text-blue-600 text-xs mr-2">{oc(tr573).duzenle}</button>
+                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'pricingRules',r.id));}catch(e){toast((oc(tr573).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} className="text-red-400 hover:text-red-600 text-xs">{oc(tr573).sil}</button>
                                     </td>
                                   </tr>
                                 ))}
@@ -3163,8 +3164,8 @@ export default function MuhasebePage(props: Props) {
                         {/* Summary KPIs */}
                         <div className="grid grid-cols-3 gap-4">
                           {[
-                            {label:tr580?'Bütçe':'Budget', val:fmtKpi(totalBudget580,'K',1), color:'text-blue-600', bg:'bg-blue-50'},
-                            {label:tr580?'Gerçekleşen':'Actual', val:fmtKpi(totalActual580,'K',1), color:'text-emerald-600', bg:'bg-emerald-50'},
+                            {label:oc(tr580).butce, val:fmtKpi(totalBudget580,'K',1), color:'text-blue-600', bg:'bg-blue-50'},
+                            {label:oc(tr580).gerceklesen, val:fmtKpi(totalActual580,'K',1), color:'text-emerald-600', bg:'bg-emerald-50'},
                             {label:tr580?'Gerçekleşme %':'Achievement', val:overallPct.toFixed(1)+'%', color:overallPct>=90?'text-emerald-700':overallPct>=70?'text-amber-600':'text-red-600', bg:overallPct>=90?'bg-emerald-50':overallPct>=70?'bg-amber-50':'bg-red-50'},
                           ].map(k=>(
                             <div key={k.label} className={`apple-card flex items-center gap-3 p-4 ${k.bg}`}>
@@ -3178,7 +3179,7 @@ export default function MuhasebePage(props: Props) {
                           <div className="overflow-x-auto">
                             <table className="w-full text-xs">
                               <thead><tr className="border-b border-gray-100">
-                                {[tr580?'Ay':'Month', tr580?'Bütçe':'Budget', tr580?'Gerçekleşen':'Actual', tr580?'Fark':'Variance', tr580?'Gerçekleşme':'Achieve.'].map(h=>(
+                                {[oc(tr580).ay, oc(tr580).butce, oc(tr580).gerceklesen, oc(tr580).fark, tr580?'Gerçekleşme':'Achieve.'].map(h=>(
                                   <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                 ))}
                               </tr></thead>
@@ -3220,7 +3221,7 @@ export default function MuhasebePage(props: Props) {
                   {/* ── Phase 591: Otomatik Fatura Takvimi ─────────────────────────── */}
                   {muhasebeTab === 'oto-fatura' && (() => {
                     const tr591 = currentLanguage === 'tr';
-                    const freqLabels591: Record<string,string> = {'monthly':tr591?'Aylık':'Monthly','quarterly':tr591?'3 Aylık':'Quarterly','yearly':tr591?'Yıllık':'Yearly'};
+                    const freqLabels591: Record<string,string> = {'monthly':oc(tr591).aylik,'quarterly':oc(tr591)._3_aylik,'yearly':oc(tr591).yillik};
                     const getNextDate = (freq: string, from: string) => {
                       // Giriş ve çıkış aynı YEREL gün ekseninde (gunBasi/gunAnahtari) — UTC gün kayması yok.
                       const d = gunBasi(from || bugunAnahtari());
@@ -3241,15 +3242,15 @@ export default function MuhasebePage(props: Props) {
                         {p591ShowForm && (
                           <div className="apple-card p-5 space-y-3">
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                              <input className="apple-input px-3 py-2 text-sm" placeholder={tr591?'Müşteri':'Customer'} value={p591Draft.customerName} onChange={e=>setP591Draft(d=>({...d,customerName:e.target.value}))} />
-                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr591?'Tutar (₺)':'Amount (₺)'} value={p591Draft.amount} onChange={e=>setP591Draft(d=>({...d,amount:e.target.value}))} />
+                              <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr591).musteri} value={p591Draft.customerName} onChange={e=>setP591Draft(d=>({...d,customerName:e.target.value}))} />
+                              <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr591).tutar_2} value={p591Draft.amount} onChange={e=>setP591Draft(d=>({...d,amount:e.target.value}))} />
                               <select className="apple-input px-3 py-2 text-sm" value={p591Draft.frequency} onChange={e=>setP591Draft(d=>({...d,frequency:e.target.value as typeof d.frequency}))}>
                                 <option value="monthly">{freqLabels591['monthly']}</option>
                                 <option value="quarterly">{freqLabels591['quarterly']}</option>
                                 <option value="yearly">{freqLabels591['yearly']}</option>
                               </select>
                               <input type="date" className="apple-input px-3 py-2 text-sm" value={p591Draft.nextDate} onChange={e=>setP591Draft(d=>({...d,nextDate:e.target.value}))} />
-                              <input className="apple-input px-3 py-2 text-sm col-span-2 md:col-span-1" placeholder={tr591?'Açıklama':'Description'} value={p591Draft.description} onChange={e=>setP591Draft(d=>({...d,description:e.target.value}))} />
+                              <input className="apple-input px-3 py-2 text-sm col-span-2 md:col-span-1" placeholder={oc(tr591).aciklama} value={p591Draft.description} onChange={e=>setP591Draft(d=>({...d,description:e.target.value}))} />
                             </div>
                             <div className="flex gap-2">
                               <button onClick={async ()=>{
@@ -3260,9 +3261,9 @@ export default function MuhasebePage(props: Props) {
                                   else { await addDoc(collection(db,'autoInvoiceSchedules'),{...payload,active:true,createdAt:serverTimestamp()}); }
                                   setP591Draft({customerName:'',amount:'',frequency:'monthly',nextDate:'',description:''});
                                   setP591ShowForm(false); setP591EditId(null);
-                                } catch(e){ toast((tr591?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                              }} className="apple-button-primary text-sm px-4 py-1.5">{tr591?'Kaydet':'Save'}</button>
-                              <button onClick={()=>{setP591ShowForm(false);setP591EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{tr591?'İptal':'Cancel'}</button>
+                                } catch(e){ toast((oc(tr591).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
+                              }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr591).kaydet}</button>
+                              <button onClick={()=>{setP591ShowForm(false);setP591EditId(null);}} className="apple-button-secondary text-sm px-4 py-1.5">{oc(tr591).iptal}</button>
                             </div>
                           </div>
                         )}
@@ -3272,7 +3273,7 @@ export default function MuhasebePage(props: Props) {
                           <div className="apple-card overflow-hidden"><div className="overflow-x-auto">
                             <table className="w-full text-xs min-w-[560px]">
                               <thead><tr className="border-b border-gray-100 bg-gray-50">
-                                {[tr591?'Müşteri':'Customer',tr591?'Tutar':'Amount',tr591?'Sıklık':'Freq.',tr591?'Sonraki Tarih':'Next Date',tr591?'Açıklama':'Desc.',tr591?'Aktif':'Active'].map(h=>(
+                                {[oc(tr591).musteri,oc(tr591).tutar,tr591?'Sıklık':'Freq.',oc(tr591).sonraki_tarih,tr591?'Açıklama':'Desc.',oc(tr591).aktif].map(h=>(
                                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                 ))}
                               </tr></thead>
@@ -3288,10 +3289,10 @@ export default function MuhasebePage(props: Props) {
                                       <td className="px-4 py-2.5 text-gray-500 max-w-[120px] truncate">{s.description||'—'}</td>
                                       <td className="px-4 py-2.5">
                                         <div className="flex items-center gap-1.5">
-                                          <button onClick={async ()=>{try{await updateDoc(doc(db,'autoInvoiceSchedules',s.id),{active:!s.active});}catch(e){toast((tr591?'Güncellenemedi: ':'Update failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-400'}`}>{s.active?(tr591?'Aktif':'Active'):(tr591?'Pasif':'Off')}</button>
-                                          {isDue&&s.active&&(<button onClick={async ()=>{try{await updateDoc(doc(db,'autoInvoiceSchedules',s.id),{nextDate:getNextDate(s.frequency,s.nextDate)});}catch(e){toast((tr591?'Güncellenemedi: ':'Update failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{tr591?'Kesildi':'Issued'}</button>)}
-                                          <button type="button" onClick={()=>{setP591Draft({customerName:s.customerName,amount:String(s.amount),frequency:s.frequency,nextDate:s.nextDate,description:s.description});setP591EditId(s.id);setP591ShowForm(true);}} title={tr591?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                          <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'autoInvoiceSchedules',s.id));}catch(e){toast((tr591?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title={tr591?'Sil':'Delete'} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                          <button onClick={async ()=>{try{await updateDoc(doc(db,'autoInvoiceSchedules',s.id),{active:!s.active});}catch(e){toast((oc(tr591).guncellenemedi)+(e instanceof Error?e.message:String(e)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-400'}`}>{s.active?(oc(tr591).aktif):(tr591?'Pasif':'Off')}</button>
+                                          {isDue&&s.active&&(<button onClick={async ()=>{try{await updateDoc(doc(db,'autoInvoiceSchedules',s.id),{nextDate:getNextDate(s.frequency,s.nextDate)});}catch(e){toast((oc(tr591).guncellenemedi)+(e instanceof Error?e.message:String(e)),'error');}}} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{tr591?'Kesildi':'Issued'}</button>)}
+                                          <button type="button" onClick={()=>{setP591Draft({customerName:s.customerName,amount:String(s.amount),frequency:s.frequency,nextDate:s.nextDate,description:s.description});setP591EditId(s.id);setP591ShowForm(true);}} title={oc(tr591).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                          <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'autoInvoiceSchedules',s.id));}catch(e){toast((oc(tr591).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title={oc(tr591).sil} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                         </div>
                                       </td>
                                     </tr>
@@ -3311,11 +3312,11 @@ export default function MuhasebePage(props: Props) {
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader title={tr597?'📅 Gelir Tanıma Takvimi':'📅 Revenue Recognition Schedule'} subtitle={tr597?'Sözleşme gelirini dönemler arası otomatik olarak dağıtın.':'Spread contract revenue across periods automatically.'} icon={BarChart3}
-                          actionButton={hasFullAccess('muhasebe')&&(<button onClick={()=>setP597ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr597?'Sözleşme Ekle':'Add Contract'}</button>)} />
+                          actionButton={hasFullAccess('muhasebe')&&(<button onClick={()=>setP597ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{oc(tr597).sozlesme_ekle}</button>)} />
                         {p597ShowForm && (
                           <div className="apple-card p-5 space-y-3">
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                              <input className="apple-input px-3 py-2 text-sm" placeholder={tr597?'Müşteri':'Customer'} value={p597Draft.customerName} onChange={e=>setP597Draft(d=>({...d,customerName:e.target.value}))} />
+                              <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr597).musteri} value={p597Draft.customerName} onChange={e=>setP597Draft(d=>({...d,customerName:e.target.value}))} />
                               <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr597?'Toplam Değer (₺)':'Total Value (₺)'} value={p597Draft.totalValue} onChange={e=>setP597Draft(d=>({...d,totalValue:e.target.value}))} />
                               <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr597?'Tanınan (₺)':'Recognized (₺)'} value={p597Draft.recognized} onChange={e=>setP597Draft(d=>({...d,recognized:e.target.value}))} />
                               <input type="date" className="apple-input px-3 py-2 text-sm" value={p597Draft.startDate} onChange={e=>setP597Draft(d=>({...d,startDate:e.target.value}))} />
@@ -3327,8 +3328,8 @@ export default function MuhasebePage(props: Props) {
                                 try { await addDoc(collection(db,'revenueContracts'),{customerName:p597Draft.customerName,totalValue:Number(p597Draft.totalValue),startDate:p597Draft.startDate,endDate:p597Draft.endDate,recognized:Number(p597Draft.recognized)||0,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Sözleşme eklendi ✓' : 'Contract added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Sözleşme eklenemedi.' : 'Failed to add contract.', 'error');}
                                 setP597Draft({customerName:'',totalValue:'',startDate:'',endDate:'',recognized:''});
                                 setP597ShowForm(false);
-                              }} className="apple-button-primary text-sm px-4 py-1.5">{tr597?'Kaydet':'Save'}</button>
-                              <button onClick={()=>setP597ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr597?'İptal':'Cancel'}</button>
+                              }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr597).kaydet}</button>
+                              <button onClick={()=>setP597ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{oc(tr597).iptal}</button>
                             </div>
                           </div>
                         )}
@@ -3353,15 +3354,15 @@ export default function MuhasebePage(props: Props) {
                                     <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'revenueContracts',c.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
                                   </div>
                                   <div className="grid grid-cols-3 gap-3 text-xs mb-3">
-                                    <div><p className="text-gray-400">{tr597?'Toplam':'Total'}</p><p className="font-bold text-gray-700">{paraYaz(c.totalValue)}</p></div>
-                                    <div><p className="text-gray-400">{tr597?'Tanınan':'Recognized'}</p><p className="font-bold text-emerald-600">{paraYaz(c.recognized)}</p></div>
+                                    <div><p className="text-gray-400">{oc(tr597).toplam}</p><p className="font-bold text-gray-700">{paraYaz(c.totalValue)}</p></div>
+                                    <div><p className="text-gray-400">{oc(tr597).taninan}</p><p className="font-bold text-emerald-600">{paraYaz(c.recognized)}</p></div>
                                     <div><p className="text-gray-400">{tr597?'Ertelenmiş':'Deferred'}</p><p className="font-bold text-amber-600">{paraYaz(deferred)}</p></div>
                                   </div>
                                   <div className="w-full bg-gray-200 rounded-full h-2 mb-1.5 overflow-hidden">
                                     <div className="h-full bg-emerald-400 rounded-full" style={{width:`${recPct}%`}}/>
                                   </div>
                                   <div className="flex items-center justify-between text-[10px] text-gray-400">
-                                    <span>{recPct.toFixed(0)}% {tr597?'tanındı':'recognized'}</span>
+                                    <span>{recPct.toFixed(0)}% {oc(tr597).tanindi}</span>
                                     {monthlyRec>0&&<span>{tr597?'Aylık:':'Monthly:'} {paraYaz(monthlyRec, { ondalik: 0 })}</span>}
                                     <button onClick={async ()=>{try{await updateDoc(doc(db,'revenueContracts',c.id),{recognized:Math.min(c.totalValue,c.recognized+monthlyRec)});}catch(e){console.error("[firestore]", e);}}} className="text-blue-500 hover:text-blue-700 font-semibold">{tr597?'Bu Ayı Tanı':'Recognize Month'}</button>
                                   </div>
@@ -3423,9 +3424,9 @@ export default function MuhasebePage(props: Props) {
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           {[
-                            {label:tr617?'Toplam Ciro':'Total Revenue',val:paraYaz(totalRevenue, { ondalik: 0 }),color:'text-blue-600',bg:'bg-blue-50'},
+                            {label:oc(tr617).toplam_ciro,val:paraYaz(totalRevenue, { ondalik: 0 }),color:'text-blue-600',bg:'bg-blue-50'},
                             {label:tr617?'Toplam Matrah':'Total Base',val:paraYaz(totalMatrah, { ondalik: 0 }),color:'text-purple-600',bg:'bg-purple-50'},
-                            {label:tr617?'Toplam KDV':'Total VAT',val:paraYaz(totalKdv, { ondalik: 0 }),color:'text-emerald-600',bg:'bg-emerald-50'},
+                            {label:oc(tr617).toplam_kdv,val:paraYaz(totalKdv, { ondalik: 0 }),color:'text-emerald-600',bg:'bg-emerald-50'},
                             {label:tr617?'Fatura Sayısı':'Invoices',val:String(donemFaturalar.length),color:'text-amber-600',bg:'bg-amber-50'},
                           ].map(k=>(
                             <div key={k.label} className={`apple-card p-5 ${k.bg}`}>
@@ -3439,7 +3440,7 @@ export default function MuhasebePage(props: Props) {
                           <div className="divide-y divide-gray-50">
                             {oranRows.map(row=>(
                               <div key={row.oranKarma ? 'karma' : String(row.oran)} className="grid grid-cols-2 sm:grid-cols-4 gap-y-1 px-4 py-3 text-xs">
-                                <span className={`font-bold ${bandColor(row.oran)}`}>{row.oranKarma ? (tr617?'Karma oran':'Mixed rate') : row.oran == null ? (tr617?'Oran yok':'No rate') : `%${row.oran} KDV`}</span>
+                                <span className={`font-bold ${bandColor(row.oran)}`}>{row.oranKarma ? (oc(tr617).karma_oran) : row.oran == null ? (oc(tr617).oran_yok) : `%${row.oran} KDV`}</span>
                                 <span className="tabular-nums text-gray-600">{paraYaz(row.matrah, { ondalik: 0 })}</span>
                                 <span className="tabular-nums font-bold text-gray-800">{paraYaz(row.kdv, { ondalik: 0 })}</span>
                                 <span className="text-gray-400">{row.count} {tr617?'fatura':'invoices'}</span>
@@ -3500,12 +3501,12 @@ export default function MuhasebePage(props: Props) {
                         <div className="grid grid-cols-3 gap-4">
                           <div className="apple-card p-4 bg-blue-50"><p className="text-xs text-gray-500">{tr625?'Bütçe Ciro':'Budget Revenue'}</p><p className="text-lg font-black text-blue-600">{paraYaz(totalBudRev, { ondalik: 0 })}</p></div>
                           <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{tr625?'Gerçekleşen Ciro':'Actual Revenue'}</p><p className="text-lg font-black text-emerald-600">{paraYaz(totalActRev, { ondalik: 0 })}</p></div>
-                          <div className={`apple-card p-4 ${variance>=0?'bg-emerald-50':'bg-red-50'}`}><p className="text-xs text-gray-500">{tr625?'Sapma':'Variance'}</p><p className={`text-lg font-black ${variance>=0?'text-emerald-600':'text-red-600'}`}>{variance>=0?'+':''}{paraYaz(Math.abs(variance), { ondalik: 0 })}</p></div>
+                          <div className={`apple-card p-4 ${variance>=0?'bg-emerald-50':'bg-red-50'}`}><p className="text-xs text-gray-500">{oc(tr625).sapma}</p><p className={`text-lg font-black ${variance>=0?'text-emerald-600':'text-red-600'}`}>{variance>=0?'+':''}{paraYaz(Math.abs(variance), { ondalik: 0 })}</p></div>
                         </div>
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs">
                             <thead><tr className="border-b border-gray-100 bg-gray-50">
-                              {[tr625?'Ay':'Month',tr625?'Bütçe Ciro':'Budget Rev.',tr625?'Gerçekleşen':'Actual',tr625?'Sapma':'Var.',tr625?'%':'%'].map(h=>(
+                              {[oc(tr625).ay,tr625?'Bütçe Ciro':'Budget Rev.',oc(tr625).gerceklesen,tr625?'Sapma':'Var.',tr625?'%':'%'].map(h=>(
                                 <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                               ))}
                             </tr></thead>
@@ -3534,7 +3535,7 @@ export default function MuhasebePage(props: Props) {
                                           try {
                                             if(existing?.id){ await updateDoc(doc(db,'revExpBudgets',existing.id),{budgetRevenue:val}); }
                                             else { await addDoc(collection(db,'revExpBudgets'),{year:p625BudgetYear,month:i,budgetRevenue:val,budgetExpense:0,createdAt:serverTimestamp()}); }
-                                          } catch(err){ toast((currentLanguage==='tr'?'Kaydedilemedi: ':'Save failed: ')+(err instanceof Error?err.message:String(err)),'error'); }
+                                          } catch(err){ toast((oc(currentLanguage).kaydedilemedi)+(err instanceof Error?err.message:String(err)),'error'); }
                                         }} className="apple-input px-2 py-0.5 text-xs w-28"/>
                                       ):(
                                         <span className="tabular-nums cursor-pointer text-blue-600 hover:underline">{bud>0?paraYaz(bud, { ondalik: 0 }):'—'}</span>
@@ -3595,7 +3596,7 @@ export default function MuhasebePage(props: Props) {
                     const rows634 = [
                       {label:tr634?'Gelir (Net)':'Revenue (Net)',budget:budgetRevenue,actual:revenue},
                       {label:tr634?'Satılan Malın Maliyeti (SMM)':'Cost of Goods Sold',budget:budgetCogs,actual:actualCogs||revenue*0.48},
-                      {label:tr634?'Brüt Kâr':'Gross Profit',budget:budgetRevenue-budgetCogs,actual:revenue-(actualCogs||revenue*0.48)},
+                      {label:oc(tr634).brut_kar,budget:budgetRevenue-budgetCogs,actual:revenue-(actualCogs||revenue*0.48)},
                       {label:tr634?'Faaliyet Giderleri':'Operating Expenses',budget:budgetOpex,actual:actualOpex},
                       {label:tr634?'FAVÖK':'EBITDA',budget:budgetRevenue-budgetCogs-budgetOpex,actual:revenue-(actualCogs||revenue*0.48)-actualOpex},
                     ];
@@ -3603,14 +3604,14 @@ export default function MuhasebePage(props: Props) {
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader title={tr634?'Varyans Analizi':'Variance Analysis'} subtitle={tr634?'Bütçe-gerçekleşen sapma analizi, kategori bazında':'Budget vs actual variance by P&L category'} icon={BarChart3}/>
                         <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-                          {([['this_month',tr634?'Bu Ay':'This Month'],['last_month',tr634?'Geçen Ay':'Last Month'],['ytd',tr634?'YTD':'YTD']] as [typeof p634Period,string][]).map(([v,l])=>(
+                          {([['this_month',oc(tr634).bu_ay],['last_month',oc(tr634).gecen_ay],['ytd',tr634?'YTD':'YTD']] as [typeof p634Period,string][]).map(([v,l])=>(
                             <button key={v} onClick={()=>setP634Period(v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${p634Period===v?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{l}</button>
                           ))}
                         </div>
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs">
                             <thead><tr className="border-b border-gray-100 bg-gray-50">
-                              {[tr634?'Kategori':'Category',tr634?'Bütçe':'Budget',tr634?'Gerçekleşen':'Actual',tr634?'Sapma':'Variance',tr634?'Sapma %':'Var%'].map(h=>(
+                              {[oc(tr634).kategori,oc(tr634).butce,oc(tr634).gerceklesen,oc(tr634).sapma,tr634?'Sapma %':'Var%'].map(h=>(
                                 <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                               ))}
                             </tr></thead>
@@ -3703,18 +3704,18 @@ export default function MuhasebePage(props: Props) {
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader title={tr640?'Tekrarlayan Fatura & Abonelik':'Recurring Billing & Subscriptions'} subtitle={tr640?'B2B abonelik ve periyodik fatura yönetimi':'B2B subscription and periodic invoice management'} icon={RefreshCw}
-                          actionButton={hasFullAccess('muhasebe')&&<button onClick={()=>setP640ShowForm(v=>!v)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4"/>{tr640?'Yeni Abonelik':'New Subscription'}</button>}
+                          actionButton={hasFullAccess('muhasebe')&&<button onClick={()=>setP640ShowForm(v=>!v)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4"/>{oc(tr640).yeni_abonelik}</button>}
                         />
                         {due640>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-amber-500"/><p className="text-xs font-semibold text-amber-800">{due640} {tr640?'abonelik önümüzdeki 7 gün içinde fatura kesilecek':'subscription(s) due for billing in next 7 days'}</p></div>}
                         {p640ShowForm&&(
                           <div className="apple-card p-5 space-y-3 border border-brand/20">
-                            <h4 className="font-bold text-sm text-gray-900">{tr640?'Yeni Abonelik':'New Subscription'}</h4>
+                            <h4 className="font-bold text-sm text-gray-900">{oc(tr640).yeni_abonelik}</h4>
                             <div className="grid grid-cols-2 gap-3">
-                              <input placeholder={tr640?'Müşteri Adı':'Customer Name'} value={p640Draft.customerName} onChange={e=>setP640Draft(d=>({...d,customerName:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
-                              <input type="number" placeholder={tr640?'Tutar (₺)':'Amount (₺)'} value={p640Draft.amount} onChange={e=>setP640Draft(d=>({...d,amount:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
+                              <input placeholder={oc(tr640).musteri_adi} value={p640Draft.customerName} onChange={e=>setP640Draft(d=>({...d,customerName:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
+                              <input type="number" placeholder={oc(tr640).tutar_2} value={p640Draft.amount} onChange={e=>setP640Draft(d=>({...d,amount:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
                               <select value={p640Draft.frequency} onChange={e=>setP640Draft(d=>({...d,frequency:e.target.value as typeof p640Draft.frequency}))} className="apple-input px-3 py-2 text-sm">
-                                <option value="Aylık">{tr640?'Aylık':'Monthly'}</option>
-                                <option value="3 Aylık">{tr640?'3 Aylık':'Quarterly'}</option>
+                                <option value="Aylık">{oc(tr640).aylik}</option>
+                                <option value="3 Aylık">{oc(tr640)._3_aylik}</option>
                                 <option value="Yıllık">{tr640?'Yıllık':'Annual'}</option>
                               </select>
                               <input type="date" value={p640Draft.nextDate} onChange={e=>setP640Draft(d=>({...d,nextDate:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
@@ -3724,8 +3725,8 @@ export default function MuhasebePage(props: Props) {
                                 if(!p640Draft.customerName||!p640Draft.amount) return;
                                 try { await addDoc(collection(db,'recurringBilling'),{customerName:p640Draft.customerName,amount:Number(p640Draft.amount),frequency:p640Draft.frequency,nextDate:p640Draft.nextDate,status:'Aktif',createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Abonelik eklendi ✓' : 'Subscription added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Abonelik eklenemedi.' : 'Failed to add subscription.', 'error');}
                                 setP640ShowForm(false);setP640Draft({customerName:'',amount:'',frequency:'Aylık',nextDate:bugunAnahtari()});
-                              }} className="apple-button-primary px-4 py-2 text-sm">{tr640?'Kaydet':'Save'}</button>
-                              <button onClick={()=>setP640ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr640?'İptal':'Cancel'}</button>
+                              }} className="apple-button-primary px-4 py-2 text-sm">{oc(tr640).kaydet}</button>
+                              <button onClick={()=>setP640ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr640).iptal}</button>
                             </div>
                           </div>
                         )}
@@ -3745,7 +3746,7 @@ export default function MuhasebePage(props: Props) {
                                   <div className="text-right shrink-0">
                                     <p className="text-sm font-black text-[#ff4000]">{paraYaz(s.amount)}</p>
                                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${daysLeft!==null&&daysLeft<=7?'bg-amber-100 text-amber-700':s.status==='Aktif'?'bg-emerald-100 text-emerald-700':'bg-gray-100 text-gray-500'}`}>
-                                      {s.status==='Aktif'?daysLeft!==null&&daysLeft<=7?`${daysLeft}g kaldı`:tr640?'Aktif':'Active':s.status}
+                                      {s.status==='Aktif'?daysLeft!==null&&daysLeft<=7?`${daysLeft}g kaldı`:oc(tr640).aktif:s.status}
                                     </span>
                                   </div>
                                   <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'recurringBilling',s.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0">✕</button>
@@ -3767,20 +3768,20 @@ export default function MuhasebePage(props: Props) {
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader title={tr643?'Şirketlerarası İşlemler':'Intercompany Transactions'} subtitle={tr643?'Holding bünyesindeki şirketler arası borç/alacak netleştirme':'Intercompany receivables & payables elimination for consolidation'} icon={Building2}
-                          actionButton={hasFullAccess('muhasebe')&&<button onClick={()=>setP643ShowForm(v=>!v)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4"/>{tr643?'İşlem Ekle':'Add Transaction'}</button>}
+                          actionButton={hasFullAccess('muhasebe')&&<button onClick={()=>setP643ShowForm(v=>!v)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-2"><Plus className="w-4 h-4"/>{oc(tr643).islem_ekle}</button>}
                         />
                         {pending643.length>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-amber-500"/><p className="text-xs font-semibold text-amber-800">{pending643.length} {tr643?'işlem netleştirme bekliyor —':'transactions pending elimination —'} {paraYaz(totalPending, { ondalik: 0 })}</p></div>}
                         {p643ShowForm&&(
                           <div className="apple-card p-5 space-y-3 border border-brand/20">
                             <h4 className="font-bold text-sm">{tr643?'Yeni Şirketlerarası İşlem':'New Intercompany Transaction'}</h4>
                             <div className="grid grid-cols-2 gap-3">
-                              <div><label className="text-xs text-gray-500 mb-1 block">{tr643?'Gönderen':'From'}</label><select value={p643Draft.from} onChange={e=>setP643Draft(d=>({...d,from:e.target.value}))} className="apple-input px-3 py-2 text-sm w-full">{entities643.map(e=><option key={e}>{e}</option>)}</select></div>
-                              <div><label className="text-xs text-gray-500 mb-1 block">{tr643?'Alıcı':'To'}</label><select value={p643Draft.to} onChange={e=>setP643Draft(d=>({...d,to:e.target.value}))} className="apple-input px-3 py-2 text-sm w-full">{entities643.map(e=><option key={e}>{e}</option>)}</select></div>
-                              <input type="number" placeholder={tr643?'Tutar':'Amount'} value={p643Draft.amount} onChange={e=>setP643Draft(d=>({...d,amount:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
+                              <div><label className="text-xs text-gray-500 mb-1 block">{oc(tr643).gonderen}</label><select value={p643Draft.from} onChange={e=>setP643Draft(d=>({...d,from:e.target.value}))} className="apple-input px-3 py-2 text-sm w-full">{entities643.map(e=><option key={e}>{e}</option>)}</select></div>
+                              <div><label className="text-xs text-gray-500 mb-1 block">{oc(tr643).alici}</label><select value={p643Draft.to} onChange={e=>setP643Draft(d=>({...d,to:e.target.value}))} className="apple-input px-3 py-2 text-sm w-full">{entities643.map(e=><option key={e}>{e}</option>)}</select></div>
+                              <input type="number" placeholder={oc(tr643).tutar} value={p643Draft.amount} onChange={e=>setP643Draft(d=>({...d,amount:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
                               <select value={p643Draft.currency} onChange={e=>setP643Draft(d=>({...d,currency:e.target.value as 'TRY'|'USD'|'EUR'}))} className="apple-input px-3 py-2 text-sm">
                                 <option value="TRY">TRY</option><option value="USD">USD</option><option value="EUR">EUR</option>
                               </select>
-                              <input placeholder={tr643?'Açıklama':'Description'} value={p643Draft.desc} onChange={e=>setP643Draft(d=>({...d,desc:e.target.value}))} className="apple-input px-3 py-2 text-sm col-span-2"/>
+                              <input placeholder={oc(tr643).aciklama} value={p643Draft.desc} onChange={e=>setP643Draft(d=>({...d,desc:e.target.value}))} className="apple-input px-3 py-2 text-sm col-span-2"/>
                               <input type="date" value={p643Draft.date} onChange={e=>setP643Draft(d=>({...d,date:e.target.value}))} className="apple-input px-3 py-2 text-sm"/>
                             </div>
                             <div className="flex gap-2">
@@ -3788,8 +3789,8 @@ export default function MuhasebePage(props: Props) {
                                 if(!p643Draft.amount||!p643Draft.desc) return;
                                 try { await addDoc(collection(db,'intercompanyTxns'),{from:p643Draft.from,to:p643Draft.to,amount:Number(p643Draft.amount),currency:p643Draft.currency,desc:p643Draft.desc,date:p643Draft.date,status:'Bekliyor',createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'İşlem eklendi ✓' : 'Transaction added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'İşlem eklenemedi.' : 'Failed to add transaction.', 'error');}
                                 setP643ShowForm(false);
-                              }} className="apple-button-primary px-4 py-2 text-sm">{tr643?'Kaydet':'Save'}</button>
-                              <button onClick={()=>setP643ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr643?'İptal':'Cancel'}</button>
+                              }} className="apple-button-primary px-4 py-2 text-sm">{oc(tr643).kaydet}</button>
+                              <button onClick={()=>setP643ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr643).iptal}</button>
                             </div>
                           </div>
                         )}
@@ -3848,7 +3849,7 @@ export default function MuhasebePage(props: Props) {
                         <div className="flex items-center justify-between flex-wrap gap-2">
                           <h3 className="font-bold text-gray-900 text-sm">🏢 {tr610?'Kâr Merkezi Analizi':'Profit Center Analysis'}</h3>
                           <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-                            {([{k:'this_month',l:tr610?'Bu Ay':'This Month'},{k:'last_month',l:tr610?'Geçen Ay':'Last Month'},{k:'ytd',l:tr610?'YTD':'YTD'}] as {k:'this_month'|'last_month'|'ytd';l:string}[]).map(t=>(
+                            {([{k:'this_month',l:oc(tr610).bu_ay},{k:'last_month',l:oc(tr610).gecen_ay},{k:'ytd',l:tr610?'YTD':'YTD'}] as {k:'this_month'|'last_month'|'ytd';l:string}[]).map(t=>(
                               <button key={t.k} onClick={()=>setP610Period(t.k)} className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${p610Period===t.k?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>{t.l}</button>
                             ))}
                           </div>
@@ -3856,7 +3857,7 @@ export default function MuhasebePage(props: Props) {
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs">
                             <thead><tr className="border-b border-gray-100 bg-gray-50">
-                              {[tr610?'Merkez':'Center',tr610?'Ciro':'Revenue',tr610?'Maliyet':'Cost',tr610?'Kâr Marjı':'Margin',tr610?'Sipariş':'Orders'].map(h=>(
+                              {[tr610?'Merkez':'Center',oc(tr610).ciro,oc(tr610).maliyet,oc(tr610).kar_marji,oc(tr610).siparis_2].map(h=>(
                                 <th key={h} className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                               ))}
                             </tr></thead>
@@ -3871,7 +3872,7 @@ export default function MuhasebePage(props: Props) {
                                 </tr>
                               ))}
                               <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
-                                <td className="px-4 py-2 text-gray-700">{tr610?'Toplam':'Total'}</td>
+                                <td className="px-4 py-2 text-gray-700">{oc(tr610).toplam}</td>
                                 <td className="px-4 py-2 font-mono text-gray-700">{paraYaz(totalRev, { ondalik: 0 })}</td>
                                 <td className="px-4 py-2 font-mono text-gray-500">{paraYaz(totalCost, { ondalik: 0 })}</td>
                                 <td className={`px-4 py-2 ${totalRev>0?((totalRev-totalCost)/totalRev*100)>=30?'text-emerald-600':'text-amber-600':'text-gray-400'}`}>%{totalRev>0?(((totalRev-totalCost)/totalRev)*100).toFixed(1):'0'}</td>

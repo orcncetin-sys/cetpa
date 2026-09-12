@@ -14,6 +14,7 @@ import ModuleHeader from './ModuleHeader';
 import { parseLocationQr } from '../lib/locationQr';
 import { transferStock, getLocationQty, type LocationRef } from '../services/logisticsService';
 import type { InventoryItem, Warehouse, Vehicle, LocationStock } from '../types';
+import { oc } from '../i18n/ortak';
 
 interface Props {
   currentLanguage: 'tr' | 'en';
@@ -135,7 +136,7 @@ export default function TransferScanPanel({
 
       {/* Ürün */}
       <div className="apple-card p-4">
-        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">{tr ? 'Ürün' : 'Product'}</p>
+        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">{oc(tr).urun}</p>
         {product ? (
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
@@ -150,7 +151,7 @@ export default function TransferScanPanel({
         ) : (
           <div className="space-y-2">
             <button onClick={() => setScanTarget('product')} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-gray-200 text-sm font-semibold text-gray-500 hover:border-brand hover:text-brand transition-colors">
-              <QrCode className="w-4 h-4" />{tr ? 'Ürün Barkodu Tara' : 'Scan Product Barcode'}
+              <QrCode className="w-4 h-4" />{oc(tr).urun_barkodu_tara}
             </button>
             <select value="" onChange={e => { const p = inventory.find(i => i.id === e.target.value); if (p) setProduct(p); }} className="apple-input w-full text-sm">
               <option value="">{tr ? 'veya listeden seç…' : 'or pick from list…'}</option>

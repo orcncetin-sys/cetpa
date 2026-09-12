@@ -18,6 +18,7 @@ import { eBelgeIndir } from '../services/ebelgeIndir';
 import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
 import { VERGI_PNTR_ORAN } from '../hooks/useMikroFaturalar';
+import { oc } from '../i18n/ortak';
 
 export interface MikroFaturaDetayVerisi {
   id: string;
@@ -141,7 +142,7 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
             <h3 className="font-bold text-[#1D1D1F]">
               {tr ? 'Fatura Detayı' : 'Invoice Detail'}
               <span className={`ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full align-middle ${fatura.yon === 'gelen' ? 'bg-purple-100 text-purple-600' : 'bg-teal-100 text-teal-700'}`}>
-                {fatura.yon === 'gelen' ? (tr ? 'GELEN' : 'IN') : (tr ? 'GİDEN' : 'OUT')}
+                {fatura.yon === 'gelen' ? (oc(tr).gelen) : (oc(tr).giden)}
               </span>
             </h3>
             <p className="text-xs text-gray-500 mt-0.5 font-mono">{fatura.faturaNo || '—'}</p>
@@ -152,28 +153,28 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
         <div className="p-5 overflow-y-auto flex-1 min-h-0">
           {satir(tr ? 'Müşteri / Cari' : 'Customer', fatura.musteri)}
           {satir(tr ? 'Cari kodu' : 'Account code', fatura.cariKod || '—')}
-          {satir(tr ? 'Tarih' : 'Date', fatura.tarih || '—')}
+          {satir(oc(tr).tarih, fatura.tarih || '—')}
           {satir(tr ? 'Matrah' : 'Base', typeof fatura.matrah === 'number' ? tl(fatura.matrah) : '—')}
-          {satir(tr ? 'KDV' : 'VAT', typeof fatura.kdv === 'number' ? `${tl(fatura.kdv)}${fatura.oranKarma ? (tr ? ' (Karma oran)' : ' (Mixed rate)') : (fatura.oran !== null ? ` (%${fatura.oran})` : '')}` : '—')}
+          {satir(oc(tr).kdv, typeof fatura.kdv === 'number' ? `${tl(fatura.kdv)}${fatura.oranKarma ? (tr ? ' (Karma oran)' : ' (Mixed rate)') : (fatura.oran !== null ? ` (%${fatura.oran})` : '')}` : '—')}
           {fatura.oranKarma && oranKirilim && oranKirilim.length > 1 && (
             <div className="bg-amber-50 rounded-xl px-3 py-2 my-2 space-y-1">
               <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">{tr ? 'KDV Kırılımı' : 'VAT Breakdown'}</p>
               {oranKirilim.map(r => (
                 <div key={String(r.oran)} className="flex items-center justify-between text-xs">
-                  <span className="text-gray-600">{r.oran === null ? (tr ? 'Bilinmiyor' : 'Unknown') : `%${r.oran}`}</span>
+                  <span className="text-gray-600">{r.oran === null ? (oc(tr).bilinmiyor) : `%${r.oran}`}</span>
                   <span className="font-semibold text-[#1D1D1F]">{tl(r.kdv)} <span className="text-gray-400 font-normal">({tr ? 'matrah' : 'base'} {tl(r.matrah)})</span></span>
                 </div>
               ))}
             </div>
           )}
-          {satir(tr ? 'Toplam' : 'Total', typeof fatura.tutar === 'number' ? tl(fatura.tutar) : '—')}
+          {satir(oc(tr).toplam, typeof fatura.tutar === 'number' ? tl(fatura.tutar) : '—')}
 
           {/* ── Fatura kalemleri ── */}
           <div className="mt-4">
             <div className="flex items-center gap-1.5 mb-2">
               <Package size={13} className="text-gray-400" />
               <span className="text-xs font-bold text-gray-600">
-                {tr ? 'Kalemler' : 'Line items'}
+                {oc(tr).kalemler}
                 {kalemler?.length ? <span className="text-gray-400 font-normal"> · {kalemler.length}</span> : null}
               </span>
             </div>
@@ -203,11 +204,11 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="text-gray-400 border-b border-gray-100">
-                      <th className="text-left font-semibold py-1.5 px-1">{tr ? 'Ürün' : 'Product'}</th>
-                      <th className="text-right font-semibold py-1.5 px-1">{tr ? 'Miktar' : 'Qty'}</th>
-                      <th className="text-left font-semibold py-1.5 px-1">{tr ? 'Birim' : 'Unit'}</th>
-                      <th className="text-right font-semibold py-1.5 px-1">{tr ? 'Tutar' : 'Amount'}</th>
-                      <th className="text-right font-semibold py-1.5 px-1">{tr ? 'KDV' : 'VAT'}</th>
+                      <th className="text-left font-semibold py-1.5 px-1">{oc(tr).urun}</th>
+                      <th className="text-right font-semibold py-1.5 px-1">{oc(tr).miktar}</th>
+                      <th className="text-left font-semibold py-1.5 px-1">{oc(tr).birim}</th>
+                      <th className="text-right font-semibold py-1.5 px-1">{oc(tr).tutar}</th>
+                      <th className="text-right font-semibold py-1.5 px-1">{oc(tr).kdv}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -256,7 +257,7 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
         </div>
 
         <div className="flex items-center justify-end gap-2 p-5 border-t border-gray-100 flex-shrink-0">
-          <button onClick={onClose} className="apple-button-secondary px-4 py-2 text-sm">{tr ? 'Kapat' : 'Close'}</button>
+          <button onClick={onClose} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr).kapat}</button>
           <button
             onClick={() => void indir('pdf')}
             disabled={!!indiriliyor}

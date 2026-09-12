@@ -25,6 +25,7 @@ import {
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
 import ModuleHeader from './ModuleHeader';
+import { oc } from '../i18n/ortak';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -179,7 +180,7 @@ export default function PerformansModule({ currentLanguage, isAuthenticated, emp
   return (
     <div className="space-y-4">
       <ModuleHeader
-        title={tr ? 'Performans Değerlendirme' : 'Performance Reviews'}
+        title={oc(tr).performans_degerlendirme}
         subtitle={tr ? 'OKR bazlı çalışan değerlendirmesi, yetkinlik skorlama ve gelişim planları' : 'OKR-based reviews, competency scoring, development plans'}
         icon={Star}
         actionButton={isAuthenticated ? (
@@ -194,8 +195,8 @@ export default function PerformansModule({ currentLanguage, isAuthenticated, emp
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: tr ? 'Toplam Değerlendirme' : 'Total Reviews', v: reviews.length, color: 'text-blue-600', bg: 'bg-blue-50' },
-          { label: tr ? 'Bekleyen' : 'Pending', v: pending.length, color: 'text-orange-600', bg: 'bg-orange-50' },
-          { label: tr ? 'Tamamlanan' : 'Completed', v: closed.length, color: 'text-green-600', bg: 'bg-green-50' },
+          { label: oc(tr).bekleyen, v: pending.length, color: 'text-orange-600', bg: 'bg-orange-50' },
+          { label: oc(tr).tamamlanan, v: closed.length, color: 'text-green-600', bg: 'bg-green-50' },
           { label: tr ? 'Ort. Puan' : 'Avg Score', v: avgScore ? `${avgScore}/5` : '—', color: avgScore >= 4 ? 'text-green-600' : 'text-amber-600', bg: avgScore >= 4 ? 'bg-green-50' : 'bg-amber-50' },
         ].map(k => (
           <div key={k.label} className={`apple-card p-4 ${k.bg}`}>
@@ -211,7 +212,7 @@ export default function PerformansModule({ currentLanguage, isAuthenticated, emp
           <button key={s} onClick={() => setFilterStatus(s)}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap
               ${filterStatus === s ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
-            {s === 'all' ? (tr ? 'Tümü' : 'All') : (tr ? STATUS_CONFIG[s].label : STATUS_CONFIG[s].labelEn)}
+            {s === 'all' ? (oc(tr).tumu) : (tr ? STATUS_CONFIG[s].label : STATUS_CONFIG[s].labelEn)}
           </button>
         ))}
       </div>
@@ -237,7 +238,7 @@ export default function PerformansModule({ currentLanguage, isAuthenticated, emp
               {(draft.employeeName === '__custom' || !employees.find(e => e.name === draft.employeeName)) && (
                 <input value={draft.employeeName === '__custom' ? '' : draft.employeeName}
                   onChange={e => setDraft(d => ({ ...d, employeeName: e.target.value }))}
-                  placeholder={tr ? 'Çalışan adı' : 'Employee name'} className="apple-input px-3 py-2 text-sm" />
+                  placeholder={oc(tr).calisan_adi} className="apple-input px-3 py-2 text-sm" />
               )}
               <input value={draft.employeeRole} onChange={e => setDraft(d => ({ ...d, employeeRole: e.target.value }))}
                 placeholder={tr ? 'Pozisyon / Rol' : 'Position / Role'} className="apple-input px-3 py-2 text-sm" />
@@ -330,7 +331,7 @@ export default function PerformansModule({ currentLanguage, isAuthenticated, emp
 
             <div className="flex gap-2">
               <button onClick={saveReview} className="apple-button-primary px-4 py-2 text-sm">{tr ? 'Değerlendirmeyi Kaydet' : 'Save Review'}</button>
-              <button onClick={() => setShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr ? 'İptal' : 'Cancel'}</button>
+              <button onClick={() => setShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr).iptal}</button>
             </div>
           </motion.div>
         )}
@@ -439,7 +440,7 @@ export default function PerformansModule({ currentLanguage, isAuthenticated, emp
                           <CheckCircle2 className="w-4 h-4" />
                           {r.status === 'Taslak' ? (tr ? 'Çalışan Değerlendirmesini Onayla' : 'Mark Self-Assessed')
                             : r.status === 'Çalışan Değerlendirdi' ? (tr ? 'Yönetici Değerlendirmesini Tamamla' : 'Complete Manager Review')
-                            : (tr ? 'Kapat' : 'Close')}
+                            : (oc(tr).kapat)}
                         </button>
                       )}
                     </div>

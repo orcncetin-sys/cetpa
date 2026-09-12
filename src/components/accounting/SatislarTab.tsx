@@ -4,6 +4,7 @@ import { type Order } from '../../types';
 import { type MikroFatura } from '../../hooks/useMikroFaturalar';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
 import { tarihYaz } from '../../utils/zaman';
+import { oc } from '../../i18n/ortak';
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type SatisKayit = { customerName?: string; totalPrice?: number; faturali?: boolean; kdvOran?: number; oranKarma?: boolean; kdvTutari?: number; syncedAt?: { toDate?: () => Date } };
@@ -59,7 +60,7 @@ export default function SatislarTab({
       {/* KPI Cards Row 1 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {/* Toplam Sipariş — count, no currency toggle */}
-        <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Tüm Siparişler' : 'All Orders', rows: satisKayitlari.map((o) => ({ label: o.customerName || '—', sub: o.syncedAt ? tarihYaz(o.syncedAt) : '', badge: o.faturali ? 'FATURALI' : 'FATURASIZ', badgeColor: o.faturali ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.reduce((s, o) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+        <button onClick={() => setDrillDown({ title: oc(currentLanguage).tum_siparisler, rows: satisKayitlari.map((o) => ({ label: o.customerName || '—', sub: o.syncedAt ? tarihYaz(o.syncedAt) : '', badge: o.faturali ? 'FATURALI' : 'FATURASIZ', badgeColor: o.faturali ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.reduce((s, o) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-brand/10 flex items-center justify-center">
               <ShoppingCart size={15} className="text-brand" />
@@ -79,7 +80,7 @@ export default function SatislarTab({
           {/* Toplam Ciro = Cetpa sipariş cirosu + (kaynak Mikro'yu içeriyorsa) Mikro satış faturaları.
               mikroSatisToplam yalnız 'giden' (satış) faturalarıdır — alış karışmaz. */}
           <p className="text-xl font-bold text-green-600">{formatConv(orders.reduce((s, o) => s + (o.totalPrice || 0), 0) + (satisKaynak !== 'cetpa' ? mikroSatisToplam : 0))}</p>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam Ciro{satisKaynak !== 'cetpa' && mikroSatisToplam > 0 ? (currentLanguage === 'tr' ? ' (Mikro dahil)' : ' (incl. Mikro)') : ''}</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam Ciro{satisKaynak !== 'cetpa' && mikroSatisToplam > 0 ? (oc(currentLanguage).mikro_dahil) : ''}</p>
         </div>
         {/* Faturalı / Faturasız — count, no currency toggle */}
         <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturalı Siparişler' : 'Invoiced Orders', rows: satisKayitlari.filter((o) => o.faturali).map((o) => ({ label: o.customerName || '—', sub: o.syncedAt ? tarihYaz(o.syncedAt) : '', badge: 'FATURALI', badgeColor: 'bg-green-100 text-green-600', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.filter((o) => o.faturali).reduce((s, o) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
@@ -94,14 +95,14 @@ export default function SatislarTab({
         {/* Toplam KDV — stays TRY */}
         {/* Karma oranlı faturalar (task #27, #18'in devamı): oranKarma tek
             f.oran'a göre kovalanırsa KDV'si yanlış orana yazılır — ayrı kova. */}
-        <button onClick={() => { const byRate: Record<string, number> = {}; satisKayitlari.forEach((o) => { if (o.oranKarma) { byRate[currentLanguage==='tr'?'Karma':'Mixed'] = (byRate[currentLanguage==='tr'?'Karma':'Mixed'] || 0) + (o.kdvTutari || 0); } else if (o.kdvOran !== undefined) { const k = `%${o.kdvOran} KDV`; byRate[k] = (byRate[k] || 0) + (o.kdvTutari || 0); } }); setDrillDown({ title: currentLanguage === 'tr' ? 'KDV Oranlarına Göre' : 'KDV by Rate', rows: Object.entries(byRate).sort(([,a],[,b]) => b - a).map(([rate, tutar]) => ({ label: rate, value: formatTRY(tutar) })), total: formatTRY(satisKayitlari.reduce((s, o) => s + (o.kdvTutari || 0), 0)) }); }} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+        <button onClick={() => { const byRate: Record<string, number> = {}; satisKayitlari.forEach((o) => { if (o.oranKarma) { byRate[oc(currentLanguage).karma] = (byRate[oc(currentLanguage).karma] || 0) + (o.kdvTutari || 0); } else if (o.kdvOran !== undefined) { const k = `%${o.kdvOran} KDV`; byRate[k] = (byRate[k] || 0) + (o.kdvTutari || 0); } }); setDrillDown({ title: currentLanguage === 'tr' ? 'KDV Oranlarına Göre' : 'KDV by Rate', rows: Object.entries(byRate).sort(([,a],[,b]) => b - a).map(([rate, tutar]) => ({ label: rate, value: formatTRY(tutar) })), total: formatTRY(satisKayitlari.reduce((s, o) => s + (o.kdvTutari || 0), 0)) }); }} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center">
               <Calculator size={15} className="text-purple-600" />
             </div>
           </div>
           <p className="text-xl font-bold text-purple-600">{formatTRY(orders.reduce((s, o) => s + (o.kdvTutari || 0), 0) + mikroSatisKdv)}</p>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam KDV{mikroDahil && mikroSatisKdv > 0 ? (currentLanguage === 'tr' ? ' (Mikro dahil)' : ' (incl. Mikro)') : ''}</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam KDV{mikroDahil && mikroSatisKdv > 0 ? (oc(currentLanguage).mikro_dahil) : ''}</p>
         </button>
       </div>
       {/* KPI Cards Row 2 */}
@@ -115,7 +116,7 @@ export default function SatislarTab({
             <CurrencyPicker />
           </div>
           <p className="text-xl font-bold text-green-600">{formatConv(orders.filter((o) => o.faturali).reduce((s, o) => s + (o.totalPrice || 0), 0) + mikroSatisCiro)}</p>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturalı Ciro{mikroDahil && mikroSatisCiro > 0 ? (currentLanguage === 'tr' ? ' (Mikro dahil)' : ' (incl. Mikro)') : ''}</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Faturalı Ciro{mikroDahil && mikroSatisCiro > 0 ? (oc(currentLanguage).mikro_dahil) : ''}</p>
         </div>
         {/* Faturasız Ciro */}
         <div onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturasız Ciro Detayı' : 'Non-Invoiced Revenue Detail', rows: satisKayitlari.filter((o) => !o.faturali).map((o) => ({ label: o.customerName || '—', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.filter((o) => !o.faturali).reduce((s, o) => s + (o.totalPrice || 0), 0)) })} role="button" tabIndex={0} className="apple-card p-4 cursor-pointer flex flex-col justify-between">
@@ -173,7 +174,7 @@ export default function SatislarTab({
             {([
               ['cetpa',  currentLanguage === 'tr' ? `Cetpa (${displayedSatis.length})` : `Cetpa (${displayedSatis.length})`],
               ['mikro',  `Mikro (${mikroSatisSatirlari.length})`],
-              ['hepsi',  currentLanguage === 'tr' ? 'Tümü' : 'All'],
+              ['hepsi',  oc(currentLanguage).tumu],
             ] as const).map(([k, l]) => (
               <button key={k} onClick={() => setSatisKaynak(k)}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${satisKaynak === k ? 'bg-white shadow-sm text-[#1D1D1F]' : 'text-gray-500 hover:text-[#1D1D1F]'}`}>

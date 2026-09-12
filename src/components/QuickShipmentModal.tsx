@@ -6,6 +6,7 @@ import { db } from '../firebase';
 import type { Order } from '../types';
 import type { Language } from '../translations';
 import { bugunAnahtari } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 interface QuickShipmentModalProps {
   order: Order | null;
@@ -38,7 +39,7 @@ export default function QuickShipmentModal({
               <Truck className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <h3 className="font-black text-gray-900">{currentLanguage === 'tr' ? 'Hızlı Sevkiyat' : 'Quick Shipment'}</h3>
+              <h3 className="font-black text-gray-900">{oc(currentLanguage).hizli_sevkiyat}</h3>
               <p className="text-xs text-gray-400">#{order.shopifyOrderId || order.id.slice(-6)} · {order.customerName}</p>
             </div>
             <button onClick={onClose} className="ml-auto p-2 hover:bg-gray-100 rounded-full transition-colors"><X className="w-4 h-4 text-gray-400" /></button>
@@ -68,9 +69,9 @@ export default function QuickShipmentModal({
             {[
               { name: 'destination', label: currentLanguage === 'tr' ? 'Adres' : 'Destination', defaultValue: order.shippingAddress || '' },
               { name: 'cargoFirm',   label: currentLanguage === 'tr' ? 'Kargo Firması' : 'Cargo Company', defaultValue: order.cargoCompany || '' },
-              { name: 'driver',      label: currentLanguage === 'tr' ? 'Sürücü' : 'Driver', defaultValue: '' },
-              { name: 'trackingNo',  label: currentLanguage === 'tr' ? 'Takip No' : 'Tracking No', defaultValue: order.trackingNumber || '' },
-              { name: 'date',        label: currentLanguage === 'tr' ? 'Tarih' : 'Date', defaultValue: today, type: 'date' },
+              { name: 'driver',      label: oc(currentLanguage).surucu, defaultValue: '' },
+              { name: 'trackingNo',  label: oc(currentLanguage).takip_no, defaultValue: order.trackingNumber || '' },
+              { name: 'date',        label: oc(currentLanguage).tarih, defaultValue: today, type: 'date' },
             ].map(f => (
               <div key={f.name}>
                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{f.label}</label>
@@ -83,7 +84,7 @@ export default function QuickShipmentModal({
               </div>
             ))}
             <div className="flex gap-3 pt-2">
-              <button type="button" onClick={onClose} className="flex-1 apple-button-secondary">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+              <button type="button" onClick={onClose} className="flex-1 apple-button-secondary">{oc(currentLanguage).iptal}</button>
               <button type="submit" className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2.5 rounded-full transition-colors flex items-center justify-center gap-2 text-sm">
                 <Truck className="w-4 h-4" />
                 {currentLanguage === 'tr' ? 'Sevkiyat Oluştur' : 'Create Shipment'}

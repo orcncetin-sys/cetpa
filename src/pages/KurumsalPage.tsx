@@ -10,6 +10,7 @@ import { motion } from 'motion/react';
 import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import CorporateGovernanceModule from '../components/CorporateGovernanceModule';
+import { oc } from '../i18n/ortak';
 
 interface Props {
   currentLanguage: 'tr' | 'en';
@@ -27,7 +28,7 @@ export default function KurumsalPage({
 }: Props) {
   return (
     <motion.div key="kurumsal" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-      {!canAccess('kurumsal') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Kurumsal Yönetim':'Corporate Governance'} /> : (
+      {!canAccess('kurumsal') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).kurumsal_yonetim} /> : (
         <>
           {!hasFullAccess('kurumsal') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
           <CorporateGovernanceModule currentLanguage={currentLanguage} isAuthenticated={!!user && hasFullAccess('kurumsal')} userRole={userRole} onNavigate={setActiveTab} />

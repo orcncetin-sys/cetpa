@@ -22,6 +22,7 @@ import { useMikroTedarikciler } from '../hooks/useMikroTedarikciler';
 import { paraYaz, tlYaz } from '../utils/currency';
 import { eslesir } from '../utils/arama';
 import { ayAnahtari, tarihYaz, zamanDate } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 const PurchasingModule = React.lazy(() => import('../components/PurchasingModule'));
 
@@ -162,18 +163,18 @@ export default function SatinAlmaPage(props: Props) {
 
   return (
             <motion.div key="satin-alma" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-              {!canAccess('satin-alma') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Satın Alma':'Purchasing'} /> : (
+              {!canAccess('satin-alma') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).satin_alma} /> : (
                 <>
                   {!hasFullAccess('satin-alma') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
 
                   {/* ── Sub-tab switcher (hidden on desktop — sidebar handles nav) ── */}
                   <div className="lg:hidden flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
                     {([
-                      { key: 'pos',       label: currentLanguage === 'tr' ? 'Satın Alma Siparişleri' : 'Purchase Orders', icon: ShoppingCart },
-                      { key: 'suppliers', label: currentLanguage === 'tr' ? 'Tedarikçiler' : 'Suppliers',         icon: Building2     },
+                      { key: 'pos',       label: oc(currentLanguage).satin_alma_siparisleri, icon: ShoppingCart },
+                      { key: 'suppliers', label: oc(currentLanguage).tedarikciler,         icon: Building2     },
                       { key: 'scorecard',       label: currentLanguage === 'tr' ? 'Tedarikçi Skorkartı' : 'Supplier Scorecard', icon: Award },
-                      { key: 'odeme-takvimi',  label: currentLanguage === 'tr' ? 'Ödeme Takvimi' : 'Payment Schedule',    icon: Calendar },
-                      { key: 'fiyat-karsilastirma', label: currentLanguage === 'tr' ? 'Fiyat Karşılaştırma' : 'Price Comparison', icon: Coins },
+                      { key: 'odeme-takvimi',  label: oc(currentLanguage).odeme_takvimi,    icon: Calendar },
+                      { key: 'fiyat-karsilastirma', label: oc(currentLanguage).fiyat_karsilastirma, icon: Coins },
                     ] as { key: PurchasingSubTab; label: string; icon: React.ElementType }[]).map(t => (
                       <button key={t.key} onClick={() => setPurchasingSubTab(t.key)}
                         className={cn('flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
@@ -312,7 +313,7 @@ export default function SatinAlmaPage(props: Props) {
                             <button onClick={() => { setAddingSupplier(true); setNewSupplier({}); }}
                               className="apple-button-primary flex items-center gap-2">
                               <Plus className="w-4 h-4" />
-                              {currentLanguage === 'tr' ? 'Yeni Tedarikçi' : 'New Supplier'}
+                              {oc(currentLanguage).yeni_tedarikci}
                             </button>
                           )
                         }
@@ -375,7 +376,7 @@ export default function SatinAlmaPage(props: Props) {
                                       </button>
                                       {isNative && (
                                         <button onClick={e => { e.stopPropagation(); void handleDeleteSupplier(s.id); }}
-                                          title={currentLanguage==='tr'?'Sil':'Delete'}
+                                          title={oc(currentLanguage).sil}
                                           className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600">
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
@@ -416,7 +417,7 @@ export default function SatinAlmaPage(props: Props) {
                           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setAcikTedarikci(null)}>
                             <div ref={ekstreModalRef} role="dialog" aria-modal="true" aria-label={acikTedarikci.ad}
                               className="relative bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-xl p-5 pt-12" onClick={e => e.stopPropagation()}>
-                              <button onClick={() => setAcikTedarikci(null)} aria-label={currentLanguage==='tr'?'Kapat':'Close'}
+                              <button onClick={() => setAcikTedarikci(null)} aria-label={oc(currentLanguage).kapat}
                                 className="absolute top-3 right-3 z-10 p-2 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100">
                                 <X className="w-5 h-5" />
                               </button>
@@ -436,7 +437,7 @@ export default function SatinAlmaPage(props: Props) {
                                 </p>
                               )}
                               <button onClick={() => setAcikTedarikci(null)} className="apple-button-secondary w-full text-sm mt-4">
-                                {currentLanguage === 'tr' ? 'Kapat' : 'Close'}
+                                {oc(currentLanguage).kapat}
                               </button>
                             </div>
                           </div>
@@ -464,7 +465,7 @@ export default function SatinAlmaPage(props: Props) {
                             <h2 className="font-bold text-lg">
                               {editingSupplier
                                 ? (currentLanguage === 'tr' ? 'Tedarikçi Düzenle' : 'Edit Supplier')
-                                : (currentLanguage === 'tr' ? 'Yeni Tedarikçi' : 'New Supplier')}
+                                : (oc(currentLanguage).yeni_tedarikci)}
                             </h2>
                             <button onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); setVknLookupMsg(null); }} aria-label="Kapat" className="p-2 -m-2 rounded-lg hover:bg-gray-100">
                               <X className="w-5 h-5 text-gray-400" />
@@ -500,12 +501,12 @@ export default function SatinAlmaPage(props: Props) {
 
                           {[
                             { key: 'name',      label: currentLanguage === 'tr' ? 'Ad / Ünvan *' : 'Name *',          required: true  },
-                            { key: 'company',   label: currentLanguage === 'tr' ? 'Firma' : 'Company',                 required: false },
-                            { key: 'email',     label: currentLanguage === 'tr' ? 'E-posta' : 'Email',                 required: false },
-                            { key: 'phone',     label: currentLanguage === 'tr' ? 'Telefon' : 'Phone',                 required: false },
-                            { key: 'taxOffice', label: currentLanguage === 'tr' ? 'Vergi Dairesi' : 'Tax Office',      required: false },
-                            { key: 'address',   label: currentLanguage === 'tr' ? 'Adres' : 'Address',                 required: false },
-                            { key: 'notes',     label: currentLanguage === 'tr' ? 'Notlar' : 'Notes',                  required: false },
+                            { key: 'company',   label: oc(currentLanguage).firma,                 required: false },
+                            { key: 'email',     label: oc(currentLanguage).e_posta,                 required: false },
+                            { key: 'phone',     label: oc(currentLanguage).telefon,                 required: false },
+                            { key: 'taxOffice', label: oc(currentLanguage).vergi_dairesi,      required: false },
+                            { key: 'address',   label: oc(currentLanguage).adres,                 required: false },
+                            { key: 'notes',     label: oc(currentLanguage).notlar,                  required: false },
                           ].map(field => (
                             <div key={field.key} className="space-y-1">
                               <label className="text-[10px] font-bold text-gray-500 uppercase">{field.label}</label>
@@ -518,9 +519,9 @@ export default function SatinAlmaPage(props: Props) {
                           ))}
                           <div className="flex gap-2 pt-2">
                             <button onClick={() => { setAddingSupplier(false); setEditingSupplier(null); setNewSupplier({}); setVknLookupMsg(null); }}
-                              className="apple-button-secondary flex-1">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
+                              className="apple-button-secondary flex-1">{oc(currentLanguage).iptal}</button>
                             <button onClick={() => void handleSaveSupplier()}
-                              className="apple-button-primary flex-1">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
+                              className="apple-button-primary flex-1">{oc(currentLanguage).kaydet}</button>
                           </div>
                         </motion.div>
                       </motion.div>
@@ -592,8 +593,8 @@ export default function SatinAlmaPage(props: Props) {
                                 </div>
                                 {/* Mini stats row */}
                                 <div className="flex gap-4 text-[10px]">
-                                  <span className="text-emerald-600 font-semibold">{s.delivered} {currentLanguage === 'tr' ? 'teslim' : 'delivered'}</span>
-                                  <span className="text-amber-600 font-semibold">{s.pending} {currentLanguage === 'tr' ? 'bekliyor' : 'pending'}</span>
+                                  <span className="text-emerald-600 font-semibold">{s.delivered} {oc(currentLanguage).teslim_2}</span>
+                                  <span className="text-amber-600 font-semibold">{s.pending} {oc(currentLanguage).bekliyor_3}</span>
                                   {s.cancelled > 0 && <span className="text-red-500 font-semibold">{s.cancelled} {currentLanguage === 'tr' ? 'iptal' : 'cancelled'}</span>}
                                   <span className="text-gray-400 ml-auto">{s.onTimeRate}% {currentLanguage === 'tr' ? 'teslimat oranı' : 'delivery rate'}</span>
                                 </div>
@@ -764,13 +765,13 @@ export default function SatinAlmaPage(props: Props) {
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="border-b border-gray-100">
-                                <th className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{tr567?'Tedarikçi':'Supplier'}</th>
+                                <th className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{oc(tr567).tedarikci}</th>
                                 {criteria.map(c => (
                                   <th key={c.key} className="py-2 px-2 text-center text-[10px] font-bold text-gray-400 uppercase whitespace-nowrap">
                                     {c.label}<br/><span className="text-gray-300 font-normal">{tr567?`%${Math.round(weights[c.key as keyof typeof weights]*100)}`:`${Math.round(weights[c.key as keyof typeof weights]*100)}%`}</span>
                                   </th>
                                 ))}
-                                <th className="py-2 px-3 text-center text-[10px] font-bold text-gray-400 uppercase">{tr567?'Toplam':'Total'}</th>
+                                <th className="py-2 px-3 text-center text-[10px] font-bold text-gray-400 uppercase">{oc(tr567).toplam}</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
@@ -902,7 +903,7 @@ export default function SatinAlmaPage(props: Props) {
                     const statusBadge = (s:string) => s==='Onaylandı'?'bg-emerald-100 text-emerald-700':s==='Teslim Alındı'?'bg-blue-100 text-blue-700':s==='İptal Edildi'?'bg-red-100 text-red-700':'bg-orange-100 text-orange-700';
                     return (
                       <motion.div key="tedarikci-portal" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
-                        <ModuleHeader title={tr551?'Tedarikçi Portalı':'Supplier Portal'} subtitle={tr551?'Tedarikçi bazında PO durumları ve bildirim gönderimi':'PO status view and notification dispatch per supplier'} icon={Building2} />
+                        <ModuleHeader title={oc(tr551).tedarikci_portali} subtitle={tr551?'Tedarikçi bazında PO durumları ve bildirim gönderimi':'PO status view and notification dispatch per supplier'} icon={Building2} />
                         {/* Supplier selector */}
                         <div className="flex flex-wrap items-center gap-3">
                           <select value={p551SelSupplier} onChange={e=>setP551SelSupplier(e.target.value)} className="apple-input px-3 py-2 text-sm">
@@ -910,7 +911,7 @@ export default function SatinAlmaPage(props: Props) {
                             {suppNames.map(s=><option key={s}>{s}</option>)}
                           </select>
                           <div className="flex gap-3 text-sm">
-                            <span className="font-bold text-orange-600">{open551.length} {tr551?'açık PO':'open PO'}</span>
+                            <span className="font-bold text-orange-600">{open551.length} {oc(tr551).acik_po}</span>
                             <span className="text-gray-400">·</span>
                             <span className="font-bold text-gray-600">{fPO(totalOpen)} {tr551?'bakiye':'outstanding'}</span>
                           </div>
@@ -925,7 +926,7 @@ export default function SatinAlmaPage(props: Props) {
                               return (
                                 <button key={sup} onClick={()=>setP551SelSupplier(sup)} className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.01] transition-all">
                                   <p className="font-semibold text-gray-800 text-sm truncate">{sup}</p>
-                                  <p className="text-xs text-gray-400 mt-1">{sopOpen.length} {tr551?'açık PO':'open PO'}</p>
+                                  <p className="text-xs text-gray-400 mt-1">{sopOpen.length} {oc(tr551).acik_po}</p>
                                   <p className="text-base font-bold text-orange-600 mt-0.5">{fPO(sopTotal)}</p>
                                 </button>
                               );
@@ -935,16 +936,16 @@ export default function SatinAlmaPage(props: Props) {
                         {/* PO table */}
                         <div className="apple-card overflow-hidden">
                           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                            <h4 className="font-bold text-gray-800 text-sm">{p551SelSupplier || (tr551?'Tüm Siparişler':'All Orders')}</h4>
+                            <h4 className="font-bold text-gray-800 text-sm">{p551SelSupplier || (oc(tr551).tum_siparisler)}</h4>
                             {p551SelSupplier && <button onClick={()=>setP551SelSupplier('')} className="text-xs text-brand hover:underline">{tr551?'Tüm Tedarikçiler':'All Suppliers'}</button>}
                           </div>
                           <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                               <thead><tr className="border-b border-gray-100 bg-gray-50/60">
                                 <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase">PO #</th>
-                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{tr551?'Tedarikçi':'Supplier'}</th>
-                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{tr551?'Tutar':'Amount'}</th>
-                                <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{tr551?'Durum':'Status'}</th>
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase hidden sm:table-cell">{oc(tr551).tedarikci}</th>
+                                <th className="px-4 py-2.5 text-right text-xs font-bold text-gray-400 uppercase">{oc(tr551).tutar}</th>
+                                <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 uppercase">{oc(tr551).durum}</th>
                               </tr></thead>
                               <tbody>
                                 {[...open551, ...closed551].map(po=>(
@@ -996,13 +997,13 @@ export default function SatinAlmaPage(props: Props) {
                                       await updateDoc(doc(db,'purchaseOrders',po.id),{status:'Onaylandı'});
                                       toast(tr578?'PO onaylandı.':'PO approved.','success');
                                     }} className="text-xs font-bold bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1 rounded-full transition-colors">
-                                      {tr578?'Onayla':'Approve'}
+                                      {oc(tr578).onayla}
                                     </button>
                                     <button onClick={async()=>{
                                       await updateDoc(doc(db,'purchaseOrders',po.id),{status:'İptal Edildi'});
                                       toast(tr578?'PO reddedildi.':'PO rejected.','warning');
                                     }} className="text-xs font-bold bg-red-100 text-red-700 hover:bg-red-200 px-3 py-1 rounded-full transition-colors">
-                                      {tr578?'Reddet':'Reject'}
+                                      {oc(tr578).reddet}
                                     </button>
                                   </div>
                                 )}
@@ -1041,7 +1042,7 @@ export default function SatinAlmaPage(props: Props) {
                         {p608ShowForm && (
                           <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                              <input className="apple-input" placeholder={tr608?'Tedarikçi':'Supplier'} value={p608Draft.supplier} onChange={e=>setP608Draft(d=>({...d,supplier:e.target.value}))}/>
+                              <input className="apple-input" placeholder={oc(tr608).tedarikci} value={p608Draft.supplier} onChange={e=>setP608Draft(d=>({...d,supplier:e.target.value}))}/>
                               <input type="number" className="apple-input" placeholder={tr608?'Birim Fiyat (₺)':'Unit Price (₺)'} value={p608Draft.price} onChange={e=>setP608Draft(d=>({...d,price:e.target.value}))}/>
                               <input type="number" className="apple-input" placeholder={tr608?'Teslim (gün)':'Lead (days)'} value={p608Draft.leadDays} onChange={e=>setP608Draft(d=>({...d,leadDays:e.target.value}))}/>
                               <input type="number" className="apple-input" placeholder={tr608?'Min. Adet':'Min Qty'} value={p608Draft.minQty} onChange={e=>setP608Draft(d=>({...d,minQty:e.target.value}))}/>
@@ -1053,12 +1054,12 @@ export default function SatinAlmaPage(props: Props) {
                               try {
                                 if(p608EditId){ await updateDoc(doc(db,'rfqQuotes',p608EditId),payload); }
                                 else { await addDoc(collection(db,'rfqQuotes'),{...payload,createdAt:serverTimestamp()}); }
-                              } catch(e){ toast((tr608?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); return; }
+                              } catch(e){ toast((oc(tr608).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); return; }
                               setP608EditId(null);
                               setP608Draft({supplier:'',price:'',leadDays:'',minQty:'',validUntil:''});
                               setP608ShowForm(false);
                               toast(tr608?'Teklif eklendi.':'Quote added.','success');
-                            }} className="apple-button-primary text-xs px-6">{tr608?'Kaydet':'Save'}</button>
+                            }} className="apple-button-primary text-xs px-6">{oc(tr608).kaydet}</button>
                           </div>
                         )}
                         {bestQuote && (
@@ -1074,7 +1075,7 @@ export default function SatinAlmaPage(props: Props) {
                           <div className="overflow-x-auto">
                             <table className="w-full text-xs">
                               <thead><tr className="border-b border-gray-100 bg-gray-50">
-                                {[tr608?'Tedarikçi':'Supplier',tr608?'Fiyat':'Price',tr608?'Teslim (g)':'Lead (d)',tr608?'Min Adet':'Min Qty',tr608?'Geçerlilik':'Valid Until',''].map(h=>(
+                                {[oc(tr608).tedarikci,tr608?'Fiyat':'Price',tr608?'Teslim (g)':'Lead (d)',tr608?'Min Adet':'Min Qty',tr608?'Geçerlilik':'Valid Until',''].map(h=>(
                                   <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                 ))}
                               </tr></thead>
@@ -1088,8 +1089,8 @@ export default function SatinAlmaPage(props: Props) {
                                     <td className="px-3 py-2.5 text-gray-500">{tarihYaz(q.validUntil)}</td>
                                     <td className="px-3 py-2.5">
                                       <div className="flex items-center gap-2">
-                                      <button onClick={()=>{setP608Draft({supplier:q.supplier,price:String(q.price),leadDays:String(q.leadDays),minQty:String(q.minQty),validUntil:q.validUntil||''});setP608EditId(q.id);setP608ShowForm(true);}} title={tr608?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'rfqQuotes',q.id));}catch(e){toast((tr608?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} className="text-red-400 hover:text-red-600 text-[10px]">✕</button>
+                                      <button onClick={()=>{setP608Draft({supplier:q.supplier,price:String(q.price),leadDays:String(q.leadDays),minQty:String(q.minQty),validUntil:q.validUntil||''});setP608EditId(q.id);setP608ShowForm(true);}} title={oc(tr608).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                      <button onClick={async ()=>{try{await deleteDoc(doc(db,'rfqQuotes',q.id));}catch(e){toast((oc(tr608).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} className="text-red-400 hover:text-red-600 text-[10px]">✕</button>
                                       </div>
                                     </td>
                                   </tr>
@@ -1113,14 +1114,14 @@ export default function SatinAlmaPage(props: Props) {
                     const utilizationPct = totalAllocated>0?(totalSpent/totalAllocated*100):0;
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
-                        <ModuleHeader title={tr612?'Satın Alma Bütçesi':'Purchase Budget'} subtitle={tr612?'Kategori bazında satın alma bütçesi ve harcama takibi':'Purchase budget tracking by category'} icon={ShoppingCart}
+                        <ModuleHeader title={oc(tr612).satin_alma_butcesi} subtitle={tr612?'Kategori bazında satın alma bütçesi ve harcama takibi':'Purchase budget tracking by category'} icon={ShoppingCart}
                           actionButton={hasFullAccess('satin-alma')&&(<button onClick={()=>setP612ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr612?'Bütçe Ekle':'Add Budget'}</button>)} />
                         {p612ShowForm && (
                           <div className="apple-card p-5 space-y-3">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <input className="apple-input" placeholder={tr612?'Kategori':'Category'} value={p612Draft.category} onChange={e=>setP612Draft(d=>({...d,category:e.target.value}))}/>
-                              <input type="number" className="apple-input" placeholder={tr612?'Bütçe (₺)':'Budget (₺)'} value={p612Draft.allocated} onChange={e=>setP612Draft(d=>({...d,allocated:e.target.value}))}/>
-                              <input type="number" className="apple-input" placeholder={tr612?'Harcanan (₺)':'Spent (₺)'} value={p612Draft.spent} onChange={e=>setP612Draft(d=>({...d,spent:e.target.value}))}/>
+                              <input className="apple-input" placeholder={oc(tr612).kategori} value={p612Draft.category} onChange={e=>setP612Draft(d=>({...d,category:e.target.value}))}/>
+                              <input type="number" className="apple-input" placeholder={oc(tr612).butce_2} value={p612Draft.allocated} onChange={e=>setP612Draft(d=>({...d,allocated:e.target.value}))}/>
+                              <input type="number" className="apple-input" placeholder={oc(tr612).harcanan_2} value={p612Draft.spent} onChange={e=>setP612Draft(d=>({...d,spent:e.target.value}))}/>
                               <input type="month" className="apple-input" value={p612Draft.period} onChange={e=>setP612Draft(d=>({...d,period:e.target.value}))}/>
                             </div>
                             <button onClick={async ()=>{
@@ -1132,16 +1133,16 @@ export default function SatinAlmaPage(props: Props) {
                                 setP612Draft(d=>({...d,category:'',allocated:'',spent:''}));
                                 setP612ShowForm(false); setP612EditId(null);
                                 toast(tr612?(p612EditId?'Bütçe güncellendi.':'Bütçe eklendi.'):(p612EditId?'Budget updated.':'Budget added.'),'success');
-                              } catch(e){ toast((tr612?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                            }} className="apple-button-primary text-xs px-6">{tr612?'Kaydet':'Save'}</button>
+                              } catch(e){ toast((oc(tr612).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
+                            }} className="apple-button-primary text-xs px-6">{oc(tr612).kaydet}</button>
                           </div>
                         )}
                         {p612Budgets.length > 0 && (
                           <>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                              <div className="apple-card p-4 bg-blue-50"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Toplam Bütçe':'Total Budget'}</p><p className="text-xl font-black text-blue-600">{paraYaz(totalAllocated, { ondalik: 0 })}</p></div>
-                              <div className="apple-card p-4 bg-amber-50"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Harcanan':'Spent'}</p><p className="text-xl font-black text-amber-600">{paraYaz(totalSpent, { ondalik: 0 })}</p></div>
-                              <div className={`apple-card p-4 ${utilizationPct>90?'bg-red-50':utilizationPct>70?'bg-orange-50':'bg-emerald-50'}`}><p className="text-[10px] font-bold text-gray-400 uppercase">{tr612?'Kullanım':'Utilization'}</p><p className={`text-xl font-black ${utilizationPct>90?'text-red-600':utilizationPct>70?'text-orange-600':'text-emerald-600'}`}>%{utilizationPct.toFixed(1)}</p></div>
+                              <div className="apple-card p-4 bg-blue-50"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr612).toplam_butce}</p><p className="text-xl font-black text-blue-600">{paraYaz(totalAllocated, { ondalik: 0 })}</p></div>
+                              <div className="apple-card p-4 bg-amber-50"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr612).harcanan}</p><p className="text-xl font-black text-amber-600">{paraYaz(totalSpent, { ondalik: 0 })}</p></div>
+                              <div className={`apple-card p-4 ${utilizationPct>90?'bg-red-50':utilizationPct>70?'bg-orange-50':'bg-emerald-50'}`}><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr612).kullanim}</p><p className={`text-xl font-black ${utilizationPct>90?'text-red-600':utilizationPct>70?'text-orange-600':'text-emerald-600'}`}>%{utilizationPct.toFixed(1)}</p></div>
                             </div>
                             <div className="space-y-3">
                               {p612Budgets.map(b=>{
@@ -1156,8 +1157,8 @@ export default function SatinAlmaPage(props: Props) {
                                         <p className={`text-sm font-bold ${isOver?'text-red-600':'text-gray-700'}`}>{paraYaz(b.spent, { ondalik: 0 })} / {paraYaz(b.allocated, { ondalik: 0 })}</p>
                                         <p className={`text-xs ${isOver?'text-red-500':'text-gray-400'}`}>%{pct.toFixed(1)}{isOver?' ⚠️':''}</p>
                                       </div>
-                                      <button type="button" onClick={()=>{setP612Draft({category:b.category,allocated:String(b.allocated),spent:String(b.spent),period:b.period});setP612EditId(b.id);setP612ShowForm(true);}} title={tr612?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                      <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'purchaseBudgets',b.id));}catch(e){toast((tr612?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                      <button type="button" onClick={()=>{setP612Draft({category:b.category,allocated:String(b.allocated),spent:String(b.spent),period:b.period});setP612EditId(b.id);setP612ShowForm(true);}} title={oc(tr612).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                      <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'purchaseBudgets',b.id));}catch(e){toast((oc(tr612).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                       </div>
                                     </div>
                                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -1197,7 +1198,7 @@ export default function SatinAlmaPage(props: Props) {
                     const sevColor:{[k:string]:string} = {'Kritik':'bg-red-100 text-red-700','Yüksek':'bg-orange-100 text-orange-700','Orta':'bg-amber-100 text-amber-700','Düşük':'bg-gray-100 text-gray-600'};
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
-                        <ModuleHeader title={tr627?'Tedarik Zinciri Riski':'Supply Chain Risk'} subtitle={tr627?'Tedarikçi bazında risk değerlendirmesi ve azaltma planları':'Supplier-level risk assessment and mitigation plans'} icon={AlertTriangle}
+                        <ModuleHeader title={oc(tr627).tedarik_zinciri_riski} subtitle={tr627?'Tedarikçi bazında risk değerlendirmesi ve azaltma planları':'Supplier-level risk assessment and mitigation plans'} icon={AlertTriangle}
                           actionButton={hasFullAccess('satin-alma')&&(<button onClick={()=>setP627ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr627?'Risk Ekle':'Add Risk'}</button>)} />
                         {(criticalRisks>0||highRisks>0)&&(
                           <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
@@ -1208,7 +1209,7 @@ export default function SatinAlmaPage(props: Props) {
                         {p627ShowForm && (
                           <div className="apple-card p-5 space-y-3">
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                              <input className="apple-input col-span-2 md:col-span-1" placeholder={tr627?'Tedarikçi':'Supplier'} value={p627Draft.supplier} onChange={e=>setP627Draft(d=>({...d,supplier:e.target.value}))}/>
+                              <input className="apple-input col-span-2 md:col-span-1" placeholder={oc(tr627).tedarikci} value={p627Draft.supplier} onChange={e=>setP627Draft(d=>({...d,supplier:e.target.value}))}/>
                               <select value={p627Draft.riskType} onChange={e=>setP627Draft(d=>({...d,riskType:e.target.value as typeof d.riskType}))} className="apple-input">
                                 {['Tedarik Kesintisi','Kalite','Fiyat Artışı','Teslimat Gecikmesi','Diğer'].map(t=><option key={t}>{t}</option>)}
                               </select>
@@ -1227,8 +1228,8 @@ export default function SatinAlmaPage(props: Props) {
                                 setP627Draft(d=>({...d,supplier:'',probability:'50',mitigationPlan:''}));
                                 setP627ShowForm(false); setP627EditId(null);
                                 toast(tr627?(p627EditId?'Risk güncellendi.':'Risk eklendi.'):(p627EditId?'Risk updated.':'Risk added.'),'success');
-                              } catch(e){ toast((tr627?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                            }} className="apple-button-primary text-xs px-6">{tr627?'Kaydet':'Save'}</button>
+                              } catch(e){ toast((oc(tr627).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
+                            }} className="apple-button-primary text-xs px-6">{oc(tr627).kaydet}</button>
                           </div>
                         )}
                         {p627Risks.length > 0 && (
@@ -1247,12 +1248,12 @@ export default function SatinAlmaPage(props: Props) {
                                   </div>
                                   <div className="text-right shrink-0">
                                     <p className="text-xs font-bold text-gray-700">{tr627?'Risk Skoru:':'Score:'} {score.toFixed(2)}</p>
-                                    <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'supplierRisks',r.id),{status:e.target.value});}catch(err){toast((tr627?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className="text-xs border border-gray-200 rounded-lg px-1 py-0.5 mt-1 bg-white">
+                                    <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'supplierRisks',r.id),{status:e.target.value});}catch(err){toast((oc(tr627).guncellenemedi)+(err instanceof Error?err.message:String(err)),'error');}}} className="text-xs border border-gray-200 rounded-lg px-1 py-0.5 mt-1 bg-white">
                                       {['Aktif','Azaltıldı','Kabul Edildi'].map(s=><option key={s}>{s}</option>)}
                                     </select>
                                   </div>
-                                  <button type="button" onClick={()=>{setP627Draft({supplier:r.supplier,riskType:r.riskType,severity:r.severity,probability:String(r.probability),mitigationPlan:r.mitigationPlan||''});setP627EditId(r.id);setP627ShowForm(true);}} title={tr627?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors shrink-0"><Edit2 className="w-3.5 h-3.5"/></button>
-                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'supplierRisks',r.id));}catch(e){toast((tr627?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={()=>{setP627Draft({supplier:r.supplier,riskType:r.riskType,severity:r.severity,probability:String(r.probability),mitigationPlan:r.mitigationPlan||''});setP627EditId(r.id);setP627ShowForm(true);}} title={oc(tr627).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors shrink-0"><Edit2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'supplierRisks',r.id));}catch(e){toast((oc(tr627).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
                                 </div>
                               );
                             })}

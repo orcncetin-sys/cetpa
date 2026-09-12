@@ -43,6 +43,7 @@ import {
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
 import { KpiCard, KpiGrid } from './ReportKit';
+import { oc } from '../../i18n/ortak';
 
 export default function UrunlerRapor(ctx: ReportsCtx) {
   const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
@@ -124,20 +125,20 @@ export default function UrunlerRapor(ctx: ReportsCtx) {
                     <tr>
                       <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-8">#</th>
                       <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                        {currentLanguage === 'tr' ? 'Ürün' : 'Product'}
+                        {oc(currentLanguage).urun}
                       </th>
                       <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-center">ABC</th>
                       <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">
-                        {currentLanguage === 'tr' ? 'Adet' : 'Qty'}
+                        {oc(currentLanguage).adet_2}
                       </th>
                       <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">
-                        {currentLanguage === 'tr' ? 'Sipariş' : 'Orders'}
+                        {oc(currentLanguage).siparis_2}
                       </th>
                       <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">
-                        {currentLanguage === 'tr' ? 'Gelir' : 'Revenue'}
+                        {oc(currentLanguage).gelir}
                       </th>
                       <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">
-                        {currentLanguage === 'tr' ? 'Pay' : 'Share'}
+                        {oc(currentLanguage).pay}
                       </th>
                     </tr>
                   </thead>
@@ -173,7 +174,7 @@ export default function UrunlerRapor(ctx: ReportsCtx) {
                   </tbody>
                   <tfoot className="bg-gray-50 border-t border-gray-200">
                     <tr>
-                      <td colSpan={5} className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'Toplam' : 'Total'}</td>
+                      <td colSpan={5} className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">{oc(currentLanguage).toplam}</td>
                       <td className="px-4 py-3 text-right text-sm font-black text-gray-800">{paraYaz(totalRevenue, { ondalik: 0 })}</td>
                       <td className="px-4 py-3 text-right text-xs font-bold text-gray-500">100%</td>
                     </tr>

@@ -18,6 +18,7 @@ import ProjectModule from '../components/ProjectModule';
 import { confirmDelete } from '../lib/confirm';
 import { paraYaz } from '../utils/currency';
 import { tarihYaz, bugunAnahtari } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 export interface P582Project { id: string; name: string; budget: number; spent: number; status: 'Aktif' | 'Tamamlandı' | 'Beklemede'; }
 export interface P582Draft { name: string; budget: string; spent: string; status: P582Project['status']; }
@@ -48,7 +49,7 @@ export default function ProjePage({
 }: Props) {
   return (
     <motion.div key="proje" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-      {!canAccess('proje') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Proje Yönetimi':'Project Management'} /> : (
+      {!canAccess('proje') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).proje_yonetimi} /> : (
         <>
           {!hasFullAccess('proje') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
           {/* ── Phase 582: Proje Maliyet Takibi ─────────────────────────── */}
@@ -61,19 +62,19 @@ export default function ProjePage({
                   <h3 className="font-bold text-gray-900 text-sm">{tr582?'💼 Proje Maliyet Takibi':'💼 Project Cost Tracking'}</h3>
                   {hasFullAccess('proje') && (
                     <button onClick={()=>setP582ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm">
-                      <Plus className="w-4 h-4"/>{tr582?'Proje Ekle':'Add Project'}
+                      <Plus className="w-4 h-4"/>{oc(tr582).proje_ekle}
                     </button>
                   )}
                 </div>
                 {p582ShowForm && (
                   <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <input className="apple-input px-3 py-2 text-sm col-span-2" placeholder={tr582?'Proje Adı':'Project Name'} value={p582Draft.name} onChange={e=>setP582Draft(d=>({...d,name:e.target.value}))} />
-                      <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr582?'Bütçe (₺)':'Budget (₺)'} value={p582Draft.budget} onChange={e=>setP582Draft(d=>({...d,budget:e.target.value}))} />
-                      <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={tr582?'Harcanan (₺)':'Spent (₺)'} value={p582Draft.spent} onChange={e=>setP582Draft(d=>({...d,spent:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm col-span-2" placeholder={oc(tr582).proje_adi} value={p582Draft.name} onChange={e=>setP582Draft(d=>({...d,name:e.target.value}))} />
+                      <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr582).butce_2} value={p582Draft.budget} onChange={e=>setP582Draft(d=>({...d,budget:e.target.value}))} />
+                      <input type="number" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr582).harcanan_2} value={p582Draft.spent} onChange={e=>setP582Draft(d=>({...d,spent:e.target.value}))} />
                       <select className="apple-input px-3 py-2 text-sm" value={p582Draft.status} onChange={e=>setP582Draft(d=>({...d,status:e.target.value as P582Draft['status']}))}>
-                        <option value="Aktif">{tr582?'Aktif':'Active'}</option>
-                        <option value="Tamamlandı">{tr582?'Tamamlandı':'Completed'}</option>
+                        <option value="Aktif">{oc(tr582).aktif}</option>
+                        <option value="Tamamlandı">{oc(tr582).tamamlandi}</option>
                         <option value="Beklemede">{tr582?'Beklemede':'On Hold'}</option>
                       </select>
                     </div>
@@ -83,8 +84,8 @@ export default function ProjePage({
                         try { const payload582={name:p582Draft.name,budget:Number(p582Draft.budget)||0,spent:Number(p582Draft.spent)||0,status:p582Draft.status}; if(p582EditId){ await updateDoc(doc(db,'projectCosts',p582EditId),payload582); setP582EditId(null); } else { await addDoc(collection(db,'projectCosts'),{...payload582,createdAt:serverTimestamp()}); } toast(tr582 ? 'Proje maliyeti eklendi ✓' : 'Project cost added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(tr582 ? 'Maliyet eklenemedi.' : 'Failed to add cost.', 'error');}
                         setP582Draft({name:'',budget:'',spent:'',status:'Aktif'});
                         setP582ShowForm(false);
-                      }} className="apple-button-primary text-sm px-4 py-1.5">{tr582?'Kaydet':'Save'}</button>
-                      <button onClick={()=>setP582ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{tr582?'İptal':'Cancel'}</button>
+                      }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr582).kaydet}</button>
+                      <button onClick={()=>setP582ShowForm(false)} className="apple-button-secondary text-sm px-4 py-1.5">{oc(tr582).iptal}</button>
                     </div>
                   </div>
                 )}
@@ -104,8 +105,8 @@ export default function ProjePage({
                             </div>
                             <div className="flex items-center gap-2 text-xs">
                               <span className={`font-bold ${isOver?'text-red-600':'text-gray-700'}`}>{paraYaz(p.spent, { ondalik: 0 })} / {paraYaz(p.budget, { ondalik: 0 })}</span>
-                              <button onClick={()=>{setP582Draft({name:p.name,budget:String(p.budget),spent:String(p.spent),status:p.status});setP582EditId(p.id);setP582ShowForm(true);}} title={tr582?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 ml-2"><Edit2 className="w-3.5 h-3.5"/></button>
-                              <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'projectCosts',p.id));}catch(e){console.error("[firestore]", e); toast(tr582?'Silinemedi (yetki?).':'Delete failed.','error');}}} className="text-red-400 hover:text-red-600 ml-2">✕</button>
+                              <button onClick={()=>{setP582Draft({name:p.name,budget:String(p.budget),spent:String(p.spent),status:p.status});setP582EditId(p.id);setP582ShowForm(true);}} title={oc(tr582).duzenle} className="text-gray-300 hover:text-blue-600 ml-2"><Edit2 className="w-3.5 h-3.5"/></button>
+                              <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'projectCosts',p.id));}catch(e){console.error("[firestore]", e); toast(oc(tr582).silinemedi_yetki,'error');}}} className="text-red-400 hover:text-red-600 ml-2">✕</button>
                             </div>
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
@@ -134,8 +135,8 @@ export default function ProjePage({
             return (
               <div className="apple-card p-5 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <h3 className="font-bold text-gray-900 text-sm">📐 {tr618?'Proje Zaman Çizelgesi':'Project Timeline'}</h3>
-                  <button onClick={()=>setP618ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr618?'Proje Ekle':'Add Project'}</button>
+                  <h3 className="font-bold text-gray-900 text-sm">📐 {oc(tr618).proje_zaman_cizelgesi}</h3>
+                  <button onClick={()=>setP618ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{oc(tr618).proje_ekle}</button>
                 </div>
                 {overdue618>0&&<div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-red-700">⚠️ {overdue618} {tr618?'proje gecikmiş':'project(s) overdue'}</div>}
                 {p618ShowForm && (
@@ -157,7 +158,7 @@ export default function ProjePage({
                       try { const payload618={name:p618Draft.name,start:p618Draft.start,end:p618Draft.end,progress:Number(p618Draft.progress)||0,status:p618Draft.status,owner:p618Draft.owner}; if(p618EditId){ await updateDoc(doc(db,'projectTimelines',p618EditId),payload618); setP618EditId(null); } else { await addDoc(collection(db,'projectTimelines'),{...payload618,createdAt:serverTimestamp()}); } toast(tr618 ? 'Zaman çizelgesi eklendi ✓' : 'Timeline added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(tr618 ? 'Zaman çizelgesi eklenemedi.' : 'Failed to add timeline.', 'error');}
                       setP618Draft({name:'',start:'',end:'',progress:'0',status:'Aktif',owner:''});
                       setP618ShowForm(false);
-                    }} className="apple-button-primary text-xs px-6">{tr618?'Kaydet':'Save'}</button>
+                    }} className="apple-button-primary text-xs px-6">{oc(tr618).kaydet}</button>
                   </div>
                 )}
                 {p618Projects.length > 0 && (
@@ -177,8 +178,8 @@ export default function ProjePage({
                               <span>{p.owner}</span>
                               <input type="range" min="0" max="100" value={p.progress} onChange={async e=>{try{await updateDoc(doc(db,'projectTimelines',p.id),{progress:Number(e.target.value)});}catch(err){console.error(err); toast(tr618?'İlerleme kaydedilemedi.':'Progress save failed.','error');}}} className="w-20"/>
                               <span className="font-bold text-gray-700 w-8 text-right">%{p.progress}</span>
-                              <button onClick={()=>{setP618Draft({name:p.name,start:p.start,end:p.end,progress:String(p.progress),status:p.status,owner:p.owner});setP618EditId(p.id);setP618ShowForm(true);}} title={tr618?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600"><Edit2 className="w-3.5 h-3.5"/></button>
-                              <button onClick={async ()=>{try{await deleteDoc(doc(db,'projectTimelines',p.id));}catch(e){console.error("[firestore]", e); toast(tr618?'Silinemedi (yetki?).':'Delete failed.','error');}}} title={tr618?'Sil':'Delete'} className="text-gray-300 hover:text-red-600"><Trash2 className="w-3.5 h-3.5"/></button>
+                              <button onClick={()=>{setP618Draft({name:p.name,start:p.start,end:p.end,progress:String(p.progress),status:p.status,owner:p.owner});setP618EditId(p.id);setP618ShowForm(true);}} title={oc(tr618).duzenle} className="text-gray-300 hover:text-blue-600"><Edit2 className="w-3.5 h-3.5"/></button>
+                              <button onClick={async ()=>{try{await deleteDoc(doc(db,'projectTimelines',p.id));}catch(e){console.error("[firestore]", e); toast(oc(tr618).silinemedi_yetki,'error');}}} title={oc(tr618).sil} className="text-gray-300 hover:text-red-600"><Trash2 className="w-3.5 h-3.5"/></button>
                             </div>
                           </div>
                           <div className="flex items-center gap-2 text-[10px] text-gray-400 mb-2">

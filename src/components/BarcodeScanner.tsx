@@ -2,6 +2,7 @@ import React, { useState, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X, Scan, Keyboard, Camera } from 'lucide-react';
+import { oc } from '../i18n/ortak';
 
 // ZXing TEK BAŞINA ~400 kB. Yalnız kamera modu SEÇİLİNCE indirilir; manuel
 // giriş modu hiç indirmez.
@@ -54,7 +55,7 @@ export default function BarcodeScanner({ isOpen, onClose, onScan, currentLanguag
               <Scan className="w-5 h-5 text-brand" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{title || (currentLanguage === 'tr' ? 'Barkod / QR Tara' : 'Scan Barcode / QR')}</h2>
+              <h2 className="text-xl font-bold text-gray-900">{title || (oc(currentLanguage).barkod_qr_tara)}</h2>
               <p className="text-sm text-gray-500">{currentLanguage === 'tr' ? 'Barkod veya QR kodu okutun ya da manuel girin.' : 'Scan a barcode or QR code, or enter it manually.'}</p>
             </div>
           </div>
@@ -83,7 +84,7 @@ export default function BarcodeScanner({ isOpen, onClose, onScan, currentLanguag
               )}
             >
               <Keyboard className="w-4 h-4" />
-              {currentLanguage === 'tr' ? 'Manuel' : 'Manual'}
+              {oc(currentLanguage).manuel}
             </button>
           </div>
 

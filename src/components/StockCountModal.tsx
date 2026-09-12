@@ -6,6 +6,7 @@ import { db } from '../firebase';
 import type { InventoryItem } from '../types';
 import type { Language } from '../translations';
 import { cn } from '../lib/utils';
+import { oc } from '../i18n/ortak';
 
 interface StockCountModalProps {
   isOpen: boolean;
@@ -126,7 +127,7 @@ export default function StockCountModal({
             </button>
             <div className="flex gap-3">
               <button onClick={onClose} className="apple-button-secondary text-sm px-5">
-                {currentLanguage === 'tr' ? 'İptal' : 'Cancel'}
+                {oc(currentLanguage).iptal}
               </button>
               <button
                 disabled={gecerliTaslak.length === 0 || stockCountSaving}

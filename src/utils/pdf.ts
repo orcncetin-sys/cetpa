@@ -19,6 +19,7 @@ import { tutarYaz, kdvAyristir, satirTutari, bilinenSayi, teklifToplamlari } fro
 // Başlık bandı / alt bant / bilgi kutusu / palet TEK KAYNAK (Faz 2 3/n, 2026-09-12): bu dosyadaki
 // 4 üretici eskiden her biri kendi bandını ve palet kopyasını yazıyordu (pdfTheme.degismez.test.ts kilitler).
 import { pdfBaslik, pdfAltBilgi, pdfBilgiKutusu, PDF_RENK, type RGB } from './pdfTheme';
+import { oc } from '../i18n/ortak';
 
 // Roboto (registerTurkishFont) Türkçe glifleri kapsıyor — artık harf
 // düşürmeye gerek yok, normTR eski çağrı yerlerini bozmamak için passthrough
@@ -227,7 +228,7 @@ export const exportCustomerStatement = async (
   // ── Header band (tek kaynak: pdfBaslik) ──────────────────────────────────
   const boxY = pdfBaslik(doc, {
     belgeAdi: lang === 'tr' ? 'HESAP EKSTRESİ' : 'ACCOUNT STATEMENT',
-    meta: `${lang === 'tr' ? 'Tarih' : 'Date'}: ${today}`,
+    meta: `${oc(lang).tarih}: ${today}`,
     renk: BRAND,
   });
 
@@ -257,7 +258,7 @@ export const exportCustomerStatement = async (
     doc.setFontSize(9);
     doc.setTextColor(...BRAND);
     doc.text(
-      `${lang === 'tr' ? 'Kredi Limiti' : 'Credit Limit'}: ${lead.creditLimit.toLocaleString('tr-TR')} TRY`,
+      `${oc(lang).kredi_limiti_2}: ${lead.creditLimit.toLocaleString('tr-TR')} TRY`,
       W - 20, boxY + 14, { align: 'right' },
     );
   }
@@ -326,9 +327,9 @@ export const exportCustomerStatement = async (
   doc.roundedRect(W - 80, sumY, 66, 36, 2, 2, 'F');
 
   const rows = [
-    [lang === 'tr' ? 'Teslim Edildi' : 'Delivered',   `${totalDelivered.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
+    [oc(lang).teslim_edildi,   `${totalDelivered.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
     [lang === 'tr' ? 'Bekleyen'     : 'Outstanding',  `${totalOutstanding.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
-    [lang === 'tr' ? 'TOPLAM'       : 'TOTAL',        `${grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
+    [oc(lang).toplam_2,        `${grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
   ];
   rows.forEach(([label, value], i) => {
     const y = sumY + 8 + i * 9;
@@ -394,7 +395,7 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
 
   // Supplier box — kutu + başlık tek kaynaktan; tedarikçi adı KALIN 11pt (standart satır
   // normal fonttur), o yüzden aynı konuma elle basılır.
-  pdfBilgiKutusu(doc, { x: col1, y: boxY, w: colW, h: boxH, baslik: lang === 'tr' ? 'TEDARİKÇİ' : 'SUPPLIER', satirlar: [] });
+  pdfBilgiKutusu(doc, { x: col1, y: boxY, w: colW, h: boxH, baslik: oc(lang).tedarikci_2, satirlar: [] });
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(...PDF_RENK.dark);
@@ -405,15 +406,15 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
   pdfBilgiKutusu(doc, {
     x: col2, y: boxY, w: colW, h: boxH, baslik: lang === 'tr' ? 'SİPARİŞ DETAYI' : 'ORDER DETAILS',
     satirlar: [
-      { metin: `${lang === 'tr' ? 'Durum' : 'Status'}: ${normTR(po.status || '-')}`, dy: 14, boyut: 8.5 },
-      { metin: `${lang === 'tr' ? 'Beklenen' : 'Expected'}: ${expDateStr}`, dy: 22, boyut: 8.5, renk: PDF_RENK.grey },
+      { metin: `${oc(lang).durum}: ${normTR(po.status || '-')}`, dy: 14, boyut: 8.5 },
+      { metin: `${oc(lang).beklenen}: ${expDateStr}`, dy: 22, boyut: 8.5, renk: PDF_RENK.grey },
     ],
   });
   // Toplam satırı KALIN + marka renkli — standart satır normal fonttur; aynı konuma elle.
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(...PDF_RENK.brand);
-  doc.text(`${lang === 'tr' ? 'Toplam' : 'Total'}: ${tutarYaz(po.totalAmount, 'TL')}`, col2 + 4, boxY + 30);
+  doc.text(`${oc(lang).toplam}: ${tutarYaz(po.totalAmount, 'TL')}`, col2 + 4, boxY + 30);
 
   // ── Items table ───────────────────────────────────────────────────────────
   const tableData = (po.items || []).map((item, idx) => [
@@ -459,7 +460,7 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
   doc.setFontSize(10);
   doc.setFont('Roboto', 'bold');
   doc.setTextColor(...PDF_RENK.white);
-  doc.text(lang === 'tr' ? 'GENEL TOPLAM' : 'GRAND TOTAL', totalsX + 2, totalsY + 7.5);
+  doc.text(oc(lang).genel_toplam, totalsX + 2, totalsY + 7.5);
   doc.text(`${tutarYaz(po.totalAmount, 'TL')}`, W - 16, totalsY + 7.5, { align: 'right' });
 
   // ── Notes ─────────────────────────────────────────────────────────────────
@@ -507,7 +508,7 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
   const colW = W / 2 - 18;
 
   // Tedarikçi adı KALIN 10pt (standart satır normal fonttur) → kutu + başlık tek kaynaktan, ad aynı konuma elle.
-  pdfBilgiKutusu(doc, { x: col1, y: boxY, w: colW, h: boxH, baslik: lang === 'tr' ? 'TEDARİKÇİ' : 'SUPPLIER', renk: GREEN, satirlar: [] });
+  pdfBilgiKutusu(doc, { x: col1, y: boxY, w: colW, h: boxH, baslik: oc(lang).tedarikci_2, renk: GREEN, satirlar: [] });
   doc.setFont('Roboto', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(...PDF_RENK.dark);
@@ -516,7 +517,7 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
   pdfBilgiKutusu(doc, {
     x: col2, y: boxY, w: colW, h: boxH, baslik: lang === 'tr' ? 'TESLİM BİLGİLERİ' : 'RECEIPT INFO', renk: GREEN,
     satirlar: [
-      { metin: `${lang === 'tr' ? 'Tarih' : 'Date'}: ${today}`, dy: 14, boyut: 8.5 },
+      { metin: `${oc(lang).tarih}: ${today}`, dy: 14, boyut: 8.5 },
       { metin: `SAS No: ${po.orderNumber}`, dy: 21, boyut: 8.5, renk: PDF_RENK.grey },
     ],
   });
@@ -567,7 +568,7 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
   doc.setFontSize(10);
   doc.setFont('Roboto', 'bold');
   doc.setTextColor(...PDF_RENK.white);
-  doc.text(lang === 'tr' ? 'GENEL TOPLAM' : 'GRAND TOTAL', W - 70, sigY + 7.5);
+  doc.text(oc(lang).genel_toplam, W - 70, sigY + 7.5);
   doc.text(`${tutarYaz(po.totalAmount, 'TL')}`, W - 16, sigY + 7.5, { align: 'right' });
 
   // Signature boxes

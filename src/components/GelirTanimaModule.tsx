@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { TrendingUp, Plus, X, ChevronRight, ChevronDown, CheckCircle2, Clock, BarChart3, Calendar, FileText, DollarSign } from 'lucide-react';
 import { paraYaz } from '../utils/currency';
 import { gunBasi, bugunAnahtari } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 interface GelirTanimaModuleProps {
   currentLanguage: string;
@@ -221,10 +222,10 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
   const maxDeferred = Math.max(...deferredByMonth.map(m => m.amount), 1);
 
   const tabs = [
-    { id: 'contracts', label: tr ? 'Sözleşmeler' : 'Contracts', icon: FileText },
+    { id: 'contracts', label: oc(tr).sozlesmeler, icon: FileText },
     { id: 'schedule', label: tr ? 'Tanıma Takvimi' : 'Schedule', icon: Calendar },
-    { id: 'deferred', label: tr ? 'Ertelenmiş Gelir' : 'Deferred Revenue', icon: Clock },
-    { id: 'recognition', label: tr ? 'Analitik' : 'Analytics', icon: BarChart3 },
+    { id: 'deferred', label: oc(tr).ertelenmis_gelir, icon: Clock },
+    { id: 'recognition', label: oc(tr).analitik, icon: BarChart3 },
   ] as const;
 
   if (!isAuthenticated) return <div className="p-8 text-center text-gray-500">{tr ? 'Lütfen giriş yapın.' : 'Please sign in.'}</div>;
@@ -245,7 +246,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
         {view === 'contracts' && (
           <button onClick={() => setShowContractForm(true)}
             className="apple-button-primary text-white px-4 py-2 rounded-full text-sm flex items-center gap-2">
-            <Plus className="w-4 h-4" /> {tr ? 'Sözleşme Ekle' : 'Add Contract'}
+            <Plus className="w-4 h-4" /> {oc(tr).sozlesme_ekle}
           </button>
         )}
       </div>
@@ -265,7 +266,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
         {[
           { label: tr ? 'Toplam Sözleşme' : 'Total Contract Value', value: fmt(totalContractValue), icon: DollarSign, color: 'text-blue-600' },
           { label: tr ? 'Tanınan Gelir' : 'Recognized Revenue', value: fmt(totalRecognized), icon: CheckCircle2, color: 'text-green-600' },
-          { label: tr ? 'Ertelenmiş Gelir' : 'Deferred Revenue', value: fmt(totalDeferred), icon: Clock, color: 'text-orange-600' },
+          { label: oc(tr).ertelenmis_gelir, value: fmt(totalDeferred), icon: Clock, color: 'text-orange-600' },
           { label: tr ? 'Tanıma Oranı' : 'Recognition Rate', value: `${totalScheduled > 0 ? ((totalRecognized/totalScheduled)*100).toFixed(1) : 0}%`, icon: TrendingUp, color: 'text-purple-600' },
         ].map((m,i) => (
           <div key={i} className="apple-card p-4">
@@ -282,7 +283,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
       {view === 'contracts' && (
         <div className="space-y-3">
           {loading ? (
-            <div className="p-8 text-center text-gray-400">{tr ? 'Yükleniyor...' : 'Loading...'}</div>
+            <div className="p-8 text-center text-gray-400">{oc(tr).yukleniyor}</div>
           ) : contracts.length === 0 ? (
             <div className="apple-card p-8 text-center text-gray-400">
               <FileText className="w-8 h-8 mx-auto mb-2 opacity-40" />
@@ -323,7 +324,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
                       <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                         <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%` }} />
                       </div>
-                      <p className="text-xs text-gray-400 mt-0.5">{progress.toFixed(1)}% {tr ? 'tanındı' : 'recognized'}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{progress.toFixed(1)}% {oc(tr).tanindi}</p>
                     </div>
                   </div>
 
@@ -380,14 +381,14 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
                 <table className="w-full text-sm min-w-[800px]">
                   <thead className="bg-gray-50 border-b border-gray-100">
                     <tr>
-                      <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Dönem' : 'Period'}</th>
-                      <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Sözleşme' : 'Contract'}</th>
+                      <th className="text-left p-3 font-medium text-gray-600">{oc(tr).donem}</th>
+                      <th className="text-left p-3 font-medium text-gray-600">{oc(tr).sozlesme}</th>
                       <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Yükümlülük' : 'Obligation'}</th>
-                      <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Yöntem' : 'Method'}</th>
+                      <th className="text-left p-3 font-medium text-gray-600">{oc(tr).yontem}</th>
                       <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Planlanan' : 'Scheduled'}</th>
-                      <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Tanınan' : 'Recognized'}</th>
-                      <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Ertelenen' : 'Deferred'}</th>
-                      <th className="text-center p-3 font-medium text-gray-600">{tr ? 'Durum' : 'Status'}</th>
+                      <th className="text-right p-3 font-medium text-gray-600">{oc(tr).taninan}</th>
+                      <th className="text-right p-3 font-medium text-gray-600">{oc(tr).ertelenen}</th>
+                      <th className="text-center p-3 font-medium text-gray-600">{oc(tr).durum}</th>
                       <th className="p-3"></th>
                     </tr>
                   </thead>
@@ -462,11 +463,11 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
             <table className="w-full text-sm">
               <thead className="border-b border-gray-100">
                 <tr>
-                  <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Sözleşme' : 'Contract'}</th>
-                  <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Müşteri' : 'Customer'}</th>
-                  <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Toplam Değer' : 'Total Value'}</th>
-                  <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Tanınan' : 'Recognized'}</th>
-                  <th className="text-right p-3 font-medium text-gray-600">{tr ? 'Ertelenen' : 'Deferred'}</th>
+                  <th className="text-left p-3 font-medium text-gray-600">{oc(tr).sozlesme}</th>
+                  <th className="text-left p-3 font-medium text-gray-600">{oc(tr).musteri}</th>
+                  <th className="text-right p-3 font-medium text-gray-600">{oc(tr).toplam_deger}</th>
+                  <th className="text-right p-3 font-medium text-gray-600">{oc(tr).taninan}</th>
+                  <th className="text-right p-3 font-medium text-gray-600">{oc(tr).ertelenen}</th>
                 </tr>
               </thead>
               <tbody>
@@ -574,7 +575,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
                 <input className="apple-input p-3 rounded-xl text-sm" placeholder={tr ? 'Müşteri Adı *' : 'Customer Name *'} value={cForm.customerName} onChange={e=>setCForm(p=>({...p,customerName:e.target.value}))} />
                 <input type="date" className="apple-input p-3 rounded-xl text-sm" value={cForm.contractDate} onChange={e=>setCForm(p=>({...p,contractDate:e.target.value}))} />
                 <div className="grid grid-cols-2 gap-2">
-                  <input type="number" className="apple-input p-3 rounded-xl text-sm" placeholder={tr ? 'Toplam Değer' : 'Total Value'} value={cForm.totalValue || ''} onChange={e=>setCForm(p=>({...p,totalValue:Number(e.target.value)}))} />
+                  <input type="number" className="apple-input p-3 rounded-xl text-sm" placeholder={oc(tr).toplam_deger} value={cForm.totalValue || ''} onChange={e=>setCForm(p=>({...p,totalValue:Number(e.target.value)}))} />
                   <select className="apple-input p-3 rounded-xl text-sm" value={cForm.currency} onChange={e=>setCForm(p=>({...p,currency:e.target.value}))}>
                     <option value="TRY">TRY</option><option value="USD">USD</option><option value="EUR">EUR</option>
                   </select>
@@ -595,7 +596,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
               {oblForms.map((o, i) => (
                 <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-2">
                   <div className="grid grid-cols-2 gap-2">
-                    <input className="apple-input p-2.5 rounded-xl text-sm col-span-2" placeholder={tr ? 'Açıklama' : 'Description'} value={o.description} onChange={e=>setOblForms(prev=>prev.map((x,j)=>j===i?{...x,description:e.target.value}:x))} />
+                    <input className="apple-input p-2.5 rounded-xl text-sm col-span-2" placeholder={oc(tr).aciklama} value={o.description} onChange={e=>setOblForms(prev=>prev.map((x,j)=>j===i?{...x,description:e.target.value}:x))} />
                     <div>
                       <label className="text-xs text-gray-500">{tr ? 'Bağımsız Satış Fiyatı' : 'Standalone Price'}</label>
                       <input type="number" className="apple-input w-full p-2.5 rounded-xl text-sm mt-1" value={o.standalonePrice || ''} onChange={e=>setOblForms(prev=>prev.map((x,j)=>j===i?{...x,standalonePrice:Number(e.target.value)}:x))} />
@@ -611,15 +612,15 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
                     </div>
                   </div>
                   <button onClick={() => setOblForms(prev => prev.filter((_,j)=>j!==i))} className="text-xs text-red-500 hover:text-red-700">
-                    {tr ? 'Kaldır' : 'Remove'}
+                    {oc(tr).kaldir}
                   </button>
                 </div>
               ))}
             </div>
 
             <div className="flex gap-3">
-              <button onClick={() => setShowContractForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{tr ? 'İptal' : 'Cancel'}</button>
-              <button onClick={saveContract} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{tr ? 'Kaydet' : 'Save'}</button>
+              <button onClick={() => setShowContractForm(false)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{oc(tr).iptal}</button>
+              <button onClick={saveContract} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{oc(tr).kaydet}</button>
             </div>
           </div>
         </div>
@@ -637,7 +638,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
             </p>
             <p className="text-sm text-gray-500">{tr ? 'Bu işlem sözleşmedeki tüm yükümlülükler için otomatik gelir takvimi oluşturacaktır.' : 'This will auto-generate revenue schedule entries for all obligations in this contract.'}</p>
             <div className="flex gap-3">
-              <button onClick={() => setShowScheduleModal(null)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{tr ? 'İptal' : 'Cancel'}</button>
+              <button onClick={() => setShowScheduleModal(null)} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{oc(tr).iptal}</button>
               <button onClick={() => generateSchedule(showScheduleModal)} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{tr ? 'Oluştur' : 'Generate'}</button>
             </div>
           </div>

@@ -13,6 +13,7 @@ import ModuleHeader from '../components/ModuleHeader';
 import { paraYaz } from '../utils/currency';
 import { gunAnahtari } from '../utils/zaman';
 import type { Employee, Payroll } from '../types';
+import { oc } from '../i18n/ortak';
 
 /** IKPage.tsx / MesaiPage.tsx'teki AttendanceRecord ile birebir aynı tanım. */
 export interface AttendanceRecord { id: string; employeeName: string; employeeId?: string; date: string; checkIn: string; checkOut: string; totalHours: number; status: 'Normal' | 'Geç Giriş' | 'Erken Çıkış' | 'Devamsız' | 'İzinli' }
@@ -57,7 +58,7 @@ export default function SelfservisPage({
               <p className="text-xs text-gray-400 mt-0.5">{myEmp.email} · {myEmp.phone}</p>
             </div>
             <div className="text-right shrink-0">
-              <p className="text-xs text-gray-400">{tr553?'Başlangıç':'Start Date'}</p>
+              <p className="text-xs text-gray-400">{oc(tr553).baslangic}</p>
               <p className="font-semibold text-gray-700">{myEmp.startDate}</p>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full mt-1 inline-block ${myEmp.status==='Aktif'?'bg-emerald-100 text-emerald-700':'bg-gray-100 text-gray-600'}`}>{myEmp.status}</span>
             </div>
@@ -71,11 +72,11 @@ export default function SelfservisPage({
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead><tr className="border-b border-gray-100">
-                    <th className="py-2 text-left text-xs font-bold text-gray-400 uppercase">{tr553?'Dönem':'Period'}</th>
-                    <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr553?'Brüt':'Gross'}</th>
+                    <th className="py-2 text-left text-xs font-bold text-gray-400 uppercase">{oc(tr553).donem}</th>
+                    <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{oc(tr553).brut}</th>
                     <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr553?'Kesinti':'Deductions'}</th>
                     <th className="py-2 text-right text-xs font-bold text-gray-400 uppercase">{tr553?'Net':'Net'}</th>
-                    <th className="py-2 text-center text-xs font-bold text-gray-400 uppercase">{tr553?'Durum':'Status'}</th>
+                    <th className="py-2 text-center text-xs font-bold text-gray-400 uppercase">{oc(tr553).durum}</th>
                   </tr></thead>
                   <tbody>
                     {myPayrolls.slice(0,12).map((p,i) => (
@@ -103,7 +104,7 @@ export default function SelfservisPage({
                 return (
                   <div className="grid grid-cols-3 gap-3">
                     {[
-                      { label: tr553?'Gün':'Days', v: myRecs.length, color:'text-blue-600' },
+                      { label: oc(tr553).gun_2, v: myRecs.length, color:'text-blue-600' },
                       { label: tr553?'Toplam Saat':'Total Hours', v: `${totalH.toFixed(0)}h`, color:'text-emerald-600' },
                       { label: tr553?'Geç Giriş':'Late', v: myRecs.filter(r=>r.status==='Geç Giriş').length, color:'text-orange-600' },
                     ].map(k=>(

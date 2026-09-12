@@ -6,6 +6,7 @@ import { pushMikroEvrak, sayimPayload } from '../services/mikroEvrak';
 import { Scan, Package, ArrowRight, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, Truck, Warehouse, X, Plus, MapPin, BarChart3, Pencil, Trash2 } from 'lucide-react';
 import type { Warehouse as WarehouseRecord } from '../types';
 import { confirmAction } from '../lib/confirm';
+import { oc } from '../i18n/ortak';
 
 
 interface MobileWMSModuleProps {
@@ -183,7 +184,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
       message: tr
         ? 'Bu konumu silmek istediğinize emin misiniz? Bu işlem geri alınamaz.'
         : 'Are you sure you want to delete this location? This cannot be undone.',
-      confirmLabel: tr ? 'Sil' : 'Delete',
+      confirmLabel: oc(tr).sil,
       variant: 'danger',
     });
     if (!ok) return;
@@ -368,10 +369,10 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
 
 
   const tabs = [
-    { id: 'dashboard', label: tr ? 'Panel' : 'Dashboard', icon: BarChart3 },
-    { id: 'tasks', label: tr ? 'Görevler' : 'Tasks', icon: Package },
+    { id: 'dashboard', label: oc(tr).panel, icon: BarChart3 },
+    { id: 'tasks', label: oc(tr).gorevler, icon: Package },
     { id: 'receive', label: tr ? 'Teslim Al' : 'Receive', icon: Truck },
-    { id: 'pick', label: tr ? 'Topla' : 'Pick', icon: ArrowRight },
+    { id: 'pick', label: oc(tr).topla, icon: ArrowRight },
     { id: 'locations', label: tr ? 'Konumlar' : 'Locations', icon: MapPin },
   ] as const;
 
@@ -409,7 +410,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
         />
         <button onClick={() => handleScan(scanInput)}
           className="px-3 py-1.5 rounded-lg bg-orange-500 text-white text-xs font-medium">
-          {tr ? 'Tara' : 'Scan'}
+          {oc(tr).tara}
         </button>
       </div>
 
@@ -420,7 +421,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
           {scanResult.found && scanResult.item ? (
             <div>
               <p>{scanResult.item.name}</p>
-              <p className="text-xs opacity-75">{tr ? 'Stok: ' : 'Stock: '}{scanResult.item.quantity ?? scanResult.item.stock ?? 0} {tr ? 'adet' : 'units'}</p>
+              <p className="text-xs opacity-75">{tr ? 'Stok: ' : 'Stock: '}{scanResult.item.quantity ?? scanResult.item.stock ?? 0} {oc(tr).adet}</p>
             </div>
           ) : (
             <p>{scanResult.message}</p>
@@ -444,8 +445,8 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
               { label: tr ? 'Bekleyen Görev' : 'Pending Tasks', value: pendingTasks, color: 'text-orange-600', bg: 'bg-orange-50' },
-              { label: tr ? 'Devam Eden' : 'In Progress', value: inProgressTasks, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: tr ? 'Tamamlanan' : 'Completed', value: todayCompleted, color: 'text-green-600', bg: 'bg-green-50' },
+              { label: oc(tr).devam_eden, value: inProgressTasks, color: 'text-blue-600', bg: 'bg-blue-50' },
+              { label: oc(tr).tamamlanan, value: todayCompleted, color: 'text-green-600', bg: 'bg-green-50' },
               { label: tr ? 'Konum Sayısı' : 'Locations', value: locations.length, color: 'text-purple-600', bg: 'bg-purple-50' },
             ].map((m,i) => (
               <div key={i} className={`apple-card p-4 ${m.bg}`}>
@@ -458,9 +459,9 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
           {/* Quick actions */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-              { icon: Truck, label: tr ? 'Mal Kabul' : 'Receive Goods', color: 'bg-blue-500', action: () => setView('receive') },
+              { icon: Truck, label: oc(tr).mal_kabul, color: 'bg-blue-500', action: () => setView('receive') },
               { icon: ArrowRight, label: tr ? 'Sipariş Toplama' : 'Pick Orders', color: 'bg-green-500', action: () => setView('pick') },
-              { icon: RefreshCw, label: tr ? 'Sayım Başlat' : 'Start Count', color: 'bg-purple-500', action: startCycleCount },
+              { icon: RefreshCw, label: oc(tr).sayim_baslat, color: 'bg-purple-500', action: startCycleCount },
               { icon: ArrowLeft, label: tr ? 'Transfer' : 'Transfer', color: 'bg-orange-500', action: () => setView('tasks') },
             ].map((a,i) => (
               <button key={i} onClick={a.action}
@@ -501,7 +502,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
       {/* RECEIVE VIEW */}
       {view === 'receive' && (
         <div className="space-y-4">
-          <h2 className="font-semibold">{tr ? 'Mal Kabul' : 'Receive Goods'}</h2>
+          <h2 className="font-semibold">{oc(tr).mal_kabul}</h2>
           {/* Pending orders */}
           <div className="space-y-2">
             {orders.filter(o => o.status === 'pending' || o.status === 'Beklemede').slice(0, 10).map(order => (
@@ -510,7 +511,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                   <div>
                     <p className="font-medium text-sm">{order.orderNo || order.id.slice(-8)}</p>
                     <p className="text-xs text-gray-500">{order.customerName || order.customer}</p>
-                    <p className="text-xs text-gray-400">{(order.lineItems || []).length} {tr ? 'kalem' : 'lines'}</p>
+                    <p className="text-xs text-gray-400">{(order.lineItems || []).length} {oc(tr).kalem}</p>
                   </div>
                   <button onClick={() => createReceiveTask(order)}
                     className="apple-button-primary text-white px-3 py-1.5 rounded-full text-xs flex items-center gap-1">
@@ -537,7 +538,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                 </div>
                 <button onClick={() => setActiveTask(activeTask?.id === task.id ? null : task)}
                   className="text-xs px-3 py-1.5 rounded-full bg-blue-50 text-blue-700">
-                  {activeTask?.id === task.id ? (tr ? 'Kapat' : 'Close') : (tr ? 'Aç' : 'Open')}
+                  {activeTask?.id === task.id ? (oc(tr).kapat) : (tr ? 'Aç' : 'Open')}
                 </button>
               </div>
               {activeTask?.id === task.id && (
@@ -557,7 +558,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                   ))}
                   <button onClick={() => completeTask(activeTask)}
                     className="w-full apple-button-primary text-white py-2.5 rounded-full text-sm font-medium">
-                    <CheckCircle2 className="w-4 h-4 inline mr-1" /> {tr ? 'Tamamla' : 'Complete'}
+                    <CheckCircle2 className="w-4 h-4 inline mr-1" /> {oc(tr).tamamla}
                   </button>
                 </div>
               )}
@@ -576,11 +577,11 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                 <div>
                   <p className="font-medium text-sm">{order.orderNo || order.id.slice(-8)}</p>
                   <p className="text-xs text-gray-500">{order.customerName || order.customer}</p>
-                  <p className="text-xs text-gray-400">{(order.lineItems || []).length} {tr ? 'kalem' : 'lines'}</p>
+                  <p className="text-xs text-gray-400">{(order.lineItems || []).length} {oc(tr).kalem}</p>
                 </div>
                 <button onClick={() => createPickTask(order)}
                   className="apple-button-primary text-white px-3 py-1.5 rounded-full text-xs flex items-center gap-1">
-                  <ArrowRight className="w-3 h-3" /> {tr ? 'Topla' : 'Pick'}
+                  <ArrowRight className="w-3 h-3" /> {oc(tr).topla}
                 </button>
               </div>
             </div>
@@ -602,7 +603,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                 </div>
                 <button onClick={() => setActiveTask(activeTask?.id === task.id ? null : task)}
                   className="text-xs px-3 py-1.5 rounded-full bg-green-50 text-green-700">
-                  {activeTask?.id === task.id ? (tr ? 'Kapat' : 'Close') : (tr ? 'Topla' : 'Pick')}
+                  {activeTask?.id === task.id ? (oc(tr).kapat) : (oc(tr).topla)}
                 </button>
               </div>
               {activeTask?.id === task.id && (
@@ -638,7 +639,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
             <h2 className="font-semibold">{tr ? 'Envanter Sayımı' : 'Cycle Count'}</h2>
             <div className="flex gap-2">
               <button onClick={() => setView('dashboard')} className="apple-button-secondary px-3 py-1.5 rounded-full text-xs">
-                {tr ? 'İptal' : 'Cancel'}
+                {oc(tr).iptal}
               </button>
               <button onClick={submitCycleCount} className="apple-button-primary text-white px-3 py-1.5 rounded-full text-xs">
                 {tr ? 'Sayımı Kaydet' : 'Submit Count'}
@@ -652,7 +653,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm">{item.productName}</p>
                     <p className="text-xs text-gray-500 font-mono">{item.sku}</p>
-                    <p className="text-xs text-gray-400">{tr ? 'Sistem: ' : 'System: '}{item.systemQty} {tr ? 'adet' : 'units'}</p>
+                    <p className="text-xs text-gray-400">{tr ? 'Sistem: ' : 'System: '}{item.systemQty} {oc(tr).adet}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -712,7 +713,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                             .slice(0, 5)
                             .map((i, ix) => (
                               <p key={ix} className="text-[10px] text-gray-600">
-                                {i.name ?? i.sku ?? '—'}: {tr ? 'sistem' : 'system'} {i.systemQty} → {tr ? 'sayılan' : 'counted'} {i.countedQty}
+                                {i.name ?? i.sku ?? '—'}: {oc(tr).sistem} {i.systemQty} → {oc(tr).sayilan} {i.countedQty}
                               </p>
                             ))}
                         </div>
@@ -756,7 +757,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                         }`}>{t.status}</span>
                       </div>
                       <p className="text-sm mt-1">{t.referenceNo || t.id.slice(-8)}</p>
-                      <p className="text-xs text-gray-400">{t.lines.length} {tr ? 'kalem' : 'lines'} · {t.lines.filter(l=>l.scanned).length} {tr ? 'tamamlandı' : 'done'}</p>
+                      <p className="text-xs text-gray-400">{t.lines.length} {oc(tr).kalem} · {t.lines.filter(l=>l.scanned).length} {tr ? 'tamamlandı' : 'done'}</p>
                     </div>
                     {t.status !== 'completed' && (
                       <button onClick={() => setActiveTask(t)}
@@ -806,11 +807,11 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
               <div className="overflow-x-auto"><table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-100">
                   <tr>
-                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Kod' : 'Code'}</th>
-                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Depo' : 'Warehouse'}</th>
-                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Koridor' : 'Aisle'}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{oc(tr).kod}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{oc(tr).depo}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{oc(tr).koridor}</th>
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Raf' : 'Rack'}</th>
-                    <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Seviye' : 'Level'}</th>
+                    <th className="text-left p-3 font-medium text-gray-600">{oc(tr).seviye}</th>
                     <th className="text-left p-3 font-medium text-gray-600">{tr ? 'Bölge' : 'Zone'}</th>
                     {isAuthenticated && <th className="p-3" />}
                   </tr>
@@ -879,15 +880,15 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
               <button onClick={() => { setShowLocForm(false); setEditingLocId(null); setLocFormError(null); }}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">{tr ? 'Depo' : 'Warehouse'}</label>
+              <label className="text-xs text-gray-500 mb-1 block">{oc(tr).depo}</label>
               <select className="apple-input w-full p-3 rounded-xl text-sm" value={locForm.warehouseId} onChange={e=>setLocForm(p=>({...p,warehouseId:e.target.value}))}>
-                <option value="">{tr ? 'Depo seçin' : 'Select warehouse'}</option>
+                <option value="">{oc(tr).depo_secin}</option>
                 {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
               </select>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">{tr ? 'Koridor' : 'Aisle'}</label>
+                <label className="text-xs text-gray-500 mb-1 block">{oc(tr).koridor}</label>
                 <input className="apple-input w-full p-3 rounded-xl text-sm" value={locForm.aisle} onChange={e=>setLocForm(p=>({...p,aisle:e.target.value.toUpperCase()}))} maxLength={3} />
               </div>
               <div>
@@ -895,7 +896,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
                 <input className="apple-input w-full p-3 rounded-xl text-sm" value={locForm.rack} onChange={e=>setLocForm(p=>({...p,rack:e.target.value}))} maxLength={3} />
               </div>
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">{tr ? 'Seviye' : 'Level'}</label>
+                <label className="text-xs text-gray-500 mb-1 block">{oc(tr).seviye}</label>
                 <input className="apple-input w-full p-3 rounded-xl text-sm" value={locForm.level} onChange={e=>setLocForm(p=>({...p,level:e.target.value}))} maxLength={3} />
               </div>
             </div>
@@ -914,8 +915,8 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
               <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2">{locFormError}</p>
             )}
             <div className="flex gap-3">
-              <button onClick={() => { setShowLocForm(false); setEditingLocId(null); setLocFormError(null); }} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{tr ? 'İptal' : 'Cancel'}</button>
-              <button onClick={saveLocation} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{tr ? 'Kaydet' : 'Save'}</button>
+              <button onClick={() => { setShowLocForm(false); setEditingLocId(null); setLocFormError(null); }} className="apple-button-secondary flex-1 p-3 rounded-full text-sm">{oc(tr).iptal}</button>
+              <button onClick={saveLocation} className="apple-button-primary text-white flex-1 p-3 rounded-full text-sm">{oc(tr).kaydet}</button>
             </div>
           </div>
         </div>

@@ -11,6 +11,7 @@ import { zamanMs, gunAnahtari, gunBasi, tarihYaz } from '../utils/zaman';
 import OpsWatchdogCard from './OpsWatchdogCard';
 import TrafikKarti from './TrafikKarti';
 import ModuleStatusBoard from './ModuleStatusBoard';
+import { oc } from '../i18n/ortak';
 
 /** Kiracının KENDİ yedek kurulumu (2026-08-21: "her şirket kendi setup'ı"). */
 interface TenantBackup {
@@ -186,8 +187,8 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
         setPayEmail(d.profile.email || d.owner?.email || t.ownerEmail || '');
         setPayAmount(String((d.billing.amount as number) || PLAN_PRICES[plan]?.[cycle === 'yearly' ? 'yearly' : 'monthly'] || ''));
         setPayCurrency('TRY');
-      } else { toast(tr ? 'Detay yüklenemedi.' : 'Failed to load detail.', 'error'); }
-    } catch { toast(tr ? 'Detay yüklenemedi.' : 'Failed to load detail.', 'error'); }
+      } else { toast(oc(tr).detay_yuklenemedi, 'error'); }
+    } catch { toast(oc(tr).detay_yuklenemedi, 'error'); }
     setDetailLoading(false);
   };
   const closeDetail = () => { setDetailId(null); setDetail(null); setPayOpen(false); setPayResult(null); };
@@ -199,8 +200,8 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
       if (res.ok) setDetail(await res.json() as TenantDetail);
       // Sessiz-başarısızlık taraması (2026-08-31): tazeleme başarısızsa ekranda
       // BAYAT veri kalıyordu, kullanıcı işlemin yansıdığını sanabilirdi.
-      else toast(tr ? 'Detay tazelenemedi — görünen veriler eski olabilir.' : 'Refresh failed — data may be stale.', 'error');
-    } catch { toast(tr ? 'Detay tazelenemedi — görünen veriler eski olabilir.' : 'Refresh failed — data may be stale.', 'error'); }
+      else toast(oc(tr).detay_tazelenemedi_gorunen_veriler_eski_olabilir, 'error');
+    } catch { toast(oc(tr).detay_tazelenemedi_gorunen_veriler_eski_olabilir, 'error'); }
   };
 
   const saveBilling = async () => {
@@ -215,8 +216,8 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
       if (res.ok) {
         setTenants(prev => prev.map(x => x.companyId === detailId ? { ...x, plan: fPlan, cycle: fCycle, status: fStatus, nextPaymentDate: nextMs ?? x.nextPaymentDate } : x));
         toast(tr ? 'Faturalandırma güncellendi.' : 'Billing updated.', 'success');
-      } else { toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error'); }
-    } catch { toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error'); }
+      } else { toast(oc(tr).guncelleme_basarisiz, 'error'); }
+    } catch { toast(oc(tr).guncelleme_basarisiz, 'error'); }
     setSavingBilling(false);
   };
 
@@ -241,10 +242,10 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
           ? { ...x, backup: { ...(x.backup ?? { enabled: true, lastRunAt: null, lastStatus: null }), yapilandirildi: !!v, remote: v || null } as TenantBackup }
           : x));
       } else {
-        toast(d.error || (tr ? 'Kaydedilemedi.' : 'Save failed.'), 'error');
+        toast(d.error || (oc(tr).kaydedilemedi_2), 'error');
       }
     } catch {
-      toast(tr ? 'Kaydedilemedi.' : 'Save failed.', 'error');
+      toast(oc(tr).kaydedilemedi_2, 'error');
     } finally { setBackupSaving(false); }
   };
 
@@ -257,8 +258,8 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
         body: JSON.stringify({ profile: { companyName: pCompanyName, taxNo: pTaxNo, taxOffice: pTaxOffice, email: pEmail, phone: pPhone, iban: pIban, address: pAddress } }),
       });
       if (res.ok) { toast(tr ? 'Firma bilgileri güncellendi.' : 'Company info updated.', 'success'); void refreshDetail(detailId); }
-      else toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error');
-    } catch { toast(tr ? 'Güncelleme başarısız.' : 'Update failed.', 'error'); }
+      else toast(oc(tr).guncelleme_basarisiz, 'error');
+    } catch { toast(oc(tr).guncelleme_basarisiz, 'error'); }
     setSavingProfile(false);
   };
 
@@ -268,21 +269,21 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
     try {
       const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/users/${encodeURIComponent(uid)}/role`, { method: 'POST', body: JSON.stringify({ role }) });
       if (res.ok) { toast(tr ? 'Rol güncellendi.' : 'Role updated.', 'success'); void refreshDetail(detailId); }
-      else { const d = await res.json().catch(() => ({})) as { error?: string }; toast(d.error || (tr ? 'Rol güncellenemedi.' : 'Role update failed.'), 'error'); }
-    } catch { toast(tr ? 'Rol güncellenemedi.' : 'Role update failed.', 'error'); }
+      else { const d = await res.json().catch(() => ({})) as { error?: string }; toast(d.error || (oc(tr).rol_guncellenemedi), 'error'); }
+    } catch { toast(oc(tr).rol_guncellenemedi, 'error'); }
     setUserBusy(null);
   };
 
   const removeUser = async (uid: string, email: string) => {
     if (!detailId) return;
-    const ok = await confirmAction({ title: tr ? 'Kullanıcıyı Kaldır' : 'Remove User', message: tr ? `"${email}" bu firmadan kaldırılacak. Emin misiniz?` : `"${email}" will be removed. Are you sure?`, confirmLabel: tr ? 'Kaldır' : 'Remove', variant: 'danger' });
+    const ok = await confirmAction({ title: tr ? 'Kullanıcıyı Kaldır' : 'Remove User', message: tr ? `"${email}" bu firmadan kaldırılacak. Emin misiniz?` : `"${email}" will be removed. Are you sure?`, confirmLabel: oc(tr).kaldir, variant: 'danger' });
     if (!ok) return;
     setUserBusy(uid);
     try {
       const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/users/${encodeURIComponent(uid)}/remove`, { method: 'POST' });
       if (res.ok) { toast(tr ? 'Kullanıcı kaldırıldı.' : 'User removed.', 'success'); void refreshDetail(detailId); }
-      else { const d = await res.json().catch(() => ({})) as { error?: string }; toast(d.error || (tr ? 'Kaldırılamadı.' : 'Removal failed.'), 'error'); }
-    } catch { toast(tr ? 'Kaldırılamadı.' : 'Removal failed.', 'error'); }
+      else { const d = await res.json().catch(() => ({})) as { error?: string }; toast(d.error || (oc(tr).kaldirilamadi), 'error'); }
+    } catch { toast(oc(tr).kaldirilamadi, 'error'); }
     setUserBusy(null);
   };
 
@@ -295,29 +296,29 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
       if (res.ok && d.success) {
         toast(d.emailSent ? (tr ? 'Davet e-postası gönderildi.' : 'Invite email sent.') : (tr ? 'Davet oluşturuldu (e-posta gönderilemedi — linki paylaşın).' : 'Invite created (email failed — share the link manually).'), d.emailSent ? 'success' : 'info');
         setInviteEmail('');
-      } else toast(d.error || (tr ? 'Davet gönderilemedi.' : 'Invite failed.'), 'error');
-    } catch { toast(tr ? 'Davet gönderilemedi.' : 'Invite failed.', 'error'); }
+      } else toast(d.error || (oc(tr).davet_gonderilemedi), 'error');
+    } catch { toast(oc(tr).davet_gonderilemedi, 'error'); }
     setInviting(false);
   };
 
   const quickStatus = async (t: Tenant, status: 'active' | 'suspended') => {
     const ok = await confirmAction(status === 'suspended'
-      ? { title: tr ? 'Firmayı Askıya Al' : 'Suspend Company', message: tr ? `"${t.companyName}" askıya alınacak. Tüm kullanıcıları erişemeyecek. Emin misiniz?` : `"${t.companyName}" will be suspended. Are you sure?`, confirmLabel: tr ? 'Askıya Al' : 'Suspend', variant: 'danger' }
-      : { title: tr ? 'Firmayı Aktifleştir' : 'Activate Company', message: tr ? `"${t.companyName}" aktifleştirilecek. Devam?` : `Activate "${t.companyName}"?`, confirmLabel: tr ? 'Aktifleştir' : 'Activate', variant: 'warning' });
+      ? { title: tr ? 'Firmayı Askıya Al' : 'Suspend Company', message: tr ? `"${t.companyName}" askıya alınacak. Tüm kullanıcıları erişemeyecek. Emin misiniz?` : `"${t.companyName}" will be suspended. Are you sure?`, confirmLabel: oc(tr).askiya_al, variant: 'danger' }
+      : { title: tr ? 'Firmayı Aktifleştir' : 'Activate Company', message: tr ? `"${t.companyName}" aktifleştirilecek. Devam?` : `Activate "${t.companyName}"?`, confirmLabel: oc(tr).aktiflestir, variant: 'warning' });
     if (!ok) return;
     setBusy(t.companyId);
     try {
       const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(t.companyId)}/status`, { method: 'POST', body: JSON.stringify({ status }) });
       if (res.ok) { setTenants(prev => prev.map(x => x.companyId === t.companyId ? { ...x, status } : x)); toast(tr ? (status === 'suspended' ? 'Askıya alındı.' : 'Aktifleştirildi.') : 'Updated.', 'success'); }
-      else toast(tr ? 'İşlem başarısız.' : 'Operation failed.', 'error');
-    } catch { toast(tr ? 'İşlem başarısız.' : 'Operation failed.', 'error'); }
+      else toast(oc(tr).islem_basarisiz, 'error');
+    } catch { toast(oc(tr).islem_basarisiz, 'error'); }
     setBusy(null);
   };
 
   const createLink = async () => {
     if (!detailId) return;
     const amt = Number(payAmount);
-    if (!amt || amt <= 0) { toast(tr ? 'Geçerli bir tutar girin.' : 'Enter a valid amount.', 'error'); return; }
+    if (!amt || amt <= 0) { toast(oc(tr).gecerli_bir_tutar_girin, 'error'); return; }
     setPayBusy(true); setPayResult(null);
     try {
       const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/payment-link`, {
@@ -332,8 +333,8 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
         void refreshDetail(detailId); // ödeme geçmişini tazele — modal/sonuç ekranını bozmadan
       } else if (d.notConfigured) {
         toast(tr ? 'İyzico yapılandırılmamış (IYZICO_API_KEY).' : 'iyzico not configured.', 'error');
-      } else { toast(d.error || (tr ? 'Link oluşturulamadı.' : 'Failed to create link.'), 'error'); }
-    } catch { toast(tr ? 'Link oluşturulamadı.' : 'Failed to create link.', 'error'); }
+      } else { toast(d.error || (oc(tr).link_olusturulamadi), 'error'); }
+    } catch { toast(oc(tr).link_olusturulamadi, 'error'); }
     setPayBusy(false);
   };
 
@@ -374,7 +375,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
           <p className="text-xs text-[#86868B]">{tr ? 'SaaS operatörü süper-admin paneli' : 'SaaS operator super-admin panel'}</p>
         </div>
         <button onClick={() => void load()} className="apple-button-secondary ml-auto text-xs flex items-center gap-1.5 px-3 py-2">
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />{tr ? 'Yenile' : 'Refresh'}
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />{oc(tr).yenile}
         </button>
       </div>
 
@@ -382,8 +383,8 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><Building2 className="w-4 h-4" />{tr ? 'Toplam Firma' : 'Companies'}</div><p className="text-2xl font-bold text-[#1D1D1F]">{tenants.length}</p></div>
         <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><Users className="w-4 h-4" />{tr ? 'Kullanıcı' : 'Users'}</div><p className="text-2xl font-bold text-[#1D1D1F]">{totalUsers}</p></div>
-        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldCheck className="w-4 h-4" />{tr ? 'Aktif' : 'Active'}</div><p className="text-2xl font-bold text-green-600">{tenants.length - suspended}</p></div>
-        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldOff className="w-4 h-4" />{tr ? 'Askıda' : 'Suspended'}</div><p className="text-2xl font-bold text-red-500">{suspended}</p></div>
+        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldCheck className="w-4 h-4" />{oc(tr).aktif}</div><p className="text-2xl font-bold text-green-600">{tenants.length - suspended}</p></div>
+        <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><ShieldOff className="w-4 h-4" />{oc(tr).askida}</div><p className="text-2xl font-bold text-red-500">{suspended}</p></div>
         <div className="apple-card p-4"><div className="flex items-center gap-2 text-[#86868B] text-xs mb-1"><CreditCard className="w-4 h-4" />{tr ? 'Aylık Gelir' : 'MRR'}</div><p className="text-2xl font-bold text-[#1D1D1F]">{fmtMoney(mrr)}</p>{tutariBilinmeyen > 0 && <p className="text-[10px] text-amber-600 mt-0.5">{tr ? `${tutariBilinmeyen} kiracının tutarı bilinmiyor — toplama dahil değil` : `${tutariBilinmeyen} tenant(s) with unknown amount excluded`}</p>}</div>
       </div>
 
@@ -406,18 +407,18 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-[#86868B] border-b border-[#f0f0f2]">
-                <th className="px-4 py-3 font-medium">{tr ? 'Firma' : 'Company'}</th>
+                <th className="px-4 py-3 font-medium">{oc(tr).firma}</th>
                 <th className="px-4 py-3 font-medium">{tr ? 'Sahip' : 'Owner'}</th>
                 <th className="px-4 py-3 font-medium text-center">{tr ? 'Kull.' : 'Users'}</th>
                 <th className="px-4 py-3 font-medium">{tr ? 'Plan' : 'Plan'}</th>
-                <th className="px-4 py-3 font-medium">{tr ? 'Sonraki Ödeme' : 'Next Payment'}</th>
+                <th className="px-4 py-3 font-medium">{oc(tr).sonraki_odeme}</th>
                 <th className="px-4 py-3 font-medium">{tr ? 'Yedek' : 'Backup'}</th>
-                <th className="px-4 py-3 font-medium">{tr ? 'Durum' : 'Status'}</th>
-                <th className="px-4 py-3 font-medium text-right">{tr ? 'İşlem' : 'Action'}</th>
+                <th className="px-4 py-3 font-medium">{oc(tr).durum}</th>
+                <th className="px-4 py-3 font-medium text-right">{oc(tr).islem}</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={8} className="text-center py-10 text-gray-400 text-sm">{tr ? 'Yükleniyor...' : 'Loading...'}</td></tr>}
+              {loading && <tr><td colSpan={8} className="text-center py-10 text-gray-400 text-sm">{oc(tr).yukleniyor}</td></tr>}
               {!loading && filtered.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-gray-400 text-sm">{tr ? 'Kayıt bulunamadı.' : 'No records.'}</td></tr>}
               {!loading && filtered.map(t => (
                 <tr key={t.companyId} className="border-b border-[#f7f7f8] last:border-0 hover:bg-gray-50/60 cursor-pointer" onClick={() => void openDetail(t)}>
@@ -445,15 +446,15 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                   </td>
                   <td className="px-4 py-3">
                     {t.status === 'suspended'
-                      ? <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600">{tr ? 'Askıda' : 'Suspended'}</span>
-                      : <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-600">{tr ? 'Aktif' : 'Active'}</span>}
+                      ? <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600">{oc(tr).askida}</span>
+                      : <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-600">{oc(tr).aktif}</span>}
                   </td>
                   <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1">
                       <button onClick={() => void openDetail(t)} className="text-xs font-semibold text-brand hover:bg-brand/10 px-3 py-1.5 rounded-lg">{tr ? 'Detay' : 'Details'}</button>
                       {t.status === 'suspended'
-                        ? <button disabled={busy === t.companyId} onClick={() => quickStatus(t, 'active')} className="text-xs font-semibold text-green-600 hover:bg-green-50 px-3 py-1.5 rounded-lg disabled:opacity-50">{tr ? 'Aktifleştir' : 'Activate'}</button>
-                        : <button disabled={busy === t.companyId} onClick={() => quickStatus(t, 'suspended')} className="text-xs font-semibold text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg disabled:opacity-50">{tr ? 'Askıya Al' : 'Suspend'}</button>}
+                        ? <button disabled={busy === t.companyId} onClick={() => quickStatus(t, 'active')} className="text-xs font-semibold text-green-600 hover:bg-green-50 px-3 py-1.5 rounded-lg disabled:opacity-50">{oc(tr).aktiflestir}</button>
+                        : <button disabled={busy === t.companyId} onClick={() => quickStatus(t, 'suspended')} className="text-xs font-semibold text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg disabled:opacity-50">{oc(tr).askiya_al}</button>}
                     </div>
                   </td>
                 </tr>
@@ -476,7 +477,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
               <button onClick={closeDetail} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100"><X className="w-4 h-4 text-[#86868B]" /></button>
             </div>
 
-            {detailLoading && <div className="p-10 text-center text-gray-400 text-sm">{tr ? 'Yükleniyor...' : 'Loading...'}</div>}
+            {detailLoading && <div className="p-10 text-center text-gray-400 text-sm">{oc(tr).yukleniyor}</div>}
 
             {!detailLoading && detail && (
               <div className="p-5 space-y-5">
@@ -489,11 +490,11 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                       <input value={pCompanyName} onChange={e => setPCompanyName(e.target.value)} className="apple-input w-full text-sm" />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Vergi No' : 'Tax No'}</label>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{oc(tr).vergi_no}</label>
                       <input value={pTaxNo} onChange={e => setPTaxNo(e.target.value)} className="apple-input w-full text-sm" />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Vergi Dairesi' : 'Tax Office'}</label>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{oc(tr).vergi_dairesi}</label>
                       <input value={pTaxOffice} onChange={e => setPTaxOffice(e.target.value)} className="apple-input w-full text-sm" />
                     </div>
                     <div>
@@ -501,7 +502,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                       <input value={pEmail} onChange={e => setPEmail(e.target.value)} className="apple-input w-full text-sm" />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1 flex items-center gap-1"><Phone className="w-3 h-3" />{tr ? 'Telefon' : 'Phone'}</label>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1 flex items-center gap-1"><Phone className="w-3 h-3" />{oc(tr).telefon}</label>
                       <input value={pPhone} onChange={e => setPPhone(e.target.value)} className="apple-input w-full text-sm" />
                     </div>
                     <div className="col-span-2">
@@ -509,11 +510,11 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                       <input value={pIban} onChange={e => setPIban(e.target.value)} className="apple-input w-full text-sm" />
                     </div>
                     <div className="col-span-2">
-                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1 flex items-center gap-1"><MapPin className="w-3 h-3" />{tr ? 'Adres' : 'Address'}</label>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1 flex items-center gap-1"><MapPin className="w-3 h-3" />{oc(tr).adres}</label>
                       <input value={pAddress} onChange={e => setPAddress(e.target.value)} className="apple-input w-full text-sm" />
                     </div>
                   </div>
-                  <button onClick={() => void saveProfile()} disabled={savingProfile} className="apple-button-primary text-sm px-4 py-2 mt-3 disabled:opacity-50">{savingProfile ? (tr ? 'Kaydediliyor...' : 'Saving...') : (tr ? 'Kaydet' : 'Save')}</button>
+                  <button onClick={() => void saveProfile()} disabled={savingProfile} className="apple-button-primary text-sm px-4 py-2 mt-3 disabled:opacity-50">{savingProfile ? (oc(tr).kaydediliyor) : (oc(tr).kaydet)}</button>
                 </section>
 
                 {/* Faturalandırma */}
@@ -529,19 +530,19 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                     <div>
                       <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Dönem' : 'Cycle'}</label>
                       <select value={fCycle} aria-label={tr ? 'Dönem' : 'Cycle'} onChange={e => { setFCycle(e.target.value); const pr = PLAN_PRICES[fPlan]?.[e.target.value === 'yearly' ? 'yearly' : 'monthly']; if (pr) setPayAmount(String(pr)); }} className="apple-input w-full text-sm">
-                        <option value="monthly">{tr ? 'Aylık' : 'Monthly'}</option>
-                        <option value="yearly">{tr ? 'Yıllık' : 'Yearly'}</option>
+                        <option value="monthly">{oc(tr).aylik}</option>
+                        <option value="yearly">{oc(tr).yillik}</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Durum' : 'Status'}</label>
-                      <select value={fStatus} aria-label={tr ? 'Durum' : 'Status'} onChange={e => setFStatus(e.target.value)} className="apple-input w-full text-sm">
-                        <option value="active">{tr ? 'Aktif' : 'Active'}</option>
-                        <option value="suspended">{tr ? 'Askıda' : 'Suspended'}</option>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{oc(tr).durum}</label>
+                      <select value={fStatus} aria-label={oc(tr).durum} onChange={e => setFStatus(e.target.value)} className="apple-input w-full text-sm">
+                        <option value="active">{oc(tr).aktif}</option>
+                        <option value="suspended">{oc(tr).askida}</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1 flex items-center gap-1"><Calendar className="w-3 h-3" />{tr ? 'Sonraki Ödeme' : 'Next Payment'}</label>
+                      <label className="block text-[11px] font-semibold text-[#86868B] mb-1 flex items-center gap-1"><Calendar className="w-3 h-3" />{oc(tr).sonraki_odeme}</label>
                       <input type="date" value={fNextDate} aria-label={tr ? 'Sonraki ödeme tarihi' : 'Next payment date'} onChange={e => setFNextDate(e.target.value)} className="apple-input w-full text-sm" />
                     </div>
                     <div className="col-span-2">
@@ -550,7 +551,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                     </div>
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <button onClick={() => void saveBilling()} disabled={savingBilling} className="apple-button-primary text-sm px-4 py-2 disabled:opacity-50">{savingBilling ? (tr ? 'Kaydediliyor...' : 'Saving...') : (tr ? 'Kaydet' : 'Save')}</button>
+                    <button onClick={() => void saveBilling()} disabled={savingBilling} className="apple-button-primary text-sm px-4 py-2 disabled:opacity-50">{savingBilling ? (oc(tr).kaydediliyor) : (oc(tr).kaydet)}</button>
                     <button onClick={() => { setPayOpen(true); setPayResult(null); }} className="apple-button-secondary text-sm px-4 py-2 flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5" />{tr ? 'Ödeme Linki Gönder' : 'Send Payment Link'}</button>
                   </div>
                 </section>
@@ -559,7 +560,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                     yoktu, kullanıcı bildirimi). Rol değişimi + kaldırma cross-tenant
                     yazma gerektirdiğinden ayrı super-admin uçları eklendi. */}
                 <section className="apple-card p-4">
-                  <h4 className="text-xs font-bold text-[#86868B] uppercase mb-3 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" />{tr ? 'Kullanıcılar' : 'Users'} ({detail.users.length})</h4>
+                  <h4 className="text-xs font-bold text-[#86868B] uppercase mb-3 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" />{oc(tr).kullanicilar} ({detail.users.length})</h4>
                   <div className="space-y-1.5">
                     {detail.users.map(u => {
                       const isOwner = u.uid === detailId;
@@ -574,7 +575,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                               value={u.role}
                               disabled={userBusy === u.uid}
                               onChange={e => void changeUserRole(u.uid, e.target.value)}
-                              aria-label={tr ? 'Rol' : 'Role'}
+                              aria-label={oc(tr).rol}
                               className="text-[11px] px-1.5 py-1 rounded-lg bg-gray-100 text-gray-700 font-semibold border-0 outline-none disabled:opacity-50"
                             >
                               {USER_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
@@ -582,7 +583,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                             <button
                               onClick={() => void removeUser(u.uid, u.email)}
                               disabled={isOwner || userBusy === u.uid}
-                              title={isOwner ? (tr ? 'Firma sahibi kaldırılamaz' : 'Owner cannot be removed') : (tr ? 'Kaldır' : 'Remove')}
+                              title={isOwner ? (tr ? 'Firma sahibi kaldırılamaz' : 'Owner cannot be removed') : (oc(tr).kaldir)}
                               className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-400 disabled:opacity-30 disabled:hover:bg-transparent"
                             ><UserMinus className="w-3.5 h-3.5" /></button>
                           </div>
@@ -601,7 +602,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                       {USER_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                     </select>
                     <button onClick={() => void inviteUser()} disabled={inviting || !inviteEmail.trim()} className="apple-button-secondary text-xs px-3 py-1.5 flex items-center gap-1 disabled:opacity-50 shrink-0">
-                      <UserPlus className="w-3.5 h-3.5" />{inviting ? (tr ? 'Gönderiliyor...' : 'Sending...') : (tr ? 'Davet Et' : 'Invite')}
+                      <UserPlus className="w-3.5 h-3.5" />{inviting ? (oc(tr).gonderiliyor) : (tr ? 'Davet Et' : 'Invite')}
                     </button>
                   </div>
                 </section>
@@ -628,7 +629,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                       onClick={() => void saveBackup()}
                       disabled={backupSaving}
                       className="apple-button-secondary text-xs px-3 py-1.5 disabled:opacity-50 shrink-0"
-                    >{backupSaving ? (tr ? 'Kaydediliyor...' : 'Saving...') : (tr ? 'Kaydet' : 'Save')}</button>
+                    >{backupSaving ? (oc(tr).kaydediliyor) : (oc(tr).kaydet)}</button>
                   </div>
                   <p className="text-[10px] text-gray-400 mt-2">
                     {tr
@@ -639,7 +640,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
 
                 {/* Ödeme geçmişi */}
                 <section className="apple-card p-4">
-                  <h4 className="text-xs font-bold text-[#86868B] uppercase mb-3 flex items-center gap-1.5"><Receipt className="w-3.5 h-3.5" />{tr ? 'Ödeme Geçmişi' : 'Payment History'} ({detail.invoices.length})</h4>
+                  <h4 className="text-xs font-bold text-[#86868B] uppercase mb-3 flex items-center gap-1.5"><Receipt className="w-3.5 h-3.5" />{oc(tr).odeme_gecmisi} ({detail.invoices.length})</h4>
                   <div className="space-y-1.5">
                     {detail.invoices.map(inv => (
                       <div key={inv.id} className="flex items-center justify-between text-sm py-1.5 border-b border-gray-50 last:border-0">
@@ -648,7 +649,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                           <div className="text-[11px] text-gray-400">{planText(inv.plan || '')} · {fmtDate(inv.createdMs || inv.createdAt, currentLanguage)}</div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${inv.status === 'paid' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>{inv.status === 'paid' ? (tr ? 'Ödendi' : 'Paid') : (tr ? 'Bekliyor' : 'Pending')}</span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${inv.status === 'paid' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>{inv.status === 'paid' ? (oc(tr).odendi) : (oc(tr).bekliyor)}</span>
                           {inv.paymentPageUrl && <button onClick={() => void copyLink(inv.paymentPageUrl!)} className="text-gray-400 hover:text-brand" title={tr ? 'Linki kopyala' : 'Copy link'}><Copy className="w-3.5 h-3.5" /></button>}
                         </div>
                       </div>
@@ -665,7 +666,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
             <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/40" onClick={e => { e.stopPropagation(); if (!payBusy) setPayOpen(false); }}>
               <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between p-5 border-b border-[#f0f0f2]">
-                  <h3 className="font-bold text-[#1D1D1F] flex items-center gap-2"><Link2 className="w-4 h-4 text-brand" />{tr ? 'Ödeme Linki' : 'Payment Link'}</h3>
+                  <h3 className="font-bold text-[#1D1D1F] flex items-center gap-2"><Link2 className="w-4 h-4 text-brand" />{oc(tr).odeme_linki}</h3>
                   <button onClick={() => setPayOpen(false)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100"><X className="w-4 h-4 text-[#86868B]" /></button>
                 </div>
                 {!payResult ? (
@@ -673,11 +674,11 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                     <div className="p-5 space-y-4">
                       <div className="grid grid-cols-3 gap-3">
                         <div className="col-span-2">
-                          <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Tutar' : 'Amount'}</label>
-                          <input type="number" value={payAmount} aria-label={tr ? 'Tutar' : 'Amount'} onChange={e => setPayAmount(e.target.value)} className="apple-input w-full text-sm" />
+                          <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{oc(tr).tutar}</label>
+                          <input type="number" value={payAmount} aria-label={oc(tr).tutar} onChange={e => setPayAmount(e.target.value)} className="apple-input w-full text-sm" />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{tr ? 'Para Birimi' : 'Currency'}</label>
+                          <label className="block text-[11px] font-semibold text-[#86868B] mb-1">{oc(tr).para_birimi}</label>
                           <select value={payCurrency} aria-label={tr ? 'Para birimi' : 'Currency'} onChange={e => setPayCurrency(e.target.value)} className="apple-input w-full text-sm"><option>TRY</option><option>USD</option><option>EUR</option></select>
                         </div>
                       </div>
@@ -692,7 +693,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                       <p className="text-[11px] text-gray-400">{tr ? 'Link İyzico üzerinden güvenli ödeme sayfası oluşturur.' : 'Creates a secure iyzico payment page.'}</p>
                     </div>
                     <div className="flex gap-3 p-5 pt-0">
-                      <button onClick={() => setPayOpen(false)} disabled={payBusy} className="apple-button-secondary flex-1">{tr ? 'Vazgeç' : 'Cancel'}</button>
+                      <button onClick={() => setPayOpen(false)} disabled={payBusy} className="apple-button-secondary flex-1">{oc(tr).vazgec}</button>
                       <button onClick={() => void createLink()} disabled={payBusy} className="apple-button-primary flex-1 disabled:opacity-50">{payBusy ? (tr ? 'Oluşturuluyor...' : 'Creating...') : (tr ? 'Link Oluştur' : 'Create Link')}</button>
                     </div>
                   </>
@@ -701,7 +702,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                     <div className="flex items-center gap-2 text-green-600 text-sm font-semibold"><Check className="w-4 h-4" />{payResult.emailed ? (tr ? 'Link oluşturuldu ve e-posta gönderildi.' : 'Link created & emailed.') : (tr ? 'Link oluşturuldu.' : 'Link created.')}</div>
                     <div className="bg-gray-50 rounded-xl p-3 text-xs text-[#1D1D1F] break-all font-mono">{payResult.url}</div>
                     <div className="flex gap-3">
-                      <button onClick={() => void copyLink(payResult.url)} className="apple-button-secondary flex-1 flex items-center justify-center gap-1.5">{copied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}{copied ? (tr ? 'Kopyalandı' : 'Copied') : (tr ? 'Kopyala' : 'Copy')}</button>
+                      <button onClick={() => void copyLink(payResult.url)} className="apple-button-secondary flex-1 flex items-center justify-center gap-1.5">{copied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}{copied ? (tr ? 'Kopyalandı' : 'Copied') : (oc(tr).kopyala)}</button>
                       <a href={payResult.url} target="_blank" rel="noreferrer" className="apple-button-primary flex-1 text-center">{tr ? 'Linki Aç' : 'Open Link'}</a>
                     </div>
                     <button onClick={() => { setPayResult(null); }} className="text-xs text-[#86868B] hover:text-[#1D1D1F] w-full text-center">{tr ? 'Yeni link oluştur' : 'Create another'}</button>

@@ -9,6 +9,7 @@
 import React, { useEffect, useState } from 'react';
 import { authFetch } from '../services/authFetch';
 import { CheckCircle2, AlertCircle, RefreshCw, KeyRound } from 'lucide-react';
+import { oc } from '../i18n/ortak';
 
 interface IntegrationStatus {
   id: string;
@@ -62,7 +63,7 @@ const IntegrationHealthPanel: React.FC<{ currentLanguage: string }> = ({ current
 
       {!items ? (
         <div className="flex items-center gap-2 text-xs text-gray-400 py-4">
-          <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {tr ? 'Kontrol ediliyor…' : 'Checking…'}
+          <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {oc(tr).kontrol_ediliyor}
         </div>
       ) : (
         <>

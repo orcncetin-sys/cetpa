@@ -13,6 +13,7 @@ import { bugunAnahtari, tarihYaz } from '../utils/zaman';
 import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import QualityModule from '../components/QualityModule';
+import { oc } from '../i18n/ortak';
 
 export interface P587Check { id: string; item: string; checked: boolean; severity: 'Kritik' | 'Uyarı' | 'Bilgi'; }
 export interface P615Metric { id: string; date: string; line: string; total: number; defects: number; rework: number; }
@@ -40,7 +41,7 @@ export default function KalitePage({
 }: Props) {
   return (
     <motion.div key="kalite" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-      {!canAccess('kalite') ? <UnauthorizedView currentLanguage={currentLanguage} tab={currentLanguage==='tr'?'Kalite Yönetimi':'Quality Management'} /> : (
+      {!canAccess('kalite') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).kalite_yonetimi} /> : (
         <>
           {!hasFullAccess('kalite') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
           {/* ── Phase 587: Kalite Kontrol Çeklisti ─────────────────────── */}
@@ -69,12 +70,12 @@ export default function KalitePage({
                     <div key={c.id} className={`flex items-center gap-3 p-3 rounded-xl ${c.checked?'bg-green-50/50':'bg-gray-50'}`}>
                       {/* Sessiz-başarısızlık taraması (2026-08-31): çeklist yazmaları
                           RBAC 403'te sessizce yutuluyordu — toast eklendi (4 nokta). */}
-                      <button onClick={()=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:!c.checked}).catch(()=>toast(tr587?'Kaydedilemedi (yetki?).':'Save failed.','error'));}} className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${c.checked?'bg-emerald-500 border-emerald-500':'border-gray-300'}`}>
+                      <button onClick={()=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:!c.checked}).catch(()=>toast(oc(tr587).kaydedilemedi_yetki,'error'));}} className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${c.checked?'bg-emerald-500 border-emerald-500':'border-gray-300'}`}>
                         {c.checked&&<svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
                       </button>
                       <span className={`flex-1 text-sm ${c.checked?'line-through text-gray-400':'text-gray-700'}`}>{c.item}</span>
                       <span className={`text-[10px] font-bold shrink-0 ${sevColors[c.severity]}`}>{c.severity}</span>
-                      <button onClick={()=>{void deleteDoc(doc(db,'qualityChecklist',c.id)).catch(()=>toast(tr587?'Silinemedi (yetki?).':'Delete failed.','error'));}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
+                      <button onClick={()=>{void deleteDoc(doc(db,'qualityChecklist',c.id)).catch(()=>toast(oc(tr587).silinemedi_yetki,'error'));}} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
                     </div>
                   ))}
                 </div>
@@ -82,17 +83,17 @@ export default function KalitePage({
                   <div className="flex gap-2">
                     <input className="flex-1 apple-input px-3 py-2 text-sm" placeholder={tr587?'Yeni kontrol maddesi...':'New check item...'} value={p587NewItem} onChange={e=>setP587NewItem(e.target.value)} onKeyDown={e=>{
                       if(e.key==='Enter'&&p587NewItem.trim()){
-                        void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>toast(tr587?'Madde eklenemedi (yetki?).':'Add failed.','error'));
+                        void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>toast(oc(tr587).madde_eklenemedi_yetki,'error'));
                         setP587NewItem('');
                       }
                     }} />
                     <button onClick={()=>{
                       if(!p587NewItem.trim()) return;
-                      void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>toast(tr587?'Madde eklenemedi (yetki?).':'Add failed.','error'));
+                      void addDoc(collection(db,'qualityChecklist'),{item:p587NewItem.trim(),checked:false,severity:'Bilgi',createdAt:serverTimestamp()}).catch(()=>toast(oc(tr587).madde_eklenemedi_yetki,'error'));
                       setP587NewItem('');
-                    }} className="apple-button-primary px-3 py-2 text-sm">{tr587?'Ekle':'Add'}</button>
+                    }} className="apple-button-primary px-3 py-2 text-sm">{oc(tr587).ekle}</button>
                     {p587Checks.length>0&&(
-                      <button onClick={()=>{p587Checks.filter(c=>!c.checked).forEach(c=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:true}).catch(()=>toast(tr587?'Kaydedilemedi (yetki?).':'Save failed.','error'));});}} className="apple-button-secondary px-3 py-2 text-xs">{tr587?'Tümünü İşaretle':'Check All'}</button>
+                      <button onClick={()=>{p587Checks.filter(c=>!c.checked).forEach(c=>{void updateDoc(doc(db,'qualityChecklist',c.id),{checked:true}).catch(()=>toast(oc(tr587).kaydedilemedi_yetki,'error'));});}} className="apple-button-secondary px-3 py-2 text-xs">{tr587?'Tümünü İşaretle':'Check All'}</button>
                     )}
                   </div>
                 )}
@@ -113,16 +114,16 @@ export default function KalitePage({
               <div className="apple-card p-5 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h3 className="font-bold text-gray-900 text-sm">📊 {tr615?'Üretim Kalite Metrikleri':'Production Quality Metrics'}</h3>
-                  <button onClick={()=>{if(p615ShowForm){setP615ShowForm(false);setP615EditId(null);}else{setP615EditId(null);setP615Draft({date:bugunAnahtari(),line:'',total:'',defects:'',rework:''});setP615ShowForm(true);}}} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr615?'Kayıt Ekle':'Add Record'}</button>
+                  <button onClick={()=>{if(p615ShowForm){setP615ShowForm(false);setP615EditId(null);}else{setP615EditId(null);setP615Draft({date:bugunAnahtari(),line:'',total:'',defects:'',rework:''});setP615ShowForm(true);}}} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{oc(tr615).kayit_ekle}</button>
                 </div>
                 {p615ShowForm && (
                   <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                       <input type="date" className="apple-input" value={p615Draft.date} onChange={e=>setP615Draft(d=>({...d,date:e.target.value}))}/>
-                      <input className="apple-input" placeholder={tr615?'Hat':'Line'} value={p615Draft.line} onChange={e=>setP615Draft(d=>({...d,line:e.target.value}))}/>
-                      <input type="number" className="apple-input" placeholder={tr615?'Toplam':'Total'} value={p615Draft.total} onChange={e=>setP615Draft(d=>({...d,total:e.target.value}))}/>
+                      <input className="apple-input" placeholder={oc(tr615).hat} value={p615Draft.line} onChange={e=>setP615Draft(d=>({...d,line:e.target.value}))}/>
+                      <input type="number" className="apple-input" placeholder={oc(tr615).toplam} value={p615Draft.total} onChange={e=>setP615Draft(d=>({...d,total:e.target.value}))}/>
                       <input type="number" className="apple-input" placeholder={tr615?'Hatalı':'Defects'} value={p615Draft.defects} onChange={e=>setP615Draft(d=>({...d,defects:e.target.value}))}/>
-                      <input type="number" className="apple-input" placeholder={tr615?'Yeniden İşlem':'Rework'} value={p615Draft.rework} onChange={e=>setP615Draft(d=>({...d,rework:e.target.value}))}/>
+                      <input type="number" className="apple-input" placeholder={oc(tr615).yeniden_islem} value={p615Draft.rework} onChange={e=>setP615Draft(d=>({...d,rework:e.target.value}))}/>
                     </div>
                     <button onClick={async ()=>{
                       if(!p615Draft.line||!p615Draft.total) return;
@@ -133,21 +134,21 @@ export default function KalitePage({
                         setP615Draft(d=>({...d,line:'',total:'',defects:'',rework:''}));
                         setP615ShowForm(false); setP615EditId(null);
                         toast(tr615?(p615EditId?'Kayıt güncellendi.':'Kayıt eklendi.'):(p615EditId?'Record updated.':'Record added.'),'success');
-                      } catch(e){ toast((tr615?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
-                    }} className="apple-button-primary text-xs px-6">{tr615?'Kaydet':'Save'}</button>
+                      } catch(e){ toast((oc(tr615).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
+                    }} className="apple-button-primary text-xs px-6">{oc(tr615).kaydet}</button>
                   </div>
                 )}
                 {p615Metrics.length > 0 && (
                   <>
                     <div className="grid grid-cols-3 gap-3">
                       <div className="bg-blue-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr615?'Toplam Üretim':'Total Produced'}</p><p className="text-xl font-black text-blue-600">{totalProduced.toLocaleString()}</p></div>
-                      <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr615?'Hata Oranı':'Defect Rate'}</p><p className="text-xl font-black text-red-600">%{defectRate.toFixed(2)}</p></div>
+                      <div className="bg-red-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr615).hata_orani}</p><p className="text-xl font-black text-red-600">%{defectRate.toFixed(2)}</p></div>
                       <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[10px] font-bold text-gray-400 uppercase">{tr615?'İlk Geçiş Verimi':'First Pass Yield'}</p><p className="text-xl font-black text-emerald-600">%{firstPassYield.toFixed(1)}</p></div>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs min-w-[560px]">
                         <thead><tr className="border-b border-gray-100 bg-gray-50">
-                          {[tr615?'Tarih':'Date',tr615?'Hat':'Line',tr615?'Toplam':'Total',tr615?'Hatalı':'Defects',tr615?'Yeniden İşlem':'Rework',tr615?'Hata %':'Defect %'].map(h=>(
+                          {[oc(tr615).tarih,oc(tr615).hat,oc(tr615).toplam,tr615?'Hatalı':'Defects',oc(tr615).yeniden_islem,tr615?'Hata %':'Defect %'].map(h=>(
                             <th key={h} className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                           ))}
                           <th className="px-3 py-2 w-8"></th>
@@ -164,8 +165,8 @@ export default function KalitePage({
                                 <td className="px-3 py-2 tabular-nums text-amber-600">{m.rework}</td>
                                 <td className={`px-3 py-2 font-bold ${dr>5?'text-red-600':dr>2?'text-amber-600':'text-emerald-600'}`}>%{dr.toFixed(2)}</td>
                                 <td className="px-3 py-2 text-right"><div className="flex items-center justify-end gap-2">
-                                  <button type="button" onClick={()=>{setP615Draft({date:m.date,line:m.line,total:String(m.total),defects:String(m.defects),rework:String(m.rework)});setP615EditId(m.id);setP615ShowForm(true);}} title={tr615?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
-                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'productionMetrics',m.id));}catch(e){toast((tr615?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title={tr615?'Sil':'Delete'} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={()=>{setP615Draft({date:m.date,line:m.line,total:String(m.total),defects:String(m.defects),rework:String(m.rework)});setP615EditId(m.id);setP615ShowForm(true);}} title={oc(tr615).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'productionMetrics',m.id));}catch(e){toast((oc(tr615).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title={oc(tr615).sil} className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                 </div></td>
                               </tr>
                             );

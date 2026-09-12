@@ -11,6 +11,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { zamanDate, zamanMs, tarihYaz } from '../../../utils/zaman';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'inventory' | 'currentLanguage' | 'fmtAna'>;
 
@@ -41,7 +42,7 @@ export default function CrmBloklar4({ reportsTab, orders, quotations, inventory,
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🏆 Satış Temsilcisi Sıralaması' : '🏆 Sales Rep Leaderboard'}</h3>
-              <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'Bu ay' : 'This month'}</span>
+              <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{oc(currentLanguage).bu_ay_2}</span>
             </div>
             <div className="space-y-2.5">
               {repList.map((r, i) => (
@@ -52,7 +53,7 @@ export default function CrmBloklar4({ reportsTab, orders, quotations, inventory,
                       <span className="text-xs font-medium text-gray-800 truncate">{r.name}</span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className="text-[10px] text-gray-400">{r.orders} {currentLanguage === 'tr' ? 'sipariş' : 'orders'}</span>
+                      <span className="text-[10px] text-gray-400">{r.orders} {oc(currentLanguage).siparis}</span>
                       <span className="text-xs font-bold text-gray-700">{fmtAna(r.rev,'K',0)}</span>
                     </div>
                   </div>
@@ -102,7 +103,7 @@ export default function CrmBloklar4({ reportsTab, orders, quotations, inventory,
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🆕 Yeni vs Tekrar Müşteri Cirosu' : '🆕 New vs Repeat Customer Revenue'}</h3>
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm bg-brand" /><span className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'Yeni' : 'New'}</span></div>
+                <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm bg-brand" /><span className="text-[10px] text-gray-500">{oc(currentLanguage).yeni}</span></div>
                 <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm bg-blue-300" /><span className="text-[10px] text-gray-500">{currentLanguage === 'tr' ? 'Tekrar' : 'Repeat'}</span></div>
               </div>
             </div>
@@ -186,7 +187,7 @@ export default function CrmBloklar4({ reportsTab, orders, quotations, inventory,
           if (!items?.length) continue;
           for (const qi of items) {
             const inv = inventory.find(ii => ii.id === qi.inventoryId || ii.name === qi.name);
-            const cat = inv?.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
+            const cat = inv?.category || (oc(currentLanguage).diger);
             if (!catQuotes[cat]) catQuotes[cat] = { won: 0, total: 0 };
             catQuotes[cat].total++;
             if (status === 'Converted to Order' || status === 'accepted' || status === 'won') catQuotes[cat].won++;
@@ -273,7 +274,7 @@ export default function CrmBloklar4({ reportsTab, orders, quotations, inventory,
               </div>
               <div className="text-right">
                 <p className="text-sm font-bold text-gray-600">{months210[months210.length-1].customers} {currentLanguage === 'tr' ? 'aktif müşteri' : 'active customers'}</p>
-                <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Bu ay' : 'This month'}</p>
+                <p className="text-[10px] text-gray-400">{oc(currentLanguage).bu_ay_2}</p>
               </div>
             </div>
           </div>
@@ -298,7 +299,7 @@ export default function CrmBloklar4({ reportsTab, orders, quotations, inventory,
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '⚠️ Müşteri Konsantrasyon Riski' : '⚠️ Customer Concentration Risk'}</h3>
               <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${riskLevel218 === 'high' ? 'bg-red-100 text-red-700' : riskLevel218 === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                {riskLevel218 === 'high' ? (currentLanguage === 'tr' ? 'Yüksek' : 'High') : riskLevel218 === 'medium' ? (currentLanguage === 'tr' ? 'Orta' : 'Med') : (currentLanguage === 'tr' ? 'Düşük' : 'Low')}
+                {riskLevel218 === 'high' ? (oc(currentLanguage).yuksek) : riskLevel218 === 'medium' ? (currentLanguage === 'tr' ? 'Orta' : 'Med') : (oc(currentLanguage).dusuk)}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-3 mb-4">

@@ -4,6 +4,7 @@
  */
 import { Warehouse as WarehouseIcon, Truck, PackageSearch } from 'lucide-react';
 import type { LocationStock } from '../types';
+import { oc } from '../i18n/ortak';
 
 interface Props {
   currentLanguage: 'tr' | 'en';
@@ -42,7 +43,7 @@ export default function LocationStockReport({ currentLanguage, locationStocks }:
                     {g.type === 'warehouse' ? <WarehouseIcon className="w-3.5 h-3.5 text-brand shrink-0" /> : <Truck className="w-3.5 h-3.5 text-brand shrink-0" />}
                     <span className="text-sm font-bold text-gray-800 truncate">{g.name}</span>
                   </div>
-                  <span className="text-[10px] font-bold text-gray-400 shrink-0">{tr ? 'toplam' : 'total'}: {total}</span>
+                  <span className="text-[10px] font-bold text-gray-400 shrink-0">{oc(tr).toplam_3}: {total}</span>
                 </div>
                 <div className="divide-y divide-gray-50">
                   {g.items.sort((a, b) => (b.quantity || 0) - (a.quantity || 0)).map(i => (

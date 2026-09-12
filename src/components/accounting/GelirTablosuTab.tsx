@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import { type Order, type Employee } from '../../types';
 import { kurCevir, paraYaz, tlYaz } from '../../utils/currency';
+import { oc } from '../../i18n/ortak';
 
 interface GelirTablosuTabProps {
   currentLanguage: string;
@@ -113,7 +114,7 @@ export default function GelirTablosuTab({
       {/* Header controls */}
       <div className="apple-card p-4 flex flex-wrap gap-3 items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-gray-600">{currentLanguage === 'tr' ? 'Dönem:' : 'Period:'}</span>
+          <span className="text-sm font-medium text-gray-600">{oc(currentLanguage).donem_2}</span>
           <select
             value={gtMonth}
             onChange={e => setGtMonth(Number(e.target.value))}
@@ -181,7 +182,7 @@ export default function GelirTablosuTab({
         <div className="p-5 border-b border-gray-100">
           <h2 className="font-black text-gray-800 text-lg">{currentLanguage === 'tr' ? 'GELİR TABLOSU' : 'INCOME STATEMENT'}</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            {monthNames[gtMonth - 1]} {gtYear} · {periodOrders.length} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {sym === '₺' ? 'TRY' : gelirCurrency}
+            {monthNames[gtMonth - 1]} {gtYear} · {periodOrders.length} {oc(currentLanguage).siparis} · {sym === '₺' ? 'TRY' : gelirCurrency}
           </p>
         </div>
         <table className="w-full text-sm">
@@ -189,7 +190,7 @@ export default function GelirTablosuTab({
             <tr className="border-b border-gray-100 bg-gray-50/60">
               <th className="text-left py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{currentLanguage === 'tr' ? 'Kalem' : 'Line Item'}</th>
               <th className="text-right py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{sym === '₺' ? 'TRY' : gelirCurrency}</th>
-              <th className="text-right py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{currentLanguage === 'tr' ? 'Marj' : 'Margin'}</th>
+              <th className="text-right py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{oc(currentLanguage).marj}</th>
             </tr>
           </thead>
           <tbody>

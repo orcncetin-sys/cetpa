@@ -13,6 +13,7 @@ import { formatInCurrency, type ExchangeRates } from '../../../utils/currency';
 import { zamanMs } from '../../../utils/zaman';
 import type { ReportsCtx } from '../useReportsData';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from '../ReportKit';
+import { oc } from '../../../i18n/ortak';
 
 type Props = Pick<ReportsCtx, 'orders' | 'currentLanguage' | 'currentT' | 'revenueCurrency' | 'setRevenueCurrency' | 'onMusteriAc' | 'statusChartData' | 'COLORS' | 'topCustomers' | 'trendData'> & {
   /** `exchangeRates ?? undefined` — yalnız TİP köprüsü, ebeveynde türetilir (bkz. CrmRapor.tsx). */
@@ -53,7 +54,7 @@ export default function CrmOzetBolumu({ orders, currentLanguage, currentT, reven
         const sadakatYuzde = toplamMusteri ? Math.round((tekrarEden / toplamMusteri) * 100) : 0;
 
         const kartlar = [
-          { label: currentLanguage==='tr'?'Toplam Müşteri':'Total Customers', value: String(toplamMusteri),
+          { label: oc(currentLanguage).toplam_musteri, value: String(toplamMusteri),
             hint: currentLanguage==='tr'?'sipariş vermiş tekil müşteri':'unique customers with orders',
             icon: Users, accent: 'text-brand', accentBg: 'bg-brand/10', money: false },
           { label: currentLanguage==='tr'?'Yeni Müşteri (30g)':'New Customers (30d)', value: String(yeni),
@@ -95,7 +96,7 @@ export default function CrmOzetBolumu({ orders, currentLanguage, currentT, reven
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Status Dağılımı */}
         <div className="apple-card p-6">
-          <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Sipariş Durumu Dağılımı':'Order Status Distribution'}</h3>
+          <h3 className="font-bold text-gray-800 mb-4">{oc(currentLanguage).siparis_durumu_dagilimi}</h3>
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
               <RePieChart>
@@ -123,7 +124,7 @@ export default function CrmOzetBolumu({ orders, currentLanguage, currentT, reven
                 <div className="w-6 h-6 rounded-full bg-brand/10 flex items-center justify-center text-[10px] font-bold text-brand flex-shrink-0">{i+1}</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
-                  <p className="text-xs text-gray-400">{c.count} {currentLanguage==='tr'?'sipariş':'orders'}</p>
+                  <p className="text-xs text-gray-400">{c.count} {oc(currentLanguage).siparis}</p>
                 </div>
                 <span className="text-sm font-bold text-brand">{formatInCurrency(c.total, revenueCurrency, fxKurlari)}</span>
               </button>
@@ -173,7 +174,7 @@ export default function CrmOzetBolumu({ orders, currentLanguage, currentT, reven
                   <span className="text-base w-7 flex-shrink-0">{medals[i] || `#${i + 1}`}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-gray-800 truncate">{r.name}</p>
-                    <p className="text-[10px] text-gray-400">{r.orderCount} {currentLanguage === 'tr' ? 'sipariş' : 'orders'} · {r.delivered} {currentLanguage === 'tr' ? 'teslim' : 'delivered'}</p>
+                    <p className="text-[10px] text-gray-400">{r.orderCount} {oc(currentLanguage).siparis} · {r.delivered} {oc(currentLanguage).teslim_2}</p>
                   </div>
                   <span className="text-sm font-bold text-brand">{formatInCurrency(r.revenue, revenueCurrency, fxKurlari)}</span>
                 </div>

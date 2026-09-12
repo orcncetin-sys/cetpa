@@ -3,6 +3,7 @@ import { Download, Search, Plus, Eye, Edit2, Trash2, X, Save, RefreshCw, ArrowRi
 import { type BankAccount, type BankTransaction } from '../../types';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
 import { paraYaz } from '../../utils/currency';
+import { oc } from '../../i18n/ortak';
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type BankForm = {
@@ -90,7 +91,7 @@ export default function BankaTab({
                 <span className={`text-base font-black ${kpi.color} group-hover:scale-110 transition-transform`}>{kpi.symbol}</span>
               </div>
               <div className={`text-xl font-bold ${kpi.color}`}>{kpi.value}</div>
-              <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{currentLanguage === 'tr' ? 'Detay için tıkla' : 'Click for details'}</div>
+              <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{oc(currentLanguage).detay_icin_tikla}</div>
             </button>
           ))}
         </div>
@@ -186,8 +187,8 @@ export default function BankaTab({
                     </td>
                     <td className="py-2.5 px-3">
                       <div className="flex items-center justify-center gap-2">
-                        <button onClick={() => openEditBank(acc)} className="action-btn-view" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye size={14} /></button>
-                        <button onClick={() => openEditBank(acc)} className="action-btn-edit" title={currentLanguage === 'tr' ? 'Düzenle' : 'Edit'}><Edit2 size={14} /></button>
+                        <button onClick={() => openEditBank(acc)} className="action-btn-view" title={oc(currentLanguage).incele}><Eye size={14} /></button>
+                        <button onClick={() => openEditBank(acc)} className="action-btn-edit" title={oc(currentLanguage).duzenle}><Edit2 size={14} /></button>
                         <button onClick={() => deleteBank(acc.id)} className="action-btn-delete"><Trash2 size={14} /></button>
                       </div>
                     </td>
@@ -253,7 +254,7 @@ export default function BankaTab({
                   onClick={() => setBankTxFilter(f)}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${bankTxFilter === f ? 'bg-brand text-white' : 'apple-button-secondary py-1.5'}`}
                 >
-                  {f === 'all' ? (currentLanguage === 'tr' ? 'Tümü' : 'All') : f === 'credit' ? (currentLanguage === 'tr' ? '↓ Alacak' : '↓ Credit') : (currentLanguage === 'tr' ? '↑ Borç' : '↑ Debit')}
+                  {f === 'all' ? (oc(currentLanguage).tumu) : f === 'credit' ? (currentLanguage === 'tr' ? '↓ Alacak' : '↓ Credit') : (currentLanguage === 'tr' ? '↑ Borç' : '↑ Debit')}
                 </button>
               ))}
             </div>
@@ -273,12 +274,12 @@ export default function BankaTab({
               <thead>
                 <tr>
                   {([
-                    { key: 'date', label: currentLanguage === 'tr' ? 'Tarih' : 'Date' },
-                    { key: 'accountName', label: currentLanguage === 'tr' ? 'Hesap' : 'Account' },
-                    { key: 'description', label: currentLanguage === 'tr' ? 'Açıklama' : 'Description' },
-                    { key: 'type', label: currentLanguage === 'tr' ? 'Tür' : 'Type' },
-                    { key: 'amount', label: currentLanguage === 'tr' ? 'Tutar' : 'Amount', align: 'right' },
-                    { key: 'balance', label: currentLanguage === 'tr' ? 'Bakiye' : 'Balance', align: 'right' },
+                    { key: 'date', label: oc(currentLanguage).tarih },
+                    { key: 'accountName', label: oc(currentLanguage).hesap },
+                    { key: 'description', label: oc(currentLanguage).aciklama },
+                    { key: 'type', label: oc(currentLanguage).tur },
+                    { key: 'amount', label: oc(currentLanguage).tutar, align: 'right' },
+                    { key: 'balance', label: oc(currentLanguage).bakiye, align: 'right' },
                   ] as { key: keyof BankTransaction; label: string; align?: string }[]).map(col => (
                     <th
                       key={col.key}
@@ -328,7 +329,7 @@ export default function BankaTab({
                       <td className="px-4 py-3">
                         <span className={`apple-badge ${tx.type === 'credit' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                           {tx.type === 'credit' ? '↓ ' : '↑ '}
-                          {tx.type === 'credit' ? (currentLanguage === 'tr' ? 'Alacak' : 'Credit') : (currentLanguage === 'tr' ? 'Borç' : 'Debit')}
+                          {tx.type === 'credit' ? (oc(currentLanguage).alacak) : (oc(currentLanguage).borc)}
                         </span>
                       </td>
                       <td className={`px-4 py-3 text-sm font-semibold text-right whitespace-nowrap ${tx.type === 'credit' ? 'text-green-600' : 'text-red-500'}`}>
@@ -353,13 +354,13 @@ export default function BankaTab({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowBankModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Banka Hesabı' : 'Bank Account'} — {editingBank ? (currentLanguage === 'tr' ? 'Düzenle' : 'Edit') : t.add}</h3>
+                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Banka Hesabı' : 'Bank Account'} — {editingBank ? (oc(currentLanguage).duzenle) : t.add}</h3>
                 <button onClick={() => setShowBankModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
                 {[
                   { label: currentLanguage === 'tr' ? 'Banka Adı' : 'Bank Name', key: 'bankName', placeholder: 'Ziraat Bankası' },
-                  { label: currentLanguage === 'tr' ? 'Şube' : 'Branch', key: 'branch', placeholder: 'Merkez' },
+                  { label: oc(currentLanguage).sube, key: 'branch', placeholder: 'Merkez' },
                   { label: currentLanguage === 'tr' ? 'Hesap Sahibi' : 'Account Holder', key: 'accountHolder', placeholder: 'Cetpa Ltd. Şti.' },
                   { label: currentLanguage === 'tr' ? 'Hesap No' : 'Account No', key: 'accountNumber', placeholder: '1234-5678' },
                   { label: 'IBAN', key: 'iban', placeholder: 'TR00 0000 0000 0000 0000 0000 00' },
@@ -371,13 +372,13 @@ export default function BankaTab({
                 ))}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Döviz' : 'Currency'}</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).doviz}</label>
                     <select value={bankForm.currency} onChange={e => setBankForm(prev => ({ ...prev, currency: e.target.value as 'TRY' | 'USD' | 'EUR' }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
                       {(['TRY', 'USD', 'EUR'] as const).map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Bakiye' : 'Balance'}</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).bakiye}</label>
                     <input type="number" value={bankForm.balance} onChange={e => setBankForm(prev => ({ ...prev, balance: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                   </div>
                 </div>

@@ -16,6 +16,7 @@ import { gunBasi, gunFarki, tarihYaz, bugunAnahtari } from '../utils/zaman';
 import { useMikroTahsilat } from '../hooks/useMikroTahsilat';
 import { useCariAdMap } from '../hooks/useMikroFaturalar';
 import { paraYaz } from '../utils/currency';
+import { oc } from '../i18n/ortak';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1238,7 +1239,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
                     <div className="flex gap-2">
                       <label className={cn('flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 border-dashed border-gray-200 text-xs font-semibold cursor-pointer transition-colors', makbuzUploading ? 'opacity-50 pointer-events-none' : 'text-gray-500 hover:border-brand hover:text-brand')}>
                         <Upload className="w-4 h-4" />
-                        {currentLanguage === 'tr' ? 'Dosya Seç' : 'Choose File'}
+                        {oc(currentLanguage).dosya_sec}
                         <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { void handleMakbuzUpload(e.target.files?.[0]); e.target.value = ''; }} />
                       </label>
                       <label className={cn('flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 border-dashed border-gray-200 text-xs font-semibold cursor-pointer transition-colors', makbuzUploading ? 'opacity-50 pointer-events-none' : 'text-gray-500 hover:border-brand hover:text-brand')}>

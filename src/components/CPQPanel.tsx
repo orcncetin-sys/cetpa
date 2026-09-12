@@ -26,6 +26,7 @@ import { sortByCreatedAt } from '../utils/fsSort';
 import { gunAnahtari } from '../utils/zaman';
 import { paraYaz } from '../utils/currency';
 import ModuleHeader from './ModuleHeader';
+import { oc } from '../i18n/ortak';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -307,15 +308,15 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <input value={templateDraft.name} onChange={e => setTemplateDraft(d => ({ ...d, name: e.target.value }))}
-                    placeholder={tr ? 'Şablon adı' : 'Template name'} className="apple-input px-3 py-2 text-sm" />
+                    placeholder={oc(tr).sablon_adi} className="apple-input px-3 py-2 text-sm" />
                   <input value={templateDraft.category} onChange={e => setTemplateDraft(d => ({ ...d, category: e.target.value }))}
-                    placeholder={tr ? 'Kategori' : 'Category'} className="apple-input px-3 py-2 text-sm" />
+                    placeholder={oc(tr).kategori} className="apple-input px-3 py-2 text-sm" />
                   <input type="number" value={templateDraft.basePrice} onChange={e => setTemplateDraft(d => ({ ...d, basePrice: parseFloat(e.target.value) || 0 }))}
                     placeholder={tr ? 'Baz Fiyat (₺)' : 'Base Price (₺)'} className="apple-input px-3 py-2 text-sm" />
                   <input type="number" min={1} value={templateDraft.minQty} onChange={e => setTemplateDraft(d => ({ ...d, minQty: parseInt(e.target.value) || 1 }))}
                     placeholder={tr ? 'Min. Miktar' : 'Min. Qty'} className="apple-input px-3 py-2 text-sm" />
                   <textarea value={templateDraft.description} onChange={e => setTemplateDraft(d => ({ ...d, description: e.target.value }))}
-                    placeholder={tr ? 'Açıklama' : 'Description'} className="apple-input px-3 py-2 text-sm md:col-span-2 resize-none" rows={2} />
+                    placeholder={oc(tr).aciklama} className="apple-input px-3 py-2 text-sm md:col-span-2 resize-none" rows={2} />
                 </div>
 
                 {/* Attributes */}
@@ -339,9 +340,9 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
 
                 <div className="flex gap-2">
                   <button onClick={saveTemplate} className="apple-button-primary px-4 py-2 text-sm">
-                    {editingTemplateId ? (tr ? 'Güncelle' : 'Update') : (tr ? 'Şablonu Kaydet' : 'Save Template')}
+                    {editingTemplateId ? (oc(tr).guncelle) : (oc(tr).sablonu_kaydet)}
                   </button>
-                  <button onClick={() => setShowTemplateForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr ? 'İptal' : 'Cancel'}</button>
+                  <button onClick={() => setShowTemplateForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr).iptal}</button>
                 </div>
               </motion.div>
             )}
@@ -449,7 +450,7 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
                   ))}
 
                   <div className="flex items-center gap-3 mt-4">
-                    <label className="text-sm font-medium text-gray-700">{tr ? 'Miktar' : 'Qty'}</label>
+                    <label className="text-sm font-medium text-gray-700">{oc(tr).miktar}</label>
                     <input type="number" value={configQty} min={configTemplate.minQty}
                       onChange={e => setConfigQty(Math.max(configTemplate.minQty, parseInt(e.target.value) || 1))}
                       className="apple-input px-3 py-2 text-sm w-24" />
@@ -479,7 +480,7 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
                       );
                     })}
                     <div className="border-t border-gray-100 pt-2 flex justify-between font-bold text-gray-900">
-                      <span>{tr ? 'Birim Fiyat' : 'Unit Price'}</span>
+                      <span>{oc(tr).birim_fiyat}</span>
                       <span>{fmtTRY(configuredPrice)}</span>
                     </div>
                     <div className="flex justify-between text-gray-500">
@@ -487,7 +488,7 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
                       <span>{configQty}</span>
                     </div>
                     <div className="bg-brand/5 rounded-xl p-2 flex justify-between font-bold text-brand">
-                      <span>{tr ? 'Toplam' : 'Total'}</span>
+                      <span>{oc(tr).toplam}</span>
                       <span>{fmtTRY(configuredPrice * configQty)}</span>
                     </div>
                   </div>
@@ -535,14 +536,14 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <input value={quoteCustomer} onChange={e => setQuoteCustomer(e.target.value)}
-                  placeholder={tr ? 'Müşteri adı' : 'Customer name'} className="apple-input px-3 py-2 text-sm" />
+                  placeholder={oc(tr).musteri_adi_2} className="apple-input px-3 py-2 text-sm" />
                 <div className="flex items-center gap-2">
                   <label className="text-xs text-gray-500 whitespace-nowrap">{tr ? 'Geçerlilik (gün)' : 'Valid days'}</label>
                   <input type="number" value={quoteValidDays} onChange={e => setQuoteValidDays(parseInt(e.target.value) || 30)}
                     className="apple-input px-3 py-2 text-sm w-20" />
                 </div>
                 <textarea value={quoteNotes} onChange={e => setQuoteNotes(e.target.value)}
-                  placeholder={tr ? 'Notlar' : 'Notes'} className="apple-input px-3 py-2 text-sm md:col-span-2 resize-none" rows={2} />
+                  placeholder={oc(tr).notlar} className="apple-input px-3 py-2 text-sm md:col-span-2 resize-none" rows={2} />
               </div>
               {(() => {
                 const net = cartItems.reduce((s, i) => s + i.totalPrice, 0);
@@ -552,7 +553,7 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
                     <div className="text-sm">
                       <div className="text-gray-500">{tr ? 'Ara Toplam (net):' : 'Subtotal (net):'} {fmtTRY(net)}</div>
                       <div className="flex items-center gap-1.5 text-gray-500">
-                        {tr ? 'KDV' : 'VAT'} %
+                        {oc(tr).kdv} %
                         <input type="number" value={quoteKdvOran} onChange={e => setQuoteKdvOran(Math.max(0, Number(e.target.value) || 0))}
                           className="apple-input px-2 py-1 text-xs w-14" />
                         : {fmtTRY(kdv)}
@@ -599,7 +600,7 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
                     <button onClick={() => updateDoc(doc(db, 'cpqQuotes', q.id), { status: 'Gönderildi' })}
                       className="apple-button-secondary px-3 py-1.5 text-xs">{tr ? 'Gönderildi İşaretle' : 'Mark Sent'}</button>
                     <button onClick={() => updateDoc(doc(db, 'cpqQuotes', q.id), { status: 'Onaylandı' })}
-                      className="apple-button-primary px-3 py-1.5 text-xs">{tr ? 'Onayla' : 'Approve'}</button>
+                      className="apple-button-primary px-3 py-1.5 text-xs">{oc(tr).onayla}</button>
                   </div>
                 )}
               </div>

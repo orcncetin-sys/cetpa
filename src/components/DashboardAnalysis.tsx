@@ -4,6 +4,7 @@ import { Brain, Sparkles, X, Loader2, TrendingUp, AlertCircle } from 'lucide-rea
 import { ThinkingOrb } from 'thinking-orbs';
 import Markdown from 'react-markdown';
 import { analyzeDashboard } from '../services/geminiService';
+import { oc } from '../i18n/ortak';
 
 interface DashboardAnalysisProps {
   data: Record<string, unknown>;
@@ -105,7 +106,7 @@ export default function DashboardAnalysis({ data, currentLanguage = 'tr' }: Dash
                   onClick={() => setIsOpen(false)}
                   className="apple-button-secondary px-8"
                 >
-                  {tr ? 'Kapat' : 'Close'}
+                  {oc(tr).kapat}
                 </button>
               </div>
             </motion.div>

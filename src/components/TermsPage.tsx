@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { oc } from '../i18n/ortak';
 
 interface Props {
   currentLanguage: 'tr' | 'en';
@@ -13,7 +14,7 @@ export default function TermsPage({ currentLanguage: lang, darkMode, onBack }: P
     // Sekme basligi — SPA'da genel sayfalar kendi basligini koymuyordu; tum
     // sayfalar "CETPA Cloud ERP — ..." gorunuyordu (a11y teshisi 2026-08-28).
     const onceki = document.title;
-    document.title = (lang === 'tr' ? 'Kullanım Koşulları' : 'Terms of Service') + ' — CETPA';
+    document.title = (oc(lang).kullanim_kosullari) + ' — CETPA';
     return () => { document.title = onceki; };
   }, [lang]);
   const isTR = lang === 'tr';
@@ -51,18 +52,18 @@ export default function TermsPage({ currentLanguage: lang, darkMode, onBack }: P
             className={`flex items-center gap-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-lg py-2.5 -my-2.5 ${darkMode ? 'text-white/60 hover:text-white' : 'text-black/60 hover:text-black'}`}
           >
             <ArrowLeft className="w-4 h-4" />
-            {isTR ? 'Geri' : 'Back'}
+            {oc(isTR).geri_2}
           </button>
           <div className="w-px h-4 bg-current opacity-20" />
           <span className="text-sm font-bold" style={{ color: 'var(--color-brand)' }}>CETPA</span>
-          <span className={`text-sm font-medium ${muted}`}>{isTR ? 'Kullanım Koşulları' : 'Terms of Service'}</span>
+          <span className={`text-sm font-medium ${muted}`}>{oc(isTR).kullanim_kosullari}</span>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-16">
         <div className="mb-12">
-          <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>{isTR ? 'Son Güncelleme' : 'Last Updated'}: 28 {isTR ? 'Ağustos' : 'August'} 2026</p>
-          <h1 className="text-4xl font-bold mb-4">{isTR ? 'Kullanım Koşulları' : 'Terms of Service'}</h1>
+          <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${muted}`}>{oc(isTR).son_guncelleme}: 28 {oc(isTR).agustos} 2026</p>
+          <h1 className="text-4xl font-bold mb-4">{oc(isTR).kullanim_kosullari}</h1>
           <p className={muted}>{isTR ? 'CETPA platformunu kullanmadan önce lütfen bu koşulları dikkatlice okuyunuz.' : 'Please read these terms carefully before using the CETPA platform.'}</p>
         </div>
 
@@ -76,7 +77,7 @@ export default function TermsPage({ currentLanguage: lang, darkMode, onBack }: P
         </div>
 
         <div className={`mt-12 pt-8 border-t ${border} text-center`}>
-          <p className={`text-xs ${muted}`}>© 2026 CETPA A.Ş. {isTR ? 'Tüm hakları saklıdır.' : 'All rights reserved.'}</p>
+          <p className={`text-xs ${muted}`}>© 2026 CETPA A.Ş. {oc(isTR).tum_haklari_saklidir}</p>
         </div>
       </main>
     </div>

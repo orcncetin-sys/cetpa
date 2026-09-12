@@ -18,6 +18,7 @@ import {
 } from 'recharts';
 import { confirmAction } from '../lib/confirm';
 import { bugunAnahtari } from '../utils/zaman';
+import { oc } from '../i18n/ortak';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -263,7 +264,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
   const askDelete = async (type: 'merkez' | 'kalem', id: string) => {
     const ok = await confirmAction({
       title: t.silOnay, message: t.silAciklama,
-      confirmLabel: currentLanguage === 'tr' ? 'Sil' : 'Delete', variant: 'danger',
+      confirmLabel: oc(currentLanguage).sil, variant: 'danger',
     });
     if (!ok) return;
     if (type === 'merkez') deleteMerkez(id); else deleteKalem(id);
@@ -593,7 +594,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                             <DeptBadge dept={m.departman} />
                             {!m.aktif && (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500 uppercase">
-                                {currentLanguage === 'tr' ? 'Pasif' : 'Inactive'}
+                                {oc(currentLanguage).pasif}
                               </span>
                             )}
                           </div>
@@ -796,7 +797,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                 <BarChart3 className="w-4 h-4 text-[#ff4000]" /> {t.butceVsGerceklesen}
               </h3>
               {deptChartData.length === 0 ? (
-                <p className="text-sm text-[#86868B] text-center py-8">{currentLanguage === 'tr' ? 'Veri yok.' : 'No data.'}</p>
+                <p className="text-sm text-[#86868B] text-center py-8">{oc(currentLanguage).veri_yok}</p>
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={deptChartData} margin={{ top: 5, right: 20, bottom: 5, left: 20 }}>
@@ -820,7 +821,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                   <PieChart className="w-4 h-4 text-[#ff4000]" /> {t.kategoriDagilimi}
                 </h3>
                 {kategoriTotals.length === 0 ? (
-                  <p className="text-sm text-[#86868B] text-center py-8">{currentLanguage === 'tr' ? 'Veri yok.' : 'No data.'}</p>
+                  <p className="text-sm text-[#86868B] text-center py-8">{oc(currentLanguage).veri_yok}</p>
                 ) : (
                   <div className="flex flex-col gap-3">
                     <ResponsiveContainer width="100%" height={160}>
@@ -856,7 +857,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                   <TrendingUp className="w-4 h-4 text-[#ff4000]" /> {t.en5Gider}
                 </h3>
                 {top5.length === 0 ? (
-                  <p className="text-sm text-[#86868B] text-center py-8">{currentLanguage === 'tr' ? 'Veri yok.' : 'No data.'}</p>
+                  <p className="text-sm text-[#86868B] text-center py-8">{oc(currentLanguage).veri_yok}</p>
                 ) : (
                   <div className="flex flex-col gap-2">
                     {top5.map((k, i) => (
@@ -888,7 +889,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                 <Target className="w-4 h-4 text-[#ff4000]" /> {t.butceSapmaAnalizi}
               </h3>
               {sapmaData.length === 0 ? (
-                <p className="text-sm text-[#86868B] text-center py-8">{currentLanguage === 'tr' ? 'Veri yok.' : 'No data.'}</p>
+                <p className="text-sm text-[#86868B] text-center py-8">{oc(currentLanguage).veri_yok}</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -901,7 +902,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                         <th className="px-3 py-2 text-right text-[10px] font-bold text-[#86868B] uppercase">{t.gerceklesen}</th>
                         <th className="px-3 py-2 text-right text-[10px] font-bold text-[#86868B] uppercase">{t.sapma}</th>
                         <th className="px-3 py-2 text-right text-[10px] font-bold text-[#86868B] uppercase">{t.sapmaPct}</th>
-                        <th className="px-3 py-2 text-left text-[10px] font-bold text-[#86868B] uppercase">{currentLanguage === 'tr' ? 'Durum' : 'Status'}</th>
+                        <th className="px-3 py-2 text-left text-[10px] font-bold text-[#86868B] uppercase">{oc(currentLanguage).durum}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -985,7 +986,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-semibold text-[#86868B] uppercase tracking-wider">{t.sorumlu}</label>
-                    <input className="apple-input" placeholder={currentLanguage === 'tr' ? 'Ad Soyad' : 'Full Name'} value={merkezForm.sorumlu} onChange={e => setMerkezForm(p => ({ ...p, sorumlu: e.target.value }))} />
+                    <input className="apple-input" placeholder={oc(currentLanguage).ad_soyad} value={merkezForm.sorumlu} onChange={e => setMerkezForm(p => ({ ...p, sorumlu: e.target.value }))} />
                   </div>
                 </div>
                 <div className="flex flex-col gap-1.5">

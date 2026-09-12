@@ -15,6 +15,7 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { Boxes, Gauge, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Lightbulb, Radio } from 'lucide-react';
 import { authedFetch } from '../lib/dbClient';
+import { oc } from '../i18n/ortak';
 
 interface ModuleInfo {
   id: string; label: string; file: string; group: string;
@@ -165,7 +166,7 @@ export default function ModuleStatusBoard({ currentLanguage, toast }: { currentL
             </p>
           </div>
           <button onClick={() => void loadModules()} disabled={loadingModules} className="apple-button-secondary ml-auto text-xs flex items-center gap-1.5 px-2.5 py-1.5 disabled:opacity-50">
-            <RefreshCw className={`w-3.5 h-3.5 ${loadingModules ? 'animate-spin' : ''}`} />{tr ? 'Yenile' : 'Refresh'}
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingModules ? 'animate-spin' : ''}`} />{oc(tr).yenile}
           </button>
         </div>
 

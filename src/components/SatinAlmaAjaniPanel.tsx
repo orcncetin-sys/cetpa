@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { Sparkles, Loader2, AlertTriangle, Factory } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { authFetch } from '../services/authFetch';
+import { oc } from '../i18n/ortak';
 
 interface Kalem { sku: string; urunAdi: string; onerilenMiktar: number; mevcutStok: number | null; esik: number | null; }
 interface Grup { tedarikci: string; kalemler: Kalem[]; gerekce: string; }
@@ -57,7 +58,7 @@ export default function SatinAlmaAjaniPanel({ currentLanguage, aiOnayli }: { cur
       )}
       {sonuc && !sonuc.success && (
         <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
-          {sonuc.error || (tr ? 'Öneri üretilemedi.' : 'Failed.')}
+          {sonuc.error || (oc(tr).oneri_uretilemedi)}
         </div>
       )}
       {sonuc?.success && sonuc.bos && <p className="text-xs text-gray-500">{sonuc.mesaj}</p>}
@@ -75,7 +76,7 @@ export default function SatinAlmaAjaniPanel({ currentLanguage, aiOnayli }: { cur
               <div className="overflow-x-auto">
                 <table className="w-full text-xs min-w-[420px]">
                   <thead><tr className="text-gray-400 border-b border-gray-100">
-                    <th className="text-left py-1 px-1">{tr ? 'Ürün' : 'Product'}</th>
+                    <th className="text-left py-1 px-1">{oc(tr).urun}</th>
                     <th className="text-right py-1 px-1">{tr ? 'Stok/Eşik' : 'Stock/Min'}</th>
                     <th className="text-right py-1 px-1">{tr ? 'Önerilen' : 'Suggested'}</th>
                   </tr></thead>

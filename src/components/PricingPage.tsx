@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Check, X, ChevronDown, Shield, CreditCard, Globe } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { oc } from '../i18n/ortak';
 import {
   PLANS,
   type PlanConfig,
@@ -38,17 +39,17 @@ export default function PricingPage({
     heroSubtitle: lang === 'tr'
       ? 'Her ölçekteki işletme için esnek fiyatlandırma. 14 gün ücretsiz deneyin.'
       : 'Flexible pricing for businesses of all sizes. Try free for 14 days.',
-    monthly: lang === 'tr' ? 'Aylık' : 'Monthly',
-    yearly: lang === 'tr' ? 'Yıllık' : 'Yearly',
+    monthly: oc(lang).aylik,
+    yearly: oc(lang).yillik,
     save: lang === 'tr' ? 'tasarruf' : 'save',
-    perMonth: lang === 'tr' ? '/ay' : '/mo',
+    perMonth: oc(lang).ay_3,
     perYear: lang === 'tr' ? '/yıl' : '/yr',
     mostPopular: lang === 'tr' ? 'En Popüler' : 'Most Popular',
-    startTrial: lang === 'tr' ? '14 Gün Ücretsiz Dene' : 'Start 14-Day Free Trial',
+    startTrial: oc(lang)._14_gun_ucretsiz_dene,
     comparePlans: lang === 'tr' ? 'Planları Karşılaştır' : 'Compare Plans',
     faqTitle: lang === 'tr' ? 'Sıkça Sorulan Sorular' : 'Frequently Asked Questions',
-    back: lang === 'tr' ? 'Geri' : 'Back',
-    users: lang === 'tr' ? 'kullanıcı' : 'users',
+    back: oc(lang).geri_2,
+    users: oc(lang).kullanici,
     module: lang === 'tr' ? 'Modül' : 'Module',
     included: lang === 'tr' ? 'Dahil' : 'Included',
     security: lang === 'tr' ? 'Güvenli Ödeme' : 'Secure Payment',

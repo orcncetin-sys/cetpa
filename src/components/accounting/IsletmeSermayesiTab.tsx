@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import { RefreshCw } from 'lucide-react';
 import { paraYaz } from '../../utils/currency';
+import { oc } from '../../i18n/ortak';
 
 type WCField = 'kasaBanka' | 'ticariAlacaklar' | 'stoklar' | 'ticariBorclar' | 'vergiSgk' | 'krediler';
 
@@ -39,7 +40,7 @@ export default function IsletmeSermayesiTab({ currentLanguage, workingCapital, w
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-xs text-gray-400">
           {tr ? 'Kalemleri elle düzenleyin — otomatik kaydedilir.' : 'Edit items manually — auto-saved.'}
-          {wcSaved && <span className="ml-2 text-emerald-600 font-bold">✓ {tr ? 'Kaydedildi' : 'Saved'}</span>}
+          {wcSaved && <span className="ml-2 text-emerald-600 font-bold">✓ {oc(tr).kaydedildi_2}</span>}
         </p>
         <button onClick={prefillWC} className="apple-button-secondary text-xs">
           <RefreshCw className="w-3.5 h-3.5" /> {tr ? 'Verilerden Doldur (Alacak + Stok)' : 'Fill from Data (AR + Stock)'}
@@ -47,7 +48,7 @@ export default function IsletmeSermayesiTab({ currentLanguage, workingCapital, w
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="apple-card p-6">
-          <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">{tr ? 'Dönen Varlıklar' : 'Current Assets'}</h4>
+          <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">{oc(tr).donen_varliklar}</h4>
           <p className="text-2xl font-black text-gray-800 mb-4">{fmt(donenVarliklar)}</p>
           <div className="space-y-3">
             <WCInput field="kasaBanka" label={tr ? 'Kasa/Banka' : 'Cash/Bank'} />
@@ -56,10 +57,10 @@ export default function IsletmeSermayesiTab({ currentLanguage, workingCapital, w
           </div>
         </div>
         <div className="apple-card p-6">
-          <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">{tr ? 'Kısa Vadeli Yükümlülükler' : 'Current Liabilities'}</h4>
+          <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">{oc(tr).kisa_vadeli_yukumlulukler}</h4>
           <p className="text-2xl font-black text-red-600 mb-4">{fmt(kvYukumluluk)}</p>
           <div className="space-y-3">
-            <WCInput field="ticariBorclar" label={tr ? 'Ticari Borçlar' : 'Trade Payables'} />
+            <WCInput field="ticariBorclar" label={oc(tr).ticari_borclar} />
             <WCInput field="vergiSgk" label={tr ? 'Vergi/SGK' : 'Tax/Social Sec.'} />
             <WCInput field="krediler" label={tr ? 'Kısa Vadeli Krediler' : 'Short-term Loans'} />
           </div>
@@ -68,7 +69,7 @@ export default function IsletmeSermayesiTab({ currentLanguage, workingCapital, w
           <h4 className="text-xs font-bold opacity-70 uppercase mb-2">{tr ? 'Net İşletme Sermayesi' : 'Net Working Capital'}</h4>
           <p className="text-3xl font-black">{fmt(netSermaye)}</p>
           <div className="mt-4 flex items-center gap-2">
-            <span className="text-xs opacity-70">{tr ? 'Cari Oran' : 'Current Ratio'}:</span>
+            <span className="text-xs opacity-70">{oc(tr).cari_oran}:</span>
             <span className="text-lg font-black">{cariOran.toFixed(2)}</span>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full bg-white ${oranDurum.cls}`}>{oranDurum.txt}</span>
           </div>

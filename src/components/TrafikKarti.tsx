@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BarChart2, RefreshCw, Globe } from 'lucide-react';
 import { authedFetch } from '../lib/dbClient';
+import { oc } from '../i18n/ortak';
 
 /**
  * TrafikKarti — süper-admin panelinde çerezsiz trafik sayacının özeti.
@@ -56,7 +57,7 @@ export default function TrafikKarti({ currentLanguage }: { currentLanguage: stri
           <h3 className="font-bold text-sm">{tr ? 'Site Trafiği (30 gün)' : 'Site Traffic (30 days)'}</h3>
         </div>
         <button onClick={() => void yukle()} disabled={yukleniyor}
-          aria-label={tr ? 'Yenile' : 'Refresh'}
+          aria-label={oc(tr).yenile}
           className="p-1.5 rounded-full hover:bg-gray-100 transition-colors disabled:opacity-40">
           <RefreshCw className={`w-3.5 h-3.5 text-gray-400 ${yukleniyor ? 'animate-spin' : ''}`} />
         </button>
