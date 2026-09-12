@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import { type ReportsCtx } from '../useReportsData';
+import { zamanDate, ayAnahtari, gunAnahtari } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'employees' | 'quotations' | 'currentLanguage' | 'fmtAna'>;
 
@@ -22,13 +23,12 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
         let maxOrderValue = 0;
         let maxOrderCustomer = '';
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
           const cid = (o as unknown as Record<string,unknown>).customerName as string|undefined || (o as unknown as Record<string,unknown>).customerId as string|undefined || 'Unknown';
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total === 'number' ? oR.total as number
             : (o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0);
           custRevenue[cid]=(custRevenue[cid]??0)+total;
-          if (d) { const dk=d.toISOString().slice(0,10); dayRevenue[dk]=(dayRevenue[dk]??0)+total; }
+          const dk=gunAnahtari(o.createdAt); if (dk) { dayRevenue[dk]=(dayRevenue[dk]??0)+total; }
           if (total > maxOrderValue) { maxOrderValue=total; maxOrderCustomer=cid; }
         });
         const topCustomer = Object.entries(custRevenue).sort((a,b)=>b[1]-a[1])[0];
@@ -66,7 +66,7 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
           const prev = new Date(now.getTime()-2*days*86400000);
           let currRev=0, prevRev=0;
           orders.forEach(o => {
-            const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
+            const d = zamanDate(o.createdAt);
             if (!d) return;
             const oR = o as unknown as Record<string,unknown>;
             const total = typeof oR.total==='number' ? oR.total as number
@@ -102,7 +102,7 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
         const currByMonth: number[] = new Array(12).fill(0);
         const prevByMonth: number[] = new Array(12).fill(0);
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           if (!d) return;
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total==='number' ? oR.total as number
@@ -141,7 +141,7 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
         const monthRevenue: number[] = new Array(12).fill(0);
         const monthCounts: number[] = new Array(12).fill(0);
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           if (!d) return;
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total==='number' ? oR.total as number
@@ -208,9 +208,9 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
       {reportsTab === 'genel' && orders.length >= 10 && (() => {
         const byMonth: Record<string,{first:number;second:number}> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const d = zamanDate(o.createdAt);
+          const key = ayAnahtari(d);
+          if (!d || !key) return;
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total==='number' ? oR.total as number
             : (o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0);
@@ -246,9 +246,8 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
       {reportsTab === 'genel' && orders.length >= 10 && (() => {
         const byDay: Record<string,number> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = d.toISOString().slice(0,10);
+          const key = gunAnahtari(o.createdAt);
+          if (!key) return;
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total==='number' ? oR.total as number
             : (o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0);
@@ -320,9 +319,8 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
         inventory.forEach(item=>{ productCategory[item.name]=(item.category??'Other'); if(item.id) productCategory[item.id]=(item.category??'Other'); });
         const catMonthRev: Record<string,Record<string,number>> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           (o.lineItems??[]).forEach(li=>{ const lr=li as unknown as Record<string,unknown>; const name=(lr.productName as string|undefined)??(lr.name as string|undefined)??''; const pid=(lr.productId as string|undefined)??''; const cat=productCategory[pid]??productCategory[name]??'Other'; const rev=((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); if (!catMonthRev[cat]) catMonthRev[cat]={}; catMonthRev[cat][key]=(catMonthRev[cat][key]??0)+rev; });
         });
         const topCats = Object.entries(catMonthRev).sort((a,b)=>Object.values(b[1]).reduce((x,y)=>x+y,0)-Object.values(a[1]).reduce((x,y)=>x+y,0)).slice(0,3);
@@ -361,7 +359,7 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
         const results = periods.map(p=>{
           const since=new Date(now.getTime()-p.days*86400000);
           const rev=orders.reduce((s,o)=>{
-            const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null;
+            const d=zamanDate(o.createdAt);
             if(!d||d<since) return s;
             const oR=o as unknown as Record<string,unknown>;
             return s+(typeof oR.total==='number'?oR.total as number:(o.lineItems??[]).reduce((s2,li)=>{ const lr=li as unknown as Record<string,unknown>; return s2+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0));
@@ -394,7 +392,7 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
         const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
         const productRev: Record<string,number>={};
         orders.forEach(o=>{
-          const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null;
+          const d=zamanDate(o.createdAt);
           if(!d||d<monthStart) return;
           (o.lineItems??[]).forEach(li=>{ const lr=li as unknown as Record<string,unknown>; const name=(lr.productName as string|undefined)??(lr.name as string|undefined)??'Unknown'; const rev=((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); productRev[name]=(productRev[name]??0)+rev; });
         });
@@ -423,7 +421,7 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
       {reportsTab === 'genel' && (() => {
         const now=new Date();
         const d30=new Date(now.getTime()-30*86400000);
-        const orders30=orders.filter(o=>{ const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null; return d&&d>=d30; }).length;
+        const orders30=orders.filter(o=>{ const d=zamanDate(o.createdAt); return d&&d>=d30; }).length;
         const lowStockCount=inventory.filter(i=>{ const stk=(i.stock as number|undefined)??0; const threshold=(i.reorderPoint as number|undefined)??(i.lowStockThreshold as number|undefined)??5; return stk<=threshold&&stk>0; }).length;
         const activeOrders=orders.filter(o=>o.status==='Processing'||o.status==='Pending'||o.status==='Shipped').length;
         const stats=[
@@ -452,7 +450,7 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
 
       {reportsTab === 'genel' && orders.length >= 5 && (() => {
         const byMonth: Record<string,number>={};
-        orders.forEach(o=>{ const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null; if(!d) return; const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; byMonth[key]=(byMonth[key]??0)+1; });
+        orders.forEach(o=>{ const key=ayAnahtari(o.createdAt); if(!key) return; byMonth[key]=(byMonth[key]??0)+1; });
         const months=Object.keys(byMonth).sort().slice(-10);
         if(months.length<3) return null;
         const vals=months.map(m=>byMonth[m]);
@@ -479,7 +477,7 @@ export default function GenelBloklar6({ reportsTab, orders, inventory, employees
 
       {reportsTab === 'genel' && orders.length >= 10 && (() => {
         const byMonth: Record<string,number>={};
-        orders.forEach(o=>{ const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null; if(!d) return; const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; const oR=o as unknown as Record<string,unknown>; const total=typeof oR.total==='number'?oR.total as number:(o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0); byMonth[key]=(byMonth[key]??0)+total; });
+        orders.forEach(o=>{ const key=ayAnahtari(o.createdAt); if(!key) return; const oR=o as unknown as Record<string,unknown>; const total=typeof oR.total==='number'?oR.total as number:(o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0); byMonth[key]=(byMonth[key]??0)+total; });
         const months=Object.keys(byMonth).sort().slice(-4);
         if(months.length<3) return null;
         const vals=months.map(m=>byMonth[m]);

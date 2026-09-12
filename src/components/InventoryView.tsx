@@ -34,6 +34,7 @@ import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';
 import { cn } from '../lib/utils';
 import { paraYaz } from '../utils/currency';
+import { zamanMs, zamanDate, tarihYaz } from '../utils/zaman';
 
 import ProductForm from './ProductForm';
 import ProductDetail from './ProductDetail';
@@ -1029,21 +1030,13 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                           {(() => {
                             const lastMov = movements
                               .filter(m => (m as unknown as { productId?: string }).productId === item.id || m.productName === item.name)
-                              .sort((a, b) => {
-                                const getT = (x: unknown) => {
-                                  if (!x) return 0;
-                                  if (typeof (x as { toDate?: () => Date }).toDate === 'function') return (x as { toDate: () => Date }).toDate().getTime();
-                                  return new Date(x as string | number).getTime();
-                                };
-                                return getT(b.timestamp) - getT(a.timestamp);
-                              })[0];
+                              .sort((a, b) => (zamanMs(b.timestamp) ?? 0) - (zamanMs(a.timestamp) ?? 0))[0];
                             if (!lastMov) return null;
-                            const d = typeof (lastMov.timestamp as { toDate?: () => Date }).toDate === 'function'
-                              ? (lastMov.timestamp as { toDate: () => Date }).toDate()
-                              : new Date(lastMov.timestamp as string | number);
+                            const d = zamanDate(lastMov.timestamp);
+                            if (!d) return null;
                             const daysAgo = Math.round((Date.now() - d.getTime()) / 86400000);
                             return (
-                              <span className="text-[9px] text-gray-400" title={d.toLocaleDateString()}>
+                              <span className="text-[9px] text-gray-400" title={tarihYaz(lastMov.timestamp)}>
                                 {daysAgo === 0
                                   ? (currentLanguage === 'tr' ? 'Bugün hareket' : 'Moved today')
                                   : (currentLanguage === 'tr' ? `${daysAgo}g önce` : `${daysAgo}d ago`)}
@@ -1267,6 +1260,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                     // Harekete tıklayınca ürün detayını aç (no-op'tı — 2026-08-02).
                     // productId (normalize) veya SKU ile envanterdeki ürünü bul.
                     const movProd = inventory.find(p => p.id === (mov as unknown as { productId?: string }).productId || (!!(mov as unknown as { sku?: string }).sku && p.sku === (mov as unknown as { sku?: string }).sku));
+                    const movD = zamanDate(mov.timestamp);
                     return (
                     <div key={mov.id}
                       onClick={() => { if (movProd) setSelectedProduct(movProd); }}
@@ -1280,7 +1274,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                           {mov.type === 'in' ? (currentLanguage === 'tr' ? 'Giriş' : 'In') : (currentLanguage === 'tr' ? 'Çıkış' : 'Out')}
                         </span>
                         <span className="text-[10px] text-gray-400 font-medium">
-                          {mov.timestamp && typeof (mov.timestamp as { toDate?: () => Date }).toDate === 'function' ? format((mov.timestamp as { toDate: () => Date }).toDate(), 'HH:mm') : ''}
+                          {movD ? format(movD, 'HH:mm') : ''}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-1" onClick={e => e.stopPropagation()}>
@@ -1303,7 +1297,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                       </div>
                       <div className="flex items-center justify-between mt-1">
                         <span className="text-[10px] text-gray-500">
-                          {mov.timestamp ? format(typeof (mov.timestamp as { toDate?: () => Date }).toDate === 'function' ? (mov.timestamp as { toDate: () => Date }).toDate() : new Date(mov.timestamp as string | number | Date), 'dd MMM yyyy', { locale: currentLanguage === 'tr' ? trLocale : undefined }) : ''}
+                          {movD ? format(movD, 'dd MMM yyyy', { locale: currentLanguage === 'tr' ? trLocale : undefined }) : ''}
                         </span>
                         <span className={cn(
                           'text-xs font-bold',
@@ -1550,13 +1544,8 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         const consMap: Record<string, number> = {};
         for (const m of movements) {
           if (m.type !== 'out') continue;
-          const ts = (() => {
-            const t = m.timestamp;
-            if (!t) return 0;
-            if (typeof (t as { toDate?: () => Date }).toDate === 'function') return (t as { toDate: () => Date }).toDate().getTime();
-            return new Date(t as string | number).getTime();
-          })();
-          if (now107 - ts > MS_30D) continue;
+          const ts = zamanMs(m.timestamp);
+          if (ts === null || now107 - ts > MS_30D) continue;
           const key = (m as unknown as { productId?: string }).productId || m.productName;
           consMap[key] = (consMap[key] || 0) + m.quantity;
         }

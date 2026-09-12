@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import type { ReportsCtx } from '../useReportsData';
+import { zamanDate, zamanMs, tarihYaz } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'inventory' | 'currentLanguage' | 'fmtAna'>;
 
@@ -25,13 +26,12 @@ export default function CrmBloklar4({ reportsTab, orders, quotations, inventory,
           const rep = (o.assignedTo as string | undefined) || (o as unknown as Record<string,unknown>).salesRep as string || '—';
           if (rep === '—') continue;
           if (!repMap196[rep]) repMap196[rep] = { rev: 0, orders: 0 };
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (od >= monthStart196) {
-              repMap196[rep].rev += o.totalPrice || 0;
-              repMap196[rep].orders++;
-            }
-          } catch { /* skip */ }
+          const od = zamanDate(o.createdAt);
+          if (!od) continue;
+          if (od >= monthStart196) {
+            repMap196[rep].rev += o.totalPrice || 0;
+            repMap196[rep].orders++;
+          }
         }
         const repList = Object.entries(repMap196).map(([name, d]) => ({ name, ...d })).sort((a, b) => b.rev - a.rev).slice(0, 8);
         if (repList.length < 2) return null;
@@ -70,31 +70,29 @@ export default function CrmBloklar4({ reportsTab, orders, quotations, inventory,
         const now200 = new Date();
         const months200 = Array.from({ length: 6 }, (_, i) => {
           const d = new Date(now200.getFullYear(), now200.getMonth() - (5 - i), 1);
-          const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const label = tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
           const year = d.getFullYear(); const month = d.getMonth();
           return { label, year, month, newRev: 0, repeatRev: 0 };
         });
         // Track first order month per customer
         const firstOrderMonth: Record<string, { year: number; month: number }> = {};
         const sortedOrders = [...orders].sort((a, b) => {
-          try {
-            const da = (a.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(a.createdAt as string);
-            const db2 = (b.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(b.createdAt as string);
-            return da.getTime() - db2.getTime();
-          } catch { return 0; }
+          const da = zamanMs(a.createdAt);
+          const db2 = zamanMs(b.createdAt);
+          if (da === null || db2 === null) return 0;
+          return da - db2;
         });
         for (const o of sortedOrders) {
           if (o.status === 'Cancelled') continue;
           const name = o.customerName || '—';
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (!firstOrderMonth[name]) firstOrderMonth[name] = { year: od.getFullYear(), month: od.getMonth() };
-            const m = months200.find(m => m.year === od.getFullYear() && m.month === od.getMonth());
-            if (!m) continue;
-            const isNew = firstOrderMonth[name].year === od.getFullYear() && firstOrderMonth[name].month === od.getMonth();
-            if (isNew) m.newRev += o.totalPrice || 0;
-            else m.repeatRev += o.totalPrice || 0;
-          } catch { /* skip */ }
+          const od = zamanDate(o.createdAt);
+          if (!od) continue;
+          if (!firstOrderMonth[name]) firstOrderMonth[name] = { year: od.getFullYear(), month: od.getMonth() };
+          const m = months200.find(m => m.year === od.getFullYear() && m.month === od.getMonth());
+          if (!m) continue;
+          const isNew = firstOrderMonth[name].year === od.getFullYear() && firstOrderMonth[name].month === od.getMonth();
+          if (isNew) m.newRev += o.totalPrice || 0;
+          else m.repeatRev += o.totalPrice || 0;
         }
         const hasData = months200.some(m => m.newRev > 0 || m.repeatRev > 0);
         if (!hasData) return null;
@@ -136,12 +134,11 @@ export default function CrmBloklar4({ reportsTab, orders, quotations, inventory,
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
           const name = o.customerName || '—';
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            const q = `Q${Math.floor(od.getMonth() / 3) + 1} ${od.getFullYear()}`;
-            if (!custData205[name]) custData205[name] = { firstQ: q, ltv: 0 };
-            custData205[name].ltv += o.totalPrice || 0;
-          } catch { /* skip */ }
+          const od = zamanDate(o.createdAt);
+          if (!od) continue;
+          const q = `Q${Math.floor(od.getMonth() / 3) + 1} ${od.getFullYear()}`;
+          if (!custData205[name]) custData205[name] = { firstQ: q, ltv: 0 };
+          custData205[name].ltv += o.totalPrice || 0;
         }
         void now205;
         const cohorts: Record<string, number[]> = {};
@@ -228,13 +225,12 @@ export default function CrmBloklar4({ reportsTab, orders, quotations, inventory,
         const now210 = new Date();
         const months210 = Array.from({ length: 6 }, (_, i) => {
           const d = new Date(now210.getFullYear(), now210.getMonth() - (5 - i), 1);
-          const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const label = tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
           const mOrds = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
-            try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-            } catch { return false; }
+            const od = zamanDate(o.createdAt);
+            if (!od) return false;
+            return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
           });
           const customers = new Set(mOrds.map(o => o.customerName || '—')).size;
           const rev = mOrds.reduce((s, o) => s + (o.totalPrice || 0), 0);

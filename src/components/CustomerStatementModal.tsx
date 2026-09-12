@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { X, FileDown } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { paraYaz } from '../utils/currency';
+import { zamanMs, tarihYaz } from '../utils/zaman';
 import type { Lead, Order } from '../types';
 
 interface CustomerStatementModalProps {
@@ -81,18 +82,17 @@ export default function CustomerStatementModal({
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {stmtOrders.sort((a, b) => {
-                  const ta = a.createdAt ? (typeof (a.createdAt as { toDate?: () => Date }).toDate === 'function' ? (a.createdAt as { toDate: () => Date }).toDate().getTime() : new Date(a.createdAt as string | number).getTime()) : 0;
-                  const tb = b.createdAt ? (typeof (b.createdAt as { toDate?: () => Date }).toDate === 'function' ? (b.createdAt as { toDate: () => Date }).toDate().getTime() : new Date(b.createdAt as string | number).getTime()) : 0;
+                  const ta = zamanMs(a.createdAt) ?? 0;
+                  const tb = zamanMs(b.createdAt) ?? 0;
                   return tb - ta;
                 }).map(o => {
                   const rawDate = o.createdAt ?? o.syncedAt;
-                  const oDate = rawDate ? (typeof (rawDate as { toDate?: () => Date }).toDate === 'function' ? (rawDate as { toDate: () => Date }).toDate() : new Date(rawDate as string | number)) : null;
                   const statusColors: Record<string, string> = { Pending: 'bg-amber-50 text-amber-600', Processing: 'bg-purple-50 text-purple-600', Shipped: 'bg-blue-50 text-blue-600', Delivered: 'bg-emerald-50 text-emerald-600', Cancelled: 'bg-gray-100 text-gray-500' };
                   const statusTR: Record<string, string> = { Pending: 'Bekliyor', Processing: 'Hazırlanıyor', Shipped: 'Kargoda', Delivered: 'Teslim', Cancelled: 'İptal' };
                   return (
                     <tr key={o.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-5 py-3 font-medium text-gray-800">#{o.shopifyOrderId || o.id.slice(-6)}</td>
-                      <td className="px-5 py-3 text-gray-500">{oDate?.toLocaleDateString('tr-TR') || '—'}</td>
+                      <td className="px-5 py-3 text-gray-500">{tarihYaz(rawDate)}</td>
                       <td className="px-5 py-3">
                         <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", statusColors[o.status] || 'bg-gray-100 text-gray-500')}>
                           {currentLanguage === 'tr' ? (statusTR[o.status] || o.status) : o.status}

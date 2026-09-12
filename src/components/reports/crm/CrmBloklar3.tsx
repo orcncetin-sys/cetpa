@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import type { ReportsCtx } from '../useReportsData';
+import { zamanMs } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'currentLanguage' | 'fmtAna'>;
 
@@ -23,10 +24,8 @@ export default function CrmBloklar3({ reportsTab, orders, currentLanguage, fmtAn
           if (o.status === 'Cancelled') continue;
           const name = o.customerName || '—';
           let days = 999;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            days = Math.round((now192.getTime() - od.getTime()) / 86400000);
-          } catch { /* skip */ }
+          const odMs = zamanMs(o.createdAt);
+          if (odMs !== null) days = Math.round((now192.getTime() - odMs) / 86400000);
           if (!custMap192[name]) custMap192[name] = { recency: days, frequency: 0, monetary: 0 };
           if (days < custMap192[name].recency) custMap192[name].recency = days;
           custMap192[name].frequency++;

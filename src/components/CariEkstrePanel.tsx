@@ -12,11 +12,12 @@
 
 import { useState, useEffect } from 'react';
 import {
-  collection, query, where, onSnapshot, Timestamp,
+  collection, query, where, onSnapshot,
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
+import { tarihYaz, zamanDate } from '../utils/zaman';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';
 import { type Order } from '../types';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
@@ -37,7 +38,7 @@ interface AgingRow {
   amount: number;
   ageD: number;
   status: string;
-  createdAt: string | null;
+  createdAt: string;
   leadId?: string;
   raw?: Record<string, unknown>; // raw document data
 }
@@ -61,15 +62,6 @@ function ageColor(ageD: number): string {
 
 function fmt(n: number): string {
   return paraYaz(n);
-}
-
-function toDate(ts: unknown): Date | null {
-  if (!ts) return null;
-  if (ts instanceof Timestamp) return ts.toDate();
-  if (ts instanceof Date) return ts;
-  if (typeof ts === 'string') { const d = new Date(ts); return isNaN(d.getTime()) ? null : d; }
-  if (typeof ts === 'object' && ts !== null && 'seconds' in ts) return new Date((ts as { seconds: number }).seconds * 1000);
-  return null;
 }
 
 // ── Bucket bar ────────────────────────────────────────────────────────────────
@@ -226,7 +218,7 @@ export default function CariEkstrePanel({
         setAgingYonu(yonAp ? 'ap' : 'ar');
         (json.satirlar ?? []).forEach(x0 => {
           const x = x0 as Record<string, unknown>;
-          const dt = toDate(x.cha_tarihi);
+          const dt = zamanDate(x.cha_tarihi);
           const ageD = dt ? Math.floor((now - dt.getTime()) / 86400000) : 0;
           const amount = Number(x.cha_meblag ?? 0);
           // cha_tip 0 = borç (satış/masraf → cari borçlanır), 1 = alacak (tahsilat/alış).
@@ -260,7 +252,7 @@ export default function CariEkstrePanel({
             ageD,
             // Tip + yön (+ açıklama ana etikette ise evrak no): "Masraf · Borç · BD-12".
             status: `${tipEtiket} · ${yon}${finalAciklama && evrakNo ? ` · ${evrakNo}` : ''}`,
-            createdAt: dt ? dt.toLocaleDateString('tr-TR') : null,
+            createdAt: tarihYaz(x.cha_tarihi),
             raw: x,
           });
         });
@@ -295,7 +287,7 @@ export default function CariEkstrePanel({
 
       snap.docs.forEach(d => {
         const o = d.data() as Order & { createdAt?: unknown; leadId?: string };
-        const dt = toDate(o.createdAt);
+        const dt = zamanDate(o.createdAt);
         const ageD = dt ? Math.floor((now - dt.getTime()) / 86400000) : 0;
         const amount = Number(o.totalPrice ?? o.totalAmount ?? 0);
 
@@ -311,7 +303,7 @@ export default function CariEkstrePanel({
           amount,
           ageD,
           status: o.status,
-          createdAt: dt ? dt.toLocaleDateString('tr-TR') : null,
+          createdAt: tarihYaz(o.createdAt),
           leadId: o.leadId,
         });
       });
@@ -346,7 +338,7 @@ export default function CariEkstrePanel({
   // ── CSV export ────────────────────────────────────────────────────────────
   const exportCSV = () => {
     const header = ['Müşteri', 'Tutar (TRY)', 'Vade (Gün)', 'Durum', 'Tarih'];
-    const csvRows = displayed.map(r => [r.customerName, r.amount.toFixed(2), r.ageD, r.status, r.createdAt ?? ''].map(v => `"${v}"`).join(','));
+    const csvRows = displayed.map(r => [r.customerName, r.amount.toFixed(2), r.ageD, r.status, r.createdAt === '—' ? '' : r.createdAt].map(v => `"${v}"`).join(','));   // CSV: bilinmeyen tarih boş hücre (ekranda '—')
     const csv = [header.join(','), ...csvRows].join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
@@ -495,7 +487,7 @@ export default function CariEkstrePanel({
                         faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
                         musteri: customerName ?? '—',
                         cariKod: cariKod ?? '—',
-                        tarih: row.createdAt ?? '—',
+                        tarih: row.createdAt,
                         tutar,
                         matrah,
                         kdv: tutar - matrah,
@@ -519,7 +511,7 @@ export default function CariEkstrePanel({
                     <td className="px-4 py-2.5 text-center">
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{row.status}</span>
                     </td>
-                    <td className="px-4 py-2.5 text-gray-400">{row.createdAt ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-gray-400">{row.createdAt}</td>
                     <td className="px-4 py-2.5 text-center">
                       {row.ageD > 90
                         ? <span title={t ? 'Kritik gecikme' : 'Critical overdue'}><AlertTriangle className="w-4 h-4 text-red-400 mx-auto" /></span>

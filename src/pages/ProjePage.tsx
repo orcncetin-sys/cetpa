@@ -17,6 +17,7 @@ import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ProjectModule from '../components/ProjectModule';
 import { confirmDelete } from '../lib/confirm';
 import { paraYaz } from '../utils/currency';
+import { tarihYaz, bugunAnahtari } from '../utils/zaman';
 
 export interface P582Project { id: string; name: string; budget: number; spent: number; status: 'Aktif' | 'Tamamlandı' | 'Beklemede'; }
 export interface P582Draft { name: string; budget: string; spent: string; status: P582Project['status']; }
@@ -128,7 +129,7 @@ export default function ProjePage({
           {/* ── Phase 618: Proje Zaman Çizelgesi (Gantt-lite) ───────────── */}
           {(() => {
             const tr618 = currentLanguage === 'tr';
-            const today618 = new Date().toISOString().slice(0,10);
+            const today618 = bugunAnahtari();
             const overdue618 = p618Projects.filter(p=>p.end<today618&&p.status!=='Tamamlandı').length;
             return (
               <div className="apple-card p-5 space-y-4">
@@ -181,9 +182,9 @@ export default function ProjePage({
                             </div>
                           </div>
                           <div className="flex items-center gap-2 text-[10px] text-gray-400 mb-2">
-                            <span>{new Date(p.start).toLocaleDateString('tr-TR')}</span>
+                            <span>{tarihYaz(p.start)}</span>
                             <span>→</span>
-                            <span className={isLate?'text-red-500 font-bold':''}>{new Date(p.end).toLocaleDateString('tr-TR')}</span>
+                            <span className={isLate?'text-red-500 font-bold':''}>{tarihYaz(p.end)}</span>
                           </div>
                           <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div className={`h-full rounded-full transition-all ${p.status==='Tamamlandı'?'bg-emerald-400':isLate?'bg-red-400':'bg-blue-400'}`} style={{width:`${p.progress}%`}}/>

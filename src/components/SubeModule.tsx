@@ -7,6 +7,7 @@ import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { paraYaz } from '../utils/currency';
+import { ayAnahtari } from '../utils/zaman';
 import {
   Building2, ArrowRightLeft, BarChart3, Plus, X,
   MapPin, Phone, Mail, User, CheckCircle, Package
@@ -163,12 +164,6 @@ export default function SubeModule({ currentLanguage, isAuthenticated, inventory
   const lmYear = tmMonth === 0 ? tmYear - 1 : tmYear;
   const lmMonth = tmMonth === 0 ? 11 : tmMonth - 1;
 
-  function toDate(v: unknown): Date | null {
-    if (!v) return null;
-    if (typeof (v as { toDate?: () => Date }).toDate === 'function') return (v as { toDate: () => Date }).toDate();
-    try { return new Date(v as string); } catch { return null; }
-  }
-
   // Mikro GİDEN (satış) faturaları — şube bazlı ay eşleşmesi 'YYYY-MM' önekiyle.
   // Şube eşleşmesi: cha_subeno == subeKodu (sayısal). Eşleşmezse o şubeye Mikro
   // geliri EKLENMEZ (yanlış şubeye yazmaktansa görünür boşluk). Maliyet Mikro
@@ -178,8 +173,8 @@ export default function SubeModule({ currentLanguage, isAuthenticated, inventory
   const mikroGiden = mikroFaturalar.filter(f => f.yon === 'giden');
   const computedPL = subeler.map(s => {
     const bOrders = plOrders.filter(o => o.subeAdi === s.subeAdi && o.status !== 'Cancelled');
-    const tmo = bOrders.filter(o => { const d = toDate(o.createdAt); return d && d.getFullYear() === tmYear && d.getMonth() === tmMonth; });
-    const lmo = bOrders.filter(o => { const d = toDate(o.createdAt); return d && d.getFullYear() === lmYear && d.getMonth() === lmMonth; });
+    const tmo = bOrders.filter(o => ayAnahtari(o.createdAt) === buAyYM);
+    const lmo = bOrders.filter(o => ayAnahtari(o.createdAt) === gecenAyYM);
     const subeNoNum = Number(s.subeKodu);
     const mikroBu    = Number.isFinite(subeNoNum) ? mikroGiden.filter(f => f.subeNo === subeNoNum && f.tarih.startsWith(buAyYM)).reduce((a, f) => a + f.tutar, 0) : 0;
     const mikroGecen = Number.isFinite(subeNoNum) ? mikroGiden.filter(f => f.subeNo === subeNoNum && f.tarih.startsWith(gecenAyYM)).reduce((a, f) => a + f.tutar, 0) : 0;

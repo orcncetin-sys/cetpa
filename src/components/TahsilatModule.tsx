@@ -11,7 +11,8 @@ import {
   collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot,
   query, serverTimestamp
 } from '../lib/dbClient';
-import { format, differenceInDays, parseISO, isValid } from 'date-fns';
+import { format } from 'date-fns';
+import { gunBasi, gunFarki, tarihYaz, bugunAnahtari } from '../utils/zaman';
 import { useMikroTahsilat } from '../hooks/useMikroTahsilat';
 import { useCariAdMap } from '../hooks/useMikroFaturalar';
 import { paraYaz } from '../utils/currency';
@@ -52,12 +53,6 @@ interface TahsilatModuleProps {
 
 const cn = (...classes: unknown[]) => classes.filter(Boolean).join(' ');
 
-function parseDate(str: string): Date | null {
-  if (!str) return null;
-  const d = parseISO(str);
-  return isValid(d) ? d : null;
-}
-
 function calcDurum(
   toplamTutar: number,
   tahsilEdilen: number,
@@ -65,7 +60,7 @@ function calcDurum(
 ): TahsilatKaydi['durum'] {
   const acik = toplamTutar - tahsilEdilen;
   if (acik <= 0) return 'Tahsil Edildi';
-  const vade = parseDate(vadeTarihi);
+  const vade = gunBasi(vadeTarihi);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   if (vade && today > vade) return 'Gecikmiş';
@@ -74,21 +69,12 @@ function calcDurum(
 }
 
 function calcFaiz(acikBakiye: number, faizOrani: number, vadeTarihi: string): number {
-  const vade = parseDate(vadeTarihi);
-  if (!vade) return 0;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const gecikme = differenceInDays(today, vade);
-  if (gecikme <= 0) return 0;
+  const gecikme = gunFarki(new Date(), vadeTarihi);
+  if (gecikme === null || gecikme <= 0) return 0;
   return acikBakiye * (faizOrani / 100) * (gecikme / 365);
 }
 
 const formatCurrency = (val: number, currency: string = 'TRY') => paraYaz(val, { birim: currency });
-
-const formatDate = (str: string) => {
-  const d = parseDate(str);
-  return d ? format(d, 'dd.MM.yyyy') : str;
-};
 
 // ─── Translations ─────────────────────────────────────────────────────────────
 
@@ -315,7 +301,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
     belgeTipi: 'Fatura' as TahsilatKaydi['belgeTipi'],
     belgeNo: '',
     toplamTutar: '',
-    faturaTarihi: format(new Date(), 'yyyy-MM-dd'),
+    faturaTarihi: bugunAnahtari(),
     vadeTarihi: '',
     faizOrani: '1.5',
     currency: 'TRY' as 'TRY' | 'USD' | 'EUR',
@@ -325,7 +311,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
   // Payment panel
   const [paymentKaydi, setPaymentKaydi] = useState<TahsilatKaydi | null>(null);
   const [paymentForm, setPaymentForm] = useState({
-    tarih: format(new Date(), 'yyyy-MM-dd'),
+    tarih: bugunAnahtari(),
     tutar: '',
     odemeTipi: 'Havale/EFT' as TahsilatOdeme['odemeTipi'],
     notlar: '',
@@ -453,7 +439,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
   const gecikmisBakiye = kayitlar
     .filter((k) => {
       if (k.durum === 'Tahsil Edildi' || (k.currency || 'TRY') !== activeCurrency) return false;
-      const vd = parseDate(k.vadeTarihi);
+      const vd = gunBasi(k.vadeTarihi);
       return vd ? today > vd : false;
     })
     .reduce((s, k) => s + (k.toplamTutar - k.tahsilEdilen), 0);
@@ -464,7 +450,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
     return kayitlar
       .filter((k) => {
         if (k.durum === 'Tahsil Edildi' || (k.currency || 'TRY') !== activeCurrency) return false;
-        const vd = parseDate(k.vadeTarihi);
+        const vd = gunBasi(k.vadeTarihi);
         return vd ? vd.getMonth() === m && vd.getFullYear() === y : false;
       })
       .reduce((s, k) => s + (k.toplamTutar - k.tahsilEdilen), 0);
@@ -474,12 +460,11 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
     const completed = kayitlar.filter((k) => k.durum === 'Tahsil Edildi');
     if (!completed.length) return 0;
     const daysArr = completed.map((k) => {
-      const ft = parseDate(k.faturaTarihi);
       const kOdemeler = odemeler.filter((o) => o.kaydiId === k.id);
-      if (!ft || !kOdemeler.length) return 0;
+      if (!kOdemeler.length) return 0;
       const lastOdeme = kOdemeler.sort((a, b) => a.tarih.localeCompare(b.tarih)).at(-1)!;
-      const od = parseDate(lastOdeme.tarih);
-      return od ? Math.max(0, differenceInDays(od, ft)) : 0;
+      const fark = gunFarki(lastOdeme.tarih, k.faturaTarihi);
+      return fark === null ? 0 : Math.max(0, fark);
     });
     return Math.round(daysArr.reduce((s, v) => s + v, 0) / daysArr.length);
   })();
@@ -495,10 +480,8 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
     return buckets.map(({ label, min, max }) => {
       const items = kayitlar.filter((k) => {
         if (k.durum === 'Tahsil Edildi' || (k.currency || 'TRY') !== activeCurrency) return false;
-        const vd = parseDate(k.vadeTarihi);
-        if (!vd) return false;
-        const diff = differenceInDays(today, vd);
-        if (diff < 0) return false;
+        const diff = gunFarki(today, k.vadeTarihi);
+        if (diff === null || diff < 0) return false;
         return diff >= min && diff <= max;
       });
       return {
@@ -557,7 +540,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
       belgeTipi: 'Fatura',
       belgeNo: '',
       toplamTutar: '',
-      faturaTarihi: format(new Date(), 'yyyy-MM-dd'),
+      faturaTarihi: bugunAnahtari(),
       vadeTarihi: '',
       faizOrani: '1.5',
       currency: 'TRY',
@@ -621,7 +604,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
   const openPaymentForm = (k: TahsilatKaydi) => {
     setPaymentKaydi(k);
     setPaymentForm({
-      tarih: format(new Date(), 'yyyy-MM-dd'),
+      tarih: bugunAnahtari(),
       tutar: '',
       odemeTipi: 'Havale/EFT',
       notlar: '',
@@ -673,7 +656,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
       showToast('Ödeme kaydedildi.');
       setPaymentKaydi(null);
       setMakbuzUrl('');
-      setPaymentForm({ tarih: format(new Date(), 'yyyy-MM-dd'), tutar: '', odemeTipi: 'Havale/EFT', notlar: '' });
+      setPaymentForm({ tarih: bugunAnahtari(), tutar: '', odemeTipi: 'Havale/EFT', notlar: '' });
     } catch (e) {
       console.error(e);
       showToast('Hata oluştu.', 'error');
@@ -704,8 +687,8 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
         k.musteriAdi,
         k.belgeNo,
         k.belgeTipi,
-        formatDate(k.faturaTarihi),
-        formatDate(k.vadeTarihi),
+        k.faturaTarihi ? tarihYaz(k.faturaTarihi) : '',   // CSV: boş tarih boş hücre (ekranda '—')
+        k.vadeTarihi ? tarihYaz(k.vadeTarihi) : '',
         k.toplamTutar.toFixed(2),
         k.tahsilEdilen.toFixed(2),
         acik.toFixed(2),
@@ -920,9 +903,9 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
                       <span className="text-[11px] text-[#86868B] mr-1">{k.belgeTipi}</span>
                       {k.belgeNo}
                     </td>
-                    <td className="px-4 py-3 text-sm text-[#1D1D1F]">{formatDate(k.faturaTarihi)}</td>
+                    <td className="px-4 py-3 text-sm text-[#1D1D1F]">{tarihYaz(k.faturaTarihi)}</td>
                     <td className={cn('px-4 py-3 text-sm font-medium', isGecikmis ? 'text-red-600' : 'text-[#1D1D1F]')}>
-                      {formatDate(k.vadeTarihi)}
+                      {tarihYaz(k.vadeTarihi)}
                     </td>
                     <td className="px-4 py-3 text-sm text-[#1D1D1F] font-mono">{formatCurrency(k.toplamTutar, k.currency || 'TRY')}</td>
                     <td className="px-4 py-3 text-sm text-green-600 font-medium font-mono">{formatCurrency(k.tahsilEdilen, k.currency || 'TRY')}</td>

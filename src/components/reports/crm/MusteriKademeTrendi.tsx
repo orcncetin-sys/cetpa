@@ -5,6 +5,7 @@
  * Props: ReportsCtx'in tamamı DEĞİL — yalnız bu kartın gerçekten kullandığı alanlar.
  */
 import type { ReportsCtx } from '../useReportsData';
+import { zamanDate } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'orders' | 'currentLanguage' | 'fmtAna'>;
 
@@ -34,11 +35,10 @@ export default function MusteriKademeTrendi({ orders, currentLanguage, fmtAna }:
     if (o.status === 'Cancelled') continue;
     const name = o.customerName || '—';
     const tier = platinum.has(name) ? 'Platinum' : silver.has(name) ? 'Silver' : 'Gold';
-    try {
-      const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-      if (od >= monthStart228) tierRevCurr[tier] += o.totalPrice || 0;
-      else if (od >= prevMonthStart228 && od <= prevMonthEnd228) tierRevPrev[tier] += o.totalPrice || 0;
-    } catch { /* skip */ }
+    const od = zamanDate(o.createdAt);
+    if (!od) continue;
+    if (od >= monthStart228) tierRevCurr[tier] += o.totalPrice || 0;
+    else if (od >= prevMonthStart228 && od <= prevMonthEnd228) tierRevPrev[tier] += o.totalPrice || 0;
   }
   const tierColors: Record<string, { bg: string; text: string; bar: string }> = {
     Platinum: { bg: 'bg-purple-50', text: 'text-purple-700', bar: 'bg-purple-400' },

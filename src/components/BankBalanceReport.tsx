@@ -17,6 +17,7 @@ import { collection, getDocs, doc, updateDoc, addDoc, deleteDoc, serverTimestamp
 import { authFetch } from '../services/authFetch';
 import { logFirestoreError, OperationType } from '../utils/firebase';
 import { paraYaz } from '../utils/currency';
+import { bugunAnahtari } from '../utils/zaman';
 import type { BankAccount, BankTransaction, BankReportPreset } from '../types';
 
 interface CostCenter { id: string; kod: string; ad: string }
@@ -38,7 +39,7 @@ export default function BankBalanceReport({ currentLanguage, exchangeRates, toas
   const tr = currentLanguage === 'tr';
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [txns, setTxns] = useState<BankTransaction[]>([]);
-  const [asOf, setAsOf] = useState(() => new Date().toISOString().slice(0, 10));
+  const [asOf, setAsOf] = useState(() => bugunAnahtari());
   const [loading, setLoading] = useState(false);
   const [openingDraft, setOpeningDraft] = useState<Record<string, string>>({});
   const [asOfRates, setAsOfRates] = useState<Record<string, number> | null>(null);

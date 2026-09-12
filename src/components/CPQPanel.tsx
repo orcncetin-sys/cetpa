@@ -23,6 +23,7 @@ import {
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { gunAnahtari } from '../utils/zaman';
 import { paraYaz } from '../utils/currency';
 import ModuleHeader from './ModuleHeader';
 
@@ -239,7 +240,7 @@ export default function CPQPanel({ currentLanguage, isAuthenticated }: Props) {
     const netToplam = cartItems.reduce((s, i) => s + i.totalPrice, 0);
     const kdvTutari = Math.round(netToplam * (quoteKdvOran / 100) * 100) / 100;
     const total = Math.round((netToplam + kdvTutari) * 100) / 100; // KDV dahil brüt
-    const validUntil = new Date(Date.now() + quoteValidDays * 86400000).toISOString().slice(0, 10);
+    const validUntil = gunAnahtari(new Date(Date.now() + quoteValidDays * 86400000)) ?? '';
     const qNum = `CPQ-${Date.now().toString(36).toUpperCase()}`;
     await addDoc(collection(db, 'cpqQuotes'), {
       quoteNumber: qNum, customerName: quoteCustomer, validUntil,

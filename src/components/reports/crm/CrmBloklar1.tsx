@@ -9,8 +9,8 @@
  * Props yalnız bu dosyanın gerçekten kullandığı ctx alanlarıdır
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
-import { type Order } from '../../../types';
 import type { ReportsCtx } from '../useReportsData';
+import { zamanDate, ayAnahtari } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'currentLanguage' | 'fmtAna'>;
 
@@ -18,18 +18,15 @@ export default function CrmBloklar1({ reportsTab, orders, currentLanguage, fmtAn
   return (
     <>
       {reportsTab === 'crm' && orders.length >= 3 && (() => {
-        const now172 = new Date();
-        const thisMonth172 = `${now172.getFullYear()}-${String(now172.getMonth()+1).padStart(2,'0')}`;
+        const thisMonth172 = ayAnahtari(new Date());
         // Find first-order-ever date per customer
         const firstOrderDate: Record<string, string> = {};
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
-          try {
-            const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            const mkey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-            const name = o.customerName || '—';
-            if (!firstOrderDate[name] || mkey < firstOrderDate[name]) firstOrderDate[name] = mkey;
-          } catch { /* skip */ }
+          const mkey = ayAnahtari(o.createdAt);
+          if (!mkey) continue;
+          const name = o.customerName || '—';
+          if (!firstOrderDate[name] || mkey < firstOrderDate[name]) firstOrderDate[name] = mkey;
         }
         // New customers this month (first order is this month)
         const newThisMonth = Object.entries(firstOrderDate)
@@ -72,22 +69,16 @@ export default function CrmBloklar1({ reportsTab, orders, currentLanguage, fmtAn
           const d = new Date(now139.getFullYear(), now139.getMonth() - (5 - i), 1);
           return { year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' }) };
         });
-        const getOD139 = (o: Order): Date => {
-          const raw = o.createdAt ?? o.syncedAt;
-          if (!raw) return new Date(0);
-          return typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
-        };
+        // Tarihi çözülemeyen sipariş hesaptan düşer (eskiden epoch 0'a sabitlenip ilk sipariş 1970 sayılıyordu).
+        const dated139 = orders.flatMap(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return d ? [{ o, d }] : []; });
         // Build first-order date per customer
         const firstOrderMap: Record<string, Date> = {};
-        for (const o of [...orders].sort((a, b) => getOD139(a).getTime() - getOD139(b).getTime())) {
-          if (!firstOrderMap[o.customerName]) firstOrderMap[o.customerName] = getOD139(o);
+        for (const { o, d } of [...dated139].sort((a, b) => a.d.getTime() - b.d.getTime())) {
+          if (!firstOrderMap[o.customerName]) firstOrderMap[o.customerName] = d;
         }
         const data139 = months139.map(m => {
-          const monthOrders = orders.filter(o => {
-            const d = getOD139(o);
-            return d.getFullYear() === m.year && d.getMonth() === m.month;
-          });
-          const customers = [...new Set(monthOrders.map(o => o.customerName))];
+          const monthOrders = dated139.filter(({ d }) => d.getFullYear() === m.year && d.getMonth() === m.month);
+          const customers = [...new Set(monthOrders.map(({ o }) => o.customerName))];
           const newCustomers = customers.filter(c => {
             const first = firstOrderMap[c];
             return first && first.getFullYear() === m.year && first.getMonth() === m.month;

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import type { Shipment, Vehicle, Warehouse, VehiclePosition } from '../types';
 import { birlesikAraclar } from '../utils/filo';
+import { zamanDate } from '../utils/zaman';
 import { KONUM_ARAC_ANAHTARI, KONUM_OLAYI } from '../hooks/useKonumYayini';
 import { useToast } from './Toast';
 
@@ -57,15 +58,6 @@ const ADIMLAR = [
   { key: 'In Transit', tr: 'Yola Çıktı',   en: 'On the way',  icon: Truck },
   { key: 'Delivered', tr: 'Teslim Edildi', en: 'Delivered',   icon: CheckCircle2 },
 ];
-
-function zamanaCevir(v: unknown): Date | null {
-  if (!v) return null;
-  const t = v as { toDate?: () => Date; seconds?: number };
-  if (typeof t.toDate === 'function') { try { return t.toDate(); } catch { /* düş */ } }
-  if (typeof t.seconds === 'number') return new Date(t.seconds * 1000);
-  const d = new Date(v as string | number);
-  return isNaN(d.getTime()) ? null : d;
-}
 
 interface Props {
   currentLanguage: string;
@@ -118,7 +110,7 @@ export default function CanliSevkiyatPanel({
   const konum = arac ? aracKonumlari.find(k => k.vehicleId === arac.id) : undefined;
 
   const konumYasiSn = useMemo(() => {
-    const d = zamanaCevir(konum?.updatedAt);
+    const d = zamanDate(konum?.updatedAt);
     return d ? Math.max(0, Math.round((simdi - d.getTime()) / 1000)) : null;
   }, [konum?.updatedAt, simdi]);
   const konumBayat = konumYasiSn === null || konumYasiSn > BAYAT_ESIK_SN;

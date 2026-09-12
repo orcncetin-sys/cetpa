@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import type { ReportsCtx } from '../useReportsData';
+import { zamanDate, ayAnahtari, tarihYaz } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'inventory' | 'currentLanguage' | 'fmtAna'>;
 
@@ -27,11 +28,10 @@ export default function CrmBloklar6({ reportsTab, orders, quotations, inventory,
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
           const name = o.customerName || '—';
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (od >= prevStart && od <= prevEnd) prevCustRev[name] = (prevCustRev[name] ?? 0) + (o.totalPrice || 0);
-            if (od >= currStart) currCustRev[name] = (currCustRev[name] ?? 0) + (o.totalPrice || 0);
-          } catch { /* skip */ }
+          const od = zamanDate(o.createdAt);
+          if (!od) continue;
+          if (od >= prevStart && od <= prevEnd) prevCustRev[name] = (prevCustRev[name] ?? 0) + (o.totalPrice || 0);
+          if (od >= currStart) currCustRev[name] = (currCustRev[name] ?? 0) + (o.totalPrice || 0);
         }
         const existingCusts = Object.keys(prevCustRev);
         if (existingCusts.length < 3) return null;
@@ -81,11 +81,11 @@ export default function CrmBloklar6({ reportsTab, orders, quotations, inventory,
           if (!custMap232[name]) custMap232[name] = { orders: 0, cancelled: 0, lastOrderDays: 999, rev: 0 };
           custMap232[name].orders++;
           if (o.status === 'Cancelled') { custMap232[name].cancelled++; continue; }
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+          const od = zamanDate(o.createdAt);
+          if (od) {
             const days = Math.round((now232.getTime() - od.getTime()) / 86400000);
             if (days < custMap232[name].lastOrderDays) custMap232[name].lastOrderDays = days;
-          } catch { /* skip */ }
+          }
           custMap232[name].rev += o.totalPrice || 0;
         }
         const riskList = Object.entries(custMap232)
@@ -196,13 +196,11 @@ export default function CrmBloklar6({ reportsTab, orders, quotations, inventory,
         // Rolling 6-month window: what % of customers re-ordered within 90 days?
         const months240 = Array.from({ length: 6 }, (_, i) => {
           const d = new Date(now240.getFullYear(), now240.getMonth() - (5 - i), 1);
-          const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const label = tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
+          const ayKey = ayAnahtari(d);
           const monthOrders = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
-            try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-            } catch { return false; }
+            return ayAnahtari(o.createdAt) === ayKey;
           });
           const uniqueCusts = new Set(monthOrders.map(o => o.customerName || '—')).size;
           const repeaters = monthOrders.filter(o => {
@@ -210,11 +208,10 @@ export default function CrmBloklar6({ reportsTab, orders, quotations, inventory,
             // Count if this customer also had an order in previous months
             const prevOrder = orders.find(po => {
               if (po === o || po.status === 'Cancelled') return false;
-              try {
-                const pod = (po.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(po.createdAt as string);
-                const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-                return po.customerName === name && pod < od;
-              } catch { return false; }
+              const pod = zamanDate(po.createdAt);
+              const od = zamanDate(o.createdAt);
+              if (!pod || !od) return false;
+              return po.customerName === name && pod < od;
             });
             return !!prevOrder;
           });
@@ -257,10 +254,8 @@ export default function CrmBloklar6({ reportsTab, orders, quotations, inventory,
         const monthStart242 = new Date(now242.getFullYear(), now242.getMonth(), 1);
         const monthRev = orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= monthStart242;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          return !!od && od >= monthStart242;
         }).reduce((s, o) => s + (o.totalPrice || 0), 0);
         // Open quotations = pipeline value
         const openQuotes = quotations.filter(q => {
@@ -367,12 +362,11 @@ export default function CrmBloklar6({ reportsTab, orders, quotations, inventory,
         for (const q of openQuotes247) {
           const m = q as unknown as Record<string,unknown>;
           const val = (m.totalAmount as number) || (m.total as number) || 0;
-          try {
-            const created = (q.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(q.createdAt as string);
-            const age = Math.round((now247.getTime() - created.getTime()) / 86400000);
-            const b = ageBuckets247.find(b => age >= b.min && age <= b.max);
-            if (b) { b.count++; b.value += val; }
-          } catch { /* skip */ }
+          const created = zamanDate(q.createdAt);
+          if (!created) continue;
+          const age = Math.round((now247.getTime() - created.getTime()) / 86400000);
+          const b = ageBuckets247.find(b => age >= b.min && age <= b.max);
+          if (b) { b.count++; b.value += val; }
         }
         const staleQuotes = ageBuckets247.slice(2).reduce((s, b) => s + b.value, 0);
         const totalQVal = ageBuckets247.reduce((s, b) => s + b.value, 0);

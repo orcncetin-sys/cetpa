@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import { itemCostTRY, type ReportsCtx } from '../useReportsData';
+import { zamanDate, gunAnahtari } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'employees' | 'quotations' | 'inventoryMovements' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -62,7 +63,8 @@ export default function GenelBloklar3({ reportsTab, orders, inventory, employees
         const filter260 = (start: Date, end: Date) => orders.filter(o => {
           if (o.status === 'Cancelled') return false;
           try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            const od = zamanDate(o.createdAt);
+            if (!od) return false;
             return od >= start && od <= end;
           } catch { return false; }
         });
@@ -158,7 +160,9 @@ export default function GenelBloklar3({ reportsTab, orders, inventory, employees
         const dayCounts = Array(7).fill(0);
         const dayRevenue = Array(7).fill(0);
         orders.forEach(o => {
-          const d = ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)).getDay();
+          const od = zamanDate(o.createdAt);
+          if (!od) return;
+          const d = od.getDay();
           dayCounts[d]++;
           dayRevenue[d] += o.totalPrice;
         });
@@ -191,17 +195,19 @@ export default function GenelBloklar3({ reportsTab, orders, inventory, employees
         const now = new Date();
         const dayCounts: Record<string, number> = {};
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const d = zamanDate(o.createdAt);
+          if (!d) return;
           const diff = Math.floor((now.getTime() - d.getTime()) / 86400000);
           if (diff <= 90) {
-            const key = d.toISOString().slice(0,10);
+            const key = gunAnahtari(d);
+            if (!key) return;
             dayCounts[key] = (dayCounts[key] || 0) + 1;
           }
         });
         const days = Array.from({length: 90}, (_, i) => {
           const d = new Date(now);
           d.setDate(d.getDate() - (89 - i));
-          return d.toISOString().slice(0,10);
+          return gunAnahtari(d) ?? '';
         });
         const maxCount = Math.max(...days.map(d => dayCounts[d] || 0), 1);
         const totalDaysWithOrders = days.filter(d => dayCounts[d] > 0).length;
@@ -273,7 +279,8 @@ export default function GenelBloklar3({ reportsTab, orders, inventory, employees
         if (!usdRate || !eurRate || !isFinite(usdRate) || !isFinite(eurRate) || usdRate <= 0 || eurRate <= 0) return null;
         const now = new Date();
         const last30 = orders.filter(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const d = zamanDate(o.createdAt);
+          if (!d) return false;
           return (now.getTime() - d.getTime()) / 86400000 <= 30;
         });
         const totalTRY = last30.reduce((s,o) => s+o.totalPrice, 0);
@@ -321,7 +328,8 @@ export default function GenelBloklar3({ reportsTab, orders, inventory, employees
         const monthlyRevArr = Array.from({length:12}, (_,i) => {
           const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1);
           return gecerliSiparisler.filter(o => {
-            const od = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+            const od = zamanDate(o.createdAt);
+            if (!od) return false;
             return od.getFullYear()===d.getFullYear() && od.getMonth()===d.getMonth();
           }).reduce((s,o)=>s+o.totalPrice,0);
         });
@@ -360,7 +368,8 @@ export default function GenelBloklar3({ reportsTab, orders, inventory, employees
         const monthData = months.map(m => {
           const mOrders = orders.filter(o => {
             if (o.status === 'Cancelled') return false; // iptaller marj trendine girmez (C6)
-            const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+            const d = zamanDate(o.createdAt);
+            if (!d) return false;
             return d.getFullYear() === m.year && d.getMonth() === m.month;
           });
           const rev = mOrders.reduce((s,o)=>s+o.totalPrice,0);
@@ -404,12 +413,14 @@ export default function GenelBloklar3({ reportsTab, orders, inventory, employees
         // İptaller gelir köprüsüne girmez (C6) — ana KPI ile aynı ciro tanımı.
         const prevOrders = orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const d = zamanDate(o.createdAt);
+          if (!d) return false;
           return d >= prevMonth && d < currMonth;
         });
         const currOrders = orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const d = zamanDate(o.createdAt);
+          if (!d) return false;
           return d >= currMonth;
         });
         if (prevOrders.length === 0 && currOrders.length === 0) return null;
@@ -462,7 +473,7 @@ export default function GenelBloklar3({ reportsTab, orders, inventory, employees
         const inventoryValue = inventory.reduce((s,i)=>s+Math.max(0,i.stockLevel)*itemCostTRY(i,exchangeRates),0);
         const avgMonthlyRevenue = totalRevenue / Math.max(1, (() => {
           const now = new Date();
-          const dates = orders.map(o => (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string));
+          const dates = orders.map(o => zamanDate(o.createdAt)).filter((d): d is Date => d !== null);
           if (dates.length === 0) return 1;
           const oldest = new Date(Math.min(...dates.map(d=>d.getTime())));
           return Math.max(1, (now.getTime() - oldest.getTime()) / (86400000 * 30));
@@ -541,7 +552,8 @@ export default function GenelBloklar3({ reportsTab, orders, inventory, employees
       {reportsTab === 'genel' && orders.length >= 12 && (() => {
         const monthRevenue: Record<number, number[]> = {};
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const d = zamanDate(o.createdAt);
+          if (!d) return;
           const m = d.getMonth();
           if (!monthRevenue[m]) monthRevenue[m] = [];
           monthRevenue[m].push(o.totalPrice);

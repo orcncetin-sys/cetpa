@@ -5,6 +5,7 @@
  * Props: ReportsCtx'in tamamı DEĞİL — yalnız bu kartın gerçekten kullandığı alanlar.
  */
 import type { ReportsCtx } from '../useReportsData';
+import { zamanMs } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'orders' | 'currentLanguage'>;
 
@@ -14,11 +15,10 @@ export default function IlkYenidenSiparisSuresi({ orders, currentLanguage }: Pro
   for (const o of orders) {
     if (o.status === 'Cancelled') continue;
     const name = o.customerName || '—';
-    try {
-      const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-      if (!custFirstTwo[name]) custFirstTwo[name] = [];
-      custFirstTwo[name].push(od.getTime());
-    } catch { /* skip */ }
+    const ms = zamanMs(o.createdAt);
+    if (ms === null) continue; // tarihsiz sipariş hesaptan düşer (eskiden NaN sıralamayı bozuyordu)
+    if (!custFirstTwo[name]) custFirstTwo[name] = [];
+    custFirstTwo[name].push(ms);
   }
   const reorderDays: number[] = [];
   for (const times of Object.values(custFirstTwo)) {

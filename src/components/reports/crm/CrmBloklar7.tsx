@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import { itemCostTRY, type ReportsCtx } from '../useReportsData';
+import { zamanMs, zamanDate, ayAnahtari } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'inventory' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -21,10 +22,9 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
         const monthStart258 = new Date(now258.getFullYear(), now258.getMonth(), 1);
         const mOrders258 = orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= monthStart258;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          if (!od) return false;
+          return od >= monthStart258;
         });
         if (mOrders258.length < 3) return null;
         const custRevMap258: Record<string, number> = {};
@@ -67,19 +67,19 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
       })()}
 
       {reportsTab === 'crm' && orders.length >= 10 && (() => {
-        const firstOrderByCustomer: Record<string, Date> = {};
-        [...orders].sort((a,b) => {
-          const da = (a.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(a.createdAt as string);
-          const db = (b.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(b.createdAt as string);
-          return da.getTime() - db.getTime();
-        }).forEach(o => {
-          if (!firstOrderByCustomer[o.customerName]) {
-            firstOrderByCustomer[o.customerName] = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          }
-        });
+        const firstOrderByCustomer: Record<string, number> = {};
+        orders
+          .flatMap(o => { const ms = zamanMs(o.createdAt); return ms === null ? [] : [{ o, ms }]; })
+          .sort((a, b) => a.ms - b.ms)
+          .forEach(({ o, ms }) => {
+            if (firstOrderByCustomer[o.customerName] === undefined) {
+              firstOrderByCustomer[o.customerName] = ms;
+            }
+          });
         const monthCounts: Record<string, number> = {};
-        Object.values(firstOrderByCustomer).forEach(d => {
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        Object.values(firstOrderByCustomer).forEach(ms => {
+          const key = ayAnahtari(ms);
+          if (!key) return;
           monthCounts[key] = (monthCounts[key] || 0) + 1;
         });
         const months = Object.keys(monthCounts).sort().slice(-12);
@@ -288,9 +288,8 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
         const custByMonth: Record<string, Set<string>> = {};
         months.forEach(m => { custByMonth[m.key] = new Set(); });
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-          if (custByMonth[key]) custByMonth[key].add(o.customerName);
+          const key = ayAnahtari(o.createdAt);
+          if (key && custByMonth[key]) custByMonth[key].add(o.customerName);
         });
         const data = months.map((m, i) => {
           const current = custByMonth[m.key];
@@ -331,12 +330,13 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
         if (converted.length < 3) return null;
         const timings: number[] = [];
         converted.forEach(q => {
-          const qDate = (q.createdAt as {toDate?:()=>Date}).toDate?.() ?? (q.createdAt ? new Date(q.createdAt as string) : null);
-          if (!qDate) return;
+          const qMs = zamanMs(q.createdAt);
+          if (qMs === null) return;
           const matchOrder = orders.find(o => o.leadId === q.leadId || o.customerName === q.customerName);
           if (!matchOrder) return;
-          const oDate = (matchOrder.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(matchOrder.createdAt as string);
-          const days = Math.floor((oDate.getTime() - qDate.getTime()) / 86400000);
+          const oMs = zamanMs(matchOrder.createdAt);
+          if (oMs === null) return;
+          const days = Math.floor((oMs - qMs) / 86400000);
           if (days >= 0 && days <= 365) timings.push(days);
         });
         if (timings.length < 2) return null;
@@ -378,7 +378,8 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
       {reportsTab === 'crm' && orders.length >= 10 && (() => {
         const custOrders: Record<string, {count: number; revenue: number; first: Date; last: Date}> = {};
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const d = zamanDate(o.createdAt);
+          if (!d) return;
           if (!custOrders[o.customerName]) custOrders[o.customerName] = { count: 0, revenue: 0, first: d, last: d };
           custOrders[o.customerName].count++;
           custOrders[o.customerName].revenue += o.totalPrice;
@@ -422,21 +423,19 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
       {reportsTab === 'crm' && orders.length >= 15 && (() => {
         const cohortMap: Record<string, {customers: Set<string>; months: Record<string, number>}> = {};
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          const cohortKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const cohortKey = ayAnahtari(o.createdAt);
+          if (!cohortKey) return;
           if (!cohortMap[cohortKey]) cohortMap[cohortKey] = { customers: new Set(), months: {} };
         });
         // Find each customer's first order month
         const custFirstMonth: Record<string, string> = {};
-        [...orders].sort((a,b) => {
-          const da = (a.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(a.createdAt as string);
-          const db = (b.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(b.createdAt as string);
-          return da.getTime()-db.getTime();
-        }).forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-          if (!custFirstMonth[o.customerName]) custFirstMonth[o.customerName] = key;
-        });
+        orders
+          .flatMap(o => { const ms = zamanMs(o.createdAt); return ms === null ? [] : [{ o, ms }]; })
+          .sort((a, b) => a.ms - b.ms)
+          .forEach(({ o, ms }) => {
+            const key = ayAnahtari(ms);
+            if (key && !custFirstMonth[o.customerName]) custFirstMonth[o.customerName] = key;
+          });
         orders.forEach(o => {
           const cohort = custFirstMonth[o.customerName];
           if (!cohort || !cohortMap[cohort]) return;
@@ -470,7 +469,8 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
       {reportsTab === 'crm' && orders.length >= 10 && (() => {
         const custFreq: Record<string, {count: number; revenue: number; lastDate: Date}> = {};
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const d = zamanDate(o.createdAt);
+          if (!d) return;
           if (!custFreq[o.customerName]) custFreq[o.customerName] = { count: 0, revenue: 0, lastDate: d };
           custFreq[o.customerName].count++;
           custFreq[o.customerName].revenue += o.totalPrice;
@@ -507,17 +507,15 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
 
       {reportsTab === 'crm' && quotations.length >= 3 && (() => {
         const now = new Date();
-        const staleQuotes = quotations.filter(q => {
-          if (q.status === 'Converted to Order' || q.status === 'approved') return false;
-          const d = (q.createdAt as {toDate?:()=>Date}).toDate?.() ?? (q.createdAt ? new Date(q.createdAt as string) : null);
-          if (!d) return false;
-          const age = (now.getTime() - d.getTime()) / 86400000;
-          return age >= 7;
-        }).map(q => {
-          const d = (q.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(q.createdAt as string);
-          const age = Math.floor((now.getTime() - d.getTime()) / 86400000);
+        const staleQuotes = quotations.flatMap(q => {
+          if (q.status === 'Converted to Order' || q.status === 'approved') return [];
+          const ms = zamanMs(q.createdAt);
+          if (ms === null) return [];
+          const ageRaw = (now.getTime() - ms) / 86400000;
+          if (ageRaw < 7) return [];
+          const age = Math.floor(ageRaw);
           const value = q.totalAmount || (q.items||q.lineItems||[]).reduce((s, i) => s + i.price * i.quantity, 0);
-          return { customer: q.customerName, age, value, status: q.status };
+          return [{ customer: q.customerName, age, value, status: q.status }];
         }).sort((a,b)=>b.value-a.value).slice(0,8);
         if (staleQuotes.length === 0) return null;
         const totalOpportunity = staleQuotes.reduce((s,q)=>s+q.value,0);
@@ -543,8 +541,9 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
         const custOrders: Record<string, {count: number; recent: boolean}> = {};
         const now = new Date();
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          const isRecent = (now.getTime() - d.getTime()) / 86400000 <= 90;
+          const ms = zamanMs(o.createdAt);
+          if (ms === null) return;
+          const isRecent = (now.getTime() - ms) / 86400000 <= 90;
           if (!custOrders[o.customerName]) custOrders[o.customerName] = { count: 0, recent: false };
           custOrders[o.customerName].count++;
           if (isRecent) custOrders[o.customerName].recent = true;

@@ -7,6 +7,7 @@ import {
 import { db } from '../firebase';
 import { byField } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
+import { bugunAnahtari } from '../utils/zaman';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, query, serverTimestamp
@@ -74,7 +75,7 @@ function fmtMoney(n: number, doviz: KasaDoviz = 'TRY') {
   return paraYaz(n, { birim: doviz });
 }
 
-const TODAY = new Date().toISOString().split('T')[0];
+const TODAY = bugunAnahtari();
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 

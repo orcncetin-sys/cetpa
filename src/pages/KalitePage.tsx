@@ -9,6 +9,7 @@ import { motion } from 'motion/react';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, collection, addDoc, updateDoc, deleteDoc, serverTimestamp } from '../lib/dbClient';
+import { bugunAnahtari, tarihYaz } from '../utils/zaman';
 import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import QualityModule from '../components/QualityModule';
@@ -112,7 +113,7 @@ export default function KalitePage({
               <div className="apple-card p-5 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h3 className="font-bold text-gray-900 text-sm">📊 {tr615?'Üretim Kalite Metrikleri':'Production Quality Metrics'}</h3>
-                  <button onClick={()=>{if(p615ShowForm){setP615ShowForm(false);setP615EditId(null);}else{setP615EditId(null);setP615Draft({date:new Date().toISOString().slice(0,10),line:'',total:'',defects:'',rework:''});setP615ShowForm(true);}}} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr615?'Kayıt Ekle':'Add Record'}</button>
+                  <button onClick={()=>{if(p615ShowForm){setP615ShowForm(false);setP615EditId(null);}else{setP615EditId(null);setP615Draft({date:bugunAnahtari(),line:'',total:'',defects:'',rework:''});setP615ShowForm(true);}}} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr615?'Kayıt Ekle':'Add Record'}</button>
                 </div>
                 {p615ShowForm && (
                   <div className="bg-gray-50 rounded-xl p-4 space-y-3">
@@ -156,7 +157,7 @@ export default function KalitePage({
                             const dr = m.total>0?(m.defects/m.total*100):0;
                             return (
                               <tr key={m.id} className="hover:bg-gray-50/50">
-                                <td className="px-3 py-2 text-gray-500">{new Date(m.date).toLocaleDateString('tr-TR')}</td>
+                                <td className="px-3 py-2 text-gray-500">{tarihYaz(m.date)}</td>
                                 <td className="px-3 py-2 font-medium text-gray-800">{m.line}</td>
                                 <td className="px-3 py-2 tabular-nums text-gray-600">{m.total}</td>
                                 <td className="px-3 py-2 tabular-nums text-red-600 font-bold">{m.defects}</td>

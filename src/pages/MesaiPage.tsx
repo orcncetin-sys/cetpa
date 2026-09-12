@@ -11,6 +11,7 @@ import { Clock, Plus } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, serverTimestamp } from '../lib/dbClient';
 import ModuleHeader from '../components/ModuleHeader';
+import { bugunAnahtari } from '../utils/zaman';
 
 /** IKPage.tsx'teki AttendanceRecord ile birebir aynı tanım (App'in timeAttendance kaydı). */
 export interface AttendanceRecord { id: string; employeeName: string; employeeId?: string; date: string; checkIn: string; checkOut: string; totalHours: number; status: 'Normal' | 'Geç Giriş' | 'Erken Çıkış' | 'Devamsız' | 'İzinli' }
@@ -32,7 +33,7 @@ export default function MesaiPage({
   p552AddForm, setP552AddForm, p552Draft, setP552Draft,
 }: Props) {
   const tr552 = currentLanguage === 'tr';
-  const today552 = new Date().toISOString().slice(0,10);
+  const today552 = bugunAnahtari();
   // Stats
   const totalHours = p552Records.reduce((s,r) => s + (r.totalHours||0), 0);
   const avgHours   = p552Records.length ? (totalHours / p552Records.length).toFixed(1) : '0';

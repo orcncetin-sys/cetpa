@@ -161,3 +161,31 @@ export function gunAnahtari(v: unknown): string | null {
   if (!d) return null;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
+// ── GÖSTERİM — tek kaynak (Faz 2 2/n, 2026-09-12) ───────────────────────────────────────
+// Ekranlarda ~90 yerde `x.toLocaleDateString('tr-TR', …)` ve önünde her seferinde elle yazılmış
+// bir çözücü vardı (`x?.toDate ? x.toDate() : new Date(x)`); çözülemeyince "Invalid Date" ya da
+// `?? new Date()` ile BUGÜN basılıyordu. Buradaki üçlü: çözüm `zamanDate` (null-güvenli),
+// biçim tr-TR Intl (görünüm aynı), bilinmeyen '—'. Sözleşme: zaman.ekran.test.ts.
+
+/** Tarih metni: 'GG.AA.YYYY' (tr-TR varsayılanı) ya da Intl seçenekleriyle ('5 Eyl'). Çözülemezse '—'. */
+export type ArayuzDili = 'tr' | 'en';
+const YEREL: Record<ArayuzDili, string> = { tr: 'tr-TR', en: 'en-US' };
+
+export function tarihYaz(v: unknown, secenek?: Intl.DateTimeFormatOptions, dil: ArayuzDili = 'tr'): string {
+  const d = zamanDate(v);
+  return d ? d.toLocaleDateString(YEREL[dil] ?? 'tr-TR', secenek) : '—';
+}
+
+/** Tarih + saat: varsayılan 'GG.AA.YYYY SS:DD' (saniyesiz); Intl seçenekleri aynen geçer. Çözülemezse '—'. */
+export function tarihSaatYaz(v: unknown, secenek?: Intl.DateTimeFormatOptions, dil: ArayuzDili = 'tr'): string {
+  const d = zamanDate(v);
+  if (!d) return '—';
+  return d.toLocaleString(YEREL[dil] ?? 'tr-TR', secenek ?? { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+/** Bugünün YEREL 'YYYY-MM-DD' anahtarı (input[type=date] varsayılanı, günlük dosya adı).
+ *  `new Date().toISOString().slice(0, 10)` UTC günüdür: TR'de 00:00-03:00 arasında DÜNÜ verir. */
+export function bugunAnahtari(simdi: Date = new Date()): string {
+  return gunAnahtari(simdi) ?? '';
+}

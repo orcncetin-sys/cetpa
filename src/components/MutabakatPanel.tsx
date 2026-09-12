@@ -10,6 +10,7 @@
 
 import { useState } from 'react';
 import { pdfBaslik } from '../utils/pdfTheme';
+import { tarihYaz, tarihSaatYaz } from '../utils/zaman';
 import { authFetch } from '../services/authFetch';
 import { FileText, Download, MessageSquare, Mail, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { jsPDF } from 'jspdf';
@@ -59,7 +60,7 @@ async function generateMutabakatPDF(data: MutabakatData, lang: string): Promise<
   // Bu belge 2026-08-21'e kadar LACİVERT (#1a3a5c) 28 mm bant kullanıyordu;
   // teklif ve sipariş ise marka kırmızısı 32 mm. Aynı firmanın aynı gün
   // ürettiği iki belge farklı kurumsal kimlik taşıyordu.
-  const dateStr = new Date(data.generatedAt).toLocaleDateString('tr-TR');
+  const dateStr = tarihYaz(data.generatedAt);
   pdfBaslik(doc, {
     belgeAdi: t ? 'MUTABAKAT' : 'RECONCILIATION',
     altBaslik: t ? 'CARİ HESAP MUTABAKAT MEKTUBU' : 'ACCOUNT BALANCE RECONCILIATION',
@@ -180,7 +181,7 @@ async function generateMutabakatPDF(data: MutabakatData, lang: string): Promise<
   doc.setFontSize(7.5);
   doc.setTextColor(120, 120, 120);
   doc.text('Cetpa Yazılım A.Ş. • www.cetpa.com.tr', margin, doc.internal.pageSize.getHeight() - 4);
-  doc.text(`${t ? 'Oluşturulma' : 'Generated'}: ${new Date(data.generatedAt).toLocaleString('tr-TR')}`, pageW - margin - 80, doc.internal.pageSize.getHeight() - 4);
+  doc.text(`${t ? 'Oluşturulma' : 'Generated'}: ${tarihSaatYaz(data.generatedAt)}`, pageW - margin - 80, doc.internal.pageSize.getHeight() - 4);
 
   return doc;
 }

@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import type { ReportsCtx } from '../useReportsData';
+import { zamanDate, ayAnahtari } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'currentLanguage' | 'fmtAna'>;
 
@@ -69,12 +70,11 @@ export default function CrmBloklar2({ reportsTab, orders, inventory, currentLang
         const lastOrderDate: Record<string, Date> = {};
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
-          try {
-            const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (!lastOrderDate[o.customerName] || d > lastOrderDate[o.customerName]) {
-              lastOrderDate[o.customerName] = d;
-            }
-          } catch { /* skip */ }
+          const d = zamanDate(o.createdAt);
+          if (!d) continue;
+          if (!lastOrderDate[o.customerName] || d > lastOrderDate[o.customerName]) {
+            lastOrderDate[o.customerName] = d;
+          }
         }
         const winBack = Object.entries(lastOrderDate)
           .filter(([, d]) => d < cutoff175)
@@ -176,11 +176,9 @@ export default function CrmBloklar2({ reportsTab, orders, inventory, currentLang
         const now161 = new Date();
         const cancelByMonth: Record<string, number> = {};
         for (const o of cancelled) {
-          try {
-            const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-            cancelByMonth[key] = (cancelByMonth[key] ?? 0) + 1;
-          } catch { /* skip */ }
+          const key = ayAnahtari(o.createdAt);
+          if (!key) continue;
+          cancelByMonth[key] = (cancelByMonth[key] ?? 0) + 1;
         }
         void now161;
         return (

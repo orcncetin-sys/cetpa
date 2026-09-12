@@ -12,6 +12,7 @@ import CustomerCombobox from './CustomerCombobox';
 import type { Lead } from '../types';
 import { eBelgeIndir } from '../services/ebelgeIndir';
 import { paraYaz } from '../utils/currency';
+import { zamanDate, bugunAnahtari } from '../utils/zaman';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, setDoc,
   onSnapshot, query, serverTimestamp
@@ -255,7 +256,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
   const [cekiliyor, setCekiliyor] = useState<string | null>(null);
   const [yonFiltre, setYonFiltre] = useState<'hepsi' | 'gelen' | 'giden'>('hepsi');
   const yilBasi = `${new Date().getFullYear()}-01-01`;
-  const bugun = new Date().toISOString().slice(0, 10);
+  const bugun = bugunAnahtari();
 
   /** Sunucu ucunu çağır; başarısızlıkta HATAYI GÖSTER — sessizce "başarılı"
    *  gösterip boş liste bırakmak bu projede tekrar eden bir hataydı. */
@@ -313,7 +314,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
         // olabilir; alt satirlardaki yedekler zaten "yok" halini karsiliyor.
         const d = snap.data();
         setGibConnected(d?.connected ?? false);
-        setGibLastCheck(d?.lastCheck?.toDate?.() ?? null);
+        setGibLastCheck(zamanDate(d?.lastCheck));
       } else {
         setGibConnected(false);
         setGibLastCheck(null);
@@ -352,7 +353,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
     alici: '',
     vergiNo: '',
     tutar: '',
-    belgeDate: new Date().toISOString().split('T')[0],
+    belgeDate: bugunAnahtari(),
     tur: 'e-fatura' as BelgeTur,
     durum: 'Bekliyor' as BelgeDurum,
     notes: '',
@@ -374,7 +375,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
       alici: '',
       vergiNo: '',
       tutar: '',
-      belgeDate: new Date().toISOString().split('T')[0],
+      belgeDate: bugunAnahtari(),
       tur: activeTab,
       durum: 'Bekliyor',
       notes: '',

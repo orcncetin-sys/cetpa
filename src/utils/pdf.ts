@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { gorunenSiparisNo, siparisTarih, siparisTarihMs } from './siparis';
+import { tarihYaz } from './zaman';
 import autoTable, { applyPlugin } from 'jspdf-autotable';
 
 // Plugin'i BU modülün jsPDF'ine açıkça uygula (Faz 1 2/n, 2026-09-05).
@@ -74,8 +75,7 @@ export const exportOrderPDF = async (
   // yedegi vardi: Mikro faturasindan turetilen siparisin PDF'inde BUGUNUN tarihi
   // cikiyordu — musteriye giden belgede yanlis tarih. utils/zaman.ts bu tuzagi
   // dosya basliginda "olumcul" diye belgeliyor.
-  const dateObj0 = siparisTarih(order);
-  const dateStr = dateObj0 ? dateObj0.toLocaleDateString('tr-TR') : '—';
+  const dateStr = tarihYaz(siparisTarih(order));
   // Teklifte `orderNumber` yoktur; `gorunenSiparisNo` o durumda '#'+id.slice(-6)
   // uretir — hem SIPARIS numarasi bicimindedir hem de QuotationDetail'in bastigi
   // numaradan (id.substring(0,8).toUpperCase()) FARKLIDIR. Ayni teklif iki
@@ -124,7 +124,7 @@ export const exportOrderPDF = async (
     // eskiden ikisi de basılıyordu ve müşteri "Takip No: -" görüyordu.
     const gecerli = (order as Record<string, unknown>).validUntil;
     doc.text(
-      `Geçerlilik: ${gecerli ? new Date(gecerli as string | number | Date).toLocaleDateString('tr-TR') : '—'}`,
+      `Geçerlilik: ${tarihYaz(gecerli)}`,
       col2 + 4, boxY + 13);
   } else {
     doc.text(`Durum: ${normTR(String(order.status || '-'))}`, col2 + 4, boxY + 13);
@@ -267,7 +267,7 @@ export const exportCustomerStatement = async (
   const DARK:  [number, number, number] = [29,  29,  31];
   const GREY:  [number, number, number] = [134, 134, 139];
 
-  const today = new Date().toLocaleDateString('tr-TR');
+  const today = tarihYaz(new Date());   // üretim tarihi = gerçek şimdi; gösterim tek kaynak
 
   // ── Header band ──────────────────────────────────────────────────────────
   doc.setFillColor(...BRAND);
@@ -346,8 +346,7 @@ export const exportCustomerStatement = async (
     : [['Order No',   'Date',  'Status', 'Items',  'Amount (TRY)']];
 
   const body = sorted.map(o => {
-    const dateObj = siparisTarih(o);
-    const dateStr2 = dateObj ? dateObj.toLocaleDateString('tr-TR') : '—';
+    const dateStr2 = tarihYaz(siparisTarih(o));
     const itemNames = (o.lineItems ?? []).map(l => normTR(String(l.name ?? l.title ?? l.sku ?? ''))).slice(0, 2).join(', ');
     const status   = statusLabel[o.status]?.[lang] ?? o.status;
     return [
@@ -453,7 +452,7 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
   const GREY:  [number, number, number] = [134, 134, 139];
   const LIGHT: [number, number, number] = [245, 245, 247];
 
-  const today = new Date().toLocaleDateString('tr-TR');
+  const today = tarihYaz(new Date());   // üretim tarihi = gerçek şimdi; gösterim tek kaynak
 
   // ── Header band ───────────────────────────────────────────────────────────
   doc.setFillColor(...BRAND);
@@ -509,14 +508,7 @@ export const exportPurchaseOrderPDF = async (po: PurchaseOrderDoc, lang: 'tr' | 
   doc.setTextColor(...DARK);
   doc.text(`${lang === 'tr' ? 'Durum' : 'Status'}: ${normTR(po.status || '-')}`, col2 + 4, boxY + 14);
 
-  let expDateStr = '-';
-  if (po.expectedDate) {
-    if (typeof po.expectedDate === 'string') {
-      expDateStr = po.expectedDate;
-    } else if (typeof po.expectedDate === 'object' && 'toDate' in po.expectedDate && typeof po.expectedDate.toDate === 'function') {
-      expDateStr = po.expectedDate.toDate().toLocaleDateString('tr-TR');
-    }
-  }
+  const expDateStr = tarihYaz(po.expectedDate);   // string/Timestamp fark etmez; bilinmiyorsa '—'
   doc.setTextColor(...GREY);
   doc.text(`${lang === 'tr' ? 'Beklenen' : 'Expected'}: ${expDateStr}`, col2 + 4, boxY + 22);
   doc.setFont('Roboto', 'bold');
@@ -611,7 +603,7 @@ export const exportGoodsReceiptPDF = async (po: PurchaseOrderDoc, lang: 'tr' | '
   const GREY:  [number, number, number] = [134, 134, 139];
   const LIGHT: [number, number, number] = [245, 245, 247];
 
-  const today = new Date().toLocaleDateString('tr-TR');
+  const today = tarihYaz(new Date());   // üretim tarihi = gerçek şimdi; gösterim tek kaynak
 
   // ── Header band ───────────────────────────────────────────────────────────
   doc.setFillColor(...GREEN);

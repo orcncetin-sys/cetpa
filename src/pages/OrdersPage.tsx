@@ -2,6 +2,7 @@ import { itemCostTRY } from '../utils/cost';
 const CanliSevkiyatPanel = React.lazy(() => import('../components/CanliSevkiyatPanel'));
 import { eslesir } from '../utils/arama';
 import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli } from '../utils/siparis';
+import { zamanMs, zamanDate, gunBasi, gunAnahtari, ayAnahtari, tarihYaz, tarihSaatYaz, bugunAnahtari } from '../utils/zaman';
 import type { BinSatiri } from '../hooks/useSekmeVerileri';
 import type { VehiclePosition } from '../types';
 import React, { useState, useEffect } from 'react';
@@ -277,7 +278,7 @@ export default function OrdersPage({
   const [p621Draft, setP621Draft] = useState({productName:'',sku:'',requestedQty:'',requestedBy:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek',notes:''});
   const [p622Shipments, setP622Shipments] = useState<Array<{id:string;orderRef:string;destination:string;incoterm:'EXW'|'FOB'|'CIF'|'DDP';currency:'USD'|'EUR'|'TRY';value:number;status:'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi';exportDate:string;customsRef?:string}>>([]);
   const [p622ShowForm, setP622ShowForm] = useState(false);
-  const [p622Draft, setP622Draft] = useState({orderRef:'',destination:'',incoterm:'FOB' as 'EXW'|'FOB'|'CIF'|'DDP',currency:'USD' as 'USD'|'EUR'|'TRY',value:'',status:'Hazırlanıyor' as 'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi',exportDate:new Date().toISOString().slice(0,10),customsRef:''});
+  const [p622Draft, setP622Draft] = useState({orderRef:'',destination:'',incoterm:'FOB' as 'EXW'|'FOB'|'CIF'|'DDP',currency:'USD' as 'USD'|'EUR'|'TRY',value:'',status:'Hazırlanıyor' as 'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi',exportDate:bugunAnahtari(),customsRef:''});
 
   // ── Kalıcılaştırma (2026-07-21): iade/talep/ticket/sevkiyat artık DB'de ────
   // Sayfa yalnız kendi sekmesinde mount olduğu için abonelikler doğal-tembel.
@@ -300,12 +301,12 @@ export default function OrdersPage({
   // Firestore Timestamp -> ms, metin -> kucuk harf, null/undefined -> ''.
   // (Once `let av: unknown` idi; strictNullChecks altinda '<' / '>' unknown'a uygulanamiyor.)
   const sortKeyOf = (raw: unknown): string | number => {
-    if (raw && typeof (raw as { toDate?: unknown }).toDate === 'function') {
-      return (raw as { toDate: () => Date }).toDate().getTime();
-    }
     if (typeof raw === 'string') return raw.toLowerCase();
     if (typeof raw === 'number') return raw;
     if (raw == null) return '';
+    // Timestamp / {seconds} / {_seconds} / Date -> ms (tek kaynak: utils/zaman)
+    const ms = zamanMs(raw);
+    if (ms !== null) return ms;
     // boolean/nesne: JS'in '<' operatorunun bu tipler icin zaten yaptigi metin cevrimi
     return String(raw);
   };
@@ -560,7 +561,7 @@ export default function OrdersPage({
 
               {/* ── Phase 521: Invoice Aging Alert ── */}
               {(() => {
-                const unpaid521 = activeOrders.filter(o => !o.paid && o.status !== 'Cancelled' && (o.createdAt || o.syncedAt) && odemeTakipli(o));
+                const unpaid521 = activeOrders.filter(o => !o.paid && o.status !== 'Cancelled' && zamanMs(o.createdAt ?? o.syncedAt) !== null && odemeTakipli(o)); // tarihi çözülemeyen fatura burada düşer → başlık sayacı ile kovalar aynı kümeyi görür
                 if (unpaid521.length === 0) return null;
                 const now521 = Date.now();
                 const buckets521 = [
@@ -570,10 +571,9 @@ export default function OrdersPage({
                   { label: '90+', labelTR: '90+ gün', items: [] as typeof unpaid521 },
                 ];
                 for (const o of unpaid521) {
-                  const raw = o.createdAt ?? o.syncedAt;
-                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                    ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
-                  const age = Math.floor((now521 - d.getTime()) / 86400000);
+                  const ms = zamanMs(o.createdAt ?? o.syncedAt);
+                  if (ms === null) continue; // filtre zaten eledi; TS daraltması için korunuyor
+                  const age = Math.floor((now521 - ms) / 86400000);
                   if (age <= 30) buckets521[0].items.push(o);
                   else if (age <= 60) buckets521[1].items.push(o);
                   else if (age <= 90) buckets521[2].items.push(o);
@@ -689,7 +689,7 @@ export default function OrdersPage({
                           // MAVI tablosuyla cikiyordu.
                           const govdeY = pdfBaslik(pdf, {
                             belgeAdi: currentLanguage === 'tr' ? 'SİPARİŞ LİSTESİ' : 'ORDER LIST',
-                            meta: new Date().toLocaleDateString('tr-TR'),
+                            meta: tarihYaz(new Date()),
                           });
                           autoTable(pdf, {
                             ...pdfTabloStili(),
@@ -701,7 +701,7 @@ export default function OrdersPage({
                               paraYaz(o.totalPrice)]),
                           });
                           pdfAltBilgi(pdf);
-                          pdf.save(`siparisler_${new Date().toISOString().split('T')[0]}.pdf`);
+                          pdf.save(`siparisler_${bugunAnahtari()}.pdf`);
                         });
                       });
                     }}
@@ -720,7 +720,7 @@ export default function OrdersPage({
 
               {/* ── Phase 119: Recurring Order Templates ── */}
               {(() => {
-                const dueToday = recurringOrders.filter(r => r.active && r.nextDue && new Date(r.nextDue) <= new Date());
+                const dueToday = recurringOrders.filter(r => { const due = gunBasi(r.nextDue); return r.active && !!due && due <= new Date(); });
                 return (
                   <div className="space-y-3">
                     {/* Due now alert */}
@@ -805,7 +805,7 @@ export default function OrdersPage({
                       ) : (
                         <div className="divide-y divide-gray-50">
                           {recurringOrders.map(r => {
-                            const due = r.nextDue ? new Date(r.nextDue) : null;
+                            const due = gunBasi(r.nextDue);
                             const overdue = due && due <= new Date();
                             return (
                               <div key={r.id} className="flex items-center gap-3 px-5 py-3">
@@ -821,7 +821,7 @@ export default function OrdersPage({
                                 </span>
                                 {due && (
                                   <span className={`text-[10px] font-bold flex-shrink-0 ${overdue ? 'text-red-600' : 'text-gray-500'}`}>
-                                    {overdue ? '⚠ ' : ''}{due.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { day: 'numeric', month: 'short' })}
+                                    {overdue ? '⚠ ' : ''}{tarihYaz(due, { day: 'numeric', month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en')}
                                   </span>
                                 )}
                                 <button
@@ -934,12 +934,9 @@ export default function OrdersPage({
                 const THREE_DAYS = 3 * 86400000;
                 const stuckOrders = activeOrders.filter(o => {
                   if (o.status !== 'Pending' && o.status !== 'Processing') return false;
-                  const raw = o.createdAt ?? o.syncedAt;
-                  if (!raw) return false;
-                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                    ? (raw as { toDate: () => Date }).toDate()
-                    : new Date(raw as string | number | Date);
-                  return now - d.getTime() > THREE_DAYS;
+                  const ms = zamanMs(o.createdAt ?? o.syncedAt);
+                  if (ms === null) return false;
+                  return now - ms > THREE_DAYS;
                 });
                 if (stuckOrders.length === 0) return null;
                 const pendingStuck    = stuckOrders.filter(o => o.status === 'Pending').length;
@@ -1033,15 +1030,13 @@ export default function OrdersPage({
                           if (q && !o.customerName.toLowerCase().includes(q) && !gorunenSiparisNo(o).toLowerCase().includes(q) && !o.shippingAddress?.toLowerCase().includes(q)) return false;
                           // Phase 501: date range filter
                           if (orderDateRange !== 'all') {
-                            const raw = o.createdAt ?? o.syncedAt;
-                            if (raw) {
-                              const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                                ? (raw as { toDate: () => Date }).toDate()
-                                : new Date(raw as string | number | Date);
+                            // Tarihi çözülemeyen sipariş eskisi gibi filtreden GEÇER (raw yokken de geçiyordu)
+                            const d = zamanDate(o.createdAt ?? o.syncedAt);
+                            if (d) {
                               const now = new Date();
                               if (orderDateRange === 'today' && d.toDateString() !== now.toDateString()) return false;
                               if (orderDateRange === 'week') { const ws = new Date(now); ws.setDate(now.getDate() - now.getDay()); ws.setHours(0,0,0,0); if (d < ws) return false; }
-                              if (orderDateRange === 'month' && (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear())) return false;
+                              if (orderDateRange === 'month' && ayAnahtari(d) !== ayAnahtari(now)) return false;
                               if (orderDateRange === 'quarter' && (Math.floor(d.getMonth()/3) !== Math.floor(now.getMonth()/3) || d.getFullYear() !== now.getFullYear())) return false;
                             }
                           }
@@ -1136,17 +1131,14 @@ export default function OrdersPage({
                               </div>
                             </td>
                             <td className="px-6 py-4 text-gray-500">
-                              {(() => { const d = siparisTarih(order); return d ? d.toLocaleDateString() : (currentLanguage === 'tr' ? 'Tarih yok' : 'Unknown Date'); })()}
+                              {(() => { const d = siparisTarih(order); return d ? tarihYaz(d) : (currentLanguage === 'tr' ? 'Tarih yok' : 'Unknown Date'); })()}
                             </td>
                             <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                               {/* Phase 534: days in current status */}
                               {(() => {
-                                const raw534 = order.createdAt ?? order.syncedAt;
-                                if (!raw534) return null;
-                                const d534 = typeof (raw534 as { toDate?: () => Date }).toDate === 'function'
-                                  ? (raw534 as { toDate: () => Date }).toDate()
-                                  : new Date(raw534 as string | number);
-                                const days534 = Math.floor((Date.now() - d534.getTime()) / 86400000);
+                                const ms534 = zamanMs(order.createdAt ?? order.syncedAt);
+                                if (ms534 === null) return null;
+                                const days534 = Math.floor((Date.now() - ms534) / 86400000);
                                 if (days534 < 1) return null;
                                 const warn534 = order.status === 'Pending' && days534 > 3;
                                 return (
@@ -1392,7 +1384,7 @@ export default function OrdersPage({
                     </div>
                     <div className="flex justify-between items-end">
                       <div className="text-xs text-gray-400">
-                        {(() => { const d = siparisTarih(order); return d ? d.toLocaleDateString() : (currentLanguage === 'tr' ? 'Tarih yok' : 'Unknown Date'); })()}
+                        {(() => { const d = siparisTarih(order); return d ? tarihYaz(d) : (currentLanguage === 'tr' ? 'Tarih yok' : 'Unknown Date'); })()}
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-brand">{paraYaz(order.totalPrice)}</p>
@@ -1532,7 +1524,7 @@ export default function OrdersPage({
                         const payload={customerName:p583Draft.customerName,productName:p583Draft.productName,serialNo:p583Draft.serialNo||'',warrantyEnd:p583Draft.warrantyEnd||'',description:p583Draft.description,priority:p583Draft.priority};
                         try {
                           if(p583EditId){ await updateDoc(doc(db,'serviceRequests',p583EditId),payload); }
-                          else { await addDoc(collection(db,'serviceRequests'),{...payload,issueDate:new Date().toISOString().slice(0,10),status:'Açık',createdAt:serverTimestamp()}); }
+                          else { await addDoc(collection(db,'serviceRequests'),{...payload,issueDate:bugunAnahtari(),status:'Açık',createdAt:serverTimestamp()}); }
                           setP583Draft({customerName:'',productName:'',serialNo:'',warrantyEnd:'',description:'',priority:'Orta'});
                           setP583ShowForm(false); setP583EditId(null);
                           toast(tr583?(p583EditId?'Talep güncellendi.':'Servis talebi oluşturuldu.'):(p583EditId?'Request updated.':'Service request created.'),'success');
@@ -1580,8 +1572,9 @@ export default function OrdersPage({
               ? (resolvedTickets.filter(t=>t.satisfaction).reduce((s,t)=>s+(t.satisfaction||0),0)/resolvedTickets.filter(t=>t.satisfaction).length).toFixed(1) : '—';
             const slaBreached = p609Tickets.filter(t=>{
               if (t.status==='Kapatıldı'||t.status==='Çözüldü') return false;
-              const created = new Date(t.createdAt);
-              const hours = (Date.now()-created.getTime())/3600000;
+              const createdMs = zamanMs(t.createdAt);
+              if (createdMs === null) return false; // tarihi bilinmeyen bilet ihlal sayılmaz
+              const hours = (Date.now()-createdMs)/3600000;
               return hours>t.slaHours;
             }).length;
             const priorityColor:{[k:string]:string} = {'Kritik':'text-red-600 bg-red-50','Yüksek':'text-orange-600 bg-orange-50','Orta':'text-amber-600 bg-amber-50','Düşük':'text-gray-600 bg-gray-50'};
@@ -1627,14 +1620,15 @@ export default function OrdersPage({
                 {p609Tickets.length > 0 && (
                   <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                     {[...p609Tickets].sort((a,b)=>{const pr={Kritik:0,Yüksek:1,Orta:2,Düşük:3};return pr[a.priority]-pr[b.priority];}).map(t=>{
-                      const hoursOpen = (Date.now()-new Date(t.createdAt).getTime())/3600000;
-                      const slaOk = hoursOpen<=t.slaHours||t.status==='Çözüldü'||t.status==='Kapatıldı';
+                      const createdMs = zamanMs(t.createdAt);
+                      const hoursOpen = createdMs === null ? null : (Date.now()-createdMs)/3600000;
+                      const slaOk = hoursOpen===null||hoursOpen<=t.slaHours||t.status==='Çözüldü'||t.status==='Kapatıldı';
                       return (
                         <div key={t.id} className={`flex items-center gap-3 border rounded-xl px-4 py-2.5 ${slaOk?'border-gray-100':'border-red-200 bg-red-50/30'}`}>
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${priorityColor[t.priority]}`}>{t.priority}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-semibold text-gray-800 truncate">{t.customer} — {t.subject}</p>
-                            <p className="text-[10px] text-gray-400">{Math.round(hoursOpen)}h {tr609?'açık':'open'} · SLA: {t.slaHours}h{!slaOk?' ⚠️':''}</p>
+                            <p className="text-[10px] text-gray-400">{hoursOpen===null?'—':`${Math.round(hoursOpen)}h`} {tr609?'açık':'open'} · SLA: {t.slaHours}h{!slaOk?' ⚠️':''}</p>
                           </div>
                           <select value={t.status} onChange={async e=>{try{await updateDoc(doc(db,'helpdeskTickets',t.id),{status:e.target.value,...(['Çözüldü','Kapatıldı'].includes(e.target.value)?{resolvedAt:new Date().toISOString()}:{})});}catch(err){toast((tr609?'Güncellenemedi: ':'Update failed: ')+(err instanceof Error?err.message:String(err)),'error');}}} className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white shrink-0">
                             {['Açık','İşlemde','Çözüldü','Kapatıldı'].map(s=><option key={s}>{s}</option>)}
@@ -1822,8 +1816,7 @@ export default function OrdersPage({
                             14, 21);
                           doc505.setTextColor(80, 80, 80);
                           doc505.setFontSize(9);
-                          const rawD = o.createdAt ?? o.syncedAt;
-                          const oDate = rawD ? (typeof (rawD as { toDate?: () => Date }).toDate === 'function' ? (rawD as { toDate: () => Date }).toDate() : new Date(rawD as string | number)).toLocaleDateString('tr-TR') : '—';
+                          const oDate = tarihYaz(o.createdAt ?? o.syncedAt);
                           doc505.text(gorunenSiparisNo(o), W - 14, 13, { align: 'right' });
                           doc505.text(oDate, W - 14, 21, { align: 'right' });
                           doc505.setTextColor(30, 30, 30);
@@ -2137,7 +2130,7 @@ export default function OrdersPage({
                       </div>
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">{currentT.date}</span>
-                        <span className="font-medium">{(() => { const d = siparisTarih(selectedOrder); return d ? d.toLocaleString() : currentT.unknown_date; })()}</span>
+                        <span className="font-medium">{(() => { const d = siparisTarih(selectedOrder); return d ? tarihSaatYaz(d) : currentT.unknown_date; })()}</span>
                       </div>
                       {/* Phase 95: Payment status + estimated delivery in detail grid */}
                       <div>
@@ -2160,9 +2153,8 @@ export default function OrdersPage({
                       </div>
                       {/* estimatedDelivery tipi `unknown`; `x && <jsx>` sonucu unknown olup ReactNode'a atanamiyor -> dogruluk kontrolunu boolean'a indirge */}
                       {!!selectedOrder.estimatedDelivery && (() => {
-                        const ed = typeof (selectedOrder.estimatedDelivery as { toDate?: () => Date }).toDate === 'function'
-                          ? (selectedOrder.estimatedDelivery as { toDate: () => Date }).toDate()
-                          : new Date(selectedOrder.estimatedDelivery as string | number);
+                        const ed = zamanDate(selectedOrder.estimatedDelivery);
+                        if (!ed) return null;
                         const isOverdue = ed < new Date() && selectedOrder.status !== 'Delivered' && selectedOrder.status !== 'Cancelled';
                         return (
                           <div>
@@ -2171,7 +2163,7 @@ export default function OrdersPage({
                             </span>
                             <span className={`font-medium text-sm flex items-center gap-1.5 mt-0.5 ${isOverdue ? 'text-red-600' : 'text-gray-800'}`}>
                               {isOverdue && <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />}
-                              {ed.toLocaleDateString()}
+                              {tarihYaz(ed)}
                               {isOverdue && <span className="text-[9px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'GECİKTİ' : 'OVERDUE'}</span>}
                             </span>
                           </div>
@@ -2201,11 +2193,8 @@ export default function OrdersPage({
                     const events: TimelineEntry[] = [
                       // creation event from order data
                       ...((() => {
-                        const raw = selectedOrder.createdAt ?? selectedOrder.syncedAt;
-                        if (!raw) return [] as TimelineEntry[];
-                        const ts = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                          ? (raw as { toDate: () => Date }).toDate().getTime()
-                          : new Date(raw as string | number).getTime();
+                        const ts = zamanMs(selectedOrder.createdAt ?? selectedOrder.syncedAt);
+                        if (ts === null) return [] as TimelineEntry[];
                         return [{ action: currentLanguage === 'tr' ? 'Sipariş oluşturuldu' : 'Order created', actor: selectedOrder.customerName || '—', ts }] as TimelineEntry[];
                       })()),
                       // Firestore-stored timeline entries
@@ -2224,7 +2213,6 @@ export default function OrdersPage({
                           <div className="absolute left-2 top-1.5 bottom-1.5 w-px bg-gray-100" />
                           <div className="space-y-4">
                             {events.map((ev, i) => {
-                              const d = new Date(ev.ts);
                               const isLast = i === events.length - 1;
                               return (
                                 <div key={i} className="relative flex gap-3 items-start">
@@ -2232,7 +2220,7 @@ export default function OrdersPage({
                                   <div className="flex-1 min-w-0">
                                     <p className="text-xs font-bold text-gray-800">{ev.action}</p>
                                     <p className="text-[10px] text-gray-400 mt-0.5">
-                                      {ev.actor} · {d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })} {d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                                      {ev.actor} · {tarihSaatYaz(ev.ts, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                                     </p>
                                     {ev.note && <p className="text-[10px] text-gray-500 mt-0.5 italic">"{ev.note}"</p>}
                                   </div>
@@ -2528,7 +2516,7 @@ export default function OrdersPage({
                                     quantity: Number(p554Draft.quantity) || 0,
                                     minQty: p554Draft.minQty ? Number(p554Draft.minQty) : undefined,
                                     notes: p554Draft.notes || undefined,
-                                    lastCounted: new Date().toISOString().slice(0,10),
+                                    lastCounted: bugunAnahtari(),
                                     createdAt: serverTimestamp(),
                                   });
                                   setP554Draft({ warehouseId: '', binCode: '', productSku: '', productName: '', quantity: '', minQty: '', notes: '' });
@@ -2596,7 +2584,7 @@ export default function OrdersPage({
                                               if (qty === null) return;
                                               const n = Number(qty);
                                               if (isNaN(n)) return;
-                                              await updateDoc(doc(db, 'warehouseBins', b.id), { quantity: n, lastCounted: new Date().toISOString().slice(0,10) });
+                                              await updateDoc(doc(db, 'warehouseBins', b.id), { quantity: n, lastCounted: bugunAnahtari() });
                                               toast(tr554 ? 'Miktar güncellendi.' : 'Quantity updated.', 'success');
                                             }} className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg transition-colors">
                                               {tr554 ? 'Düzelt' : 'Adjust'}
@@ -2624,22 +2612,17 @@ export default function OrdersPage({
                 const daysBack = p576Period === '7d' ? 7 : p576Period === '30d' ? 30 : 90;
                 const from576 = new Date(now576.getTime() - daysBack * 86400000);
                 const periodOrders = orders.filter(o => {
-                  if (!o.createdAt) return false;
-                  try {
-                    const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-                    return d >= from576 && d <= now576;
-                  } catch { return false; }
+                  const d = zamanDate(o.createdAt);
+                  return !!d && d >= from576 && d <= now576;
                 });
                 const shipped576 = periodOrders.filter(o => o.status === 'Shipped' || o.status === 'Delivered');
                 const delivered576 = periodOrders.filter(o => o.status === 'Delivered');
                 const cancelled576 = periodOrders.filter(o => o.status === 'Cancelled');
                 const onTime576 = delivered576.filter(o => {
-                  if (!o.estimatedDelivery) return true;
-                  try {
-                    const est = new Date(o.estimatedDelivery as string);
-                    const del = o.deliveryPhoto ? now576 : est; // approximation
-                    return del <= est;
-                  } catch { return true; }
+                  const est = zamanDate(o.estimatedDelivery);
+                  if (!est) return true;
+                  const del = o.deliveryPhoto ? now576 : est; // approximation
+                  return del <= est;
                 });
                 const fillRate = periodOrders.length > 0 ? (shipped576.length / periodOrders.length) * 100 : 0;
                 const onTimeRate = delivered576.length > 0 ? (onTime576.length / delivered576.length) * 100 : 0;
@@ -2647,11 +2630,9 @@ export default function OrdersPage({
                 // Average order processing time (created → shipped)
                 const avgProcessDays = shipped576.length > 0
                   ? shipped576.reduce((s,o) => {
-                    if (!o.createdAt) return s;
-                    try {
-                      const cr = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-                      return s + (now576.getTime() - cr.getTime()) / 86400000;
-                    } catch { return s; }
+                    const crMs = zamanMs(o.createdAt);
+                    if (crMs === null) return s;
+                    return s + (now576.getTime() - crMs) / 86400000;
                   }, 0) / shipped576.length : 0;
                 // Low stock ratio
                 const lowStockItems = inventory.filter(item => item.stockLevel <= item.lowStockThreshold);
@@ -2748,8 +2729,9 @@ export default function OrdersPage({
               {lojistikTab === 'arac-takip' && (() => {
                 const tr593 = currentLanguage === 'tr';
                 const statusColors593: Record<string,string> = {'Müsait':'bg-green-100 text-green-700','Yolda':'bg-blue-100 text-blue-700','Bakımda':'bg-amber-100 text-amber-700','Arızalı':'bg-red-100 text-red-700'};
-                const today593 = new Date().toISOString().slice(0,10);
-                const maintenanceDue = p593Vehicles.filter(v=>v.nextService&&v.nextService<=new Date(Date.now()+7*86400000).toISOString().slice(0,10));
+                const today593 = bugunAnahtari();
+                const haftaya593 = bugunAnahtari(new Date(Date.now()+7*86400000));
+                const maintenanceDue = p593Vehicles.filter(v=>v.nextService&&v.nextService<=haftaya593);
                 const stats = {müsait:p593Vehicles.filter(v=>v.status==='Müsait').length, yolda:p593Vehicles.filter(v=>v.status==='Yolda').length, bakimda:p593Vehicles.filter(v=>v.status==='Bakımda'||v.status==='Arızalı').length};
                 return (
                   <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
@@ -2925,7 +2907,7 @@ export default function OrdersPage({
                                 <td className="px-3 py-2.5 text-gray-500">{sh.incoterm}</td>
                                 <td className="px-3 py-2.5 font-bold text-gray-700">{paraYaz(sh.value, { birim: sh.currency })}</td>
                                 <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor[sh.status]}`}>{sh.status}</span></td>
-                                <td className="px-3 py-2.5 text-gray-500">{new Date(sh.exportDate).toLocaleDateString('tr-TR')}</td>
+                                <td className="px-3 py-2.5 text-gray-500">{tarihYaz(sh.exportDate)}</td>
                                 <td className="px-3 py-2.5 text-right"><div className="flex items-center justify-end gap-2">
                                   <button type="button" onClick={()=>{setP622Draft({orderRef:sh.orderRef,destination:sh.destination,incoterm:sh.incoterm,currency:sh.currency,value:String(sh.value),status:sh.status,exportDate:sh.exportDate,customsRef:sh.customsRef||''});setP622EditId(sh.id);setP622ShowForm(true);}} title={tr622?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
                                   <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'exportShipments',sh.id));}catch(e){toast((tr622?'Silinemedi: ':'Delete failed: ')+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
@@ -2945,18 +2927,11 @@ export default function OrdersPage({
               {lojistikTab === 'sevkiyat' && <>
               {/* ── Phase 60: Today's Shipment Summary ── */}
               {(() => {
-                const todayStr = new Date().toDateString();
+                const bugun60 = bugunAnahtari();
                 const shipped   = orders.filter(o => o.status === 'Shipped');
                 const delivered = orders.filter(o => o.status === 'Delivered');
-                const todayShipped = orders.filter(o => {
-                  if (o.status !== 'Shipped') return false;
-                  const raw = o.createdAt ?? o.syncedAt;
-                  if (!raw) return false;
-                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                    ? (raw as { toDate: () => Date }).toDate()
-                    : new Date(raw as string | number);
-                  return d.toDateString() === todayStr;
-                });
+                const todayShipped = orders.filter(o =>
+                  o.status === 'Shipped' && gunAnahtari(o.createdAt ?? o.syncedAt) === bugun60);
                 const pending = orders.filter(o => o.status === 'Processing');
                 const stats = [
                   { label: currentLanguage === 'tr' ? 'Kargoda' : 'In Transit',      value: shipped.length,     color: 'text-blue-700',    bg: 'bg-blue-50',    icon: Truck        },
@@ -2988,20 +2963,15 @@ export default function OrdersPage({
 
               {/* ── Phase 108: Delivery SLA Strip ── */}
               {(() => {
-                const toTs108 = (val: unknown): number => {
-                  if (!val) return 0;
-                  if (typeof (val as { toDate?: () => Date }).toDate === 'function') return (val as { toDate: () => Date }).toDate().getTime();
-                  return new Date(val as string | number).getTime();
-                };
                 const SLA_DAYS = 7; // on-time = delivered within 7 days of creation
                 const deliveredOrders = orders.filter(o => o.status === 'Delivered');
                 if (deliveredOrders.length === 0) return null;
 
                 let onTimeCount = 0, totalDays = 0;
                 for (const o of deliveredOrders) {
-                  const created = toTs108(o.createdAt ?? o.syncedAt);
-                  const synced  = toTs108(o.syncedAt ?? o.createdAt);
-                  const days = created && synced ? Math.abs(synced - created) / 86400000 : SLA_DAYS;
+                  const created = zamanMs(o.createdAt ?? o.syncedAt);
+                  const synced  = zamanMs(o.syncedAt ?? o.createdAt);
+                  const days = created !== null && synced !== null ? Math.abs(synced - created) / 86400000 : SLA_DAYS;
                   if (days <= SLA_DAYS) onTimeCount++;
                   totalDays += Math.max(0, days);
                 }
@@ -3587,7 +3557,7 @@ export default function OrdersPage({
                       await addDoc(collection(db, 'shipments'), {
                         customerName: o.customerName ?? '', destination: o.shippingAddress ?? '',
                         driver: '', cargoFirm: '', trackingNo: '', status: 'Pending',
-                        date: new Date().toISOString().slice(0, 10), orderId: o.id,
+                        date: bugunAnahtari(), orderId: o.id,
                         companyId: (o as unknown as { companyId?: string }).companyId ?? null,
                         createdAt: serverTimestamp(),
                       });

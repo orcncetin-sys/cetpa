@@ -12,6 +12,7 @@ import {
   onSnapshot, query, serverTimestamp,
 } from '../lib/dbClient';
 import { paraYaz } from '../utils/currency';
+import { zamanDate, gunFarki, bugunAnahtari, tarihYaz } from '../utils/zaman';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,13 +81,6 @@ const cn = (...classes: unknown[]) => classes.filter(Boolean).join(' ');
 // Tek kaynak: utils/currency.paraYaz (0 ondalık, bilinmeyen tutar '—'). İmza korundu, çağrı yerleri değişmedi.
 const formatTRY = (val: number) => paraYaz(val, { ondalik: 0 });
 
-const formatDateTR = (str: string): string => {
-  if (!str) return '-';
-  const d = new Date(str);
-  if (isNaN(d.getTime())) return str;
-  return d.toLocaleDateString('tr-TR');
-};
-
 function calcYillikAmort(item: SabitKiymet): number {
   if (item.faydaliOmur <= 0) return 0;
   // Tamamen amortismana tabi tutulmuşsa yıllık amortisman 0 (önce azalan-bakiyede
@@ -105,10 +99,10 @@ function calcBirikmisSalinma(item: SabitKiymet): number {
   // Manuel override (0 = otomatik hesapla) — önce sessizce yok sayılıyordu.
   if (item.birikmisSalinma > 0) return Math.min(item.birikmisSalinma, item.alisBedeli);
   if (!item.alisTarihi) return 0;
-  const alis = new Date(item.alisTarihi);
+  const alis = zamanDate(item.alisTarihi);
+  if (!alis) return 0;
   const now = new Date();
   now.setHours(0, 0, 0, 0);
-  if (isNaN(alis.getTime())) return 0;
   const yilGecen = (now.getTime() - alis.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
   if (yilGecen <= 0) return 0;
   const yilCapped = Math.min(yilGecen, item.faydaliOmur);
@@ -145,13 +139,6 @@ function generateDemirbasNo(existing: SabitKiymet[]): string {
     .filter(n => !isNaN(n));
   const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
   return `DMB-${String(next).padStart(4, '0')}`;
-}
-
-function daysUntil(dateStr: string): number {
-  const d = new Date(dateStr);
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  return Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 // ─── Config maps ──────────────────────────────────────────────────────────────
@@ -324,7 +311,7 @@ const emptyVarlik = (): Omit<SabitKiymet, 'id'> => ({
   demirbasNo: '',
   ad: '',
   kategori: 'Diğer' as Kategori,
-  alisTarihi: new Date().toISOString().split('T')[0],
+  alisTarihi: bugunAnahtari(),
   alisBedeli: 0,
   paraBirimi: 'TRY' as ParaBirimi,
   amortYontemi: 'Doğrusal' as AmortYontemi,
@@ -337,7 +324,7 @@ const emptyVarlik = (): Omit<SabitKiymet, 'id'> => ({
 const emptyBakim = (): Omit<BakimKayit, 'id'> => ({
   varlikId: '',
   varlikAd: '',
-  bakimTarihi: new Date().toISOString().split('T')[0],
+  bakimTarihi: bugunAnahtari(),
   bakimTuru: 'Periyodik' as BakimTuru,
   yapilanIslem: '',
   maliyet: 0,
@@ -349,7 +336,7 @@ const emptySigorta = (): Omit<SigortaKayit, 'id'> => ({
   varlikAd: '',
   policeNo: '',
   sigortaSirketi: '',
-  baslangicTarihi: new Date().toISOString().split('T')[0],
+  baslangicTarihi: bugunAnahtari(),
   bitisTarihi: '',
   primTutari: 0,
   teminatTutari: 0,
@@ -562,7 +549,7 @@ export default function SabitKiymetModule({
           aylikAmort: calcAylikAmort(item),
           birikmisSalinma: calcBirikmisSalinma(item),
           netDegerDefter: calcNetDeger(item),
-          hesaplamaTarihi: now.toISOString().split('T')[0],
+          hesaplamaTarihi: bugunAnahtari(now),
           createdAt: serverTimestamp(),
         })
       ));
@@ -788,7 +775,7 @@ export default function SabitKiymetModule({
                       <td className="px-4 py-3 text-xs font-mono text-[#86868B]">{item.demirbasNo}</td>
                       <td className="px-4 py-3 font-medium text-sm text-[#1D1D1F]">{item.ad}</td>
                       <td className="px-4 py-3"><KategoriBadge kategori={item.kategori} /></td>
-                      <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">{formatDateTR(item.alisTarihi)}</td>
+                      <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">{tarihYaz(item.alisTarihi)}</td>
                       <td className="px-4 py-3 text-sm font-medium text-[#1D1D1F] whitespace-nowrap">
                         {paraYaz(item.alisBedeli, { birim: item.paraBirimi, ondalik: 0 })}
                       </td>
@@ -797,7 +784,7 @@ export default function SabitKiymetModule({
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 text-sm text-[#1D1D1F]">
                           <MapPin className="w-3 h-3 text-[#86868B] flex-shrink-0" />
-                          <span className="truncate max-w-[120px]">{item.departman || '-'}</span>
+                          <span className="truncate max-w-[120px]">{item.departman || '—'}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3"><DurumBadge durum={item.durum} /></td>
@@ -898,7 +885,7 @@ export default function SabitKiymetModule({
                           <td className="px-4 py-2.5 text-right text-sm text-orange-600">{formatTRY(k.yillikAmort)}</td>
                           <td className="px-4 py-2.5 text-right text-sm text-orange-700 font-medium">{formatTRY(k.birikmisSalinma)}</td>
                           <td className="px-4 py-2.5 text-right text-sm text-green-700 font-semibold">{formatTRY(k.netDegerDefter)}</td>
-                          <td className="px-4 py-2.5 text-right text-xs text-[#86868B]">{formatDateTR(k.hesaplamaTarihi)}</td>
+                          <td className="px-4 py-2.5 text-right text-xs text-[#86868B]">{tarihYaz(k.hesaplamaTarihi)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -934,7 +921,7 @@ export default function SabitKiymetModule({
                     <motion.tr key={item.id} className="hover:bg-[#F5F5F7]/60 transition-colors"
                       initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.025, duration: 0.2 }}>
                       <td className="px-4 py-3 font-medium text-sm text-[#1D1D1F]">{item.varlikAd}</td>
-                      <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">{formatDateTR(item.bakimTarihi)}</td>
+                      <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">{tarihYaz(item.bakimTarihi)}</td>
                       <td className="px-4 py-3">
                         <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium',
                           item.bakimTuru === 'Periyodik' ? 'bg-blue-100 text-blue-700' :
@@ -942,9 +929,9 @@ export default function SabitKiymetModule({
                           {item.bakimTuru === 'Periyodik' ? L('periyodik') : item.bakimTuru === 'Arıza' ? L('ariza') : L('genel')}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-[#1D1D1F] max-w-[200px] truncate">{item.yapilanIslem || '-'}</td>
+                      <td className="px-4 py-3 text-sm text-[#1D1D1F] max-w-[200px] truncate">{item.yapilanIslem || '—'}</td>
                       <td className="px-4 py-3 text-sm font-medium text-[#1D1D1F] whitespace-nowrap">{formatTRY(item.maliyet)}</td>
-                      <td className="px-4 py-3 text-sm text-[#86868B] whitespace-nowrap">{item.sonrakiBakimTarihi ? formatDateTR(item.sonrakiBakimTarihi) : '-'}</td>
+                      <td className="px-4 py-3 text-sm text-[#86868B] whitespace-nowrap">{tarihYaz(item.sonrakiBakimTarihi)}</td>
                       <td className="px-4 py-3">
                         {isAuthenticated && (
                           <div className="flex items-center gap-1">
@@ -987,7 +974,8 @@ export default function SabitKiymetModule({
                   ) : sigortalar.length === 0 ? (
                     <tr><td colSpan={9} className="py-10 text-center text-sm text-[#86868B]">{L('kayitYok')}</td></tr>
                   ) : sigortalar.map((item, idx) => {
-                    const remaining = item.bitisTarihi ? daysUntil(item.bitisTarihi) : null;
+                    // Yerel gün farkı — eski UTC-gece-yarısı hesabı TR'de yarını "2 gün" sayıyordu; bilinmiyorsa null.
+                    const remaining = gunFarki(item.bitisTarihi, new Date());
                     const expiringSoon = remaining !== null && remaining >= 0 && remaining <= 30;
                     return (
                       <motion.tr key={item.id} className="hover:bg-[#F5F5F7]/60 transition-colors"
@@ -995,10 +983,10 @@ export default function SabitKiymetModule({
                         <td className="px-4 py-3 font-medium text-sm text-[#1D1D1F]">{item.varlikAd}</td>
                         <td className="px-4 py-3 text-xs font-mono text-[#86868B]">{item.policeNo}</td>
                         <td className="px-4 py-3 text-sm text-[#1D1D1F]">{item.sigortaSirketi}</td>
-                        <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">{formatDateTR(item.baslangicTarihi)}</td>
+                        <td className="px-4 py-3 text-sm text-[#1D1D1F] whitespace-nowrap">{tarihYaz(item.baslangicTarihi)}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm text-[#1D1D1F]">{formatDateTR(item.bitisTarihi)}</span>
+                            <span className="text-sm text-[#1D1D1F]">{tarihYaz(item.bitisTarihi)}</span>
                             {expiringSoon && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200">
                                 <AlertTriangle className="w-2.5 h-2.5" />{L('yakindaVadesi')}

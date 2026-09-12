@@ -31,6 +31,7 @@ import { db, auth } from '../../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../../utils/firebase';
 import { sortByCreatedAt } from '../../utils/fsSort';
 import { formatInCurrency, kisaTutar } from '../../utils/currency';
+import { zamanDate, zamanMs, ayAnahtari, tarihYaz } from '../../utils/zaman';
 import ModuleHeader from '../ModuleHeader';
 import {
   type Order,
@@ -224,15 +225,20 @@ export default function IKRapor(ctx: ReportsCtx) {
               { label: currentLanguage==='tr'?'5+ Yıl':'5+ Yrs', min: 60, max: Infinity, count: 0 },
             ];
             for (const e of active) {
-              if (!e.startDate) continue;
-              const months = Math.round((now154.getTime() - new Date(e.startDate).getTime()) / (30 * 86400000));
+              const startMs = zamanMs(e.startDate);
+              if (startMs === null) continue;
+              const months = Math.round((now154.getTime() - startMs) / (30 * 86400000));
               const b = tenureBuckets.find(b => months >= b.min && months < b.max);
               if (b) b.count++;
             }
             const maxBucket = Math.max(...tenureBuckets.map(b => b.count), 1);
             // Avg tenure
-            const avgTenureMonths = active.filter(e => e.startDate).length > 0
-              ? Math.round(active.filter(e => e.startDate).reduce((s, e) => s + Math.round((now154.getTime() - new Date(e.startDate!).getTime()) / (30 * 86400000)), 0) / active.filter(e => e.startDate).length)
+            const tenureMonths154 = active
+              .map(e => zamanMs(e.startDate))
+              .filter((ms): ms is number => ms !== null)
+              .map(ms => Math.round((now154.getTime() - ms) / (30 * 86400000)));
+            const avgTenureMonths = tenureMonths154.length > 0
+              ? Math.round(tenureMonths154.reduce((s, m) => s + m, 0) / tenureMonths154.length)
               : 0;
             // Salary by dept
             const deptSalary: Record<string, number> = {};
@@ -360,13 +366,12 @@ export default function IKRapor(ctx: ReportsCtx) {
         const now208 = new Date();
         const months208 = Array.from({ length: 6 }, (_, i) => {
           const d = new Date(now208.getFullYear(), now208.getMonth() - (5 - i), 1);
-          const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const label = tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
           const rev = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
-            try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-            } catch { return false; }
+            const od = zamanDate(o.createdAt);
+            if (!od) return false;
+            return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
           const payroll = employees.filter(e => e.status === 'Aktif').reduce((s, e) => s + (e.salary || 0), 0);
           return { label, rev, payroll, ratio: rev > 0 ? Math.round((payroll / rev) * 100) : 0 };
@@ -515,10 +520,9 @@ export default function IKRapor(ctx: ReportsCtx) {
         const cutoff233 = new Date(now233.getFullYear(), now233.getMonth() - months233, 1);
         const recentRev = orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= cutoff233;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          if (!od) return false;
+          return od >= cutoff233;
         }).reduce((s, o) => s + (o.totalPrice || 0), 0);
         const activeEmps233 = employees.filter(e => e.status === 'Aktif');
         const totalPayroll233 = activeEmps233.reduce((s, e) => s + (e.salary || 0), 0) * months233;
@@ -659,7 +663,8 @@ export default function IKRapor(ctx: ReportsCtx) {
         const totalPayroll = employees.reduce((s,e) => s + (e.salary || 0), 0);
         const data = months.map(m => {
           const rev = orders.filter(o => {
-            const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+            const d = zamanDate(o.createdAt);
+            if (!d) return false;
             return d.getFullYear() === m.year && d.getMonth() === m.month;
           }).reduce((s,o) => s+o.totalPrice, 0);
           return { label: m.label, revenue: rev, payroll: totalPayroll, ratio: rev > 0 ? (totalPayroll/rev*100) : 0 };
@@ -693,7 +698,8 @@ export default function IKRapor(ctx: ReportsCtx) {
       {reportsTab === 'ik' && employees.length >= 2 && orders.length >= 5 && (() => {
         const now = new Date();
         const last90Rev = orders.filter(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const d = zamanDate(o.createdAt);
+          if (!d) return false;
           return (now.getTime() - d.getTime()) / 86400000 <= 90;
         }).reduce((s,o) => s+o.totalPrice, 0);
         const activeEmps = employees.filter(e => e.status === 'Aktif');
@@ -774,7 +780,8 @@ export default function IKRapor(ctx: ReportsCtx) {
       {reportsTab === 'ik' && employees.length >= 2 && orders.length >= 5 && (() => {
         const now = new Date();
         const annualRev = orders.filter(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const d = zamanDate(o.createdAt);
+          if (!d) return false;
           return (now.getTime() - d.getTime()) / 86400000 <= 365;
         }).reduce((s,o)=>s+o.totalPrice,0);
         const deptData: Record<string, {count: number; payroll: number}> = {};
@@ -824,9 +831,8 @@ export default function IKRapor(ctx: ReportsCtx) {
         //       ve "avg NaN years" gösterirdi;
         //   (b) 365.25 günlük yıl: 30-günlük ay yılı ~%1.4 şişiriyordu.
         const tenureData = employees.filter(e=>e.status==='Aktif' && e.startDate).map(e => {
-          const start = (e.startDate as unknown as { toDate?: () => Date }).toDate?.()
-            ?? new Date(e.startDate as string);
-          if (isNaN(start.getTime())) return null;      // çözülemeyen tarih ortalamaya girmez
+          const start = zamanDate(e.startDate);
+          if (!start) return null;                       // çözülemeyen tarih ortalamaya girmez
           const years = (now.getTime() - start.getTime()) / (365.25 * 86400000);
           if (years < 0) return null;                    // gelecek tarihli kayıt
           return { name: e.name, months: years * 12, years, dept: e.department };
@@ -944,17 +950,10 @@ export default function IKRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'ik' && employees.length >= 3 && (() => {
-        const toTs338 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const monthCount: Record<string, number> = {};
         employees.forEach(e => {
-          const ts = toTs338((e as unknown as Record<string,unknown>).startDate || (e as unknown as Record<string,unknown>).createdAt || (e as unknown as Record<string,unknown>).hireDate);
-          if (!ts) return;
-          const d = new Date(ts);
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari((e as unknown as Record<string,unknown>).startDate || (e as unknown as Record<string,unknown>).createdAt || (e as unknown as Record<string,unknown>).hireDate);
+          if (!key) return;
           monthCount[key] = (monthCount[key] || 0) + 1;
         });
         const keys338 = Object.keys(monthCount).sort().slice(-8);
@@ -1052,16 +1051,11 @@ export default function IKRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'ik' && employees.length >= 2 && orders.length >= 3 && (() => {
-        const toTs360 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const totalSalary = employees.reduce((s, e) => s + (e.salary || 0), 0);
         const monthRevMap: Record<string, number> = {};
         orders.forEach(o => {
-          const d = new Date(toTs360(o.createdAt));
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;                              // tarihsiz sipariş kovaya girmez (eskiden '1970-01' / 'NaN-NaN')
           monthRevMap[key] = (monthRevMap[key] || 0) + (o.totalPrice || 0);
         });
         const keys360 = Object.keys(monthRevMap).sort().slice(-6);
@@ -1149,9 +1143,8 @@ export default function IKRapor(ctx: ReportsCtx) {
       {reportsTab === 'ik' && employees.length >= 3 && (() => {
         const joinByMonth: Record<string, number> = {};
         employees.forEach(e => {
-          const d = e.startDate ? ((e.startDate as unknown as {toDate?:()=>Date}).toDate?.() ?? new Date(e.startDate as string)) : null;
-          if (!d || isNaN(d.getTime())) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(e.startDate);
+          if (!key) return;
           joinByMonth[key] = (joinByMonth[key] ?? 0) + 1;
         });
         const months = Object.keys(joinByMonth).sort().slice(-9);
@@ -1160,9 +1153,8 @@ export default function IKRapor(ctx: ReportsCtx) {
         const rows = months.map(m => { cumulative += joinByMonth[m]; return { month: m.slice(5), new: joinByMonth[m], total: cumulative }; });
         // Reset and properly calculate cumulative
         const allBefore = employees.filter(e => {
-          const d = e.startDate ? ((e.startDate as unknown as {toDate?:()=>Date}).toDate?.() ?? new Date(e.startDate as string)) : null;
-          if (!d || isNaN(d.getTime())) return false;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(e.startDate);
+          if (!key) return false;
           return key < months[0];
         }).length;
         let running = allBefore;
@@ -1229,7 +1221,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const ytdStart = new Date(now.getFullYear(), 0, 1);
         let rev30 = 0, revYTD = 0;
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           if (!d) return;
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total === 'number' ? oR.total as number
@@ -1346,8 +1338,8 @@ export default function IKRapor(ctx: ReportsCtx) {
         const avgTenure = (() => {
           const now = new Date();
           const tenures = employees.map(e => {
-            const d = e.startDate ? ((e.startDate as unknown as {toDate?:()=>Date}).toDate?.() ?? new Date(e.startDate as string)) : null;
-            if (!d || isNaN(d.getTime())) return null;
+            const d = zamanDate(e.startDate);
+            if (!d) return null;
             return (now.getTime() - d.getTime()) / (365.25*86400000);
           }).filter((t): t is number => t !== null && t >= 0);
           return tenures.length > 0 ? tenures.reduce((a,b)=>a+b,0)/tenures.length : 0;
@@ -1379,8 +1371,8 @@ export default function IKRapor(ctx: ReportsCtx) {
         const ninetyAgo = new Date(now.getTime() - 90 * 86400000);
         const recent = employees
           .map(e => {
-            const d = e.startDate ? ((e.startDate as unknown as {toDate?:()=>Date}).toDate?.() ?? new Date(e.startDate as string)) : null;
-            if (!d || isNaN(d.getTime()) || d < ninetyAgo) return null;
+            const d = zamanDate(e.startDate);
+            if (!d || d < ninetyAgo) return null;
             const eR = e as unknown as Record<string,unknown>;
             return {
               name: (eR.name as string|undefined) ?? (eR.firstName as string|undefined) ?? 'Employee',
@@ -1488,8 +1480,8 @@ export default function IKRapor(ctx: ReportsCtx) {
         const in60 = new Date(now.getTime()+60*86400000);
         const upcoming = employees
           .map(e => {
-            const d = e.startDate ? ((e.startDate as unknown as {toDate?:()=>Date}).toDate?.()??new Date(e.startDate as string)) : null;
-            if (!d || isNaN(d.getTime())) return null;
+            const d = zamanDate(e.startDate);
+            if (!d) return null;
             const nextAnniv = new Date(now.getFullYear(),d.getMonth(),d.getDate());
             if (nextAnniv < now) nextAnniv.setFullYear(now.getFullYear()+1);
             if (nextAnniv > in60) return null;
@@ -1540,7 +1532,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const d90 = new Date(now.getTime()-90*86400000);
         let orders30=0,orders90=0,rev30=0,rev90=0;
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           if (!d) return;
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total==='number' ? oR.total as number
@@ -1612,7 +1604,7 @@ export default function IKRapor(ctx: ReportsCtx) {
         const inactive = total-active-onLeave;
         const retentionRate = total>0 ? Math.round((active/total)*100) : 100;
         const now = new Date();
-        const newIn90 = employees.filter(e=>{ const d=e.startDate?((e.startDate as unknown as {toDate?:()=>Date}).toDate?.()??new Date(e.startDate as string)):null; return d&&!isNaN(d.getTime())&&(now.getTime()-d.getTime())/(86400000)<90; }).length;
+        const newIn90 = employees.filter(e=>{ const d=zamanDate(e.startDate); return d!==null&&(now.getTime()-d.getTime())/(86400000)<90; }).length;
         return (
           <div className="apple-card p-4 mb-4">
             <h3 className="font-semibold text-sm mb-3">{currentLanguage === 'tr' ? 'İşgücü Kalıcılığı' : 'Workforce Retention'}</h3>
@@ -1674,8 +1666,8 @@ export default function IKRapor(ctx: ReportsCtx) {
         const d90=new Date(now.getTime()-90*86400000);
         const onboarding=employees
           .map(e=>{
-            const d=e.startDate?((e.startDate as unknown as {toDate?:()=>Date}).toDate?.()??new Date(e.startDate as string)):null;
-            if(!d||isNaN(d.getTime())||d<d90) return null;
+            const d=zamanDate(e.startDate);
+            if(!d||d<d90) return null;
             const eR=e as unknown as Record<string,unknown>;
             const daysIn=Math.floor((now.getTime()-d.getTime())/86400000);
             return { name:(eR.name as string|undefined)??(eR.firstName as string|undefined)??'New Hire', dept:e.department??'', daysIn, progress:Math.min(Math.round((daysIn/90)*100),100) };

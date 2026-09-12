@@ -7,6 +7,7 @@
 
 import Papa from 'papaparse';
 import { gorunenSiparisNo, odemeTakipli } from './siparis';
+import { gunAnahtari, bugunAnahtari } from './zaman';
 import type { Order, Lead, InventoryItem } from '../types';
 
 // ── Generic download helper ───────────────────────────────────────────────────
@@ -22,10 +23,6 @@ function downloadCSV(csv: string, filename: string): void {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-}
-
-function ts(): string {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
 // ── Orders ────────────────────────────────────────────────────────────────────
@@ -48,16 +45,12 @@ export function exportOrdersCSV(orders: Order[], lang: string = 'tr'): void {
     [tr ? 'Kargo Firması'      : 'Carrier']:         o.cargoCompany ?? '',
     [tr ? 'Teslimat Adresi'    : 'Shipping Address']:o.shippingAddress ?? '',
     [tr ? 'Oluşturulma'        : 'Created']:
-      o.createdAt
-        ? (typeof o.createdAt === 'string'
-            ? o.createdAt.slice(0, 10)
-            : (o.createdAt as { toDate?: () => Date }).toDate?.().toISOString().slice(0, 10) ?? '')
-        : '',
+      gunAnahtari(o.createdAt) ?? '',   // yerel gün; bilinmiyorsa BOŞ hücre (bugün DEĞİL)
     [tr ? 'Notlar'             : 'Notes']:           o.notes ?? '',
   }));
 
   const csv = Papa.unparse(rows);
-  downloadCSV(csv, `CETPA_Siparisler_${ts()}.csv`);
+  downloadCSV(csv, `CETPA_Siparisler_${bugunAnahtari()}.csv`);
 }
 
 // ── Leads (CRM) ───────────────────────────────────────────────────────────────
@@ -75,15 +68,11 @@ export function exportLeadsCSV(leads: Lead[], lang: string = 'tr'): void {
     [tr ? 'Atanan'             : 'Assigned To']:     l.assignedTo ?? '',
     [tr ? 'AI Skoru'           : 'AI Score']:        l.score ?? '',
     [tr ? 'Oluşturulma'        : 'Created']:
-      l.createdAt
-        ? (typeof l.createdAt === 'string'
-            ? l.createdAt.slice(0, 10)
-            : (l.createdAt as { toDate?: () => Date }).toDate?.().toISOString().slice(0, 10) ?? '')
-        : '',
+      gunAnahtari(l.createdAt) ?? '',   // yerel gün; bilinmiyorsa BOŞ hücre (bugün DEĞİL)
   }));
 
   const csv = Papa.unparse(rows);
-  downloadCSV(csv, `CETPA_Musteriler_${ts()}.csv`);
+  downloadCSV(csv, `CETPA_Musteriler_${bugunAnahtari()}.csv`);
 }
 
 // ── Inventory ─────────────────────────────────────────────────────────────────
@@ -109,7 +98,7 @@ export function exportInventoryCSV(inventory: InventoryItem[], lang: string = 't
   }));
 
   const csv = Papa.unparse(rows);
-  downloadCSV(csv, `CETPA_Envanter_${ts()}.csv`);
+  downloadCSV(csv, `CETPA_Envanter_${bugunAnahtari()}.csv`);
 }
 
 // ── Stock Movements ───────────────────────────────────────────────────────────
@@ -128,14 +117,7 @@ export interface StockMovementRow {
 export function exportStockMovementsCSV(movements: StockMovementRow[], lang: string = 'tr'): void {
   const tr = lang === 'tr';
   const rows = movements.map(m => {
-    let tsStr = '';
-    if (m.timestamp) {
-      if (typeof m.timestamp === 'string') {
-        tsStr = m.timestamp.slice(0, 10);
-      } else {
-        tsStr = (m.timestamp as { toDate?: () => Date }).toDate?.().toISOString().slice(0, 10) ?? '';
-      }
-    }
+    const tsStr = gunAnahtari(m.timestamp) ?? '';   // yerel gün; bilinmiyorsa BOŞ hücre
     return {
       [tr ? 'Ürün'         : 'Product']:    m.productName,
       [tr ? 'Tür'          : 'Type']:       m.type === 'in' ? (tr ? 'Giriş' : 'In') : m.type === 'out' ? (tr ? 'Çıkış' : 'Out') : (tr ? 'Düzeltme' : 'Adjustment'),
@@ -146,7 +128,7 @@ export function exportStockMovementsCSV(movements: StockMovementRow[], lang: str
     };
   });
   const csv = Papa.unparse(rows);
-  downloadCSV(csv, `CETPA_Stok_Hareketleri_${ts()}.csv`);
+  downloadCSV(csv, `CETPA_Stok_Hareketleri_${bugunAnahtari()}.csv`);
 }
 
 // ── Inventory CSV Import Template ─────────────────────────────────────────────
@@ -189,5 +171,5 @@ export function exportMonthlySummaryCSV(rows: MonthlySummaryRow[], lang: string 
     [tr ? 'Teslim Edilen'    : 'Delivered']:         r.delivered,
   }));
   const csv = Papa.unparse(mapped);
-  downloadCSV(csv, `CETPA_Aylik_Ozet_${ts()}.csv`);
+  downloadCSV(csv, `CETPA_Aylik_Ozet_${bugunAnahtari()}.csv`);
 }

@@ -9,6 +9,7 @@ import { db, auth } from '../firebase';
 import { InventoryItem, Warehouse } from '../types';
 import { useModalErisilebilirlik } from '../hooks/useModalErisilebilirlik';
 import { formatCurrency } from '../utils/currency';
+import { bugunAnahtari } from '../utils/zaman';
 
 interface ProductFormProps {
   isOpen: boolean;
@@ -364,7 +365,7 @@ export default function ProductForm({ isOpen, onClose, onSave, initialData, ware
                     id="cost-date"
                     type="date"
                     value={formData.costDate}
-                    max={new Date().toISOString().slice(0, 10)}
+                    max={bugunAnahtari()}
                     onChange={e => setFormData(prev => ({ ...prev, costDate: e.target.value }))}
                     className="apple-input w-full"
                   />

@@ -3,6 +3,7 @@ import { collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp } from 
 import { db } from '../firebase';
 import { TrendingUp, Plus, X, ChevronRight, ChevronDown, CheckCircle2, Clock, BarChart3, Calendar, FileText, DollarSign } from 'lucide-react';
 import { paraYaz } from '../utils/currency';
+import { gunBasi, bugunAnahtari } from '../utils/zaman';
 
 interface GelirTanimaModuleProps {
   currentLanguage: string;
@@ -61,8 +62,10 @@ function fmt(n: number, currency = 'TRY') {
 
 
 function straightLineMonths(start: string, end: string): number {
-  const s = new Date(start);
-  const e = new Date(end);
+  // 'YYYY-MM-DD' → YEREL gün (UTC gece yarısına sabitlenip ay kaymasın); çözülemezse tek ay
+  const s = gunBasi(start);
+  const e = gunBasi(end);
+  if (!s || !e) return 1;
   return Math.max(1, (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + 1);
 }
 
@@ -77,7 +80,7 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
   const [loading, setLoading] = useState(true);
 
   // Contract form
-  const blankContract = () => ({ contractNo: '', customerName: '', contractDate: new Date().toISOString().split('T')[0], startDate: '', endDate: '', totalValue: 0, currency: 'TRY', method: 'straight_line' as Contract['method'], notes: '', obligations: [] as PerformanceObligation[] });
+  const blankContract = () => ({ contractNo: '', customerName: '', contractDate: bugunAnahtari(), startDate: '', endDate: '', totalValue: 0, currency: 'TRY', method: 'straight_line' as Contract['method'], notes: '', obligations: [] as PerformanceObligation[] });
   const [cForm, setCForm] = useState(blankContract());
   const [oblForms, setOblForms] = useState<Omit<PerformanceObligation,'id'>[]>([]);
 
@@ -129,11 +132,12 @@ export default function GelirTanimaModule({ currentLanguage, isAuthenticated }: 
   // Generate revenue schedule for a contract
   const generateSchedule = async (contract: Contract) => {
     const scheduleItems: Omit<RevenueSchedule, 'id' | 'createdAt'>[] = [];
-    const start = new Date(contract.startDate);
-    const end = new Date(contract.endDate);
+    // Çözülemeyen tarih → straight_line takvimi ÜRETİLMEZ (eskiden Invalid Date ile döngü sessizce hiç dönmüyordu)
+    const start = gunBasi(contract.startDate);
+    const end = gunBasi(contract.endDate);
 
     for (const obl of contract.obligations) {
-      if (obl.recognitionMethod === 'straight_line') {
+      if (obl.recognitionMethod === 'straight_line' && start && end) {
         const months = straightLineMonths(contract.startDate, contract.endDate);
         const monthlyAmount = obl.allocatedValue / months;
         const current = new Date(start);

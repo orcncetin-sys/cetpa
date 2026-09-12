@@ -26,6 +26,7 @@ import {
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { odemeTakipli, gorunenSiparisNo, siparisTarih } from '../utils/siparis';
+import { zamanDate, gunFarki, gunAnahtari, bugunAnahtari, tarihYaz } from '../utils/zaman';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
 import ModuleHeader from './ModuleHeader';
@@ -94,9 +95,9 @@ interface Props {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function daysOverdue(dueDateStr: string): number {
-  const due = new Date(dueDateStr);
-  const today = new Date();
-  const diff = Math.floor((today.getTime() - due.getTime()) / 86400000);
+  // Yerel gün farkı (utils/zaman) — eski UTC-gece-yarısı hesabı TR'de 00:00-03:00 arası bir gün eksik sayıyordu.
+  const diff = gunFarki(new Date(), dueDateStr);
+  if (diff === null) return 0;                     // vade bilinmiyorsa "gecikmiş" SAYMA (eskiden NaN sızıyordu)
   return Math.max(0, diff);
 }
 
@@ -143,8 +144,8 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
   const emptyInvoice: Omit<OverdueInvoice, 'id' | 'createdAt'> = {
     invoiceNo: '', customerName: '', customerEmail: '', customerPhone: '',
     amount: 0, currency: 'TRY',
-    dueDate: new Date().toISOString().slice(0, 10),
-    issueDate: new Date().toISOString().slice(0, 10),
+    dueDate: bugunAnahtari(),
+    issueDate: bugunAnahtari(),
     status: 'Açık',
     activityLog: [],
   };
@@ -204,7 +205,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
   const mevcutFaturaNolari = new Set(invoices.map(i => i.invoiceNo).filter(Boolean));
   const bugunMs538 = Date.now();
   const vadeTarihi = (o: { dueDate?: string; syncedAt?: unknown; createdAt?: unknown; orderDate?: unknown }): Date | null => {
-    if (o.dueDate) { const d = new Date(o.dueDate); return isNaN(d.getTime()) ? null : d; }
+    if (o.dueDate) return zamanDate(o.dueDate);
     const t = siparisTarih(o);
     if (!t) return null;                       // tarihi bilinmeyen sipariş içe AKTARILMAZ
     const v = new Date(t); v.setDate(v.getDate() + 30); return v;   // varsayılan 30 gün vade
@@ -219,16 +220,16 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
 
   const siparislerdenIceAktar = async () => {
     for (const o of iceAktarilabilir) {
-      const vade = vadeTarihi(o);
-      const t = siparisTarih(o);
-      if (!vade || !t) continue;               // guard: yukarıdaki süzgeç zaten eler
+      const vadeGunu = gunAnahtari(vadeTarihi(o));
+      const islemGunu = gunAnahtari(siparisTarih(o));
+      if (!vadeGunu || !islemGunu) continue;   // guard: yukarıdaki süzgeç zaten eler
       await addDoc(collection(db, 'dunningInvoices'), {
         invoiceNo: gorunenSiparisNo(o),
         customerName: o.customerName ?? '',
         customerEmail: '', customerPhone: '',
         amount: o.totalPrice ?? 0, currency: 'TRY',
-        dueDate: vade.toISOString().slice(0, 10),
-        issueDate: t.toISOString().slice(0, 10),
+        dueDate: vadeGunu,
+        issueDate: islemGunu,
         status: 'Açık',
         siparisId: o.id,
         activityLog: [{ date: new Date().toISOString(), action: tr ? 'Siparişlerden içe aktarıldı' : 'Imported from orders' }],
@@ -264,7 +265,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
       action: `${method === 'email' ? '📧' : method === 'whatsapp' ? '💬' : method === 'phone' ? '📞' : '📮'} ${tr ? 'İletişim kuruldu' : 'Contact made'} (${method})`,
     }];
     await updateDoc(doc(db, 'dunningInvoices', inv.id), {
-      lastContactDate: new Date().toISOString().slice(0, 10),
+      lastContactDate: bugunAnahtari(),
       lastContactMethod: method,
       activityLog: log,
     });
@@ -486,7 +487,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
                   }`} />
                   <div className="min-w-0">
                     <p className="font-bold text-gray-900 text-sm">{inv.customerName}</p>
-                    <p className="text-xs text-gray-500">{inv.invoiceNo} • {tr ? 'Vade:' : 'Due:'} {new Date(inv.dueDate).toLocaleDateString('tr-TR')}</p>
+                    <p className="text-xs text-gray-500">{inv.invoiceNo} • {tr ? 'Vade:' : 'Due:'} {tarihYaz(inv.dueDate)}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
@@ -562,7 +563,7 @@ export default function DunningModule({ currentLanguage, isAuthenticated, orders
                           <div className="space-y-1">
                             {[...inv.activityLog].reverse().slice(0, 5).map((log, i) => (
                               <div key={i} className="flex items-center gap-2 text-xs text-gray-500">
-                                <span className="text-gray-300">{new Date(log.date).toLocaleDateString('tr-TR')}</span>
+                                <span className="text-gray-300">{tarihYaz(log.date)}</span>
                                 <span>{log.action}</span>
                               </div>
                             ))}

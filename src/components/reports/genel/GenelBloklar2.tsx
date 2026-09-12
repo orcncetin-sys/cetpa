@@ -11,6 +11,7 @@
  */
 import { itemCostTRY, type ReportsCtx, brutMarj } from '../useReportsData';
 import { type Order } from '../../../types';
+import { zamanDate, tarihYaz } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'employees' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -110,24 +111,18 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         const monthProgress = Math.round((dayOfMonth / daysInMonth) * 100);
         const mRevenue225 = orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= monthStart225;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          return od !== null && od >= monthStart225;
         }).reduce((s, o) => s + (o.totalPrice || 0), 0);
         const mOrders225 = orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= monthStart225;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          return od !== null && od >= monthStart225;
         }).length;
         const mNewCustomers225 = new Set(orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= monthStart225;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          return od !== null && od >= monthStart225;
         }).map(o => o.customerName || '—')).size;
         // Pace = what we'd expect at current run rate by end of month
         const pace225 = dayOfMonth > 0 ? Math.round((mRevenue225 / dayOfMonth) * daysInMonth) : 0;
@@ -187,13 +182,11 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
           weekStart.setDate(weekStart.getDate() - (7 - i) * 7 - weekStart.getDay());
           weekStart.setHours(0, 0, 0, 0);
           const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 6); weekEnd.setHours(23, 59, 59, 999);
-          const label = `W${weekStart.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', day: 'numeric' })}`;
+          const label = `W${tarihYaz(weekStart, { month: 'short', day: 'numeric' }, currentLanguage === 'tr' ? 'tr' : 'en')}`;
           const rev = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
-            try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-              return od >= weekStart && od <= weekEnd;
-            } catch { return false; }
+            const od = zamanDate(o.createdAt);
+            return od !== null && od >= weekStart && od <= weekEnd;
           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
           return { label, rev, weekStart };
         });
@@ -254,10 +247,8 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         };
         const filterOrders = (start: Date, end: Date) => orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= start && od <= end;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          return od !== null && od >= start && od <= end;
         });
         const prev235 = calcMargin(filterOrders(prevMonthStart235, prevMonthEnd235));
         const curr235 = calcMargin(filterOrders(currMonthStart235, new Date()));
@@ -306,10 +297,8 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         const months3Start = new Date(now239.getFullYear(), now239.getMonth() - 3, 1);
         const recentOrders = orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= months3Start;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          return od !== null && od >= months3Start;
         });
         const revenue239 = recentOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
         const cogs239 = recentOrders.reduce((s, o) =>
@@ -360,10 +349,8 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         const prevMonthEnd245 = new Date(now245.getFullYear(), now245.getMonth(), 0, 23, 59, 59);
         const filterOrders245 = (start: Date, end: Date) => orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= start && od <= end;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          return od !== null && od >= start && od <= end;
         });
         const currOrders = filterOrders245(monthStart245, new Date());
         const prevOrders = filterOrders245(prevMonthStart245, prevMonthEnd245);
@@ -387,7 +374,7 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
             <div className="flex items-center gap-2 mb-4">
               <span className="text-xl">📋</span>
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Yönetici KPI Özeti' : 'Executive KPI Summary'}</h3>
-              <span className="text-[10px] text-gray-400 ml-auto">{now245.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'long', year: 'numeric' })}</span>
+              <span className="text-[10px] text-gray-400 ml-auto">{tarihYaz(now245, { month: 'long', year: 'numeric' }, currentLanguage === 'tr' ? 'tr' : 'en')}</span>
             </div>
             <div className="grid grid-cols-2 gap-3">
               {kpis245.map(k => (
@@ -455,10 +442,8 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         const m3Start = new Date(now250.getFullYear(), now250.getMonth() - 3, 1);
         const recentOrds = orders.filter(o => {
           if (o.status === 'Cancelled') return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= m3Start;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          return od !== null && od >= m3Start;
         });
         const rev250 = recentOrds.reduce((s, o) => s + (o.totalPrice || 0), 0);
         const activeEmp250 = employees.filter(e => e.status === 'Aktif').length;
@@ -481,7 +466,7 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
               <span className="text-2xl">🔭</span>
               <div>
                 <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '360° İş Zekası Özeti' : '360° Business Intelligence Summary'}</h3>
-                <p className="text-[10px] text-gray-400">{now250.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                <p className="text-[10px] text-gray-400">{tarihYaz(now250, { day: 'numeric', month: 'long', year: 'numeric' }, currentLanguage === 'tr' ? 'tr' : 'en')}</p>
               </div>
             </div>
             <div className="space-y-2.5">
@@ -504,14 +489,14 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         const currYear = now251.getFullYear();
         const prevYear = currYear - 1;
         const months251 = Array.from({ length: 12 }, (_, i) => {
-          const label = new Date(currYear, i, 1).toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const label = tarihYaz(new Date(currYear, i, 1), { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
           const curr = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
-            try { const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string); return d.getFullYear() === currYear && d.getMonth() === i; } catch { return false; }
+            const d = zamanDate(o.createdAt); return d !== null && d.getFullYear() === currYear && d.getMonth() === i;
           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
           const prev = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
-            try { const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string); return d.getFullYear() === prevYear && d.getMonth() === i; } catch { return false; }
+            const d = zamanDate(o.createdAt); return d !== null && d.getFullYear() === prevYear && d.getMonth() === i;
           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
           return { label, curr, prev };
         });

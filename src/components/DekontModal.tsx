@@ -16,6 +16,7 @@ import { X, Loader2, AlertTriangle } from 'lucide-react';
 import { pushMikroEvrak, dekontPayload } from '../services/mikroEvrak';
 import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
+import { bugunAnahtari } from '../utils/zaman';
 
 interface HareketTuru {
   cha_evrak_tip: number;
@@ -45,7 +46,7 @@ export default function DekontModal({ cariKod, cariAdi, mevcutBakiye, entityId, 
   const [evrakTip, setEvrakTip] = useState<string>('');
   const [yon, setYon]           = useState<'borc' | 'alacak'>('borc');
   const [tutar, setTutar]       = useState('');
-  const [tarih, setTarih]       = useState(new Date().toISOString().slice(0, 10));
+  const [tarih, setTarih]       = useState(bugunAnahtari());
   const [aciklama, setAciklama] = useState('');
 
   const [gonderiliyor, setGonderiliyor] = useState(false);

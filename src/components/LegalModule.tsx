@@ -13,7 +13,7 @@ import {
 } from '../lib/dbClient';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { logFirestoreError, OperationType } from '../utils/firebase';
-import { zamanDate } from '../utils/zaman';
+import { zamanDate, tarihYaz, bugunAnahtari } from '../utils/zaman';
 import {
   type Contract,
   type LegalCase,
@@ -100,7 +100,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
       await addDoc(collection(db, 'legalDocs'), {
-        title: file.name, type: category, date: new Date().toISOString().split('T')[0],
+        title: file.name, type: category, date: bugunAnahtari(),
         status: 'Aktif', fileUrl: url, fileName: file.name, fileSize: file.size,
         uploadedBy: auth.currentUser?.email || 'unknown', createdAt: serverTimestamp()
       });
@@ -707,7 +707,7 @@ const LegalModule: React.FC<LegalModuleProps> = ({ currentLanguage }) => {
                                       <p className="font-medium text-gray-800 truncate">{r.subjectEmail}</p>
                                       <p className="text-[10px] text-gray-500">
                                         {r.type}
-                                        {d && ` · ${d.toLocaleDateString('tr-TR')}`}
+                                        {d && ` · ${tarihYaz(r.createdAt)}`}
                                         {gun !== null && ` · ${gun} ${tr ? 'gün' : 'd'}`}
                                         {gecikti && (tr ? ' · SÜRE AŞILDI' : ' · OVERDUE')}
                                       </p>

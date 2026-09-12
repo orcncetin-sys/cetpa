@@ -13,6 +13,7 @@ import { doc, collection, addDoc, updateDoc, deleteDoc, serverTimestamp } from '
 import { cn } from '../lib/utils';
 import { itemCostTRY } from '../utils/cost';
 import { paraYaz } from '../utils/currency';
+import { zamanMs, zamanDate, gunBasi, gunAnahtari, bugunAnahtari, tarihYaz } from '../utils/zaman';
 import AIInlineNudge from '../components/AIInlineNudge';
 import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import type { LabelItem } from '../components/LabelSheetModal';
@@ -330,12 +331,8 @@ export default function InventoryPage(props: Props) {
                 const cons: Record<string, { last30: number; prev30: number }> = {};
                 for (const m of inventoryMovements) {
                   if (m.type !== 'out') continue;
-                  const ts = (() => {
-                    const t = m.timestamp;
-                    if (!t) return 0;
-                    if (typeof (t as { toDate?: () => Date }).toDate === 'function') return (t as { toDate: () => Date }).toDate().getTime();
-                    return new Date(t as string | number).getTime();
-                  })();
+                  const ts = zamanMs(m.timestamp);
+                  if (ts === null) continue;
                   const age = now114 - ts;
                   const key = (m.productId as string | undefined) || m.productName;
                   cons[key] = cons[key] || { last30: 0, prev30: 0 };
@@ -796,8 +793,9 @@ export default function InventoryPage(props: Props) {
                   !p579Search || b.productName.toLowerCase().includes(p579Search.toLowerCase()) || b.batchNo.toLowerCase().includes(p579Search.toLowerCase()) || b.sku.toLowerCase().includes(p579Search.toLowerCase())
                 );
                 const statusColors579: Record<string,string> = { 'Aktif': 'bg-green-100 text-green-700', 'Karantina': 'bg-red-100 text-red-700', 'Kullanıldı': 'bg-gray-100 text-gray-500' };
-                const today579 = new Date().toISOString().slice(0,10);
-                const expiringSoon = p579Batches.filter(b => b.status==='Aktif' && b.expiryDate && b.expiryDate > today579 && b.expiryDate <= new Date(Date.now()+30*86400000).toISOString().slice(0,10));
+                const today579 = bugunAnahtari();
+                const soon579 = gunAnahtari(new Date(Date.now()+30*86400000)) ?? '';
+                const expiringSoon = p579Batches.filter(b => b.status==='Aktif' && b.expiryDate && b.expiryDate > today579 && b.expiryDate <= soon579);
                 const expired = p579Batches.filter(b => b.status==='Aktif' && b.expiryDate && b.expiryDate < today579);
                 return (
                   <div className="apple-card p-5">
@@ -860,7 +858,7 @@ export default function InventoryPage(props: Props) {
                           <tbody className="divide-y divide-gray-50">
                             {filteredBatches.map(b=>{
                               const isExp = b.expiryDate && b.expiryDate < today579;
-                              const isExpSoon = b.expiryDate && !isExp && b.expiryDate <= new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+                              const isExpSoon = b.expiryDate && !isExp && b.expiryDate <= soon579;
                               return (
                                 <tr key={b.id} className={`hover:bg-gray-50/50 ${isExp?'bg-red-50/20':isExpSoon?'bg-amber-50/20':''}`}>
                                   <td className="px-3 py-2.5 font-mono text-gray-500">{b.sku}</td>
@@ -1004,7 +1002,7 @@ export default function InventoryPage(props: Props) {
                             try {
                               if(p588EditId){ await updateDoc(doc(db,'supplierConsignments',p588EditId),payload); }
                               else { await addDoc(collection(db,'supplierConsignments'),{...payload,status:'Depoda',createdAt:serverTimestamp()}); }
-                              setP588Draft({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:new Date().toISOString().slice(0,10)});
+                              setP588Draft({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:bugunAnahtari()});
                               setP588ShowForm(false); setP588EditId(null);
                             } catch(e){ toast((tr588?'Kaydedilemedi: ':'Save failed: ')+(e instanceof Error?e.message:String(e)),'error'); }
                           }} className="apple-button-primary text-sm px-4 py-1.5">{tr588?'Kaydet':'Save'}</button>
@@ -1056,8 +1054,9 @@ export default function InventoryPage(props: Props) {
                 const days611 = daysMap[p611Period];
                 const cutoff611 = new Date(Date.now() - days611*86400000);
                 const recentOut611 = inventoryMovements.filter(m => {
-                  if (m.type!=='out'||!m.timestamp) return false;
-                  try { const d=(m.timestamp as {toDate?:()=>Date}).toDate?.()??new Date(m.timestamp as string); return d>=cutoff611; } catch { return false; }
+                  if (m.type!=='out') return false;
+                  const d = zamanDate(m.timestamp);
+                  return d !== null && d >= cutoff611;
                 });
                 // Aggregate qty out per product name
                 const qtyOut:{[name:string]:number} = {};
@@ -1107,14 +1106,16 @@ export default function InventoryPage(props: Props) {
               {/* ── Phase 642: Garanti Takip ─────────────────────────────────── */}
               {(() => {
                 const tr642 = currentLanguage === 'tr';
-                const today642 = new Date().toISOString().slice(0,10);
-                const getExpiryDate = (w: typeof p642Warranties[0]) => {
-                  const d = new Date(w.purchaseDate);
+                const today642 = bugunAnahtari();
+                const soon642 = gunAnahtari(new Date(Date.now()+30*86400000)) ?? '';
+                const getExpiryDate = (w: typeof p642Warranties[0]): string | null => {
+                  const d = gunBasi(w.purchaseDate);
+                  if (!d) return null;
                   d.setMonth(d.getMonth()+w.warrantyMonths);
-                  return d.toISOString().slice(0,10);
+                  return gunAnahtari(d);
                 };
                 const statusCls:{[k:string]:string}={Aktif:'bg-emerald-100 text-emerald-700','Sona Erdi':'bg-gray-100 text-gray-600','Talep Açık':'bg-amber-100 text-amber-700'};
-                const expiringSoon = p642Warranties.filter(w=>{const e=getExpiryDate(w);return e>=today642&&e<=new Date(Date.now()+30*86400000).toISOString().slice(0,10)&&w.status==='Aktif';});
+                const expiringSoon = p642Warranties.filter(w=>{const e=getExpiryDate(w);return e!==null&&e>=today642&&e<=soon642&&w.status==='Aktif';});
                 return (
                   <div className="apple-card p-5 space-y-4">
                     <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1137,7 +1138,7 @@ export default function InventoryPage(props: Props) {
                           <button onClick={async ()=>{
                             if(!p642Draft.productName) return;
                             try { await addDoc(collection(db,'warranties'),{productName:p642Draft.productName,sku:p642Draft.sku,serialNo:p642Draft.serialNo,customerName:p642Draft.customerName,purchaseDate:p642Draft.purchaseDate,warrantyMonths:Number(p642Draft.warrantyMonths)||12,status:'Aktif',createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Garanti kaydedildi ✓' : 'Warranty saved ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Garanti kaydedilemedi.' : 'Failed to save warranty.', 'error');}
-                            setP642Draft({productName:'',sku:'',serialNo:'',customerName:'',purchaseDate:new Date().toISOString().slice(0,10),warrantyMonths:'12'});
+                            setP642Draft({productName:'',sku:'',serialNo:'',customerName:'',purchaseDate:bugunAnahtari(),warrantyMonths:'12'});
                             setP642ShowForm(false);
                             toast(tr642?'Garanti kaydı oluşturuldu.':'Warranty record created.','success');
                           }} className="apple-button-primary text-xs px-6">{tr642?'Kaydet':'Save'}</button>
@@ -1156,7 +1157,7 @@ export default function InventoryPage(props: Props) {
                           <tbody className="divide-y divide-gray-50">
                             {p642Warranties.map(w=>{
                               const expiry = getExpiryDate(w);
-                              const expired = expiry < today642;
+                              const expired = expiry !== null && expiry < today642;
                               const autoStatus: typeof w.status = expired?'Sona Erdi':w.status;
                               return (
                                 <tr key={w.id} className="hover:bg-gray-50/50">
@@ -1164,8 +1165,8 @@ export default function InventoryPage(props: Props) {
                                   <td className="px-3 py-2.5 font-mono text-gray-500">{w.sku||'—'}</td>
                                   <td className="px-3 py-2.5 font-mono text-gray-500">{w.serialNo||'—'}</td>
                                   <td className="px-3 py-2.5 text-gray-600">{w.customerName||'—'}</td>
-                                  <td className="px-3 py-2.5 text-gray-500">{new Date(w.purchaseDate).toLocaleDateString('tr-TR')}</td>
-                                  <td className={`px-3 py-2.5 font-semibold ${expired?'text-red-500':expiry<=new Date(Date.now()+30*86400000).toISOString().slice(0,10)?'text-amber-500':'text-gray-600'}`}>{new Date(expiry).toLocaleDateString('tr-TR')}</td>
+                                  <td className="px-3 py-2.5 text-gray-500">{tarihYaz(w.purchaseDate)}</td>
+                                  <td className={`px-3 py-2.5 font-semibold ${expired?'text-red-500':expiry!==null&&expiry<=soon642?'text-amber-500':'text-gray-600'}`}>{tarihYaz(expiry)}</td>
                                   <td className="px-3 py-2.5">
                                     <select value={autoStatus} onChange={async e=>{try{await updateDoc(doc(db,'warranties',w.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statusCls[autoStatus]}`}>
                                       {['Aktif','Sona Erdi','Talep Açık'].map(s=><option key={s}>{s}</option>)}
@@ -1245,7 +1246,7 @@ export default function InventoryPage(props: Props) {
                         <p className="text-[10px] text-gray-300">{tr644?'Planlanmış ve Onaylanmış siparişler dahil edilmektedir.':'Planned and Confirmed orders are included.'}</p>
                       </div>
                     )}
-                    <p className="text-[10px] text-gray-400">Ufuk: {tr644?'önümüzdeki':'next'} {p644Horizon} {tr644?'gün':'days'} · {tr644?'son güncelleme:':'as of:'} {new Date().toLocaleDateString('tr-TR')}</p>
+                    <p className="text-[10px] text-gray-400">Ufuk: {tr644?'önümüzdeki':'next'} {p644Horizon} {tr644?'gün':'days'} · {tr644?'son güncelleme:':'as of:'} {tarihYaz(new Date(), undefined)}</p>
                   </div>
                 );
               })()}

@@ -9,6 +9,7 @@ import MikroPushButton from './MikroPushButton';
 import { bakimTalepPayload } from '../services/mikroEvrak';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { confirmDelete } from '../lib/confirm';
+import { zamanMs, gunBasi, gunAnahtari, bugunAnahtari } from '../utils/zaman';
 import { CalendarDays,
   Plus, X, Settings, Zap, Car, Monitor, Package,
   Edit2, Trash2
@@ -66,15 +67,17 @@ const KATEGORİ_ICONS: Record<string, any> = {
 };
 
 function daysUntil(dateStr: string): number {
-  if (!dateStr) return 999;
-  return Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000);
+  const ms = zamanMs(dateStr);
+  if (ms === null) return 999;
+  return Math.ceil((ms - Date.now()) / 86400000);
 }
 
 function nextMaintenance(sonBakim: string, sikligi: number): string {
-  if (!sonBakim || !sikligi) return '';
-  const d = new Date(sonBakim);
+  if (!sikligi) return '';
+  const d = gunBasi(sonBakim);
+  if (!d) return '';
   d.setDate(d.getDate() + sikligi);
-  return d.toISOString().slice(0, 10);
+  return gunAnahtari(d) ?? '';
 }
 
 function DaysBadge({ days }: { days: number }) {
@@ -120,7 +123,7 @@ const emptyIsEmri: Omit<IsEmri, 'id'> = {
 };
 
 const emptyAriza: Omit<Ariza, 'id'> = {
-  ekipmanId: '', ekipmanAd: '', tarih: new Date().toISOString().slice(0, 10),
+  ekipmanId: '', ekipmanAd: '', tarih: bugunAnahtari(),
   aciklama: '', etki: 'Orta', cozum: '', cozumSuresi: 0,
 };
 

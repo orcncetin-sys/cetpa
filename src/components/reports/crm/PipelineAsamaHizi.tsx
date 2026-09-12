@@ -5,6 +5,7 @@
  * Props: ReportsCtx'in tamamı DEĞİL — yalnız bu kartın gerçekten kullandığı alanlar.
  */
 import type { ReportsCtx } from '../useReportsData';
+import { zamanMs } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'quotations' | 'currentLanguage'>;
 
@@ -15,15 +16,14 @@ export default function PipelineAsamaHizi({ quotations, currentLanguage }: Props
   for (const q of quotations) {
     const m = q as unknown as Record<string,unknown>;
     const status = ((m.status as string) || '').toLowerCase();
-    try {
-      const created = (q.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(q.createdAt as string);
-      const age = Math.round((now255.getTime() - created.getTime()) / 86400000);
-      if (age < 0 || age > 365) continue;
-      if (status === 'draft' || status === 'taslak') stageGroups.draft.push(age);
-      else if (status === 'sent' || status === 'gönderildi') stageGroups.sent.push(age);
-      else if (status === 'negotiation' || status === 'müzakere') stageGroups.negotiation.push(age);
-      else if (status === 'pending' || status === 'beklemede') stageGroups.pending.push(age);
-    } catch { /* skip */ }
+    const createdMs = zamanMs(q.createdAt);
+    if (createdMs === null) continue; // tarihsiz teklif düşer (eskiden NaN yaş gruba giriyordu)
+    const age = Math.round((now255.getTime() - createdMs) / 86400000);
+    if (age < 0 || age > 365) continue;
+    if (status === 'draft' || status === 'taslak') stageGroups.draft.push(age);
+    else if (status === 'sent' || status === 'gönderildi') stageGroups.sent.push(age);
+    else if (status === 'negotiation' || status === 'müzakere') stageGroups.negotiation.push(age);
+    else if (status === 'pending' || status === 'beklemede') stageGroups.pending.push(age);
   }
   const stages255 = [
     { key: 'draft', label: currentLanguage === 'tr' ? 'Taslak' : 'Draft', color: 'bg-gray-400' },

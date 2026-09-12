@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { Users, UserCheck, CheckCircle2, CreditCard } from 'lucide-react';
 import { formatInCurrency, type ExchangeRates } from '../../../utils/currency';
+import { zamanMs } from '../../../utils/zaman';
 import type { ReportsCtx } from '../useReportsData';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from '../ReportKit';
 
@@ -34,15 +35,11 @@ export default function CrmOzetBolumu({ orders, currentLanguage, currentT, reven
         const musteriler = new Map<string, { adet: number; ciro: number; ilk: number }>();
         for (const o of gecerli) {
           const ad = musteriAdi(o);
-          const ms = (() => {
-            const raw = o.createdAt as { toDate?: () => Date } | string | undefined;
-            try { const d = (raw as { toDate?: () => Date })?.toDate?.() ?? new Date(raw as string); return d.getTime(); }
-            catch { return NaN; }
-          })();
+          const ms = zamanMs(o.createdAt);
           const m = musteriler.get(ad) ?? { adet: 0, ciro: 0, ilk: Number.POSITIVE_INFINITY };
           m.adet += 1;
           m.ciro += Number(o.totalPrice) || 0;
-          if (Number.isFinite(ms)) m.ilk = Math.min(m.ilk, ms);
+          if (ms !== null) m.ilk = Math.min(m.ilk, ms);
           musteriler.set(ad, m);
         }
         const toplamMusteri = musteriler.size;

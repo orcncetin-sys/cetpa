@@ -21,6 +21,7 @@ import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { useMikroTedarikciler } from '../hooks/useMikroTedarikciler';
 import { paraYaz, tlYaz } from '../utils/currency';
 import { eslesir } from '../utils/arama';
+import { ayAnahtari, tarihYaz, zamanDate } from '../utils/zaman';
 
 const PurchasingModule = React.lazy(() => import('../components/PurchasingModule'));
 
@@ -196,14 +197,7 @@ export default function SatinAlmaPage(props: Props) {
                           const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
                           const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
                           const label = d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
-                          const cost = orders.filter(o => {
-                            const raw = o.createdAt ?? o.syncedAt;
-                            if (!raw) return false;
-                            const od = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                              ? (raw as { toDate: () => Date }).toDate()
-                              : new Date(raw as string | number);
-                            return `${od.getFullYear()}-${String(od.getMonth() + 1).padStart(2, '0')}` === key;
-                          }).reduce((s, o) => s + (o.lineItems ?? []).reduce((ls, li) => ls + ((li.costPrice ?? 0) * li.quantity), 0), 0);
+                          const cost = orders.filter(o => ayAnahtari(o.createdAt ?? o.syncedAt) === key).reduce((s, o) => s + (o.lineItems ?? []).reduce((ls, li) => ls + ((li.costPrice ?? 0) * li.quantity), 0), 0);
                           months.push({ label, cost });
                         }
                         const maxCost = Math.max(...months.map(m => m.cost), 1);
@@ -628,18 +622,15 @@ export default function SatinAlmaPage(props: Props) {
                     // Group by month using expectedDelivery or createdAt + 30 days
                     type PayGroup = { month: string; pos: typeof openPOs; total: number };
                     const groupMap: Record<string, PayGroup> = {};
-                    const now134 = new Date();
                     for (const po of openPOs) {
                       const raw = (po as Record<string, unknown>).expectedDelivery ?? (po as Record<string, unknown>).createdAt;
-                      let dueDate: Date;
-                      if (raw) {
-                        dueDate = typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
-                        // If no expected delivery, add 30 days to creation
-                        if (!(po as Record<string, unknown>).expectedDelivery) dueDate = new Date(dueDate.getTime() + 30 * 86400000);
-                      } else {
-                        dueDate = new Date(now134.getTime() + 30 * 86400000);
-                      }
-                      const key = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
+                      // Tarihi çözülemeyen PO plandan DÜŞER — eski "bugün+30" yedeği sahte kesinlikti (zaman.ts B tuzağı).
+                      let dueDate = zamanDate(raw);
+                      if (!dueDate) continue;
+                      // If no expected delivery, add 30 days to creation
+                      if (!(po as Record<string, unknown>).expectedDelivery) dueDate = new Date(dueDate.getTime() + 30 * 86400000);
+                      const key = ayAnahtari(dueDate);
+                      if (!key) continue;
                       const label = dueDate.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'long', year: 'numeric' });
                       if (!groupMap[key]) groupMap[key] = { month: label, pos: [], total: 0 };
                       groupMap[key].pos.push(po);
@@ -647,11 +638,17 @@ export default function SatinAlmaPage(props: Props) {
                     }
                     const groups = Object.entries(groupMap).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
                     const grandTotal = groups.reduce((s, g) => s + g.total, 0);
+                    // Başlık sayımı = plana GİREN PO'lar; tarihsiz olanlar (629'da düşenler) toplamda da yok, sayımda da olmamalı.
+                    const planlananAdet = groups.reduce((s, g) => s + g.pos.length, 0);
+                    const tarihsizAdet = openPOs.length - planlananAdet;
+                    const tarihsizNotu = tarihsizAdet > 0
+                      ? (currentLanguage === 'tr' ? ` · ${tarihsizAdet} tarihsiz plandan düştü` : ` · ${tarihsizAdet} undated excluded`)
+                      : '';
                     return (
                       <div className="space-y-4">
                         <ModuleHeader
                           title={currentLanguage === 'tr' ? 'Tedarikçi Ödeme Takvimi' : 'Vendor Payment Schedule'}
-                          subtitle={currentLanguage === 'tr' ? `${openPOs.length} açık sipariş · Toplam ${paraYaz(grandTotal, { ondalik: 0 })}` : `${openPOs.length} open POs · Total ${paraYaz(grandTotal, { ondalik: 0 })}`}
+                          subtitle={currentLanguage === 'tr' ? `${planlananAdet} açık sipariş · Toplam ${paraYaz(grandTotal, { ondalik: 0 })}${tarihsizNotu}` : `${planlananAdet} open POs · Total ${paraYaz(grandTotal, { ondalik: 0 })}${tarihsizNotu}`}
                           icon={Calendar}
                         />
                         {groups.map(g => (
@@ -687,8 +684,9 @@ export default function SatinAlmaPage(props: Props) {
                     for (const po of apPurchaseOrders) {
                       if (!po.createdAt || !po.expectedDate) continue;
                       try {
-                        const created = (po.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(po.createdAt as string);
-                        const expected = new Date(po.expectedDate as string);
+                        const created = zamanDate(po.createdAt);
+                        const expected = zamanDate(po.expectedDate);
+                        if (!created || !expected) continue;
                         const days = Math.round((expected.getTime() - created.getTime()) / 86400000);
                         if (days <= 0 || days > 365) continue;
                         if (!ltMap[po.supplier]) ltMap[po.supplier] = { days: [], onTime: 0 };
@@ -856,8 +854,8 @@ export default function SatinAlmaPage(props: Props) {
                       .map(po => {
                         let daysOpen = 0;
                         try {
-                          const created = (po.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(po.createdAt as string);
-                          daysOpen = Math.floor((now165.getTime() - created.getTime()) / 86400000);
+                          const created = zamanDate(po.createdAt);
+                          if (created) daysOpen = Math.floor((now165.getTime() - created.getTime()) / 86400000);
                         } catch { /* skip */ }
                         return { ...po, daysOpen };
                       })
@@ -1087,7 +1085,7 @@ export default function SatinAlmaPage(props: Props) {
                                     <td className="px-3 py-2.5 font-bold font-mono text-gray-800">{paraYaz(q.price)}</td>
                                     <td className="px-3 py-2.5 text-gray-500">{q.leadDays}</td>
                                     <td className="px-3 py-2.5 text-gray-500">{q.minQty}</td>
-                                    <td className="px-3 py-2.5 text-gray-500">{q.validUntil?new Date(q.validUntil).toLocaleDateString('tr-TR'):'—'}</td>
+                                    <td className="px-3 py-2.5 text-gray-500">{tarihYaz(q.validUntil)}</td>
                                     <td className="px-3 py-2.5">
                                       <div className="flex items-center gap-2">
                                       <button onClick={()=>{setP608Draft({supplier:q.supplier,price:String(q.price),leadDays:String(q.leadDays),minQty:String(q.minQty),validUntil:q.validUntil||''});setP608EditId(q.id);setP608ShowForm(true);}} title={tr608?'Düzenle':'Edit'} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>

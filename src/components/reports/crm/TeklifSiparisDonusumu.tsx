@@ -5,6 +5,7 @@
  * Props: ReportsCtx'in tamamı DEĞİL — yalnız bu kartın gerçekten kullandığı alanlar.
  */
 import type { ReportsCtx } from '../useReportsData';
+import { zamanDate, tarihYaz } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'quotations' | 'currentLanguage' | 'fmtAna'>;
 
@@ -17,13 +18,11 @@ export default function TeklifSiparisDonusumu({ quotations, currentLanguage, fmt
   const now145 = new Date();
   const months145 = Array.from({ length: 6 }, (_, i) => {
     const d = new Date(now145.getFullYear(), now145.getMonth() - (5 - i), 1);
-    const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+    const label = tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
     const mq = quotations.filter(q => {
-      if (!q.createdAt) return false;
-      try {
-        const qd = (q.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(q.createdAt as string);
-        return qd.getFullYear() === d.getFullYear() && qd.getMonth() === d.getMonth();
-      } catch { return false; }
+      const qd = zamanDate(q.createdAt);
+      if (!qd) return false;
+      return qd.getFullYear() === d.getFullYear() && qd.getMonth() === d.getMonth();
     });
     return { label, total: mq.length, converted: mq.filter(q => q.status === 'Converted to Order' || q.status === 'approved').length };
   });

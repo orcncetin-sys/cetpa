@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import type { ReportsCtx } from '../useReportsData';
+import { zamanDate, zamanMs, ayAnahtari, gunAnahtari } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'inventory' | 'currentLanguage' | 'fmtAna'>;
 
@@ -22,7 +23,7 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
         const thisMonthCustomers = new Set<string>();
         const allTimeCustomers = new Set<string>();
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           const cid = (o as unknown as Record<string,unknown>).customerId as string | undefined
             || (o as unknown as Record<string,unknown>).customerName as string | undefined
             || 'Unknown';
@@ -56,15 +57,13 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
         const ordersByMonth: Record<string, number> = {};
         const quotesByMonth: Record<string, number> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           ordersByMonth[key] = (ordersByMonth[key] ?? 0) + 1;
         });
         quotations.forEach(q => {
-          const d = q.createdAt ? ((q.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(q.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(q.createdAt);
+          if (!key) return;
           quotesByMonth[key] = (quotesByMonth[key] ?? 0) + 1;
         });
         const allMonths = [...new Set([...Object.keys(ordersByMonth), ...Object.keys(quotesByMonth)])].sort().slice(-6);
@@ -110,13 +109,10 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
         const monthRepeat: Record<string, number> = {};
         const custFirstMonth: Record<string, string> = {};
         [...orders].sort((a,b)=>{
-          const da = a.createdAt ? ((a.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(a.createdAt as string)) : new Date(0);
-          const db = b.createdAt ? ((b.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(b.createdAt as string)) : new Date(0);
-          return da.getTime()-db.getTime();
+          return (zamanMs(a.createdAt) ?? 0) - (zamanMs(b.createdAt) ?? 0);
         }).forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           const cid = (o as unknown as Record<string,unknown>).customerId as string|undefined || (o as unknown as Record<string,unknown>).customerName as string|undefined || 'Unknown';
           if (!custFirstMonth[cid]) custFirstMonth[cid] = key;
           if (!monthSeen[key]) { monthSeen[key] = new Set(); monthRepeat[key] = 0; }
@@ -229,9 +225,8 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
       {reportsTab === 'crm' && quotations.length >= 3 && (() => {
         const byMonth: Record<string,{count:number;value:number}> = {};
         quotations.forEach(q => {
-          const d = q.createdAt ? ((q.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(q.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(q.createdAt);
+          if (!key) return;
           if (!byMonth[key]) byMonth[key]={count:0,value:0};
           byMonth[key].count++;
           const qR = q as unknown as Record<string,unknown>;
@@ -262,15 +257,14 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
       {reportsTab === 'crm' && orders.length >= 10 && (() => {
         const custMonthOrders: Record<string,Record<string,number>> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
-          if (!d) return;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           const cid = (o as unknown as Record<string,unknown>).customerName as string|undefined || (o as unknown as Record<string,unknown>).customerId as string|undefined || 'Unknown';
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
           if (!custMonthOrders[cid]) custMonthOrders[cid]={};
           custMonthOrders[cid][key]=(custMonthOrders[cid][key]??0)+1;
         });
         const topCusts = Object.entries(custMonthOrders).sort((a,b)=>Object.values(b[1]).reduce((x,y)=>x+y,0)-Object.values(a[1]).reduce((x,y)=>x+y,0)).slice(0,5);
-        const allMonths = [...new Set(orders.map(o=>{const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null;if(!d)return '';return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;}).filter(Boolean))].sort().slice(-5);
+        const allMonths = [...new Set(orders.map(o=>ayAnahtari(o.createdAt)??'').filter(Boolean))].sort().slice(-5);
         if (topCusts.length < 2 || allMonths.length < 2) return null;
         const maxOrders = Math.max(...topCusts.flatMap(([,m])=>Object.values(m)),1);
         return (
@@ -305,9 +299,8 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
       {reportsTab === 'crm' && orders.length >= 5 && (() => {
         const byMonth: Record<string,{qty:number;lines:number;orders:number}> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           if (!byMonth[key]) byMonth[key]={qty:0,lines:0,orders:0};
           byMonth[key].orders++;
           (o.lineItems??[]).forEach(li=>{ const lr=li as unknown as Record<string,unknown>; byMonth[key].qty+=((lr.quantity as number|undefined)??1); byMonth[key].lines++; });
@@ -335,7 +328,7 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
       {reportsTab === 'crm' && orders.length >= 5 && (() => {
         const custLTV: Record<string,{revenue:number;orders:number;firstOrder:Date|null;lastOrder:Date|null}> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           const cid = (o as unknown as Record<string,unknown>).customerName as string|undefined || (o as unknown as Record<string,unknown>).customerId as string|undefined || 'Unknown';
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total==='number' ? oR.total as number
@@ -402,14 +395,13 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
         let grossRev=0, cancelledRev=0;
         const byMonth: Record<string,{gross:number;net:number}> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
+          const key = ayAnahtari(o.createdAt);
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total==='number' ? oR.total as number
             : (o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0);
           grossRev+=total;
           if (o.status==='Cancelled') cancelledRev+=total;
-          if (d) {
-            const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          if (key) {
             if (!byMonth[key]) byMonth[key]={gross:0,net:0};
             byMonth[key].gross+=total;
             if (o.status!=='Cancelled') byMonth[key].net+=total;
@@ -439,9 +431,8 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
       {reportsTab === 'crm' && orders.length >= 10 && (() => {
         const dayCount: Record<string,number> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = d.toISOString().slice(0,10);
+          const key = gunAnahtari(o.createdAt);
+          if (!key) return;
           dayCount[key]=(dayCount[key]??0)+1;
         });
         const days = Object.keys(dayCount).sort().slice(-35);
@@ -477,14 +468,11 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
       {reportsTab === 'crm' && orders.length >= 5 && (() => {
         const custFirstMonth: Record<string,string> = {};
         [...orders].sort((a,b)=>{
-          const da=a.createdAt?((a.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(a.createdAt as string)):new Date(0);
-          const db=b.createdAt?((b.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(b.createdAt as string)):new Date(0);
-          return da.getTime()-db.getTime();
+          return (zamanMs(a.createdAt) ?? 0) - (zamanMs(b.createdAt) ?? 0);
         }).forEach(o=>{
-          const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null;
-          if(!d) return;
+          const key=ayAnahtari(o.createdAt);
+          if(!key) return;
           const cid=(o as unknown as Record<string,unknown>).customerId as string|undefined||(o as unknown as Record<string,unknown>).customerName as string|undefined||'Unknown';
-          const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
           if(!custFirstMonth[cid]) custFirstMonth[cid]=key;
         });
         const newByMonth: Record<string,number>={};
@@ -541,8 +529,8 @@ export default function CrmBloklar10({ reportsTab, orders, quotations, inventory
         const now=new Date();
         const custLastOrder: Record<string,Date>={};
         const custOrders: Record<string,{date:Date;gap:number}[]>={};
-        [...orders].sort((a,b)=>{ const da=a.createdAt?((a.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(a.createdAt as string)):new Date(0); const db=b.createdAt?((b.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(b.createdAt as string)):new Date(0); return da.getTime()-db.getTime(); }).forEach(o=>{
-          const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null; if(!d) return;
+        [...orders].sort((a,b)=>(zamanMs(a.createdAt) ?? 0) - (zamanMs(b.createdAt) ?? 0)).forEach(o=>{
+          const d=zamanDate(o.createdAt); if(!d) return;
           const cid=(o as unknown as Record<string,unknown>).customerName as string|undefined||(o as unknown as Record<string,unknown>).customerId as string|undefined||'Unknown';
           const prev=custLastOrder[cid];
           const gap=prev?Math.floor((d.getTime()-prev.getTime())/86400000):0;

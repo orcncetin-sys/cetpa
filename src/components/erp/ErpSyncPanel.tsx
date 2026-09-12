@@ -24,6 +24,7 @@ import { collection, query, limit, onSnapshot, orderBy } from '../../lib/dbClien
 import { db } from '../../firebase';
 import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';
+import { zamanDate } from '../../utils/zaman';
 import type { ErpImportResult, ErpStatusResult } from '../../types/erp';
 import { authFetch } from '../../services/authFetch';
 
@@ -77,7 +78,7 @@ interface LogEntry {
   success: boolean;
   error: string | null;
   duration: number;
-  timestamp?: { toDate: () => Date };
+  timestamp?: unknown;   // Timestamp sınıfı / {_seconds} / ISO — zamanDate çözer
   [k: string]: unknown;   // logRefField dinamik okunuyor
 }
 
@@ -388,7 +389,7 @@ function LogPanel({ logs, show, onToggle, lang: t, pickRef }: {
           ) : (
             <div className="divide-y divide-gray-50">
               {logs.map(entry => {
-                const ts = entry.timestamp?.toDate?.();
+                const ts = zamanDate(entry.timestamp);
                 const ref = pickRef(entry as Record<string, unknown>);
                 return (
                   <div key={entry.id} className="flex items-center justify-between px-5 py-3 hover:bg-gray-50/60 transition-colors">

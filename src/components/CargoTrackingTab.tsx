@@ -4,6 +4,7 @@ import { collection, onSnapshot, query, limit, addDoc, serverTimestamp } from '.
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { tarihYaz, tarihSaatYaz } from '../utils/zaman';
 
 type Carrier = 'DHL' | 'UPS' | 'FedEx' | 'Yurtiçi' | 'MNG' | 'Aras' | 'PTT';
 
@@ -224,12 +225,7 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
                   {currentLanguage === 'tr' ? 'Tahmini Teslimat' : 'Est. Delivery'}
                 </p>
                 <p className={cn("text-sm font-bold", darkMode ? "text-white" : "text-[#1D1D1F]")}>
-                  {trackResult.estimatedDelivery
-                    ? new Date(trackResult.estimatedDelivery).toLocaleDateString(
-                        currentLanguage === 'tr' ? 'tr-TR' : 'en-US',
-                        { day: 'numeric', month: 'short', year: 'numeric' }
-                      )
-                    : '-'}
+                  {trackResult.estimatedDelivery ? tarihYaz(trackResult.estimatedDelivery, { day: 'numeric', month: 'short', year: 'numeric' }, currentLanguage === 'tr' ? 'tr' : 'en') : '-'}
                 </p>
               </div>
             </div>
@@ -283,12 +279,7 @@ const CargoTrackingTab: React.FC<Props> = ({ darkMode, currentLanguage }) => {
                         </p>
                       </div>
                       <p className={cn("text-[10px] font-bold whitespace-nowrap", darkMode ? "text-white/60" : "text-gray-400")}>
-                        {evt.timestamp
-                          ? new Date(evt.timestamp).toLocaleString(
-                              currentLanguage === 'tr' ? 'tr-TR' : 'en-US',
-                              { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }
-                            )
-                          : '-'}
+                        {evt.timestamp ? tarihSaatYaz(evt.timestamp, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }, currentLanguage === 'tr' ? 'tr' : 'en') : '-'}
                       </p>
                     </div>
                   </div>

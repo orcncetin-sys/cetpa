@@ -1,6 +1,6 @@
 import { sayiBicimleyici } from '../utils/recharts';
 import { odemeTakipli, gorunenSiparisNo, siparisTarih } from '../utils/siparis';
-import { gunAnahtari } from '../utils/zaman';
+import { gunAnahtari, zamanDate, zamanMs, ayAnahtari, tarihYaz, bugunAnahtari } from '../utils/zaman';
 import { siparisDurumEtiketi, sevkiyatDurumEtiketi } from '../utils/durumEtiketi';
 import KurUyarisi from '../components/KurUyarisi';
 import React from 'react';
@@ -160,9 +160,10 @@ export default function DashboardPage(props: Props) {
   // Giden (satış) faturalarını tarih aralığına göre filtrele
   const filteredMikroFaturalar = mikroFaturalar.filter(f => {
     if (f.yon !== 'giden') return false;
-    const start = new Date(dateRange.startDate);
-    const end = new Date(dateRange.endDate);
-    const d = new Date(f.tarih);
+    const start = zamanDate(dateRange.startDate);
+    const end = zamanDate(dateRange.endDate);
+    const d = zamanDate(f.tarih);
+    if (!start || !end || !d) return false;
     return d >= start && d <= end;
   });
 
@@ -235,7 +236,7 @@ export default function DashboardPage(props: Props) {
                     {/* Phase 514: Live clock */}
                     <div className="hidden lg:flex flex-col items-end text-right">
                       <span className="text-sm font-black text-gray-800 tabular-nums">{dashClock.toLocaleTimeString(currentLanguage === 'en' ? 'en-US' : 'tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                      <span className="text-[10px] text-gray-400">{dashClock.toLocaleDateString(currentLanguage === 'en' ? 'en-US' : 'tr-TR', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                      <span className="text-[10px] text-gray-400">{tarihYaz(dashClock, { weekday: 'short', day: 'numeric', month: 'short' }, currentLanguage === 'en' ? 'en' : 'tr')}</span>
                     </div>
                   </div>
                 }
@@ -249,12 +250,9 @@ export default function DashboardPage(props: Props) {
                 // Orders stuck in Pending > 3 days (native + mikro)
                 const stuckPending = combinedOrders.filter(o => {
                   if (o.status !== 'Pending') return false;
-                  const raw = o.createdAt ?? o.syncedAt;
-                  if (!raw) return false;
-                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                    ? (raw as { toDate: () => Date }).toDate()
-                    : new Date(raw as string | number);
-                  return (now528 - d.getTime()) > 3 * 86400000;
+                  const ms = zamanMs(o.createdAt ?? o.syncedAt);
+                  if (ms === null) return false;
+                  return (now528 - ms) > 3 * 86400000;
                 });
                 if (stuckPending.length > 0)
                   alerts.push({ id: 'stuckPending', color: 'amber', icon: '⏳',
@@ -265,12 +263,9 @@ export default function DashboardPage(props: Props) {
                 // Leads with no activity > 7 days
                 const inactiveLeads = leads.filter(l => {
                   if (l.status === 'Closed') return false;
-                  const raw = l.updatedAt ?? l.createdAt;
-                  if (!raw) return false;
-                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                    ? (raw as { toDate: () => Date }).toDate()
-                    : new Date(raw as string | number);
-                  return (now528 - d.getTime()) > 7 * 86400000;
+                  const ms = zamanMs(l.updatedAt ?? l.createdAt);
+                  if (ms === null) return false;
+                  return (now528 - ms) > 7 * 86400000;
                 });
                 if (inactiveLeads.length > 0)
                   alerts.push({ id: 'inactiveLeads', color: 'blue', icon: '👤',
@@ -421,20 +416,18 @@ export default function DashboardPage(props: Props) {
                       {(() => {
                         const days = Array.from({ length: 7 }, (_, i) => {
                           const d = new Date(); d.setDate(d.getDate() - (6 - i));
-                          const dayStr = d.toDateString();
+                          const dayStr = gunAnahtari(d);
 
                           // Native revenue for this day
                           const revNative = orders.filter(o => {
                             if (!odemeTakipli(o)) return false;   // mikro türevi aşağıda sayılıyor
-                            const od = siparisTarih(o);
-                            return od?.toDateString() === dayStr;
+                            return gunAnahtari(siparisTarih(o)) === dayStr;
                           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
                           
                           // Mikro revenue for this day
                           const revMikro = mikroFaturalar.filter(f => {
                             if (f.yon !== 'giden') return false;
-                            const fd = new Date(f.tarih);
-                            return fd.toDateString() === dayStr;
+                            return gunAnahtari(f.tarih) === dayStr;
                           }).reduce((s, f) => s + (f.tutar || 0), 0);
 
                           return { day: d.getDate(), rev: revNative + revMikro };
@@ -468,10 +461,10 @@ export default function DashboardPage(props: Props) {
               {(() => {
                 const pendingCount   = combinedOrders.filter(o => o.status === 'Pending').length;
                 const lowStockCount  = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)).length;
-                const shippedToday   = orders.filter(o => {
-                  const d = (o.syncedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(0);
-                  return o.status === 'Shipped' && d.toDateString() === new Date().toDateString();
-                }).length;
+                const bugunKey = bugunAnahtari();
+                const shippedToday   = orders.filter(o =>
+                  o.status === 'Shipped' && gunAnahtari(o.syncedAt) === bugunKey
+                ).length;
                 // ÇİFT FİLTRE DÜZELTİLDİ (2026-09-04): `filteredOrders` zaten seçili
                 // tarih aralığına süzülmüştü, üstüne bir de sabit "son 7 gün" penceresi
                 // uygulanıyordu — kullanıcı aralığı "bu yıl" yapınca kart yine son 7
@@ -496,8 +489,8 @@ export default function DashboardPage(props: Props) {
                   + mikroFaturalar
                       .filter(f => {
                         if (f.yon !== 'giden') return false;
-                        const d = new Date(f.tarih);
-                        return !isNaN(d.getTime()) && (Date.now() - d.getTime()) < 7 * 86400000;
+                        const ms = zamanMs(f.tarih);
+                        return ms !== null && (Date.now() - ms) < 7 * 86400000;
                       })
                       .reduce((s, f) => s + (f.tutar || 0), 0);
 
@@ -626,10 +619,8 @@ export default function DashboardPage(props: Props) {
                   if (l.status === 'Closed') return false;
                   const raw = l.updatedAt ?? l.createdAt;
                   if (!raw) return true;
-                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                    ? (raw as { toDate: () => Date }).toDate()
-                    : new Date(raw as string | number);
-                  return now7 - d.getTime() > 7 * 86400000;
+                  const ms = zamanMs(raw);
+                  return ms !== null && now7 - ms > 7 * 86400000;
                 });
                 if (overdueleads.length > 0) {
                   insights.push({
@@ -645,21 +636,18 @@ export default function DashboardPage(props: Props) {
 
                 // Insight 4: top revenue month-over-month rise
                 const nowD = new Date();
+                const buAyKey = ayAnahtari(nowD);
+                const gecenAyKey = ayAnahtari(new Date(nowD.getFullYear(), nowD.getMonth() - 1, 1));
                 const thisMonthRev = orders
                   .filter(o => {
-                    const raw = o.syncedAt ?? o.createdAt;
-                    if (!raw) return false;
-                    const d = typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
-                    return d.getFullYear() === nowD.getFullYear() && d.getMonth() === nowD.getMonth();
+                    const k = ayAnahtari(o.syncedAt ?? o.createdAt);
+                    return k !== null && k === buAyKey;
                   })
                   .reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                 const lastMonthRev = orders
                   .filter(o => {
-                    const raw = o.syncedAt ?? o.createdAt;
-                    if (!raw) return false;
-                    const d = typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
-                    const lm = new Date(nowD.getFullYear(), nowD.getMonth() - 1, 1);
-                    return d.getFullYear() === lm.getFullYear() && d.getMonth() === lm.getMonth();
+                    const k = ayAnahtari(o.syncedAt ?? o.createdAt);
+                    return k !== null && k === gecenAyKey;
                   })
                   .reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                 if (lastMonthRev > 0 && thisMonthRev > lastMonthRev * 1.1) {
@@ -696,7 +684,10 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 543: Upcoming Tax Deadlines Widget ── */}
               {dashVergiDeadlines.length > 0 && (() => {
-                const getDays = (sonTarih: string) => Math.ceil((new Date(sonTarih).getTime() - Date.now()) / 86400000);
+                const getDays = (sonTarih: string): number | null => {
+                  const ms = zamanMs(sonTarih);
+                  return ms === null ? null : Math.ceil((ms - Date.now()) / 86400000);
+                };
                 return (
                   <div className={cn('rounded-2xl border p-4', darkMode ? 'bg-white/5 border-white/10' : 'bg-amber-50/60 border-amber-200/60')}>
                     <div className="flex items-center justify-between mb-3">
@@ -714,8 +705,8 @@ export default function DashboardPage(props: Props) {
                     <div className="space-y-2">
                       {dashVergiDeadlines.map(d => {
                         const days = getDays(d.sonTarih);
-                        const isUrgent = days <= 7;
-                        const isCritical = days <= 2;
+                        const isUrgent = days !== null && days <= 7;
+                        const isCritical = days !== null && days <= 2;
                         return (
                           <div
                             key={d.id}
@@ -726,13 +717,13 @@ export default function DashboardPage(props: Props) {
                           >
                             <div className="min-w-0">
                               <p className={cn('text-xs font-bold truncate', isCritical ? 'text-red-800' : isUrgent ? 'text-orange-800' : 'text-gray-800')}>{d.vergiTuru}</p>
-                              <p className="text-[10px] text-gray-500">{new Date(d.sonTarih).toLocaleDateString('tr-TR')}</p>
+                              <p className="text-[10px] text-gray-500">{tarihYaz(d.sonTarih)}</p>
                             </div>
                             <span className={cn(
                               'shrink-0 ml-2 text-[10px] font-black px-2 py-0.5 rounded-full',
                               isCritical ? 'bg-red-200 text-red-800' : isUrgent ? 'bg-orange-200 text-orange-800' : 'bg-amber-100 text-amber-700'
                             )}>
-                              {days === 0 ? (currentLanguage === 'tr' ? 'Bugün!' : 'Today!') : `${days}g`}
+                              {days === null ? '—' : days === 0 ? (currentLanguage === 'tr' ? 'Bugün!' : 'Today!') : `${days}g`}
                             </span>
                           </div>
                         );
@@ -748,15 +739,8 @@ export default function DashboardPage(props: Props) {
                 const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
                 const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
                 const lastMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-                const getOrderDate = (o: Order): Date => {
-                  const raw = o.createdAt ?? o.syncedAt;
-                  if (!raw) return new Date(0);
-                  return typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                    ? (raw as { toDate: () => Date }).toDate()
-                    : new Date(raw as string | number);
-                };
-                const mtdRev  = orders.filter(o => getOrderDate(o) >= thisMonthStart).reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const lastRev = orders.filter(o => { const d = getOrderDate(o); return d >= lastMonthStart && d <= lastMonthEnd; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const mtdRev  = orders.filter(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return !!d && d >= thisMonthStart; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const lastRev = orders.filter(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return !!d && d >= lastMonthStart && d <= lastMonthEnd; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const pct = lastRev > 0 ? Math.round(((mtdRev - lastRev) / lastRev) * 100) : null;
                 const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
                 const dayProgress = Math.round((now.getDate() / daysInMonth) * 100);
@@ -819,12 +803,7 @@ export default function DashboardPage(props: Props) {
               {(() => {
                 const now = new Date();
                 const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-                const getOD = (o: Order): Date => {
-                  const raw = o.createdAt ?? o.syncedAt;
-                  if (!raw) return new Date(0);
-                  return typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
-                };
-                const mtdRev99 = orders.filter(o => getOD(o) >= thisMonthStart && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
+                const mtdRev99 = orders.filter(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return !!d && d >= thisMonthStart && o.status !== 'Cancelled'; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const pct99 = monthlyTarget > 0 ? Math.min(Math.round((mtdRev99 / monthlyTarget) * 100), 200) : 0;
                 const barColor99 = pct99 >= 100 ? 'bg-emerald-400' : pct99 >= 70 ? 'bg-brand' : pct99 >= 40 ? 'bg-amber-400' : 'bg-red-400';
                 return (
@@ -844,7 +823,7 @@ export default function DashboardPage(props: Props) {
                               onKeyDown={e => {
                                 if (e.key === 'Enter') {
                                   const v = Number(targetDraft);
-                                  const mk = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
+                                  const mk = bugunAnahtari().slice(0, 7);
                                   saveMonthlyTarget(mk, v);
                                   setIsEditingTarget(false);
                                 }
@@ -853,7 +832,7 @@ export default function DashboardPage(props: Props) {
                               className="text-sm font-bold bg-gray-100 rounded-lg px-2 py-1 outline-none w-36"
                               placeholder="0"
                             />
-                            <button onClick={() => { const v = Number(targetDraft); const mk = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })(); saveMonthlyTarget(mk, v); setIsEditingTarget(false); }}
+                            <button onClick={() => { const v = Number(targetDraft); const mk = bugunAnahtari().slice(0, 7); saveMonthlyTarget(mk, v); setIsEditingTarget(false); }}
                               className="text-[10px] bg-brand text-white px-2 py-1 rounded-lg font-bold">{currentLanguage === 'tr' ? 'Kaydet' : 'Save'}</button>
                             <button onClick={() => setIsEditingTarget(false)} className="text-[10px] text-gray-400 hover:text-gray-600">{currentLanguage === 'tr' ? 'İptal' : 'Cancel'}</button>
                           </div>
@@ -889,13 +868,12 @@ export default function DashboardPage(props: Props) {
                 const now174 = new Date();
                 const months174 = Array.from({ length: 3 }, (_, i) => {
                   const d = new Date(now174.getFullYear(), now174.getMonth() - (2 - i), 1);
-                  const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+                  const label = tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
+                  const ayKey174 = ayAnahtari(d);
                   const mOrders = orders.filter(o => {
                     if (o.status === 'Cancelled') return false;
-                    try {
-                      const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-                      return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-                    } catch { return false; }
+                    const k = ayAnahtari(o.createdAt);
+                    return k !== null && k === ayKey174;
                   });
                   const actual = mOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                   const pct = monthlyTarget > 0 ? Math.round((actual / monthlyTarget) * 100) : 0;
@@ -1019,11 +997,9 @@ export default function DashboardPage(props: Props) {
                 if (lowStockCount > 0) alerts125.push({ level: 'warn', icon: '📦', message: currentLanguage === 'tr' ? `${lowStockCount} ürün kritik stok seviyesinde` : `${lowStockCount} products at critical stock level` });
                 // Overdue payments
                 const now125 = Date.now();
-                const overdueCount = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o) && o.createdAt && (() => {
-                  const ts = o.createdAt;
-                  if (!ts) return false;
-                  const d = typeof (ts as { toDate?: () => Date }).toDate === 'function' ? (ts as { toDate: () => Date }).toDate() : new Date(ts as string);
-                  return (now125 - d.getTime()) > 30 * 86400000;
+                const overdueCount = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o) && (() => {
+                  const ms = zamanMs(o.createdAt);
+                  return ms !== null && (now125 - ms) > 30 * 86400000;
                 })()).length;
                 if (overdueCount > 0) alerts125.push({ level: 'danger', icon: '💳', message: currentLanguage === 'tr' ? `${overdueCount} siparişin ödemesi 30+ gün gecikmiş` : `${overdueCount} orders have payment overdue 30+ days` });
                 // Pending price overrides
@@ -1060,13 +1036,10 @@ export default function DashboardPage(props: Props) {
               {/* ── Phase 130: Daily Cash Position ── */}
               {orders.length > 0 && (() => {
                 const today130 = new Date();
-                const todayStr = today130.toDateString();
-                const todayOrders = orders.filter(o => {
-                  const raw = o.createdAt ?? o.syncedAt;
-                  if (!raw) return false;
-                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
-                  return d.toDateString() === todayStr && o.status !== 'Cancelled';
-                });
+                const todayStr = bugunAnahtari(today130);
+                const todayOrders = orders.filter(o =>
+                  gunAnahtari(o.createdAt ?? o.syncedAt) === todayStr && o.status !== 'Cancelled'
+                );
                 const todayRevenue = todayOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const todayPaid = todayOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const totalUnpaid = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o)).reduce((s, o) => s + (o.totalPrice || 0), 0);
@@ -1077,7 +1050,7 @@ export default function DashboardPage(props: Props) {
                         <span className="text-base">💵</span>
                         <div>
                           <h3 className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? 'Günlük Nakit Pozisyonu' : 'Daily Cash Position'}</h3>
-                          <p className="text-[10px] text-gray-400">{today130.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+                          <p className="text-[10px] text-gray-400">{tarihYaz(today130, { weekday: 'long', day: 'numeric', month: 'long' }, currentLanguage === 'tr' ? 'tr' : 'en')}</p>
                         </div>
                       </div>
                       <div className="text-right">
@@ -1107,15 +1080,8 @@ export default function DashboardPage(props: Props) {
                 // Last 30 days revenue vs prior 30 days
                 const d30ago = new Date(now159); d30ago.setDate(d30ago.getDate() - 30);
                 const d60ago = new Date(now159); d60ago.setDate(d60ago.getDate() - 60);
-                const getOD159 = (o: Order): Date => {
-                  const raw = o.createdAt ?? o.syncedAt;
-                  if (!raw) return new Date(0);
-                  return typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                    ? (raw as { toDate: () => Date }).toDate()
-                    : new Date(raw as string | number);
-                };
-                const last30 = orders.filter(o => { const d = getOD159(o); return d >= d30ago && o.status !== 'Cancelled'; });
-                const prev30 = orders.filter(o => { const d = getOD159(o); return d >= d60ago && d < d30ago && o.status !== 'Cancelled'; });
+                const last30 = orders.filter(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return !!d && d >= d30ago && o.status !== 'Cancelled'; });
+                const prev30 = orders.filter(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return !!d && d >= d60ago && d < d30ago && o.status !== 'Cancelled'; });
                 const rev30 = last30.reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const revPrev = prev30.reduce((s, o) => s + (o.totalPrice || 0), 0);
                 const dailyRev = rev30 / 30;
@@ -1125,7 +1091,8 @@ export default function DashboardPage(props: Props) {
                 const weeks: number[] = Array(8).fill(0);
                 for (const o of orders) {
                   if (o.status === 'Cancelled') continue;
-                  const d = getOD159(o);
+                  const d = zamanDate(o.createdAt ?? o.syncedAt);
+                  if (!d) continue;
                   const daysAgo = Math.floor((now159.getTime() - d.getTime()) / 86400000);
                   const weekIdx = 7 - Math.floor(daysAgo / 7);
                   if (weekIdx >= 0 && weekIdx < 8) weeks[weekIdx] += o.totalPrice || 0;
@@ -1164,27 +1131,18 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 539: Shipments Mini-Widget ── */}
               {shipments.length > 0 && (() => {
-                const todayStr539 = new Date().toDateString();
+                const todayStr539 = bugunAnahtari();
                 const inTransit  = shipments.filter(s => s.status === 'In Transit').length;
                 const pending539 = shipments.filter(s => s.status === 'Pending').length;
                 const delivToday = shipments.filter(s => {
                   if (s.status !== 'Delivered') return false;
                   const raw = (s as unknown as Record<string, unknown>).updatedAt ?? (s as unknown as Record<string, unknown>).date;
-                  if (!raw) return false;
-                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                    ? (raw as { toDate: () => Date }).toDate()
-                    : new Date(raw as string);
-                  return d.toDateString() === todayStr539;
+                  return gunAnahtari(raw) === todayStr539;
                 }).length;
                 const recent539 = [...shipments]
                   .sort((a, b) => {
-                    const getT = (s: Shipment) => {
-                      const raw = (s as unknown as Record<string, unknown>).createdAt;
-                      if (!raw) return 0;
-                      return typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                        ? (raw as { toDate: () => Date }).toDate().getTime()
-                        : new Date(raw as string).getTime();
-                    };
+                    // Tarihi bilinmeyen kayıt 0 (epoch) ile en sona düşer — sıralama yedeği, "şimdi" değil.
+                    const getT = (s: Shipment) => zamanMs((s as unknown as Record<string, unknown>).createdAt) ?? 0;
                     return getT(b) - getT(a);
                   })
                   .slice(0, 5);
@@ -1386,16 +1344,11 @@ export default function DashboardPage(props: Props) {
                 const now103 = new Date();
                 const months103 = Array.from({ length: 6 }, (_, i) => {
                   const d = new Date(now103.getFullYear(), now103.getMonth() - (5 - i), 1);
-                  return { year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' }) };
+                  return { key: ayAnahtari(d), label: d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' }) };
                 });
-                const getOD103 = (o: Order): Date => {
-                  const raw = o.createdAt ?? o.syncedAt;
-                  if (!raw) return new Date(0);
-                  return typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
-                };
                 const data103 = months103.map(m => ({
                   label: m.label,
-                  rev: orders.filter(o => { const d = getOD103(o); return d.getFullYear() === m.year && d.getMonth() === m.month && o.status !== 'Cancelled'; }).reduce((s, o) => s + (o.totalPrice || 0), 0),
+                  rev: orders.filter(o => { const k = ayAnahtari(o.createdAt ?? o.syncedAt); return k !== null && k === m.key && o.status !== 'Cancelled'; }).reduce((s, o) => s + (o.totalPrice || 0), 0),
                 }));
                 const maxRev103 = Math.max(...data103.map(d => d.rev), 1);
                 return (
@@ -1720,16 +1673,8 @@ export default function DashboardPage(props: Props) {
                 const toShip = orders.filter(o => o.status === 'Processing');
                 const staleLeads = leads.filter(l => {
                   if (l.status === 'Closed') return false;
-                  const lastTouch = l.updatedAt
-                    ? (typeof (l.updatedAt as { toDate?: () => Date }).toDate === 'function'
-                        ? (l.updatedAt as { toDate: () => Date }).toDate()
-                        : new Date(l.updatedAt as string | number))
-                    : (l.createdAt
-                        ? (typeof (l.createdAt as { toDate?: () => Date }).toDate === 'function'
-                            ? (l.createdAt as { toDate: () => Date }).toDate()
-                            : new Date(l.createdAt as string | number))
-                        : null);
-                  return lastTouch ? (Date.now() - lastTouch.getTime()) > 30 * 86400000 : false;
+                  const lastTouch = zamanMs(l.updatedAt || l.createdAt);
+                  return lastTouch !== null && (Date.now() - lastTouch) > 30 * 86400000;
                 });
                 const lowStockItems = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5));
                 const agendaItems = [
@@ -1918,16 +1863,15 @@ export default function DashboardPage(props: Props) {
                 const months: { key: string; label: string; revenue: number; orders: number }[] = [];
                 for (let i = 5; i >= 0; i--) {
                   const d = new Date(now6.getFullYear(), now6.getMonth() - i, 1);
-                  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  const key = ayAnahtari(d);
+                  if (!key) continue;
                   const short = d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
                   months.push({ key, label: short, revenue: 0, orders: 0 });
                 }
                 for (const o of orders) {
-                  const raw = o.createdAt;
-                  const d = raw
-                    ? (typeof raw === 'string' ? new Date(raw) : (raw as { toDate?: () => Date }).toDate?.() ?? new Date())
-                    : new Date();
-                  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  // Tarihi çözülemeyen sipariş kovaya girmez — eskiden `?? new Date()` ile BUGÜNe sayılıyordu.
+                  const key = ayAnahtari(o.createdAt);
+                  if (!key) continue;
                   const bucket = months.find(m => m.key === key);
                   if (bucket) { bucket.revenue += o.totalPrice; bucket.orders++; }
                 }
@@ -2098,18 +2042,11 @@ export default function DashboardPage(props: Props) {
                 const in7 = new Date(today7.getTime() + 7 * 86400000);
                 const upcoming = leads
                   .filter(l => {
-                    if (!l.nextFollowUpDate) return false;
-                    const due = typeof (l.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
-                      ? (l.nextFollowUpDate as { toDate: () => Date }).toDate()
-                      : new Date(l.nextFollowUpDate as unknown as string | number);
-                    return due >= today7 && due <= in7;
+                    const due = zamanDate(l.nextFollowUpDate);
+                    return !!due && due >= today7 && due <= in7;
                   })
-                  .sort((a, b) => {
-                    const getDate = (x: unknown) => typeof (x as { toDate?: () => Date }).toDate === 'function'
-                      ? (x as { toDate: () => Date }).toDate()
-                      : new Date(x as string | number);
-                    return getDate(a.nextFollowUpDate).getTime() - getDate(b.nextFollowUpDate).getTime();
-                  });
+                  // Süzgeçten geçenlerin tarihi çözülmüştür; `?? 0` yalnız tip daraltması, "şimdi" yedeği değil.
+                  .sort((a, b) => (zamanMs(a.nextFollowUpDate) ?? 0) - (zamanMs(b.nextFollowUpDate) ?? 0));
                 if (upcoming.length === 0) return null;
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
@@ -2124,9 +2061,8 @@ export default function DashboardPage(props: Props) {
                     </div>
                     <div className="space-y-2">
                       {upcoming.slice(0, 5).map(l => {
-                        const due = typeof (l.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
-                          ? (l.nextFollowUpDate as { toDate: () => Date }).toDate()
-                          : new Date(l.nextFollowUpDate as unknown as string | number);
+                        const due = zamanDate(l.nextFollowUpDate);
+                        if (!due) return null;
                         const daysLeft = Math.round((due.getTime() - today7.getTime()) / 86400000);
                         return (
                           <button key={l.id} onClick={() => { setActiveTab('crm'); setSelectedLead(l); }}
@@ -2139,7 +2075,7 @@ export default function DashboardPage(props: Props) {
                               <p className={cn("text-[10px] truncate", darkMode ? "text-white/65" : "text-gray-400")}>{l.company}</p>
                             </div>
                             <p className={cn("text-[11px] font-bold flex-shrink-0", darkMode ? "text-white/50" : "text-gray-400")}>
-                              {due.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', day: 'numeric' })}
+                              {tarihYaz(due, { month: 'short', day: 'numeric' }, currentLanguage === 'tr' ? 'tr' : 'en')}
                             </p>
                           </button>
                         );
@@ -2212,11 +2148,8 @@ export default function DashboardPage(props: Props) {
                 const DAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                 const counts = Array(7).fill(0);
                 for (const o of orders) {
-                  const raw = o.createdAt ?? o.syncedAt;
-                  if (!raw) continue;
-                  const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                    ? (raw as { toDate: () => Date }).toDate()
-                    : new Date(raw as string | number | Date);
+                  const d = zamanDate(o.createdAt ?? o.syncedAt);
+                  if (!d) continue;
                   counts[d.getDay()] += 1;
                 }
                 const maxC = Math.max(...counts, 1);
@@ -2310,7 +2243,7 @@ export default function DashboardPage(props: Props) {
           {/* ── Phase 595: Görevler & Hatırlatıcılar ─────────────────────── */}
           {activeTab === 'dashboard' && (() => {
             const tr595 = currentLanguage === 'tr';
-            const today595 = new Date().toISOString().slice(0,10);
+            const today595 = bugunAnahtari();
             const overdueTasks = p595Tasks.filter(t => !t.done && t.dueDate < today595);
             const todayTasks = p595Tasks.filter(t => !t.done && t.dueDate === today595);
             const prioColors595: Record<string,string> = {'Kritik':'border-l-red-500 bg-red-50/30','Yüksek':'border-l-orange-400 bg-orange-50/20','Orta':'border-l-amber-300 bg-amber-50/10','Düşük':'border-l-gray-300 bg-gray-50/50'};

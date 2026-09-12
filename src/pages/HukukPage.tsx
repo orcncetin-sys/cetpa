@@ -14,6 +14,7 @@ import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ModuleHeader from '../components/ModuleHeader';
 import LegalModule from '../components/LegalModule';
+import { bugunAnahtari, gunAnahtari } from '../utils/zaman';
 
 /** App.tsx'teki p597Contracts state'inin eleman tipiyle birebir aynı tanım. */
 export interface P597Contract { id: string; customerName: string; totalValue: number; startDate: string; endDate: string; recognized: number }
@@ -46,8 +47,8 @@ export default function HukukPage({
           {/* ── Phase 598: Sözleşme Yenileme Uyarıları ─────────────────── */}
           {(() => {
             const tr598 = currentLanguage === 'tr';
-            const today598 = new Date().toISOString().slice(0,10);
-            const alertDate598 = new Date(Date.now()+p598AlertDays*86400000).toISOString().slice(0,10);
+            const today598 = bugunAnahtari();
+            const alertDate598 = gunAnahtari(Date.now()+p598AlertDays*86400000) ?? '';
             // Use contracts from LegalModule's Firestore — but we don't have them directly
             // Instead show alert config + derive from p597Contracts as a proxy
             const expiringContracts = p597Contracts.filter(c=>c.endDate&&c.endDate>=today598&&c.endDate<=alertDate598);

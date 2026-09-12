@@ -9,6 +9,7 @@ import MikroPushButton from './MikroPushButton';
 import { servisIsEmriPayload } from '../services/mikroEvrak';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { confirmDelete } from '../lib/confirm';
+import { bugunAnahtari, tarihYaz, zamanDate, zamanMs } from '../utils/zaman';
 import {
   Plus, X, Star, AlertCircle, CheckCircle, Clock, Edit2, Trash2
 } from 'lucide-react';
@@ -74,8 +75,9 @@ function DurumBadge({ durum }: { durum: string }) {
   return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${DURUM_CLS[durum] ?? 'bg-gray-100 text-gray-600'}`}>{durum}</span>;
 }
 
-function slaDeadline(acilis: string, slaGun: number): Date {
-  const d = new Date(acilis);
+function slaDeadline(acilis: string, slaGun: number): Date | null {
+  const d = zamanDate(acilis);
+  if (!d) return null;
   d.setDate(d.getDate() + slaGun);
   return d;
 }
@@ -83,6 +85,7 @@ function slaDeadline(acilis: string, slaGun: number): Date {
 function slaStatus(talep: ServisTalebi): 'breach' | 'warning' | 'ok' {
   if (['Çözüldü', 'İptal'].includes(talep.durum)) return 'ok';
   const deadline = slaDeadline(talep.acilisTarihi, talep.slaGun);
+  if (!deadline) return 'ok'; // eski davranışla aynı: çözülemeyen tarih NaN → 'ok' düşüyordu, artık açık
   const diffH = (deadline.getTime() - Date.now()) / 3600000;
   if (diffH < 0) return 'breach';
   if (diffH < 24) return 'warning';
@@ -101,7 +104,9 @@ function StarRating({ value, onChange }: { value: number; onChange?: (v: number)
 }
 
 function garantiDurum(bitis: string): { label: string; cls: string } {
-  const days = Math.ceil((new Date(bitis).getTime() - Date.now()) / 86400000);
+  const ms = zamanMs(bitis);
+  if (ms === null) return { label: '—', cls: 'bg-gray-100 text-gray-500' }; // bilinmeyen tarih 'Aktif' GÖRÜNMESİN
+  const days = Math.ceil((ms - Date.now()) / 86400000);
   if (days < 0) return { label: 'Expired', cls: 'bg-red-100 text-red-700' };
   if (days < 30) return { label: 'Süresi Dolmak Üzere', cls: 'bg-amber-100 text-amber-700' };
   return { label: 'Aktif', cls: 'bg-green-100 text-green-700' };
@@ -113,7 +118,7 @@ const labelCls = 'text-xs font-medium text-gray-500 mb-1 block';
 const emptyTalep: Omit<ServisTalebi, 'id'> = {
   talepNo: '', musteriAd: '', urunAd: '', seriNo: '', kategori: 'Arıza',
   oncelik: 3, aciklama: '', atanan: '', slaGun: 3, notlar: '',
-  durum: 'Açık', acilisTarihi: new Date().toISOString().slice(0, 10),
+  durum: 'Açık', acilisTarihi: bugunAnahtari(),
 };
 
 const emptyGaranti: Omit<Garanti, 'id'> = {
@@ -211,13 +216,15 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
   }
 
   const acik = talepler.filter(t => !['Çözüldü', 'İptal'].includes(t.durum)).length;
-  const bugunAcilan = talepler.filter(t => t.acilisTarihi === new Date().toISOString().slice(0, 10)).length;
+  const bugunAcilan = talepler.filter(t => t.acilisTarihi === bugunAnahtari()).length;
   const cozulenler = talepler.filter(t => t.durum === 'Çözüldü');
   const puanlilar = cozulenler.filter(t => t.memnuniyetPuani);
   const ortMemnuniyet = puanlilar.length ? Math.round((puanlilar.reduce((s, t) => s + (t.memnuniyetPuani ?? 0), 0) / puanlilar.length) * 20) : 0;
 
   const expiringSoon = garantiler.filter(g => {
-    const days = Math.ceil((new Date(g.garantiBitis).getTime() - Date.now()) / 86400000);
+    const ms = zamanMs(g.garantiBitis);
+    if (ms === null) return false;
+    const days = Math.ceil((ms - Date.now()) / 86400000);
     return days >= 0 && days < 30;
   });
 
@@ -315,7 +322,7 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
                             {sla === 'breach' && <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
                             {sla === 'warning' && <Clock className="w-3.5 h-3.5 text-amber-500" />}
                             {sla === 'ok' && <CheckCircle className="w-3.5 h-3.5 text-green-500" />}
-                            <span className="text-xs text-gray-500">{deadline.toLocaleDateString('tr-TR')}</span>
+                            <span className="text-xs text-gray-500">{tarihYaz(deadline)}</span>
                           </div>
                         </td>
                         <td className="px-4 py-3"><DurumBadge durum={t.durum} /></td>
@@ -425,7 +432,8 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
                 </tr></thead>
                 <tbody className="divide-y divide-gray-50">
                   {garantiler.map(g => {
-                    const days = Math.ceil((new Date(g.garantiBitis).getTime() - Date.now()) / 86400000);
+                    const ms = zamanMs(g.garantiBitis);
+                    const days = ms === null ? null : Math.ceil((ms - Date.now()) / 86400000);
                     const { label, cls } = garantiDurum(g.garantiBitis);
                     return (
                       <tr key={g.id} className="hover:bg-gray-50/50 transition-colors">
@@ -434,7 +442,7 @@ export default function ServisModule({ currentLanguage: _lang, isAuthenticated }
                         <td className="px-4 py-3 text-gray-500">{g.musteriAd}</td>
                         <td className="px-4 py-3 text-gray-500">{g.satisTarihi}</td>
                         <td className="px-4 py-3 text-gray-500">{g.garantiBitis}</td>
-                        <td className="px-4 py-3 text-gray-700 font-medium">{days > 0 ? `${days}g` : '—'}</td>
+                        <td className="px-4 py-3 text-gray-700 font-medium">{days !== null && days > 0 ? `${days}g` : '—'}</td>
                         <td className="px-4 py-3"><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cls}`}>{label}</span></td>
                       </tr>
                     );

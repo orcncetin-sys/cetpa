@@ -3,6 +3,7 @@ import { ShoppingCart, TrendingUp, FileText, Calculator, CheckCircle, BarChart3,
 import { type Order } from '../../types';
 import { type MikroFatura } from '../../hooks/useMikroFaturalar';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
+import { tarihYaz } from '../../utils/zaman';
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type SatisKayit = { customerName?: string; totalPrice?: number; faturali?: boolean; kdvOran?: number; oranKarma?: boolean; kdvTutari?: number; syncedAt?: { toDate?: () => Date } };
@@ -58,7 +59,7 @@ export default function SatislarTab({
       {/* KPI Cards Row 1 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {/* Toplam Sipariş — count, no currency toggle */}
-        <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Tüm Siparişler' : 'All Orders', rows: satisKayitlari.map((o) => ({ label: o.customerName || '—', sub: o.syncedAt?.toDate ? o.syncedAt.toDate().toLocaleDateString('tr-TR') : '', badge: o.faturali ? 'FATURALI' : 'FATURASIZ', badgeColor: o.faturali ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.reduce((s, o) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+        <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Tüm Siparişler' : 'All Orders', rows: satisKayitlari.map((o) => ({ label: o.customerName || '—', sub: o.syncedAt ? tarihYaz(o.syncedAt) : '', badge: o.faturali ? 'FATURALI' : 'FATURASIZ', badgeColor: o.faturali ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.reduce((s, o) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-brand/10 flex items-center justify-center">
               <ShoppingCart size={15} className="text-brand" />
@@ -81,7 +82,7 @@ export default function SatislarTab({
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam Ciro{satisKaynak !== 'cetpa' && mikroSatisToplam > 0 ? (currentLanguage === 'tr' ? ' (Mikro dahil)' : ' (incl. Mikro)') : ''}</p>
         </div>
         {/* Faturalı / Faturasız — count, no currency toggle */}
-        <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturalı Siparişler' : 'Invoiced Orders', rows: satisKayitlari.filter((o) => o.faturali).map((o) => ({ label: o.customerName || '—', sub: o.syncedAt?.toDate ? o.syncedAt.toDate().toLocaleDateString('tr-TR') : '', badge: 'FATURALI', badgeColor: 'bg-green-100 text-green-600', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.filter((o) => o.faturali).reduce((s, o) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+        <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Faturalı Siparişler' : 'Invoiced Orders', rows: satisKayitlari.filter((o) => o.faturali).map((o) => ({ label: o.customerName || '—', sub: o.syncedAt ? tarihYaz(o.syncedAt) : '', badge: 'FATURALI', badgeColor: 'bg-green-100 text-green-600', value: formatConv(o.totalPrice || 0) })), total: formatConv(satisKayitlari.filter((o) => o.faturali).reduce((s, o) => s + (o.totalPrice || 0), 0)) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
               <FileText size={15} className="text-blue-600" />
@@ -235,7 +236,7 @@ export default function SatislarTab({
                 <tr key={o.id} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="py-2.5 px-3 font-medium text-gray-800">{o.customerName}</td>
                   <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">
-                    {(o.syncedAt as { toDate?: () => Date })?.toDate ? (o.syncedAt as { toDate: () => Date }).toDate().toLocaleDateString('tr-TR') : '—'}
+                    {tarihYaz(o.syncedAt)}
                   </td>
                   <td className="py-2.5 px-3 text-right font-semibold">{formatTRY(o.totalPrice || 0)}</td>
                   <td className="py-2.5 px-3 text-center">
@@ -257,7 +258,7 @@ export default function SatislarTab({
                     <span className="ml-1.5 text-[9px] font-bold bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full align-middle">MİKRO</span>
                   </td>
                   <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">
-                    {f.tarih ? new Date(f.tarih).toLocaleDateString('tr-TR') : '—'}
+                    {tarihYaz(f.tarih)}
                   </td>
                   <td className="py-2.5 px-3 text-right font-semibold">{formatTRY(f.tutar)}</td>
                   <td className="py-2.5 px-3 text-center text-xs font-mono text-gray-600">{f.faturaNo || '—'}</td>

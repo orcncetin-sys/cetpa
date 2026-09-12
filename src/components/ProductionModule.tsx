@@ -16,7 +16,7 @@ import {
   doc, serverTimestamp, runTransaction,
 } from '../lib/dbClient';
 import { logFirestoreError, OperationType } from '../utils/firebase';
-import { format } from 'date-fns';
+import { tarihYaz, zamanMs } from '../utils/zaman';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell
@@ -337,15 +337,6 @@ function generateOrderNo(): string {
   return 'ÜE-' + Date.now().toString().slice(-6);
 }
 
-function safeFormat(dateStr: string): string {
-  try {
-    if (!dateStr) return '—';
-    return format(new Date(dateStr), 'dd.MM.yyyy');
-  } catch {
-    return dateStr;
-  }
-}
-
 /** Robust sorting helper */
 function sortData<T>(data: T[], key: string, direction: 'asc' | 'desc'): T[] {
   return [...data].sort((a: any, b: any) => {
@@ -362,10 +353,10 @@ function sortData<T>(data: T[], key: string, direction: 'asc' | 'desc'): T[] {
     }
 
     // Date comparison (attempt)
-    const ad = new Date(av);
-    const bd = new Date(bv);
-    if (!isNaN(ad.getTime()) && !isNaN(bd.getTime()) && typeof av === 'string' && av.includes('-')) {
-      return direction === 'asc' ? ad.getTime() - bd.getTime() : bd.getTime() - ad.getTime();
+    const am = zamanMs(av);
+    const bm = zamanMs(bv);
+    if (am !== null && bm !== null && typeof av === 'string' && av.includes('-')) {
+      return direction === 'asc' ? am - bm : bm - am;
     }
 
     // String comparison
@@ -453,13 +444,8 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
         (snap) => {
           const orders = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductionOrder));
           // Sort descending by createdAt if present, fallback to orderNo
-          orders.sort((a, b) => {
-            const ta = (a.createdAt as { toDate?: () => Date } | string | undefined);
-            const tb = (b.createdAt as { toDate?: () => Date } | string | undefined);
-            const da = ta ? (typeof (ta as { toDate?: () => Date }).toDate === 'function' ? (ta as { toDate: () => Date }).toDate() : new Date(ta as string)) : new Date(0);
-            const db2 = tb ? (typeof (tb as { toDate?: () => Date }).toDate === 'function' ? (tb as { toDate: () => Date }).toDate() : new Date(tb as string)) : new Date(0);
-            return db2.getTime() - da.getTime();
-          });
+          // createdAt yoksa/çözülemezse 0 (epoch) — sıralamada sona düşer; "şimdi" değil.
+          orders.sort((a, b) => (zamanMs(b.createdAt) ?? 0) - (zamanMs(a.createdAt) ?? 0));
           setProductionOrders(orders);
         },
         (err) => logFirestoreError(err, OperationType.LIST, 'productionOrders')
@@ -1079,12 +1065,12 @@ export default function ProductionModule({ currentLanguage, isAuthenticated }: P
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-gray-50 rounded-xl p-2.5">
                       <p className="text-gray-400 font-semibold uppercase tracking-wider text-[9px] mb-0.5">{t.sonBakim}</p>
-                      <p className="font-medium text-[#1D1D1F]">{safeFormat(machine.lastMaintenance)}</p>
+                      <p className="font-medium text-[#1D1D1F]">{tarihYaz(machine.lastMaintenance)}</p>
                     </div>
                     {machine.nextMaintenance && (
                       <div className="bg-amber-50 rounded-xl p-2.5">
                         <p className="text-amber-400 font-semibold uppercase tracking-wider text-[9px] mb-0.5">{t.sonrakiBakim}</p>
-                        <p className="font-medium text-amber-700">{safeFormat(machine.nextMaintenance)}</p>
+                        <p className="font-medium text-amber-700">{tarihYaz(machine.nextMaintenance)}</p>
                       </div>
                     )}
                   </div>

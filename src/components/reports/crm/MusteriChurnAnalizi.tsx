@@ -4,8 +4,8 @@
  * Render koşulu `reportsTab === 'crm' && orders.length >= 5` ebeveyn CrmRapor.tsx'te durur.
  * Props: ReportsCtx'in tamamı DEĞİL — yalnız bu kartın gerçekten kullandığı alanlar.
  */
-import { type Order } from '../../../types';
 import type { ReportsCtx } from '../useReportsData';
+import { zamanDate } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'orders' | 'currentLanguage' | 'fmtAna'>;
 
@@ -14,16 +14,12 @@ export default function MusteriChurnAnalizi({ orders, currentLanguage, fmtAna }:
   const prevMonthStart = new Date(now187.getFullYear(), now187.getMonth() - 1, 1);
   const prevMonthEnd = new Date(now187.getFullYear(), now187.getMonth(), 0, 23, 59, 59);
   const currMonthStart = new Date(now187.getFullYear(), now187.getMonth(), 1);
-  const getDate187 = (o: Order) => {
-    try { return (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string); }
-    catch { return null; }
-  };
   const prevCustomers = new Set<string>();
   const currCustomers = new Set<string>();
   const prevRevByCustomer: Record<string, number> = {};
   for (const o of orders) {
     if (o.status === 'Cancelled') continue;
-    const d = getDate187(o);
+    const d = zamanDate(o.createdAt);
     if (!d) continue;
     const name = o.customerName || '—';
     if (d >= prevMonthStart && d <= prevMonthEnd) {

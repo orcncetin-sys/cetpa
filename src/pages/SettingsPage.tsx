@@ -9,11 +9,12 @@ import {
 import { db, auth } from '../firebase';
 import {
   doc, setDoc, addDoc, updateDoc, deleteDoc,
-  collection, serverTimestamp, Timestamp,
+  collection, serverTimestamp,
 } from '../lib/dbClient';
 import { authFetch } from '../services/authFetch';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { paraYaz } from '../utils/currency';
+import { tarihSaatYaz } from '../utils/zaman';
 import ModuleHeader from '../components/ModuleHeader';
 import SubscriptionPanel from '../components/SubscriptionPanel';
 import ERPHubPanel from '../components/ERPHubPanel';
@@ -666,7 +667,7 @@ export default function SettingsPage({
           action: String(l.action || l.type || 'update'),
           entity: String(l.entity || l.collection || l.module || ''),
           entityId: String(l.entityId || l.docId || l.id || ''),
-          ts: l.timestamp instanceof Timestamp ? l.timestamp.toDate().toISOString() : String(l.timestamp || l.createdAt || new Date().toISOString()),
+          ts: l.timestamp ?? l.createdAt,
           details: l.details || l.description || l.message ? String(l.details || l.description || l.message) : undefined,
         }));
         const filtered641 = p641Entity === 'all' ? normalised : normalised.filter(l => l.entity === p641Entity);
@@ -698,7 +699,7 @@ export default function SettingsPage({
                       </div>
                       {l.details && <p className="text-[10px] text-gray-500 truncate">{l.details}</p>}
                     </div>
-                    <span className="text-[10px] text-gray-400 shrink-0">{new Date(l.ts).toLocaleString('tr-TR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                    <span className="text-[10px] text-gray-400 shrink-0">{tarihSaatYaz(l.ts, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                 ))}
               </div>

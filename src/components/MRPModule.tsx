@@ -29,6 +29,7 @@ import MikroPushButton from './MikroPushButton';
 import { uretimTalepPayload, satinAlmaTalepPayload } from '../services/mikroEvrak';
 import { sortByCreatedAt, byField } from '../utils/fsSort';
 import ModuleHeader from './ModuleHeader';
+import { gunAnahtari, tarihYaz } from '../utils/zaman';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -222,7 +223,7 @@ export default function MRPModule({
         itemName: productName,
         qty: demandQty,
         unit: 'adet',
-        neededBy: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+        neededBy: gunAnahtari(Date.now() + 14 * 86400000) ?? '',
         reason: tr ? `${demandQty} adet talep` : `Demand: ${demandQty} units`,
         routingId: routing?.id,
       });
@@ -244,7 +245,7 @@ export default function MRPModule({
               itemName: comp.name,
               qty: shortage,
               unit: comp.unit,
-              neededBy: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+              neededBy: gunAnahtari(Date.now() + 7 * 86400000) ?? '',
               reason: tr
                 ? `Kalan stok: ${avail} ${comp.unit}, Gereken: ${required} ${comp.unit}`
                 : `Available: ${avail} ${comp.unit}, Required: ${required} ${comp.unit}`,
@@ -722,7 +723,7 @@ export default function MRPModule({
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="font-bold text-gray-900">{s.qty} {s.unit}</p>
-                    <p className="text-xs text-gray-400">{tr ? 'Gerekli:' : 'By:'} {new Date(s.neededBy).toLocaleDateString('tr-TR')}</p>
+                    <p className="text-xs text-gray-400">{tr ? 'Gerekli:' : 'By:'} {tarihYaz(s.neededBy)}</p>
                     <MikroPushButton
                       compact
                       method={s.type === 'purchase' ? 'SatinAlmaTalepKaydetV2' : 'UretimTalepKaydetV2'}

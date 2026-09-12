@@ -11,6 +11,7 @@
  */
 import type { ReportsCtx } from '../useReportsData';
 import { paraYaz } from '../../../utils/currency';
+import { zamanDate, zamanMs, ayAnahtari } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'currentLanguage' | 'fmtAna'>;
 
@@ -71,7 +72,7 @@ export default function CrmBloklar8({ reportsTab, orders, quotations, currentLan
           { label: '15+ days', days: 999, count: 0, color: '#ef4444' },
         ];
         quotations.forEach(q => {
-          const d = (q.createdAt as {toDate?:()=>Date}).toDate?.() ?? (q.createdAt ? new Date(q.createdAt as string) : null);
+          const d = zamanDate(q.createdAt);
           if (!d) return;
           const age = (now.getTime() - d.getTime()) / 86400000;
           if (age <= 1) responseGroups[0].count++;
@@ -108,12 +109,12 @@ export default function CrmBloklar8({ reportsTab, orders, quotations, currentLan
         const now = new Date();
         const months = Array.from({length: 6}, (_, i) => {
           const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-          return {key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`, year: d.getFullYear(), month: d.getMonth()};
+          return {key: ayAnahtari(d) ?? '', label: `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`, year: d.getFullYear(), month: d.getMonth()};
         });
         orders.forEach(o => {
           const rep = (o.assignedTo as string) || 'Unassigned';
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          const mkey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          const mkey = ayAnahtari(o.createdAt);
+          if (!mkey) return;
           if (!repMonthly[rep]) repMonthly[rep] = {};
           repMonthly[rep][mkey] = (repMonthly[rep][mkey] || 0) + o.totalPrice;
         });
@@ -166,7 +167,8 @@ export default function CrmBloklar8({ reportsTab, orders, quotations, currentLan
       {reportsTab === 'crm' && orders.length >= 10 && (() => {
         const custDates: Record<string, Date[]> = {};
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+          const d = zamanDate(o.createdAt);
+          if (!d) return;
           if (!custDates[o.customerName]) custDates[o.customerName] = [];
           custDates[o.customerName].push(d);
         });
@@ -278,16 +280,11 @@ export default function CrmBloklar8({ reportsTab, orders, quotations, currentLan
       })()}
 
       {reportsTab === 'crm' && orders.length >= 8 && (() => {
-        const toTs331 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
+        // Tarihi çözülemeyen sipariş hesaptan düşer (eskiden epoch 0 → '1970-01' anahtarıyla müşteri "görülmüş" sayılıyordu).
+        const dated331 = orders.flatMap(o => { const ts = zamanMs(o.createdAt); return ts === null ? [] : [{ o, ts, key: ayAnahtari(ts) ?? '' }]; });
         const seenBefore: Record<string, string> = {};
         const monthData: Record<string, {newC: number; ret: number}> = {};
-        [...orders].sort((a, b) => toTs331(a.createdAt) - toTs331(b.createdAt)).forEach(o => {
-          const d = new Date(toTs331(o.createdAt));
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        dated331.sort((a, b) => a.ts - b.ts).forEach(({ o, key }) => {
           if (!monthData[key]) monthData[key] = {newC: 0, ret: 0};
           const cust = o.customerName || 'Unknown';
           if (seenBefore[cust]) monthData[key].ret++;
@@ -464,15 +461,10 @@ export default function CrmBloklar8({ reportsTab, orders, quotations, currentLan
       })()}
 
       {reportsTab === 'crm' && orders.length >= 8 && (() => {
-        const toTs353 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const custOrders: Record<string, number[]> = {};
         orders.forEach(o => {
           const c = o.customerName || 'Unknown';
-          const ts = toTs353(o.createdAt);
+          const ts = zamanMs(o.createdAt);
           if (!ts) return;
           if (!custOrders[c]) custOrders[c] = [];
           custOrders[c].push(ts);
@@ -575,17 +567,10 @@ export default function CrmBloklar8({ reportsTab, orders, quotations, currentLan
       })()}
 
       {reportsTab === 'crm' && quotations.length >= 4 && (() => {
-        const toTs362 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const monthQV: Record<string, {total: number; count: number}> = {};
         quotations.forEach(q => {
-          const ts = toTs362((q as unknown as Record<string,unknown>).createdAt);
-          if (!ts) return;
-          const d = new Date(ts);
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(q.createdAt);
+          if (!key) return;
           const val = (q as unknown as Record<string,unknown>).totalPrice as number || (q as unknown as Record<string,unknown>).total as number || 0;
           if (!monthQV[key]) monthQV[key] = {total: 0, count: 0};
           monthQV[key].total += val;

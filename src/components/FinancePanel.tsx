@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { DollarSign, TrendingUp, TrendingDown, FileText, Clock, CheckCircle2, AlertCircle, AlarmClock, Waves, Info } from 'lucide-react';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
-import { zamanMs } from '../utils/zaman';
+import { zamanMs, tarihYaz } from '../utils/zaman';
 import { odemeTakipli, gorunenSiparisNo } from '../utils/siparis';
 import { tlYaz } from '../utils/currency';
 import { toplaBilinen, tahsilatOrani } from '../utils/para';
@@ -368,7 +368,7 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
         const weekLabel = (offset: number) => {
           const d = new Date(now109);
           d.setDate(d.getDate() + offset * 7);
-          return d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', day: 'numeric' });
+          return tarihYaz(d, { month: 'short', day: 'numeric' }, currentLanguage === 'tr' ? 'tr' : 'en');
         };
 
         // Build 8 weeks: -3 past, current, +4 future

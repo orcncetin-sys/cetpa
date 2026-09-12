@@ -12,6 +12,7 @@ import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ModuleHeader from '../components/ModuleHeader';
 import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import { paraYaz } from '../utils/currency';
+import { zamanDate, gunBasi, gunAnahtari } from '../utils/zaman';
 import type { Order, Lead, Employee } from '../types';
 
 const HRModule = React.lazy(() => import('../components/HRModule'));
@@ -337,8 +338,9 @@ export default function IKPage(props: Props) {
                                 disabled={!leaveForm.employeeName || !leaveForm.startDate || !leaveForm.endDate}
                                 onClick={async () => {
                                   if (!leaveForm.employeeName || !leaveForm.startDate || !leaveForm.endDate) return;
-                                  const start = new Date(leaveForm.startDate);
-                                  const end   = new Date(leaveForm.endDate);
+                                  const start = gunBasi(leaveForm.startDate);
+                                  const end   = gunBasi(leaveForm.endDate);
+                                  if (!start || !end) return;
                                   const days  = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1);
                                   const emp = employees.find(e => e.name.toLowerCase().includes(leaveForm.employeeName.toLowerCase()));
                                   await addDoc(collection(db, 'leaveRequests'), {
@@ -479,8 +481,8 @@ export default function IKPage(props: Props) {
                     const thisYear138 = today138.getFullYear();
                     // Show leaves active in current month
                     const current = approved.filter(l => {
-                      const start = l.startDate ? new Date(l.startDate) : null;
-                      const end = l.endDate ? new Date(l.endDate) : null;
+                      const start = gunBasi(l.startDate);
+                      const end = gunBasi(l.endDate);
                       if (!start || !end) return false;
                       return (
                         (start.getFullYear() === thisYear138 && start.getMonth() === thisMonth138) ||
@@ -499,7 +501,8 @@ export default function IKPage(props: Props) {
                         <div className="divide-y divide-gray-50">
                           {current.map(l => {
                             const typeLabel = { annual: currentLanguage === 'tr' ? 'Yıllık' : 'Annual', sick: currentLanguage === 'tr' ? 'Hastalık' : 'Sick', unpaid: currentLanguage === 'tr' ? 'Ücretsiz' : 'Unpaid', other: currentLanguage === 'tr' ? 'Diğer' : 'Other' }[l.type] || l.type;
-                            const isNow = l.startDate && l.endDate && new Date(l.startDate) <= today138 && new Date(l.endDate) >= today138;
+                            const izinBas = gunBasi(l.startDate), izinBit = gunBasi(l.endDate);
+                            const isNow = !!izinBas && !!izinBit && izinBas <= today138 && izinBit >= today138;
                             return (
                               <div key={l.id} className="flex items-center gap-4 px-5 py-3">
                                 <div className="flex-1 min-w-0">
@@ -820,7 +823,7 @@ export default function IKPage(props: Props) {
                     const tr616 = currentLanguage === 'tr';
                     const daysMap:{[k:string]:number} = {'3m':90,'6m':180,'12m':365};
                     const days616 = daysMap[p616Period];
-                    const cutoff616 = new Date(Date.now()-days616*86400000).toISOString().slice(0,10);
+                    const cutoff616 = gunAnahtari(Date.now()-days616*86400000) ?? '';
                     const activeEmps = employees.filter(e=>e.status==='Aktif').length;
                     const leftEmps = employees.filter(e=>e.status==='Ayrıldı'&&e.startDate>=cutoff616).length;
                     const turnoverRate = activeEmps+leftEmps>0?(leftEmps/(activeEmps+leftEmps)*100):0;
@@ -870,12 +873,12 @@ export default function IKPage(props: Props) {
                     if (p629KpiPeriod==='this_month') start629 = new Date(now629.getFullYear(), now629.getMonth(), 1);
                     else if (p629KpiPeriod==='last_month') start629 = new Date(now629.getFullYear(), now629.getMonth()-1, 1);
                     else start629 = new Date(now629.getFullYear(), 0, 1);
-                    const end629 = p629KpiPeriod==='last_month'?new Date(now629.getFullYear(), now629.getMonth(), 0):now629;
+                    const end629 = p629KpiPeriod==='last_month'?new Date(now629.getFullYear(), now629.getMonth(), 0, 23, 59, 59, 999):now629;   // ayın son günü dahil
                     // Sales per rep in period
                     const repSales:{[name:string]:{orders:number;revenue:number}} = {};
                     orders.filter(o=>{
                       if(o.status==='Cancelled'||!o.assignedTo||!o.createdAt) return false;
-                      try { const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string); return d>=start629&&d<=end629; } catch { return false; }
+                      const d=zamanDate(o.createdAt); return !!d&&d>=start629&&d<=end629;
                     }).forEach(o=>{ const r=o.assignedTo!; if(!repSales[r]) repSales[r]={orders:0,revenue:0}; repSales[r].orders++; repSales[r].revenue+=(o.totalPrice||0); });
                     const rows = employees.filter(e=>e.status==='Aktif').map(e=>({...e,sales:repSales[e.name]||{orders:0,revenue:0}})).sort((a,b)=>b.sales.revenue-a.sales.revenue);
                     return (

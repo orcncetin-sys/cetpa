@@ -12,6 +12,7 @@
 import { itemCostTRY, type ReportsCtx } from '../useReportsData';
 import { odemeTakipli } from '../../../utils/siparis';
 import { paraYaz } from '../../../utils/currency';
+import { zamanDate, zamanMs, gunAnahtari, ayAnahtari, gunFarki } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'employees' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -22,8 +23,8 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
         const now = new Date();
         const currMonth = new Date(now.getFullYear(), now.getMonth(), 1);
         const mOrders = orders.filter(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          return d >= currMonth;
+          const d = zamanDate(o.createdAt);
+          return !!d && d >= currMonth;
         });
         const revenue = mOrders.reduce((s,o)=>s+o.totalPrice,0);
         const cogs = mOrders.reduce((s,o)=>s+(o.lineItems||[]).reduce((sc,li)=>{
@@ -65,8 +66,8 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
       {reportsTab === 'genel' && orders.length >= 10 && (() => {
         const dayRevenue: Record<string, number> = {};
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          const key = d.toISOString().slice(0,10);
+          const key = gunAnahtari(o.createdAt);
+          if (!key) return;
           dayRevenue[key] = (dayRevenue[key]||0) + o.totalPrice;
         });
         const topDays = Object.entries(dayRevenue)
@@ -97,12 +98,12 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
         const days = Array.from({length: 28}, (_, i) => {
           const d = new Date(now);
           d.setDate(d.getDate() - (27 - i));
-          return d.toISOString().slice(0, 10);
+          return gunAnahtari(d) ?? '';
         });
         const dayRev: Record<string, number> = {};
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          const key = d.toISOString().slice(0, 10);
+          const key = gunAnahtari(o.createdAt);
+          if (!key) return;
           dayRev[key] = (dayRev[key] || 0) + o.totalPrice;
         });
         const rolling7: number[] = [];
@@ -145,8 +146,8 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
         ];
         const partData = parts.map(p => {
           const partOrders = orders.filter(o => {
-            const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-            return p.hours.includes(d.getHours());
+            const d = zamanDate(o.createdAt);
+            return !!d && p.hours.includes(d.getHours());
           });
           return {
             ...p,
@@ -196,8 +197,8 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
         const unpaidRev = unpaid.reduce((s, o) => s + o.totalPrice, 0);
         const now = new Date();
         const overdue = unpaid.filter(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          return (now.getTime() - d.getTime()) / 86400000 > 30;
+          const d = zamanDate(o.createdAt);
+          return !!d && (now.getTime() - d.getTime()) / 86400000 > 30;
         });
         const overdueRev = overdue.reduce((s, o) => s + o.totalPrice, 0);
         return (
@@ -303,15 +304,10 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
       })()}
 
       {reportsTab === 'genel' && orders.length >= 6 && (() => {
-        const toTs339 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const monthGM: Record<string, {rev: number; cost: number}> = {};
         orders.forEach(o => {
-          const d = new Date(toTs339(o.createdAt));
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           if (!monthGM[key]) monthGM[key] = {rev: 0, cost: 0};
           monthGM[key].rev += o.totalPrice || 0;
           const lineCost = (o.lineItems || []).reduce((s: number, li: {costPrice?: number; quantity?: number}) => s + (li.costPrice || 0) * (li.quantity || 1), 0);
@@ -447,17 +443,12 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
       })()}
 
       {reportsTab === 'genel' && orders.length >= 10 && (() => {
-        const toTs351 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         // Build week × day grid for last 8 weeks
         const now351 = Date.now();
         const grid: Record<string, number> = {};
         orders.forEach(o => {
-          const ts = toTs351(o.createdAt);
-          if (!ts) return;
+          const ts = zamanMs(o.createdAt);
+          if (ts === null) return;
           const d = new Date(ts);
           const weekAgo = Math.floor((now351 - ts) / (7 * 86400000));
           if (weekAgo > 7) return;
@@ -535,17 +526,11 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
       })()}
 
       {reportsTab === 'genel' && orders.length >= 7 && (() => {
-        const toTs365 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const daySet = new Set<string>();
         orders.forEach(o => {
-          const ts = toTs365(o.createdAt);
-          if (!ts) return;
-          const d = new Date(ts);
-          daySet.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
+          const key = gunAnahtari(o.createdAt);
+          if (!key) return;
+          daySet.add(key);
         });
         const sortedDays = [...daySet].sort();
         if (sortedDays.length < 3) return null;
@@ -553,7 +538,7 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
         let streak = 0;
         let checkDate = new Date();
         while (true) {
-          const key = `${checkDate.getFullYear()}-${String(checkDate.getMonth()+1).padStart(2,'0')}-${String(checkDate.getDate()).padStart(2,'0')}`;
+          const key = gunAnahtari(checkDate) ?? '';
           if (!daySet.has(key)) break;
           streak++;
           checkDate = new Date(checkDate.getTime() - 86400000);
@@ -561,7 +546,7 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
         // Longest streak
         let maxStreak = 0, cur = 1;
         for (let i = 1; i < sortedDays.length; i++) {
-          const diff = (new Date(sortedDays[i]).getTime() - new Date(sortedDays[i-1]).getTime()) / 86400000;
+          const diff = gunFarki(sortedDays[i], sortedDays[i-1]);
           if (diff === 1) { cur++; maxStreak = Math.max(maxStreak, cur); }
           else cur = 1;
         }
@@ -569,7 +554,7 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
         const last30: boolean[] = [];
         for (let i = 29; i >= 0; i--) {
           const d = new Date(Date.now() - i * 86400000);
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          const key = gunAnahtari(d) ?? '';
           last30.push(daySet.has(key));
         }
         return (

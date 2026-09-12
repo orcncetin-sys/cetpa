@@ -11,6 +11,7 @@ import { motion } from 'motion/react';
 import { UserCheck, Users } from 'lucide-react';
 import ModuleHeader from '../components/ModuleHeader';
 import { paraYaz } from '../utils/currency';
+import { gunAnahtari } from '../utils/zaman';
 import type { Employee, Payroll } from '../types';
 
 /** IKPage.tsx / MesaiPage.tsx'teki AttendanceRecord ile birebir aynı tanım. */
@@ -96,8 +97,8 @@ export default function SelfservisPage({
             <div className="apple-card p-5">
               <h4 className="font-bold text-gray-800 mb-3">{tr553?'Mesai Özeti (Son 30 Gün)':'Attendance Summary (Last 30 Days)'}</h4>
               {(() => {
-                const cut = new Date(Date.now()-30*86400000).toISOString().slice(0,10);
-                const myRecs = p552Records.filter(r=>r.employeeName===myEmp.name && r.date>=cut);
+                const cut = gunAnahtari(Date.now()-30*86400000);
+                const myRecs = cut ? p552Records.filter(r=>r.employeeName===myEmp.name && r.date>=cut) : [];
                 const totalH = myRecs.reduce((s,r)=>s+(r.totalHours||0),0);
                 return (
                   <div className="grid grid-cols-3 gap-3">

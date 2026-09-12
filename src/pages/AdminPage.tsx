@@ -21,6 +21,7 @@ import { UserRole, type LucaConfig, type MikroConfig } from '../types';
 import type { Lead, Order, InventoryItem, InventoryMovement, Employee } from '../types';
 import { tlYaz, kisaTutar } from '../utils/currency';
 import { basHarf } from '../utils/buyukHarf';
+import { zamanDate, zamanMs, tarihSaatYaz } from '../utils/zaman';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -685,9 +686,7 @@ export default function AdminPage({
                     <tr><td colSpan={5} className="text-center py-8 text-gray-400 text-xs">{tr571?'Sonuç bulunamadı.':'No results found.'}</td></tr>
                   ) : (
                     filtered571.map((log: Record<string, unknown>, i: number) => {
-                      const ts = (log.createdAt as {toDate?:()=>Date})?.toDate?.()
-                        ?? ((log.timestamp as {toDate?:()=>Date})?.toDate?.())
-                        ?? (log.createdAt ? new Date(log.createdAt as string) : null);
+                      const ts = zamanDate(log.createdAt) ?? zamanDate(log.timestamp);
                       const action = (log.action as string) || '—';
                       const actionColor = action.includes('DELETE') || action.includes('Sil') ? 'bg-red-100 text-red-700'
                         : action.includes('CREATE') || action.includes('Oluştur') ? 'bg-emerald-100 text-emerald-700'
@@ -889,8 +888,8 @@ export default function AdminPage({
           const tr600 = currentLanguage === 'tr';
           const integrations600 = [
             { name: 'Shopify', connected: !!(healthData as {shopify?:boolean}|null)?.shopify, lastSync: tr600?'Entegrasyon':'Integration', icon: '🛒', desc: tr600?'E-ticaret entegrasyonu':'E-commerce integration' },
-            { name: 'Mikro', connected: !!(mikroSettings as {connected?:boolean})?.connected, lastSync: (mikroSettings as {lastSync?:string})?.lastSync ? new Date((mikroSettings as {lastSync:string}).lastSync).toLocaleString('tr-TR') : null, icon: '💼', desc: tr600?'ERP entegrasyonu (JumpBulut)':'ERP integration (JumpBulut)' },
-            { name: 'Luca', connected: !!(lucaSettings as {connected?:boolean})?.connected, lastSync: (lucaSettings as {lastSync?:string})?.lastSync ? new Date((lucaSettings as {lastSync:string}).lastSync).toLocaleString('tr-TR') : null, icon: '📒', desc: tr600?'Muhasebe entegrasyonu':'Accounting integration' },
+            { name: 'Mikro', connected: !!(mikroSettings as {connected?:boolean})?.connected, lastSync: (mikroSettings as {lastSync?:string})?.lastSync ? tarihSaatYaz((mikroSettings as {lastSync:string}).lastSync) : null, icon: '💼', desc: tr600?'ERP entegrasyonu (JumpBulut)':'ERP integration (JumpBulut)' },
+            { name: 'Luca', connected: !!(lucaSettings as {connected?:boolean})?.connected, lastSync: (lucaSettings as {lastSync?:string})?.lastSync ? tarihSaatYaz((lucaSettings as {lastSync:string}).lastSync) : null, icon: '📒', desc: tr600?'Muhasebe entegrasyonu':'Accounting integration' },
             { name: 'Logo', connected: false, lastSync: null, icon: '🐯', desc: tr600?'Logo Tiger/Go ERP':'Logo Tiger/Go ERP' },
             { name: 'Dynamics', connected: false, lastSync: null, icon: '🪟', desc: tr600?'Microsoft Dynamics 365 BC':'Microsoft Dynamics 365 BC' },
             { name: 'SAP B1', connected: false, lastSync: null, icon: '🔷', desc: tr600?'SAP Business One':'SAP Business One' },
@@ -940,7 +939,7 @@ export default function AdminPage({
           ) : (
             <div className="space-y-2 max-h-96 overflow-y-auto">
               {clientErrors.map(e => {
-                const ts = e.timestamp?.toMillis?.();
+                const ts = zamanMs(e.timestamp);
                 const when = ts ? new Date(ts).toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US') : '—';
                 return (
                   <div key={e.id} className="border border-gray-100 rounded-xl p-3 hover:bg-gray-50/60 transition-colors">

@@ -25,6 +25,7 @@ import ModuleHeader from './ModuleHeader';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { oncelikEtiketi } from '../utils/durumEtiketi';
 import { paraYaz } from '../utils/currency';
+import { zamanDate, tarihYaz } from '../utils/zaman';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -64,16 +65,6 @@ interface ApprovalQueueProps {
   userEmail?: string | null;
   userName?: string | null;
 }
-
-// ── Helper ────────────────────────────────────────────────────────────────────
-
-const toDate = (val: unknown): Date => {
-  if (!val) return new Date();
-  if (typeof val === 'object' && val !== null && 'toDate' in val && typeof (val as { toDate: () => Date }).toDate === 'function') {
-    return (val as { toDate: () => Date }).toDate();
-  }
-  return new Date(val as string | number);
-};
 
 const TYPE_META: Record<ApprovalType, { icon: React.ElementType; color: string; bg: string; label: Record<'tr' | 'en', string> }> = {
   purchase_order:       { icon: ShoppingCart, color: 'text-blue-600',   bg: 'bg-blue-50',   label: { tr: 'Satınalma Emri',     en: 'Purchase Order'     } },
@@ -280,7 +271,7 @@ export default function ApprovalQueue({
           {filtered.map(req => {
             const meta = TYPE_META[req.type] || TYPE_META.other;
             const Icon = meta.icon;
-            const d = toDate(req.createdAt);
+            const d = zamanDate(req.createdAt);
             return (
               <motion.div
                 key={req.id}
@@ -322,7 +313,7 @@ export default function ApprovalQueue({
                       </span>
                     )}
                     <span className="text-[10px] text-gray-300 ml-auto">
-                      {d.toLocaleDateString(t === 'tr' ? 'tr-TR' : 'en-US', { day: '2-digit', month: 'short' })}
+                      {d ? tarihYaz(d, { day: '2-digit', month: 'short' }, t === 'tr' ? 'tr' : 'en') : '—'}
                     </span>
                   </div>
                 </div>

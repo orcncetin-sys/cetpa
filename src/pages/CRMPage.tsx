@@ -23,6 +23,7 @@ import { twMerge } from 'tailwind-merge';
 import Papa from 'papaparse';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { odemeTakipli } from '../utils/siparis';
+import { zamanDate, zamanMs, gunFarki, ayAnahtari, gunAnahtari, tarihYaz } from '../utils/zaman';
 import { authFetch } from '../services/authFetch';
 import { exportLeadsCSV } from '../utils/export';
 import { formatCurrency, formatInCurrency, paraYaz, tlYaz, kisaTutar } from '../utils/currency';
@@ -222,8 +223,7 @@ export default function CRMPage({
   // Davranış eskisiyle aynı: Timestamp/Date -> ms, metin -> küçük harf,
   // yok/null -> '' (yalnızca sıralama içindir, sayısal alana 0 yazılmaz).
   const sortKeyValue = (raw: unknown): string | number => {
-    if (raw && typeof (raw as { toDate?: unknown }).toDate === 'function') return (raw as { toDate: () => Date }).toDate().getTime();
-    if (raw instanceof Date) return raw.getTime();
+    if (raw instanceof Date || (raw && typeof (raw as { toDate?: unknown }).toDate === 'function')) return zamanMs(raw) ?? '';
     if (typeof raw === 'string') return raw.toLowerCase();
     if (typeof raw === 'number') return raw;
     if (raw === undefined || raw === null) return '';
@@ -269,7 +269,7 @@ export default function CRMPage({
   );
 
   const saveMonthlyTarget = (monthKey: string, value: number) => {
-    const curMonth = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
+    const curMonth = ayAnahtari(new Date()) ?? '';
     if (monthKey === curMonth) setMonthlyTarget(value);
     const updated = { ...monthlyTargets, [monthKey]: value };
     if (value === 0) delete updated[monthKey];
@@ -306,7 +306,9 @@ export default function CRMPage({
   const handleUpdateFollowUpDate = async (date: string) => {
     if (!selectedLead) return;
     try {
-      const nextFollowUpDate = Timestamp.fromDate(new Date(date));
+      const parsed = zamanDate(date);
+      if (!parsed) return;
+      const nextFollowUpDate = Timestamp.fromDate(parsed);
       await updateDoc(doc(db, 'leads', selectedLead.id), { nextFollowUpDate, updatedAt: serverTimestamp() });
       setSelectedLead({ ...selectedLead, nextFollowUpDate });
     } catch (error) {
@@ -482,7 +484,7 @@ export default function CRMPage({
                   overdueLeadCount: leads.filter(l => {
                     if (['Closed Won','Closed Lost','Closed'].includes(l.status)) return false;
                     if (!l.nextFollowUpDate) return false;
-                    try { const d = typeof (l.nextFollowUpDate as {toDate?:()=>Date}).toDate==='function' ? (l.nextFollowUpDate as {toDate:()=>Date}).toDate() : new Date(l.nextFollowUpDate as string); return d < new Date(); } catch { return false; }
+                    const d = zamanDate(l.nextFollowUpDate); return !!d && d < new Date();
                   }).length
                 }}
                 onAction={() => {}}
@@ -606,7 +608,7 @@ export default function CRMPage({
                                   </div>
                                 </td>
                                 <td className="px-6 py-4 text-gray-500">
-                                  {order.syncedAt ? (typeof (order.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (order.syncedAt as { toDate: () => Date }).toDate() : new Date(order.syncedAt as unknown as string | number | Date)).toLocaleDateString() : 'Unknown Date'}
+                                  {order.syncedAt ? tarihYaz(order.syncedAt) : 'Unknown Date'}
                                 </td>
                                 <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                                   <select value={order.status} onChange={(e) => {
@@ -1060,7 +1062,7 @@ export default function CRMPage({
                                 return (
                                   <tr key={c.id} className="hover:bg-gray-50/50">
                                     <td className="px-3 py-2.5 font-medium text-gray-800">{c.name}</td>
-                                    <td className="px-3 py-2.5 text-gray-500">{new Date(c.sentDate).toLocaleDateString('tr-TR')}</td>
+                                    <td className="px-3 py-2.5 text-gray-500">{tarihYaz(c.sentDate)}</td>
                                     <td className="px-3 py-2.5 font-mono text-gray-600">{c.recipients.toLocaleString()}</td>
                                     <td className="px-3 py-2.5 font-bold text-emerald-600">%{or}</td>
                                     <td className="px-3 py-2.5 font-bold text-amber-600">%{cr}</td>
@@ -1103,9 +1105,8 @@ export default function CRMPage({
                     const today = new Date();
                     const expiring = contracts.filter(c => {
                       if (!c.endDate) return false;
-                      const d = new Date(c.endDate);
-                      const diff = (d.getTime() - today.getTime()) / 86400000;
-                      return diff >= 0 && diff <= 30;
+                      const diff = gunFarki(c.endDate, today);
+                      return diff !== null && diff >= 0 && diff <= 30;
                     });
                     if (expiring.length === 0) return null;
                     return (
@@ -1183,9 +1184,7 @@ export default function CRMPage({
                   ) : (
                     <div className="space-y-2">
                       {contracts.map(c => {
-                        const today = new Date();
-                        const end = c.endDate ? new Date(c.endDate) : null;
-                        const daysLeft = end ? Math.ceil((end.getTime() - today.getTime()) / 86400000) : null;
+                        const daysLeft = c.endDate ? gunFarki(c.endDate, new Date()) : null;
                         const expired = daysLeft !== null && daysLeft < 0;
                         const expiringSoon = daysLeft !== null && daysLeft >= 0 && daysLeft <= 30;
                         return (
@@ -1467,16 +1466,14 @@ export default function CRMPage({
               {/* ── Phase 142: Sales Target Tracker ── */}
               {activeTab === 'crm' && crmTab === 'hedefler' && (() => {
                 const now = new Date();
-                const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                const thisMonthKey = ayAnahtari(now) ?? '';
 
                 // ── Build revenue-per-month from all orders ──────────────────
                 const revenueByMonth: Record<string, number> = {};
                 const dealsByMonth: Record<string, number> = {};
                 const repByMonth: Record<string, Record<string, { actual: number; deals: number }>> = {};
                 for (const o of orders) {
-                  const dateStr = o.createdAt
-                    ? (() => { try { const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; } catch { return ''; } })()
-                    : '';
+                  const dateStr = ayAnahtari(o.createdAt);
                   if (!dateStr) continue;
                   revenueByMonth[dateStr] = (revenueByMonth[dateStr] || 0) + (o.totalPrice || 0);
                   dealsByMonth[dateStr] = (dealsByMonth[dateStr] || 0) + 1;
@@ -1491,8 +1488,8 @@ export default function CRMPage({
                 const months: { key: string; label: string; year: number; month: number }[] = [];
                 for (let i = 11; i >= 0; i--) {
                   const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-                  const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-                  const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', year: 'numeric' });
+                  const key = ayAnahtari(d) ?? '';
+                  const label = tarihYaz(d, { month: 'short', year: 'numeric' }, currentLanguage === 'tr' ? 'tr' : 'en');
                   months.push({ key, label, year: d.getFullYear(), month: d.getMonth()+1 });
                 }
 
@@ -1526,7 +1523,7 @@ export default function CRMPage({
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div>
                         <h2 className="text-xl font-bold text-gray-900">{currentLanguage === 'tr' ? 'Satış Hedefleri' : 'Sales Targets'}</h2>
-                        <p className="text-sm text-gray-500">{now.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'long', year: 'numeric' })}</p>
+                        <p className="text-sm text-gray-500">{tarihYaz(now, { month: 'long', year: 'numeric' }, currentLanguage === 'tr' ? 'tr' : 'en')}</p>
                       </div>
                       {!isEditingTarget && (
                         <button onClick={() => { setIsEditingTarget(true); setTargetDraft(String(monthlyTarget)); }}
@@ -1767,21 +1764,15 @@ export default function CRMPage({
               />
               {/* ── Phase 515: Follow-up Due Alert ── */}
               {!p515Dismissed && (() => {
-                const now515 = new Date(); now515.setHours(0,0,0,0);
+                const now515 = new Date();
                 const overdue = leads.filter(l => {
                   if (!l.nextFollowUpDate || huniAsamasi(l) === 'Closed') return false;
-                  const due = typeof (l.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
-                    ? (l.nextFollowUpDate as { toDate: () => Date }).toDate()
-                    : new Date(l.nextFollowUpDate as unknown as string | number);
-                  return due <= now515;
+                  const fark = gunFarki(l.nextFollowUpDate, now515);
+                  return fark !== null && fark < 0;
                 });
                 const dueToday = leads.filter(l => {
                   if (!l.nextFollowUpDate || huniAsamasi(l) === 'Closed') return false;
-                  const due = typeof (l.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
-                    ? (l.nextFollowUpDate as { toDate: () => Date }).toDate()
-                    : new Date(l.nextFollowUpDate as unknown as string | number);
-                  const dueD = new Date(due); dueD.setHours(0,0,0,0);
-                  return dueD.getTime() === now515.getTime();
+                  return gunFarki(l.nextFollowUpDate, now515) === 0;
                 });
                 if (overdue.length === 0 && dueToday.length === 0) return null;
                 return (
@@ -2025,15 +2016,7 @@ export default function CRMPage({
                     leadId: l.id,
                     company: l.company,
                   }))
-                ).filter(a => a.date).sort((a, b) => {
-                  const ta = typeof (a.date as { toDate?: () => Date }).toDate === 'function'
-                    ? (a.date as { toDate: () => Date }).toDate().getTime()
-                    : new Date(a.date as string | number).getTime();
-                  const tb = typeof (b.date as { toDate?: () => Date }).toDate === 'function'
-                    ? (b.date as { toDate: () => Date }).toDate().getTime()
-                    : new Date(b.date as string | number).getTime();
-                  return tb - ta;
-                }).slice(0, 8);
+                ).filter(a => a.date).sort((a, b) => (zamanMs(b.date) ?? 0) - (zamanMs(a.date) ?? 0)).slice(0, 8);
                 if (allActivities.length === 0) return null;
                 const typeIcon: Record<string, string> = { Call: '📞', Email: '✉️', Meeting: '🤝', Note: '📝', Visit: '🏢' };
                 return (
@@ -2043,11 +2026,10 @@ export default function CRMPage({
                     </p>
                     <div className="space-y-2">
                       {allActivities.map((a, i) => {
-                        const ts = typeof (a.date as { toDate?: () => Date }).toDate === 'function'
-                          ? (a.date as { toDate: () => Date }).toDate()
-                          : new Date(a.date as string | number);
-                        const daysAgo = Math.floor((Date.now() - ts.getTime()) / 86400000);
-                        const timeLabel = daysAgo === 0 ? (currentLanguage === 'tr' ? 'Bugün' : 'Today')
+                        const tsMs = zamanMs(a.date);
+                        const daysAgo = tsMs === null ? null : Math.floor((Date.now() - tsMs) / 86400000);
+                        const timeLabel = daysAgo === null ? '—'
+                          : daysAgo === 0 ? (currentLanguage === 'tr' ? 'Bugün' : 'Today')
                           : daysAgo === 1 ? (currentLanguage === 'tr' ? 'Dün' : 'Yesterday')
                           : `${daysAgo}${currentLanguage === 'tr' ? ' gün önce' : 'd ago'}`;
                         return (
@@ -2173,10 +2155,7 @@ export default function CRMPage({
                                 const actTs = (acts: LeadActivity[]) => acts.length > 0
                                   ? Math.max(...acts.map(act => {
                                       const raw = act as unknown as Record<string, unknown>;
-                                      if (typeof raw.date === 'string') return new Date(raw.date).getTime();
-                                      const cs = raw.createdAt as {seconds?: number} | undefined;
-                                      if (cs?.seconds) return cs.seconds * 1000;
-                                      return 0;
+                                      return zamanMs(raw.date) ?? zamanMs(raw.createdAt) ?? 0;
                                     }))
                                   : 0;
                                 return actTs(b.activities ?? []) - actTs(a.activities ?? []);
@@ -2219,9 +2198,8 @@ export default function CRMPage({
                                 {/* Phase 81: Lead Age Indicator */}
                                 {(() => {
                                   if (!lead.createdAt) return null;
-                                  const created = typeof (lead.createdAt as { toDate?: () => Date }).toDate === 'function'
-                                    ? (lead.createdAt as { toDate: () => Date }).toDate()
-                                    : new Date(lead.createdAt as string | number);
+                                  const created = zamanDate(lead.createdAt);
+                                  if (!created) return null;
                                   const ageD = Math.round((Date.now() - created.getTime()) / 86400000);
                                   if (ageD < 1) return null;
                                   const ageColor = ageD <= 7 ? 'bg-emerald-50 text-emerald-600' : ageD <= 30 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-500';
@@ -2303,9 +2281,8 @@ export default function CRMPage({
                                   : null;
                                 const raw527 = lastAct?.date ?? lead.updatedAt ?? lead.createdAt;
                                 if (!raw527) return null;
-                                const d527 = typeof (raw527 as { toDate?: () => Date }).toDate === 'function'
-                                  ? (raw527 as { toDate: () => Date }).toDate()
-                                  : new Date(raw527 as string | number);
+                                const d527 = zamanDate(raw527);
+                                if (!d527) return null;
                                 const days527 = Math.floor((Date.now() - d527.getTime()) / 86400000);
                                 if (days527 < 1) return null;
                                 const color527 = days527 <= 3 ? 'bg-emerald-50 text-emerald-600'
@@ -2327,11 +2304,8 @@ export default function CRMPage({
                               })()}
                               {/* Phase 36: Follow-up due badge */}
                               {!!lead.nextFollowUpDate && (() => {
-                                const due = typeof (lead.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function'
-                                  ? (lead.nextFollowUpDate as { toDate: () => Date }).toDate()
-                                  : new Date(lead.nextFollowUpDate as unknown as string | number);
-                                const today = new Date(); today.setHours(0, 0, 0, 0);
-                                const daysLeft = Math.round((due.getTime() - today.getTime()) / 86400000);
+                                const daysLeft = gunFarki(lead.nextFollowUpDate, new Date());
+                                if (daysLeft === null) return null;
                                 const isOverdue = daysLeft < 0;
                                 const isToday   = daysLeft === 0;
                                 const isSoon    = daysLeft > 0 && daysLeft <= 7;
@@ -2607,10 +2581,8 @@ export default function CRMPage({
                 orders.forEach(o => {
                   if (o.status==='Cancelled'||!o.assignedTo) return;
                   if (!o.createdAt) return;
-                  try {
-                    const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
-                    if (d<from581) return;
-                  } catch { return; }
+                  const d = zamanDate(o.createdAt);
+                  if (!d || d < from581) return;
                   const rep = o.assignedTo;
                   if (!repMap[rep]) repMap[rep] = {leads:0,won:0,revenue:0};
                   repMap[rep].revenue += (o.totalPrice||0);
@@ -2701,12 +2673,10 @@ export default function CRMPage({
                   if (!customerScores[cn]) customerScores[cn]={name:cn,orders:0,revenue:0,recencyDays:999,score:0};
                   customerScores[cn].orders++;
                   customerScores[cn].revenue+=(o.totalPrice||0);
-                  if (o.createdAt) {
-                    try {
-                      const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
-                      const days=Math.floor((now585.getTime()-d.getTime())/86400000);
-                      if (days<customerScores[cn].recencyDays) customerScores[cn].recencyDays=days;
-                    } catch {}
+                  const d = zamanDate(o.createdAt);
+                  if (d) {
+                    const days=Math.floor((now585.getTime()-d.getTime())/86400000);
+                    if (days<customerScores[cn].recencyDays) customerScores[cn].recencyDays=days;
                   }
                 });
                 const maxRev = Math.max(...Object.values(customerScores).map(c=>c.revenue),1);
@@ -2764,12 +2734,10 @@ export default function CRMPage({
                   if (!customerMap601[cn]) customerMap601[cn]={name:cn,orders:0,revenue:0,recencyDays:999,type:o.customerType||'Retail'};
                   customerMap601[cn].orders++;
                   customerMap601[cn].revenue+=(o.totalPrice||0);
-                  if (o.createdAt) {
-                    try {
-                      const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
-                      const days=Math.floor((now601.getTime()-d.getTime())/86400000);
-                      if (days<customerMap601[cn].recencyDays) customerMap601[cn].recencyDays=days;
-                    } catch {}
+                  const d = zamanDate(o.createdAt);
+                  if (d) {
+                    const days=Math.floor((now601.getTime()-d.getTime())/86400000);
+                    if (days<customerMap601[cn].recencyDays) customerMap601[cn].recencyDays=days;
                   }
                 });
                 const customers601 = Object.values(customerMap601);
@@ -2909,7 +2877,7 @@ export default function CRMPage({
                 // Paid orders in period
                 const paidOrders = orders.filter(o=>{
                   if(!o.paid||!o.createdAt) return false;
-                  try { const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string); return d>=cutoff626; } catch { return false; }
+                  const d = zamanDate(o.createdAt); return !!d && d >= cutoff626;
                 });
                 const unpaidOrders = orders.filter(o=>!o.paid&&o.status!=='Cancelled'&&odemeTakipli(o));
                 const payRate = orders.filter(o=>o.status!=='Cancelled').length>0?(paidOrders.length/orders.filter(o=>o.status!=='Cancelled').length*100):0;
@@ -2964,10 +2932,8 @@ export default function CRMPage({
                 const repRevMap: Record<string,number> = {};
                 orders.filter(o => {
                   if (o.status==='Cancelled'||!o.assignedTo||!o.createdAt) return false;
-                  try {
-                    const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
-                    return d>=monthStart604;
-                  } catch { return false; }
+                  const d = zamanDate(o.createdAt);
+                  return !!d && d >= monthStart604;
                 }).forEach(o => {
                   const rep = o.assignedTo!;
                   repRevMap[rep] = (repRevMap[rep]||0) + (o.totalPrice||0);
@@ -3018,7 +2984,7 @@ export default function CRMPage({
                 const scored = leads.filter(l=>!['Closed Lost'].includes(l.status)).map(l=>{
                   const cOrds = orders.filter(o=>o.customerName===l.name||(o as unknown as Record<string,unknown>)['customerId']===l.id);
                   const cRev = cOrds.reduce((s,o)=>s+(o.totalPrice||0),0);
-                  const lastOrd = cOrds.length>0?Math.max(...cOrds.map(o=>{try{const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);return d.getTime();}catch{return 0;}})):0;
+                  const lastOrd = cOrds.length>0?Math.max(...cOrds.map(o=>zamanMs(o.createdAt) ?? 0)):0;
                   const recency = lastOrd>0?Math.round((now633-lastOrd)/86400000):999;
                   const frequency = cOrds.length;
                   const monetary = cRev;
@@ -3363,18 +3329,15 @@ export default function CRMPage({
                       const paidRev   = custOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                       const unpaidRev = totalRev - paidRev;
                       // Phase 104: CLV calculations
-                      const getOD104 = (o: Order): Date => {
-                        const raw = o.createdAt ?? o.syncedAt;
-                        if (!raw) return new Date(0);
-                        return typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number);
-                      };
-                      const sorted104    = [...custOrders].sort((a, b) => getOD104(a).getTime() - getOD104(b).getTime());
+                      // Tarihsiz sipariş eskiden de epoch 0 sayılıyordu (sıralamada öne düşer); o sıra korunur.
+                      const odMs104 = (o: Order): number => zamanMs(o.createdAt ?? o.syncedAt) ?? 0;
+                      const sorted104    = [...custOrders].sort((a, b) => odMs104(a) - odMs104(b));
                       const firstOrder   = sorted104[0];
                       const lastOrder    = sorted104[sorted104.length - 1];
-                      const firstDate    = getOD104(firstOrder);
-                      const lastDate     = getOD104(lastOrder);
-                      const daysSinceLast = Math.floor((Date.now() - lastDate.getTime()) / 86400000);
-                      const tenureMonths = Math.max(1, (lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24 * 30));
+                      const firstMs      = odMs104(firstOrder);
+                      const lastMs       = odMs104(lastOrder);
+                      const daysSinceLast = Math.floor((Date.now() - lastMs) / 86400000);
+                      const tenureMonths = Math.max(1, (lastMs - firstMs) / (1000 * 60 * 60 * 24 * 30));
                       const ordersPerMonth = custOrders.length / tenureMonths;
                       const aov = totalRev / custOrders.length;
                       const clv12 = aov * ordersPerMonth * 12;
@@ -3433,7 +3396,7 @@ export default function CRMPage({
                             <div>
                               <p className="font-bold text-sm text-[#1D2226]">{order.shopifyOrderId}</p>
                               <p className="text-xs text-gray-500 mt-1">
-                                {order.syncedAt ? (typeof (order.syncedAt as { toDate?: () => Date }).toDate === 'function' ? (order.syncedAt as { toDate: () => Date }).toDate() : new Date(order.syncedAt as unknown as string | number | Date)).toLocaleDateString() : currentT.unknown_date}
+                                {order.syncedAt ? tarihYaz(order.syncedAt) : currentT.unknown_date}
                               </p>
                               <p className="text-[10px] text-gray-400 mt-1 truncate max-w-[200px]">{order.shippingAddress}</p>
                             </div>
@@ -3476,15 +3439,12 @@ export default function CRMPage({
                   {/* ── Commission Summary for Dealer / B2B Leads ── */}
                   {(selectedLead.priceTier === 'Dealer' || selectedLead.priceTier === 'B2B Premium' || selectedLead.priceTier === 'B2B Standard' || selectedLead.customerType === 'B2B') && (() => {
                     const now = new Date();
-                    const curPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-                    const [cpYear, cpMonth] = curPeriod.split('-').map(Number);
+                    const curPeriod = ayAnahtari(now) ?? '';
                     const dealerOrders = orders.filter(o => {
                       if (o.status === 'Cancelled') return false;
                       const matches = (o.customerName === (selectedLead.company || selectedLead.name));
                       if (!matches) return false;
-                      const raw = o.syncedAt ?? o.createdAt;
-                      const d = raw && typeof (raw as {toDate?:()=>Date}).toDate === 'function' ? (raw as {toDate:()=>Date}).toDate() : new Date(raw as string|number);
-                      return d.getFullYear() === cpYear && d.getMonth() + 1 === cpMonth;
+                      return ayAnahtari(o.syncedAt ?? o.createdAt) === curPeriod;
                     });
                     const actualSales = dealerOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                     const tier = selectedLead.priceTier || 'B2B Standard';
@@ -3633,12 +3593,7 @@ export default function CRMPage({
                       {(!selectedLead.activities || selectedLead.activities.length === 0) ? (
                         <p className="text-sm text-gray-500 text-center py-4">{currentT.no_activities_logged}</p>
                       ) : (() => {
-                        const sorted = [...selectedLead.activities].sort((a, b) => {
-                          const getTs = (d: unknown) => typeof (d as { toDate?: () => Date }).toDate === 'function'
-                            ? (d as { toDate: () => Date }).toDate().getTime()
-                            : new Date(d as string | number).getTime();
-                          return getTs(b.date) - getTs(a.date);
-                        });
+                        const sorted = [...selectedLead.activities].sort((a, b) => (zamanMs(b.date) ?? 0) - (zamanMs(a.date) ?? 0));
                         const ICON_MAP: Record<string, { icon: React.ElementType; bg: string; color: string }> = {
                           Note:    { icon: FileText, bg: 'bg-gray-100',    color: 'text-gray-600'    },
                           Call:    { icon: Phone,    bg: 'bg-blue-50',     color: 'text-blue-600'    },
@@ -3649,10 +3604,8 @@ export default function CRMPage({
                           const cfg = ICON_MAP[activity.type] ?? ICON_MAP.Note;
                           const Icon = cfg.icon;
                           const dateStr = (() => {
-                            const d = typeof (activity.date as { toDate?: () => Date }).toDate === 'function'
-                              ? (activity.date as { toDate: () => Date }).toDate()
-                              : new Date(activity.date as unknown as string | number);
-                            return d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
+                            const d = zamanDate(activity.date);
+                            return d ? d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
                           })();
                           return (
                             <div key={activity.id} className="flex gap-3 relative">
@@ -3696,7 +3649,7 @@ export default function CRMPage({
                     </div>
                     <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                       <h4 className="font-bold mb-3">{currentT.follow_up_reminder}</h4>
-                      <input type="date" value={selectedLead.nextFollowUpDate ? (typeof (selectedLead.nextFollowUpDate as { toDate?: () => Date }).toDate === 'function' ? (selectedLead.nextFollowUpDate as { toDate: () => Date }).toDate() : new Date(selectedLead.nextFollowUpDate as unknown as string | number | Date)).toISOString().split('T')[0] : ''} onChange={(e) => handleUpdateFollowUpDate(e.target.value)} className="border rounded p-2 text-sm" />
+                      <input type="date" value={gunAnahtari(selectedLead.nextFollowUpDate) ?? ''} onChange={(e) => handleUpdateFollowUpDate(e.target.value)} className="border rounded p-2 text-sm" />
                     </div>
                   </div>
                 </div>

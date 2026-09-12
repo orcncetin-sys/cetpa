@@ -19,6 +19,7 @@ import { itemCostTRY, type ReportsCtx, brutMarj } from '../useReportsData';
 import { odemeTakipli, siparisTarih } from '../../../utils/siparis';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from '../ReportKit';
 import { paraYaz } from '../../../utils/currency';
+import { zamanDate } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentT' | 'currentLanguage' | 'onNavigate' | 'recurringOrders' | 'fmtAna' | 'totalOrders' | 'revenueSymbol' | 'revenueFormatted' | 'avgOrderFormatted' | 'lowStockItems' | 'trendData' | 'categoryChartData' | 'COLORS' | 'revenueCurrency' | 'setRevenueCurrency'>;
 
@@ -241,9 +242,9 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
           try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            const od = zamanDate(o.createdAt);
+            if (!od) continue;
             const h = od.getHours();
-            if (isNaN(h)) continue;
             hasHours = true;
             const bucket = hourBuckets186.find(b => h >= b.start && h < b.start + 3);
             if (bucket) { bucket.count++; bucket.rev += o.totalPrice || 0; }
@@ -290,7 +291,8 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
             for (const o of orders) {
               if (o.status === 'Cancelled') continue;
               try {
-                const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+                const d = zamanDate(o.createdAt);
+                if (!d) continue;
                 dayCounts[d.getDay()].revenue += o.totalPrice || 0;
                 dayCounts[d.getDay()].orders++;
               } catch { /* skip */ }
@@ -334,8 +336,8 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                 const sold30 = orders
                   .filter(o => {
                     try {
-                      const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-                      return d >= cutoff148 && o.status !== 'Cancelled';
+                      const d = zamanDate(o.createdAt);
+                      return !!d && d >= cutoff148 && o.status !== 'Cancelled';
                     } catch { return false; }
                   })
                   .reduce((s, o) => {

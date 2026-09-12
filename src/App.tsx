@@ -1,6 +1,6 @@
 import { useSekmeVerileri } from './hooks/useSekmeVerileri';
 import { useShallow } from 'zustand/react/shallow';
-import { zamanMs } from './utils/zaman';
+import { zamanMs, zamanDate, ayAnahtari, gunAnahtari, bugunAnahtari } from './utils/zaman';
 import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
 import MuhasebeGroupNav from './components/MuhasebeGroupNav';
@@ -1306,7 +1306,8 @@ function AppContent() {
 
   const filteredOrders = orders.filter(o => {
     if (!o.createdAt) return true;
-    const orderDate = (o.createdAt as { toDate?: () => Date })?.toDate ? (o.createdAt as { toDate: () => Date }).toDate() : new Date(o.createdAt as string | number | Date);
+    const orderDate = zamanDate(o.createdAt);
+    if (!orderDate) return false; // tarih var ama çözülemiyor → aralık dışı (eski Invalid Date davranışıyla aynı)
     return isWithinInterval(orderDate, {
       start: startOfDay(new Date(dateRange.startDate)),
       end: endOfDay(new Date(dateRange.endDate))
@@ -1315,7 +1316,8 @@ function AppContent() {
 
   const filteredLeads = leads.filter(l => {
     if (!l.createdAt) return true;
-    const leadDate = (l.createdAt as { toDate?: () => Date })?.toDate ? (l.createdAt as { toDate: () => Date }).toDate() : new Date(l.createdAt as string | number | Date);
+    const leadDate = zamanDate(l.createdAt);
+    if (!leadDate) return false; // tarih var ama çözülemiyor → aralık dışı (eski Invalid Date davranışıyla aynı)
     return isWithinInterval(leadDate, {
       start: startOfDay(new Date(dateRange.startDate)),
       end: endOfDay(new Date(dateRange.endDate))
@@ -1432,7 +1434,7 @@ function AppContent() {
   useEffect(() => {
     if (!user || !inventory.length || !orders.length) return;
 
-    const dedupeKey = `autonotif_${user.uid}_${new Date().toDateString()}`;
+    const dedupeKey = `autonotif_${user.uid}_${bugunAnahtari()}`;
     if (sessionStorage.getItem(dedupeKey)) return;
     sessionStorage.setItem(dedupeKey, '1');
 
@@ -1485,8 +1487,9 @@ function AppContent() {
       // 2. Overdue pending orders (> 7 days)
       const overdueOrders = orders.filter(o => {
         if (o.status !== 'Pending') return false;
-        const d = (o.createdAt as { toDate?: () => Date })?.toDate?.() ?? new Date(o.createdAt as string | number);
-        return now - d.getTime() > 7 * DAY;
+        const ms = zamanMs(o.createdAt);
+        if (ms === null) return false; // tarihi bilinmiyor → gecikmiş SAYMA
+        return now - ms > 7 * DAY;
       });
       if (overdueOrders.length > 0) {
         await autoNotify(
@@ -1585,7 +1588,7 @@ function AppContent() {
   // ── Phase 547: Bilanço — bank accounts fetched on demand ──────────────────
   // ── Phase 548: Masraf Yönetimi — expense claims ────────────────────────────
   const [p548Form, setP548Form] = useState(false);
-  const [p548Draft, setP548Draft] = useState({ employeeName: '', category: 'Ulaşım', amount: '', currency: 'TRY', date: new Date().toISOString().slice(0,10), description: '' });
+  const [p548Draft, setP548Draft] = useState({ employeeName: '', category: 'Ulaşım', amount: '', currency: 'TRY', date: bugunAnahtari(), description: '' });
   // ── Phase 549: İade Yönetimi (RMA) ──────────────────────────────────────
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false); // Phase 28
@@ -1598,7 +1601,7 @@ function AppContent() {
   // Per-month target history: { "2026-05": 100000, ... } — synced from settings/targets
   const [monthlyTargets, setMonthlyTargets] = useState<Record<string, number>>({});
   const saveMonthlyTarget = (monthKey: string, value: number) => {
-    const isCurrentMonth = monthKey === (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
+    const isCurrentMonth = monthKey === bugunAnahtari().slice(0, 7);
     if (isCurrentMonth) setMonthlyTarget(value);
     const updated = { ...monthlyTargets, [monthKey]: value };
     if (value === 0) { delete updated[monthKey]; }
@@ -1609,16 +1612,16 @@ function AppContent() {
   const [p551SelSupplier, setP551SelSupplier] = useState<string>('');
   // ── Phase 552: Mesai & Devam (Time & Attendance) ─────────────────────────
   const [p552AddForm, setP552AddForm] = useState(false);
-  const [p552Draft, setP552Draft] = useState({ employeeName: '', date: new Date().toISOString().slice(0,10), checkIn: '09:00', checkOut: '18:00' });
+  const [p552Draft, setP552Draft] = useState({ employeeName: '', date: bugunAnahtari(), checkIn: '09:00', checkOut: '18:00' });
   // ── Phase 553: Çalışan Self-Servis ───────────────────────────────────────
   // (no extra state — uses existing employees/payrolls/leaveRequests)
   // ── Phase 555: Ba/Bs Formu ───────────────────────────────────────────────
-  const [p555Period, setP555Period] = useState(() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const [p555Period, setP555Period] = useState(() => bugunAnahtari().slice(0, 7));
   // ── Phase 557: Senaryo Bütçesi ───────────────────────────────────────────
   const [p557Scenario, setP557Scenario] = useState<'base'|'best'|'worst'>('base');
   // ── Phase 554: WMS Bin/Location ──────────────────────────────────────────
   // ── Phase 556: SGK e-Bildirge ─────────────────────────────────────────────
-  const [p556Period, setP556Period] = useState(() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const [p556Period, setP556Period] = useState(() => bugunAnahtari().slice(0, 7));
   // ── Phase 558: KDV Analiz Raporu ─────────────────────────────────────────
   const [p558Year, setP558Year] = useState(() => String(new Date().getFullYear()));
   // ── Phase 559: Müşteri Cari Hesap Ekstresi ────────────────────────────────
@@ -1770,7 +1773,7 @@ function AppContent() {
   const [p587NewItem, setP587NewItem] = useState('');
   // ── Phase 588: Consignment Stock ──────────────────────────────────────────
   const [p588ShowForm, setP588ShowForm] = useState(false);
-  const [p588Draft, setP588Draft] = useState({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:new Date().toISOString().slice(0,10)});
+  const [p588Draft, setP588Draft] = useState({supplierName:'',productName:'',sku:'',qty:'',agreedPrice:'',locationCode:'',startDate:bugunAnahtari()});
   // ── Phase 590: Notification Inbox ─────────────────────────────────────────
   // ── Phase 591: Auto-Invoice Scheduler ─────────────────────────────────────
   const [p591ShowForm, setP591ShowForm] = useState(false);
@@ -1815,7 +1818,7 @@ function AppContent() {
   const [p611Period, setP611Period] = useState<'30d'|'90d'|'180d'>('90d');
   // ── Phase 612: Satın Alma Bütçesi ─────────────────────────────────────────
   const [p612ShowForm, setP612ShowForm] = useState(false);
-  const [p612Draft, setP612Draft] = useState({category:'',allocated:'',spent:'',period:new Date().toISOString().slice(0,7)});
+  const [p612Draft, setP612Draft] = useState({category:'',allocated:'',spent:'',period:bugunAnahtari().slice(0, 7)});
   // ── Phase 613: Müşteri Portföy Analizi ────────────────────────────────────
   // ── Phase 614: Nakit Pozisyon Özeti ──────────────────────────────────────
   // ── Phase 615: Üretim Kalite Metrikleri ──────────────────────────────────
@@ -1824,14 +1827,14 @@ function AppContent() {
   const [p615Metrics, setP615Metrics] = useState<Array<{id:string;date:string;line:string;total:number;defects:number;rework:number}>>([]);
   const [p615ShowForm, setP615ShowForm] = useState(false);
   const [p615EditId, setP615EditId] = useState<string|null>(null);
-  const [p615Draft, setP615Draft] = useState({date:new Date().toISOString().slice(0,10),line:'',total:'',defects:'',rework:''});
+  const [p615Draft, setP615Draft] = useState({date:bugunAnahtari(),line:'',total:'',defects:'',rework:''});
   // Kalite modülünün aktif sekmesi — Üretim Kalite Metrikleri yalnız KPI sekmesinde
   // gösterilsin diye (aksi halde her sekmenin altında sabit kalıyordu).
   const [qualityActiveTab, setQualityActiveTab] = useState<string>('qc');
   // ── Phase 616: Çalışan Devir Analizi ─────────────────────────────────────
   const [p616Period, setP616Period] = useState<'3m'|'6m'|'12m'>('12m');
   // ── Phase 617: KDV Mutabakat ──────────────────────────────────────────────
-  const [p617Month, setP617Month] = useState(()=>new Date().toISOString().slice(0,7));
+  const [p617Month, setP617Month] = useState(()=>bugunAnahtari().slice(0, 7));
   // ── Phase 618: Proje Zaman Çizelgesi ─────────────────────────────────────
   const [p618Projects, setP618Projects] = useState<Array<{id:string;name:string;start:string;end:string;progress:number;status:'Aktif'|'Tamamlandı'|'Gecikmiş'|'Beklemede';owner:string}>>([]);
   const [p618ShowForm, setP618ShowForm] = useState(false);
@@ -1881,12 +1884,8 @@ function AppContent() {
     const STALE_HOURS = 24;
     const threshold = Date.now() - STALE_HOURS * 3600000;
     const stale: string[] = [];
-    const parseSync = (v: unknown): number | null => {
-      if (!v) return null;
-      try { return typeof (v as {toDate?:()=>Date}).toDate==='function' ? (v as {toDate:()=>Date}).toDate().getTime() : new Date(v as string).getTime(); } catch { return null; }
-    };
-    const mikroTs = parseSync(mikroSettings.lastSync);
-    const lucaTs  = parseSync(lucaSettings.lastSync);
+    const mikroTs = zamanMs(mikroSettings.lastSync);
+    const lucaTs  = zamanMs(lucaSettings.lastSync);
     if (mikroSettings.enabled && mikroSettings.connected && mikroTs !== null && mikroTs < threshold) stale.push('Mikro ERP');
     if (lucaSettings.enabled && lucaSettings.connected && lucaTs !== null && lucaTs < threshold) stale.push('Luca');
     setStaleIntegrations(stale);
@@ -2032,7 +2031,7 @@ function AppContent() {
     setFxRefreshing(false);
   };
   // ── Phase 636: SGK/Net Bordro Hesaplama Motoru ────────────────────────────
-  const [p636Month, setP636Month] = useState(()=>new Date().toISOString().slice(0,7));
+  const [p636Month, setP636Month] = useState(()=>bugunAnahtari().slice(0, 7));
   // ── Phase 637: Kapasite Planlama ──────────────────────────────────────────
   const [p637Horizon, setP637Horizon] = useState<'7d'|'30d'|'90d'>('30d');
   // ── Phase 638: Otomatik Ödeme Eşleştirme ──────────────────────────────────
@@ -2042,17 +2041,17 @@ function AppContent() {
   // ── Phase 640: Tekrarlayan Fatura / Abonelik ───────────────────────────────
   const [p640Subs, setP640Subs] = useState<Array<{id:string;customerName:string;amount:number;frequency:'Aylık'|'3 Aylık'|'Yıllık';nextDate:string;status:'Aktif'|'Pasif'|'İptal'}>>([]);
   const [p640ShowForm, setP640ShowForm] = useState(false);
-  const [p640Draft, setP640Draft] = useState({customerName:'',amount:'',frequency:'Aylık' as 'Aylık'|'3 Aylık'|'Yıllık',nextDate:new Date().toISOString().slice(0,10)});
+  const [p640Draft, setP640Draft] = useState({customerName:'',amount:'',frequency:'Aylık' as 'Aylık'|'3 Aylık'|'Yıllık',nextDate:bugunAnahtari()});
   // ── Phase 641: Denetim İzi (Audit Trail) ──────────────────────────────────
 
   // ── Phase 642: Garanti Takip ───────────────────────────────────────────────
   const [p642Warranties, setP642Warranties] = useState<Array<{id:string;productName:string;sku:string;serialNo:string;customerName:string;purchaseDate:string;warrantyMonths:number;status:'Aktif'|'Sona Erdi'|'Talep Açık'}>>([]);
   const [p642ShowForm, setP642ShowForm] = useState(false);
-  const [p642Draft, setP642Draft] = useState({productName:'',sku:'',serialNo:'',customerName:'',purchaseDate:new Date().toISOString().slice(0,10),warrantyMonths:'12'});
+  const [p642Draft, setP642Draft] = useState({productName:'',sku:'',serialNo:'',customerName:'',purchaseDate:bugunAnahtari(),warrantyMonths:'12'});
   // ── Phase 643: Şirketlerarası İşlemler ────────────────────────────────────
   const [p643Txns, setP643Txns] = useState<Array<{id:string;from:string;to:string;amount:number;currency:'TRY'|'USD'|'EUR';desc:string;date:string;status:'Bekliyor'|'Netleştirildi'}>>([]);
   const [p643ShowForm, setP643ShowForm] = useState(false);
-  const [p643Draft, setP643Draft] = useState({from:'Cetpa A.Ş.',to:'Cetpa Lojistik Ltd.',amount:'',currency:'TRY' as 'TRY'|'USD'|'EUR',desc:'',date:new Date().toISOString().slice(0,10)});
+  const [p643Draft, setP643Draft] = useState({from:'Cetpa A.Ş.',to:'Cetpa Lojistik Ltd.',amount:'',currency:'TRY' as 'TRY'|'USD'|'EUR',desc:'',date:bugunAnahtari()});
   // ── Phase 644: MRP / Malzeme İhtiyaç Planlaması ───────────────────────────
   const [p644Horizon, setP644Horizon] = useState(30);
 
@@ -2154,17 +2153,13 @@ function AppContent() {
   const [showLeaveForm, setShowLeaveForm] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ employeeName: '', type: 'annual' as 'annual' | 'sick' | 'unpaid' | 'other', startDate: '', endDate: '', reason: '' });
   // ── Phase 117: Payroll ────────────────────────────────────────────────────
-  const [payrollMonth, setPayrollMonth] = useState(() => {
-    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  });
+  const [payrollMonth, setPayrollMonth] = useState(() => bugunAnahtari().slice(0, 7));
   const [payrollView, setPayrollView] = useState<'summary' | 'detail'>('summary');
   // ── Phase 118: Bank Reconciliation ───────────────────────────────────────
   const [bankBalance, setBankBalance] = useState<number>(0);
   const [bankBalanceDraft, setBankBalanceDraft] = useState('');
   const [bankBalanceEditing, setBankBalanceEditing] = useState(false);
-  const [reconMonth, setReconMonth] = useState(() => {
-    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  });
+  const [reconMonth, setReconMonth] = useState(() => bugunAnahtari().slice(0, 7));
   // ── Phase 119: Recurring Order Templates ─────────────────────────────────
   const [recurringOrders, setRecurringOrders] = useState<Array<{
     id: string; templateName: string; customerName: string; totalPrice: number;
@@ -2182,9 +2177,7 @@ function AppContent() {
   const [budgets, setBudgets] = useState<BudgetEntry[]>([]);
   const [allBudgetsFirestore, setAllBudgetsFirestore] = useState<Record<string, BudgetEntry[]>>({});
   const [budgetDraft, setBudgetDraft] = useState<Record<string, string>>({});
-  const [budgetMonth, setBudgetMonth] = useState(() => {
-    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  });
+  const [budgetMonth, setBudgetMonth] = useState(() => bugunAnahtari().slice(0, 7));
   // Sync budgets state when month selector or Firestore data changes
   useEffect(() => {
     setBudgets(allBudgetsFirestore[budgetMonth] ?? []);
@@ -2725,7 +2718,7 @@ function AppContent() {
       if (!snap.exists()) return;
       const d = snap.data() as Record<string, number>;
       setMonthlyTargets(d);
-      const curKey = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
+      const curKey = bugunAnahtari().slice(0, 7);
       if (d[curKey] !== undefined) setMonthlyTarget(d[curKey]);
     }, () => { /* non-critical */ });
 
@@ -3073,7 +3066,7 @@ function AppContent() {
         if (newOrder.faturali) {
           try {
             await addDoc(collection(db, 'journalEntries'), {
-              date: new Date().toISOString().split('T')[0],
+              date: bugunAnahtari(),
               fiş: `SIP-${shopifyOrderId}`,
               aciklama: `${customerName} - Faturalı Satış`,
               debitHesap: '120 - Alıcılar',
@@ -3086,7 +3079,7 @@ function AppContent() {
             });
             if (kdvOran > 0) {
               await addDoc(collection(db, 'journalEntries'), {
-                date: new Date().toISOString().split('T')[0],
+                date: bugunAnahtari(),
                 fiş: `SIP-${shopifyOrderId}-KDV`,
                 aciklama: `${customerName} - KDV %${kdvOran}`,
                 debitHesap: '120 - Alıcılar',
@@ -4132,10 +4125,9 @@ function AppContent() {
                             success: { bg: 'bg-green-50', dot: 'bg-green-500', border: 'border-green-100' },
                             info:    { bg: 'bg-blue-50',  dot: 'bg-blue-400',  border: 'border-blue-100' },
                           }[type] ?? { bg: 'bg-gray-50', dot: 'bg-gray-300', border: 'border-gray-100' };
-                          const createdAt = n.createdAt as { toDate?: () => Date };
-                          const dateObj = createdAt?.toDate?.() ?? null;
+                          const dateObj = zamanDate(n.createdAt);
                           const timeStr = dateObj ? format(dateObj, 'HH:mm') : '';
-                          const isToday = dateObj ? dateObj.toDateString() === new Date().toDateString() : true;
+                          const isToday = gunAnahtari(n.createdAt) === bugunAnahtari(); // yerel gün anahtarı; çözülemeyen tarih "bugün" sayılmaz (dateStr zaten dateObj ile korunuyor)
                           const dateStr = dateObj && !isToday ? format(dateObj, 'dd.MM') : '';
                           return (
                             <div
@@ -6097,11 +6089,8 @@ function AppContent() {
       <AIChat
         currentLanguage={currentLanguage}
         businessContext={(() => {
-          const now = new Date();
-          const thisMonth = orders.filter(o => {
-            if (!o.createdAt) return false;
-            try { const d = typeof (o.createdAt as {toDate?:()=>Date}).toDate === 'function' ? (o.createdAt as {toDate:()=>Date}).toDate() : new Date(o.createdAt as string); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); } catch { return false; }
-          });
+          const buAy = bugunAnahtari().slice(0, 7);
+          const thisMonth = orders.filter(o => ayAnahtari(o.createdAt) === buAy); // çözülemeyen tarih → null → bu aya sayılmaz
           const totalRev = thisMonth.filter(o=>o.status!=='Cancelled').reduce((s,o)=>s+(o.totalPrice||0),0);
           const pendingOrders = orders.filter(o=>o.status==='Pending').length;
           const processingOrders = orders.filter(o=>o.status==='Processing').length;

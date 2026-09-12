@@ -11,6 +11,7 @@
  */
 import { itemCostTRY, brutMarj, type ReportsCtx } from '../useReportsData';
 import { paraYaz } from '../../../utils/currency';
+import { ayAnahtari, zamanDate, tarihYaz } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -21,13 +22,12 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
         const now166 = new Date();
         const months166 = Array.from({ length: 6 }, (_, i) => {
           const d = new Date(now166.getFullYear(), now166.getMonth() - (5 - i), 1);
-          const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const label = tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
+          const ayKey = ayAnahtari(d);
           const mOrders = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
-            try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-            } catch { return false; }
+            // Tarihi çözülemeyen sipariş (null) hiçbir aya girmez.
+            return ayAnahtari(o.createdAt) === ayKey;
           });
           // Kalemi olmayan siparis (Mikro fatura turevi / sentetik) marj hesabina
           // GIRMEZ — aksi halde maliyet 0 sayilip marj %100'e sisiyordu (2026-09-04).
@@ -92,12 +92,11 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
         }
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
-          try {
-            const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            const oq = getQuarter(d);
-            const entry = quarters.find(qt => qt.year === d.getFullYear() && qt.q === oq);
-            if (entry) { entry.revenue += o.totalPrice || 0; entry.orders++; }
-          } catch { /* skip */ }
+          const d = zamanDate(o.createdAt);
+          if (!d) continue;
+          const oq = getQuarter(d);
+          const entry = quarters.find(qt => qt.year === d.getFullYear() && qt.q === oq);
+          if (entry) { entry.revenue += o.totalPrice || 0; entry.orders++; }
         }
         const maxQ = Math.max(...quarters.map(q => q.revenue), 1);
         const currQ = quarters[quarters.length - 1];
@@ -139,12 +138,10 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
         // Last 6 months revenue
         const months190 = Array.from({ length: 6 }, (_, i) => {
           const d = new Date(now190.getFullYear(), now190.getMonth() - (5 - i), 1);
+          const ayKey = ayAnahtari(d);
           const rev = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
-            try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-            } catch { return false; }
+            return ayAnahtari(o.createdAt) === ayKey;
           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
           return { x: i, rev };
         });
@@ -157,8 +154,7 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
         const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX || 1);
         const intercept = (sumY - slope * sumX) / n;
         const forecast = [1, 2, 3].map(f => ({
-          label: new Date(now190.getFullYear(), now190.getMonth() + f, 1)
-            .toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', year: '2-digit' }),
+          label: tarihYaz(new Date(now190.getFullYear(), now190.getMonth() + f, 1), { month: 'short', year: '2-digit' }, currentLanguage === 'tr' ? 'tr' : 'en'),
           rev: Math.max(0, Math.round(slope * (n - 1 + f) + intercept)),
         }));
         const maxForecast = Math.max(...months190.map(m => m.rev), ...forecast.map(f => f.rev), 1);
@@ -207,13 +203,14 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
         if (delivered197.length < 3) return null;
         const cycleTimes = delivered197.map(o => {
           const m = o as unknown as Record<string,unknown>;
-          try {
-            const created = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            const delivered = ((m.deliveredAt as { toDate?: () => Date })?.toDate?.() ?? new Date(m.deliveredAt as string))
-              || ((m.updatedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(m.updatedAt as string));
-            const days = Math.round((delivered.getTime() - created.getTime()) / 86400000);
-            return days >= 0 && days < 365 ? days : null;
-          } catch { return null; }
+          const created = zamanDate(o.createdAt);
+          // deliveredAt çözülemezse updatedAt'e düşülür. Eski `||` zinciri bunu hiç
+          // yapamıyordu: `new Date(undefined)` Invalid Date NESNESİ (truthy) döndüğü
+          // için yedek dal ölüydü, sonuç NaN → kayıt sessizce düşüyordu.
+          const delivered = zamanDate(m.deliveredAt) ?? zamanDate(m.updatedAt);
+          if (!created || !delivered) return null;
+          const days = Math.round((delivered.getTime() - created.getTime()) / 86400000);
+          return days >= 0 && days < 365 ? days : null;
         }).filter((d): d is number => d !== null);
         if (cycleTimes.length < 3) return null;
         const avgCycle = Math.round(cycleTimes.reduce((s, d) => s + d, 0) / cycleTimes.length);
@@ -266,13 +263,11 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
         const now198 = new Date();
         const months198 = Array.from({ length: 6 }, (_, i) => {
           const d = new Date(now198.getFullYear(), now198.getMonth() - (5 - i), 1);
-          const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const label = tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
+          const ayKey = ayAnahtari(d);
           const mOrds = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
-            try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-            } catch { return false; }
+            return ayAnahtari(o.createdAt) === ayKey;
           });
           const aov = mOrds.length > 0 ? Math.round(mOrds.reduce((s, o) => s + (o.totalPrice || 0), 0) / mOrds.length) : 0;
           return { label, aov, count: mOrds.length };
@@ -320,12 +315,10 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
         const dayRevMap: Record<string, number> = {};
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (od < cutoff202) continue;
-            const key = od.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { day: '2-digit', month: 'short' });
-            dayRevMap[key] = (dayRevMap[key] ?? 0) + (o.totalPrice || 0);
-          } catch { /* skip */ }
+          const od = zamanDate(o.createdAt);
+          if (!od || od < cutoff202) continue;
+          const key = tarihYaz(od, { day: '2-digit', month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
+          dayRevMap[key] = (dayRevMap[key] ?? 0) + (o.totalPrice || 0);
         }
         const topDays = Object.entries(dayRevMap).sort(([,a],[,b]) => b - a).slice(0, 6);
         if (topDays.length < 3) return null;
@@ -394,15 +387,13 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
         const now215 = new Date();
         const months215 = Array.from({ length: 12 }, (_, i) => {
           const d = new Date(now215.getFullYear(), now215.getMonth() - (11 - i), 1);
+          const ayKey = ayAnahtari(d);
           const mOrds = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
-            try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-            } catch { return false; }
+            return ayAnahtari(o.createdAt) === ayKey;
           });
           return {
-            label: d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', year: '2-digit' }),
+            label: tarihYaz(d, { month: 'short', year: '2-digit' }, currentLanguage === 'tr' ? 'tr' : 'en'),
             count: mOrds.length,
             rev: mOrds.reduce((s, o) => s + (o.totalPrice || 0), 0),
           };
@@ -448,10 +439,9 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
         const recentPurchases = orders.filter(o => {
           const m = o as unknown as Record<string,unknown>;
           if (!m.isPurchase && !m.purchaseOrder) return false;
-          try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= cut216;
-          } catch { return false; }
+          const od = zamanDate(o.createdAt);
+          if (!od) return false;
+          return od >= cut216;
         }).reduce((s, o) => s + (o.totalPrice || 0), 0);
         const estimatedPayroll = inventory.length; // fallback
         void estimatedPayroll;

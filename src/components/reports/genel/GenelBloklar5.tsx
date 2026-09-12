@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import { type ReportsCtx } from '../useReportsData';
+import { zamanMs, zamanDate, ayAnahtari, gunAnahtari, tarihYaz } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'currentLanguage' | 'fmtAna'>;
 
@@ -17,20 +18,15 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
   return (
     <>
       {reportsTab === 'genel' && orders.length >= 10 && (() => {
-        const toTs371 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const now371 = Date.now();
         // IPTAL EDILEN SIPARIS CIROYA GIRMEZ (2026-09-04 denetimi): eskiden
         // filtrede status kontrolu yoktu ve iptaller tahmini yukari cekiyordu.
         const gecerli371 = orders.filter(o => o.status !== 'Cancelled');
-        const last90 = gecerli371.filter(o => toTs371(o.createdAt) > now371 - 90 * 86400000);
+        const last90 = gecerli371.filter(o => { const ts = zamanMs(o.createdAt); return ts !== null && ts > now371 - 90 * 86400000; });
         if (last90.length < 5) return null;
         const dailyAvg = last90.reduce((s, o) => s + (o.totalPrice || 0), 0) / 90;
-        const last30Rev = gecerli371.filter(o => toTs371(o.createdAt) > now371 - 30 * 86400000).reduce((s, o) => s + (o.totalPrice || 0), 0);
-        const last60to30Rev = gecerli371.filter(o => { const ts = toTs371(o.createdAt); return ts > now371 - 60 * 86400000 && ts <= now371 - 30 * 86400000; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const last30Rev = gecerli371.filter(o => { const ts = zamanMs(o.createdAt); return ts !== null && ts > now371 - 30 * 86400000; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const last60to30Rev = gecerli371.filter(o => { const ts = zamanMs(o.createdAt); return ts !== null && ts > now371 - 60 * 86400000 && ts <= now371 - 30 * 86400000; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
         const momGrowth = last60to30Rev > 0 ? (last30Rev - last60to30Rev) / last60to30Rev : 0;
         const buyumeKatsayisi = 0.5;   // buyume trendinin tahmine yansitilan orani
         const forecast = dailyAvg * 30 * (1 + momGrowth * buyumeKatsayisi);
@@ -65,19 +61,14 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
       })()}
 
       {reportsTab === 'genel' && orders.length >= 5 && (() => {
-        const toTs380 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const thisYear = new Date().getFullYear();
         const dayRev: Record<string, number> = {};
         orders.forEach(o => {
-          const ts = toTs380(o.createdAt);
-          if (!ts) return;
-          const d = new Date(ts);
+          const d = zamanDate(o.createdAt);
+          if (!d) return;
           if (d.getFullYear() !== thisYear) return;
-          const key = d.toISOString().slice(0, 10);
+          const key = gunAnahtari(d);
+          if (!key) return;
           dayRev[key] = (dayRev[key] || 0) + (o.totalPrice || 0);
         });
         const top5 = Object.entries(dayRev).sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -91,7 +82,7 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
               {top5.map(([date, rev], i) => (
                 <div key={i} className="flex items-center gap-3">
                   <span className="text-[10px] font-bold text-gray-500 w-6">{i + 1}.</span>
-                  <span className="text-xs text-gray-600 w-24">{new Date(date).toLocaleDateString('tr-TR', {day:'2-digit', month:'short'})}</span>
+                  <span className="text-xs text-gray-600 w-24">{tarihYaz(date, {day:'2-digit', month:'short'})}</span>
                   <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full rounded-full transition-all" style={{width: `${(rev / maxDay) * 100}%`, background: i === 0 ? '#ff4000' : '#6366f1'}} />
                   </div>
@@ -107,7 +98,7 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
         const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         const matrix: number[][] = Array.from({length: 7}, () => [0,0,0,0]);
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           if (!d) return;
           const dow = (d.getDay() + 6) % 7; // 0=Mon
           const weekOfMonth = Math.min(Math.floor((d.getDate() - 1) / 7), 3);
@@ -156,9 +147,8 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
       {reportsTab === 'genel' && orders.length >= 10 && (() => {
         const byMonth: Record<string, number> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           const oRec390 = o as unknown as Record<string,unknown>;
           const total = typeof oRec390.total === 'number' ? oRec390.total as number
             : (o.lineItems ?? []).reduce((s, li) => { const lr = li as unknown as Record<string,unknown>; return s + ((lr.quantity as number | undefined) ?? 0) * ((lr.unitPrice as number | undefined) ?? (lr.price as number | undefined) ?? 0); }, 0);
@@ -218,9 +208,8 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
         const lastMonth = `${lastDate.getFullYear()}-${String(lastDate.getMonth()+1).padStart(2,'0')}`;
         let thisMRev = 0, lastMRev = 0;
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total === 'number' ? oR.total as number
             : (o.lineItems ?? []).reduce((s, li) => { const lr = li as unknown as Record<string,unknown>; return s + ((lr.quantity as number|undefined)??0) * ((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); }, 0);
@@ -310,7 +299,7 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
         const year = now.getFullYear();
         const quarters: Record<string, number> = {Q1: 0, Q2: 0, Q3: 0, Q4: 0};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           if (!d || d.getFullYear() !== year) return;
           const q = `Q${Math.ceil((d.getMonth()+1)/3)}`;
           const oR = o as unknown as Record<string,unknown>;
@@ -344,7 +333,7 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
       {reportsTab === 'genel' && orders.length >= 5 && (() => {
         const weeks: Record<string, number> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           if (!d) return;
           const weekStart = new Date(d);
           weekStart.setDate(d.getDate() - ((d.getDay() + 6) % 7));
@@ -386,7 +375,7 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
         const d180 = new Date(now.getTime() - 180 * 86400000);
         let curr = 0, prev = 0, currC = 0, prevC = 0;
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           if (!d) return;
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total === 'number' ? oR.total as number
@@ -424,7 +413,7 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
         let rev30 = 0, rev30to60 = 0, orders30 = 0, orders30to60 = 0;
         let cancelCount = 0;
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           if (!d) return;
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total === 'number' ? oR.total as number
@@ -517,9 +506,8 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
       {reportsTab === 'genel' && orders.length >= 5 && (() => {
         const byMonth: Record<string, number> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total === 'number' ? oR.total as number
             : (o.lineItems ?? []).reduce((s, li) => { const lr = li as unknown as Record<string,unknown>; return s + ((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); }, 0);
@@ -550,9 +538,9 @@ export default function GenelBloklar5({ reportsTab, orders, inventory, currentLa
 
       {reportsTab === 'genel' && orders.length >= 5 && (() => {
         const sorted = [...orders].sort((a,b) => {
-          const da = a.createdAt ? ((a.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(a.createdAt as string)) : new Date(0);
-          const db = b.createdAt ? ((b.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(b.createdAt as string)) : new Date(0);
-          return da.getTime()-db.getTime();
+          const ta = zamanMs(a.createdAt) ?? 0;
+          const tb = zamanMs(b.createdAt) ?? 0;
+          return ta-tb;
         });
         let cumulative = 0;
         const points = sorted.map(o => {

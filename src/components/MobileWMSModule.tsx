@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, incrementField } from '../lib/dbClient';
+import { bugunAnahtari } from '../utils/zaman';
 import { db } from '../firebase';
 import { pushMikroEvrak, sayimPayload } from '../services/mikroEvrak';
 import { Scan, Package, ArrowRight, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, Truck, Warehouse, X, Plus, MapPin, BarChart3, Pencil, Trash2 } from 'lucide-react';
@@ -320,7 +321,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
   const submitCycleCount = async () => {
     const discrepancies = cycleItems.filter(i => i.counted && i.countedQty !== null && i.countedQty !== i.systemQty);
     await addDoc(collection(db, 'wmsCycleCounts'), {
-      date: new Date().toISOString().split('T')[0],
+      date: bugunAnahtari(),
       items: cycleItems,
       discrepancyCount: discrepancies.length,
       createdAt: serverTimestamp(),
@@ -335,7 +336,7 @@ export default function MobileWMSModule({ currentLanguage, isAuthenticated, inve
       try {
         const sayimEvraki = sayimPayload(counted.map(i => ({ sku: i.sku, counted: i.countedQty ?? 0 })));
         pushMikroEvrak('SayimSonuclariKaydetV2', sayimEvraki,
-          { entityType: 'cycleCount', entityId: new Date().toISOString().slice(0, 10) }
+          { entityType: 'cycleCount', entityId: bugunAnahtari() }
         ).catch(() => { /* syncLog'da görünür */ });
       } catch (e) {
         setScanResult({ found: false, message: (tr ? 'Sayım kaydedildi ama Mikro\'ya gönderilmedi: ' : 'Count saved but not sent to Mikro: ') + (e instanceof Error ? e.message : String(e)) });

@@ -18,6 +18,7 @@ import UnauthorizedView from '../components/UnauthorizedView';
 import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ProductionModule from '../components/ProductionModule';
 import BOMPanel from '../components/BOMPanel';
+import { tarihYaz, gunAnahtari } from '../utils/zaman';
 
 export interface P605Line { id?: string; line: string; maxCap: number; planned: number; actual: number; }
 export interface P605Draft { line: string; maxCap: string; planned: string; actual: string; }
@@ -195,8 +196,8 @@ export default function UretimPage({
                             <td className="px-3 py-2.5 font-medium text-gray-800">{o.productName}</td>
                             <td className="px-3 py-2.5 text-gray-600">{o.qty}</td>
                             <td className="px-3 py-2.5 text-gray-500">{o.workCenter||'—'}</td>
-                            <td className="px-3 py-2.5 text-gray-500">{o.plannedStart?new Date(o.plannedStart).toLocaleDateString('tr-TR'):'—'}</td>
-                            <td className="px-3 py-2.5 text-gray-500">{o.plannedEnd?new Date(o.plannedEnd).toLocaleDateString('tr-TR'):'—'}</td>
+                            <td className="px-3 py-2.5 text-gray-500">{tarihYaz(o.plannedStart)}</td>
+                            <td className="px-3 py-2.5 text-gray-500">{tarihYaz(o.plannedEnd)}</td>
                             <td className="px-3 py-2.5">
                               <select value={o.status} onChange={async e=>{try{await updateDoc(doc(db,'productionOrders',o.id),{status:e.target.value});}catch(err){console.error(err); toast(tr624?'Durum güncellenemedi (yetki?).':'Status update failed.','error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statusCls[o.status]}`}>
                                 {['Planlandı','Üretimde','Tamamlandı','İptal'].map(s=><option key={s}>{s}</option>)}
@@ -218,7 +219,7 @@ export default function UretimPage({
           {(() => {
             const tr637 = currentLanguage === 'tr';
             const horizonDays = p637Horizon==='7d'?7:p637Horizon==='30d'?30:90;
-            const cutoff637 = new Date(Date.now()+horizonDays*86400000).toISOString().slice(0,10);
+            const cutoff637 = gunAnahtari(new Date(Date.now()+horizonDays*86400000)) ?? '';
             const upcoming637 = p624Orders.filter(o=>o.status!=='Tamamlandı'&&o.status!=='İptal'&&o.plannedEnd&&o.plannedEnd<=cutoff637);
             const workCenterLoad:{[wc:string]:{orders:number;totalQty:number}} = {};
             upcoming637.forEach(o=>{

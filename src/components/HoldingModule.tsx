@@ -4,6 +4,7 @@ import {
 } from '../lib/dbClient';
 import { db } from '../firebase';
 import { paraYaz } from '../utils/currency';
+import { bugunAnahtari } from '../utils/zaman';
 import { Building2, Plus, BarChart3, FileText, ArrowLeftRight, TrendingUp, TrendingDown, Minus, X } from 'lucide-react';
 
 interface HoldingModuleProps {
@@ -97,7 +98,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
   // Account form state
   const [aForm, setAForm] = useState({ entityId:'', code:'', name:'', type:'asset' as GLAccount['type'], balance:0, currency:'TRY' });
   // IC form state
-  const [icForm, setICForm] = useState({ fromEntityId:'', toEntityId:'', description:'', amount:0, currency:'TRY', type:'trade' as Intercompany['type'], date: new Date().toISOString().split('T')[0] });
+  const [icForm, setICForm] = useState({ fromEntityId:'', toEntityId:'', description:'', amount:0, currency:'TRY', type:'trade' as Intercompany['type'], date: bugunAnahtari() });
 
   useEffect(() => {
     const unsubs: (() => void)[] = [];
@@ -135,7 +136,7 @@ export default function HoldingModule({ currentLanguage, isAuthenticated, exchan
   const addIC = async () => {
     if (!icForm.fromEntityId || !icForm.toEntityId || icForm.amount <= 0) return;
     await addDoc(collection(db, 'holdingIntercompany'), { ...icForm, eliminated: false, createdAt: serverTimestamp() });
-    setICForm({ fromEntityId:'', toEntityId:'', description:'', amount:0, currency:'TRY', type:'trade', date: new Date().toISOString().split('T')[0] });
+    setICForm({ fromEntityId:'', toEntityId:'', description:'', amount:0, currency:'TRY', type:'trade', date: bugunAnahtari() });
     setShowICForm(false);
   };
 

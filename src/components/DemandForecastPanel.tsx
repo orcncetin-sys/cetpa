@@ -19,6 +19,7 @@ import {
   Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
 import { collection, getDocs, query, where, limit, Timestamp } from '../lib/dbClient';
+import { zamanDate, ayAnahtari, bugunAnahtari } from '../utils/zaman';
 import { auth, db } from '../firebase';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -119,8 +120,9 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
       const monthlyRevenue: Record<string, number> = {};
 
       for (const o of orders) {
-        const d   = o.syncedAt?.toDate?.() ?? new Date();
-        const mon = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        // Tarihsiz sipariş BUGÜN'e sayılmaz (eski `?? new Date()` cari ayı şişiriyordu) — hesaptan düşer.
+        const mon = ayAnahtari(o.syncedAt);
+        if (!mon) continue;
         monthlyRevenue[mon] = (monthlyRevenue[mon] ?? 0) + (o.totalPrice || 0);
 
         for (const item of o.lineItems ?? []) {
@@ -151,12 +153,12 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
         const raw = m as Record<string, unknown>;
         const sku = String(raw.sth_stok_kod ?? '');
         if (!sku) continue;
-        const dt = new Date(String(raw.sth_tarih ?? ''));
-        if (!(dt.getTime() >= cutoff90)) continue;
+        const dt = zamanDate(raw.sth_tarih);
+        const mon = ayAnahtari(dt);
+        if (!dt || !mon || dt.getTime() < cutoff90) continue;
         const qty = Math.abs(Number(raw.sth_miktar) || 0);
         if (!qty) continue;
         const name = inventory.find(p => p.sku === sku)?.name ?? sku;
-        const mon = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
         productMap[name] ??= { units: 0, revenue: 0, byMonth: {} };
         productMap[name].units += qty;
         productMap[name].byMonth[mon] = (productMap[name].byMonth[mon] ?? 0) + qty;
@@ -179,7 +181,7 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
         .join('; ');
 
       // ── 3. Call server-side Gemini proxy ─────────────────────────────────
-      const today = new Date().toISOString().slice(0, 7);
+      const today = bugunAnahtari().slice(0, 7);
       const token = await auth.currentUser?.getIdToken();
       if (!token) throw new Error(tr ? 'Oturum açık değil.' : 'Not authenticated.');
 

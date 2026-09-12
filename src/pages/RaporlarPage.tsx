@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { zamanMs } from '../utils/zaman';
+import { zamanMs, zamanDate, ayAnahtari, bugunAnahtari, tarihYaz } from '../utils/zaman';
 import { paraYaz, kisaTutar } from '../utils/currency';
 import { pdfBaslik, pdfTabloStili } from '../utils/pdfTheme';
 import { registerTurkishFont } from '../utils/pdfFont';
@@ -145,7 +145,7 @@ export default function RaporlarPage({
                 const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
                 await registerTurkishFont(pdf);
                 const tr63 = currentLanguage === 'tr';
-                const today63 = new Date().toLocaleDateString(tr63 ? 'tr-TR' : 'en-US');
+                const today63 = tarihYaz(new Date(), undefined, tr63 ? 'tr' : 'en');
                 // Kapak — ORTAK tema (src/utils/pdfTheme.ts). 2026-08-21'e kadar
                 // LACİVERT (#1a3a5c) idi; teklif/sipariş marka kırmızısıydı.
                 pdfBaslik(pdf, {
@@ -193,7 +193,7 @@ export default function RaporlarPage({
                   body: lowStock.map(i => [i.sku, i.name, i.stockLevel ?? 0, i.lowStockThreshold ?? 5]),
                   styles: { font: 'Roboto', fontSize: 9 },
                 });
-                pdf.save(`cetpa-rapor-${new Date().toISOString().split('T')[0]}.pdf`);
+                pdf.save(`cetpa-rapor-${bugunAnahtari()}.pdf`);
               });
             });
           }}
@@ -203,24 +203,17 @@ export default function RaporlarPage({
         </button>
         <button
           onClick={() => {
-            // Tarih çözümü — çözülemeyen kayıt SAYILMAZ.
-            // Eskiden `?? new Date()` vardı: tarihi olmayan her kayıt sessizce
-            // İÇİNDE BULUNULAN AYA yazılıyor ve o ayı şişiriyordu.
-            const ayOf = (raw: unknown): string | null => {
-              if (!raw) return null;
-              try {
-                const d = typeof raw === 'string' ? new Date(raw) : (raw as { toDate?: () => Date }).toDate?.();
-                if (!d || !Number.isFinite(d.getTime())) return null;
-                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-              } catch { return null; }
-            };
+            // Tarih çözümü `ayAnahtari` (tek kaynak, src/utils/zaman.ts) —
+            // çözülemeyen kayıt SAYILMAZ. Eskiden `?? new Date()` vardı: tarihi
+            // olmayan her kayıt sessizce İÇİNDE BULUNULAN AYA yazılıyor ve o ayı
+            // şişiriyordu.
             const bosSatir = (month: string): MonthlySummaryRow =>
               ({ month, orderCount: 0, revenue: 0, newLeads: 0, delivered: 0 });
 
             const monthMap = new Map<string, MonthlySummaryRow>();
             let tarihsiz = 0;
             for (const o of orders) {
-              const month = ayOf(o.createdAt);
+              const month = ayAnahtari(o.createdAt);
               if (!month) { tarihsiz++; continue; }
               const row = monthMap.get(month) ?? bosSatir(month);
               row.orderCount++;
@@ -238,7 +231,7 @@ export default function RaporlarPage({
             // siparişi, gerçekten ne zaman kazanıldığının ölçüsüdür.
             const ilkSiparisAyi = new Map<string, string>();
             for (const o of orders) {
-              const month = ayOf(o.createdAt);
+              const month = ayAnahtari(o.createdAt);
               if (!month) continue;
               const ad = (o.customerName || '—').trim();
               const mevcut = ilkSiparisAyi.get(ad);
@@ -297,13 +290,11 @@ export default function RaporlarPage({
         // Invalid Date verir ve `d >= monthStart` sessizce false doner: bu KPI
         // paneli (Aylik Ciro / Siparis Adedi / Ort. Siparis Degeri) ayin BUTUN
         // native siparislerini sayimdan dusuruyordu, yalniz Mikro faturalarini
-        // sayiyordu. Ayni dosyadaki `ayOf` zaten dogru yapiyordu — tek sayfada
+        // sayiyordu. Ayni dosyadaki `ayOf` (bugun `ayAnahtari`) zaten dogru yapiyordu — tek sayfada
         // iki farkli ciro tanimi vardi.
         const ayBasiMs570 = monthStart570.getTime();
         const monthOrders570 = orders.filter(o => {
-          // `createdAt` types.ts'te `unknown`; zamanMs'in parametre tipi disa
-          // aktarilmadigi icin imzadan turetilir (bkz. App.tsx:2890).
-          const ms = zamanMs(o.createdAt as Parameters<typeof zamanMs>[0]);
+          const ms = zamanMs(o.createdAt);
           return ms !== null && ms >= ayBasiMs570;
         });
         const actRevenue570 = monthOrders570.reduce((s, o) => s + (o.totalPrice || 0), 0);
@@ -365,19 +356,19 @@ export default function RaporlarPage({
           if (p603TrendMetric === 'revenue') {
             return orders.filter(o => {
               if (o.status === 'Cancelled' || !o.createdAt) return false;
-              try { const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string); return d >= start && d <= end; } catch { return false; }
+              const d = zamanDate(o.createdAt); return d !== null && d >= start && d <= end;
             }).reduce((s, o) => s + (o.totalPrice || 0), 0);
           }
           if (p603TrendMetric === 'orders') {
             return orders.filter(o => {
               if (!o.createdAt) return false;
-              try { const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string); return d >= start && d <= end; } catch { return false; }
+              const d = zamanDate(o.createdAt); return d !== null && d >= start && d <= end;
             }).length;
           }
           if (p603TrendMetric === 'leads') {
             return leads.filter(l => {
               if (!l.createdAt) return false;
-              try { const d = (l.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(l.createdAt as string); return d >= start && d <= end; } catch { return false; }
+              const d = zamanDate(l.createdAt); return d !== null && d >= start && d <= end;
             }).length;
           }
           return 0;
@@ -449,13 +440,11 @@ export default function RaporlarPage({
         const histMonths = 6;
         const history = Array.from({ length: histMonths }, (_, i) => {
           const d = new Date(now620.getFullYear(), now620.getMonth() - histMonths + i + 1, 1);
-          const label = d.toLocaleString('tr-TR', { month: 'short', year: '2-digit' });
+          const label = tarihYaz(d, { month: 'short', year: '2-digit' });
+          const ayD = ayAnahtari(d);
           const rev = orders.filter(o => {
             if (o.status === 'Cancelled' || !o.createdAt) return false;
-            try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-            } catch { return false; }
+            return ayD !== null && ayAnahtari(o.createdAt) === ayD;
           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
           return { label, rev };
         });
@@ -466,7 +455,7 @@ export default function RaporlarPage({
         const slope = (n * sumY - sumX * history.reduce((s, m) => s + m.rev, 0)) / (n * sumXX - sumX * sumX) || 0;
         const forecast = Array.from({ length: horizonMonths }, (_, i) => {
           const d = new Date(now620.getFullYear(), now620.getMonth() + i + 1, 1);
-          const label = d.toLocaleString('tr-TR', { month: 'short', year: '2-digit' });
+          const label = tarihYaz(d, { month: 'short', year: '2-digit' });
           const val = Math.max(0, avgRev + slope * (histMonths + i));
           return { label, val };
         });
@@ -521,14 +510,19 @@ export default function RaporlarPage({
         ].filter(s => s.count > 0 || s.stage === 'Processing');
         const total631 = pipeline631.reduce((s, p) => s + p.count, 0) || 1;
         const bottleneck631 = [...pipeline631].sort((a, b) => b.count - a.count)[0];
-        const cycleOrders = orders.filter(o => o.status === 'Delivered' && o.createdAt && o.estimatedDelivery);
-        const avgCycle = cycleOrders.length > 0 ? cycleOrders.reduce((s, o) => {
-          try {
-            const created = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            const delivered = (o.estimatedDelivery as { toDate?: () => Date }).toDate?.() ?? new Date(o.estimatedDelivery as string);
-            return s + (delivered.getTime() - created.getTime()) / (86400000);
-          } catch { return s; }
-        }, 0) / cycleOrders.length : null;
+        // Tarih çözümü `zamanMs` (tek kaynak). İki tarihten biri çözülemeyen
+        // sipariş hem paydan hem paydadan DÜŞER (eskiden Invalid Date → NaN
+        // toplamı ortalamayı komple bozuyordu). Fark ms tabanlı kesirli gün
+        // (toFixed(1) ile basılıyor); `gunFarki` tam güne yuvarladığından
+        // BİLEREK kullanılmadı — hesap tanımı değişmesin.
+        const cycleDays = orders
+          .filter(o => o.status === 'Delivered')
+          .map(o => {
+            const created = zamanMs(o.createdAt), delivered = zamanMs(o.estimatedDelivery);
+            return created === null || delivered === null ? null : (delivered - created) / 86400000;
+          })
+          .filter((gun): gun is number => gun !== null);
+        const avgCycle = cycleDays.length > 0 ? cycleDays.reduce((s, gun) => s + gun, 0) / cycleDays.length : null;
         return (
           <div className="apple-card p-5 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -564,7 +558,7 @@ export default function RaporlarPage({
                   <div className="text-center py-4 space-y-2">
                     <p className="text-4xl font-bold text-[#ff4000]">{avgCycle.toFixed(1)}<span className="text-base font-normal text-gray-500 ml-1">{tr631 ? 'gün' : 'days'}</span></p>
                     <p className="text-sm text-gray-500">{tr631 ? 'Ortalama sipariş teslim süresi' : 'Avg. order fulfillment cycle'}</p>
-                    <p className="text-xs text-gray-400">{cycleOrders.length} {tr631 ? 'teslim edilen siparişten' : 'delivered orders analyzed'}</p>
+                    <p className="text-xs text-gray-400">{cycleDays.length} {tr631 ? 'teslim edilen siparişten' : 'delivered orders analyzed'}</p>
                   </div>
                 ) : (
                   <div className="text-center py-6">
@@ -616,7 +610,7 @@ export default function RaporlarPage({
         const cutoff619 = new Date(Date.now() - p619MinCoverage * 86400000);
         const recentSales619 = orders.filter(o => {
           if (o.status === 'Cancelled' || !o.createdAt) return false;
-          try { const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string); return d >= cutoff619; } catch { return false; }
+          const d = zamanDate(o.createdAt); return d !== null && d >= cutoff619;
         });
         const skuSold: { [sku: string]: number } = {};
         recentSales619.forEach(o => { (o.lineItems || []).forEach(li => { skuSold[li.sku] = (skuSold[li.sku] || 0) + li.quantity; }); });

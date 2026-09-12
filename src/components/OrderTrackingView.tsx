@@ -12,6 +12,7 @@ import {
   MapPin, RefreshCw, ExternalLink,
 } from 'lucide-react';
 import { paraYaz } from '../utils/currency';
+import { tarihYaz } from '../utils/zaman';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -167,7 +168,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
                     <Clock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                     <span>{tr ? 'Tahmini teslimat' : 'Est. delivery'}:</span>
                     <span className="font-bold text-gray-800">
-                      {new Date(order.estimatedDelivery).toLocaleDateString('tr-TR')}
+                      {tarihYaz(order.estimatedDelivery)}
                     </span>
                   </div>
                 )}

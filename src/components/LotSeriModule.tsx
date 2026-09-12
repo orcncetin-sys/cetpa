@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { Plus, Search, X, Save, AlertTriangle, Hash, CheckCircle2 } from 'lucide-react';
 import CustomerCombobox from './CustomerCombobox';
 import type { Lead } from '../types';
+import { bugunAnahtari, gunAnahtari, tarihYaz } from '../utils/zaman';
 
 interface LotKaydi {
   id: string;
@@ -73,8 +74,8 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
   const [showHareketModal, setShowHareketModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const today = bugunAnahtari();
+  const in30 = gunAnahtari(Date.now() + 30 * 86400000) ?? '';
 
   const initLot = { lotNo: '', urunAdi: '', urunSku: '', miktar: 0, kalanMiktar: 0, tedarikci: '', uretimTarihi: '', sonKullanmaTarihi: '', girisDate: today, depo: '', durum: 'Aktif' as LotKaydi['durum'], notlar: '' };
   const initSeri = { seriNo: '', urunAdi: '', urunSku: '', lotNo: '', durum: 'Stokta' as SeriNo['durum'], musteriAdi: '', satisDate: '', garantiBitis: '', notlar: '' };
@@ -281,7 +282,7 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
                       <td className="py-2 hidden md:table-cell">
                         {l.sonKullanmaTarihi ? (
                           <span className={`text-xs font-semibold ${isExpired ? 'text-red-600' : isExpiring ? 'text-amber-600' : 'text-gray-600'}`}>
-                            {new Date(l.sonKullanmaTarihi).toLocaleDateString('tr-TR')}
+                            {tarihYaz(l.sonKullanmaTarihi)}
                             {isExpired && ' ⚠️'}
                             {isExpiring && !isExpired && ' ⏰'}
                           </span>
@@ -335,7 +336,7 @@ export default function LotSeriModule({ currentLanguage, isAuthenticated, invent
                       <td className="py-2 hidden lg:table-cell">
                         {s.garantiBitis ? (
                           <span className={`text-xs font-semibold ${garantiExpired ? 'text-red-500' : 'text-gray-600'}`}>
-                            {new Date(s.garantiBitis).toLocaleDateString('tr-TR')}
+                            {tarihYaz(s.garantiBitis)}
                             {garantiExpired && ' (Sona erdi)'}
                           </span>
                         ) : '—'}

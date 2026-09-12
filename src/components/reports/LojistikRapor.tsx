@@ -20,8 +20,6 @@ import {
   AlertCircle, Calendar, Download, CheckCircle2,
   CreditCard,
 } from 'lucide-react';
-import { format } from 'date-fns';
-import { tr, enUS } from 'date-fns/locale';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -32,6 +30,7 @@ import { logFirestoreError as importedLogFirestoreError, OperationType } from '.
 import { siparisDurumEtiketi } from '../../utils/durumEtiketi';
 import { gorunenSiparisNo } from '../../utils/siparis';
 import { sortByCreatedAt } from '../../utils/fsSort';
+import { zamanDate, zamanMs, ayAnahtari } from '../../utils/zaman';
 import { formatInCurrency, paraYaz, kisaTutar } from '../../utils/currency';
 import ModuleHeader from '../ModuleHeader';
 import {
@@ -219,12 +218,10 @@ export default function LojistikRapor(ctx: ReportsCtx) {
             const leadTimes: number[] = [];
             for (const o of delivered) {
               try {
-                const created = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+                const created = zamanDate(o.createdAt);
+                if (!created) continue;
                 // Approximate delivery date as updatedAt or +7 days heuristic
-                const raw2 = (o as unknown as Record<string,unknown>).updatedAt;
-                const delivered_date = raw2
-                  ? ((raw2 as { toDate?: () => Date }).toDate?.() ?? new Date(raw2 as string))
-                  : null;
+                const delivered_date = zamanDate((o as unknown as Record<string,unknown>).updatedAt);
                 if (delivered_date) {
                   const days = Math.round((delivered_date.getTime() - created.getTime()) / 86400000);
                   if (days >= 0 && days <= 90) leadTimes.push(days);
@@ -282,8 +279,8 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const last90 = new Date(now195); last90.setDate(last90.getDate() - 90);
         const recent = orders.filter(o => {
           try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            return od >= last90;
+            const od = zamanDate(o.createdAt);
+            return !!od && od >= last90;
           } catch { return false; }
         });
         const totalOrders195 = recent.length;
@@ -509,7 +506,8 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         for (const o of openOrders) {
           if (!ageBuckets[o.status]) continue;
           try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            const od = zamanDate(o.createdAt);
+            if (!od) continue;
             const days = Math.round((now229.getTime() - od.getTime()) / 86400000);
             ageBuckets[o.status].total += days;
             ageBuckets[o.status].count++;
@@ -591,11 +589,9 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         for (const o of deliveredOrders) {
           const m = o as unknown as Record<string,unknown>;
           try {
-            const deliveredDate = ((m.deliveredAt as { toDate?: () => Date })?.toDate?.() ?? new Date(m.deliveredAt as string))
-              || ((m.updatedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(m.updatedAt as string));
-            const expectedDate = ((m.expectedDelivery as { toDate?: () => Date })?.toDate?.() ?? new Date(m.expectedDelivery as string))
-              || ((m.estimatedDelivery as { toDate?: () => Date })?.toDate?.() ?? new Date(m.estimatedDelivery as string));
-            if (deliveredDate <= expectedDate) onTime++;
+            const deliveredDate = zamanDate(m.deliveredAt) ?? zamanDate(m.updatedAt);
+            const expectedDate = zamanDate(m.expectedDelivery) ?? zamanDate(m.estimatedDelivery);
+            if (deliveredDate && expectedDate && deliveredDate <= expectedDate) onTime++;
           } catch { /* skip */ }
         }
         const otdRate = deliveredOrders.length > 0 ? Math.round((onTime / deliveredOrders.length) * 100) : 0;
@@ -630,9 +626,9 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const cancellationRate = total > 0 ? (cancelled / total * 100) : 0;
         const utilizationRate = total > 0 ? ((total - pending) / total * 100) : 0;
         const now = new Date();
-        const avgAge = orders.filter(o => o.status === 'Pending' || o.status === 'Processing').map(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          return (now.getTime() - d.getTime()) / 86400000;
+        const avgAge = orders.filter(o => o.status === 'Pending' || o.status === 'Processing').flatMap(o => {
+          const d = zamanDate(o.createdAt);
+          return d ? [(now.getTime() - d.getTime()) / 86400000] : [];
         });
         const avgOpenAge = avgAge.length > 0 ? avgAge.reduce((s,a)=>s+a,0) / avgAge.length : 0;
         const score = Math.round(deliveryRate * 0.4 + utilizationRate * 0.3 + Math.max(0, 100 - cancellationRate * 5) * 0.2 + Math.max(0, 100 - avgOpenAge * 2) * 0.1);
@@ -671,10 +667,11 @@ export default function LojistikRapor(ctx: ReportsCtx) {
 
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         const now = new Date();
-        const aged = orders.filter(o => o.status === 'Pending' || o.status === 'Processing').map(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
+        const aged = orders.filter(o => o.status === 'Pending' || o.status === 'Processing').flatMap(o => {
+          const d = zamanDate(o.createdAt);
+          if (!d) return [];
           const age = Math.floor((now.getTime() - d.getTime()) / 86400000);
-          return { ...o, age };
+          return [{ ...o, age }];
         });
         const critical = aged.filter(o => o.age >= 7);
         const urgent = aged.filter(o => o.age >= 3 && o.age < 7);
@@ -721,8 +718,8 @@ export default function LojistikRapor(ctx: ReportsCtx) {
           cargoMap[cargo].revenue += o.totalPrice;
         });
         const last30 = orders.filter(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          return (now.getTime() - d.getTime()) / 86400000 <= 30;
+          const d = zamanDate(o.createdAt);
+          return !!d && (now.getTime() - d.getTime()) / 86400000 <= 30;
         });
         const withCargo = last30.filter(o => o.cargoCompany).length;
         const withoutCargo = last30.filter(o => !o.cargoCompany).length;
@@ -761,11 +758,9 @@ export default function LojistikRapor(ctx: ReportsCtx) {
 
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         const delivered = orders.filter(o => o.status === 'Delivered' && o.createdAt).map(o => {
-          const created = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          const delivered = o.estimatedDelivery
-            ? ((o.estimatedDelivery as {toDate?:()=>Date}).toDate?.() ?? new Date(o.estimatedDelivery as string))
-            : null;
-          if (!delivered) return null;
+          const created = zamanDate(o.createdAt);
+          const delivered = zamanDate(o.estimatedDelivery);
+          if (!created || !delivered) return null;
           const days = Math.floor((delivered.getTime() - created.getTime()) / 86400000);
           return days >= 0 && days <= 30 ? days : null;
         }).filter((d): d is number => d !== null);
@@ -803,8 +798,8 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         const now = new Date();
         const last30Days = orders.filter(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          return (now.getTime() - d.getTime()) / 86400000 <= 30;
+          const d = zamanDate(o.createdAt);
+          return !!d && (now.getTime() - d.getTime()) / 86400000 <= 30;
         });
         const statusBreakdown = {
           Pending: last30Days.filter(o=>o.status==='Pending').length,
@@ -889,8 +884,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         });
         const data = months.map(m => {
           const mOrders = orders.filter(o => {
-            const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-            return d.getFullYear() === m.year && d.getMonth() === m.month;
+            return ayAnahtari(o.createdAt) === m.key;
           });
           const total = mOrders.reduce((s,o)=>s+o.totalPrice,0);
           const cancelled = mOrders.filter(o=>o.status==='Cancelled');
@@ -931,15 +925,15 @@ export default function LojistikRapor(ctx: ReportsCtx) {
           Processing: pending.filter(o => o.status === 'Processing'),
         };
         const oldest = pending.reduce((oldest, o) => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          return d < oldest ? d : oldest;
+          const d = zamanDate(o.createdAt);
+          return d && d < oldest ? d : oldest;
         }, now);
         const oldestDays = Math.floor((now.getTime() - oldest.getTime()) / 86400000);
         const aging = [
-          {label: '0-1 days', orders: pending.filter(o => { const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string); return (now.getTime()-d.getTime())/86400000 <= 1; })},
-          {label: '2-3 days', orders: pending.filter(o => { const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string); const age=(now.getTime()-d.getTime())/86400000; return age>1&&age<=3; })},
-          {label: '4-7 days', orders: pending.filter(o => { const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string); const age=(now.getTime()-d.getTime())/86400000; return age>3&&age<=7; })},
-          {label: '7+ days', orders: pending.filter(o => { const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string); return (now.getTime()-d.getTime())/86400000>7; })},
+          {label: '0-1 days', orders: pending.filter(o => { const d = zamanDate(o.createdAt); return !!d && (now.getTime()-d.getTime())/86400000 <= 1; })},
+          {label: '2-3 days', orders: pending.filter(o => { const d = zamanDate(o.createdAt); if (!d) return false; const age=(now.getTime()-d.getTime())/86400000; return age>1&&age<=3; })},
+          {label: '4-7 days', orders: pending.filter(o => { const d = zamanDate(o.createdAt); if (!d) return false; const age=(now.getTime()-d.getTime())/86400000; return age>3&&age<=7; })},
+          {label: '7+ days', orders: pending.filter(o => { const d = zamanDate(o.createdAt); return !!d && (now.getTime()-d.getTime())/86400000>7; })},
         ];
         return (
           <div className="apple-card p-6">
@@ -972,26 +966,21 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         const delivered324 = orders.filter(o => o.status === 'Delivered');
         if (delivered324.length < 3) return null;
-        const toTs324 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const lateOrders = delivered324.filter(o => {
-          const created = toTs324(o.createdAt);
-          const updated = toTs324((o as unknown as Record<string,unknown>).updatedAt);
+          const created = zamanMs(o.createdAt) ?? 0;
+          const updated = zamanMs((o as unknown as Record<string,unknown>).updatedAt) ?? 0;
           return updated > 0 && created > 0 && (updated - created) > 3 * 86400000;
         });
         const onTime = delivered324.length - lateOrders.length;
         const lateRate = (lateOrders.length / delivered324.length * 100).toFixed(1);
         const months324: Record<string, {late: number; total: number}> = {};
         delivered324.forEach(o => {
-          const d = new Date(toTs324(o.createdAt));
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           if (!months324[key]) months324[key] = {late: 0, total: 0};
           months324[key].total++;
-          const created = toTs324(o.createdAt);
-          const updated = toTs324((o as unknown as Record<string,unknown>).updatedAt);
+          const created = zamanMs(o.createdAt) ?? 0;
+          const updated = zamanMs((o as unknown as Record<string,unknown>).updatedAt) ?? 0;
           if (updated > 0 && created > 0 && (updated - created) > 3 * 86400000) months324[key].late++;
         });
         const monthKeys = Object.keys(months324).sort().slice(-6);
@@ -1057,17 +1046,12 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'lojistik' && orders.length >= 7 && (() => {
-        const toTs332 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const days332 = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
         const dayData = days332.map(d => ({day: d, count: 0, revenue: 0}));
         orders.forEach(o => {
-          const ts = toTs332(o.createdAt);
-          if (!ts) return;
-          const dow = new Date(ts).getDay();
+          const d = zamanDate(o.createdAt);
+          if (!d) return;
+          const dow = d.getDay();
           dayData[dow].count++;
           dayData[dow].revenue += o.totalPrice || 0;
         });
@@ -1151,16 +1135,11 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'lojistik' && orders.filter(o => o.status === 'Delivered').length >= 3 && (() => {
-        const toTs349 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const delivTimes = orders
           .filter(o => o.status === 'Delivered')
           .map(o => {
-            const created = toTs349(o.createdAt);
-            const updated = toTs349((o as unknown as Record<string,unknown>).updatedAt || (o as unknown as Record<string,unknown>).deliveredAt);
+            const created = zamanMs(o.createdAt) ?? 0;
+            const updated = zamanMs((o as unknown as Record<string,unknown>).updatedAt || (o as unknown as Record<string,unknown>).deliveredAt) ?? 0;
             return (created && updated && updated > created) ? Math.floor((updated - created) / 86400000) : -1;
           })
           .filter(d => d >= 0 && d <= 60);
@@ -1196,15 +1175,10 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'lojistik' && orders.length >= 6 && (() => {
-        const toTs356 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const monthItems: Record<string, number> = {};
         orders.forEach(o => {
-          const d = new Date(toTs356(o.createdAt));
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           const qty = (o.lineItems || []).reduce((s: number, li: {quantity?: number}) => s + (li.quantity || 1), 0);
           monthItems[key] = (monthItems[key] || 0) + qty;
         });
@@ -1263,11 +1237,6 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'lojistik' && orders.length >= 8 && (() => {
-        const toTs367 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const now367 = Date.now();
         const ageBuckets = [
           {label: '< 1d',  max: 1,   count: 0, color: '#10b981'},
@@ -1278,7 +1247,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         ];
         const openOrders = orders.filter(o => !['Delivered','Cancelled'].includes(o.status));
         openOrders.forEach(o => {
-          const created = toTs367(o.createdAt);
+          const created = zamanMs(o.createdAt);
           if (!created) return;
           const ageDays = (now367 - created) / 86400000;
           const b = ageBuckets.find(b => ageDays < b.max);
@@ -1337,18 +1306,12 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'lojistik' && orders.filter(o => o.status === 'Delivered').length >= 4 && (() => {
-        const toTs375 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const monthOTD: Record<string, {total: number; onTime: number}> = {};
         orders.filter(o => o.status === 'Delivered').forEach(o => {
-          const created = toTs375(o.createdAt);
-          const updated = toTs375((o as unknown as Record<string,unknown>).updatedAt || (o as unknown as Record<string,unknown>).deliveredAt);
-          if (!created) return;
-          const d = new Date(created);
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const created = zamanMs(o.createdAt);
+          const updated = zamanMs((o as unknown as Record<string,unknown>).updatedAt || (o as unknown as Record<string,unknown>).deliveredAt) ?? 0;
+          const key = ayAnahtari(o.createdAt);
+          if (!created || !key) return;
           if (!monthOTD[key]) monthOTD[key] = {total: 0, onTime: 0};
           monthOTD[key].total++;
           const days = (updated && updated > created) ? (updated - created) / 86400000 : 0;
@@ -1378,10 +1341,9 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         const diffs: number[] = [];
         orders.forEach(o => {
-          const created = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
-          const delivered = (o as unknown as Record<string,unknown>).deliveredAt;
-          if (!created || !delivered) return;
-          const dDate = (delivered as {toDate?:()=>Date}).toDate?.() ?? new Date(delivered as string);
+          const created = zamanDate(o.createdAt);
+          const dDate = zamanDate((o as unknown as Record<string,unknown>).deliveredAt);
+          if (!created || !dDate) return;
           const diff = Math.round((dDate.getTime() - created.getTime()) / 86400000);
           if (diff >= 0 && diff <= 30) diffs.push(diff);
         });
@@ -1515,13 +1477,10 @@ export default function LojistikRapor(ctx: ReportsCtx) {
 
       {reportsTab === 'lojistik' && orders.length >= 3 && (() => {
         const now = new Date();
-        const stuck = orders.filter(o => {
-          if (o.status !== 'Processing' && o.status !== 'Pending') return false;
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
-          if (!d) return false;
-          return (now.getTime() - d.getTime()) / 86400000 > 7;
-        }).map(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : new Date();
+        const stuck = orders.flatMap(o => {
+          if (o.status !== 'Processing' && o.status !== 'Pending') return [];
+          const d = zamanDate(o.createdAt);
+          if (!d || (now.getTime() - d.getTime()) / 86400000 <= 7) return [];
           const days = Math.floor((now.getTime() - d.getTime()) / 86400000);
           const cid = (o as unknown as Record<string,unknown>).customerName as string | undefined
             || (o as unknown as Record<string,unknown>).customerId as string | undefined
@@ -1529,7 +1488,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
           const oR = o as unknown as Record<string,unknown>;
           const total = typeof oR.total === 'number' ? oR.total as number
             : (o.lineItems ?? []).reduce((s, li) => { const lr = li as unknown as Record<string,unknown>; return s + ((lr.quantity as number|undefined)??0) * ((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); }, 0);
-          return {id: o.id, status: o.status, days, customer: cid, total};
+          return [{id: o.id, status: o.status, days, customer: cid, total}];
         }).sort((a, b) => b.days - a.days).slice(0, 6);
         if (stuck.length === 0) return (
           <div className="apple-card p-4 mb-4 flex items-center gap-2">
@@ -1562,7 +1521,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         const dayTotals: {sum: number; count: number}[] = Array.from({length: 7}, () => ({sum: 0, count: 0}));
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
+          const d = zamanDate(o.createdAt);
           if (!d) return;
           const dow = (d.getDay() + 6) % 7;
           const oR = o as unknown as Record<string,unknown>;
@@ -1596,10 +1555,9 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         const byMonth: Record<string, {delivered: number; total: number}> = {};
         orders.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
-          if (!d) return;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           if (o.status === 'Processing' || o.status === 'Pending') return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
           if (!byMonth[key]) byMonth[key] = {delivered: 0, total: 0};
           byMonth[key].total++;
           if (o.status === 'Delivered') byMonth[key].delivered++;
@@ -1701,13 +1659,12 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         const byMonth: Record<string, {sum: number; count: number}> = {};
         orders.forEach(o => {
-          const created = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
-          const delivered = (o as unknown as Record<string,unknown>).deliveredAt ?? (o as unknown as Record<string,unknown>).completedAt;
-          if (!created || !delivered || o.status !== 'Delivered') return;
-          const dDate = (delivered as {toDate?:()=>Date}).toDate?.() ?? new Date(delivered as string);
+          const created = zamanDate(o.createdAt);
+          const dDate = zamanDate((o as unknown as Record<string,unknown>).deliveredAt ?? (o as unknown as Record<string,unknown>).completedAt);
+          const key = ayAnahtari(o.createdAt);
+          if (!created || !dDate || !key || o.status !== 'Delivered') return;
           const diff = Math.round((dDate.getTime() - created.getTime()) / 86400000);
           if (diff < 0 || diff > 60) return;
-          const key = `${created.getFullYear()}-${String(created.getMonth()+1).padStart(2,'0')}`;
           if (!byMonth[key]) byMonth[key] = {sum: 0, count: 0};
           byMonth[key].sum += diff;
           byMonth[key].count++;
@@ -1790,9 +1747,8 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         if (shipped.length < 3) return null;
         const byMonth: Record<string, number> = {};
         shipped.forEach(o => {
-          const d = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           byMonth[key] = (byMonth[key] ?? 0) + 1;
         });
         const months = Object.keys(byMonth).sort().slice(-8);
@@ -1862,15 +1818,13 @@ export default function LojistikRapor(ctx: ReportsCtx) {
 
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         // Segment by days since order creation
-        const now = new Date();
         const segments = [{label:'≤1d',min:0,max:1,color:'#22c55e'},{label:'2-3d',min:1,max:3,color:'#84cc16'},
           {label:'4-7d',min:3,max:7,color:'#f59e0b'},{label:'8-14d',min:7,max:14,color:'#ef4444'},{label:'14d+',min:14,max:9999,color:'#7c3aed'}];
         const counts = segments.map(s=>({...s,count:0}));
         orders.filter(o=>o.status==='Delivered').forEach(o=>{
-          const created = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
-          const deliv = (o as unknown as Record<string,unknown>).deliveredAt ?? (o as unknown as Record<string,unknown>).completedAt;
-          if (!created) return;
-          const end = deliv ? ((deliv as {toDate?:()=>Date}).toDate?.()??new Date(deliv as string)) : now;
+          const created = zamanDate(o.createdAt);
+          const end = zamanDate((o as unknown as Record<string,unknown>).deliveredAt ?? (o as unknown as Record<string,unknown>).completedAt);
+          if (!created || !end) return;
           const days = (end.getTime()-created.getTime())/86400000;
           const seg = counts.find(s=>days>=s.min&&days<s.max);
           if (seg) seg.count++;
@@ -1904,9 +1858,8 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         // Conversion by month
         const convByMonth: Record<string,{total:number;conv:number}> = {};
         quotations.forEach(q => {
-          const d = q.createdAt ? ((q.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(q.createdAt as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(q.createdAt);
+          if (!key) return;
           if (!convByMonth[key]) convByMonth[key]={total:0,conv:0};
           convByMonth[key].total++;
           const qR = q as unknown as Record<string,unknown>;
@@ -2065,10 +2018,9 @@ export default function LojistikRapor(ctx: ReportsCtx) {
         const fulfilled = orders
           .filter(o=>o.status==='Delivered')
           .map(o=>{
-            const created = o.createdAt ? ((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)) : null;
-            const delivered = (o as unknown as Record<string,unknown>).deliveredAt??(o as unknown as Record<string,unknown>).completedAt;
-            if (!created||!delivered) return null;
-            const dDate = (delivered as {toDate?:()=>Date}).toDate?.()??new Date(delivered as string);
+            const created = zamanDate(o.createdAt);
+            const dDate = zamanDate((o as unknown as Record<string,unknown>).deliveredAt??(o as unknown as Record<string,unknown>).completedAt);
+            if (!created||!dDate) return null;
             const hours = (dDate.getTime()-created.getTime())/3600000;
             if (hours<0||hours>8760) return null;
             const cid=(o as unknown as Record<string,unknown>).customerName as string|undefined||(o as unknown as Record<string,unknown>).customerId as string|undefined||'Unknown';
@@ -2107,7 +2059,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         let weekdayCount=0,weekendCount=0,weekdayRev=0,weekendRev=0;
         orders.forEach(o=>{
-          const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null;
+          const d=zamanDate(o.createdAt);
           if(!d) return;
           const oR=o as unknown as Record<string,unknown>;
           const total=typeof oR.total==='number'?oR.total as number:(o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0);
@@ -2139,7 +2091,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       {reportsTab === 'lojistik' && orders.length >= 5 && (() => {
         const now=new Date();
         const d90=new Date(now.getTime()-90*86400000);
-        const recent=orders.filter(o=>{ const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null; return d&&d>=d90; }).sort((a,b)=>{ const da=a.createdAt?((a.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(a.createdAt as string)):new Date(0); const db=b.createdAt?((b.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(b.createdAt as string)):new Date(0); return da.getTime()-db.getTime(); });
+        const recent=orders.filter(o=>{ const d=zamanDate(o.createdAt); return !!d&&d>=d90; }).sort((a,b)=>(zamanMs(a.createdAt)??0)-(zamanMs(b.createdAt)??0));
         if(recent.length<5) return null;
         const vals=recent.map(o=>{ const oR=o as unknown as Record<string,unknown>; return typeof oR.total==='number'?oR.total as number:(o.lineItems??[]).reduce((s,li)=>{ const lr=li as unknown as Record<string,unknown>; return s+((lr.quantity as number|undefined)??0)*((lr.unitPrice as number|undefined)??(lr.price as number|undefined)??0); },0); });
         const step=Math.max(1,Math.floor(vals.length/30));
@@ -2196,7 +2148,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
       {reportsTab === 'lojistik' && orders.length >= 1 && (() => {
         const now=new Date();
         const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
-        const thisMonth=orders.filter(o=>{ const d=o.createdAt?((o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string)):null; return d&&d>=monthStart; });
+        const thisMonth=orders.filter(o=>{ const d=zamanDate(o.createdAt); return !!d&&d>=monthStart; });
         const shipped=thisMonth.filter(o=>o.status==='Shipped'||o.status==='Delivered').length;
         const pending=thisMonth.filter(o=>o.status==='Pending').length;
         const processing=thisMonth.filter(o=>o.status==='Processing').length;

@@ -9,11 +9,10 @@ import autoTable from 'jspdf-autotable';
 import { registerTurkishFont } from '../utils/pdfFont';
 import { formatAmount } from '../utils/currency';
 import { type Quotation, type QuotationItem } from '../types';
-import { format } from 'date-fns';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz, VARSAYILAN_BASLIK } from '../utils/belgeSablonu';
-import { tr } from 'date-fns/locale';
 import { cn } from '../lib/utils';
 import { teklifToplamlari } from '../utils/para';
+import { tarihYaz } from '../utils/zaman';
 
 interface QuotationDetailProps {
   isOpen: boolean;
@@ -96,17 +95,10 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
       doc.setTextColor(255, 255, 255);
       doc.text(sablon?.title?.trim() || VARSAYILAN_BASLIK.teklif, W - 14, 15, { align: 'right' });
 
-      // Parse date
-      let dateObj = new Date();
-      if (quotation.createdAt) {
-        const ca = quotation.createdAt;
-        dateObj = (typeof ca === 'object' && ca !== null && 'toDate' in ca && typeof (ca as { toDate: () => Date }).toDate === 'function')
-          ? (ca as { toDate: () => Date }).toDate()
-          : new Date(ca as string | number | Date);
-      }
       const docNo = quotation.id.substring(0, 8).toUpperCase();
-      const dateStr = format(dateObj, 'dd.MM.yyyy');
-      const validStr = quotation.validUntil ? format(new Date(quotation.validUntil as string | number | Date), 'dd.MM.yyyy') : '-';
+      // Tarihler tek kaynaktan (utils/zaman): çözülemezse '—' — eskisi gibi BUGÜN basılmaz.
+      const dateStr = tarihYaz(quotation.createdAt);
+      const validStr = tarihYaz(quotation.validUntil);
 
       doc.setFontSize(8);
       doc.setFont('Roboto', 'normal');
@@ -382,8 +374,8 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
             <div className="space-y-4">
               <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">{t.quotation_info || 'Teklif Bilgileri'}</h4>
               <div className="space-y-2">
-                <p className="text-sm text-gray-500 flex items-center gap-2"><Calendar className="w-4 h-4 text-gray-400" /> {t.date || 'Tarih'}: {format((quotation.createdAt as { toDate?: () => Date })?.toDate?.() || new Date(), 'dd MMM yyyy', { locale: tr })}</p>
-                <p className="text-sm text-gray-500 flex items-center gap-2"><Clock className="w-4 h-4 text-gray-400" /> {t.valid_until || 'Geçerlilik'}: {quotation.validUntil ? format(new Date(quotation.validUntil as string | number | Date), 'dd MMM yyyy', { locale: tr }) : '-'}</p>
+                <p className="text-sm text-gray-500 flex items-center gap-2"><Calendar className="w-4 h-4 text-gray-400" /> {t.date || 'Tarih'}: {tarihYaz(quotation.createdAt, { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                <p className="text-sm text-gray-500 flex items-center gap-2"><Clock className="w-4 h-4 text-gray-400" /> {t.valid_until || 'Geçerlilik'}: {tarihYaz(quotation.validUntil, { day: '2-digit', month: 'short', year: 'numeric' })}</p>
               </div>
             </div>
             <div className="space-y-4">

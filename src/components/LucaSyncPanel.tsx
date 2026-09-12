@@ -21,6 +21,7 @@ import { collection, query, limit, onSnapshot } from '../lib/dbClient';
 import { db } from '../firebase';
 import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';
+import { zamanDate } from '../utils/zaman';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ interface LogEntry {
   lucaRef:   string | null;
   error:     string | null;
   duration:  number;
-  timestamp?: { toDate: () => Date };
+  timestamp?: unknown; // Timestamp | {_seconds} | ISO — zamanDate çözer
 }
 
 const EMPTY_SYNC: SyncState = { running: false, result: null, error: null };
@@ -333,7 +334,7 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
               </p>
             ) : (
               logs.map(entry => {
-                const ts = entry.timestamp?.toDate?.();
+                const ts = zamanDate(entry.timestamp);
                 return (
                   <div key={entry.id} className={`rounded-xl px-3 py-2 flex items-start justify-between gap-2 ${
                     entry.success ? 'bg-emerald-50' : 'bg-red-50'

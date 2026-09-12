@@ -5,12 +5,12 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, Edit2, Package, Tag, Layers, DollarSign, History, TrendingUp, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import ProductForm from './ProductForm';
-import { format } from 'date-fns';
 
 import { InventoryItem, Warehouse } from '../types';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { faturaEsle } from '../utils/faturaEsle';
 import { paraYaz } from '../utils/currency';
+import { zamanMs, gunAnahtari, tarihYaz } from '../utils/zaman';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
 
 /** Hem Cetpa şeması hem normalize edilmiş Mikro hareketi buraya oturur. */
@@ -39,14 +39,6 @@ interface ProductDetailProps {
 }
 
 const tl = (n: number) => paraYaz(n);
-
-function toDate(ts: unknown): Date | null {
-  if (!ts) return null;
-  const t = ts as { toDate?: () => Date };
-  if (typeof t.toDate === 'function') { try { return t.toDate(); } catch { /* düş */ } }
-  const d = new Date(ts as string | number);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
 
 export default function ProductDetail({ product, onClose, movements = [], warehouses }: ProductDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -79,7 +71,7 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
   // Bu ürünün hareketleri: productId VEYA SKU eşleşmesi (Mikro satırları SKU ile gelir).
   const urunHareketleri = movements
     .filter(m => (m.productId && m.productId === product.id) || (m.sku && m.sku === product.sku))
-    .sort((a, b) => (toDate(b.timestamp)?.getTime() ?? 0) - (toDate(a.timestamp)?.getTime() ?? 0));
+    .sort((a, b) => (zamanMs(b.timestamp) ?? 0) - (zamanMs(a.timestamp) ?? 0));
 
   // Son/ortalama satış fiyatı — 'out' (satış) hareketlerinin KDV hariç birim fiyatından.
   const satisHareketleri = urunHareketleri.filter(m => m.type === 'out' && (m.birimFiyat ?? 0) > 0);
@@ -222,11 +214,10 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
                     </tr>
                   ) : (
                     urunHareketleri.slice(0, 20).map((m) => {
-                      const d = toDate(m.timestamp);
                       return (
                       <tr key={m.id} className="hover:bg-gray-50/50 transition-colors cursor-pointer"
                         onClick={() => setSeciliHareket(m)}>
-                        <td className="px-4 py-3 text-xs text-gray-600">{d ? format(d, 'dd.MM.yyyy') : '—'}</td>
+                        <td className="px-4 py-3 text-xs text-gray-600">{tarihYaz(m.timestamp)}</td>
                         <td className="px-4 py-3 text-xs font-medium">
                           <span className={m.type === 'in' ? 'text-green-600' : 'text-red-500'}>
                             {m.type === 'in' ? '▲ Giriş' : '▼ Çıkış'}
@@ -256,12 +247,11 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
         {/* Hareket Detayı — satıra tıklanınca (2026-08-28) */}
         {seciliHareket && (() => {
           const m = seciliHareket;
-          const d = toDate(m.timestamp);
           // Eşleşme MUHAFAZAKÂR (utils/faturaEsle.ts): cari + gün ikisi de
           // tutmalı ve TEK fatura çıkmalı; yoksa düğme hiç görünmez.
           const f = faturaEsle(mikroFaturalar, {
             cariKod: m.cariKod ?? null,
-            tarih: d ? format(d, 'yyyy-MM-dd') : null,
+            tarih: gunAnahtari(m.timestamp),
           });
           return (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setSeciliHareket(null)}>
@@ -271,7 +261,7 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
                   <button onClick={() => setSeciliHareket(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X className="w-4 h-4" /></button>
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div><span className="text-gray-400 font-bold uppercase block text-[10px]">Tarih</span>{d ? format(d, 'dd.MM.yyyy') : '—'}</div>
+                  <div><span className="text-gray-400 font-bold uppercase block text-[10px]">Tarih</span>{tarihYaz(m.timestamp)}</div>
                   <div><span className="text-gray-400 font-bold uppercase block text-[10px]">Tür</span>
                     <span className={m.type === 'in' ? 'text-green-600' : 'text-red-500'}>{m.type === 'in' ? '▲ Giriş' : '▼ Çıkış'}</span></div>
                   <div><span className="text-gray-400 font-bold uppercase block text-[10px]">Miktar</span>{m.quantity}</div>

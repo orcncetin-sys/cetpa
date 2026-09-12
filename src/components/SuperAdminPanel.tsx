@@ -7,6 +7,7 @@ import {
 import { authedFetch } from '../lib/dbClient';
 import { confirmAction } from '../lib/confirm';
 import { paraYaz } from '../utils/currency';
+import { zamanMs, gunAnahtari, gunBasi, tarihYaz } from '../utils/zaman';
 import OpsWatchdogCard from './OpsWatchdogCard';
 import TrafikKarti from './TrafikKarti';
 import ModuleStatusBoard from './ModuleStatusBoard';
@@ -70,22 +71,15 @@ const PLAN_PRICES: Record<string, { monthly: number; yearly: number }> = {
   free: { monthly: 0, yearly: 0 },
 };
 
-function toMs(v: unknown): number {
-  if (!v) return 0;
+function toMs(v: unknown): number | null {
+  if (!v) return null;
+  // Epoch SANİYE sezgiseli (< 1e12) korundu; gerisi tek kaynak utils/zaman (Timestamp/zarf/ISO/Date).
   if (typeof v === 'number') return v < 1e12 ? v * 1000 : v;
-  if (typeof v === 'string') { const t = Date.parse(v); return isNaN(t) ? 0 : t; }
-  if (typeof v === 'object') {
-    const o = v as { seconds?: number; _seconds?: number; toMillis?: () => number };
-    if (typeof o.toMillis === 'function') return o.toMillis();
-    if (o.seconds) return o.seconds * 1000;
-    if (o._seconds) return o._seconds * 1000;
-  }
-  return 0;
+  return zamanMs(v);
 }
 function fmtDate(v: unknown, lang: string): string {
-  const ms = toMs(v);
-  if (!ms) return '—';
-  return new Date(ms).toLocaleDateString(lang === 'tr' ? 'tr-TR' : 'en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  // Göç kuralı C: dil dinamik (tr/en) → tarihYaz'ın 3. parametresi; Intl seçenekleri aynen. Bilinmiyorsa '—'.
+  return tarihYaz(toMs(v), { year: 'numeric', month: 'short', day: 'numeric' }, lang === 'tr' ? 'tr' : 'en');
 }
 function fmtMoney(v: number, currency = 'TRY'): string {
   return paraYaz(v, { birim: currency, ondalik: 0 });
@@ -179,7 +173,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
         setFCycle(cycle === 'yearly' ? 'yearly' : 'monthly');
         setFStatus(d.status === 'suspended' ? 'suspended' : 'active');
         const ms = toMs(d.billing.nextPaymentDate ?? d.billing.currentPeriodEnd);
-        setFNextDate(ms ? new Date(ms).toISOString().slice(0, 10) : '');
+        setFNextDate(gunAnahtari(ms) ?? '');   // yerel gün (input[type=date]); bilinmiyorsa boş
         setFNote(d.note || '');
         setPCompanyName(d.profile.companyName || '');
         setPTaxNo(d.profile.taxNo || '');
@@ -213,7 +207,7 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
     if (!detailId) return;
     setSavingBilling(true);
     try {
-      const nextMs = fNextDate ? Date.parse(fNextDate) : undefined;
+      const nextMs = fNextDate ? gunBasi(fNextDate)?.getTime() : undefined;   // yerel gün başı — yükleme (gunAnahtari) ile aynı zemin, UTC- bölgede gün kaymaz
       const res = await authedFetch(`/api/superadmin/tenants/${encodeURIComponent(detailId)}/update`, {
         method: 'POST',
         body: JSON.stringify({ plan: fPlan, cycle: fCycle, status: fStatus, note: fNote, nextPaymentDate: nextMs ?? null }),

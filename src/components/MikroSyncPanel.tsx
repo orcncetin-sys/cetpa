@@ -17,6 +17,7 @@ import {
 import { getSyncQueueStats, clearDeadJobs } from '../services/syncRetryService';
 import { processMikroRetries } from '../services/mikroEvrak';
 import { paraYaz } from '../utils/currency';
+import { ayAnahtari } from '../utils/zaman';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -101,7 +102,7 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   const [cariImport, setCariImport] = useState<ImportState>({ running: false, result: null, error: null });
 
   // Pull-flow states
-  const defaultPeriod = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const defaultPeriod = ayAnahtari(new Date()) ?? '';   // YEREL ay (toISOString UTC ayı verirdi: ayın 1'i 00:00-03:00 arası önceki ay) // YYYY-MM
   const [pullPeriod, setPullPeriod] = useState(defaultPeriod);
   const [bakiyePull, setBakiyePull] = useState<PullState>({ running: false, result: null, error: null });
   const [mizanPull,  setMizanPull]  = useState<PullState>({ running: false, result: null, error: null });

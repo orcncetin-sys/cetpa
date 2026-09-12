@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { Calendar, CheckCircle2, AlertTriangle, Clock, RefreshCw, TrendingUp } from 'lucide-react';
 import { byField } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
+import { ayAnahtari, gunFarki, gunAnahtari, bugunAnahtari, tarihYaz } from '../utils/zaman';
 
 interface VergiDeadline {
   id: string;
@@ -66,8 +67,7 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
     const ym = `${m[1]}-${m[2]}`;
     return orders.reduce((s, o) => {
       if (o.status === 'Cancelled' || o.faturali === false) return s;
-      let d: string;
-      try { d = (o.createdAt as { toDate?: () => Date })?.toDate?.()?.toISOString().slice(0, 7) ?? new Date(o.createdAt as string).toISOString().slice(0, 7); } catch { return s; }
+      const d = ayAnahtari(o.createdAt);         // yerel ay; bilinmiyorsa null → öneriye girmez
       if (d !== ym) return s;
       const rate = (o.kdvOran ?? 20) / 100;
       return s + (Number(o.totalPrice) || 0) * rate;
@@ -78,15 +78,15 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
     const unsub = onSnapshot(query(collection(db, 'vergiTakvimi')), snap => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as VergiDeadline)).sort(byField('sonTarih', 'asc'));
       // Auto-mark overdue
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bugunAnahtari();
       const updated = data.map(d => d.durum === 'Yapılacak' && d.sonTarih < today ? { ...d, durum: 'Gecikmiş' as const } : d);
       setDeadlines(updated);
     });
     return () => unsub();
   }, []);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const in30Days = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const today = bugunAnahtari();
+  const in30Days = gunAnahtari(Date.now() + 30 * 86400000) ?? '';   // today ile AYNI (yerel) gün kuralı
 
   const upcoming = deadlines.filter(d => d.durum === 'Yapılacak' && d.sonTarih >= today && d.sonTarih <= in30Days);
   const late = deadlines.filter(d => d.durum === 'Gecikmiş' || (d.durum === 'Yapılacak' && d.sonTarih < today));
@@ -121,8 +121,9 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
 
   const getDaysBadge = (sonTarih: string, durum: string) => {
     if (durum === 'Tamamlandı') return { label: tr ? 'Tamamlandı' : 'Done', cls: 'bg-green-100 text-green-700' };
-    const diffMs = new Date(sonTarih).getTime() - Date.now();
-    const days = Math.ceil(diffMs / 86400000);
+    // Yerel gün farkı (utils/zaman) — eski UTC-gece-yarısı hesabı TR'de 00:00-03:00 arası "Bugün"ü "1g" gösteriyordu.
+    const days = gunFarki(sonTarih, new Date());
+    if (days === null) return { label: '—', cls: 'bg-gray-100 text-gray-500' };
     if (days < 0) return { label: tr ? `${Math.abs(days)}g gecikmiş` : `${Math.abs(days)}d overdue`, cls: 'bg-red-100 text-red-700' };
     if (days === 0) return { label: tr ? 'Bugün!' : 'Today!', cls: 'bg-red-100 text-red-700' };
     if (days <= 7) return { label: `${days}g`, cls: 'bg-orange-100 text-orange-700' };
@@ -209,7 +210,7 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {tr ? 'Dönem:' : 'Period:'} {d.donem} &nbsp;•&nbsp;
-                    {tr ? 'Son Tarih:' : 'Deadline:'} {new Date(d.sonTarih).toLocaleDateString('tr-TR')} &nbsp;•&nbsp;
+                    {tr ? 'Son Tarih:' : 'Deadline:'} {tarihYaz(d.sonTarih)} &nbsp;•&nbsp;
                     {d.sorumlu}
                   </p>
                 </div>

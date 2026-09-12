@@ -18,6 +18,7 @@ import { useEffect, useState } from 'react';
 import { History, AlertTriangle } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, onSnapshot } from '../lib/dbClient';
+import { zamanMs } from '../utils/zaman';
 
 interface Props {
   currentLanguage: string;
@@ -33,16 +34,6 @@ function zamanFarki(ms: number, tr: boolean): string {
   if (sa < 24) return tr ? `${sa} sa önce` : `${sa}h ago`;
   const gun = Math.floor(sa / 24);
   return tr ? `${gun} gün önce` : `${gun}d ago`;
-}
-
-/** Firestore/PG timestamp veya ISO string → ms. Çözülemezse null. */
-function zamanMs(v: unknown): number | null {
-  if (!v) return null;
-  const t = v as { toDate?: () => Date; seconds?: number };
-  if (typeof t.toDate === 'function') { try { return t.toDate().getTime(); } catch { /* düş */ } }
-  if (typeof t.seconds === 'number') return t.seconds * 1000;
-  const d = new Date(v as string | number);
-  return Number.isNaN(d.getTime()) ? null : d.getTime();
 }
 
 export default function SonSenkronRozeti({ currentLanguage, onNavigate }: Props) {

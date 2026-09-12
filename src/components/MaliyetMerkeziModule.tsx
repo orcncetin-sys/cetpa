@@ -17,6 +17,7 @@ import {
   PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer
 } from 'recharts';
 import { confirmAction } from '../lib/confirm';
+import { bugunAnahtari } from '../utils/zaman';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -243,7 +244,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
   const [showKalemModal, setShowKalemModal] = useState(false);
   const [editingKalem, setEditingKalem] = useState<MaliyetKalemi | null>(null);
   const [kalemForm, setKalemForm] = useState({
-    merkezId: '', merkezAd: '', tarih: new Date().toISOString().split('T')[0],
+    merkezId: '', merkezAd: '', tarih: bugunAnahtari(),
     kategori: KATEGORILER[0], aciklama: '', tutar: '',
     belgeTipi: 'Fatura' as MaliyetKalemi['belgeTipi'], belgeNo: '', onaylandi: false,
   });
@@ -373,7 +374,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
     setKalemForm({
       merkezId: merkezler[0]?.id ?? '',
       merkezAd: merkezler[0]?.ad ?? '',
-      tarih: new Date().toISOString().split('T')[0],
+      tarih: bugunAnahtari(),
       kategori: KATEGORILER[0], aciklama: '', tutar: '',
       belgeTipi: 'Fatura', belgeNo: '', onaylandi: false,
     });
@@ -508,7 +509,7 @@ export default function MaliyetMerkeziModule({ currentLanguage, isAuthenticated 
       k.tarih, k.merkezAd, k.kategori, k.aciklama, k.belgeTipi, k.belgeNo, k.tutar,
       k.onaylandi ? t.onaylandi : t.onaylanmadi,
     ]);
-    exportCSVFile(`gider-kalemleri-${new Date().toISOString().split('T')[0]}.csv`, headers, rows);
+    exportCSVFile(`gider-kalemleri-${bugunAnahtari()}.csv`, headers, rows);
   };
 
   // ── Render ──

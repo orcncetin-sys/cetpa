@@ -29,6 +29,7 @@ import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ModuleHeader from '../components/ModuleHeader';
 import type { Order, Employee, Warehouse, Supplier, InventoryItem, Lead } from '../types';
 import { faturaTipiEtiketi } from '../utils/durumEtiketi';
+import { zamanDate, zamanMs, ayAnahtari, gunAnahtari, gunBasi, bugunAnahtari, tarihYaz } from '../utils/zaman';
 
 const SabitKiymetModule    = React.lazy(() => import('../components/SabitKiymetModule'));
 const MaliyetMerkeziModule = React.lazy(() => import('../components/MaliyetMerkeziModule'));
@@ -378,13 +379,11 @@ export default function MuhasebePage(props: Props) {
                     const now146 = new Date();
                     const months146 = Array.from({ length: 6 }, (_, i) => {
                       const d = new Date(now146.getFullYear(), now146.getMonth() - (5 - i), 1);
-                      const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', year: '2-digit' });
+                      const label = tarihYaz(d, { month: 'short', year: '2-digit' }, currentLanguage === 'tr' ? 'tr' : 'en');
                       const mOrders = orders.filter(o => {
                         if (!(o as unknown as Record<string,unknown>).kdvTutari) return false;
-                        try {
-                          const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-                          return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-                        } catch { return false; }
+                        const od = zamanDate(o.createdAt);
+                        return !!od && od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
                       });
                       const kdvCollected = mOrders.reduce((s, o) => s + (((o as unknown as Record<string,unknown>).kdvTutari as number) || 0), 0);
                       const netRevenue = mOrders.reduce((s, o) => s + (((o as unknown as Record<string,unknown>).kdvHaricTutar as number) || o.totalPrice || 0), 0);
@@ -451,13 +450,10 @@ export default function MuhasebePage(props: Props) {
                         const today607 = new Date();
                         // Find unpaid orders sorted by createdAt
                         const unpaidOrders = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o) && o.createdAt);
-                        const withDays = unpaidOrders.map(o => {
-                          let daysPast = 0;
-                          try {
-                            const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-                            daysPast = Math.floor((today607.getTime() - d.getTime()) / 86400000);
-                          } catch { /* skip */ }
-                          return {...o, daysPast};
+                        const withDays = unpaidOrders.flatMap(o => {
+                          const d = zamanDate(o.createdAt);
+                          if (!d) return []; // tarih çözülemedi → sahte "0 gün" yerine listeden düşer
+                          return [{...o, daysPast: Math.floor((today607.getTime() - d.getTime()) / 86400000)}];
                         }).sort((a,b) => b.daysPast - a.daysPast);
                         if (withDays.length === 0) return null;
                         const getBucket = (days: number) => {
@@ -514,11 +510,6 @@ export default function MuhasebePage(props: Props) {
                   {muhasebeTab === 'ap' && (
                     <motion.div key="muhasebe-ap" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
                       {(() => {
-                        const toTs110 = (val: unknown): number => {
-                          if (!val) return 0;
-                          if (typeof (val as { toDate?: () => Date }).toDate === 'function') return (val as { toDate: () => Date }).toDate().getTime();
-                          return new Date(val as string | number).getTime();
-                        };
                         const now110 = Date.now();
                         // Only include open/pending POs (not delivered/cancelled)
                         const openPOs = apPurchaseOrders.filter(po => !['Teslim Alındı', 'İptal Edildi'].includes(po.status));
@@ -538,7 +529,7 @@ export default function MuhasebePage(props: Props) {
                           { label: currentLanguage === 'tr' ? 'Gecikmiş (60+ gün)'        : 'Overdue (60+ d)',   range: '60+',   orders: [], color: 'text-red-700',     bg: 'bg-red-50',     dot: 'bg-red-500'    },
                         ];
                         openPOs.forEach(po => {
-                          const created = toTs110(po.createdAt);
+                          const created = zamanMs(po.createdAt);
                           const days = created ? Math.floor((now110 - created) / 86400000) : 0;
                           if (days <= 30) apBuckets[0].orders.push(po);
                           else if (days <= 60) apBuckets[1].orders.push(po);
@@ -628,7 +619,8 @@ export default function MuhasebePage(props: Props) {
                                 </div>
                                 <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
                                   {openPOs.map(po => {
-                                    const days110 = po.createdAt ? Math.floor((now110 - toTs110(po.createdAt)) / 86400000) : 0;
+                                    const created110 = zamanMs(po.createdAt);
+                                    const days110 = created110 ? Math.floor((now110 - created110) / 86400000) : 0;
                                     const late = days110 > 60;
                                     return (
                                       <div key={po.id} className="flex items-center gap-4 px-5 py-3">
@@ -674,10 +666,8 @@ export default function MuhasebePage(props: Props) {
                         const monthOrders = orders.filter(o => {
                           const raw = o.createdAt ?? o.syncedAt;
                           if (!raw) return false;
-                          const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                            ? (raw as { toDate: () => Date }).toDate()
-                            : new Date(raw as string | number);
-                          return d.getFullYear() === bYear && d.getMonth() + 1 === bMonthN;
+                          const d = zamanDate(raw);
+                          return !!d && d.getFullYear() === bYear && d.getMonth() + 1 === bMonthN;
                         });
                         const totalMonthRevenue = monthOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                         // Distribute actual spend proportionally (heuristic — real ERP uses cost centers)
@@ -817,19 +807,14 @@ export default function MuhasebePage(props: Props) {
                           if (!o.paid) return false;
                           const raw = o.createdAt ?? o.syncedAt;
                           if (!raw) return false;
-                          const d = typeof (raw as { toDate?: () => Date }).toDate === 'function'
-                            ? (raw as { toDate: () => Date }).toDate()
-                            : new Date(raw as string | number);
-                          return d.getFullYear() === rYear && d.getMonth() + 1 === rMonthN;
+                          const d = zamanDate(raw);
+                          return !!d && d.getFullYear() === rYear && d.getMonth() + 1 === rMonthN;
                         });
                         const bookReceipts   = monthPaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
                         const openAPThisMonth = apPurchaseOrders
                           .filter(po => {
                             if (['Teslim Alındı', 'İptal Edildi'].includes(po.status)) return false;
-                            const ts = po.createdAt ? (() => {
-                              if (typeof (po.createdAt as { toDate?: () => Date }).toDate === 'function') return (po.createdAt as { toDate: () => Date }).toDate();
-                              return new Date(po.createdAt as string | number);
-                            })() : null;
+                            const ts = zamanDate(po.createdAt);
                             return ts ? ts.getFullYear() === rYear && ts.getMonth() + 1 === rMonthN : false;
                           })
                           .reduce((s, po) => s + po.totalAmount, 0);
@@ -946,7 +931,8 @@ export default function MuhasebePage(props: Props) {
                         const tr623 = currentLanguage === 'tr';
                         const openLCs = p623LCs.filter(lc=>lc.status==='Açık');
                         const totalValue623 = openLCs.reduce((s,lc)=>s+lc.amount,0);
-                        const expiringSoon = openLCs.filter(lc=>new Date(lc.expiryDate)<=new Date(Date.now()+30*86400000)).length;
+                        const sinir623 = Date.now()+30*86400000; // 30 günlük pencere sonu (gerçek şimdi)
+                        const expiringSoon = openLCs.filter(lc=>{ const ms = zamanMs(lc.expiryDate); return ms !== null && ms <= sinir623; }).length; // çözülemeyen vade sayılmaz
                         const statCls:{[k:string]:string}={Açık:'bg-emerald-100 text-emerald-700','Kullanıldı':'bg-blue-100 text-blue-700','Sona Erdi':'bg-gray-100 text-gray-500',İptal:'bg-red-100 text-red-700'};
                         return (
                           <div className="apple-card p-5 space-y-4 mt-4">
@@ -989,7 +975,7 @@ export default function MuhasebePage(props: Props) {
                                       <td className="px-3 py-2.5 text-gray-600">{lc.beneficiary}</td>
                                       <td className="px-3 py-2.5 font-mono text-gray-500">{lc.ref}</td>
                                       <td className="px-3 py-2.5 font-bold">{paraYaz(lc.amount, { birim: lc.currency })}</td>
-                                      <td className="px-3 py-2.5 text-gray-500">{lc.expiryDate?new Date(lc.expiryDate).toLocaleDateString('tr-TR'):'—'}</td>
+                                      <td className="px-3 py-2.5 text-gray-500">{tarihYaz(lc.expiryDate)}</td>
                                       <td className="px-3 py-2.5"><select value={lc.status} onChange={async e=>{try{await updateDoc(doc(db,'letterOfCredit',lc.id),{status:e.target.value});}catch(err){console.error(err);}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 ${statCls[lc.status]}`}>{['Açık','Kullanıldı','Sona Erdi','İptal'].map(s=><option key={s}>{s}</option>)}</select></td>
                                     </tr>
                                   ))}
@@ -1115,11 +1101,11 @@ export default function MuhasebePage(props: Props) {
                         const custMap: Record<string, CustAR> = {};
                         for (const o of unpaid131) {
                           const name = o.customerName || '—';
+                          // Tarihsiz sipariş BUGÜN'e düşmez (eski `: new Date()` yedeği 0 gün
+                          // gösterip "taze alacak" gibi sayıyordu) — yaşlandırmadan düşer.
+                          const d = zamanDate(o.createdAt ?? o.syncedAt);
+                          if (!d) continue;
                           if (!custMap[name]) custMap[name] = { name, total: 0, b0_30: 0, b31_60: 0, b61_90: 0, b90p: 0, oldest: 0 };
-                          const raw = o.createdAt ?? o.syncedAt;
-                          const d = raw
-                            ? (typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number))
-                            : new Date();
                           const days = Math.floor((now131 - d.getTime()) / 86400000);
                           const amt = o.totalPrice || 0;
                           custMap[name].total += amt;
@@ -1203,11 +1189,8 @@ export default function MuhasebePage(props: Props) {
                     const overdueOrders = orders
                       .filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o) && o.createdAt)
                       .map(o => {
-                        let daysOld = 0;
-                        try {
-                          const d = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-                          daysOld = Math.floor((now178.getTime() - d.getTime()) / 86400000);
-                        } catch { /* skip */ }
+                        const d = zamanDate(o.createdAt);
+                        const daysOld = d ? Math.floor((now178.getTime() - d.getTime()) / 86400000) : 0; // çözülemeyen → 0 → aşağıdaki >30 süzgecinden düşer
                         return { ...o, daysOld };
                       })
                       .filter(o => o.daysOld > 30)
@@ -1353,13 +1336,11 @@ export default function MuhasebePage(props: Props) {
                     const months143: { label: string; revenue: number; cogs: number; grossProfit: number }[] = [];
                     for (let m = 5; m >= 0; m--) {
                       const d = new Date(now143.getFullYear(), now143.getMonth() - m, 1);
-                      const label = d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', year: '2-digit' });
+                      const label = tarihYaz(d, { month: 'short', year: '2-digit' }, currentLanguage === 'tr' ? 'tr' : 'en');
                       const monthOrders = orders.filter(o => {
                         if (!o.createdAt) return false;
-                        try {
-                          const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-                          return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth() && o.status !== 'Cancelled';
-                        } catch { return false; }
+                        const od = zamanDate(o.createdAt);
+                        return !!od && od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth() && o.status !== 'Cancelled';
                       });
                       // Gelir eskiden yalnız native orders'tı (2026-08-17 bildirimi) — Mikro
                       // giden faturaları additive eklendi (faturali siparişler mikroFaturalar'da
@@ -1574,18 +1555,14 @@ export default function MuhasebePage(props: Props) {
                     }
                     // Inflows: paid orders
                     orders.filter(o => o.paid && o.status !== 'Cancelled').forEach(o => {
-                      const raw = o.createdAt ?? o.syncedAt;
-                      const d = raw ? (typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number)) : null;
-                      if (!d) return;
-                      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                      const key = ayAnahtari(o.createdAt ?? o.syncedAt);
+                      if (!key) return;
                       if (months[key]) months[key].inflow += o.totalPrice || 0;
                     });
                     // Outflows: COGS from all orders (proxy for expenses)
                     orders.filter(o => o.status !== 'Cancelled').forEach(o => {
-                      const raw = o.createdAt ?? o.syncedAt;
-                      const d = raw ? (typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : new Date(raw as string | number)) : null;
-                      if (!d) return;
-                      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                      const key = ayAnahtari(o.createdAt ?? o.syncedAt);
+                      if (!key) return;
                       if (months[key]) {
                         const cogs = (o.lineItems ?? []).reduce((s, li) => s + ((li.costPrice ?? 0) * li.quantity), 0);
                         months[key].outflow += cogs;
@@ -1593,7 +1570,7 @@ export default function MuhasebePage(props: Props) {
                     });
                     const rows = Object.entries(months).map(([key, v]) => {
                       const [year, month] = key.split('-');
-                      const label = new Date(Number(year), Number(month) - 1, 1).toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', year: '2-digit' });
+                      const label = tarihYaz(new Date(Number(year), Number(month) - 1, 1), { month: 'short', year: '2-digit' }, currentLanguage === 'tr' ? 'tr' : 'en');
                       return { key, label, ...v, net: v.inflow - v.outflow };
                     });
                     const totalInflow = rows.reduce((s, r) => s + r.inflow, 0);
@@ -1715,7 +1692,7 @@ export default function MuhasebePage(props: Props) {
                     // tahsil edilmiş ve zaten ödenmiş KDV'yi de borç gibi gösterip bilançoyu
                     // şişiriyordu. Cari aya (henüz beyan edilmemiş varsayılan dönem) sınırlandı —
                     // aynı kapsam KDV Analizi/KDV Mutabakat sekmelerinde de kullanılıyor.
-                    const guncelAy547 = new Date().toISOString().slice(0, 7);
+                    const guncelAy547 = bugunAnahtari().slice(0, 7); // yerel YYYY-MM (UTC ay kayması yok)
                     const mikroKdvBorc547 = mikroFaturalar
                       .filter(f => f.tarih.startsWith(guncelAy547))
                       .reduce((s,f) => s + (f.yon === 'giden' ? f.kdv : -f.kdv), 0);
@@ -1974,7 +1951,7 @@ export default function MuhasebePage(props: Props) {
                                 const amt=parseFloat(p548Draft.amount);
                                 if(!p548Draft.employeeName||!Number.isFinite(amt)||amt<=0){ toast(tr548?'Geçerli bir tutar girin.':'Enter a valid amount.','error'); return; }
                                 try{ await addDoc(collection(db,'masraflar'),{...p548Draft,amount:amt,status:'Bekliyor',createdAt:serverTimestamp()});
-                                setP548Form(false); setP548Draft({employeeName:'',category:tr548?'Ulaşım':'Transportation',amount:'',currency:'TRY',date:new Date().toISOString().slice(0,10),description:''}); }
+                                setP548Form(false); setP548Draft({employeeName:'',category:tr548?'Ulaşım':'Transportation',amount:'',currency:'TRY',date:bugunAnahtari(),description:''}); }
                                 catch(e){ console.error('[masraf save]',e); toast(tr548?'Kaydedilemedi.':'Could not save.','error'); }
                               }} className="apple-button-primary px-4 py-2 text-sm">{tr548?'Kaydet':'Save'}</button>
                               <button onClick={()=>setP548Form(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr548?'İptal':'Cancel'}</button>
@@ -2140,7 +2117,7 @@ export default function MuhasebePage(props: Props) {
                     for (let i = 5; i >= 0; i--) {
                       const d = new Date(now557.getFullYear(), now557.getMonth() - i, 1);
                       const rev = orders.filter(o => {
-                        const od = o.createdAt ? new Date(typeof (o.createdAt as {toDate?:()=>Date}).toDate === 'function' ? (o.createdAt as {toDate:()=>Date}).toDate() : o.createdAt as string) : null;
+                        const od = zamanDate(o.createdAt);
                         return od && od.getFullYear()===d.getFullYear() && od.getMonth()===d.getMonth() && o.status !== 'Cancelled';
                       }).reduce((s,o)=>s+(o.totalPrice||0),0);
                       last6.push(rev);
@@ -2405,8 +2382,8 @@ export default function MuhasebePage(props: Props) {
 
                     const selCustomer = p559Customer || customerNames[0] || '';
                     const custOrders = orders.filter(o => o.customerName === selCustomer).sort((a,b) => {
-                      const da = a.createdAt ? (typeof (a.createdAt as {toDate?:()=>Date}).toDate==='function'?(a.createdAt as {toDate:()=>Date}).toDate():new Date(a.createdAt as string)).getTime() : 0;
-                      const db2 = b.createdAt ? (typeof (b.createdAt as {toDate?:()=>Date}).toDate==='function'?(b.createdAt as {toDate:()=>Date}).toDate():new Date(b.createdAt as string)).getTime() : 0;
+                      const da = zamanMs(a.createdAt) ?? 0;
+                      const db2 = zamanMs(b.createdAt) ?? 0;
                       return da - db2;
                     });
                     const custLead = leads.find(l => l.name === selCustomer);
@@ -2418,12 +2395,7 @@ export default function MuhasebePage(props: Props) {
                       const isPaid = o.paid === true;
                       const amt = o.totalPrice || 0;
                       runBalance += amt;
-                      return { ...o, runBalance, isPaid, dateStr: (() => {
-                        const raw = o.createdAt ?? o.syncedAt;
-                        if (!raw) return '—';
-                        const d = typeof (raw as {toDate?:()=>Date}).toDate==='function'?(raw as {toDate:()=>Date}).toDate():new Date(raw as string);
-                        return d.toLocaleDateString('tr-TR');
-                      })() };
+                      return { ...o, runBalance, isPaid, dateStr: tarihYaz(o.createdAt ?? o.syncedAt) };
                     });
 
                     const totalInvoiced = custOrders.reduce((s,o) => s+(o.totalPrice||0), 0);
@@ -2613,7 +2585,7 @@ export default function MuhasebePage(props: Props) {
                         {mikroFaturalar.length > 0 && (() => {
                           const giden564 = mikroFaturalar.filter(f => f.yon === 'giden');
                           const gelen564 = mikroFaturalar.filter(f => f.yon === 'gelen');
-                          const buAy564 = new Date().toISOString().slice(0, 7);
+                          const buAy564 = bugunAnahtari().slice(0, 7); // yerel YYYY-MM
                           const gelenBuAy564 = gelen564.filter(f => f.tarih.startsWith(buAy564));
                           return (
                             <div className="apple-card p-4 space-y-3">
@@ -2712,12 +2684,7 @@ export default function MuhasebePage(props: Props) {
                                     const invoiceNo = o.mikroFaturaNo || o.lucaFaturaNo || o.irsaliyeNo || '—';
                                     const isSynced = o.mikroSynced || o.lucaSynced;
                                     const hasFatura = o.hasInvoice || !!o.mikroFaturaNo || !!o.lucaFaturaNo;
-                                    const dateStr = (() => {
-                                      const raw = o.createdAt ?? o.syncedAt;
-                                      if (!raw) return '—';
-                                      const d = typeof (raw as {toDate?:()=>Date}).toDate==='function'?(raw as {toDate:()=>Date}).toDate():new Date(raw as string);
-                                      return d.toLocaleDateString('tr-TR');
-                                    })();
+                                    const dateStr = tarihYaz(o.createdAt ?? o.syncedAt);
                                     return (
                                       <tr key={o.id} onClick={() => setP564DetayId(o.id)} className={`hover:bg-gray-50/50 transition-colors cursor-pointer ${!hasFatura?'bg-red-50/20':''}`}>
                                         <td className="px-3 py-2.5 text-gray-400">{dateStr}</td>
@@ -2833,7 +2800,7 @@ export default function MuhasebePage(props: Props) {
                       // `paid` YOK, tahsilat Mikro cari hesapta — "odenmemis" sayilamaz.
                       if(o.paid||o.status==='Cancelled'||!odemeTakipli(o)) return false;
                       if(!o.createdAt) return false;
-                      try { const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string); return d>=cutoff630; } catch { return false; }
+                      const d=zamanDate(o.createdAt); return !!d&&d>=cutoff630;
                     });
                     const buckets = [
                       {label:tr630?'0-30 Gün':'0-30 Days',min:0,max:30,color:'text-emerald-600',bg:'bg-emerald-50',orders:[] as typeof unpaidInvoiced},
@@ -2842,12 +2809,11 @@ export default function MuhasebePage(props: Props) {
                       {label:tr630?'90+ Gün':'90+ Days',min:91,max:9999,color:'text-red-600',bg:'bg-red-50',orders:[] as typeof unpaidInvoiced},
                     ];
                     unpaidInvoiced.forEach(o=>{
-                      try {
-                        const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
-                        const days=Math.floor((today630.getTime()-d.getTime())/86400000);
-                        const b = buckets.find(bk=>days>=bk.min&&days<=bk.max);
-                        if(b) b.orders.push(o);
-                      } catch { /* skip */ }
+                      const d=zamanDate(o.createdAt);
+                      if(!d) return;
+                      const days=Math.floor((today630.getTime()-d.getTime())/86400000);
+                      const b = buckets.find(bk=>days>=bk.min&&days<=bk.max);
+                      if(b) b.orders.push(o);
                     });
                     const totalUnpaid = unpaidInvoiced.reduce((s,o)=>s+(o.totalPrice||0),0);
                     if(unpaidInvoiced.length===0) return null;
@@ -2885,10 +2851,8 @@ export default function MuhasebePage(props: Props) {
                       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
                       const rev = orders.filter(o => {
                         if (o.status === 'Cancelled' || !o.createdAt) return false;
-                        try {
-                          const od = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-                          return od.getFullYear()===d.getFullYear() && od.getMonth()===d.getMonth();
-                        } catch { return false; }
+                        const od = zamanDate(o.createdAt);
+                        return !!od && od.getFullYear()===d.getFullYear() && od.getMonth()===d.getMonth();
                       }).reduce((s,o) => s+(o.totalPrice||0), 0);
                       hist.push(rev);
                     }
@@ -3161,10 +3125,8 @@ export default function MuhasebePage(props: Props) {
                         // sayılıyor — burada da sayarsak çift sayım olur (kdv-mutabakat'taki
                         // aynı desen: donemFaturasiz yalnız faturasız siparişleri toplar).
                         if ((o as unknown as { faturali?: boolean }).faturali) return false;
-                        try {
-                          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-                          return d >= st && d <= en;
-                        } catch { return false; }
+                        const d = zamanDate(o.createdAt);
+                        return !!d && d >= st && d <= en;
                       }).reduce((s,o) => s+(o.totalPrice||0), 0);
                       const mm = String(m + 1).padStart(2, '0');
                       const mikroAct = mikroFaturalar
@@ -3260,14 +3222,17 @@ export default function MuhasebePage(props: Props) {
                     const tr591 = currentLanguage === 'tr';
                     const freqLabels591: Record<string,string> = {'monthly':tr591?'Aylık':'Monthly','quarterly':tr591?'3 Aylık':'Quarterly','yearly':tr591?'Yıllık':'Yearly'};
                     const getNextDate = (freq: string, from: string) => {
-                      const d = new Date(from || new Date().toISOString().slice(0,10));
+                      // Giriş ve çıkış aynı YEREL gün ekseninde (gunBasi/gunAnahtari) — UTC gün kayması yok.
+                      const d = gunBasi(from || bugunAnahtari());
+                      if (!d) throw new Error(`Geçersiz tarih: ${from}`); // eski davranış da fırlatıyordu (Invalid Date → toISOString RangeError)
                       if (freq==='monthly') d.setMonth(d.getMonth()+1);
                       else if (freq==='quarterly') d.setMonth(d.getMonth()+3);
                       else d.setFullYear(d.getFullYear()+1);
-                      return d.toISOString().slice(0,10);
+                      return gunAnahtari(d) ?? '';
                     };
-                    const today591 = new Date().toISOString().slice(0,10);
-                    const due591 = p591Schedules.filter(s=>s.active&&s.nextDate<=new Date(Date.now()+7*86400000).toISOString().slice(0,10));
+                    const today591 = bugunAnahtari();
+                    const haftaSonu591 = gunAnahtari(Date.now()+7*86400000) ?? '';
+                    const due591 = p591Schedules.filter(s=>s.active&&s.nextDate<=haftaSonu591);
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader title={tr591?'🗓️ Otomatik Fatura Takvimi':'🗓️ Auto-Invoice Scheduler'} subtitle={tr591?'Tekrarlayan faturaları otomatik olarak planlayın.':'Schedule recurring invoice generation.'} icon={Calendar}
@@ -3376,8 +3341,8 @@ export default function MuhasebePage(props: Props) {
                               const recPct = c.totalValue>0?(c.recognized/c.totalValue)*100:0;
                               // Monthly recognition
                               let monthlyRec = 0;
-                              if (c.startDate&&c.endDate) {
-                                const ms = new Date(c.startDate).getTime(); const me = new Date(c.endDate).getTime();
+                              const ms = zamanMs(c.startDate), me = zamanMs(c.endDate);
+                              if (ms!==null&&me!==null) {
                                 const months = Math.max(1,Math.round((me-ms)/(30*86400000)));
                                 monthlyRec = c.totalValue/months;
                               }
@@ -3430,7 +3395,7 @@ export default function MuhasebePage(props: Props) {
                       const inv = o as unknown as { faturali?: boolean; hasInvoice?: boolean };
                       if (inv.faturali ?? inv.hasInvoice ?? false) return false;
                       const raw = o.createdAt ?? (o as unknown as { syncedAt?: unknown }).syncedAt;
-                      const d = raw ? new Date(typeof (raw as { toDate?: () => Date }).toDate === 'function' ? (raw as { toDate: () => Date }).toDate() : (raw as string)) : null;
+                      const d = zamanDate(raw);
                       return !!d && d.getFullYear() === fy617 && d.getMonth() + 1 === fm617;
                     });
                     const faturasizTutar = donemFaturasiz.reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
@@ -3510,10 +3475,8 @@ export default function MuhasebePage(props: Props) {
                         // faturali siparişler mikroFaturalar'da zaten sayılıyor — çift
                         // sayım önlemek için burada atlanır (kdv-mutabakat deseni).
                         if ((o as unknown as { faturali?: boolean }).faturali) return false;
-                        try {
-                          const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
-                          return d.getFullYear()===year625&&d.getMonth()===i;
-                        } catch { return false; }
+                        const d=zamanDate(o.createdAt);
+                        return !!d&&d.getFullYear()===year625&&d.getMonth()===i;
                       }).reduce((s,o)=>s+(o.totalPrice||0),0);
                       const mm625 = String(i + 1).padStart(2, '0');
                       const mikroRev = mikroFaturalar
@@ -3601,10 +3564,10 @@ export default function MuhasebePage(props: Props) {
                       return new Date(now634.getFullYear(),0,1);
                     };
                     const start634 = getStart634();
-                    const end634 = p634Period==='last_month'?new Date(now634.getFullYear(),now634.getMonth(),0):now634;
+                    const end634 = p634Period==='last_month'?new Date(now634.getFullYear(),now634.getMonth(),0,23,59,59,999):now634;   // ayın son GÜNÜ dahil (00:00 sınırı son günün faturalarını düşürüyordu)
                     const periodOrders = orders.filter(o=>{
                       if(!o.createdAt||o.status==='Cancelled') return false;
-                      try{const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);return d>=start634&&d<=end634;}catch{return false;}
+                      const d=zamanDate(o.createdAt);return !!d&&d>=start634&&d<=end634;
                     });
                     // Gelir eskiden yalnız native orders'tı (2026-08-17 bildirimi) — Mikro
                     // giden faturaları additive eklendi. SMM (COGS) Mikro faturasında satır
@@ -3612,8 +3575,8 @@ export default function MuhasebePage(props: Props) {
                     // kesinlik üretmemek için değiştirilmedi.
                     const periodMikroFaturalar = mikroFaturalar.filter(f => {
                       if (f.yon !== 'giden') return false;
-                      const d = new Date(f.tarih);
-                      return d >= start634 && d <= end634;
+                      const d = zamanDate(f.tarih);
+                      return !!d && d >= start634 && d <= end634;
                     });
                     // faturali (Mikro'ya giden) siparişler mikroFaturalar'da zaten sayılıyor
                     // — gelir toplamına ikinci kez katılmasın (kdv-mutabakat deseni). COGS
@@ -3735,7 +3698,8 @@ export default function MuhasebePage(props: Props) {
                   {/* ── Phase 640: Tekrarlayan Fatura / Abonelik Yönetimi ────────── */}
                   {muhasebeTab === 'tekrar-fatura' && (() => {
                     const tr640 = currentLanguage === 'tr';
-                    const due640 = p640Subs.filter(s=>s.status==='Aktif'&&s.nextDate<=new Date(Date.now()+7*86400000).toISOString().slice(0,10)).length;
+                    const haftaSonu640 = gunAnahtari(Date.now()+7*86400000) ?? '';
+                    const due640 = p640Subs.filter(s=>s.status==='Aktif'&&s.nextDate<=haftaSonu640).length;
                     return (
                       <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader title={tr640?'Tekrarlayan Fatura & Abonelik':'Recurring Billing & Subscriptions'} subtitle={tr640?'B2B abonelik ve periyodik fatura yönetimi':'B2B subscription and periodic invoice management'} icon={RefreshCw}
@@ -3759,7 +3723,7 @@ export default function MuhasebePage(props: Props) {
                               <button onClick={async ()=>{
                                 if(!p640Draft.customerName||!p640Draft.amount) return;
                                 try { await addDoc(collection(db,'recurringBilling'),{customerName:p640Draft.customerName,amount:Number(p640Draft.amount),frequency:p640Draft.frequency,nextDate:p640Draft.nextDate,status:'Aktif',createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Abonelik eklendi ✓' : 'Subscription added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Abonelik eklenemedi.' : 'Failed to add subscription.', 'error');}
-                                setP640ShowForm(false);setP640Draft({customerName:'',amount:'',frequency:'Aylık',nextDate:new Date().toISOString().slice(0,10)});
+                                setP640ShowForm(false);setP640Draft({customerName:'',amount:'',frequency:'Aylık',nextDate:bugunAnahtari()});
                               }} className="apple-button-primary px-4 py-2 text-sm">{tr640?'Kaydet':'Save'}</button>
                               <button onClick={()=>setP640ShowForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{tr640?'İptal':'Cancel'}</button>
                             </div>
@@ -3770,17 +3734,18 @@ export default function MuhasebePage(props: Props) {
                         ):(
                           <div className="space-y-2">
                             {p640Subs.map(s=>{
-                              const daysLeft = Math.ceil((new Date(s.nextDate).getTime()-Date.now())/86400000);
+                              const nextMs = zamanMs(s.nextDate);
+                              const daysLeft = nextMs===null ? null : Math.ceil((nextMs-Date.now())/86400000);
                               return (
                                 <div key={s.id} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white gap-4">
                                   <div className="flex-1 min-w-0">
                                     <p className="text-sm font-semibold text-gray-900 truncate">{s.customerName}</p>
-                                    <p className="text-xs text-gray-400">{s.frequency} • {tr640?'Sonraki:':'Next:'} {new Date(s.nextDate).toLocaleDateString('tr-TR')}</p>
+                                    <p className="text-xs text-gray-400">{s.frequency} • {tr640?'Sonraki:':'Next:'} {tarihYaz(s.nextDate)}</p>
                                   </div>
                                   <div className="text-right shrink-0">
                                     <p className="text-sm font-black text-[#ff4000]">{paraYaz(s.amount)}</p>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${daysLeft<=7?'bg-amber-100 text-amber-700':s.status==='Aktif'?'bg-emerald-100 text-emerald-700':'bg-gray-100 text-gray-500'}`}>
-                                      {s.status==='Aktif'?daysLeft<=7?`${daysLeft}g kaldı`:tr640?'Aktif':'Active':s.status}
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${daysLeft!==null&&daysLeft<=7?'bg-amber-100 text-amber-700':s.status==='Aktif'?'bg-emerald-100 text-emerald-700':'bg-gray-100 text-gray-500'}`}>
+                                      {s.status==='Aktif'?daysLeft!==null&&daysLeft<=7?`${daysLeft}g kaldı`:tr640?'Aktif':'Active':s.status}
                                     </span>
                                   </div>
                                   <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;try{await deleteDoc(doc(db,'recurringBilling',s.id));}catch(e){console.error("[firestore]", e);}}} className="text-gray-300 hover:text-red-400 text-sm flex-shrink-0">✕</button>
@@ -3836,7 +3801,7 @@ export default function MuhasebePage(props: Props) {
                               <div key={t.id} className="flex items-center gap-4 p-3 rounded-xl border border-gray-100 bg-white">
                                 <div className="flex-1 min-w-0">
                                   <p className="text-xs font-bold text-gray-800">{t.from} → {t.to}</p>
-                                  <p className="text-xs text-gray-400">{t.desc} • {new Date(t.date).toLocaleDateString('tr-TR')}</p>
+                                  <p className="text-xs text-gray-400">{t.desc} • {tarihYaz(t.date)}</p>
                                 </div>
                                 <span className="font-black text-sm text-gray-900">{paraYaz(t.amount, { birim: t.currency })}</span>
                                 <button onClick={async ()=>{try{await updateDoc(doc(db,'intercompanyTxns',t.id),{status:'Netleştirildi'});}catch(e){console.error("[firestore]", e);}}}
@@ -3859,13 +3824,11 @@ export default function MuhasebePage(props: Props) {
                     if (p610Period==='this_month') start610 = new Date(now610.getFullYear(), now610.getMonth(), 1);
                     else if (p610Period==='last_month') start610 = new Date(now610.getFullYear(), now610.getMonth()-1, 1);
                     else start610 = new Date(now610.getFullYear(), 0, 1); // YTD
-                    const end610 = p610Period==='last_month' ? new Date(now610.getFullYear(), now610.getMonth(), 0) : now610;
+                    const end610 = p610Period==='last_month' ? new Date(now610.getFullYear(), now610.getMonth(), 0, 23, 59, 59, 999) : now610;   // ayın son günü dahil
                     const periodOrders = orders.filter(o => {
                       if (!o.createdAt||o.status==='Cancelled') return false;
-                      try {
-                        const d=(o.createdAt as {toDate?:()=>Date}).toDate?.()??new Date(o.createdAt as string);
-                        return d>=start610&&d<=end610;
-                      } catch { return false; }
+                      const d=zamanDate(o.createdAt);
+                      return !!d&&d>=start610&&d<=end610;
                     });
                     // Group by customerType as profit centers
                     const centers: Record<string,{revenue:number;cost:number;count:number}> = {};

@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import type { ReportsCtx } from '../useReportsData';
+import { zamanDate } from '../../../utils/zaman';
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'quotations' | 'currentLanguage'>;
 
@@ -22,12 +23,12 @@ export default function CrmBloklar5({ reportsTab, quotations, currentLanguage }:
         for (const q of quotations) {
           const m = q as unknown as Record<string,unknown>;
           const status = (m.status as string) || '';
-          if (status !== 'Converted to Order' && status !== 'accepted') continue;
+          if (status !== 'Converted to Order' && status !== 'accepted' && status !== 'Converted') continue;   // 'Converted': 2026-09-12 öncesi yazıcı kalıntısı
           try {
-            const created = (q.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(q.createdAt as string);
-            const converted = m.convertedAt
-              ? ((m.convertedAt as { toDate?: () => Date }).toDate?.() ?? new Date(m.convertedAt as string))
-              : new Date();
+            const created = zamanDate(q.createdAt);
+            // convertedAt yoksa "bugün" yedeği YOK (zaman.ts B tuzağı): süre her gün şişiyordu. Bilinmeyen kayıt hesaptan düşer.
+            const converted = zamanDate(m.convertedAt);
+            if (!created || !converted) continue;
             const days = Math.round((converted.getTime() - created.getTime()) / 86400000);
             if (days >= 0 && days < 180) conversionTimes.push(days);
           } catch { /* skip */ }

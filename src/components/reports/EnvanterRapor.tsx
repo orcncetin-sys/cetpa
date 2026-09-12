@@ -31,6 +31,7 @@ import { db, auth } from '../../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../../utils/firebase';
 import { sortByCreatedAt } from '../../utils/fsSort';
 import { formatInCurrency, kisaTutar, paraYaz } from '../../utils/currency';
+import { ayAnahtari, tarihYaz, zamanDate, zamanMs } from '../../utils/zaman';
 import ModuleHeader from '../ModuleHeader';
 import {
   type Order,
@@ -275,10 +276,11 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
             const in90 = new Date(today144); in90.setDate(in90.getDate() + 90);
             const expItems = inventory
               .filter(i => i.expiryDate)
-              .map(i => {
-                const expDate = new Date(i.expiryDate as string);
+              .flatMap(i => {
+                const expDate = zamanDate(i.expiryDate);
+                if (!expDate) return [];
                 const daysLeft = Math.round((expDate.getTime() - today144.getTime()) / 86400000);
-                return { ...i, expDate, daysLeft };
+                return [{ ...i, daysLeft }];
               })
               .sort((a, b) => a.daysLeft - b.daysLeft);
             if (expItems.length === 0) return null;
@@ -324,7 +326,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                             <td className="py-2.5 px-3 font-medium text-gray-900">{item.name}</td>
                             <td className="py-2.5 px-3 font-mono text-xs text-gray-500">{item.sku}</td>
                             <td className="py-2.5 px-3 text-right text-gray-700">{item.stockLevel}</td>
-                            <td className="py-2.5 px-3 text-center text-xs text-gray-600">{item.expDate.toLocaleDateString()}</td>
+                            <td className="py-2.5 px-3 text-center text-xs text-gray-600">{tarihYaz(item.expiryDate)}</td>
                             <td className={`py-2.5 px-3 text-center font-bold text-sm ${isExpired ? 'text-red-600' : isCritical ? 'text-orange-600' : isWarn ? 'text-amber-600' : 'text-emerald-600'}`}>
                               {isExpired ? `+${Math.abs(item.daysLeft)}` : item.daysLeft}
                             </td>
@@ -571,7 +573,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const months182 = Array.from({ length: 6 }, (_, i) => {
           const d = new Date(now182.getFullYear(), now182.getMonth() - (5 - i), 1);
           return {
-            label: d.toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' }),
+            label: tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en'),
             year: d.getFullYear(), month: d.getMonth(),
           };
         });
@@ -583,7 +585,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           const mOrders = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
             try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+              const od = zamanDate(o.createdAt);
+              if (!od) return false;
               return od.getFullYear() === year && od.getMonth() === month;
             } catch { return false; }
           });
@@ -828,18 +831,20 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           const month = (thisMonth - 5 + i + 12) % 12;
           const cYear = thisMonth - 5 + i < 0 ? currYear - 1 : currYear;
           const pYear = cYear - 1;
-          const label = new Date(cYear, month, 1).toLocaleDateString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
+          const label = tarihYaz(new Date(cYear, month, 1), { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
           const curr = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
             try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+              const od = zamanDate(o.createdAt);
+              if (!od) return false;
               return od.getFullYear() === cYear && od.getMonth() === month;
             } catch { return false; }
           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
           const prev = orders.filter(o => {
             if (o.status === 'Cancelled') return false;
             try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+              const od = zamanDate(o.createdAt);
+              if (!od) return false;
               return od.getFullYear() === pYear && od.getMonth() === month;
             } catch { return false; }
           }).reduce((s, o) => s + (o.totalPrice || 0), 0);
@@ -883,8 +888,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
           try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (od < cutoff199) continue;
+            const od = zamanDate(o.createdAt);
+            if (!od || od < cutoff199) continue;
             for (const li of (o.lineItems ?? [])) {
               soldRecently.add(li.inventoryId || li.name || li.sku || '');
             }
@@ -937,8 +942,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
           try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (od < cutoff201) continue;
+            const od = zamanDate(o.createdAt);
+            if (!od || od < cutoff201) continue;
             for (const li of (o.lineItems ?? [])) {
               const key = li.inventoryId || li.name || '';
               if (!key) continue;
@@ -1010,8 +1015,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
           try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (od < cutoff204) continue;
+            const od = zamanDate(o.createdAt);
+            if (!od || od < cutoff204) continue;
             for (const li of (o.lineItems ?? [])) {
               const key = li.inventoryId || li.name || '';
               if (!key) continue;
@@ -1166,10 +1171,11 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const warn90 = new Date(now219); warn90.setDate(warn90.getDate() + 90);
         const expiryItems = inventory
           .filter(i => i.expiryDate)
-          .map(i => {
-            const exp = new Date(i.expiryDate!);
+          .flatMap(i => {
+            const exp = zamanDate(i.expiryDate);
+            if (!exp) return [];
             const daysLeft = Math.round((exp.getTime() - now219.getTime()) / 86400000);
-            return { name: i.name, daysLeft, stock: i.stockLevel ?? 0, value: (i.stockLevel ?? 0) * itemCostTRY(i, exchangeRates) };
+            return [{ name: i.name, daysLeft, stock: i.stockLevel ?? 0, value: (i.stockLevel ?? 0) * itemCostTRY(i, exchangeRates) }];
           })
           .filter(i => i.daysLeft <= 90)
           .sort((a, b) => a.daysLeft - b.daysLeft)
@@ -1207,8 +1213,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
           try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (od < cutoff227) continue;
+            const od = zamanDate(o.createdAt);
+            if (!od || od < cutoff227) continue;
             for (const li of (o.lineItems ?? [])) {
               const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
               const cat = inv?.category || (currentLanguage === 'tr' ? 'Diğer' : 'Other');
@@ -1319,8 +1325,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           for (const o of orders) {
             if (o.status === 'Cancelled') continue;
             try {
-              const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-              if (od < start || od > end) continue;
+              const od = zamanDate(o.createdAt);
+              if (!od || od < start || od > end) continue;
               for (const li of (o.lineItems ?? [])) {
                 const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
                 const cat = inv?.category || 'Other';
@@ -1383,8 +1389,9 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           // No category penalty
           if (!i.category) score -= 10;
           // Expiry penalty
-          if (i.expiryDate) {
-            const daysLeft = Math.round((new Date(i.expiryDate).getTime() - now238.getTime()) / 86400000);
+          const exp238 = zamanDate(i.expiryDate);
+          if (exp238) {
+            const daysLeft = Math.round((exp238.getTime() - now238.getTime()) / 86400000);
             if (daysLeft < 0) score -= 40;
             else if (daysLeft < 30) score -= 25;
             else if (daysLeft < 90) score -= 10;
@@ -1440,8 +1447,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           const createdAt = m.createdAt;
           if (!createdAt) return false;
           try {
-            const d = (createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(createdAt as string);
-            return d >= recent90;
+            const d = zamanDate(createdAt);
+            return d !== null && d >= recent90;
           } catch { return false; }
         });
         if (newProducts.length === 0) return null;
@@ -1545,8 +1552,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
           try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
-            if (od < cutoff254) continue;
+            const od = zamanDate(o.createdAt);
+            if (!od || od < cutoff254) continue;
             for (const li of (o.lineItems ?? [])) {
               const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
               if (!inv) continue;
@@ -1598,7 +1605,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         for (const o of orders) {
           if (o.status === 'Cancelled') continue;
           try {
-            const od = (o.createdAt as { toDate?: () => Date }).toDate?.() ?? new Date(o.createdAt as string);
+            const od = zamanDate(o.createdAt);
+            if (!od) continue;
             for (const li of (o.lineItems ?? [])) {
               const key = li.inventoryId || li.name || '';
               if (!key) continue;
@@ -1689,16 +1697,13 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
 
       {reportsTab === 'envanter' && inventory.length >= 5 && (() => {
         const now = new Date();
-        const risky = inventory.filter(item => {
-          if (!item.expiryDate) return false;
-          const exp = new Date(item.expiryDate);
+        const risky = inventory.flatMap(item => {
+          const exp = zamanDate(item.expiryDate);
+          if (!exp) return [];
           const daysLeft = Math.floor((exp.getTime() - now.getTime()) / 86400000);
-          return daysLeft <= 180 && daysLeft > 0 && item.stockLevel > 0;
-        }).map(item => {
-          const exp = new Date(item.expiryDate!);
-          const daysLeft = Math.floor((exp.getTime() - now.getTime()) / 86400000);
+          if (!(daysLeft <= 180 && daysLeft > 0 && item.stockLevel > 0)) return [];
           const writeDownValue = item.stockLevel * itemCostTRY(item, exchangeRates);
-          return { name: item.name, sku: item.sku, daysLeft, stock: item.stockLevel, value: writeDownValue };
+          return [{ name: item.name, sku: item.sku, daysLeft, stock: item.stockLevel, value: writeDownValue }];
         }).sort((a,b) => a.daysLeft - b.daysLeft).slice(0, 8);
         if (risky.length === 0) {
           return (
@@ -1770,8 +1775,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         });
         const catRevenue: Record<string, Record<string, number>> = {};
         orders.forEach(o => {
-          const d = (o.createdAt as {toDate?:()=>Date}).toDate?.() ?? new Date(o.createdAt as string);
-          const mkey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const mkey = ayAnahtari(o.createdAt);
+          if (!mkey) return;
           (o.lineItems || []).forEach(li => {
             const inv = inventory.find(it => it.id === li.inventoryId || it.sku === li.sku);
             const cat = inv?.category || 'Uncategorized';
@@ -1857,7 +1862,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const velocityMap: Record<string, {units: number; value: number}> = {};
         inventoryMovements.filter(m => {
           if (m.type !== 'out') return false;
-          const d = (m.timestamp as {toDate?:()=>Date}).toDate?.() ?? new Date(m.timestamp as string);
+          const d = zamanDate(m.timestamp);
+          if (!d) return false;
           return (now.getTime() - d.getTime()) / 86400000 <= 30;
         }).forEach(m => {
           const key = m.productName || 'Unknown';
@@ -1947,7 +1953,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const velocityMap: Record<string, number> = {};
         inventoryMovements.filter(m => {
           if (m.type !== 'out') return false;
-          const d = (m.timestamp as {toDate?:()=>Date}).toDate?.() ?? new Date(m.timestamp as string);
+          const d = zamanDate(m.timestamp);
+          if (!d) return false;
           return (now.getTime() - d.getTime()) / 86400000 <= 30;
         }).forEach(m => {
           velocityMap[m.productName || 'Unknown'] = (velocityMap[m.productName || 'Unknown'] || 0) + (m.quantity || 1);
@@ -2376,17 +2383,10 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'envanter' && inventoryMovements.length >= 5 && (() => {
-        const toTs344 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const monthIO: Record<string, {in: number; out: number}> = {};
         inventoryMovements.forEach(m => {
-          const ts = toTs344(m.timestamp);
-          if (!ts) return;
-          const d = new Date(ts);
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(m.timestamp);
+          if (!key) return;
           if (!monthIO[key]) monthIO[key] = {in: 0, out: 0};
           if (m.type === 'in') monthIO[key].in += m.quantity || 0;
           else monthIO[key].out += m.quantity || 0;
@@ -2417,16 +2417,11 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'envanter' && orders.length >= 5 && (() => {
-        const toTs348 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const monthCOGS: Record<string, number> = {};
         let kapsamDisi348 = 0;
         orders.forEach(o => {
-          const d = new Date(toTs348(o.createdAt));
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(o.createdAt);
+          if (!key) return;
           const cogs = (o.lineItems || []).reduce((s: number, li: {costPrice?: number; quantity?: number; sku?: string}) => {
             const item = inventory.find(i => i.sku === li.sku);
             return s + (li.costPrice || (item ? itemCostTRY(item, exchangeRates) : 0)) * (li.quantity || 1);
@@ -2533,15 +2528,11 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'envanter' && inventory.length >= 5 && inventoryMovements.length >= 3 && (() => {
-        const toTs358 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const now358 = Date.now();
         const lastSale358: Record<string, number> = {};
         inventoryMovements.filter(m => m.type === 'out').forEach(m => {
-          const ts = toTs358(m.timestamp);
+          const ts = zamanMs(m.timestamp);
+          if (ts === null) return;
           const key = m.productName || '';
           if (key && (!lastSale358[key] || ts > lastSale358[key])) lastSale358[key] = ts;
         });
@@ -2606,14 +2597,9 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'envanter' && inventoryMovements.length >= 5 && (() => {
-        const toTs368 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const cutoff = Date.now() - 30 * 86400000;
         const recentOut: Record<string, number> = {};
-        inventoryMovements.filter(m => m.type === 'out' && toTs368(m.timestamp) > cutoff)
+        inventoryMovements.filter(m => { const ts = zamanMs(m.timestamp); return m.type === 'out' && ts !== null && ts > cutoff; })
           .forEach(m => { recentOut[m.productName || 'Unknown'] = (recentOut[m.productName || 'Unknown'] || 0) + (m.quantity || 0); });
         const velocityData = Object.entries(recentOut).map(([sku, qty]) => ({sku, qty})).sort((a, b) => b.qty - a.qty).slice(0, 8);
         if (velocityData.length < 2) return null;
@@ -2713,17 +2699,10 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'envanter' && inventoryMovements.length >= 5 && (() => {
-        const toTs379 = (v: unknown): number => {
-          if (!v) return 0;
-          if (typeof (v as {toDate?:()=>Date}).toDate === 'function') return (v as {toDate:()=>Date}).toDate().getTime();
-          return new Date(v as string|number).getTime();
-        };
         const monthDelta: Record<string, number> = {};
         inventoryMovements.forEach(m => {
-          const ts = toTs379(m.timestamp);
-          if (!ts) return;
-          const d = new Date(ts);
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(m.timestamp);
+          if (!key) return;
           const item = inventory.find(i => i.name === m.productName);
           const cost = item?.costPrice || 0;
           const delta = (m.quantity || 0) * cost * (m.type === 'in' ? 1 : -1);
@@ -2768,7 +2747,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const now = new Date();
         const lastMove: Record<string, Date> = {};
         inventoryMovements.forEach(m => {
-          const d = m.date ? ((m.date as {toDate?:()=>Date}).toDate?.() ?? new Date(m.date as string)) : null;
+          const d = zamanDate(m.date);
           if (!d) return;
           const pid = m.productId as string;
           if (!lastMove[pid] || d > lastMove[pid]) lastMove[pid] = d;
@@ -2992,7 +2971,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         });
         const now = new Date();
         const oldestMove = inventoryMovements.reduce((oldest, m) => {
-          const d = m.date ? ((m.date as {toDate?:()=>Date}).toDate?.() ?? new Date(m.date as string)) : null;
+          const d = zamanDate(m.date);
           if (!d) return oldest;
           return d < oldest ? d : oldest;
         }, now);
@@ -3160,7 +3139,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const now = new Date();
         const outPerProduct: Record<string, {qty: number; days: number}> = {};
         inventoryMovements.filter(m => m.type === 'out').forEach(m => {
-          const d = m.date ? ((m.date as {toDate?:()=>Date}).toDate?.() ?? new Date(m.date as string)) : null;
+          const d = zamanDate(m.date);
           if (!d) return;
           const pid = m.productId as string;
           const daysSince = (now.getTime() - d.getTime()) / 86400000;
@@ -3248,9 +3227,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
       {reportsTab === 'envanter' && inventoryMovements.length >= 5 && (() => {
         const byMonth: Record<string,{in:number;out:number}> = {};
         inventoryMovements.forEach(m => {
-          const d = m.date ? ((m.date as {toDate?:()=>Date}).toDate?.()??new Date(m.date as string)) : null;
-          if (!d) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const key = ayAnahtari(m.date);
+          if (!key) return;
           if (!byMonth[key]) byMonth[key]={in:0,out:0};
           if (m.type==='in') byMonth[key].in+=(m.quantity??0);
           else byMonth[key].out+=(m.quantity??0);
@@ -3285,7 +3263,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const d30 = new Date(now.getTime()-30*86400000);
         let totalIn=0,totalOut=0,totalIn30=0,totalOut30=0;
         inventoryMovements.forEach(m => {
-          const d = m.date ? ((m.date as {toDate?:()=>Date}).toDate?.()??new Date(m.date as string)) : null;
+          const d = zamanDate(m.date);
           if (m.type==='in') { totalIn+=(m.quantity??0); if(d&&d>=d30) totalIn30+=(m.quantity??0); }
           else { totalOut+=(m.quantity??0); if(d&&d>=d30) totalOut30+=(m.quantity??0); }
         });
@@ -3348,7 +3326,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const recentIn = inventoryMovements
           .filter(m=>m.type==='in')
           .map(m=>{
-            const d = m.date ? ((m.date as {toDate?:()=>Date}).toDate?.()??new Date(m.date as string)) : null;
+            const d = zamanDate(m.date);
             return {
               ...m,
               date2: d,
@@ -3371,7 +3349,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                 <div key={i} className="flex items-center justify-between text-xs">
                   <span className="truncate flex-1 text-gray-700">{m.productName}</span>
                   <span className="text-green-600 font-bold ml-2">+{m.quantity??0}</span>
-                  <span className="text-gray-400 ml-2">{m.date2!.toLocaleDateString('tr-TR',{day:'2-digit',month:'short'})}</span>
+                  <span className="text-gray-400 ml-2">{tarihYaz(m.date2,{day:'2-digit',month:'short'})}</span>
                 </div>
               ))}
             </div>
@@ -3383,7 +3361,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const now = new Date();
         const outByProduct: Record<string,number> = {};
         inventoryMovements.filter(m=>m.type==='out').forEach(m=>{ outByProduct[m.productId as string]=(outByProduct[m.productId as string]??0)+(m.quantity??0); });
-        const oldestMove = inventoryMovements.reduce((oldest,m)=>{ const d=m.date?((m.date as {toDate?:()=>Date}).toDate?.()??new Date(m.date as string)):null; return (d&&d<oldest)?d:oldest; },now);
+        const oldestMove = inventoryMovements.reduce((oldest,m)=>{ const d=zamanDate(m.date); return (d&&d<oldest)?d:oldest; },now);
         const months = Math.max((now.getTime()-oldestMove.getTime())/(30*86400000),1);
         const deficit = inventory
           .filter(item=>((item.stock as number|undefined)??0)===0)
@@ -3531,7 +3509,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           const stk=(item.stock as number|undefined)??0;
           const val=retail*stk;
           if(!expStr) { healthyValue+=val; return; }
-          const expDate=new Date(expStr);
+          const expDate=zamanDate(expStr);
+          if(!expDate) { healthyValue+=val; return; }
           if(expDate<now) expiredValue+=val;
           else if(expDate<in30) nearExpiryValue+=val;
           else healthyValue+=val;
@@ -3563,7 +3542,7 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
       {reportsTab === 'envanter' && inventory.length >= 3 && inventoryMovements.length >= 5 && (() => {
         const now=new Date();
         const outRates: Record<string,number>={};
-        const oldest=inventoryMovements.reduce((o,m)=>{ const d=m.date?((m.date as {toDate?:()=>Date}).toDate?.()??new Date(m.date as string)):null; return (d&&d<o)?d:o; },now);
+        const oldest=inventoryMovements.reduce((o,m)=>{ const d=zamanDate(m.date); return (d&&d<o)?d:o; },now);
         const months=Math.max((now.getTime()-oldest.getTime())/(30*86400000),1);
         inventoryMovements.filter(m=>m.type==='out').forEach(m=>{ outRates[m.productId as string]=(outRates[m.productId as string]??0)+(m.quantity??0)/months; });
         const forecast=inventory
@@ -3605,8 +3584,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
       {reportsTab === 'envanter' && inventory.length >= 3 && inventoryMovements.length >= 5 && (() => {
         const now=new Date();
         const d30=new Date(now.getTime()-30*86400000);
-        const recentOut=inventoryMovements.filter(m=>m.type==='out').filter(m=>{ const d=m.date?((m.date as {toDate?:()=>Date}).toDate?.()??new Date(m.date as string)):null; return d&&d>=d30; });
-        const recentIn=inventoryMovements.filter(m=>m.type==='in').filter(m=>{ const d=m.date?((m.date as {toDate?:()=>Date}).toDate?.()??new Date(m.date as string)):null; return d&&d>=d30; });
+        const recentOut=inventoryMovements.filter(m=>m.type==='out').filter(m=>{ const d=zamanDate(m.date); return d&&d>=d30; });
+        const recentIn=inventoryMovements.filter(m=>m.type==='in').filter(m=>{ const d=zamanDate(m.date); return d&&d>=d30; });
         const totalOut=recentOut.reduce((s,m)=>s+(m.quantity??0),0);
         const totalIn=recentIn.reduce((s,m)=>s+(m.quantity??0),0);
         const fillRate=totalOut>0?Math.min(Math.round((totalIn/totalOut)*100),200):100;
@@ -3633,7 +3612,8 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
         const now = new Date();
         const lastSaleByProduct: Record<string, Date> = {};
         inventoryMovements.filter(m => m.type === 'out').forEach(m => {
-          const d = (m.timestamp as {toDate?:()=>Date}).toDate?.() ?? new Date(m.timestamp as string);
+          const d = zamanDate(m.timestamp);
+          if (!d) return;
           const key = m.productName || 'Unknown';
           if (!lastSaleByProduct[key] || d > lastSaleByProduct[key]) lastSaleByProduct[key] = d;
         });

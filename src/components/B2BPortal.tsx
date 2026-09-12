@@ -5,6 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import { confirmAction, confirmDelete } from '../lib/confirm';
 import { odemeTakipli } from '../utils/siparis';
+import { tarihYaz } from '../utils/zaman';
 import { authFetch } from '../services/authFetch';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -13,8 +14,7 @@ import {
   ShoppingBag, Trash2, Users, X,
 } from 'lucide-react';
 import {
-  collection, doc, query, where, onSnapshot,
-  addDoc, updateDoc, deleteDoc,
+  collection, doc, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp,
 } from '../lib/dbClient';
 import type { User } from 'firebase/auth';
 import { db, auth } from '../firebase';
@@ -225,7 +225,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
             }),
           });
           if (!response.ok) throw new Error('Shopify API error');
-          await updateDoc(doc(db, 'quotations', q.id), { status: 'Converted' });
+          await updateDoc(doc(db, 'quotations', q.id), { status: 'Converted to Order', convertedAt: serverTimestamp() });   // 'Converted' yazılıyordu: okuyucular (545, CrmBloklar5) 'Converted to Order' bekler; convertedAt dönüşüm süresi kartı için (hakem)
           setShopifySyncStatus({ type: 'success', message: 'Teklif başarıyla Shopify siparişine dönüştürüldü.' });
         } catch (err) {
           setShopifySyncStatus({ type: 'error', message: err instanceof Error ? err.message : 'Dönüştürme hatası.' });
@@ -544,7 +544,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                             {q.status === 'approved' ? currentT.approved : q.status === 'Converted to Order' ? currentT.converted : currentT.pending}
                           </span>
                         </td>
-                        <td className="py-2.5 px-2 text-xs text-[#86868B] hidden md:table-cell">{(q.createdAt as { toDate?: () => Date })?.toDate ? (q.createdAt as { toDate: () => Date }).toDate().toLocaleDateString('tr-TR') : '—'}</td>
+                        <td className="py-2.5 px-2 text-xs text-[#86868B] hidden md:table-cell">{tarihYaz(q.createdAt)}</td>
                         <td className="py-2.5 px-2">
                           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={(e) => { e.stopPropagation(); setSelectedQuotation(q); }} className="p-1.5 rounded-lg hover:bg-blue-50 text-[#86868B] hover:text-blue-600 transition-colors" title={currentLanguage === 'tr' ? 'İncele' : 'View'}><Eye className="w-3.5 h-3.5" /></button>

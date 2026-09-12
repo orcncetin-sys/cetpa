@@ -5,6 +5,7 @@ import { collection, addDoc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import type { Order } from '../types';
 import type { Language } from '../translations';
+import { bugunAnahtari } from '../utils/zaman';
 
 interface QuickShipmentModalProps {
   order: Order | null;
@@ -21,7 +22,7 @@ export default function QuickShipmentModal({
 }: QuickShipmentModalProps) {
   if (!order) return null;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = bugunAnahtari();
 
   return (
     <AnimatePresence>

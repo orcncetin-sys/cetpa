@@ -5,6 +5,7 @@ import { PLANS, type SubscriptionPlan, createTrialSubscription, type UserSubscri
 import { doc, setDoc, serverTimestamp } from '../lib/dbClient';
 import { db } from '../firebase';
 import { paraYaz } from '../utils/currency';
+import { bugunAnahtari } from '../utils/zaman';
 
 interface OnboardingFlowProps {
   currentLanguage: 'tr' | 'en';
@@ -45,7 +46,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
   const downloadDeployBundle = () => {
     const dbPass = vps.dbPassword || 'CHANGE_ME_' + Math.random().toString(36).slice(2, 10);
     const env = [
-      `# CETPA — ${companyName || 'firma'} kurulum env'i (${new Date().toISOString().slice(0, 10)})`,
+      `# CETPA — ${companyName || 'firma'} kurulum env'i (${bugunAnahtari()})`,
       `NODE_ENV=production`,
       `PORT=5173`,
       `DATABASE_URL=postgresql://cetpa:${dbPass}@/cetpa_db?host=/var/run/postgresql`,
@@ -117,7 +118,7 @@ export default function OnboardingFlow({ currentLanguage, onComplete }: Onboardi
     const p = (s: string) => L.push(s);
     p('#!/usr/bin/env bash');
     p('set -euo pipefail');
-    p(`# CETPA self-hosted installer — ${companyName || 'firma'} — ${new Date().toISOString().slice(0, 10)}`);
+    p(`# CETPA self-hosted installer — ${companyName || 'firma'} — ${bugunAnahtari()}`);
     p(`DOMAIN="${domain}"`);
     p(`DB_PASS="${dbPass}"`);
     p('REPO="https://github.com/orcncetin-sys/cetpa.git"');
