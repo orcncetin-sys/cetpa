@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatCurrency, formatInCurrency, kurCevir } from './currency';
+import { formatCurrency, formatInCurrency, kurCevir, tlyeCevir, kurFarki } from './currency';
 
 describe('formatCurrency', () => {
   it('formats TRY amounts with ₺ symbol', () => {
@@ -117,5 +117,58 @@ describe('kurCevir — uydurma kur YASAK', () => {
     // Ikisi de "kur yok -> gosterme" diyor; biri sayi, digeri string dilinde.
     expect(kurCevir(40000, 'USD', null)).toBeNull();
     expect(formatInCurrency(40000, 'USD', undefined)).toBe('—');
+  });
+});
+
+// Faz 3 1/n hakem turu (2026-09-13): döviz→TL çevirimi üç kopyaydı (MuhasebePage tlYap — global isFinite —,
+// nakitBilanco dovizTopla içi, mutabakatMasraf tlyeCevir). Tek kaynak burada, kurCevir'in tersi.
+describe('tlyeCevir — dövizi TL’ye çevirir, kur yoksa null (kurCevir’in tersi)', () => {
+  const kurlar = { USD: 40, EUR: 45 };
+  it('TRY olduğu gibi; boş birim TRY sayılır', () => {
+    expect(tlyeCevir(100, 'TRY', kurlar)).toBe(100);
+    expect(tlyeCevir(100, undefined, null)).toBe(100);
+    expect(tlyeCevir(100, '', undefined)).toBe(100);
+  });
+  it('kur varsa tutar × kur', () => {
+    expect(tlyeCevir(10, 'USD', kurlar)).toBe(400);
+    expect(tlyeCevir(2, 'EUR', kurlar)).toBe(90);
+  });
+  it('kur yok / 0 / negatif / NaN → null (2024 sabiti YOK)', () => {
+    expect(tlyeCevir(10, 'GBP', kurlar)).toBeNull();
+    expect(tlyeCevir(10, 'USD', null)).toBeNull();
+    expect(tlyeCevir(10, 'USD', undefined)).toBeNull();
+    expect(tlyeCevir(10, 'USD', { USD: 0 })).toBeNull();
+    expect(tlyeCevir(10, 'USD', { USD: -3 })).toBeNull();
+    expect(tlyeCevir(10, 'USD', { USD: NaN })).toBeNull();
+  });
+  it('tutar bilinmiyorsa null — kur olsa bile; null tutar 0 SAYILMAZ (global isFinite tuzağı)', () => {
+    expect(tlyeCevir(NaN, 'USD', kurlar)).toBeNull();
+    expect(tlyeCevir(NaN, 'TRY', kurlar)).toBeNull();
+    expect(tlyeCevir(null as unknown as number, 'TRY', kurlar)).toBeNull();
+  });
+  it('kurCevir ile SİMETRİK: TL → döviz → TL aynı tutara döner; kur yokken ikisi de null', () => {
+    const doviz = kurCevir(40000, 'USD', kurlar);
+    expect(doviz).toBe(1000);
+    expect(tlyeCevir(doviz as number, 'USD', kurlar)).toBe(40000);
+    expect(kurCevir(40000, 'EUR', {})).toBeNull();
+    expect(tlyeCevir(1000, 'EUR', {})).toBeNull();
+  });
+});
+
+describe('kurFarki — Phase 635 kur değerleme (bakiye × (güncel − defter)); bilinmeyen girdi → null', () => {
+  it('sayı: 1000 USD × (41,50 − 40,00) = +1.500 TL; defter kuru güncelin üstündeyse negatif', () => {
+    expect(kurFarki(1000, 40, 41.5)).toBeCloseTo(1500, 6);
+    expect(kurFarki('250', '45', 44)).toBeCloseTo(-250, 6);   // sayısal string girişler kabul
+  });
+  it("güncel kur yoksa (null/NaN) ya da bakiye/defter kuru boş/bozuk (NaN, '', 'abc', undefined) → null ('—'); ₺0 zarar uydurulmaz", () => {
+    expect(kurFarki(1000, 40, null)).toBeNull();
+    expect(kurFarki(1000, 40, NaN)).toBeNull();
+    for (const bozuk of [NaN, '', 'abc', undefined, null]) {
+      expect(kurFarki(bozuk, 40, 41.5)).toBeNull();
+      expect(kurFarki(1000, bozuk, 41.5)).toBeNull();
+    }
+  });
+  it('bakiye 0 gerçek sıfır: fark 0 (pozisyon yok), null değil', () => {
+    expect(kurFarki(0, 40, 41.5)).toBe(0);
   });
 });

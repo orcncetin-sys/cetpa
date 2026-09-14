@@ -2157,7 +2157,7 @@ function AppContent() {
   const [payrollMonth, setPayrollMonth] = useState(() => bugunAnahtari().slice(0, 7));
   const [payrollView, setPayrollView] = useState<'summary' | 'detail'>('summary');
   // ── Phase 118: Bank Reconciliation ───────────────────────────────────────
-  const [bankBalance, setBankBalance] = useState<number>(0);
+  const [bankBalance, setBankBalance] = useState<number>(NaN); // ekstre bakiyesi girilene dek BİLİNMİYOR — ₺0 değil (Faz 3, 2026-09-13)
   const [bankBalanceDraft, setBankBalanceDraft] = useState('');
   const [bankBalanceEditing, setBankBalanceEditing] = useState(false);
   const [reconMonth, setReconMonth] = useState(() => bugunAnahtari().slice(0, 7));

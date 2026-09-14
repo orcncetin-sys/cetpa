@@ -8,7 +8,7 @@
  * tarih bilinmiyorsa BUGÜNE DÜŞMEZ; Mikro türevinde `paid` yokluğu "ödenmedi" değildir.
  */
 import { describe, it, expect } from 'vitest';
-import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli } from './siparis';
+import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli, siparisTutari } from './siparis';
 
 describe('gorunenSiparisNo — üreticiden bağımsız numara', () => {
   it('Cetpa-native / Mikro türevi: orderNumber (Türkçe karakterli seri dahil) aynen', () => {
@@ -76,5 +76,27 @@ describe('odemeTakipli — tahsilat semantiği', () => {
     expect(odemeTakipli({})).toBe(true);
     expect(odemeTakipli({ source: 'shopify' })).toBe(true);
     expect(odemeTakipli({ source: 'native' })).toBe(true);
+  });
+});
+
+// Faz 3 1/n hakem turu (2026-09-13): nakitBilanco (`||`) ve mutabakatMasraf (`??`) iki farklı kopya
+// taşıyordu — {totalPrice: 0, totalAmount: 500} Bilanço'ya +500, e-Mutabakat'a +0 giriyordu. Tek kaynak.
+describe('siparisTutari — totalPrice ?? totalAmount (sunucuyla aynı), ikisi de bilinmiyorsa NaN', () => {
+  it('totalPrice biliniyorsa o — 0 DAHİL (`||` eskiden 0 tutarı totalAmount’a düşürüyordu)', () => {
+    expect(siparisTutari({ totalPrice: 1500 })).toBe(1500);
+    expect(siparisTutari({ totalPrice: 0, totalAmount: 900 })).toBe(0);
+    expect(siparisTutari({ totalPrice: '2.5' })).toBe(2.5);          // sayısal string kabul
+  });
+  it('totalPrice bilinmiyorsa totalAmount', () => {
+    expect(siparisTutari({ totalPrice: undefined, totalAmount: 900 })).toBe(900);
+    expect(siparisTutari({ totalPrice: null, totalAmount: 900 })).toBe(900);
+    expect(siparisTutari({ totalPrice: '', totalAmount: 900 })).toBe(900);
+    expect(siparisTutari({ totalPrice: NaN, totalAmount: 900 })).toBe(900);
+  });
+  it('ikisi de bilinmiyorsa NaN — asla 0 (sunucudaki son `?? 0` sahte sıfırdır, burada yok)', () => {
+    expect(siparisTutari({})).toBeNaN();
+    expect(siparisTutari({ totalPrice: undefined, totalAmount: null })).toBeNaN();
+    expect(siparisTutari({ totalPrice: 'abc', totalAmount: '' })).toBeNaN();
+    expect(siparisTutari({ totalPrice: Infinity })).toBeNaN();
   });
 });

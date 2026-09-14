@@ -113,6 +113,27 @@ export const kurCevir = (
   return amountInTRY / kur;
 };
 
+/**
+ * Döviz tutarını TL'ye çevirir — `kurCevir`in TERSİ, aynı sözleşme: kur yoksa / 0 / negatif / NaN
+ * → null (2024 sabiti YOK); tutar bilinmiyorsa null. Boş birim TRY sayılır.
+ *
+ * NEDEN BURADA (Faz 3 1/n hakem turu, 2026-09-13): döviz→TL çevirimi ÜÇ kopyaydı — MuhasebePage
+ * yerel `tlYap`/`tlTopla` (global `isFinite` kullanıyordu: null → 0 → true), nakitBilanco
+ * `dovizTopla` içi, mutabakatMasraf `tlyeCevir`. Sayfadaki kopya ölüydü (tanım dışında çağrı yok),
+ * diğer ikisi şimdi burayı çağırır. `kurCevir` ile simetri testi currency.test.ts'te.
+ */
+export const tlyeCevir = (
+  tutar: number,
+  birim: string | undefined,
+  kurlar?: Readonly<ExchangeRates> | null,
+): number | null => {
+  if (!Number.isFinite(tutar)) return null;   // global sürüm null'u 0 sayar — o yüzden Number.
+  if (!birim || birim === 'TRY') return tutar;
+  const kur = kurlar?.[birim];
+  if (kur === undefined || !Number.isFinite(kur) || kur <= 0) return null;
+  return tutar * kur;
+};
+
 export const formatInCurrency = (
   amountInTRY: number,
   currency: string,
@@ -146,6 +167,16 @@ export const formatInCurrency = (
 // gruplama) ki 325 yerin taşınması ekranı değiştirmesin; tek fark: bilinmeyen → '—', negatifte
 // işaret sembolün önünde. Sözleşme: currency.ekran.test.ts.
 import { bilinenSayi } from './para';
+
+/**
+ * Kur farkı (TL) = döviz bakiyesi × (güncel kur − defterdeki kur). Bakiye ya da defter kuru bilinmiyorsa
+ * (boş/bozuk giriş → NaN) ya da güncel kur yoksa null → ekran '—'. Phase 635 sayfada `?? 0` ile
+ * "−bakiye × defterKuru" diye tümüyle uydurma bir zarar basıyordu; 2026-09-14'te tek yere alındı.
+ */
+export const kurFarki = (bakiye: unknown, defterKuru: unknown, guncelKur: number | null): number | null =>
+  guncelKur === null || !Number.isFinite(guncelKur) || !bilinenSayi(bakiye) || !bilinenSayi(defterKuru)
+    ? null
+    : Number(bakiye) * (guncelKur - Number(defterKuru));
 
 const PARA_SEMBOLU: Record<string, string> = { TRY: '₺', USD: '$', EUR: '€', GBP: '£', CHF: 'CHF ', JPY: '¥' };
 

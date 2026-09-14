@@ -24,6 +24,7 @@
  * gibi tahsilat yüzeyleri bu süzgeçten geçmeli.
  */
 import { zamanDate } from './zaman';
+import { bilinenSayi } from './para';
 
 /**
  * TİPLER YAPISAL, `Order`'a BAĞLI DEĞİL (2026-09-04): bazı bileşenler
@@ -45,6 +46,10 @@ export interface SiparisTarihAlanlari {
 }
 export interface SiparisKaynakAlani {
   source?: string;
+}
+export interface SiparisTutarAlanlari {
+  totalPrice?: unknown;
+  totalAmount?: unknown;
 }
 
 /** Listede/başlıkta gösterilecek sipariş numarası — üreticiden bağımsız. */
@@ -78,4 +83,18 @@ export function odemeTakipli(o: SiparisKaynakAlani): boolean {
   // eşitlik kontrolü onları "takipli" sayıp CSV'de 'Bekliyor' yazıyordu. Mikro kaynaklı
   // HİÇBİR kaydın tahsilatı Cetpa'da izlenmez — gerçeği Mikro cari hesapta yaşar.
   return !(o.source ?? '').startsWith('mikro');
+}
+
+/**
+ * Siparişin tutarı: `totalPrice ?? totalAmount`; ikisi de bilinmiyorsa NaN (ASLA 0).
+ * TEK KAYNAK (Faz 3 1/n hakem turu, 2026-09-13): nakitBilanco (`||` önceliği) ve mutabakatMasraf
+ * (`??` önceliği) aynı PR'da iki farklı kopya taşıyordu — {totalPrice: 0, totalAmount: 500} siparişi
+ * Bilanço'ya +500, e-Mutabakat'a +0 giriyordu. Sunucuyla aynı `??` semantiği (server.ts 2883/3157
+ * `Number(o.totalPrice ?? o.totalAmount ?? 0)` — oradaki son `?? 0` sahte sıfırdır, burada YOK):
+ * meşru 0 tutar 0 KALIR, totalAmount'a düşmez. Sayısal string kabul (bilinenSayi).
+ */
+export function siparisTutari(o: SiparisTutarAlanlari): number {
+  if (bilinenSayi(o.totalPrice)) return Number(o.totalPrice);
+  if (bilinenSayi(o.totalAmount)) return Number(o.totalAmount);
+  return NaN;
 }

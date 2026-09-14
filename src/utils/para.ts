@@ -39,11 +39,64 @@ export function satirTutari(fiyat: unknown, miktar: unknown): number {
   return Number.isFinite(f) && Number.isFinite(m) ? f * m : NaN;
 }
 
+/** `toplaBilinen`in dönüşü: bilinen toplam + bilinen/bilinmeyen sayaçları. */
+export interface Tutar { toplam: number; bilinen: number; bilinmeyen: number }
+
 /** Bilinen değerleri toplar; bilinmeyenleri SAYAR (UI "n kaydın tutarı bilinmiyor" der). */
-export function toplaBilinen<T>(liste: readonly T[], sec: (o: T) => unknown): { toplam: number; bilinen: number; bilinmeyen: number } {
+export function toplaBilinen<T>(liste: readonly T[], sec: (o: T) => unknown): Tutar {
   let toplam = 0, bilinen = 0, bilinmeyen = 0;
   for (const o of liste) { const n = sayi(sec(o)); if (Number.isFinite(n)) { toplam += n; bilinen++; } else bilinmeyen++; }
   return { toplam, bilinen, bilinmeyen };
+}
+
+/**
+ * Ekrana giden sayı — TEK SÖZLEŞME (Faz 3 hakem turu, 2026-09-14): HİÇ bilinen yokken ama bilinmeyen
+ * varken NaN (paraYaz/tlYaz → '—'); aksi hâlde bilinen KISMİ toplam — `bilinmeyen > 0` ise sayfa yanına
+ * "N kayıt tutarsız" notu koyar (CLAUDE.md: '—' VEYA açık not). Boş liste gerçek 0.
+ * Eskiden kdvAylik (bu sözleşme), karZarar, faturaTakipTahmin ve butceVaryans'ta (`bilinmeyen > 0 ? NaN`)
+ * dört kopyaydı — aynı ay geliri P&L'de kısmi toplam, bütçede '—' basıyordu. Türetme (fark/oran/sapma)
+ * ayrı kural: bir girdi eksikse hesaplanmaz (null) — kısmi toplamdan sapma üretilmez.
+ */
+export function ekranTutari(t: Tutar): number {
+  return t.bilinen === 0 && t.bilinmeyen > 0 ? NaN : t.toplam;
+}
+
+/**
+ * TÜRETME kapısı — ekran sözleşmesi DEĞİL: fark/net/oran/marj/özkaynak gibi BAŞKA bir sayıya girecek toplam.
+ * Bir kayıt bile bilinmiyorsa NaN: "kısmi giriş − tam çıkış" bir net değil, bilinmeyen kadar yanlış bir sayıdır;
+ * ekran '—' basar, not "N kayıt tutarsız" der. Boş liste gerçek 0 (hareketsiz ay). 2026-09-14 hakem turu:
+ * karMerkezleri/nakitBilanco/babsKdvAnaliz/bankaMutabakat kısmi toplamdan türetiyordu — dördü buna bağlandı.
+ */
+export function tamTutar(t: Tutar): number {
+  return t.bilinmeyen === 0 ? t.toplam : NaN;
+}
+
+/** Birden çok `Tutar`ı birleştirir (toplam ve iki sayaç toplanır); boş → sıfır. Toplam satırları için. */
+export function tutarBirlestir(...t: readonly Tutar[]): Tutar {
+  return t.reduce<Tutar>((a, b) => ({ toplam: a.toplam + b.toplam, bilinen: a.bilinen + b.bilinen, bilinmeyen: a.bilinmeyen + b.bilinmeyen }), { toplam: 0, bilinen: 0, bilinmeyen: 0 });
+}
+
+/** Sipariş satırının maliyet alanları (Order.lineItems kalemi; yapısal, tipe bağımlı değil). */
+export interface MaliyetliSatir { costPrice?: unknown; quantity?: unknown }
+export interface MaliyetliSiparis { lineItems?: readonly MaliyetliSatir[] | null }
+
+/**
+ * Siparişin satır maliyeti (Σ costPrice × quantity) — COGS'un TEK KAYNAĞI (finansalOranlar Phase 132,
+ * karZarar Phase 143 + Başabaş aynı siparişe aynı cevabı verir). Herhangi bir satır bilinmiyorsa ya da
+ * satır hiç yoksa NaN: "satırsız sipariş 0 maliyetli" demek gelirin tamamını kâr saymaktır (Mikro
+ * türetmesi %100 brüt marj basıyordu); kısmi toplam da sahte kesinliktir.
+ * Kullanım: `toplaBilinen(siparisler, siparisMaliyeti)` → sipariş SAYILIR (kalem değil).
+ */
+export function siparisMaliyeti(o: MaliyetliSiparis): number {
+  const satirlar = o.lineItems ?? [];
+  if (satirlar.length === 0) return NaN;
+  let toplam = 0;
+  for (const s of satirlar) {
+    const tutar = satirTutari(s.costPrice, s.quantity);
+    if (!Number.isFinite(tutar)) return NaN;
+    toplam += tutar;
+  }
+  return toplam;
 }
 
 export interface TahsilatSiparisi { totalPrice?: unknown; paid?: boolean; status?: string; source?: string }

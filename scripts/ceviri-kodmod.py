@@ -72,7 +72,9 @@ def main():
                 n += 1
                 return f"oc({ifade(m.group('kosul'))}).{k}"
 
-            yeni = DESEN.sub(yer, s)
+            # Yorum satırlarına DOKUNMA (`//`, `*`, `/*` ile başlayan): oradaki 'çift' kod değil metindir; 4/n ve
+            # Faz 3 1/n'de birer yorum satırı sözlüğe girdi, elle geri alındı (degismez testi de yorumları saymaz).
+            yeni = '\n'.join(l if re.match(r'\s*(//|\*|/\*)', l) else DESEN.sub(yer, l) for l in s.split('\n'))
             if n and not KURU:
                 if not re.search(r"from '[^']*i18n/ortak'", yeni):
                     son = list(re.finditer(r"^import .*?;$", yeni, re.M))

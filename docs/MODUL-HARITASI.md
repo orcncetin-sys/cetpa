@@ -28,11 +28,17 @@
 | Inline çeviri | 3,722 yer |
 | `new jsPDF` | 12 yer |
 
-## B. Faz 1 sırası — TESTSİZ + PARA YOĞUN
+## A2. Faz 3 — kapanan modüller (ölçüm kapanış anında; sonraki fazlar bu satırı günceller)
+
+| Modül | Kapanış | Satır | `\|\|0` | Hesap → utils (test) | Satır içi çeviri | Not |
+|---|---|---|---|---|---|---|
+| `src/pages/MuhasebePage.tsx` | ✅ 2026-09-14 | 3,950 → 3,700 | 66 → **0** | 35 panel → `src/utils/muhasebe/` 12 modül, 12 test dosyası, 318 test | 329 → 8 (şablonlu/dil kodu; 345 anahtar `src/i18n/muhasebe.ts`, `mc()`) | Ekran toplamı `para.ekranTutari` (kısmi + not), türetilen sayı `para.tamTutar` (eksik girdi → '—'); 6 ürün kararı Obsidian Açık İşler'de; kalan `reduce` yalnız tipli alanlar (null → NaN → '—') |
+
+
 
 | Dosya | Satır | Para eşl. | `\|\|0` | Mikro | Koleksiyonlar |
 |---|---|---|---|---|---|
-| `src/pages/MuhasebePage.tsx` | 3,950 | 156 | 73 | ✓ | autoInvoiceSchedules, bankMatchRuns, cariBalances, intercompanyTxns, letterOfCredit… |
+| `src/pages/MuhasebePage.tsx` ✅ Faz 3 kapandı 2026-09-14 (A2) | 3,950 | 156 | 73 | ✓ | autoInvoiceSchedules, bankMatchRuns, cariBalances, intercompanyTxns, letterOfCredit… |
 | `src/components/AccountingModule.tsx` | 2,873 | 93 | 48 | ✓ | bankAccounts, bankTransactions, budgets, cariBalances, checks… |
 | `src/server/routes/mikroRoutes.ts` | 4,456 | 60 | 40 | ✓ | mikroCariHareketler |
 | `src/pages/OrdersPage.tsx` | 3,619 | 50 | 30 | ✓ | demandRequests, exportShipments, helpdeskTickets, inventoryMovements, notifications… |
@@ -470,7 +476,7 @@
 | `KalitePage.tsx` | 186 |  | 1 | 2 | ✅ saglam | ui | Kalite Yönetimi sekmesi: RBAC sarmalayıcı + kalite kontrol listesi (qualityChecklist) ve üretim hata/rework metrikleri (productionMetrics) CRUD'u, QualityModule'ü gösterir. |  |
 | `KurumsalPage.tsx` | 40 |  | 1 |  | ✅ saglam | ui | Kurumsal Yönetim sekmesi için yalnız RBAC sarmalayıcı (UnauthorizedView/ReadOnlyBanner) olup içeriği CorporateGovernanceModule'e devreder. |  |
 | `MesaiPage.tsx` | 140 |  | 1 | 1 | ⚠️ supheli | ui | Mesai & Devam Takibi sekmesi: personel giriş/çıkış kaydı formu ile timeAttendance koleksiyonuna kayıt ekler ve listeler. | Tek-kaynak ihlali (yarım düzeltme kaynağı): satır 15-16 `AttendanceRecord` tipi IKPage.tsx'teki tanımın kopyası, dosya yorumu bunu itiraf ediyor («IKPage.tsx'teki AttendanceRecord ile birebir aynı tanım»). IKPage'de status enum'una/alanına ekleme yapılırsa MesaiPage eski şekille yazmaya devam eder,  |
-| `MuhasebePage.tsx` | 3,950 |  | 1 | 73 | ⚠️ supheli | para, mikro, belge, ui | Muhasebe ana sayfası (29 alt-sekme): KDV mutabakat, e-Fatura takip, Ba-Bs, finansal oranlar, nakit akışı, bütçe, tekrarlayan faturalama, akreditif, şirketler-arası işlem, fiyatlama kuralları ve banka/tahsilat/kasa modüllerini Mikro faturaları + cariBalances ile birleştirerek gösterir. | (1) Sahte kesinlik: paraMatematigi=156 ile kopya.sifir=73 — satır 308 `Number(bakiye ?? 0)` (Mikro cari bakiyesi yoksa AR/AP oranına 0 girer), 389-390 `kdvTutari || 0` / `kdvHaricTutar || o.totalPrice || 0`, 687/835/1134/1271/1280 `o.totalPrice || 0`, 1282 `po.totalAmount || 0`, 1393 `f.tutar || 0`; |
+| `MuhasebePage.tsx` | 3,950 |  | 1 | 73 | ✅ Faz 3 kapandı 2026-09-14 (bkz. A2; aşağıdaki bulgu tarihsel) | para, mikro, belge, ui | Muhasebe ana sayfası (29 alt-sekme): KDV mutabakat, e-Fatura takip, Ba-Bs, finansal oranlar, nakit akışı, bütçe, tekrarlayan faturalama, akreditif, şirketler-arası işlem, fiyatlama kuralları ve banka/tahsilat/kasa modüllerini Mikro faturaları + cariBalances ile birleştirerek gösterir. | (1) Sahte kesinlik: paraMatematigi=156 ile kopya.sifir=73 — satır 308 `Number(bakiye ?? 0)` (Mikro cari bakiyesi yoksa AR/AP oranına 0 girer), 389-390 `kdvTutari || 0` / `kdvHaricTutar || o.totalPrice || 0`, 687/835/1134/1271/1280 `o.totalPrice || 0`, 1282 `po.totalAmount || 0`, 1393 `f.tutar || 0`; |
 | `OrdersPage.tsx` | 3,619 |  | 1 | 30 | ⚠️ supheli | para, pdf, belge, ui, mikro, tenant | Sipariş yönetimi ana sayfası: sipariş liste/detay, sevkiyat ve araç takibi, iade, tekrarlayan sipariş, talep/servis kayıtları, PDF/CSV dışa aktarım ve Mikro fatura bilgisiyle sipariş görünümü. | Sahte kesinlik: satır 1199 `KDV%{order.kdvOran ?? 0}` — satır 1190 yorumuna göre faturasız dal kdvOran YAZMIYOR, o siparişler ekranda 'KDV%0' görünür; satır 538/1842/1848/1977/2052 `o.totalPrice || 0` tutarsız siparişi 0 ciro sayar (sifir=30, paraMatematigi=50). Yarım düzeltme kaynağı: para biçimi 2 |
 | `ProjePage.tsx` | 204 |  | 1 | 3 | ✅ saglam | ui | Proje Yönetimi sekmesi: proje bütçe/harcama kartları (projectCosts) ve zaman çizelgesi (projectTimelines) için ekle/düzenle/sil formları. |  |
 | `RaporlarPage.tsx` | 663 |  | 1 | 19 | ⚠️ supheli | para, pdf, ui, mikro | Raporlar sekmesi: satış/stok/müşteri KPI panoları, aylık hedef takibi, gelir trend tahmini, Mikro faturalarından cari raporu ve PDF/CSV dışa aktarım. | Sahte kesinlik: satır 158/174/308/368/458 `(o.totalPrice || 0)` — totalPrice olmayan sipariş toplam ciroya ve müşteri sıralamasına 0 olarak girer, rapor sessizce düşük çıkar; satır 465 `slope = (...) / (n*sumXX - sumX*sumX) || 0` — tek aylık veride payda 0, NaN yerine 0 eğim → 'trend düz' uydurma so |

@@ -6,7 +6,7 @@
  * toplama girmez, sayılır; ekranda/PDF'te '—'. Bu dosya o sözleşmeyi kilitler.
  */
 import { describe, it, expect } from 'vitest';
-import { tutarYaz, kdvAyristir, satirTutari, toplaBilinen, tahsilatOrani, teklifToplamlari } from './para';
+import { tutarYaz, kdvAyristir, satirTutari, toplaBilinen, siparisMaliyeti, tahsilatOrani, teklifToplamlari, ekranTutari, tamTutar, tutarBirlestir } from './para';
 
 describe('tutarYaz — PDF/CSV için tutar metni', () => {
   it("bilinen: Türk biçimi + birim ('1.234,56 TL'); 0 gerçek sıfırdır", () => {
@@ -66,6 +66,24 @@ describe('toplaBilinen — bilinmeyen toplama girmez, SAYILIR', () => {
   });
 });
 
+describe('siparisMaliyeti — sipariş satır maliyeti (COGS tek kaynağı: Phase 132 + 143)', () => {
+  it('bilinen satırlar toplanır; sayısal string miktar kabul; 0 maliyet (numune) geçerli', () => {
+    expect(siparisMaliyeti({ lineItems: [{ costPrice: 400, quantity: 2 }, { costPrice: 50, quantity: '4' }] })).toBe(1000);
+    expect(siparisMaliyeti({ lineItems: [{ costPrice: 0, quantity: 3 }] })).toBe(0);
+  });
+  it("tek satırın costPrice/quantity'si bilinmiyorsa sipariş maliyeti NaN — kısmi toplam sahte kesinliktir", () => {
+    for (const v of [undefined, null, '', NaN, 'abc', Infinity]) {
+      expect(siparisMaliyeti({ lineItems: [{ costPrice: 5, quantity: 1 }, { costPrice: v, quantity: 2 }] })).toBeNaN();
+      expect(siparisMaliyeti({ lineItems: [{ costPrice: 5, quantity: v }] })).toBeNaN();
+    }
+  });
+  it('satırı olmayan (boş / yok / null) siparişin maliyeti BİLİNMİYOR — 0 değil (Mikro türetmesi %100 brüt marj basıyordu)', () => {
+    expect(siparisMaliyeti({ lineItems: [] })).toBeNaN();
+    expect(siparisMaliyeti({})).toBeNaN();
+    expect(siparisMaliyeti({ lineItems: null })).toBeNaN();
+  });
+});
+
 describe('tahsilatOrani — yalnız ödeme takipli ve tutarı bilinen siparişler', () => {
   const s = (ek: Record<string, unknown>) => ({ status: 'Delivered', ...ek });
   it('2 ödendi (300) / 4 izlenen (600) → %50', () => {
@@ -105,5 +123,43 @@ describe('teklifToplamlari — kalem bazlı KDV, tek kaynak (Form + Detail + PDF
   });
   it('%0 KDV geçerli (ihracat): kdv 0, brüt = net', () => {
     expect(teklifToplamlari([{ price: 10, quantity: 1, vatRate: 0 }])).toEqual({ net: 10, kdv: 0, brut: 10, bilinmeyenSatir: 0 });
+  });
+});
+
+describe("ekranTutari — ekran köprüsü TEK sözleşme: hiç bilinen yokken '—', kısmi bilinmeyen kısmi toplam + not", () => {
+  it('bilinen > 0 ve bilinmeyen > 0 → kısmi toplam (sayfa "N kayıt tutarsız" notu koyar)', () => {
+    expect(ekranTutari({ toplam: 500, bilinen: 2, bilinmeyen: 1 })).toBe(500);
+    expect(ekranTutari(toplaBilinen([100, null, 400, 'abc'], x => x))).toBe(500);
+  });
+  it("bilinen = 0 ve bilinmeyen > 0 → NaN (paraYaz/tlYaz '—'; '₺0' sahte kesinlik)", () => {
+    expect(ekranTutari({ toplam: 0, bilinen: 0, bilinmeyen: 2 })).toBeNaN();
+    expect(ekranTutari(toplaBilinen([null, undefined, ''], x => x))).toBeNaN();
+  });
+  it('boş liste gerçek 0 (kayıt yok ≠ bilinmiyor); meşru 0 toplam 0 kalır', () => {
+    expect(ekranTutari({ toplam: 0, bilinen: 0, bilinmeyen: 0 })).toBe(0);
+    expect(ekranTutari(toplaBilinen([], x => x))).toBe(0);
+    expect(ekranTutari({ toplam: 0, bilinen: 3, bilinmeyen: 0 })).toBe(0);
+  });
+});
+
+describe("tamTutar — TÜRETME kapısı: bir kayıt bile bilinmiyorsa NaN (ekranTutari'den farklı: kısmi toplam türetmeye GİRMEZ)", () => {
+  it('bilinmeyen 0 → toplam (boş liste gerçek 0); bilinmeyen > 0 → NaN, bilinen olsa da', () => {
+    expect(tamTutar({ toplam: 250, bilinen: 3, bilinmeyen: 0 })).toBe(250);
+    expect(tamTutar({ toplam: 0, bilinen: 0, bilinmeyen: 0 })).toBe(0);
+    expect(tamTutar({ toplam: 250, bilinen: 3, bilinmeyen: 1 })).toBeNaN();
+    expect(ekranTutari({ toplam: 250, bilinen: 3, bilinmeyen: 1 })).toBe(250);   // ekran: kısmi + not
+  });
+  it('net = tamTutar(a) − tamTutar(b): bir taraf kısmiyken NaN → paraYaz "—" (kısmi giriş − tam çıkış "net" değildir)', () => {
+    const giris = { toplam: 1500, bilinen: 1, bilinmeyen: 1 }, cikis = { toplam: 50, bilinen: 1, bilinmeyen: 0 };
+    expect(tamTutar(giris) - tamTutar(cikis)).toBeNaN();
+    expect(tamTutar({ ...giris, bilinmeyen: 0 }) - tamTutar(cikis)).toBe(1450);
+  });
+});
+
+describe('tutarBirlestir — toplam satırı: toplamlar ve iki sayaç toplanır', () => {
+  it('sayaçlar birleşir; boş → sıfır; tek eleman aynen', () => {
+    expect(tutarBirlestir({ toplam: 100, bilinen: 1, bilinmeyen: 0 }, { toplam: 50.5, bilinen: 2, bilinmeyen: 3 })).toEqual({ toplam: 150.5, bilinen: 3, bilinmeyen: 3 });
+    expect(tutarBirlestir()).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 0 });
+    expect(tutarBirlestir({ toplam: 7, bilinen: 1, bilinmeyen: 0 })).toEqual({ toplam: 7, bilinen: 1, bilinmeyen: 0 });
   });
 });
