@@ -501,6 +501,7 @@ import UnauthorizedView from './components/UnauthorizedView';
 import ReadOnlyBanner from './components/ReadOnlyBanner';
 import { basHarf } from './utils/buyukHarf';
 import { oc } from './i18n/ortak';
+import { SATIN_ALMA_MENU } from './lib/satinAlmaMenu';
 
 // ── Eski hash yönlendirmesi GÖÇÜ — Router mount olmadan ÖNCE ─────────────────
 // Path yönlendirmesine geçmeden önceki linkler/yer imleri `/#crm` biçimindeydi
@@ -984,6 +985,10 @@ function AppContent() {
 
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  // Masaüstü kenar menüsü: aktif grubun alt listesi OKLA kapatılıp açılabilsin (2026-09-18 kullanıcı bildirimi).
+  // Alt liste yalnız "grup aktif mi"ye bağlıydı; okun kendi durumu yoktu, basınca hiçbir şey olmuyordu.
+  // Yalnız kullanıcının KAPATTIĞI gruplar tutulur; başka gruba geçip dönünce liste yeniden açık gelir.
+  const [kapaliMenuGruplari, setKapaliMenuGruplari] = useState<ReadonlySet<string>>(() => new Set());
   const [kpiCurrency, setKpiCurrency] = useState<'TRY'|'USD'|'EUR'>('TRY');
   // TRY seciliyken kur hic sorgulanmaz — davranis eskisiyle birebir ayni.
   // USD/EUR seciliyken kur yoksa uydurma yerine '—' doner (bkz. FX_FALLBACK notu).
@@ -4465,17 +4470,11 @@ function AppContent() {
             },
             {
               id: 'satin-alma', label: oc(tr).satin_alma, icon: ShoppingCart,
-              children: [
-                { label: oc(tr).satin_alma_siparisleri, subId: 'pos',              action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('pos'); } },
-                { label: oc(tr).tedarikciler,                  subId: 'suppliers',        action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('suppliers'); } },
-                { label: tr ? 'Tedarikçi Performansı' : 'Supplier Score',   subId: 'scorecard',        action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('scorecard'); } },
-                { label: oc(tr).odeme_takvimi,         subId: 'odeme-takvimi',    action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('odeme-takvimi'); } },
-                { label: oc(tr).tedarikci_portali,      subId: 'tedarikci-portal', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarikci-portal'); } }, // Phase 551
-                { label: oc(tr).satin_alma_butcesi,     subId: 'satin-butce',      action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('satin-butce'); } }, // Phase 612
-                { label: oc(tr).tedarik_zinciri_riski, subId: 'tedarik-risk',   action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('tedarik-risk'); } }, // Phase 627
-                // Muhasebe'den taşındı (2026-08-31 kullanıcı isteği).
-                { label: oc(tr).fiyat_karsilastirma,    subId: 'fiyat-karsilastirma', action: () => { setActiveTab('satin-alma'); setPurchasingSubTab('fiyat-karsilastirma'); } },
-              ],
+              // Tek kaynak (2026-09-18): mobil sekme barı (SatinAlmaPage) ile AYNI liste — lib/satinAlmaMenu.
+              children: SATIN_ALMA_MENU.map(m => ({
+                label: m.etiket(tr), subId: m.key,
+                action: () => { setActiveTab('satin-alma'); setPurchasingSubTab(m.key); },
+              })),
             },
             {
               id: 'ik', label: tr ? 'İnsan Kaynakları' : 'HR', icon: UserCheck,
@@ -4560,9 +4559,11 @@ function AppContent() {
 
                   return (
                     <div key={group.id}>
+                      <div className="relative">
                       <button
                         onClick={() => {
                           if (isGroupActive && !hasChildren) return;
+                          setKapaliMenuGruplari(prev => { if (!prev.has(group.id)) return prev; const n = new Set(prev); n.delete(group.id); return n; });
                           setSelectedLead(null); setSelectedOrder(null); // detay görünümünü kapat
                           setActiveTab(group.id);
                           if (group.id === 'crm') setCrmTab('leads');
@@ -4582,13 +4583,28 @@ function AppContent() {
                         )}
                       >
                         <Icon className={cn('w-4 h-4 shrink-0', isGroupActive ? 'text-brand' : '')} />
-                        <span className="truncate flex-1">{group.label}</span>
-                        {hasChildren && (
-                          <ChevronDown className={cn('w-3 h-3 shrink-0 transition-transform', isGroupActive ? 'rotate-180 text-brand' : darkMode ? 'text-white/60' : 'text-gray-300')} />
-                        )}
+                        <span className={cn('truncate flex-1', hasChildren && 'pr-6')}>{group.label}</span>
                       </button>
+                      {/* Ok AYRI bir hedef: aktif grupta alt listeyi kapatır/açar; pasif grupta gruba gider (liste açık gelir).
+                          Düğme içinde düğme geçersiz HTML olduğundan satırın üstüne konumlandırılır. */}
+                      {hasChildren && (
+                        <button
+                          type="button"
+                          aria-expanded={isGroupActive && !kapaliMenuGruplari.has(group.id)}
+                          aria-label={`${group.label} — ${isGroupActive && !kapaliMenuGruplari.has(group.id) ? (tr ? 'alt menüyü gizle' : 'collapse submenu') : (tr ? 'alt menüyü göster' : 'expand submenu')}`}
+                          onClick={e => {
+                            e.stopPropagation();
+                            if (!isGroupActive) { (e.currentTarget.previousElementSibling as HTMLButtonElement | null)?.click(); return; }
+                            setKapaliMenuGruplari(prev => { const n = new Set(prev); if (n.has(group.id)) n.delete(group.id); else n.add(group.id); return n; });
+                          }}
+                          className={cn('absolute right-1 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors', darkMode ? 'hover:bg-white/10' : 'hover:bg-gray-100')}
+                        >
+                          <ChevronDown className={cn('w-3 h-3 shrink-0 transition-transform', isGroupActive && !kapaliMenuGruplari.has(group.id) ? 'rotate-180 text-brand' : darkMode ? 'text-white/60' : 'text-gray-300')} />
+                        </button>
+                      )}
+                      </div>
 
-                      {hasChildren && isGroupActive && (
+                      {hasChildren && isGroupActive && !kapaliMenuGruplari.has(group.id) && (
                         <div className="mt-0.5 ml-3 pl-2.5 border-l space-y-0.5 pb-1" style={{ borderColor: darkMode ? 'rgba(255,255,255,0.08)' : '#e5e7eb' }}>
                           {group.children!.map(child => {
                             const active = isChildActive(child.subId, (child as { target?: MuhasebeTarget }).target);

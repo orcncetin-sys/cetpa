@@ -47,6 +47,7 @@ import { type LabelItem } from './LabelSheetModal';
 
 import { type InventoryItem, type InventoryMovement, type Warehouse, type Consignment, type StockDiscrepancy } from '../types';
 import { oc } from '../i18n/ortak';
+import { satirNet } from '../lib/stokFiyat';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -190,9 +191,11 @@ const InventoryView: React.FC<InventoryViewProps> = ({
     const sku = raw.sth_stok_kod;
     if (m.type || typeof sku !== 'string' || !sku) return m; // zaten normalize (Cetpa)
     const prod = inventory.find(p => p.sku === sku);
-    const miktar = Math.abs(Number(raw.sth_miktar) || 0);
-    // sth_tutar = KDV HARİÇ satır matrahı. Birim fiyat = tutar / miktar (KDV hariç).
-    const tutar = Math.abs(Number(raw.sth_tutar) || 0);
+    // Tutar/birim fiyat NET'tir: satır + fatura altı iskontoları düşülmüş (lib/stokFiyat.satirNet — Fiyat Karşılaştırma
+    // ile AYNI hesap; eskiden burada brüt sth_tutar/miktar kullanılıyor, aynı evrak iki ekranda iki fiyat basıyordu —
+    // 2026-09-18). Hesaplanamayan satırda tutar/birimFiyat TANIMSIZ kalır (ekran '—'), ₺0 uydurulmaz.
+    const net = satirNet(raw);
+    const miktar = net.miktar ?? 0;   // miktar bilinmiyorsa hareket listesinde 0 adet görünür (tip number; fiyat üretilmez)
     return {
       ...m,
       productId: prod?.id ?? sku,
@@ -201,8 +204,8 @@ const InventoryView: React.FC<InventoryViewProps> = ({
       quantity: miktar,
       type: Number(raw.sth_tip) === 0 ? 'in' : 'out',
       timestamp: (raw.sth_tarih as string) ?? m.timestamp,
-      tutar,
-      birimFiyat: miktar > 0 ? tutar / miktar : 0,
+      tutar: net.durum === 'tamam' ? net.net : undefined,
+      birimFiyat: net.durum === 'tamam' ? net.birimFiyat : undefined,
       // Hangi cariye giriş/çıkış. Mikro sth_cari_kodu taşır; ad çözülemezse kod.
       cariKod: (raw.sth_cari_kodu as string) ?? (raw.sth_cari_kod as string) ?? '',
     } as InventoryMovement;

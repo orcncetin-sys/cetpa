@@ -5,6 +5,7 @@
  * Props: ReportsCtx'in tamamı DEĞİL — yalnız bu kartın gerçekten kullandığı alanlar.
  */
 import { itemCostTRY, type ReportsCtx } from '../useReportsData';
+import { stokFiyatOzeti } from '../../../lib/stokFiyat';
 
 type Props = Pick<ReportsCtx, 'orders' | 'inventory' | 'inventoryMovements' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -12,23 +13,13 @@ export default function MusteriKarAnalizi({ orders, inventory, inventoryMovement
   // Ortalama alış fiyatı — gerçek Mikro stok hareketlerinden (STOK_HAREKETLERI,
   // sth_tip=0 alış) SKU bazında ağırlıklı ortalama. inventory.costPrice (itemCostTRY)
   // birçok kalemde 0/boş çıkıyordu (2026-08-13 kullanıcı bildirimi — bu yüzden
-  // her müşteri "%100 kâr" gösteriyordu, maliyet hiç düşülmüyordu). Aynı hesap
-  // yöntemi server.ts'teki /api/reports/stok-fiyat-karsilastirma ile tutarlı.
+  // her müşteri "%100 kâr" gösteriyordu, maliyet hiç düşülmüyordu). HESAP TEK KAYNAKTA: lib/stokFiyat.stokFiyatOzeti
+  // — /api/reports/stok-fiyat-karsilastirma ile AYNI fonksiyon (NET: satır + fatura altı iskontoları düşülmüş; tutarı
+  // bilinmeyen satır ortalamaya girmez). Eskiden burada brüt `sth_tutar || 0` kopyası vardı: iskontolu alımda SMM
+  // şişiyor, müşteri marjı olduğundan düşük çıkıyordu (2026-09-18).
   const avgAlisFiyatMap = new Map<string, number>();
-  {
-    const tut = new Map<string, number>(), mik = new Map<string, number>();
-    for (const m0 of inventoryMovements) {
-      const m = m0 as unknown as Record<string, unknown>;
-      const sku = String(m.sth_stok_kod ?? '').trim();
-      if (!sku || Number(m.sth_tip) !== 0) continue; // yalnız alış
-      if (m.sth_iptal === true || Number(m.sth_iptal ?? 0) === 1) continue;
-      const miktar = Math.abs(Number(m.sth_miktar) || 0);
-      const tutar = Math.abs(Number(m.sth_tutar) || 0);
-      if (miktar <= 0) continue;
-      tut.set(sku, (tut.get(sku) ?? 0) + tutar);
-      mik.set(sku, (mik.get(sku) ?? 0) + miktar);
-    }
-    for (const [sku, m] of mik) if (m > 0) avgAlisFiyatMap.set(sku, tut.get(sku)! / m);
+  for (const r of stokFiyatOzeti(inventoryMovements as unknown as readonly Record<string, unknown>[]).satirlar) {
+    if (r.alisOrtFiyat !== null) avgAlisFiyatMap.set(r.sku, r.alisOrtFiyat);
   }
   const custProfit: Record<string, { rev: number; cogs: number }> = {};
   for (const o of orders) {

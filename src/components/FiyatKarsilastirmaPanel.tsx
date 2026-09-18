@@ -22,18 +22,28 @@ import { faturaEsle } from '../utils/faturaEsle';
 import { authFetch } from '../services/authFetch';
 import type { MikroFatura } from '../hooks/useMikroFaturalar';
 import { oc } from '../i18n/ortak';
+import type { NetKaynagi } from '../lib/stokFiyat';
 
 interface FiyatKarsilastirmaRow {
   sku: string; ad: string;
-  alisOrtFiyat: number | null; alisMiktar: number; alisTutar: number; alisAdet: number;
-  satisOrtFiyat: number | null; satisMiktar: number; satisTutar: number; satisAdet: number;
+  /** Ortalamalar NET tutardan (satır + fatura altı iskontoları düşülmüş) — hesap src/lib/stokFiyat.ts (2026-09-18). */
+  alisOrtFiyat: number | null; alisMiktar: number; alisTutar: number; alisBrutTutar: number; alisIskonto: number; alisAdet: number;
+  satisOrtFiyat: number | null; satisMiktar: number; satisTutar: number; satisBrutTutar: number; satisIskonto: number; satisAdet: number;
   marjTL: number | null; marjYuzde: number | null;
+  /** Tutarı/miktarı bilinmediği ya da iskontosu tutarsız olduğu için ortalamaya GİRMEYEN satır sayısı (yön bazında). */
+  bilinmeyenSatir: number; alisBilinmeyen: number; satisBilinmeyen: number;
+  /** Miktarı 0 ama tutarı dolu satır (fiyat farkı / dönem sonu iskonto faturası olabilir) — birim fiyata bölünemez. */
+  miktarsizSatir: number;
   /** inventory.stockLevel'dan — hareket netine değil gerçek stoğa dayanır; SKU inventory'de yoksa null. */
   kalanStok: number | null;
 }
 interface FiyatDetaySatiri {
-  tarih: string | null; yon: 'alis' | 'satis'; miktar: number; tutar: number;
-  birimFiyat: number; cariKod: string | null; evrakNo: string | null;
+  tarih: string | null; yon: 'alis' | 'satis'; miktar: number | null;
+  /** null = hesaplanamadı (tutar/miktar bilinmiyor ya da iskonto brütü aşıyor) → '—', ₺0 değil. `tutar` NET'tir. */
+  brutTutar: number | null; iskonto: number | null; tutar: number | null;
+  birimFiyat: number | null; cariKod: string | null; evrakNo: string | null;
+  /** Netin hangi yolla belirlendiği (lib/stokFiyat NetKaynagi); hesaplanamayan satırda null. */
+  kaynak: NetKaynagi | null;
 }
 type FkSortKey = 'ad' | 'alisOrtFiyat' | 'alisMiktar' | 'satisOrtFiyat' | 'satisMiktar' | 'marjTL' | 'kalanStok';
 
@@ -50,6 +60,10 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
   const [fkRows, setFkRows] = useState<FiyatKarsilastirmaRow[]>([]);
   const [fkLoading, setFkLoading] = useState(false);
   const [fkError, setFkError] = useState<string | null>(null);
+  /** Aynada GERÇEKTEN bulunan sth_iskonto<N> kolonları; null = henüz yüklenmedi, [] = iskonto kolonu yok (uyarı basılır). */
+  const [fkIskontoKolonlari, setFkIskontoKolonlari] = useState<string[] | null>(null);
+  /** Ortalamaya giren satırların net kaynağı dökümü — hesabın hangi yolla yapıldığı ekranda görünsün. */
+  const [fkNetKaynaklari, setFkNetKaynaklari] = useState<Partial<Record<NetKaynagi, number>>>({});
   const [fkSearch, setFkSearch] = useState('');
   // Sıralama (2026-08-13 kullanıcı bildirimi: tablo hiç sıralanmıyordu — kolon
   // başlıkları tıklanabilir değildi). AccountingModule'deki SortHeader deseni
@@ -78,7 +92,7 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
       .then(r => r.json())
       .then(json => {
         if (iptal) return;
-        if (json.success) setFkRows(json.rows);
+        if (json.success) { setFkRows(json.rows); setFkIskontoKolonlari(Array.isArray(json.iskontoKolonlari) ? json.iskontoKolonlari : null); setFkNetKaynaklari(json.netKaynaklari && typeof json.netKaynaklari === 'object' ? json.netKaynaklari : {}); }
         else setFkError(json.error || (oc(currentLanguage).veri_alinamadi));
       })
       .catch(() => { if (!iptal) setFkError(oc(currentLanguage).veri_alinamadi); })
@@ -173,9 +187,17 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
                       <p className="font-semibold text-gray-800">{r.ad}</p>
                       <p className="text-[10px] text-gray-400 font-mono">{r.sku}</p>
                     </td>
-                    <td className="px-4 py-3 text-right font-medium text-blue-600">{fmtF(r.alisOrtFiyat)}</td>
+                    <td className="px-4 py-3 text-right font-medium text-blue-600"
+                      title={r.alisIskonto > 0 ? `${trFk ? 'Brüt' : 'Gross'} ${fmtF(r.alisBrutTutar)} − ${trFk ? 'iskonto' : 'discount'} ${fmtF(r.alisIskonto)} = ${trFk ? 'net' : 'net'} ${fmtF(r.alisTutar)}` : undefined}>
+                      {fmtF(r.alisOrtFiyat)}
+                      {(r.alisBilinmeyen > 0 || r.miktarsizSatir > 0) && <span className="text-amber-600" title={[r.alisBilinmeyen > 0 ? `${r.alisBilinmeyen} ${trFk ? 'alış satırının tutarı/miktarı bilinmiyor ya da iskontosu tutarsız — ortalamaya girmedi' : 'purchase lines unknown/inconsistent — excluded from average'}` : '', r.miktarsizSatir > 0 ? `${r.miktarsizSatir} ${trFk ? 'satır miktarsız (fiyat farkı / dönem sonu iskonto faturası olabilir) — birim fiyata yansımadı' : 'lines without quantity (price-difference invoice?) — not reflected in unit price'}` : ''].filter(Boolean).join(' · ')}> *</span>}
+                    </td>
                     <td className="px-4 py-3 text-right text-gray-500 hidden md:table-cell">{r.alisMiktar.toLocaleString('tr-TR')}</td>
-                    <td className="px-4 py-3 text-right font-medium text-emerald-600">{fmtF(r.satisOrtFiyat)}</td>
+                    <td className="px-4 py-3 text-right font-medium text-emerald-600"
+                      title={r.satisIskonto > 0 ? `${trFk ? 'Brüt' : 'Gross'} ${fmtF(r.satisBrutTutar)} − ${trFk ? 'iskonto' : 'discount'} ${fmtF(r.satisIskonto)} = ${trFk ? 'net' : 'net'} ${fmtF(r.satisTutar)}` : undefined}>
+                      {fmtF(r.satisOrtFiyat)}
+                      {r.satisBilinmeyen > 0 && <span className="text-amber-600" title={`${r.satisBilinmeyen} ${trFk ? 'satış satırının tutarı/miktarı bilinmiyor ya da iskontosu tutarsız — ortalamaya girmedi' : 'sale lines unknown/inconsistent — excluded from average'}`}> *</span>}
+                    </td>
                     <td className="px-4 py-3 text-right text-gray-500 hidden md:table-cell">{r.satisMiktar.toLocaleString('tr-TR')}</td>
                     <td className={`px-4 py-3 text-right font-medium ${r.kalanStok == null ? 'text-gray-300' : r.kalanStok <= 0 ? 'text-red-500' : 'text-gray-700'}`}>
                       {r.kalanStok == null ? '—' : r.kalanStok.toLocaleString('tr-TR')}
@@ -191,7 +213,23 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
           </div>
         </div>
       )}
-      <p className="text-[10px] text-gray-400 text-center">{trFk ? 'Fiyatlar KDV hariç, satır bazlı gerçek Mikro stok hareketlerinden (STOK_HAREKETLERI) ağırlıklı ortalamadır.' : 'Prices are VAT-excluded, weighted averages from real Mikro stock movement lines.'}</p>
+      {fkIskontoKolonlari !== null && fkIskontoKolonlari.length === 0 && fkRows.length > 0 && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-center">{trFk ? 'Stok hareketi verisinde iskonto kolonu (sth_iskonto…) bulunamadı — fiyatlar BRÜT tutardan hesaplandı. "Stok Hareketleri"ni yeniden çekin.' : 'No discount columns (sth_iskonto…) found in the stock movement data — prices are computed from GROSS amounts. Re-pull "Stock Movements".'}</p>
+      )}
+      {Object.keys(fkNetKaynaklari).length > 0 && (
+        <p className="text-[10px] text-gray-400 text-center">
+          {trFk ? 'Net tutar nasıl belirlendi: ' : 'How net was determined: '}
+          {([
+            ['iskontosuz', trFk ? 'iskontosuz' : 'no discount'],
+            ['satirIskontosu', trFk ? 'satır iskontosu düşüldü' : 'line discount deducted'],
+            ['faturaAltiBasliktan', trFk ? 'fatura altı iskonto fatura toplamından dağıtıldı' : 'invoice-level discount allocated from invoice total'],
+            ['faturaAltiKdvden', trFk ? "fatura altı iskonto KDV'den türetildi (fatura başlığı yok)" : 'invoice-level discount derived from VAT (no invoice header)'],
+            ['tutarZatenNet', trFk ? 'tutar zaten net' : 'amount already net'],
+            ['dogrulanamadi', trFk ? "KDV'yle doğrulanamadı" : 'not verifiable via VAT'],
+          ] as [NetKaynagi, string][]).filter(([k]) => (fkNetKaynaklari[k] ?? 0) > 0).map(([k, ad]) => `${fkNetKaynaklari[k]} ${trFk ? 'satır' : 'lines'} ${ad}`).join(' · ')}
+        </p>
+      )}
+      <p className="text-[10px] text-gray-400 text-center">{trFk ? 'Fiyatlar KDV hariç ve NET: satır iskontoları ile satırlara dağıtılmış fatura altı iskontoları düşülmüştür. Satır bazlı gerçek Mikro stok hareketlerinden (STOK_HAREKETLERI) ağırlıklı ortalamadır.' : 'Prices are VAT-excluded and NET: line discounts and invoice-level discounts distributed to lines are deducted. Weighted averages from real Mikro stock movement lines.'}</p>
 
       {/* Evrak → fatura modalı */}
       {fkFatura && (
@@ -224,8 +262,10 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
                       <th className="text-left py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Tarih' : 'Date'}</th>
                       <th className="text-left py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Yön' : 'Direction'}</th>
                       <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Miktar' : 'Qty'}</th>
-                      <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Birim Fiyat (KDV hariç)' : 'Unit Price (excl. VAT)'}</th>
-                      <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Tutar' : 'Amount'}</th>
+                      <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Net Birim Fiyat (KDV hariç)' : 'Net Unit Price (excl. VAT)'}</th>
+                      <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase hidden sm:table-cell">{trFk ? 'Brüt Tutar' : 'Gross'}</th>
+                      <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'İskonto' : 'Discount'}</th>
+                      <th className="text-right py-2 px-2 text-[10px] font-bold text-gray-400 uppercase">{trFk ? 'Net Tutar' : 'Net Amount'}</th>
                       <th className="text-left py-2 px-2 text-[10px] font-bold text-gray-400 uppercase hidden sm:table-cell">{trFk ? 'Evrak' : 'Doc'}</th>
                     </tr>
                   </thead>
@@ -238,8 +278,16 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
                             {s.yon === 'alis' ? (trFk ? 'Alış' : 'Purchase') : (trFk ? 'Satış' : 'Sale')}
                           </span>
                         </td>
-                        <td className="py-2 px-2 text-right text-gray-700">{s.miktar.toLocaleString('tr-TR')}</td>
-                        <td className="py-2 px-2 text-right font-medium text-gray-800">{fmtF(s.birimFiyat)}</td>
+                        <td className="py-2 px-2 text-right text-gray-700">{s.miktar == null ? '—' : s.miktar.toLocaleString('tr-TR')}</td>
+                        <td className="py-2 px-2 text-right font-medium text-gray-800" title={s.birimFiyat == null ? (trFk ? 'Tutar/miktar bilinmiyor ya da iskonto tutarsız — ortalamaya girmedi' : 'Unknown amount/quantity or inconsistent discount — excluded from average') : undefined}>{fmtF(s.birimFiyat)}</td>
+                        <td className="py-2 px-2 text-right text-gray-400 hidden sm:table-cell">{fmtF(s.brutTutar)}</td>
+                        <td className={`py-2 px-2 text-right ${s.iskonto ? 'text-amber-700 font-medium' : 'text-gray-300'}`}
+                          title={s.kaynak === 'faturaAltiBasliktan' ? (trFk ? 'Fatura altı iskonto — fatura toplamı (başlık) ile satırlar arasındaki farktan, satırlara orantılı dağıtıldı' : 'Invoice-level discount — allocated pro rata from the gap between the invoice total and its lines')
+                            : s.kaynak === 'faturaAltiKdvden' ? (trFk ? "Fatura altı iskonto — satırda yazılı değil, fatura başlığı bulunamadı; satırın KDV'sinden türetildi. (\"Faturaları Çek\" çalıştırılırsa başlıkla kesinleşir.)" : 'Invoice-level discount — not on the line and no invoice header found; derived from the line VAT. (Pull invoices to confirm via the header.)')
+                            : s.kaynak === 'tutarZatenNet' ? (trFk ? 'Mikro tutarı zaten iskontolu yazmış — tekrar düşülmedi' : 'Mikro amount already net — not deducted again')
+                            : s.kaynak === 'dogrulanamadi' ? (trFk ? "KDV'yle doğrulanamadı (KDV'siz satır) — satırdaki iskonto alanları düşüldü" : 'Not verifiable via VAT — line discount fields deducted') : undefined}>
+                          {s.iskonto == null ? '—' : s.iskonto > 0 ? `−${fmtF(s.iskonto)}` : fmtF(0)}{(s.kaynak === 'faturaAltiKdvden' || s.kaynak === 'faturaAltiBasliktan') && <span className="text-[9px] text-amber-600"> ᶠ</span>}
+                        </td>
                         <td className="py-2 px-2 text-right text-gray-600">{fmtF(s.tutar)}</td>
                         <td className="py-2 px-2 hidden sm:table-cell">
                           {(() => {

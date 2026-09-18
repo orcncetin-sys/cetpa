@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 const CariEkstrePanel = React.lazy(() => import('../components/CariEkstrePanel'));
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -6,7 +6,8 @@ import {
   X, Trash2, Phone, Mail, FileText, Edit2, CheckCircle2, BarChart3, Eye, Wallet, Clock,
 } from 'lucide-react';
 import { useModalErisilebilirlik } from '../hooks/useModalErisilebilirlik';
-import { Coins } from 'lucide-react';
+import { Coins, Globe, ShieldAlert } from 'lucide-react';
+import { SATIN_ALMA_MENU, type SatinAlmaSekmesi } from '../lib/satinAlmaMenu';
 const FiyatKarsilastirmaPanel = React.lazy(() => import('../components/FiyatKarsilastirmaPanel'));
 import SatinAlmaAjaniPanel from '../components/SatinAlmaAjaniPanel';
 import { db } from '../firebase';
@@ -26,7 +27,12 @@ import { oc } from '../i18n/ortak';
 
 const PurchasingModule = React.lazy(() => import('../components/PurchasingModule'));
 
-type PurchasingSubTab = 'pos' | 'suppliers' | 'scorecard' | 'odeme-takvimi' | 'tedarikci-portal' | 'satin-butce' | 'tedarik-risk' | 'fiyat-karsilastirma';
+type PurchasingSubTab = SatinAlmaSekmesi;
+/** Mobil sekme barı simgeleri — Record tipi sayesinde listeye eklenen sekme simgesiz kalırsa tsc durdurur. */
+const SEKME_SIMGESI: Record<SatinAlmaSekmesi, React.ElementType> = {
+  'pos': ShoppingCart, 'suppliers': Building2, 'scorecard': Award, 'odeme-takvimi': Calendar,
+  'tedarikci-portal': Globe, 'satin-butce': Wallet, 'tedarik-risk': ShieldAlert, 'fiyat-karsilastirma': Coins,
+};
 
 interface Props {
   currentLanguage: 'tr' | 'en';
@@ -161,27 +167,42 @@ export default function SatinAlmaPage(props: Props) {
   // bildirimi: "popup'ta X ile kapama yok").
   const ekstreModalRef = useModalErisilebilirlik(!!acikTedarikci, () => setAcikTedarikci(null));
 
+  // Mobil sekme barı: seçili sekme görünür alana YALNIZ YATAY kaydırılır ve yalnız sekme değişince. (scrollIntoView
+  // dikeyde sayfayı da oynatır; satır içi ref ise her render'da yeniden çağrılırdı — bar ekran dışındayken sayfa zıplardı.)
+  const sekmeBarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const kap = sekmeBarRef.current;
+    const el = kap?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!kap || !el) return;
+    kap.scrollTo({ left: el.offsetLeft - (kap.clientWidth - el.offsetWidth) / 2, behavior: 'smooth' });
+  }, [purchasingSubTab]);
+
   return (
             <motion.div key="satin-alma" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
               {!canAccess('satin-alma') ? <UnauthorizedView currentLanguage={currentLanguage} tab={oc(currentLanguage).satin_alma} /> : (
                 <>
                   {!hasFullAccess('satin-alma') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
 
-                  {/* ── Sub-tab switcher (hidden on desktop — sidebar handles nav) ── */}
-                  <div className="lg:hidden flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-                    {([
-                      { key: 'pos',       label: oc(currentLanguage).satin_alma_siparisleri, icon: ShoppingCart },
-                      { key: 'suppliers', label: oc(currentLanguage).tedarikciler,         icon: Building2     },
-                      { key: 'scorecard',       label: currentLanguage === 'tr' ? 'Tedarikçi Skorkartı' : 'Supplier Scorecard', icon: Award },
-                      { key: 'odeme-takvimi',  label: oc(currentLanguage).odeme_takvimi,    icon: Calendar },
-                      { key: 'fiyat-karsilastirma', label: oc(currentLanguage).fiyat_karsilastirma, icon: Coins },
-                    ] as { key: PurchasingSubTab; label: string; icon: React.ElementType }[]).map(t => (
-                      <button key={t.key} onClick={() => setPurchasingSubTab(t.key)}
-                        className={cn('flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
-                          purchasingSubTab === t.key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}>
-                        <t.icon className="w-4 h-4" /> {t.label}
-                      </button>
-                    ))}
+                  {/* ── Sub-tab switcher (hidden on desktop — sidebar handles nav) ──
+                      2026-09-18 kullanıcı bildirimi: mobilde bar kaymıyordu, Fiyat Karşılaştırma'ya girilemiyordu.
+                      Bar `w-fit` idi ve kaydırma kabı yoktu (main overflow-x-hidden taşanı kesiyordu); ayrıca 8 sekmenin
+                      yalnız 5'i elle listeliydi. Artık liste TEK KAYNAKTAN (lib/satinAlmaMenu) ve yatay kaydırılabilir;
+                      seçili sekme görünür alana kaydırılır (derin bağlantıyla gelince barın sonunda kalmasın). */}
+                  <div ref={sekmeBarRef} className="lg:hidden relative -mx-3 sm:-mx-4 px-3 sm:px-4 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    role="tablist" aria-label={oc(currentLanguage).satin_alma}>
+                    <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-max">
+                      {SATIN_ALMA_MENU.map(m => {
+                        const Icon = SEKME_SIMGESI[m.key];
+                        const secili = purchasingSubTab === m.key;
+                        return (
+                          <button key={m.key} role="tab" aria-selected={secili} onClick={() => setPurchasingSubTab(m.key)}
+                            className={cn('flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all shrink-0 whitespace-nowrap',
+                              secili ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}>
+                            <Icon className="w-4 h-4" /> {m.etiket(currentLanguage === 'tr')}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   {/* Purchase Orders */}

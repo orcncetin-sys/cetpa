@@ -11,6 +11,8 @@
  */
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike, DocDaralt } from '../adminDbTypes.js';
+import { stokFiyatOzeti, stokFiyatDetay, faturaToplamlari } from '../../lib/stokFiyat.js';
+import { bilinenSayi } from '../../utils/para.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface ReportsRouteCtx {
@@ -69,23 +71,25 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
   });
 
   // ── Stok Fiyat Karşılaştırma (alım vs satım ortalama fiyat) ────────────────
-  // Mikro'da hazır bir rapor değil — STOK_HAREKETLERI satır bazlı hareketleri
-  // (sth_stok_kod/sth_miktar/sth_tutar/sth_tip) zaten inventoryMovements'a
-  // çekiliyor (/api/mikro/import/stok-hareket). Burada SKU+yön bazında
-  // ağırlıklı ortalama fiyat (SUM(tutar)/SUM(miktar)) hesaplanır — InventoryView.tsx'in
-  // kanıtlı normalize deseniyle aynı formül (birimFiyat = tutar/miktar, KDV hariç,
-  // sth_tip 0=giriş/alış 1=çıkış/satış). Native (Cetpa) hareketlerde fiyat alanı
-  // hiç yok (InventoryMovement tipi) — yalnız Mikro satırları (sth_stok_kod dolu
-  // olanlar) hesaba katılır, bu bir eksiklik değil.
+  // Mikro'da hazır bir rapor değil — STOK_HAREKETLERI satır bazlı hareketleri zaten inventoryMovements'a
+  // çekiliyor (/api/mikro/import/stok-hareket, SELECT * → tüm sth_ kolonları). Burada SKU+yön bazında
+  // NET ağırlıklı ortalama fiyat hesaplanır: Σ(sth_tutar − Σ sth_iskonto<N>) / Σ miktar, KDV hariç,
+  // sth_tip 0=giriş/alış, diğerleri çıkış/satış. HESAP TEK KAYNAKTA: src/lib/stokFiyat.ts (testli).
+  // 2026-09-18 kullanıcı bildirimi: brüt sth_tutar kullanılıyordu — satır ve fatura altı iskontoları hiç
+  // düşülmüyor, iskontolu alımda ortalama alış fiyatı olduğundan yüksek çıkıyordu; ayrıca `|| 0` tutarı
+  // bilinmeyen satırı ₺0 tutar + gerçek miktarla ortalamaya sokuyordu. Native (Cetpa) hareketlerde fiyat
+  // alanı hiç yok (InventoryMovement tipi) — yalnız Mikro satırları (sth_stok_kod dolu) hesaba katılır.
   app.get('/api/reports/stok-fiyat-karsilastirma', C.requireAuth, async (req: Request, res: Response) => {
     try {
       const cid = await C.getUserCompanyId((req as Request & { uid?: string }).uid || '');
-      const [movements, inventory] = await Promise.all([
+      // mikroFaturalar: fatura BAŞLIKLARI (cha_meblag) — satırdan ayırt edilemeyen iskonto durumlarında hakem (lib/stokFiyat).
+      const [movements, inventory, basliklar] = await Promise.all([
         C.loadCompanyDocs('inventoryMovements', cid),
         C.loadCompanyDocs('inventory', cid),
+        C.loadCompanyDocs('mikroFaturalar', cid),
       ]);
       const adMap = new Map<string, string>();
-      const stokMap = new Map<string, number>();
+      const stokMap = new Map<string, number | null>();
       for (const it of inventory) {
         const rec = it as Record<string, unknown>;
         const sku = String(rec.sku ?? '').trim();
@@ -95,68 +99,31 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
         // (gerçek/güncel stok) dayanır: hareket penceresi tüm geçmişi kapsamayabilir
         // (açılış bakiyesi, transfer, sayım farkı gibi alış/satış dışı hareketler),
         // stockLevel Mikro gece senkronundan gelen otoriter değer (2026-08-13).
-        stokMap.set(sku, Number(rec.stockLevel ?? 0));
+        // stockLevel yoksa 0 DEĞİL bilinmiyor (null → ekran '—'; eski `?? 0` "stok bitti" kırmızısı basıyordu).
+        stokMap.set(sku, bilinenSayi(rec.stockLevel) ? Number(rec.stockLevel) : null);
       }
 
-      type Grup = { alisTutar: number; alisMiktar: number; alisAdet: number; satisTutar: number; satisMiktar: number; satisAdet: number };
-      const gruplar = new Map<string, Grup>();
-      for (const m of movements) {
-        const sku = String(m.sth_stok_kod ?? '').trim();
-        if (!sku) continue; // native (Cetpa) hareketi — fiyat alanı yok, atla
-        const iptal = m.sth_iptal === true || Number(m.sth_iptal ?? 0) === 1;
-        if (iptal) continue;
-        const miktar = Math.abs(Number(m.sth_miktar) || 0);
-        const tutar = Math.abs(Number(m.sth_tutar) || 0);
-        if (miktar <= 0) continue;
-        const g = gruplar.get(sku) ?? { alisTutar: 0, alisMiktar: 0, alisAdet: 0, satisTutar: 0, satisMiktar: 0, satisAdet: 0 };
-        if (Number(m.sth_tip) === 0) { g.alisTutar += tutar; g.alisMiktar += miktar; g.alisAdet++; }
-        else                         { g.satisTutar += tutar; g.satisMiktar += miktar; g.satisAdet++; }
-        gruplar.set(sku, g);
-      }
-
-      const rows = [...gruplar.entries()].map(([sku, g]) => {
-        const alisOrt  = g.alisMiktar  > 0 ? g.alisTutar  / g.alisMiktar  : null;
-        const satisOrt = g.satisMiktar > 0 ? g.satisTutar / g.satisMiktar : null;
-        const marj = alisOrt != null && satisOrt != null ? satisOrt - alisOrt : null;
-        const marjYuzde = marj != null && alisOrt ? (marj / alisOrt) * 100 : null;
-        return {
-          sku, ad: adMap.get(sku) ?? sku,
-          alisOrtFiyat: alisOrt, alisMiktar: g.alisMiktar, alisTutar: g.alisTutar, alisAdet: g.alisAdet,
-          satisOrtFiyat: satisOrt, satisMiktar: g.satisMiktar, satisTutar: g.satisTutar, satisAdet: g.satisAdet,
-          marjTL: marj, marjYuzde,
-          kalanStok: stokMap.has(sku) ? stokMap.get(sku)! : null,
-        };
-      }).sort((a, b) => (b.alisTutar + b.satisTutar) - (a.alisTutar + a.satisTutar));
-
-      res.json({ success: true, rows, toplamSku: rows.length });
+      const ozet = stokFiyatOzeti(movements, { faturaToplamlari: faturaToplamlari(basliklar) });
+      const rows = ozet.satirlar.map(r => ({ ...r, ad: adMap.get(r.sku) ?? r.sku, kalanStok: stokMap.get(r.sku) ?? null }));
+      // iskontoKolonlari: aynada GERÇEKTEN bulunan sth_iskonto<N> kolonları — boşsa ekran "iskonto kolonu yok" der.
+      res.json({ success: true, rows, toplamSku: rows.length, iskontoKolonlari: ozet.iskontoKolonlari, netKaynaklari: ozet.netKaynaklari });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
     }
   });
 
   // GET /api/reports/stok-fiyat-karsilastirma/:sku/detay — bir SKU'nun tüm alım/satım satırları
+  // (brüt, iskonto, NET tutar ve net birim fiyat — src/lib/stokFiyat.ts stokFiyatDetay)
   app.get('/api/reports/stok-fiyat-karsilastirma/:sku/detay', C.requireAuth, async (req: Request, res: Response) => {
     try {
       const sku = String(req.params['sku'] || '').trim();
       if (!sku) return res.status(400).json({ success: false, error: 'sku gerekli.' });
       const cid = await C.getUserCompanyId((req as Request & { uid?: string }).uid || '');
-      const movements = await C.loadCompanyDocs('inventoryMovements', cid);
-      const satirlar = movements
-        .filter(m => String(m.sth_stok_kod ?? '').trim() === sku)
-        .filter(m => !(m.sth_iptal === true || Number(m.sth_iptal ?? 0) === 1))
-        .map(m => {
-          const miktar = Math.abs(Number(m.sth_miktar) || 0);
-          const tutar = Math.abs(Number(m.sth_tutar) || 0);
-          return {
-            tarih: m.sth_tarih ?? null,
-            yon: Number(m.sth_tip) === 0 ? 'alis' as const : 'satis' as const,
-            miktar, tutar,
-            birimFiyat: miktar > 0 ? tutar / miktar : 0,
-            cariKod: m.sth_cari_kodu ?? m.sth_cari_kod ?? null,
-            evrakNo: [m.sth_evrakno_seri, m.sth_evrakno_sira].filter(v => v !== '' && v != null).join('-') || null,
-          };
-        })
-        .sort((a, b) => String(b.tarih ?? '').localeCompare(String(a.tarih ?? '')));
+      const [movements, basliklar] = await Promise.all([
+        C.loadCompanyDocs('inventoryMovements', cid),
+        C.loadCompanyDocs('mikroFaturalar', cid),
+      ]);
+      const satirlar = stokFiyatDetay(movements, sku, { faturaToplamlari: faturaToplamlari(basliklar) });
       res.json({ success: true, sku, satirlar, toplam: satirlar.length });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });

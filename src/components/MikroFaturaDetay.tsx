@@ -18,6 +18,8 @@ import { eBelgeIndir } from '../services/ebelgeIndir';
 import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
 import { VERGI_PNTR_ORAN } from '../hooks/useMikroFaturalar';
+import { kalemleriCoz, satirMasrafi } from '../lib/stokFiyat';
+import { bilinenSayi } from '../utils/para';
 import { oc } from '../i18n/ortak';
 
 export interface MikroFaturaDetayVerisi {
@@ -96,19 +98,43 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
    *  — yeni bir Mikro sorgusu gerekmeden, burada gruplanıp gerçek kırılım
    *  gösterilebilir (liste ekranındaki "Karma" rozeti yalnız uyarı verir,
    *  burada asıl rakamlar var). */
+  /** Kalem netleri: satırın KDV'si + (biliniyorsa) fatura toplamıyla çözülür — lib/stokFiyat.kalemleriCoz. */
+  const cozumler = useMemo(() => (kalemler?.length ? kalemleriCoz(kalemler, fatura.tutar) : []), [kalemler, fatura.tutar]);
+
   const oranKirilim = useMemo(() => {
     if (!kalemler?.length) return null;
     const map = new Map<string, { oran: number | null; matrah: number; kdv: number }>();
-    for (const k of kalemler) {
+    for (const [i, k] of kalemler.entries()) {
       const oran = VERGI_PNTR_ORAN[String(k.sth_vergi_pntr ?? '')] ?? null;
       const key = oran === null ? 'bilinmiyor' : String(oran);
       const cur = map.get(key) ?? { oran, matrah: 0, kdv: 0 };
-      cur.matrah += Number(k.sth_tutar ?? 0) || 0;
-      cur.kdv += Number(k.sth_vergi ?? 0) || 0;
+      // Matrah NET'tir (iskonto düşülmüş — lib/stokFiyat.satirNet, KDV ile sağlanır); eskiden BRÜT sth_tutar toplanıyordu
+      // ve iskontolu faturada matrah + KDV fatura toplamını tutmuyordu. Hesaplanamayan satır 0 SAYILMAZ, atlanır.
+      const net = cozumler[i]?.net;
+      if (net != null) cur.matrah += net;
+      if (bilinenSayi(k.sth_vergi)) cur.kdv += Math.abs(Number(k.sth_vergi));
       map.set(key, cur);
     }
     return [...map.values()].sort((a, b) => (b.oran ?? -1) - (a.oran ?? -1));
-  }, [kalemler]);
+  }, [kalemler, cozumler]);
+
+  /** SAĞLAMA (2026-09-18): Σ kalem neti + Σ masraf + Σ KDV, fatura toplamını tutuyor mu? İskontonun doğru düşüldüğünün
+   *  ekrandaki kanıtı — tutmuyorsa kullanıcı bunu GÖRÜR (sessiz yanlış fiyat yerine). */
+  const saglama = useMemo(() => {
+    if (!kalemler?.length || !bilinenSayi(fatura.tutar)) return null;
+    let net = 0, kdv = 0, masraf = 0, brut = 0, eksik = 0;
+    for (const [i, k] of kalemler.entries()) {
+      const c = cozumler[i];
+      // Miktarı 0 olan satırın (fiyat farkı) TUTARI da toplanır — yalnız KDV'si toplanınca sağlama yanlış alarm veriyordu.
+      if (c && c.net !== null && c.brut !== null) { net += c.net; brut += c.brut; } else eksik++;
+      if (bilinenSayi(k.sth_vergi)) kdv += Math.abs(Number(k.sth_vergi)); else eksik++;
+      masraf += satirMasrafi(k);
+    }
+    const toplam = Math.abs(Number(fatura.tutar));
+    const kalemToplami = net + masraf + kdv, fark = kalemToplami - toplam;
+    // Pay: kuruş yuvarlamaları satır sayısıyla birikir; on binde 5 (200 bin ₺'lik faturada 100 ₺) — %0,5 çok gevşekti.
+    return { net, kdv, masraf, iskonto: brut - net, kalemToplami, fark, tutuyor: eksik === 0 && Math.abs(fark) <= Math.max(1, toplam * 0.0005), eksik };
+  }, [kalemler, cozumler, fatura.tutar]);
 
   const indir = async (tur: 'xml' | 'pdf') => {
     if (indiriliyor) return;
@@ -134,7 +160,10 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    // z-[60]: bu modal çoğu yerde BAŞKA bir z-50 modalın içinden açılır (Fiyat Karşılaştırma → İşlem Detayı → evrak,
+    // cari ekstre, ürün detayı). Aynı z-50'de DOM sırası kazanıyordu ve fatura, onu açan İşlem Detayı'nın ALTINDA
+    // kalıyordu (2026-09-18 kullanıcı bildirimi). Bildirim/toast katmanları z-[100]+ — onların altında kalır.
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       {/* Kalem tablosu eklendiği için genişletildi; uzun faturada gövde kaydırılır. */}
       <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between p-5 border-b border-gray-100">
@@ -207,17 +236,21 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                       <th className="text-left font-semibold py-1.5 px-1">{oc(tr).urun}</th>
                       <th className="text-right font-semibold py-1.5 px-1">{oc(tr).miktar}</th>
                       <th className="text-left font-semibold py-1.5 px-1">{oc(tr).birim}</th>
-                      <th className="text-right font-semibold py-1.5 px-1">{oc(tr).tutar}</th>
+                      <th className="text-right font-semibold py-1.5 px-1">{oc(tr).brut}</th>
+                      <th className="text-right font-semibold py-1.5 px-1">{tr ? 'İskonto' : 'Discount'}</th>
+                      <th className="text-right font-semibold py-1.5 px-1">{tr ? 'Net' : 'Net'}</th>
                       <th className="text-right font-semibold py-1.5 px-1">{oc(tr).kdv}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {kalemler.map((k, i) => {
+                      const n = cozumler[i];
                       const sku    = String(k.sth_stok_kod ?? '');
                       const ad     = String(k.urunAdi ?? '') || sku || '—';
-                      const miktar = Number(k.sth_miktar ?? 0) || 0;
-                      const tutar  = Number(k.sth_tutar ?? 0) || 0;
-                      const kdv    = Number(k.sth_vergi ?? 0) || 0;
+                      // Bilinmeyen sayı ₺0 basılmaz ('—'); net/iskonto lib/stokFiyat.satirNet (KDV ile sağlanır).
+                      const miktar = bilinenSayi(k.sth_miktar) ? Number(k.sth_miktar) : null;
+                      const kdv = bilinenSayi(k.sth_vergi) ? Number(k.sth_vergi) : null;
+                      const fa = n?.kaynak === 'faturaAltiKdvden' || n?.kaynak === 'faturaAltiBasliktan';
                       return (
                         <tr key={`${sku}-${i}`} className="border-b border-gray-50 last:border-0">
                           <td className="py-1.5 px-1 text-[#1D1D1F]">
@@ -225,18 +258,30 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                             {sku && ad !== sku && <span className="block text-[10px] text-gray-400 font-mono">{sku}</span>}
                           </td>
                           <td className="py-1.5 px-1 text-right tabular-nums text-gray-600">
-                            {miktar.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                            {miktar === null ? '—' : miktar.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                           </td>
                           {/* Birim sunucuda sto_birimX_ad'dan çözülür (2026-08-31);
                               şemada yoksa '—' — uydurma 'ADET' yazılmaz. */}
                           <td className="py-1.5 px-1 text-left text-gray-500">{String(k.birim ?? '') || '—'}</td>
-                          <td className="py-1.5 px-1 text-right tabular-nums font-semibold text-[#1D1D1F]">{tl(tutar)}</td>
-                          <td className="py-1.5 px-1 text-right tabular-nums text-gray-500">{tl(kdv)}</td>
+                          <td className="py-1.5 px-1 text-right tabular-nums text-gray-400">{n?.brut != null ? tl(n.brut) : '—'}</td>
+                          <td className={`py-1.5 px-1 text-right tabular-nums ${n?.iskonto ? 'text-amber-700' : 'text-gray-300'}`}
+                            title={fa ? (tr ? 'Fatura altı iskonto — satırda yazılı değil; fatura toplamından / satırın KDV\'sinden türetildi' : 'Invoice-level discount — not on the line; derived from the invoice total / line VAT') : undefined}>
+                            {n?.iskonto != null ? (n.iskonto > 0 ? `−${tl(n.iskonto)}` : tl(0)) : '—'}
+                          </td>
+                          <td className="py-1.5 px-1 text-right tabular-nums font-semibold text-[#1D1D1F]">{n?.net != null ? tl(n.net) : '—'}</td>
+                          <td className="py-1.5 px-1 text-right tabular-nums text-gray-500">{kdv === null ? '—' : tl(kdv)}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+                {saglama && (
+                  <p className={`mt-2 text-[11px] rounded-lg px-2.5 py-1.5 ${saglama.tutuyor ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50 border border-amber-200'}`}>
+                    {saglama.tutuyor
+                      ? (tr ? `✓ Sağlama: kalem neti ${tl(saglama.net)}${saglama.masraf > 0 ? ` + masraf ${tl(saglama.masraf)}` : ''} + KDV ${tl(saglama.kdv)} = fatura toplamı ${tl(saglama.kalemToplami)}${saglama.iskonto > 0 ? ` (iskonto −${tl(saglama.iskonto)} düşülmüş)` : ''}` : `✓ Check: line net ${tl(saglama.net)}${saglama.masraf > 0 ? ` + charges ${tl(saglama.masraf)}` : ''} + VAT ${tl(saglama.kdv)} = invoice total ${tl(saglama.kalemToplami)}${saglama.iskonto > 0 ? ` (discount −${tl(saglama.iskonto)} deducted)` : ''}`)
+                      : (tr ? `Sağlama TUTMUYOR: kalem neti + KDV = ${tl(saglama.kalemToplami)}, fatura toplamı ${tl(Math.abs(Number(fatura.tutar)))} (fark ${tl(saglama.fark)})${saglama.eksik > 0 ? ` · ${saglama.eksik} alan okunamadı` : ''} — iskonto/masraf dağılımı bu faturada doğrulanamadı.` : `Check FAILED: line net + VAT = ${tl(saglama.kalemToplami)}, invoice total ${tl(Math.abs(Number(fatura.tutar)))} (diff ${tl(saglama.fark)})${saglama.eksik > 0 ? ` · ${saglama.eksik} unreadable fields` : ''} — discount/charge allocation could not be verified for this invoice.`)}
+                  </p>
+                )}
               </div>
             )}
           </div>

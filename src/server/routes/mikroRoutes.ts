@@ -1573,7 +1573,12 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
                      'sth_evrakno_seri', 'sth_evrakno_sira', 'sth_tarih', 'sth_satir_no'];
     const sthCols = await mikroKolonlar('STOK_HAREKETLERI');
     const sthSet  = new Set(sthCols.map(c => c.toLowerCase()));
-    const secim = sthCols.length ? istenen.filter(c => sthSet.has(c.toLowerCase())) : istenen;
+    // İskonto/masraf kolonları ŞEMADAN (ad tahmini yok): yalnız `sth_iskonto1` isteniyordu — fatura altı iskontosunun
+    // düştüğü diğer alanlar modala hiç gelmiyor, kalem tutarı BRÜT basılıyordu (2026-09-18). Net hesap lib/stokFiyat.
+    const iskMas = sthCols.filter(c => /^sth_(iskonto|masraf)\d+$/i.test(c));
+    const secim = sthCols.length
+      ? [...new Set([...istenen.filter(c => sthSet.has(c.toLowerCase())), ...iskMas])]
+      : istenen;
     if (!secim.length) return res.status(502).json({ success: false, error: 'STOK_HAREKETLERI şeması okunamadı.' });
 
     // Satır sırası: sth_satir_no varsa gerçek kalem sırası; yoksa sth_Guid ile
@@ -1712,6 +1717,29 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
              ') t GROUP BY sth_stok_kod, depo HAVING SUM(net) <> 0 ORDER BY sth_stok_kod' },
       // Gelen (alış) fatura doğrulaması: cha_tip 1 başlığı ile sth_evraktip 3
       // satırı aynı evrak numarasında buluşuyor mu, toplamlar tutuyor mu?
+      // İSKONTO KEŞFİ (2026-09-18, kullanıcı bildirimi: fatura altı iskontosu ortalama alış fiyatına girmiyordu).
+      // src/lib/stokFiyat.ts satır NET tutarını ayna dokümanındaki `sth_iskonto<N>` alanlarından hesaplıyor; bu
+      // sorgular kolonların GERÇEKTEN var olduğunu, TUTAR (₺) taşıdığını ve fatura altı iskontosunun satırlara
+      // dağıtıldığını (Σ satır iskontosu ≈ başlık iskontosu) canlı veriyle teyit etmek için. Kolon adı uydurulmaz:
+      // ilk iki sorgu INFORMATION_SCHEMA'dan okur; örnek sorgular yoksa "Invalid column" ile yüksek sesle düşer.
+      { ad: 'sthIskontoKolonlari',
+        sql: "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'STOK_HAREKETLERI' " +
+             "AND (COLUMN_NAME LIKE 'sth[_]isk%' OR COLUMN_NAME LIKE 'sth[_]masraf%') ORDER BY COLUMN_NAME" },
+      { ad: 'chaIskontoKolonlari',
+        sql: "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'CARI_HESAP_HAREKETLERI' " +
+             "AND (COLUMN_NAME LIKE '%isk%' OR COLUMN_NAME LIKE '%aratoplam%') ORDER BY COLUMN_NAME" },
+      { ad: 'iskontoluAlisSatirOrnegi',
+        sql: 'SELECT TOP 8 sth_evrakno_seri, sth_evrakno_sira, sth_stok_kod, sth_miktar, sth_tutar, sth_vergi, ' +
+             'sth_iskonto1, sth_iskonto2, sth_iskonto3, sth_iskonto4, sth_iskonto5, sth_iskonto6 ' +
+             'FROM STOK_HAREKETLERI WHERE sth_evraktip = 3 AND ISNULL(sth_iptal, 0) = 0 AND ' +
+             '(sth_iskonto1 <> 0 OR sth_iskonto2 <> 0 OR sth_iskonto3 <> 0 OR sth_iskonto4 <> 0 OR sth_iskonto5 <> 0 OR sth_iskonto6 <> 0) ' +
+             'ORDER BY sth_tarih DESC' },
+      { ad: 'iskontoluAlisBaslikOrnegi',
+        sql: 'SELECT TOP 5 cha_evrakno_seri, cha_evrakno_sira, cha_aratoplam, cha_meblag, ' +
+             'cha_ft_iskonto1, cha_ft_iskonto2, cha_ft_iskonto3, cha_ft_iskonto4, cha_ft_iskonto5, cha_ft_iskonto6 ' +
+             'FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 AND cha_tip = 1 AND ISNULL(cha_iptal, 0) = 0 AND ' +
+             '(cha_ft_iskonto1 <> 0 OR cha_ft_iskonto2 <> 0 OR cha_ft_iskonto3 <> 0 OR cha_ft_iskonto4 <> 0 OR cha_ft_iskonto5 <> 0 OR cha_ft_iskonto6 <> 0) ' +
+             'ORDER BY cha_tarihi DESC' },
       { ad: 'alisFaturaBasliklari',
         sql: 'SELECT TOP 3 cha_evrakno_seri, cha_evrakno_sira, cha_tip, cha_meblag, cha_tarihi FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 AND cha_tip = 1 ORDER BY cha_tarihi DESC' },
       { ad: 'alisSatirOrnegi',
