@@ -2,6 +2,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, X, Save, PieChart } from 'lucide-react';
 import { type Budget, type JournalEntry } from '../../types';
 import { formatTRY, type AccountingT } from './shared';
+// Hesap tek kaynakta (utils/muhasebe/butceGerceklesme.ts)
+import { butceGerceklesme } from '../../utils/muhasebe/butceGerceklesme';
+import { ekranTutari } from '../../utils/para';
+import { ac } from '../../i18n/accounting';
 
 type BudgetForm = { category: string; amount: number; period: string };
 
@@ -22,6 +26,9 @@ export default function ButceTab({
   t, currentLanguage, budgets, journalEntries, deleteBudget,
   showBudgetModal, setShowBudgetModal, budgetForm, setBudgetForm, saveBudget,
 }: ButceTabProps) {
+  // Hesap tek kaynakta (utils/muhasebe/butceGerceklesme.ts) — kalemler + Genel Bütçe Durumu halkası.
+  const ozet = butceGerceklesme(budgets, journalEntries);
+
   return (
     <>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -40,36 +47,38 @@ export default function ButceTab({
                   {t.noRecords}
                 </div>
               )}
-              {budgets.map(b => {
-                const actual = journalEntries
-                  .filter(e => e.kategori === b.category && e.date.startsWith(b.period))
-                  .reduce((sum, e) => sum + (e.borc || 0), 0);
-
-                const percent = b.amount > 0 ? Math.min(100, Math.round((actual / b.amount) * 100)) : 0;
-                const color = percent > 90 ? 'bg-red-500' : percent > 70 ? 'bg-orange-500' : 'bg-blue-500';
+              {ozet.kalemler.map(k => {
+                // Kırpma SUNUM kararıdır (yalnız çubuk genişliği); hesap gerçek oranı döndürür (aşımda %120).
+                const cubuk = k.yuzde === null ? 0 : Math.min(100, k.yuzde);
+                const color = cubuk > 90 ? 'bg-red-500' : cubuk > 70 ? 'bg-orange-500' : 'bg-blue-500';
 
                 return (
-                  <div key={b.id} className="group relative">
+                  <div key={k.id} className="group relative">
                     <div className="flex justify-between text-sm mb-2">
                       <div className="flex flex-col">
-                        <span className="font-semibold text-gray-800">{b.category}</span>
-                        <span className="text-[10px] text-gray-400 uppercase font-bold">{b.period}</span>
+                        <span className="font-semibold text-gray-800">{k.kategori}</span>
+                        <span className="text-[10px] text-gray-400 uppercase font-bold">{k.donem}</span>
                       </div>
                       <div className="text-right">
-                        <span className="font-bold text-gray-800">{formatTRY(actual)}</span>
+                        <span className="font-bold text-gray-800">{formatTRY(ekranTutari(k.gerceklesen))}</span>
                         <span className="text-gray-400 mx-1">/</span>
-                        <span className="text-gray-500">{formatTRY(b.amount)}</span>
+                        <span className="text-gray-500">{formatTRY(k.butce)}</span>
+                        {k.gerceklesen.bilinmeyen > 0 && (
+                          <span className="block text-[10px] text-orange-500 font-semibold">
+                            {currentLanguage === 'tr' ? `${k.gerceklesen.bilinmeyen} kayıt tutarsız` : `${k.gerceklesen.bilinmeyen} records without amount`}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                       <motion.div
                         initial={{ width: 0 }}
-                        animate={{ width: `${percent}%` }}
+                        animate={{ width: `${cubuk}%` }}
                         className={`h-full ${color}`}
                       />
                     </div>
                     <button
-                      onClick={() => deleteBudget(b.id)}
+                      onClick={() => deleteBudget(k.id)}
                       className="absolute -right-2 -top-2 p-1 bg-white shadow-sm border border-gray-100 rounded-full text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <X size={10} />
@@ -83,14 +92,16 @@ export default function ButceTab({
               {budgets.length > 0 ? (
                 <>
                   {(() => {
-                    const totalBudget = budgets.reduce((sum, b) => sum + b.amount, 0);
-                    const totalActual = budgets.reduce((sum, b) => {
-                      const actual = journalEntries
-                        .filter(e => e.kategori === b.category && e.date.startsWith(b.period))
-                        .reduce((s, entry) => s + (entry.borc || 0), 0);
-                      return sum + actual;
-                    }, 0);
-                    const totalPercent = totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0;
+                    const totalPercent = ozet.toplamYuzde;                                   // null = hesaplanamaz ('—')
+                    const halka = totalPercent === null ? 0 : Math.min(100, totalPercent);   // yalnız yay uzunluğu
+                    const tutarsiz = ozet.toplamButce.bilinmeyen + ozet.toplamGerceklesen.bilinmeyen;
+                    const notMetni = totalPercent !== null
+                      ? (currentLanguage === 'tr' ? `Toplam bütçenin %${totalPercent}'i kullanıldı.` : `${totalPercent}% of total budget used.`)
+                      : tutarsiz > 0
+                        ? (currentLanguage === 'tr'
+                            ? `Kullanım oranı hesaplanamıyor — ${ozet.toplamButce.bilinmeyen} bütçe, ${ozet.toplamGerceklesen.bilinmeyen} fiş tutarsız.`
+                            : `Usage cannot be computed — ${ozet.toplamButce.bilinmeyen} budgets and ${ozet.toplamGerceklesen.bilinmeyen} entries have no amount.`)
+                        : (ac(currentLanguage).kullanim_orani_hesaplanamiyor_toplam_butce_sifir);
 
                     return (
                       <>
@@ -104,19 +115,15 @@ export default function ButceTab({
                               cx="64" cy="64" r="56"
                               fill="none" stroke="#ff4000" strokeWidth="8"
                               strokeDasharray={351.8}
-                              strokeDashoffset={351.8 - (351.8 * Math.min(100, totalPercent)) / 100}
+                              strokeDashoffset={351.8 - (351.8 * halka) / 100}
                               strokeLinecap="round"
                             />
                           </svg>
-                          <span className="text-2xl font-black text-gray-800 relative z-10">%{totalPercent}</span>
-                          <span className="text-[10px] text-gray-500 uppercase font-bold relative z-10">{currentLanguage === 'tr' ? 'Kullanım' : 'Usage'}</span>
+                          <span className="text-2xl font-black text-gray-800 relative z-10">{totalPercent === null ? '—' : `%${totalPercent}`}</span>
+                          <span className="text-[10px] text-gray-500 uppercase font-bold relative z-10">{ac(currentLanguage).kullanim}</span>
                         </div>
-                        <h4 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Genel Bütçe Durumu' : 'Overall Budget Status'}</h4>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {currentLanguage === 'tr'
-                            ? `Toplam bütçenin %${totalPercent}'i kullanıldı.`
-                            : `${totalPercent}% of total budget used.`}
-                        </p>
+                        <h4 className="font-bold text-gray-800">{ac(currentLanguage).genel_butce_durumu}</h4>
+                        <p className="text-xs text-gray-500 mt-1">{notMetni}</p>
                       </>
                     );
                   })()}
@@ -124,7 +131,7 @@ export default function ButceTab({
               ) : (
                 <div className="text-gray-400">
                   <PieChart size={48} className="mx-auto mb-4 opacity-20" />
-                  <p className="text-sm">{currentLanguage === 'tr' ? 'Henüz bütçe hedefi belirlenmedi.' : 'No budget goals set yet.'}</p>
+                  <p className="text-sm">{ac(currentLanguage).henuz_butce_hedefi_belirlenmedi}</p>
                 </div>
               )}
             </div>

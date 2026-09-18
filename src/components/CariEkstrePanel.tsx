@@ -17,6 +17,7 @@ import {
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
+import { bilinenSayi } from '../utils/para';
 import { tarihYaz, zamanDate } from '../utils/zaman';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';
 import { type Order } from '../types';
@@ -480,8 +481,12 @@ export default function CariEkstrePanel({
                       const x = row.raw;
                       const seri = String(x.cha_evrakno_seri ?? '').trim();
                       const sira = x.cha_evrakno_sira;
-                      const tutar = Number(x.cha_meblag ?? 0) || 0;
-                      const matrah = Number(x.cha_aratoplam ?? 0) || 0;
+                      // `MikroFaturaDetayVerisi` sözleşmesi: NaN = BİLİNMİYOR (useMikroFaturalar ile aynı).
+                      // Eski `Number(x ?? 0) || 0` okunamayan meblağı ₺0'lık gerçek bir fatura gibi
+                      // gösteriyordu — aynı modal hook'tan gelirken '—' basıyor, buradan gelirken ₺0
+                      // basıyordu (yarım düzeltme sınıfı). KDV farkı da bilinmeyene dokununca NaN olur.
+                      const tutar = bilinenSayi(x.cha_meblag) ? Number(x.cha_meblag) : NaN;
+                      const matrah = bilinenSayi(x.cha_aratoplam) ? Number(x.cha_aratoplam) : NaN;
                       setSelectedInvoice({
                         id: row.id,
                         faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),

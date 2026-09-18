@@ -1,12 +1,28 @@
 import { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
 import { parseTRNumber, parseTRDate } from '../utils/trParse';
-import { odemeTakipli, siparisTarihMs } from '../utils/siparis';
-import { paraYaz, tlYaz } from '../utils/currency';
+import { tlYaz } from '../utils/currency';
+import { bilinenSayi, ekranTutari, sayiSirala, tamTutar } from '../utils/para';
+import {
+  cetpaEvrakNolari, cariAdHaritasi, mikroSatisSatirlari as mikroSatisSatirlariHesapla,
+  cetpaSatisSatirlari, satisKayitlari as satisKayitlariHesapla, satisKpi,
+} from '../utils/muhasebe/satislar';
+import { faturaTutarlari, mikroFaturaSatirlari as mikroFaturaSatirlariHesapla } from '../utils/muhasebe/faturalar';
+import { mikroMizanSatirlari, mizanHesapla, fisDogrula } from '../utils/muhasebe/mizan';
+import { kdvDonemi } from '../utils/muhasebe/kdvBeyan';
+import { gelirGiderOzeti, grafikTavani } from '../utils/muhasebe/gelirGider';
+import { dovizBakiyeleri, hareketleriAyikla } from '../utils/muhasebe/bankaHesap';
+import { mikroCarileriAyir, bakiyeliCariKodlari, cariKarsilastirici, cariEslesir, cariKodu, musteridenTedarikci } from '../utils/muhasebe/cariImport';
+// Hesap tek kaynakta (utils/muhasebe/isletmeSermayesi.ts) — ön-doldurmanın alacak süzgeci (odemeTakipli)
+// ve stok değeri (depoDeger.depoToplamlari) artık oradan gelir; bu dosyada kopya yok.
+import { prefillDegerleri, type WCKalemleri } from '../utils/muhasebe/isletmeSermayesi';
+// İrsaliye toplamı / çalışan maaşı / depo dağılımı — 13 grubun dışında kalan üç yüzey (kapanış ölçüsü, 2026-09-18).
+import { irsaliyeToplami, irsaliyeToplamYamasi, adediBilinmeyenKalem, depodakiAdet, formSayisi, girilenAlanYamasi, gorunenTutar, pozitifSayi } from '../utils/muhasebe/irsaliyeCalisan';
 import { type MuhasebeMenuItem, type MuhasebeTarget } from '../lib/muhasebeMenu';
-import { authFetch } from '../services/authFetch';
 import DekontModal from './DekontModal';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
+// SortHeader / formatTRY / formatCurrency / exportCSV / HESAP_PLANI tek evi: ./accounting/shared (döngü kırıldı, 2026-09-18)
+import { formatTRY, HESAP_PLANI } from './accounting/shared';
 import CeklerTab from './accounting/CeklerTab';
 import CalisanlarTab from './accounting/CalisanlarTab';
 import ButceTab from './accounting/ButceTab';
@@ -28,10 +44,9 @@ import GelenIrsaliyeTab from './accounting/GelenIrsaliyeTab';
 import BankaHareketleriTab from './accounting/BankaHareketleriTab';
 import GelirTablosuTab from './accounting/GelirTablosuTab';
 import FaturalarTab from './accounting/FaturalarTab';
-import { dekontPayload } from '../services/mikroEvrak';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Plus, Download, Building2, BookOpen, TrendingUp,
+  Plus, Download, Building2, BookOpen,
   X, Save, Calculator, BarChart3, FileText, Briefcase,
   AlertCircle, CheckCircle, Info, ArrowUpDown, ShoppingCart, Users, Truck, Package,
   ArrowRightLeft, CreditCard, FileUp, FileDown, Home,
@@ -76,45 +91,7 @@ import { format } from 'date-fns';
 import { confirmAction } from '../lib/confirm';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { oc } from '../i18n/ortak';
-
-// --- SortHeader Component ---
-export const SortHeader = ({ 
-  label, 
-  sortKey, 
-  currentSort, 
-  onSort, 
-  className 
-}: { 
-  label: string, 
-  sortKey: string, 
-  currentSort: { key: string, direction: 'asc' | 'desc' }, 
-  onSort: (key: string) => void,
-  className?: string
-}) => {
-  const isActive = currentSort.key === sortKey;
-  const cn = (...classes: unknown[]) => classes.filter(Boolean).join(' ');
-  
-  return (
-    <th 
-      className={cn(
-        "px-4 py-3 text-left text-[10px] font-bold text-[#86868B] uppercase tracking-wider cursor-pointer hover:bg-gray-100/50 transition-colors group",
-        className
-      )}
-      onClick={() => onSort(sortKey)}
-    >
-      <div className="flex items-center gap-1.5">
-        {label}
-        <TrendingUp 
-          className={cn(
-            "w-3 h-3 transition-all",
-            isActive ? "text-[#ff4000] opacity-100" : "text-gray-300 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100",
-            isActive && currentSort.direction === 'desc' ? "rotate-180" : ""
-          )} 
-        />
-      </div>
-    </th>
-  );
-};
+import { ac, type AccountingT } from '../i18n/accounting';
 
 interface AccountingModuleProps {
   orders: Order[];
@@ -144,184 +121,16 @@ interface AccountingModuleProps {
   hideTabBar?: boolean;
 }
 
-export const HESAP_PLANI = [
-  '100 - Kasa', '102 - Bankalar', '108 - Diğer Hazır Değerler',
-  '120 - Alıcılar', '121 - Alacak Senetleri', '153 - Ticari Mallar',
-  '191 - İndirilecek KDV', '195 - İş Avansları', '197 - Sayım ve Tesellüm Noksanları',
-  '200 - Arazi ve Arsalar', '253 - Tesis, Makine ve Cihazlar', '254 - Taşıtlar',
-  '255 - Demirbaşlar', '257 - Birikmiş Amortismanlar', '291 - Gelecek Yıllara Ait Giderler',
-  '320 - Satıcılar', '321 - Borç Senetleri', '360 - Ödenecek Vergi ve Fonlar',
-  '361 - Ödenecek Sosyal Güvenlik Kesintileri',
-  '370 - Dönem Kârı Vergi ve Diğer Yasal Yükümlülük Karşılıkları',
-  '391 - Hesaplanan KDV', '400 - Banka Kredileri', '420 - Uzun Vadeli Kredi',
-  '500 - Sermaye', '570 - Geçmiş Yıllar Kârları', '590 - Dönem Net Kârı',
-  '600 - Yurt İçi Satışlar', '610 - Satıştan İadeler',
-  '620 - Satılan Ticari Mallar Maliyeti', '630 - Araştırma ve Geliştirme Giderleri',
-  '631 - Pazarlama, Satış ve Dağıtım Giderleri', '632 - Genel Yönetim Giderleri',
-  '640 - İştiraklerden Temettü Gelirleri', '642 - Faiz Gelirleri',
-  '653 - Komisyon Giderleri', '660 - Kısa Vadeli Borçlanma Giderleri',
-  '680 - Çalışmayan Kısım Gid. ve Zararları', '689 - Diğer Olağandışı Gider ve Zararlar',
-  '690 - Dönem Kârı veya Zararı',
-];
-
-export const formatTRY = (n: number) => paraYaz(n);
-
-export const formatCurrency = (n: number, currency: string = 'TRY') => paraYaz(n, { birim: currency });
-
-export const exportCSV = (filename: string, headers: string[], rows: (string | number)[][]) => {
-  const bom = '\uFEFF';
-  const csv = bom + [headers, ...rows]
-    .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
-    .join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-};
-
 const MONTHS_TR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const MONTHS_EN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-export const AT = {
-  tr: {
-    bankAndCash: 'Banka & Kasa', journal: 'Yevmiye', trialBalance: 'Mizan',
-    incomeExpense: 'Gelir/Gider', vat: 'KDV', luca: 'Luca',
-    tryBalance: 'TRY Bakiye', usdBalance: 'USD Bakiye', eurBalance: 'EUR Bakiye', accountCount: 'Hesap Sayısı',
-    bankCashAccounts: 'Banka & Kasa Hesapları', importStatement: 'Ekstre İçe Aktar', addAccount: 'Hesap Ekle',
-    noAccounts: 'Henüz hesap eklenmedi.', bank: 'Banka', accountType: 'Hesap Türü', iban: 'IBAN',
-    balance: 'Bakiye', currency: 'Döviz', actions: 'İşlem',
-    journalBook: 'Yevmiye Defteri', newEntry: 'Yeni Kayıt', noEntries: 'Henüz kayıt yok.',
-    date: 'Tarih', receiptNo: 'Fiş No', description: 'Açıklama', debitAccount: 'Borç Hesabı',
-    creditAccount: 'Alacak Hesabı', debit: 'Borç (₺)', credit: 'Alacak (₺)', vatRate: 'KDV%',
-    category: 'Kategori', delete: 'Sil',
-    totalDebit: 'Toplam Borç', totalCredit: 'Toplam Alacak', debitBalance: 'Borç Bakiyesi', creditBalance: 'Alacak Bakiyesi',
-    trialBalanceTitle: 'Mizan', balanced: 'Mizan Dengeli', notBalanced: 'Mizan Dengeli Değil!',
-    accountCode: 'Hesap Kodu & Adı', noJournalEntries: 'Yevmiye kaydı bulunmuyor.', total: 'TOPLAM',
-    period: 'Dönem:', totalIncome: 'Toplam Gelir', totalExpense: 'Toplam Gider', netProfit: 'Net Kâr/Zarar',
-    annualChart: (y: number) => `${y} Yıllık Gelir/Gider Grafiği`, income: 'Gelir', expense: 'Gider',
-    incomeBreakdown: 'Gelir Dağılımı', expenseBreakdown: 'Gider Dağılımı',
-    noIncomeThisPeriod: 'Bu dönemde gelir yok.', noExpenseThisPeriod: 'Bu dönemde gider yok.',
-    account: 'Hesap', amount: 'Tutar',
-    calculatedVat: 'Hesaplanan KDV', deductibleVat: 'İndirilecek KDV', vatPayable: 'Ödenecek KDV',
-    vatPayableDesc: 'Vergi dairesine ödenecek', vatRefundDesc: 'İade alınacak',
-    vatBreakdown: 'KDV Oranlarına Göre Dağılım', vatBase: 'Matrah (₺)', vatAmount: 'KDV Tutarı (₺)',
-    noVatEntries: 'Bu dönemde KDV kaydı yok.', vatDeclaration: 'Beyanname PDF',
-    lucaTitle: 'Luca ERP Entegrasyonu', connected: 'Bağlı', notConnected: 'Bağlı Değil',
-    lucaInfo: "Luca Yazılım, Türkiye'nin önde gelen muhasebe ERP sistemidir. API entegrasyonu ile yevmiye kayıtlarınızı otomatik olarak Luca'ya aktarabilirsiniz.",
-    companyCode: 'Şirket Kodu', recordsToSync: 'Aktarılacak Kayıt', lastSync: 'Son Senkronizasyon',
-    neverSynced: 'Hiç senkronize edilmedi', save: 'Kaydet', testConnection: 'Bağlantıyı Test Et',
-    syncNow: 'Senkronize Et', editAccount: 'Hesabı Düzenle', newBankAccount: 'Yeni Banka Hesabı',
-    bankName: 'Banka Adı', branch: 'Şube', accountHolder: 'Hesap Sahibi',
-    accountNumber: 'Hesap Numarası', bankBalance: 'Bakiye', cancel: 'İptal',
-    newJournalEntry: 'Yeni Yevmiye Kaydı', editJournalEntry: 'Yevmiye Kaydı Düzenle', receiptDoc: 'Fiş / Belge No',
-    descriptionPlaceholder: 'Satış faturası...', debitAccountLabel: 'Borç Hesabı', creditAccountLabel: 'Alacak Hesabı',
-    debitLabel: 'Borç (₺)', creditLabel: 'Alacak (₺)', vatRateLabel: 'KDV Oranı', categoryLabel: 'Kategori',
-    loginRequired: 'Kaydetmek için giriş yapmalısınız.', bankNameRequired: 'Banka adı zorunludur.',
-    descRequired: 'Açıklama zorunludur.', errorOccurred: 'Hata oluştu.', deleteError: 'Silme hatası.',
-    accountUpdated: 'Hesap güncellendi.', accountAdded: 'Hesap eklendi.', accountDeleted: 'Hesap silindi.',
-    journalAdded: 'Yevmiye kaydı eklendi.', journalDeleted: 'Kayıt silindi.',
-    confirmDeleteAccount: 'Bu hesabı silmek istediğinize emin misiniz?',
-    confirmDeleteEntry: 'Bu kaydı silmek istediğinize emin misiniz?',
-    lucaSaved: 'Luca yapılandırması kaydedildi.', lucaSuccess: 'Luca bağlantısı başarılı!',
-    lucaError: 'API Key ve Şirket Kodu gerekli.', lucaNotConnected: 'Önce bağlantıyı test edin.',
-    lucaSynced: (n: number) => `${n} kayıt Luca'ya aktarıldı.`, declarationPreparing: 'Beyanname hazırlanıyor...',
-    csvImported: (n: number) => `${n} işlem yevmiyeye aktarıldı.`, csvSuccess: (n: number) => `${n} CSV işlemi aktarıldı.`,
-    csvError: 'CSV okunamadı. Lütfen biçimi kontrol edin.', pdfUploaded: 'PDF yüklendi ve görüntülemeye hazır.',
-    unsupportedFormat: 'Desteklenen format: .csv veya .pdf',
-    pdfStatus: (name: string) => `"${name}" yüklendi. PDF banka ekstrelerini manuel inceleme için saklayın.`,
-    importedCount: (n: number) => `${n} işlem yevmiyeye aktarıldı.`,
-    importedLabel: 'İçe aktarıldı',
-    searchAccounts: 'Hesap ara...',
-    sortBy: 'Sırala',
-    satislar: 'Satışlar', musteriler: 'Cariler', tedarikciler: 'Tedarikçiler',
-    urunler: 'Hizmet & Ürünler', depo: 'Depo', transfer: 'Depolar Arası',
-    cekler: 'Çekler', calisanlar: 'Çalışanlar', gidenIrsaliye: 'Giden İrsaliye',
-    gelenIrsaliye: 'Gelen İrsaliye', butce: 'Bütçe', isletme_sermayesi: 'İşletme Sermayesi',
-    tahsilat: 'Tahsilat & Vade', maliyet_merkezi: 'Maliyet Merkezi', sabit_kiymet: 'Sabit Kıymet',
-    noRecords: 'Kayıt bulunamadı.', add: 'Ekle', name: 'Ad', company: 'Şirket',
-    email: 'E-posta', phone: 'Telefon', address: 'Adres', notes2: 'Notlar',
-    taxNo: 'Vergi No', code: 'Kod', type2: 'Tür', unitPrice: 'Birim Fiyat',
-    unit: 'Birim', location: 'Konum', fromWarehouse: 'Çıkış Deposu', toWarehouse: 'Giriş Deposu', selectWarehouse: 'Depo seçin',
-    product: 'Ürün', quantity: 'Miktar', checkNo: 'Çek No', bank2: 'Banka',
-    amount2: 'Tutar', dueDate: 'Vade Tarihi', drawer: 'Lehtar/Borçlu', checkType: 'Çek Türü',
-    received: 'Alınan', given: 'Verilen', position: 'Görev', department: 'Departman',
-    salary: 'Maaş', startDate: 'Başlangıç', waybillNo: 'İrsaliye No', invoiceNo: 'Fatura No', customer2: 'Müşteri',
-    supplier2: 'Tedarikçi', status2: 'Durum', total2: 'Toplam', pending2: 'Bekliyor',
-    completed2: 'Tamamlandı', cancelled2: 'İptal',
-  },
-  en: {
-    bankAndCash: 'Bank & Cash', journal: 'Journal', trialBalance: 'Trial Balance',
-    incomeExpense: 'Income/Expense', vat: 'VAT', luca: 'Luca',
-    tryBalance: 'TRY Balance', usdBalance: 'USD Balance', eurBalance: 'EUR Balance', accountCount: 'Accounts',
-    bankCashAccounts: 'Bank & Cash Accounts', importStatement: 'Import Statement', addAccount: 'Add Account',
-    noAccounts: 'No accounts added yet.', bank: 'Bank', accountType: 'Account Type', iban: 'IBAN',
-    balance: 'Balance', currency: 'Currency', actions: 'Actions',
-    journalBook: 'Journal Book', newEntry: 'New Entry', noEntries: 'No entries yet.',
-    date: 'Date', receiptNo: 'Receipt No', description: 'Description', debitAccount: 'Debit Account',
-    creditAccount: 'Credit Account', debit: 'Debit (₺)', credit: 'Credit (₺)', vatRate: 'VAT%',
-    category: 'Category', delete: 'Delete',
-    totalDebit: 'Total Debit', totalCredit: 'Total Credit', debitBalance: 'Debit Balance', creditBalance: 'Credit Balance',
-    trialBalanceTitle: 'Trial Balance', balanced: 'Balanced', notBalanced: 'Not Balanced!',
-    accountCode: 'Account Code & Name', noJournalEntries: 'No journal entries found.', total: 'TOTAL',
-    period: 'Period:', totalIncome: 'Total Income', totalExpense: 'Total Expense', netProfit: 'Net Profit/Loss',
-    annualChart: (y: number) => `${y} Annual Income/Expense Chart`, income: 'Income', expense: 'Expense',
-    incomeBreakdown: 'Income Breakdown', expenseBreakdown: 'Expense Breakdown',
-    noIncomeThisPeriod: 'No income this period.', noExpenseThisPeriod: 'No expenses this period.',
-    account: 'Account', amount: 'Amount',
-    calculatedVat: 'Output VAT', deductibleVat: 'Input VAT', vatPayable: 'VAT Payable',
-    vatPayableDesc: 'Payable to tax office', vatRefundDesc: 'Refund eligible',
-    vatBreakdown: 'VAT by Rate', vatBase: 'Base (₺)', vatAmount: 'VAT Amount (₺)',
-    noVatEntries: 'No VAT entries this period.', vatDeclaration: 'Declaration PDF',
-    lucaTitle: 'Luca ERP Integration', connected: 'Connected', notConnected: 'Not Connected',
-    lucaInfo: 'Luca is a leading Turkish accounting ERP. Use the API integration to automatically push your journal entries to Luca.',
-    companyCode: 'Company Code', recordsToSync: 'Records to Sync', lastSync: 'Last Sync',
-    neverSynced: 'Never synced', save: 'Save', testConnection: 'Test Connection',
-    syncNow: 'Sync Now', editAccount: 'Edit Account', newBankAccount: 'New Bank Account',
-    bankName: 'Bank Name', branch: 'Branch', accountHolder: 'Account Holder',
-    accountNumber: 'Account Number', bankBalance: 'Balance', cancel: 'Cancel',
-    newJournalEntry: 'New Journal Entry', editJournalEntry: 'Edit Journal Entry', receiptDoc: 'Receipt / Doc No',
-    descriptionPlaceholder: 'Sales invoice...', debitAccountLabel: 'Debit Account', creditAccountLabel: 'Credit Account',
-    debitLabel: 'Debit (₺)', creditLabel: 'Credit (₺)', vatRateLabel: 'VAT Rate', categoryLabel: 'Category',
-    loginRequired: 'Please log in to save.', bankNameRequired: 'Bank name is required.',
-    descRequired: 'Description is required.', errorOccurred: 'An error occurred.', deleteError: 'Delete error.',
-    accountUpdated: 'Account updated.', accountAdded: 'Account added.', accountDeleted: 'Account deleted.',
-    journalAdded: 'Journal entry added.', journalDeleted: 'Entry deleted.',
-    confirmDeleteAccount: 'Are you sure you want to delete this account?',
-    confirmDeleteEntry: 'Are you sure you want to delete this entry?',
-    lucaSaved: 'Luca configuration saved.', lucaSuccess: 'Luca connection successful!',
-    lucaError: 'API Key and Company Code are required.', lucaNotConnected: 'Please test the connection first.',
-    lucaSynced: (n: number) => `${n} records pushed to Luca.`, declarationPreparing: 'Preparing declaration...',
-    csvImported: (n: number) => `${n} transactions imported to journal.`, csvSuccess: (n: number) => `${n} CSV transactions imported.`,
-    csvError: 'Could not read CSV. Please check the format.', pdfUploaded: 'PDF uploaded and ready to view.',
-    unsupportedFormat: 'Supported formats: .csv or .pdf',
-    pdfStatus: (name: string) => `"${name}" uploaded. Keep PDF bank statements for manual review.`,
-    importedCount: (n: number) => `${n} transactions imported to journal.`,
-    importedLabel: 'Imported',
-    searchAccounts: 'Search accounts...',
-    sortBy: 'Sort',
-    satislar: 'Sales', musteriler: 'Accounts', tedarikciler: 'Suppliers',
-    urunler: 'Services & Products', depo: 'Warehouse', transfer: 'Inter-Warehouse',
-    cekler: 'Checks', calisanlar: 'Employees', gidenIrsaliye: 'Outgoing Waybills',
-    gelenIrsaliye: 'Incoming Waybills', butce: 'Budget', isletme_sermayesi: 'Working Capital',
-    tahsilat: 'Collections & Due Dates', maliyet_merkezi: 'Cost Centers', sabit_kiymet: 'Fixed Assets',
-    noRecords: 'No records found.', add: 'Add', name: 'Name', company: 'Company',
-    email: 'Email', phone: 'Phone', address: 'Address', notes2: 'Notes',
-    taxNo: 'Tax No', code: 'Code', type2: 'Type', unitPrice: 'Unit Price',
-    unit: 'Unit', location: 'Location', fromWarehouse: 'From Warehouse', toWarehouse: 'To Warehouse', selectWarehouse: 'Select warehouse',
-    product: 'Product', quantity: 'Quantity', checkNo: 'Check No', bank2: 'Bank',
-    amount2: 'Amount', dueDate: 'Due Date', drawer: 'Drawer/Payee', checkType: 'Check Type',
-    received: 'Received', given: 'Given', position: 'Position', department: 'Department',
-    salary: 'Salary', startDate: 'Start Date', waybillNo: 'Waybill No', invoiceNo: 'Invoice No', customer2: 'Customer',
-    supplier2: 'Supplier', status2: 'Status', total2: 'Total', pending2: 'Pending',
-    completed2: 'Completed', cancelled2: 'Cancelled',
-  },
-} as const;
+// Modül sözlüğü src/i18n/accounting.ts'e taşındı (Faz 3 2/n) — `AT[dil]` artık `ac(dil)`.
 
-export type AccountingT = typeof AT[keyof typeof AT];
+
+export type { AccountingT };
 
 export default function AccountingModule({ orders = [], currentLanguage, isAuthenticated = false, userRole, exchangeRates, initialTab, allowedTabs, initialCustomerSearch, createNotification, warehouses: warehousesProp, employees: employeesProp, navMenu, onNavigate, controlledTab, onControlledTabChange, hideTabBar }: AccountingModuleProps) {
-  const t = AT[currentLanguage];
+  const t = ac(currentLanguage);
   const MONTHS = currentLanguage === 'en' ? MONTHS_EN : MONTHS_TR;
   const resolvedInitialTab = (() => {
     const tab = initialTab || 'banka';
@@ -362,6 +171,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [stockForm, setStockForm] = useState({ productName: '', sku: '', quantity: 0, warehouseId: '', category: '', notes: '' });
   const [editingStock, setEditingStock] = useState<WarehouseItem | null>(null);
   // Dekont modalı hedefi (null = kapalı). Bkz. müşteri satırındaki Mikro düğmesi.
+  /** bakiye: NaN = bilinmiyor (DekontModal '—' basar; Mikro payload'ına girmez). */
   const [dekontHedef, setDekontHedef] = useState<{ cariKod: string; ad: string; bakiye: number; id: string } | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
@@ -385,6 +195,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     faturaNo: '', faturaTipi: 'e-fatura' as 'e-fatura'|'e-arsiv'|'ihracat',
     customerName: '', customerEmail: '', taxId: '', taxOffice: '',
     address: '', kdvOran: 20, date: format(new Date(),'yyyy-MM-dd'), notes: '', orderId: '',
+    // Elle girilen toplam (KDV DAHİL). `invoiceSource` (sipariş) hiçbir yerden set edilmiyordu
+    // (2026-09-18 ölçümü: `setInvoiceSource` yalnız null ile çağrılıyor) → her fatura ₺0/₺0/₺0
+    // kaydediliyordu. Sipariş bağlanınca onun tutarı kullanılır, bağlı değilse bu alan.
+    // Dokümana YAZILMAZ: hesaplanan totalPrice/kdvHaric/kdvTutari yazılır.
+    tutar: '',
   });
 
   useEffect(() => {
@@ -397,16 +212,26 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const handleCreateInvoice = async () => {
     const src = invoiceSource;
     const lineItems = src ? (src.lineItems as Record<string,unknown>[] || []) : [];
-    const totalPrice = src ? (src.totalPrice as number || 0) : 0;
-    const round2 = (n: number) => Math.round(n * 100) / 100;
-    const kdvHaric = round2(totalPrice / (1 + invoiceForm.kdvOran / 100));
-    const kdvTutari = round2(totalPrice - kdvHaric);
+    // Hesap tek kaynakta (utils/muhasebe/faturalar.faturaTutarlari) — KDV ayrıştırma ve yuvarlama orada.
+    // Tutar bilinmiyorsa (sipariş bağlı değil VE alan boş/geçersiz) fatura KAYDEDİLMEZ: eskiden
+    // `src.totalPrice as number || 0` ile ₺0 tutarlı, ₺0 KDV'li sahte fatura yazılıyordu.
+    const { tutar: girilenTutar, ...faturaAlanlari } = invoiceForm;
+    const tutarlar = faturaTutarlari(src ? src.totalPrice : girilenTutar, invoiceForm.kdvOran);
+    if (!tutarlar) {
+      // İki durum: tutar BİLİNMİYOR (alan boş / sayı değil) ya da EKSİ girilmiş — modaldaki `min="0"`
+      // tarayıcıca zorlanmıyor (modalda <form> yok). Mesaj ikisini de kapsar; hangisi olduğunu
+      // modaldaki alan altı notu söyler.
+      setToast({ msg: currentLanguage==='tr'
+        ? 'Fatura tutarı geçersiz — fatura kesilmedi. Toplam (KDV dahil) alanına eksi olmayan bir tutar girin.'
+        : 'Invoice amount is invalid — nothing was saved. Enter a non-negative total (VAT included).', type: 'error' });
+      return;
+    }
     await addDoc(collection(db, 'invoices'), {
-      ...invoiceForm,
+      ...faturaAlanlari,
       lineItems,
-      totalPrice,
-      kdvHaric,
-      kdvTutari,
+      totalPrice: tutarlar.toplam,
+      kdvHaric: tutarlar.kdvHaric,
+      kdvTutari: tutarlar.kdvTutari,
       status: 'Kesildi',
       createdAt: serverTimestamp(),
     });
@@ -415,8 +240,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     }
     setShowInvoiceModal(false);
     setInvoiceSource(null);
-    setInvoiceForm({ faturaNo:'', faturaTipi:'e-fatura', customerName:'', customerEmail:'', taxId:'', taxOffice:'', address:'', kdvOran:20, date:format(new Date(),'yyyy-MM-dd'), notes:'', orderId:'' });
-    setToast({ msg: currentLanguage==='tr'?'Fatura başarıyla kesildi.':'Invoice created successfully.', type:'success' });
+    setInvoiceForm({ faturaNo:'', faturaTipi:'e-fatura', customerName:'', customerEmail:'', taxId:'', taxOffice:'', address:'', kdvOran:20, date:format(new Date(),'yyyy-MM-dd'), notes:'', orderId:'', tutar:'' });
+    setToast({ msg: ac(currentLanguage).fatura_basariyla_kesildi, type:'success' });
   };
 
   // Bank Accounts
@@ -427,9 +252,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [bankSearch, setBankSearch] = useState('');
   const [bankSortKey, setBankSortKey] = useState<keyof BankAccount>('bankName');
   const [bankSortDir, setBankSortDir] = useState<'asc' | 'desc'>('asc');
+  // `balance: '' ` = girilmedi (bilinmiyor) — eskiden 0'dı ve boş alan `Number('') === 0` ile
+  // sessizce ₺0 bakiye kaydediyordu (saveBank artık bilinenSayi ile eler; utils/muhasebe/bankaHesap.ts grubu).
   const [bankForm, setBankForm] = useState({
     bankName: '', branch: '', accountHolder: '', accountNumber: '',
-    iban: '', currency: 'TRY' as 'TRY' | 'USD' | 'EUR', balance: 0,
+    iban: '', currency: 'TRY' as 'TRY' | 'USD' | 'EUR', balance: '' as number | '',
     accountType: 'Vadesiz' as 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa' | 'Akreditif (L/C)' | 'Teminat Mektubu',
   });
 
@@ -448,7 +275,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [journalForm, setJournalForm] = useState({
     date: format(new Date(), 'yyyy-MM-dd'), fiş: '', aciklama: '',
     debitHesap: HESAP_PLANI[0], alacakHesap: HESAP_PLANI[0],
-    borc: 0, alacak: 0, kdvOran: 0,
+    // kdvOran null = ORAN BİLİNMİYOR (düzenlenen eski kayıt); yeni kayıt varsayılanı %0 (parite).
+    borc: 0, alacak: 0, kdvOran: 0 as number | null,
     kategori: 'Satış' as JournalEntry['kategori'],
   });
   const [journalSearch, setJournalSearch] = useState('');
@@ -535,19 +363,15 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   useEffect(() => {
     if (!isAuthenticated || !userRole) return;
     const unsub = onSnapshot(collection(db, 'cariBalances'), s => {
-      const set = new Set<string>();
-      s.docs.forEach(d => {
-        const x = d.data() as Record<string, unknown>;
-        const kod = String(x.cariKod ?? d.id).trim();
-        if (kod && Number(x.bakiye ?? 0) !== 0) set.add(kod);
-      });
-      setCariBalanceKodSet(set);
+      // Hesap tek kaynakta (utils/muhasebe/cariImport.ts): yalnız BİLİNEN ve ≠ 0 bakiye "bakiyeli" sayılır.
+      setCariBalanceKodSet(bakiyeliCariKodlari(s.docs.map(d => ({ id: d.id, veri: d.data() as Record<string, unknown> }))));
     }, (error) => logFirestoreError(error, OperationType.LIST, 'cariBalances'));
     return () => unsub();
   }, [isAuthenticated, userRole]);
   // İşletme sermayesi — editlenebilir kalemler (settings/workingCapital'da saklanır)
   type WCField = 'kasaBanka' | 'ticariAlacaklar' | 'stoklar' | 'ticariBorclar' | 'vergiSgk' | 'krediler';
-  const [workingCapital, setWorkingCapital] = useState<Record<WCField, number>>({
+  // Değerler `unknown`: DB'den null gelebilir, boşaltılan alan NaN'dır — 0 DEĞİL (utils/muhasebe/isletmeSermayesi.ts).
+  const [workingCapital, setWorkingCapital] = useState<WCKalemleri>({
     kasaBanka: 0, ticariAlacaklar: 0, stoklar: 0, ticariBorclar: 0, vergiSgk: 0, krediler: 0,
   });
   const [wcSaved, setWcSaved] = useState(false);
@@ -621,12 +445,14 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [irsaliyeSortDir, setIrsaliyeSortDir] = useState<'asc' | 'desc'>('desc');
 
   // New tab form states
-  const [customerForm, setCustomerForm] = useState({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', taxOffice: '', notes: '', creditLimit: 0, balance: 0, riskGroup: 'Düşük' as 'Düşük' | 'Orta' | 'Yüksek' });
-  const [supplierForm, setSupplierForm] = useState({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', notes: '', balance: 0, riskGroup: 'Düşük' as 'Düşük' | 'Orta' | 'Yüksek' });
+  // creditLimit / balance BAŞLANGIÇ DEĞERİ null = "girilmedi" (0 DEĞİL) — yeni kayıtta da sahte
+  // ₺0 limit/bakiye yazılmasın diye; saveCustomer/saveSupplier null alanı payload'a koymaz.
+  const [customerForm, setCustomerForm] = useState<{ name: string; company: string; email: string; phone: string; address: string; taxNo: string; taxOffice: string; notes: string; creditLimit: number | null; balance: number | null; riskGroup: 'Düşük' | 'Orta' | 'Yüksek' }>({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', taxOffice: '', notes: '', creditLimit: null, balance: null, riskGroup: 'Düşük' });
+  const [supplierForm, setSupplierForm] = useState<{ name: string; company: string; email: string; phone: string; address: string; taxNo: string; notes: string; balance: number | null; riskGroup: 'Düşük' | 'Orta' | 'Yüksek' }>({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', notes: '', balance: null, riskGroup: 'Düşük' });
   const [serviceForm, setServiceForm] = useState({ code: '', name: '', type: 'Ürün' as 'Ürün' | 'Hizmet', unitPrice: 0, vatRate: 18, unit: 'Adet', notes: '' });
   const [transferForm, setTransferForm] = useState({ fromWarehouse: '', toWarehouse: '', productName: '', quantity: 0, date: format(new Date(), 'yyyy-MM-dd'), notes: '', status: 'Bekliyor' as Transfer['status'] });
   const [checkForm, setCheckForm] = useState({ checkNo: '', bankName: '', amount: 0, dueDate: format(new Date(), 'yyyy-MM-dd'), drawer: '', type: 'Alınan' as Check['type'], status: 'Aktif' as Check['status'] });
-  const [employeeForm, setEmployeeForm] = useState({ name: '', employeeId: '', tcId: '', position: '', department: '', salary: 0, startDate: format(new Date(), 'yyyy-MM-dd'), email: '', phone: '' });
+  const [employeeForm, setEmployeeForm] = useState<{ name: string; employeeId: string; tcId: string; position: string; department: string; salary: number | null; startDate: string; email: string; phone: string }>({ name: '', employeeId: '', tcId: '', position: '', department: '', salary: null, startDate: format(new Date(), 'yyyy-MM-dd'), email: '', phone: '' });
   const [budgetForm, setBudgetForm] = useState({ category: 'Genel Gider', amount: 0, period: format(new Date(), 'yyyy-MM') });
   const [waybillForm, setWaybillForm] = useState<{
     waybillNo: string;
@@ -634,12 +460,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     party: string;
     date: string;
     items: WaybillItem[];
-    total: number;
     status: Waybill['status'];
     warehouseId: string;
   }>({
     waybillNo: '', invoiceNo: '', party: '', date: format(new Date(), 'yyyy-MM-dd'),
-    items: [], total: 0, status: 'Bekliyor', warehouseId: ''
+    items: [], status: 'Bekliyor', warehouseId: ''
   });
 
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -668,11 +493,13 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         ['Hesaplanan KDV', normTR(formatTRY(hesaplananKDV))],
         ['İndirilecek KDV', normTR(formatTRY(indirilecekKDV))],
         ['Ödenecek/İade KDV', normTR(formatTRY(odenecekKDV))],
+        // Tutarı bilinmeyen kayıt varsa net TÜRETİLMEZ ('—'); beyannamede sessiz kalmaz, sayısı yazılır.
+        ...(kdvTutarsiz > 0 ? [['Not', normTR(`${kdvTutarsiz} kayıt tutarsız — net hesaplanamadı`)]] : []),
       ],
     });
     const oranBody = Object.entries(kdvOranBreakdown).map(([oran, data]) => [
-      oran === 'karma' ? (oc(currentLanguage).karma) : `%${oran}`,
-      normTR(formatTRY(data.matrah)), normTR(formatTRY(data.kdv)),
+      oran === 'karma' ? (oc(currentLanguage).karma) : oran === 'bilinmiyor' ? (oc(currentLanguage).bilinmiyor) : `%${oran}`,
+      normTR(formatTRY(ekranTutari(data.matrah))), normTR(formatTRY(ekranTutari(data.kdv))),
     ]);
     autoTable(doc, {
       ...pdfTabloStili(),
@@ -689,18 +516,21 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   // toplanabilir/pivotlanabilir. Noktalı virgül ayraç (TR Excel ondalık virgül),
   // UTF-8 BOM (Türkçe karakter).
   const downloadVatDeclarationCSV = () => {
+    // Bilinmeyen → BOŞ hücre (Excel'de toplama girmez); `Math.round(NaN)` hücreye 'NaN' metni basardı.
+    const csvSayi = (n: number): number | string => (Number.isFinite(n) ? Math.round(n * 100) / 100 : '');
     const rows: (string | number)[][] = [
       ['KDV Beyannamesi Ozeti'],
       ['Donem', `${kdvMonth}/${kdvYear}`],
       [],
       ['Kalem', 'Tutar'],
-      ['Hesaplanan KDV', Math.round(hesaplananKDV * 100) / 100],
-      ['Indirilecek KDV', Math.round(indirilecekKDV * 100) / 100],
-      ['Odenecek/Iade KDV', Math.round(odenecekKDV * 100) / 100],
+      ['Hesaplanan KDV', csvSayi(hesaplananKDV)],
+      ['Indirilecek KDV', csvSayi(indirilecekKDV)],
+      ['Odenecek/Iade KDV', csvSayi(odenecekKDV)],
+      ...(kdvTutarsiz > 0 ? [['Not', `${kdvTutarsiz} kayit tutarsiz`]] : []),
       [],
       ['Oran (%)', 'Matrah', 'KDV'],
       ...Object.entries(kdvOranBreakdown).map(([oran, data]) => [
-        oran, Math.round(data.matrah * 100) / 100, Math.round(data.kdv * 100) / 100,
+        oran, csvSayi(ekranTutari(data.matrah)), csvSayi(ekranTutari(data.kdv)),
       ]),
     ];
     const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\n');
@@ -834,55 +664,15 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       // mikroFaturalar dinleyicisi useMikroFaturalar hook'una taşındı (eşleme tek yerde).
       // Müşteriler artık CRM ile ORTAK kaynaktan okunur: leads koleksiyonu.
       // (type==='Supplier' olanlar Tedarikçiler sekmesine aittir, burada gizlenir.)
+      // Hesap tek kaynakta (utils/muhasebe/cariImport.ts) — rol ayrımı, alan eşlemesi, bilinmeyen bakiye/limit.
       onSnapshot(collection(db, 'leads'), s => {
-        // Mikro'dan gelen tedarikçiler (type==='Supplier') Tedarikçiler sekmesini besler
-        setMikroSuppliers(
-          s.docs
-            .filter(d => (d.data().type as string) === 'Supplier')
-            .map(d => {
-              const x = d.data() as Record<string, unknown>;
-              return {
-                id: d.id,
-                name:    (x.name as string) || (x.company as string) || '—',
-                company: (x.company as string) || '',
-                email:   (x.email as string) || '',
-                phone:   (x.phone as string) || '',
-                address: (x.address as string) || '',
-                taxNo:   (x.taxId as string) || (x.taxNo as string) || '',
-                taxOffice: (x.taxOffice as string) || '',
-                notes:   (x.notes as string) || '',
-                balance: Number(x.bakiye ?? x.balance ?? 0),
-                riskGroup: (x.riskGroup as Supplier['riskGroup']) || 'Düşük',
-                createdAt: x.createdAt,
-              } as Supplier;
-            })
+        const { musteriler, tedarikciler } = mikroCarileriAyir(
+          s.docs.map(d => ({ id: d.id, veri: d.data() as Record<string, unknown> })),
         );
-        setCustomers(
-        s.docs
-          .filter(d => ((d.data().type as string) ?? 'Customer') !== 'Supplier')
-          .map(d => {
-            const x = d.data() as Record<string, unknown>;
-            return {
-              id: d.id,
-              name:        (x.name as string) || (x.company as string) || '—',
-              company:     (x.company as string) || '',
-              email:       (x.email as string) || '',
-              phone:       (x.phone as string) || '',
-              address:     (x.address as string) || '',
-              taxNo:       (x.taxId as string) || (x.taxNo as string) || '',
-              taxOffice:   (x.taxOffice as string) || '',
-              notes:       (x.notes as string) || '',
-              creditLimit: Number(x.creditLimit ?? 0),
-              balance:     Number(x.bakiye ?? x.balance ?? 0),
-              riskGroup:   (x.riskGroup as Customer['riskGroup']) || 'Düşük',
-              // Mikro cari kodu — Mikro faturalarında müşteri ADINI çözmek için
-              // şart. Eşlemede yoktu, bu yüzden fatura satırlarında ad yerine
-              // "1470747917" gibi cari kodu görünüyordu (2026-08-01).
-              mikroCariKod: (x.mikroCariKod as string) || '',
-              createdAt:   x.createdAt,
-            } as Customer;
-          })
-      ); }, (error) => logFirestoreError(error, OperationType.LIST, 'leads')),
+        // Mikro'dan gelen tedarikçiler (type==='Supplier') Tedarikçiler sekmesini besler
+        setMikroSuppliers(tedarikciler);
+        setCustomers(musteriler);
+      }, (error) => logFirestoreError(error, OperationType.LIST, 'leads')),
       onSnapshot(collection(db, 'suppliers'), s => setSuppliers(s.docs.map(d => ({ id: d.id, ...d.data() } as Supplier))), (error) => logFirestoreError(error, OperationType.LIST, 'suppliers')),
       onSnapshot(collection(db, 'services'), s => setServices(s.docs.map(d => ({ id: d.id, ...d.data() } as Service))), (error) => logFirestoreError(error, OperationType.LIST, 'services')),
       onSnapshot(collection(db, 'warehouseItems'), s => setWarehouseItems(s.docs.map(d => ({ id: d.id, ...d.data() } as WarehouseItem))), (error) => logFirestoreError(error, OperationType.LIST, 'warehouseItems')),
@@ -891,7 +681,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       onSnapshot(collection(db, 'budgets'), s => setBudgets(s.docs.map(d => ({ id: d.id, ...d.data() } as Budget))), (error) => logFirestoreError(error, OperationType.LIST, 'budgets')),
       onSnapshot(collection(db, 'waybills'), s => setWaybills(s.docs.map(d => ({ id: d.id, ...d.data() } as Waybill))), (error) => logFirestoreError(error, OperationType.LIST, 'waybills')),
       onSnapshot(doc(db, 'settings', 'workingCapital'), s => {
-        if (s.exists()) setWorkingCapital(prev => ({ ...prev, ...(s.data() as Partial<Record<WCField, number>>) }));
+        // Cast `Partial<WCKalemleri>`: DB'ye null yazılan alan state'e null gelir ve 'bilinmiyor' GÖSTERİLİR —
+        // eski `Partial<Record<WCField, number>>` cast'i null gelince tip düzeyinde yalan söylüyordu.
+        if (s.exists()) setWorkingCapital(prev => ({ ...prev, ...(s.data() as Partial<WCKalemleri>) }));
       }, () => { /* yoksa varsayılan 0 */ })
     ];
     return () => unsubs.forEach(u => u());
@@ -955,36 +747,54 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   // İşletme sermayesi: kalemi güncelle + settings'e kaydet (debounce'lu)
   const wcSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Kalıcı yazım: bilinmeyen (NaN) alan null yazılır — 0 yazmak "0 TL beyan edildi" demektir.
+   *  (JSON.stringify NaN'ı zaten null'a çevirir; niyeti örtük bırakmıyoruz.) */
+  const wcSayi = (x: unknown): number | null => (bilinenSayi(x) ? Number(x) : null);
+  const wcYazilabilir = (wc: WCKalemleri): Record<WCField, number | null> => ({
+    kasaBanka: wcSayi(wc.kasaBanka), ticariAlacaklar: wcSayi(wc.ticariAlacaklar), stoklar: wcSayi(wc.stoklar),
+    ticariBorclar: wcSayi(wc.ticariBorclar), vergiSgk: wcSayi(wc.vergiSgk), krediler: wcSayi(wc.krediler),
+  });
   const updateWC = (field: WCField, value: number) => {
     setWorkingCapital(prev => {
-      const next = { ...prev, [field]: value };
+      const next: WCKalemleri = { ...prev, [field]: value };
       if (wcSaveTimer.current) clearTimeout(wcSaveTimer.current);
       wcSaveTimer.current = setTimeout(() => {
-        void setDoc(doc(db, 'settings', 'workingCapital'), { ...next, updatedAt: serverTimestamp() }, { merge: true })
+        void setDoc(doc(db, 'settings', 'workingCapital'), { ...wcYazilabilir(next), updatedAt: serverTimestamp() }, { merge: true })
           .then(() => { setWcSaved(true); setTimeout(() => setWcSaved(false), 1500); })
           .catch(() => { /* non-critical */ });
       }, 600);
       return next;
     });
   };
-  // Gerçek veriden ön-doldur: alacaklar = ödenmemiş siparişler, stok = depo değeri
+  // Gerçek veriden ön-doldur: alacaklar = ödenmemiş siparişler, stok = depo değeri.
+  // Hesap tek kaynakta (utils/muhasebe/isletmeSermayesi.ts → prefillDegerleri; stok depoDeger.depoToplamlari,
+  // alacak süzgeci utils/siparis.odemeTakipli).
+  //
+  // Mikro faturasindan turetilen siparislerde `paid` YOKTUR — tahsilat gercegi
+  // Mikro cari hesabinda. Suzgec olmadan bu buton, bilinmeyeni "alacak" sayip
+  // settings/workingCapital'a KALICI yaziyordu; sonrasinda cari oran/likidite
+  // rakamlari silinmeyecek sekilde sisiyordu (2026-09-04 denetimi).
   const prefillWC = () => {
-    // Mikro faturasindan turetilen siparislerde `paid` YOKTUR — tahsilat gercegi
-    // Mikro cari hesabinda. Suzgec olmadan bu buton, bilinmeyeni "alacak" sayip
-    // settings/workingCapital'a KALICI yaziyordu; sonrasinda cari oran/likidite
-    // rakamlari silinmeyecek sekilde sisiyordu (2026-09-04 denetimi).
-    const ar = orders
-      .filter(o => !(o as unknown as { paid?: boolean }).paid && o.status !== 'Cancelled' && odemeTakipli(o))
-      .reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
-    const stok = warehouseItems.reduce((s, w) => s + (Number(w.quantity) || 0) * (Number((w as unknown as { costPrice?: number }).costPrice) || 0), 0);
-    const next = { ...workingCapital, ticariAlacaklar: Math.round(ar), stoklar: Math.round(stok) };
+    const { alacak, stok } = prefillDegerleri(orders, warehouseItems);
+    // Bu iki değer settings/workingCapital'a KALICI yazılıp cari oran/likiditeye girer → EKRAN değil
+    // TÜRETME kapısı: `tamTutar`, bir kayıt bile tutarsızsa NaN döner ve o alan HİÇ yazılmaz. Kısmi
+    // toplamı kalıcı yazmak sahte 0'ın başka bir biçimidir: ertesi gün kimse eksik olduğunu göremez.
+    const arToplam = tamTutar(alacak);
+    const stokToplam = tamTutar(stok);
+    const next: WCKalemleri = {
+      ...workingCapital,
+      ...(Number.isFinite(arToplam) ? { ticariAlacaklar: Math.round(arToplam) } : {}),
+      ...(Number.isFinite(stokToplam) ? { stoklar: Math.round(stokToplam) } : {}),
+    };
     setWorkingCapital(next);
-    void setDoc(doc(db, 'settings', 'workingCapital'), { ...next, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+    void setDoc(doc(db, 'settings', 'workingCapital'), { ...wcYazilabilir(next), updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+    const tutarsiz = alacak.bilinmeyen + stok.bilinmeyen;
+    if (tutarsiz > 0) showToast(currentLanguage === 'tr' ? `${tutarsiz} kayıt tutarsız — ilgili alan ön-doldurulmadı.` : `${tutarsiz} records have unknown amounts — the affected field was not prefilled.`, 'info');
   };
 
   const handleSyncMikroBank = async () => {
     if (!mikroEnabled || !mikroAccessToken) {
-      showToast(currentLanguage === 'tr' ? 'Mikro ERP entegrasyonu aktif değil.' : 'Mikro ERP integration is not active.', 'error');
+      showToast(ac(currentLanguage).mikro_erp_entegrasyonu_aktif_degil, 'error');
       return;
     }
     setMikroBankLoading(true);
@@ -996,17 +806,17 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       };
       const res = await pullBankMovementsFromMikro({}, config) as { notImplemented?: boolean; Data?: unknown[] };
       if (res?.notImplemented) {
-        showToast(currentLanguage === 'tr' ? 'Mikro JumpBulut API\'sinde banka hareketi servisi bulunmuyor. Banka hesap tanımları Ayarlar > Mikro > "Bankalar" ile çekilebilir.' : 'Mikro JumpBulut API has no bank movement service. Bank account definitions can be pulled via Settings > Mikro > Banks.', 'info');
+        showToast(ac(currentLanguage).mikro_jumpbulut_api_sinde_banka_hareketi_servisi, 'info');
       } else if (res?.Data) {
         setMikroBankMovements(res.Data as never[]);
         setMikroBankLastSync(new Date().toLocaleString());
-        showToast(currentLanguage === 'tr' ? 'Banka hareketleri başarıyla çekildi.' : 'Bank movements successfully fetched.', 'success');
+        showToast(ac(currentLanguage).banka_hareketleri_basariyla_cekildi, 'success');
       } else {
-        showToast(currentLanguage === 'tr' ? 'Hareket bulunamadı.' : 'No movements found.', 'info');
+        showToast(ac(currentLanguage).hareket_bulunamadi, 'info');
       }
     } catch (err) {
       console.error(err);
-      showToast(currentLanguage === 'tr' ? 'Mikro API hatası.' : 'Mikro API error.', 'error');
+      showToast(ac(currentLanguage).mikro_api_hatasi, 'error');
     } finally {
       setMikroBankLoading(false);
     }
@@ -1029,7 +839,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         await updateDoc(doc(db, 'settings', 'luca'), { enabled: false }).catch(() => {});
       }
       
-      showToast(currentLanguage === 'tr' ? 'Mikro yapılandırması kaydedildi.' : 'Mikro configuration saved.');
+      showToast(ac(currentLanguage).mikro_yapilandirmasi_kaydedildi);
     } catch (err) {
       logFirestoreError(err, OperationType.UPDATE, 'settings/mikro', auth.currentUser?.uid);
       showToast(t.errorOccurred, 'error');
@@ -1039,25 +849,29 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   // Bank CRUD
   const openAddBank = () => {
     setEditingBank(null);
-    setBankForm({ bankName: '', branch: '', accountHolder: '', accountNumber: '', iban: '', currency: 'TRY', balance: 0, accountType: 'Vadesiz' });
+    setBankForm({ bankName: '', branch: '', accountHolder: '', accountNumber: '', iban: '', currency: 'TRY', balance: '', accountType: 'Vadesiz' });
     setShowBankModal(true);
   };
 
   const openEditBank = (acc: BankAccount) => {
     setEditingBank(acc);
-    setBankForm({ bankName: acc.bankName, branch: acc.branch, accountHolder: acc.accountHolder, accountNumber: acc.accountNumber, iban: acc.iban, currency: acc.currency, balance: acc.balance, accountType: acc.accountType });
+    // DB'den sayı olmayan bakiye gelebilir (listener hiçbir alanı doğrulamıyor) → alan boş açılır, 0 yazılmaz
+    setBankForm({ bankName: acc.bankName, branch: acc.branch, accountHolder: acc.accountHolder, accountNumber: acc.accountNumber, iban: acc.iban, currency: acc.currency, balance: bilinenSayi(acc.balance) ? Number(acc.balance) : '', accountType: acc.accountType });
     setShowBankModal(true);
   };
 
   const saveBank = async () => {
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
     if (!bankForm.bankName.trim()) return showToast(t.bankNameRequired, 'error');
+    // Bilinmeyen bakiye KAYDEDİLMEZ: boş alan eskiden `Number('') === 0` ile sessizce ₺0 yazıyordu
+    if (!bilinenSayi(bankForm.balance)) return showToast(ac(currentLanguage).bakiye_sayi_olmali_bos_birakilirsa_kaydedilmez_b, 'error');
+    const kayit = { ...bankForm, balance: Number(bankForm.balance) };
     try {
       if (editingBank) {
-        await updateDoc(doc(db, 'bankAccounts', editingBank.id), { ...bankForm, updatedAt: serverTimestamp() });
+        await updateDoc(doc(db, 'bankAccounts', editingBank.id), { ...kayit, updatedAt: serverTimestamp() });
         showToast(t.accountUpdated);
       } else {
-        await addDoc(collection(db, 'bankAccounts'), { ...bankForm, updatedAt: serverTimestamp() });
+        await addDoc(collection(db, 'bankAccounts'), { ...kayit, updatedAt: serverTimestamp() });
         showToast(t.accountAdded);
       }
       setShowBankModal(false);
@@ -1066,7 +880,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   const deleteBank = async (id: string) => {
     const ok = await confirmAction({
-      title: currentLanguage === 'tr' ? 'Hesabı Sil' : 'Delete Account',
+      title: ac(currentLanguage).hesabi_sil,
       message: t.confirmDeleteAccount,
       confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
@@ -1084,7 +898,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   // Bank Transaction Pull (from Mikro)
   const pullBankTransactions = async () => {
     if (!mikroEnabled || !mikroAccessToken) {
-      showToast(currentLanguage === 'tr' ? 'Mikro entegrasyonu etkin değil veya Access Token eksik.' : 'Mikro integration not enabled or Access Token missing.', 'error');
+      showToast(ac(currentLanguage).mikro_entegrasyonu_etkin_degil_veya_access_token, 'error');
       return;
     }
     setBankTxPulling(true);
@@ -1094,25 +908,17 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       const monthAgo = format(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd');
       const result = await pullBankMovementsFromMikro({ baslangicTarihi: monthAgo, bitisTarihi: today }, config) as Record<string, unknown>;
       if (result?.notImplemented) {
-        showToast(currentLanguage === 'tr' ? 'Mikro JumpBulut API\'sinde banka hareketi servisi bulunmuyor. Banka hesap tanımları Ayarlar > Mikro > "Bankalar" ile çekilebilir.' : 'Mikro JumpBulut API has no bank movement service. Bank account definitions can be pulled via Settings > Mikro > Banks.', 'info');
+        showToast(ac(currentLanguage).mikro_jumpbulut_api_sinde_banka_hareketi_servisi, 'info');
         setBankTxPulling(false);
         return;
       }
-      const rows = (result?.data ?? result?.items ?? result?.list ?? []) as Record<string, unknown>[];
+      const rows = (result?.data ?? result?.items ?? result?.list ?? []) as unknown[];
 
-      const newTxs: Omit<BankTransaction, 'id'>[] = rows.map((r) => ({
-        accountId: String(r.HesapId ?? r.accountId ?? ''),
-        accountName: String(r.BankaAdi ?? r.bankName ?? r.HesapAdi ?? ''),
-        date: String(r.Tarih ?? r.date ?? today),
-        description: String(r.Aciklama ?? r.description ?? r.BelgeNo ?? ''),
-        amount: Math.abs(Number(r.Tutar ?? r.amount ?? 0)),
-        type: Number(r.Tutar ?? r.amount ?? 0) >= 0 ? 'credit' : 'debit',
-        balance: Number(r.BakiyeSonrasi ?? r.balance ?? 0),
-        currency: (String(r.DovizKodu ?? r.currency ?? 'TRY') as 'TRY' | 'USD' | 'EUR'),
-        reference: String(r.BelgeNo ?? r.reference ?? ''),
-        source: 'mikro' as const,
-        createdAt: serverTimestamp(),
-      }));
+      // Hesap tek kaynakta (utils/muhasebe/bankaHesap.ts hareketleriAyikla): tutarı bilinmeyen satır
+      // YAZILMAZ ve sayılır (eskiden "₺0 alacak" olarak kalıcı yazılıyordu); bakiyesi bilinmeyen satır
+      // bakiyesiz yazılır (ekran '—'); tanınmayan döviz kodu tipe yalan söylenmeden atlanır ve sayılır.
+      const ayik = hareketleriAyikla(rows, { bugun: today });
+      const newTxs: Omit<BankTransaction, 'id'>[] = ayik.kayitlar.map(k => ({ ...k, createdAt: serverTimestamp() }));
 
       // Upsert to Firestore (skip duplicates by reference+date)
       const existing = new Set(bankTransactions.map(t => `${t.reference}_${t.date}`));
@@ -1121,15 +927,18 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
       const now = format(new Date(), 'dd.MM.yyyy HH:mm');
       setBankTxLastPull(now);
+      const atlamaNotu = currentLanguage === 'tr'
+        ? `${ayik.atlanan > 0 ? ` ${ayik.atlanan} satır atlandı (${ayik.tutarsiz} tutarı bilinmiyor, ${ayik.birimsiz} birimi tanınmadı).` : ''}${ayik.bakiyesiz > 0 ? ` ${ayik.bakiyesiz} hareketin bakiyesi bilinmiyor.` : ''}`
+        : `${ayik.atlanan > 0 ? ` ${ayik.atlanan} row(s) skipped (${ayik.tutarsiz} without amount, ${ayik.birimsiz} unknown currency).` : ''}${ayik.bakiyesiz > 0 ? ` ${ayik.bakiyesiz} without balance.` : ''}`;
       showToast(
-        currentLanguage === 'tr'
+        (currentLanguage === 'tr'
           ? `${toAdd.length} yeni hareket çekildi.`
-          : `${toAdd.length} new transactions pulled.`,
-        'success'
+          : `${toAdd.length} new transactions pulled.`) + atlamaNotu,
+        ayik.atlanan > 0 ? 'info' : 'success'
       );
     } catch (err) {
       console.error('Bank pull error:', err);
-      showToast(currentLanguage === 'tr' ? 'Banka hareketleri çekilemedi.' : 'Failed to pull bank transactions.', 'error');
+      showToast(ac(currentLanguage).banka_hareketleri_cekilemedi, 'error');
     } finally {
       setBankTxPulling(false);
     }
@@ -1139,17 +948,17 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const saveJournal = async () => {
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
     if (!journalForm.aciklama.trim()) return showToast(t.descRequired, 'error');
-    // Çift taraflı kayıt dengesi: borç == alacak (kuruş toleransı) ve pozitif.
-    const jBorc = Number(journalForm.borc) || 0;
-    const jAlacak = Number(journalForm.alacak) || 0;
-    if (jBorc <= 0 || jAlacak <= 0) return showToast(currentLanguage === 'tr' ? 'Borç ve alacak tutarları sıfırdan büyük olmalı.' : 'Debit and credit must be positive.', 'error');
-    if (Math.abs(jBorc - jAlacak) > 0.01) return showToast(currentLanguage === 'tr' ? `Fiş dengesiz: borç (${jBorc}) ≠ alacak (${jAlacak}).` : `Unbalanced entry: debit (${jBorc}) ≠ credit (${jAlacak}).`, 'error');
+    // Hesap tek kaynakta (utils/muhasebe/mizan.fisDogrula) — sıra: bilinmiyor → pozitif değil → dengesiz
+    const fis = fisDogrula(journalForm.borc, journalForm.alacak);
+    if (fis.hata === 'bilinmiyor') return showToast(ac(currentLanguage).borc_ve_alacak_tutari_sayi_olmali, 'error');
+    if (fis.hata === 'pozitifDegil') return showToast(ac(currentLanguage).borc_ve_alacak_tutarlari_sifirdan_buyuk_olmali, 'error');
+    if (fis.hata === 'dengesiz') return showToast(currentLanguage === 'tr' ? `Fiş dengesiz: borç (${fis.borc}) ≠ alacak (${fis.alacak}).` : `Unbalanced entry: debit (${fis.borc}) ≠ credit (${fis.alacak}).`, 'error');
     try {
       if (editingJournal) {
-        await updateDoc(doc(db, 'journalEntries', editingJournal.id), { ...journalForm, updatedAt: serverTimestamp() });
+        await updateDoc(doc(db, 'journalEntries', editingJournal.id), { ...journalForm, borc: fis.borc, alacak: fis.alacak, updatedAt: serverTimestamp() });
         showToast(t.accountUpdated);
       } else {
-        await addDoc(collection(db, 'journalEntries'), { ...journalForm, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'journalEntries'), { ...journalForm, borc: fis.borc, alacak: fis.alacak, createdAt: serverTimestamp() });
         showToast(t.journalAdded);
       }
       setShowJournalModal(false);
@@ -1163,7 +972,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   const deleteJournal = async (id: string) => {
     const ok = await confirmAction({
-      title: currentLanguage === 'tr' ? 'Kaydı Sil' : 'Delete Entry',
+      title: ac(currentLanguage).kaydi_sil,
       message: t.confirmDeleteEntry,
       confirmLabel: oc(currentLanguage).sil,
       variant: 'danger',
@@ -1188,7 +997,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       alacakHesap: e.alacakHesap,
       borc: e.borc,
       alacak: e.alacak,
-      kdvOran: e.kdvOran ?? 0,
+      // Bilinmeyen oran forma %0 yazılmaz — seçimde '—' kalır (kullanıcı seçmezse null kaydedilir).
+      kdvOran: bilinenSayi(e.kdvOran) ? Number(e.kdvOran) : null,
       kategori: e.kategori
     });
     setShowJournalModal(true);
@@ -1298,7 +1108,14 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         taxId:       customerForm.taxNo,
         taxOffice:   customerForm.taxOffice,
         notes:       customerForm.notes,
-        creditLimit: customerForm.creditLimit,
+        // KREDİ LİMİTİ KOŞULLU (2026-09-18 delta turu): limit bilinmiyorsa (form boş / kayıtta
+        // alan hiç yok — Mikro cari importu bu alanı yazmaz) anahtar payload'a HİÇ girmez.
+        // Eskiden form `c.creditLimit || 0` ile doluyor ve yalnız adresi düzeltmek için açılan
+        // bir kaydın limiti KALICI ₺0 oluyordu; krediLimiti() null yerine 0 dönüp cari ekstre
+        // kartı '—' yerine ₺0, export boş yerine 0 basıyordu.
+        // Önceden BİLİNEN limiti kullanıcı boşalttıysa açıkça null yazılır (PATCH-merge eskiyi korur, silme
+        // sessiz no-op olurdu — 2026-09-19 kapanış incelemesi, çalışan maaşıyla aynı sınıf): girilenAlanYamasi.
+        ...girilenAlanYamasi('creditLimit', customerForm.creditLimit, editingCustomer?.creditLimit),
         riskGroup:   customerForm.riskGroup,
         type:        'Customer',
         updatedAt:   serverTimestamp(),
@@ -1319,7 +1136,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         showToast(t.accountAdded);
       }
       setShowCustomerModal(false);
-      setCustomerForm({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', taxOffice: '', notes: '', creditLimit: 0, balance: 0, riskGroup: 'Düşük' });
+      setCustomerForm({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', taxOffice: '', notes: '', creditLimit: null, balance: null, riskGroup: 'Düşük' });
       setEditingCustomer(null);
     } catch { showToast(t.errorOccurred, 'error'); }
   };
@@ -1345,15 +1162,22 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
     if (!supplierForm.name.trim()) return showToast(t.bankNameRequired, 'error');
     try {
+      // BAKİYE KOŞULLU (2026-09-18 delta turu): bilinmiyorsa (form boş / kayıtta alan hiç yok —
+      // Satın Alma'dan açılan tedarikçi `{name, createdAt}` olarak yazılıyor) anahtar payload'a
+      // HİÇ girmez. `{ ...supplierForm }` spread'i eskiden `balance: 0` yazıyor ve yalnız telefonu
+      // düzeltmek için açılan kaydın bakiyesi KALICI '₺0 / sıfır' oluyordu.
+      const { balance, ...supplierRest } = supplierForm;
+      // Önceden BİLİNEN bakiyeyi kullanıcı boşalttıysa açıkça null (girilenAlanYamasi; müşteri limiti / maaş ile aynı kural).
+      const supplierVeri = { ...supplierRest, ...girilenAlanYamasi('balance', balance, editingSupplier?.balance) };
       if (editingSupplier) {
-        await updateDoc(doc(db, 'suppliers', editingSupplier.id), { ...supplierForm, updatedAt: serverTimestamp() });
+        await updateDoc(doc(db, 'suppliers', editingSupplier.id), { ...supplierVeri, updatedAt: serverTimestamp() });
         showToast(t.accountUpdated);
       } else {
-        await addDoc(collection(db, 'suppliers'), { ...supplierForm, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'suppliers'), { ...supplierVeri, createdAt: serverTimestamp() });
         showToast(t.accountAdded);
       }
       setShowSupplierModal(false);
-      setSupplierForm({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', notes: '', balance: 0, riskGroup: 'Düşük' });
+      setSupplierForm({ name: '', company: '', email: '', phone: '', address: '', taxNo: '', notes: '', balance: null, riskGroup: 'Düşük' });
       setEditingSupplier(null);
     } catch { showToast(t.errorOccurred, 'error'); }
   };
@@ -1412,6 +1236,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const saveTransfer = async () => {
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
     if (!transferForm.productName.trim()) return showToast(t.bankNameRequired, 'error');
+    // 0 / boş miktarlı transfer kaydedilmez: bu kayıt Mikro'ya giden depo transfer evrakının girdisidir.
+    if (!pozitifSayi(transferForm.quantity)) return showToast(ac(currentLanguage).transfer_miktari_sifirdan_buyuk_olmali, 'error');
     try {
       if (editingTransfer) {
         await updateDoc(doc(db, 'transfers', editingTransfer.id), { ...transferForm, updatedAt: serverTimestamp() });
@@ -1421,7 +1247,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         showToast(t.accountAdded);
         if (createNotification) {
           await createNotification(
-            currentLanguage === 'tr' ? 'Yeni Transfer' : 'New Transfer',
+            ac(currentLanguage).yeni_transfer,
             currentLanguage === 'tr' ? `${transferForm.fromWarehouse} deposundan ${transferForm.toWarehouse} deposuna ${transferForm.quantity} adet ${transferForm.productName} transferi oluşturuldu.` : `New transfer created: ${transferForm.quantity} ${transferForm.productName} from ${transferForm.fromWarehouse} to ${transferForm.toWarehouse}.`,
             'info'
           );
@@ -1453,6 +1279,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const saveCheck = async () => {
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
     if (!checkForm.checkNo.trim()) return showToast(t.bankNameRequired, 'error');
+    if (!pozitifSayi(checkForm.amount)) return showToast(ac(currentLanguage).cek_tutari_sifirdan_buyuk_olmali, 'error');
     try {
       if (editingCheck) {
         await updateDoc(doc(db, 'checks', editingCheck.id), { ...checkForm, updatedAt: serverTimestamp() });
@@ -1487,16 +1314,22 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const saveEmployee = async () => {
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
     if (!employeeForm.name.trim()) return showToast(t.bankNameRequired, 'error');
+    // Maaş bilinmiyorsa (alan boş) `salary` sahte ₺0 olarak YAZILMAZ — eski `{ ...employeeForm }` yayımı, yalnız
+    // telefonu düzeltilen çalışanın bilinmeyen maaşını kalıcı ₺0 yapıyordu (MusterilerTab creditLimit ile aynı
+    // sınıf). Önceden BİLİNEN maaşı kullanıcı boşalttıysa açıkça null yazılır (PATCH-merge eskiyi korurdu):
+    // kural tek kaynakta — utils/muhasebe/irsaliyeCalisan.girilenAlanYamasi.
+    const { salary, ...calisanAlanlari } = employeeForm;
+    const calisanKaydi = { ...calisanAlanlari, ...girilenAlanYamasi('salary', salary, editingEmployee?.salary) };
     try {
       if (editingEmployee) {
-        await updateDoc(doc(db, 'employees', editingEmployee.id), { ...employeeForm, updatedAt: serverTimestamp() });
+        await updateDoc(doc(db, 'employees', editingEmployee.id), { ...calisanKaydi, updatedAt: serverTimestamp() });
         showToast(t.accountUpdated);
       } else {
-        await addDoc(collection(db, 'employees'), { ...employeeForm, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'employees'), { ...calisanKaydi, createdAt: serverTimestamp() });
         showToast(t.accountAdded);
       }
       setShowEmployeeModal(false);
-      setEmployeeForm({ name: '', employeeId: '', tcId: '', position: '', department: '', salary: 0, startDate: format(new Date(), 'yyyy-MM-dd'), email: '', phone: '' });
+      setEmployeeForm({ name: '', employeeId: '', tcId: '', position: '', department: '', salary: null, startDate: format(new Date(), 'yyyy-MM-dd'), email: '', phone: '' });
       setEditingEmployee(null);
     } catch { showToast(t.errorOccurred, 'error'); }
   };
@@ -1520,6 +1353,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   const saveBudget = async () => {
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
+    // Boşaltılan tutar alanı 0 üretir — ₺0 bütçe hedefi kaydedilmez (gerçekleşme oranı 0'a bölünürdü).
+    if (!budgetForm.period) return showToast(ac(currentLanguage).donem_secilmeli, 'error');
+    if (!pozitifSayi(budgetForm.amount)) return showToast(ac(currentLanguage).butce_tutari_sifirdan_buyuk_olmali, 'error');
     try {
       await addDoc(collection(db, 'budgets'), { ...budgetForm, createdAt: serverTimestamp() });
       showToast(t.accountAdded);
@@ -1548,14 +1384,24 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const saveWaybill = async () => {
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
     if (!waybillForm.waybillNo.trim()) return showToast(t.bankNameRequired, 'error');
+    // Adedi okunamayan kalem (boşaltılmış sayı alanı) kaydedilmez: 'Tamamlandı' irsaliyede bu miktar aşağıda
+    // warehouseItems.quantity'ye YAZILIR — NaN stok üretirdi.
+    const adetsizKalem = adediBilinmeyenKalem(waybillForm.items);
+    if (adetsizKalem > 0) return showToast(currentLanguage === 'tr' ? `${adetsizKalem} kalemin miktarı boş — irsaliye kaydedilmedi` : `${adetsizKalem} line(s) have no quantity — waybill not saved`, 'error');
+    // Toplam kalemlerden TÜRETİLİR (utils/muhasebe/irsaliyeCalisan.irsaliyeToplami). Eski kod modalda toplamı
+    // hesaplayıp gösteriyor ama forma yazmıyordu: her yeni irsaliye `total: 0` kaydediliyordu. Türetilemiyorsa
+    // (kalemsiz / fiyatı ya da KDV'si boş kalem): yeni kayıtta `total` hiç yazılmaz; DÜZENLEMEDE açıkça null
+    // yazılır — türetilen alanın girdileri değişti, PATCH-merge'in koruyacağı eski toplam artık YANLIŞ
+    // (irsaliyeToplamYamasi; 2026-09-19 kapanış incelemesi). Liste her iki durumda '—' gösterir.
+    const irsaliyeKaydi = { ...waybillForm, ...irsaliyeToplamYamasi(waybillForm.items, editingWaybill !== null) };
     try {
       let waybillId = '';
       if (editingWaybill) {
         waybillId = editingWaybill.id;
-        await updateDoc(doc(db, 'waybills', waybillId), { ...waybillForm, updatedAt: serverTimestamp() });
+        await updateDoc(doc(db, 'waybills', waybillId), { ...irsaliyeKaydi, updatedAt: serverTimestamp() });
         showToast(t.accountUpdated);
       } else {
-        const docRef = await addDoc(collection(db, 'waybills'), { ...waybillForm, type: waybillType, createdAt: serverTimestamp() });
+        const docRef = await addDoc(collection(db, 'waybills'), { ...irsaliyeKaydi, type: waybillType, createdAt: serverTimestamp() });
         waybillId = docRef.id;
         showToast(t.accountAdded);
       }
@@ -1585,7 +1431,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       }
 
       setShowWaybillModal(false);
-      setWaybillForm({ waybillNo: '', invoiceNo: '', party: '', date: format(new Date(), 'yyyy-MM-dd'), items: [], total: 0, status: 'Bekliyor', warehouseId: '' });
+      setWaybillForm({ waybillNo: '', invoiceNo: '', party: '', date: format(new Date(), 'yyyy-MM-dd'), items: [], status: 'Bekliyor', warehouseId: '' });
       setEditingWaybill(null);
     } catch { showToast(t.errorOccurred, 'error'); }
   };
@@ -1607,10 +1453,13 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     }
   };
 
-  // KPI computations
-  const tryBalance = bankAccounts.filter(a => a.currency === 'TRY').reduce((s, a) => s + a.balance, 0);
-  const usdBalance = bankAccounts.filter(a => a.currency === 'USD').reduce((s, a) => s + a.balance, 0);
-  const eurBalance = bankAccounts.filter(a => a.currency === 'EUR').reduce((s, a) => s + a.balance, 0);
+  // KPI computations — Hesap tek kaynakta (utils/muhasebe/bankaHesap.ts dovizBakiyeleri):
+  // bakiyesi bilinmeyen (DB'de null/sayı olmayan) hesap toplama girmez, sayılır; hiç bilinen yoksa NaN → paraYaz '—'.
+  const bankaBakiyeleri = dovizBakiyeleri(bankAccounts);
+  const tryBalance = ekranTutari(bankaBakiyeleri.TRY);
+  const usdBalance = ekranTutari(bankaBakiyeleri.USD);
+  const eurBalance = ekranTutari(bankaBakiyeleri.EUR);
+  const bakiyeBilinmeyen = { TRY: bankaBakiyeleri.TRY.bilinmeyen, USD: bankaBakiyeleri.USD.bilinmeyen, EUR: bankaBakiyeleri.EUR.bilinmeyen };
 
   // Filtered + sorted bank accounts
   const toggleBankSort = (key: keyof BankAccount) => {
@@ -1639,11 +1488,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       return !q || e.aciklama.toLowerCase().includes(q) || e.fiş.toLowerCase().includes(q) || e.debitHesap.toLowerCase().includes(q) || e.alacakHesap.toLowerCase().includes(q) || e.kategori.toLowerCase().includes(q);
     })
     .sort((a, b) => {
+      // Sayısal sütunlar: bilinmeyen (DB null/NaN) 0 sayılmaz, listenin SONUNA gider (para.ts sayiSirala) — yönü `-cmp` ile çevirme
+      if (journalSortKey === 'borc' || journalSortKey === 'alacak' || journalSortKey === 'kdvOran') return sayiSirala(a[journalSortKey], b[journalSortKey], journalSortDir === 'desc');
       let cmp = 0;
       if (journalSortKey === 'date') cmp = (a.date || '').localeCompare(b.date || '');
-      else if (journalSortKey === 'borc') cmp = a.borc - b.borc;
-      else if (journalSortKey === 'alacak') cmp = a.alacak - b.alacak;
-      else if (journalSortKey === 'kdvOran') cmp = (a.kdvOran ?? 0) - (b.kdvOran ?? 0);
       else if (journalSortKey === 'kategori') cmp = (a.kategori || '').localeCompare(b.kategori || '', 'tr');
       else if (journalSortKey === 'fiş') cmp = (a.fiş || '').localeCompare(b.fiş || '', 'tr');
       else if (journalSortKey === 'aciklama') cmp = (a.aciklama || '').localeCompare(b.aciklama || '', 'tr');
@@ -1652,39 +1500,18 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       return journalSortDir === 'asc' ? cmp : -cmp;
     });
 
-  // Mizan computation
-  // journalEntries (Cetpa) bu Mikro-ağırlıklı caride boş kalıyordu (2026-08-13
-  // code review bulgusu: Mizan hâlâ yalnız journalEntries okuyordu, KDV/Satışlar'a
-  // yapılan Mikro-additive düzeltme buraya hiç uygulanmamıştı). mikroFaturalar'dan
-  // GERÇEK çift-taraflı (double-entry) satırlar sentezlenir — tahmini bir toplam
-  // değil, standart Türk hesap planına göre borç/alacak ayrımı:
-  //  giden (satış):  120-Alıcılar borç = tutar  ↔  600-Satışlar alacak = matrah + 391-Hesaplanan KDV alacak = kdv
-  //  gelen (alış):   153-Ticari Mallar borç = matrah + 191-İndirilecek KDV borç = kdv  ↔  320-Satıcılar alacak = tutar
-  // Alış, GİDER değil VARLIK (stok) hesabına (153) düşer — satır maliyeti bilinmediği
-  // için COGS'a (620) atanamaz; bu ayrım Finansal Oranlar'daki "COGS bilinmiyor"
-  // ilkesiyle tutarlı, yanlış bir gider rakamı üretmez.
-  const mikroMizanSatirlari: { debitHesap: string; alacakHesap: string; borc: number; alacak: number }[] = [];
-  mikroFaturalar.forEach(f => {
-    if (f.yon === 'giden') {
-      if (f.matrah) mikroMizanSatirlari.push({ debitHesap: '120 - Alıcılar', alacakHesap: '600 - Yurt İçi Satışlar', borc: f.matrah, alacak: f.matrah });
-      if (f.kdv)    mikroMizanSatirlari.push({ debitHesap: '120 - Alıcılar', alacakHesap: '391 - Hesaplanan KDV', borc: f.kdv, alacak: f.kdv });
-    } else {
-      if (f.matrah) mikroMizanSatirlari.push({ debitHesap: '153 - Ticari Mallar', alacakHesap: '320 - Satıcılar', borc: f.matrah, alacak: f.matrah });
-      if (f.kdv)    mikroMizanSatirlari.push({ debitHesap: '191 - İndirilecek KDV', alacakHesap: '320 - Satıcılar', borc: f.kdv, alacak: f.kdv });
-    }
-  });
-  const mizanMap: Record<string, { borc: number; alacak: number }> = {};
-  [...journalEntries, ...mikroMizanSatirlari].forEach(e => {
-    if (!mizanMap[e.debitHesap]) mizanMap[e.debitHesap] = { borc: 0, alacak: 0 };
-    if (!mizanMap[e.alacakHesap]) mizanMap[e.alacakHesap] = { borc: 0, alacak: 0 };
-    mizanMap[e.debitHesap].borc += e.borc;
-    mizanMap[e.alacakHesap].alacak += e.alacak;
-  });
-  const mizanRows = Object.entries(mizanMap).map(([hesap, vals]) => ({
-    hesap, borc: vals.borc, alacak: vals.alacak,
-    borcBakiye: Math.max(0, vals.borc - vals.alacak),
-    alacakBakiye: Math.max(0, vals.alacak - vals.borc),
+  // Mizan computation — hesap tek kaynakta (utils/muhasebe/mizan.mikroMizanSatirlari + mizanHesapla);
+  // 2026-08-13 Mikro-sentez gerekçesi (hesap planı yön tablosu, "alış stok hesabına düşer") da oraya taşındı.
+  const mikroMizan = mikroMizanSatirlari(mikroFaturalar);          // { satirlar, bilinmeyen: matrah/KDV'si bilinmeyen fatura }
+  const mizan = mizanHesapla(journalEntries, mikroMizan.satirlar);  // satır Tutar'ları + bakiye (NaN = türetilemedi) + dengeli boolean|null
+  // MizanTab sayısal MizanRow bekler: satır/toplam tutarları EKRAN sözleşmesi (ekranTutari: kısmi toplam + not,
+  // hiç bilinen yoksa NaN → '—'); bakiye TÜRETME (tamTutar kapısı, NaN → '—').
+  const mizanRows = mizan.satirlar.map(r => ({
+    hesap: r.hesap, borc: ekranTutari(r.borc), alacak: ekranTutari(r.alacak),
+    borcBakiye: r.borcBakiye, alacakBakiye: r.alacakBakiye,
   }));
+  const mizanBilinmeyen = mizan.bilinmeyen;           // tutarı bilinmeyen yevmiye kaydı sayısı
+  const mizanMikroBilinmeyen = mikroMizan.bilinmeyen; // mizana alınamayan Mikro faturası sayısı
 
   const toggleMizanSort = (key: typeof mizanSortKey) => {
     if (mizanSortKey === key) setMizanSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -1692,17 +1519,15 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   };
 
   const sortedMizanRows = [...mizanRows].sort((a, b) => {
-    let cmp: number;
-    if (mizanSortKey === 'hesap') cmp = a.hesap.localeCompare(b.hesap, 'tr');
-    else cmp = (a[mizanSortKey] || 0) - (b[mizanSortKey] || 0);
-    return mizanSortDir === 'asc' ? cmp : -cmp;
+    if (mizanSortKey === 'hesap') { const cmp = a.hesap.localeCompare(b.hesap, 'tr'); return mizanSortDir === 'asc' ? cmp : -cmp; }
+    return sayiSirala(a[mizanSortKey], b[mizanSortKey], mizanSortDir === 'desc'); // bilinmeyen (NaN) sona
   });
 
-  const mizanTotals = mizanRows.reduce((acc, r) => ({
-    borc: acc.borc + r.borc, alacak: acc.alacak + r.alacak,
-    borcBakiye: acc.borcBakiye + r.borcBakiye, alacakBakiye: acc.alacakBakiye + r.alacakBakiye,
-  }), { borc: 0, alacak: 0, borcBakiye: 0, alacakBakiye: 0 });
-  const mizanDengeli = Math.abs(mizanTotals.borc - mizanTotals.alacak) < 0.01;
+  const mizanTotals = {
+    borc: ekranTutari(mizan.toplam.borc), alacak: ekranTutari(mizan.toplam.alacak),
+    borcBakiye: ekranTutari(mizan.toplam.borcBakiye), alacakBakiye: ekranTutari(mizan.toplam.alacakBakiye),
+  };
+  const mizanDengeli = mizan.dengeli; // boolean | null — null: bir taraf bilinmeyen içeriyor, rozet verilmez
   const displayedMizan = mizanSearch
     ? sortedMizanRows.filter(r => r.hesap.toLowerCase().includes(mizanSearch.toLowerCase()))
     : sortedMizanRows;
@@ -1712,159 +1537,63 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   // burada yalnız EK satırlar hazırlanır. Varsayılan kaynak 'cetpa' olduğu için
   // ekran davranışı değişmez — Mikro'yu görmek opt-in.
   //
-  // MÜKERRER SAYIM ELEMESİ: Cetpa siparişi Mikro'ya gönderildiğinde evrak no
-  // `mikroEvrakNo` alanına geri yazılıyor. Aynı satış iki kez görünmesin diye
-  // o evrak numaralarına sahip Mikro faturaları listelenmez.
-  const cetpayaAitEvrakNo = new Set(
-    orders.map(o => String((o as unknown as { mikroEvrakNo?: string }).mikroEvrakNo ?? '').trim())
-          .filter(Boolean),
-  );
-  const cariAdMap = new Map<string, string>();
-  for (const c of customers) {
-    const kod = (c as unknown as { mikroCariKod?: string }).mikroCariKod;
-    if (kod) cariAdMap.set(String(kod).trim(), c.name);
-  }
-  // Faturalar sekmesi yön filtresine uyar; Satışlar sekmesi (aşağıda) yalnız
-  // GİDEN fatura gösterir — satış tanımı gereği.
-  const mikroFaturaSatirlari = mikroFaturalar
-    .filter(f => faturaYon === 'hepsi' || f.yon === faturaYon)
-    // Yıl filtresi: tarih 'YYYY-...' ile başlıyorsa o yıl. 'hepsi' → tüm yıllar.
-    .filter(f => faturaYil === 'hepsi' || (typeof f.tarih === 'string' && f.tarih.startsWith(faturaYil)))
-    .filter(f => !f.faturaNo || !cetpayaAitEvrakNo.has(f.faturaNo))
-    // e-belge türü filtresi (eskiden yalnız Cetpa invoices'a uygulanıyordu):
-    // 0=e-Fatura, 1=e-Arşiv, 2=e-İrsaliye. Tür BİLİNMİYORSA (-1: cha_ebelge_turu
-    // Mikro'da dolu değil) filtreden GİZLEME — aksi halde alan boşsa e-Fatura/e-Arşiv
-    // seçince liste bombos görünür. Yalnız KESİN karşıt türü ele; İhracat türü
-    // cha_ebelge_turu'da YOK (ayrı kavram) → o filtrede Mikro faturası gösterilmez.
-    .filter(f => {
-      if (invoiceTypeFilter === 'all') return true;
-      if (invoiceTypeFilter === 'e-fatura') return f.ebelgeTuru === 0 || f.ebelgeTuru === -1;
-      if (invoiceTypeFilter === 'e-arsiv') return f.ebelgeTuru === 1 || f.ebelgeTuru === -1;
-      return false; // ihracat
-    })
-    .map(f => ({ ...f, musteri: cariAdMap.get(f.cariKod) || f.cariKod || '—' }))
-    // ARAMA FİLTRESİ BURADAN KALDIRILDI (2026-08-28).
-    //
-    // Burada `satisSearch` ile süzülüyordu — ama bu liste YALNIZCA Faturalar
-    // sekmesinde kullanılıyor (FaturalarTab'a prop olarak gider); `satisSearch`
-    // ise SATIŞLAR sekmesinin arama kutusu. İki sonucu vardı:
-    //   1. Faturalar'da arama yapınca Mikro satırları HİÇ filtrelenmiyordu
-    //      (`satisSearch` orada daima ''), yani 161 faturada "ahmet" aramak
-    //      Cetpa faturalarını süzüp Mikro faturalarının tamamını bırakıyordu.
-    //   2. Satışlar'da arama yapmak, dokunulmaması gereken Faturalar listesini
-    //      sessizce süzüyordu.
-    // Filtre artık FaturalarTab'ın kendi tablosunda `invoiceSearch` ile
-    // uygulanıyor — Cetpa faturalarıyla AYNI desende (KPI'lar tam listeyi,
-    // tablo süzülmüş listeyi gösterir).
-    .sort((a, b) => (satisSortDir === 'asc' ? 1 : -1) * (
-      satisSortKey === 'customerName' ? a.musteri.localeCompare(b.musteri, 'tr')
-      : satisSortKey === 'totalPrice' ? a.tutar - b.tutar
-      // "KDV%" kolonu Mikro satırlarında tutar+oranı birlikte gösteriyor
-      // (₺13.333,34 (%20)) ama neredeyse her satır aynı %20 oranı taşıyor —
-      // orana göre sıralamak görsel olarak "rastgele" görünüyordu (2026-08-17
-      // bildirimi). Görünen ve değişkenlik gösteren asıl değer tutar (kdv).
-      : satisSortKey === 'kdvOran' ? (a.kdv ?? 0) - (b.kdv ?? 0)
-      : a.tarih.localeCompare(b.tarih)
-    ));
+  // Hesap tek kaynakta (utils/muhasebe/satislar.cetpaEvrakNolari / cariAdHaritasi)
+  // — mükerrer sayım elemesi ve Mikro cari kodu → müşteri adı eşlemesi orada.
+  const cetpayaAitEvrakNo = cetpaEvrakNolari(orders);
+  const cariAdMap = cariAdHaritasi(customers);
+  // Hesap tek kaynakta (utils/muhasebe/faturalar.mikroFaturaSatirlari) — yön/yıl/e-belge türü
+  // süzgeçleri, mükerrer sayım elemesi, "arama filtresi buradan kaldırıldı (2026-08-28)" ve
+  // "KDV% kolonu tutara göre sıralanır (2026-08-17)" notları modülde. Bilinmeyen tutar/KDV
+  // artık 0 sayılmaz, sıralamada her iki yönde de SONA gider (`para.sayiSirala`).
+  // ⚠️ `sirala` SATIŞLAR sekmesinin durumunu kullanıyor (sayfa paritesi için korundu) — bkz. Açık İşler.
+  const mikroFaturaSatirlari = mikroFaturaSatirlariHesapla(mikroFaturalar, {
+    yon: faturaYon,
+    yil: faturaYil,
+    ebelgeTuru: invoiceTypeFilter,
+    cetpaEvrakNolari: cetpayaAitEvrakNo,
+    cariAdMap,
+    sirala: { anahtar: satisSortKey, yon: satisSortDir },
+  });
   // Satışlar sekmesi: yalnız giden (satış) faturaları.
-  //
-  // BAĞIMSIZ ZİNCİR (2026-08-11 düzeltmesi): eskiden bu liste `mikroFaturaSatirlari`
-  // üzerinden türetiliyordu, yani FATURALAR sekmesinin filtrelerini (faturaYon,
-  // faturaYil, invoiceTypeFilter) sessizce miras alıyordu. Faturalar'da "gelen"
-  // seçiliyse `.filter(yon==='giden')` boş küme veriyor, yıl uyuşmazsa da öyle →
-  // Satışlar sekmesi "Mikro (0)" ve tüm KPI'lar ₺0,00 görünüyordu. Satışlar'ın
-  // kendi yıl seçicisi (satisYil) var; başka sekmenin durumuna bağlı DEĞİL.
-  const mikroSatisSatirlari = mikroFaturalar
-    .filter(f => f.yon === 'giden')
-    .filter(f => satisYil === 'hepsi' || (typeof f.tarih === 'string' && f.tarih.startsWith(satisYil)))
-    // Cetpa'dan Mikro'ya gönderilmiş faturayı iki kez sayma.
-    .filter(f => !f.faturaNo || !cetpayaAitEvrakNo.has(f.faturaNo))
-    .map(f => ({ ...f, musteri: cariAdMap.get(f.cariKod) || f.cariKod || '—' }))
-    .filter(f => {
-      const q = satisSearch.toLowerCase();
-      return !q || f.musteri.toLowerCase().includes(q) || String(f.tutar).includes(q) || f.faturaNo.toLowerCase().includes(q);
-    })
-    .sort((a, b) => (satisSortDir === 'asc' ? 1 : -1) * (
-      satisSortKey === 'customerName' ? a.musteri.localeCompare(b.musteri, 'tr')
-      : satisSortKey === 'totalPrice' ? a.tutar - b.tutar
-      // "KDV%" kolonu Mikro satırlarında tutar+oranı birlikte gösteriyor
-      // (₺13.333,34 (%20)) ama neredeyse her satır aynı %20 oranı taşıyor —
-      // orana göre sıralamak görsel olarak "rastgele" görünüyordu (2026-08-17
-      // bildirimi). Görünen ve değişkenlik gösteren asıl değer tutar (kdv).
-      : satisSortKey === 'kdvOran' ? (a.kdv ?? 0) - (b.kdv ?? 0)
-      : a.tarih.localeCompare(b.tarih)
-    ));
-  const mikroSatisToplam = mikroSatisSatirlari.reduce((t, f) => t + f.tutar, 0);
-  const mikroSatisKdvToplam = mikroSatisSatirlari.reduce((t, f) => t + (f.kdv || 0), 0);
+  // Hesap tek kaynakta (utils/muhasebe/satislar.mikroSatisSatirlari) — yön/yıl/evrak
+  // dışlamaları, arama ve sıralama (bilinmeyen tutar/KDV sona) orada; BAĞIMSIZ ZİNCİR
+  // (2026-08-11) ve "KDV% kolonu tutara göre sıralanır" (2026-08-17) notları da modülde.
+  const mikroSatisSatirlari = mikroSatisSatirlariHesapla(mikroFaturalar, {
+    yil: satisYil,
+    cetpaEvrakNolari: cetpayaAitEvrakNo,
+    cariAdMap,
+    arama: satisSearch,
+    siralama: { anahtar: satisSortKey, azalan: satisSortDir === 'desc' },
+  });
   // Mikro satış faturaları tanım gereği FATURALI. Satışlar KPI'larına additive
   // katılır (satisKaynak Mikro'yu içeriyorsa); orders mantığı (q-serisi faturasız
   // dahil) korunur — kullanıcının "bu modülü bozma" uyarısı gereği toplamlar
   // toplanır, drill-down/orders akışına dokunulmaz.
   const mikroDahil = satisKaynak !== 'cetpa';
-  const mikroSatisAdet = mikroDahil ? mikroSatisSatirlari.length : 0;
-  const mikroSatisCiro = mikroDahil ? mikroSatisToplam : 0;
-  const mikroSatisKdv = mikroDahil ? mikroSatisKdvToplam : 0;
-  // Satışlar sekmesi drill-down'ları için Mikro satış faturalarını orders şekline
-  // çevir; drill-down'lar `satisKayitlari`'ni okur (orders BOŞ olduğu için detaylar
-  // "Kayıt bulunamadı" gösteriyordu — 2026-08-02). Mikro faturaları FATURALI sayılır;
-  // q-serisi/faturasız orders'ta korunur.
-  const mikroSatisAsOrders = mikroDahil
-    ? mikroSatisSatirlari.map(f => ({
-        customerName: f.musteri,
-        totalPrice: f.tutar,
-        faturali: true,
-        kdvOran: f.oran ?? undefined,
-        oranKarma: f.oranKarma,
-        kdvTutari: f.kdv,
-        syncedAt: undefined as unknown,
-      }))
-    : [];
-  const satisKayitlari: Array<{ customerName?: string; totalPrice?: number; faturali?: boolean; kdvOran?: number; kdvTutari?: number; syncedAt?: { toDate?: () => Date } }> =
-    [...(orders as unknown as typeof mikroSatisAsOrders), ...mikroSatisAsOrders] as never;
+  // Hesap tek kaynakta (utils/muhasebe/satislar.satisKpi) — additive toplama, Mikro
+  // payı, müşteri/oran kırılımları; bilinmeyen tutar 0 sayılmaz, SAYILIR.
+  const satisOzet = satisKpi(orders, mikroSatisSatirlari, mikroDahil);
+  // Hesap tek kaynakta (utils/muhasebe/satislar.satisKayitlari) — Mikro faturaları
+  // drill-down için orders şekline çevrilir (orders BOŞ olduğu için detaylar
+  // "Kayıt bulunamadı" gösteriyordu — 2026-08-02).
+  const satisKayitlari = satisKayitlariHesapla(orders, mikroSatisSatirlari, mikroDahil);
 
-  // Satışlar computed
-  const displayedSatis = orders
-    .filter((o: Order) => {
-      const q = satisSearch.toLowerCase();
-      return !q || (o.customerName || '').toLowerCase().includes(q) || String(o.totalPrice || 0).includes(q);
-    })
-    .sort((a: Order, b: Order) => {
-      let cmp: number;
-      if (satisSortKey === 'customerName') cmp = (a.customerName || '').localeCompare(b.customerName || '', 'tr');
-      else if (satisSortKey === 'totalPrice') cmp = (a.totalPrice || 0) - (b.totalPrice || 0);
-      else if (satisSortKey === 'faturali') cmp = (a.faturali ? 1 : 0) - (b.faturali ? 1 : 0);
-      else if (satisSortKey === 'kdvOran') cmp = (a.kdvOran || 0) - (b.kdvOran || 0);
-      else {
-        // Paylasilan siparisTarihMs (2026-09-04): yalniz `syncedAt` okundugunda
-        // Mikro faturasindan turetilen siparisler '' anahtariyla ayni kovaya
-        // dusuyor ve tarih sutunu dolu gorunurken siralama rastgele kaliyordu.
-        cmp = siparisTarihMs(a) - siparisTarihMs(b);
-      }
-      return satisSortDir === 'asc' ? cmp : -cmp;
-    });
+  // Satışlar computed — hesap tek kaynakta (utils/muhasebe/satislar.cetpaSatisSatirlari):
+  // arama tr-TR küçük harf, bilinmeyen tutar/oran/tarih her iki yönde de sona.
+  const displayedSatis = cetpaSatisSatirlari(orders, {
+    arama: satisSearch,
+    siralama: { anahtar: satisSortKey, azalan: satisSortDir === 'desc' },
+  });
 
   const toggleSatisSort = (key: typeof satisSortKey) => {
     if (satisSortKey === key) setSatisSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSatisSortKey(key); setSatisSortDir('asc'); }
   };
 
-  // Müşteriler computed
-  const RISK_SIRA: Record<string, number> = { 'Düşük': 0, 'Orta': 1, 'Yüksek': 2 };
+  // Müşteriler computed — sıralama/arama tek kaynakta (utils/muhasebe/cariImport.ts): bilinmeyen bakiye sona.
   const displayedMusteriler = customers
-    .filter(c => !customerSearch || c.name.toLowerCase().includes(customerSearch.toLowerCase()) || (c.company || '').toLowerCase().includes(customerSearch.toLowerCase()))
-    .sort((a, b) => {
-      let cmp: number;
-      if (musteriSortKey === 'balance') {
-        cmp = (a.balance || 0) - (b.balance || 0);
-      } else if (musteriSortKey === 'riskGroup') {
-        cmp = (RISK_SIRA[a.riskGroup || ''] ?? -1) - (RISK_SIRA[b.riskGroup || ''] ?? -1);
-      } else {
-        const av = (a[musteriSortKey] || '') as string;
-        const bv = (b[musteriSortKey] || '') as string;
-        cmp = av.localeCompare(bv, 'tr');
-      }
-      return musteriSortDir === 'asc' ? cmp : -cmp;
-    });
+    .filter(c => cariEslesir(c, customerSearch))
+    .sort(cariKarsilastirici<Customer>(musteriSortKey, musteriSortDir));
 
   const toggleMusteriSort = (key: typeof musteriSortKey) => {
     if (musteriSortKey === key) setMusteriSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -1884,11 +1613,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   );
   /** Bir cari'nin rolü: satış faturası varsa müşteri, alış varsa tedarikçi. */
   const cariRol = (c: Customer): { label: string; cls: string } | null => {
-    const kod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
-      || (c as unknown as { code?: string }).code || c.taxNo || '';
+    const kod = cariKodu(c);
     const m = !!kod && satisCariKodSet.has(kod);
     const td = !!kod && alisCariKodSet.has(kod);
-    if (m && td) return { label: currentLanguage === 'tr' ? 'Müşteri + Tedarikçi' : 'Customer + Supplier', cls: 'bg-purple-100 text-purple-700' };
+    if (m && td) return { label: ac(currentLanguage).musteri_tedarikci, cls: 'bg-purple-100 text-purple-700' };
     if (td)      return { label: oc(currentLanguage).tedarikci, cls: 'bg-amber-100 text-amber-700' };
     if (m)       return { label: oc(currentLanguage).musteri, cls: 'bg-teal-100 text-teal-700' };
     // Satış/alış faturası YOK ama bakiyesi VAR → gider/diğer cari (7 Mehmet gibi).
@@ -1896,25 +1624,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     if (!!kod && cariBalanceKodSet.has(kod)) return { label: oc(currentLanguage).diger, cls: 'bg-gray-100 text-gray-600' };
     return null;
   };
+  // Hesap tek kaynakta (utils/muhasebe/cariImport.ts): musteridenTedarikci bakiye/risk/cari kodu KAYBETMEDEN taşır.
   const mikroTedarikcileri: Supplier[] = customers
-    .filter(c => {
-      const kod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
-        || (c as unknown as { code?: string }).code || c.taxNo;
-      return !!kod && alisCariKodSet.has(kod);
-    })
-    .map(c => ({
-      id: c.id,
-      name: c.name,
-      company: c.company || '',
-      email: c.email || '',
-      phone: c.phone || '',
-      taxNo: c.taxNo || '',
-      address: c.address || '',
-      // Tedarikçi burada ayrı bir kayıt değil, alış faturası olan AYNI cari
-      // (Customer) — bakiye/risk zaten o kayıtta hesaplı, kaybetmeden taşı.
-      balance: c.balance || 0,
-      riskGroup: c.riskGroup || 'Düşük',
-    } as Supplier));
+    .filter(c => { const kod = cariKodu(c); return !!kod && alisCariKodSet.has(kod); })
+    .map(musteridenTedarikci);
   // Üç kaynak: elle girilmiş suppliers + leads(type='Supplier') + alış faturalı
   // cariler. Ad/vergi no ile dedup.
   const birlesikTedarikciler = [
@@ -1926,20 +1639,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     ...birlesikTedarikciler.filter(m => !suppliers.some(s => s.name === m.name || (!!s.taxNo && s.taxNo === m.taxNo))),
   ];
   const displayedTedarikciler = allSuppliers
-    .filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()) || (s.company || '').toLowerCase().includes(supplierSearch.toLowerCase()))
-    .sort((a, b) => {
-      let cmp: number;
-      if (tedarikciSortKey === 'balance') {
-        cmp = (a.balance || 0) - (b.balance || 0);
-      } else if (tedarikciSortKey === 'riskGroup') {
-        cmp = (RISK_SIRA[a.riskGroup || ''] ?? -1) - (RISK_SIRA[b.riskGroup || ''] ?? -1);
-      } else {
-        const av = (a[tedarikciSortKey] || '') as string;
-        const bv = (b[tedarikciSortKey] || '') as string;
-        cmp = av.localeCompare(bv, 'tr');
-      }
-      return tedarikciSortDir === 'asc' ? cmp : -cmp;
-    });
+    .filter(s => cariEslesir(s, supplierSearch))
+    .sort(cariKarsilastirici<Supplier>(tedarikciSortKey, tedarikciSortDir));
 
   const toggleTedarikciSort = (key: typeof tedarikciSortKey) => {
     if (tedarikciSortKey === key) setTedarikciSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -1993,9 +1694,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     const out: Array<WarehouseItem & { quantity: number }> = [];
     for (const wi of warehouseItems) {
       if (String(wi.id).startsWith('mikro-')) {
-        const bd = (wi as unknown as { depoBreakdown?: Record<string, number> | null }).depoBreakdown;
-        const q = bd && depoNo ? Number(bd[depoNo] ?? 0) : 0;
-        if (q > 0) out.push({ ...wi, quantity: q });
+        const bd = (wi as unknown as { depoBreakdown?: Record<string, unknown> | null }).depoBreakdown;
+        const q = depodakiAdet(bd, depoNo);
+        // Anahtar VAR ama sayı okunamıyorsa (NaN) kalem listede KALIR: adet '—' görünür, depoToplamlari onu
+        // "bilinmeyen" sayar. Eski `Number(bd[depoNo] ?? 0)` + `q > 0` bu kalemi depodan sessizce düşürüyordu.
+        if (q > 0 || Number.isNaN(q)) out.push({ ...wi, quantity: q });
         // depoBreakdown yok/0 → bu depoda gösterme (bayat warehouseId'ye DÜŞME).
       } else if (wi.warehouseId === whId) {
         out.push(wi);
@@ -2063,9 +1766,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const displayedCalisanlar = employees
     .filter(e => !employeeSearch || e.name.toLowerCase().includes(employeeSearch.toLowerCase()) || e.position.toLowerCase().includes(employeeSearch.toLowerCase()))
     .sort((a, b) => {
+      // Maaş: bilinmeyen 0 sayılmaz, her iki yönde de SONA gider (para.sayiSirala) — yönü `-cmp` ile çevirme
+      // Hücre 0'ı da '—' basar (eski sahte-sıfır kayıtları) — sıralayıcı aynı tanımı kullanır: gorunenTutar.
+      if (calisanSortKey === 'salary') return sayiSirala(gorunenTutar(a.salary), gorunenTutar(b.salary), calisanSortDir === 'desc');
       let cmp: number;
-      if (calisanSortKey === 'salary') cmp = (a.salary || 0) - (b.salary || 0);
-      else if (calisanSortKey === 'startDate') cmp = (a.startDate || '').localeCompare(b.startDate || '');
+      if (calisanSortKey === 'startDate') cmp = (a.startDate || '').localeCompare(b.startDate || '');
       else if (calisanSortKey === 'department') cmp = (a.department || '').localeCompare(b.department || '', 'tr');
       else cmp = a.name.localeCompare(b.name, 'tr');
       return calisanSortDir === 'asc' ? cmp : -cmp;
@@ -2081,9 +1786,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     waybills
       .filter(w => w.type === type && (!waybillSearch || w.waybillNo.toLowerCase().includes(waybillSearch.toLowerCase()) || w.party.toLowerCase().includes(waybillSearch.toLowerCase())))
       .sort((a, b) => {
+        // Toplam: bilinmeyen 0 sayılmaz, her iki yönde de SONA gider (para.sayiSirala) — yönü `-cmp` ile çevirme
+        // Hücre 0'ı da '—' basar (eski `total: 0` kayıtları) — sıralayıcı aynı tanımı kullanır: gorunenTutar.
+        if (irsaliyeSortKey === 'total') return sayiSirala(gorunenTutar(a.total), gorunenTutar(b.total), irsaliyeSortDir === 'desc');
         let cmp: number;
-        if (irsaliyeSortKey === 'total') cmp = (a.total || 0) - (b.total || 0);
-        else if (irsaliyeSortKey === 'date') cmp = a.date.localeCompare(b.date);
+        if (irsaliyeSortKey === 'date') cmp = a.date.localeCompare(b.date);
         else if (irsaliyeSortKey === 'status') cmp = a.status.localeCompare(b.status, 'tr');
         else if (irsaliyeSortKey === 'party') cmp = a.party.localeCompare(b.party, 'tr');
         else cmp = a.waybillNo.localeCompare(b.waybillNo);
@@ -2095,122 +1802,41 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     else { setIrsaliyeSortKey(key); setIrsaliyeSortDir('asc'); }
   };
 
-  // Gelir/Gider computation
-  const filteredEntries = journalEntries.filter(e => {
-    if (!e.date) return false;
-    const d = new Date(e.date);
-    if (gelirUseRange && gelirDateFrom && gelirDateTo) {
-      return e.date >= gelirDateFrom && e.date <= gelirDateTo;
-    }
-    return d.getMonth() + 1 === gelirMonth && d.getFullYear() === gelirYear;
+  // Gelir/Gider — hesap tek kaynakta (utils/muhasebe/gelirGider.ts): fisTutari (C2 kuralı), dönem/aralık
+  // süzgeci, Mikro giden = gelir / gelen ≠ gider kuralı, 12 aylık grafik, hesap kırılımı.
+  // Bilinmeyen tutar 0 sayılmaz, SAYILIR.
+  const ggOzeti = gelirGiderOzeti(journalEntries, mikroFaturalar, {
+    yil: gelirYear, ay: gelirMonth,
+    aralik: gelirUseRange ? { from: gelirDateFrom, to: gelirDateTo } : undefined,
   });
-  const gelirEntries = filteredEntries.filter(e => e.alacakHesap.startsWith('6'));
-  const giderEntries = filteredEntries.filter(e => e.debitHesap.startsWith('6') || e.debitHesap.startsWith('7') || e.debitHesap.startsWith('8'));
-  // Mikro GİDEN (satış) faturaları GELİR tarafına eklenir (KDV/Satışlar'daki
-  // additive desenin aynısı, 2026-08-13). Mikro GELEN (alış) faturaları
-  // GİDER'e EKLENMEZ — alış tutarı stok (153-Ticari Mallar) hesabına düşer,
-  // Gider'e ancak satış anında COGS (620) olarak yansır; Mikro fatura satırında
-  // maliyet bilgisi olmadığından bu ayrım yapılamaz (Finansal Oranlar'daki
-  // "COGS bilinmiyor" ilkesiyle tutarlı — yanlış bir gider rakamı üretmemek
-  // için alış kasıtlı olarak dışarıda bırakıldı).
-  const mikroDonemFiltresi = (tarih: string) => {
-    if (gelirUseRange && gelirDateFrom && gelirDateTo) return tarih >= gelirDateFrom && tarih <= gelirDateTo;
-    const d = new Date(tarih);
-    return d.getMonth() + 1 === gelirMonth && d.getFullYear() === gelirYear;
-  };
-  const mikroGelirTutar = mikroFaturalar.filter(f => f.yon === 'giden' && mikroDonemFiltresi(f.tarih)).reduce((s, f) => s + f.matrah, 0);
-  /**
-   * Bir gelir fişinin tutarı. `alacak ?? borc` DEĞİL, `alacak || borc`.
-   *
-   * NEDEN (2026-08-22 denetim bulgusu C2): `??` yalnız null/undefined'da
-   * devreye girer, SAYISAL 0'da girmez. 2026-08-22 öncesi banka CSV import'u
-   * fişleri TEK TARAFLI yazıyordu (borc=X, alacak=0) — o kayıtlar için
-   * `alacak ?? borc` → 0 dönüyor ve aktarılmış tahsilatlar gelir tablosunda
-   * 0 TL görünüyordu. Import artık dengeli yazıyor (borç=alacak) ama
-   * VERİTABANINDAKİ ESKİ KAYITLAR öyle kaldı; `||` onları da kurtarır.
-   * Dengeli fişte borç=alacak olduğundan `||` doğru sonucu değiştirmez.
-   */
-  const fisTutari = (e: { alacak?: number; borc?: number }) => e.alacak || e.borc || 0;
+  const toplamGelir = ekranTutari(ggOzeti.gelir);   // kısmi toplam + sekmede "N kayıt tutarsız" notu; hiç bilinen yoksa NaN → '—'
+  const toplamGider = ekranTutari(ggOzeti.gider);
+  const netKar = ggOzeti.net;                        // tamTutar: bir kayıt bile bilinmiyorsa NaN → formatInCurrency '—'
+  const monthlyData = ggOzeti.aylik.map((a, i) => ({ month: MONTHS[i], gelir: ekranTutari(a.gelir), gider: ekranTutari(a.gider) }));
+  const maxChartVal = grafikTavani(ggOzeti.aylik);
+  // `as const` tuple: Object.fromEntries'in tuple aşırı yüklemesini seçtirir — düz dizide dönüş `any` olurdu.
+  const gelirBreakdown = Object.fromEntries(Object.entries(ggOzeti.gelirKirilimi).map(([h, t]) => [h, ekranTutari(t)] as const));
+  const giderBreakdown = Object.fromEntries(Object.entries(ggOzeti.giderKirilimi).map(([h, t]) => [h, ekranTutari(t)] as const));
 
-  const toplamGelir = gelirEntries.reduce((s, e) => s + fisTutari(e), 0) + mikroGelirTutar; // gelir = alacak (kredi) + Mikro
-  const toplamGider = giderEntries.reduce((s, e) => s + e.borc, 0);               // gider = borç (debit) — yalnız native, bkz. yukarıdaki not
-  const netKar = toplamGelir - toplamGider;
-
-  // Monthly chart data
-  const monthlyData = MONTHS.map((m, i) => {
-    const month = i + 1;
-    const mEntries = journalEntries.filter(e => {
-      if (!e.date) return false;
-      const d = new Date(e.date);
-      return d.getMonth() + 1 === month && d.getFullYear() === gelirYear;
-    });
-    const gelir = mEntries.filter(e => e.alacakHesap.startsWith('6')).reduce((s, e) => s + fisTutari(e), 0);
-    const gider = mEntries.filter(e => e.debitHesap.startsWith('6') || e.debitHesap.startsWith('7') || e.debitHesap.startsWith('8')).reduce((s, e) => s + e.borc, 0);
-    const mikroGelirAy = mikroFaturalar
-      .filter(f => f.yon === 'giden' && (() => { const d = new Date(f.tarih); return d.getMonth() + 1 === month && d.getFullYear() === gelirYear; })())
-      .reduce((s, f) => s + f.matrah, 0);
-    return { month: m, gelir: gelir + mikroGelirAy, gider };
-  });
-  const maxChartVal = Math.max(...monthlyData.map(d => Math.max(d.gelir, d.gider)), 1);
-
-  // Gelir breakdown by account
-  const gelirBreakdown: Record<string, number> = {};
-  if (mikroGelirTutar > 0) gelirBreakdown['600 - Yurt İçi Satışlar (Mikro)'] = mikroGelirTutar;
-  gelirEntries.forEach(e => { gelirBreakdown[e.alacakHesap] = (gelirBreakdown[e.alacakHesap] || 0) + fisTutari(e); });
-  const giderBreakdown: Record<string, number> = {};
-  giderEntries.forEach(e => { giderBreakdown[e.debitHesap] = (giderBreakdown[e.debitHesap] || 0) + e.borc; });
-
-  // KDV computation
-  const kdvFilteredEntries = journalEntries.filter(e => {
-    if (!e.date) return false; // tarihsiz fiş hiçbir döneme dahil edilmez (aylık P&L ile tutarlı)
-    const d = new Date(e.date);
-    return d.getMonth() + 1 === kdvMonth && d.getFullYear() === kdvYear;
-  });
-  // Mikro faturalarından KDV özeti (2026-08-02): journalEntries boş — Mikro'da
-  // muhasebe fişi yok. Satış faturası (giden) KDV'si = HESAPLANAN (391); alış
-  // faturası (gelen) = İNDİRİLECEK (191). Seçili döneme (ay/yıl) filtrelenir.
-  // mikroFaturalar zaten iptal edilmişleri dışlamış (server + client _iptal).
-  const mikroKdvDonem = mikroFaturalar.filter(f => {
-    const ts = String((f as { tarih?: string }).tarih || '');
-    return Number(ts.slice(0, 4)) === kdvYear && Number(ts.slice(5, 7)) === kdvMonth;
-  });
-  const mikroHesaplananKDV = mikroKdvDonem.filter(f => f.yon === 'giden').reduce((s, f) => s + (Number((f as { kdv?: number }).kdv) || 0), 0);
-  const mikroIndirilecekKDV = mikroKdvDonem.filter(f => f.yon === 'gelen').reduce((s, f) => s + (Number((f as { kdv?: number }).kdv) || 0), 0);
-  const hesaplananKDV = kdvFilteredEntries.filter(e => e.alacakHesap === '391 - Hesaplanan KDV').reduce((s, e) => s + e.alacak, 0) + mikroHesaplananKDV;
-  const indirilecekKDV = kdvFilteredEntries.filter(e => e.debitHesap === '191 - İndirilecek KDV').reduce((s, e) => s + e.borc, 0) + mikroIndirilecekKDV;
-  const odenecekKDV = hesaplananKDV - indirilecekKDV;
-  // Matrah yalnız gelir (alacakHesap 6xx) fişlerinden, oran bazında; KDV = matrah*oran.
-  // (Önceki sürüm her borç satırından matrah uyduruyordu.)
-  // string key: Mikro'dan gelen karma oranlı faturalar (2026-08-17, task #27,
-  // #18'in devamı — bu KDV Beyannamesi PDF/CSV'sini besliyor) 'karma' adında
-  // ayrı bir kovaya gider; tek f.oran'a göre kovalarsak KDV yanlış orana yazılır.
-  const kdvOranBreakdown: Record<string, { matrah: number; kdv: number }> = {};
-  kdvFilteredEntries.filter(e => e.alacakHesap.startsWith('6') && (e.kdvOran ?? 0) > 0).forEach(e => {
-    const oran = e.kdvOran ?? 0;
-    const matrah = fisTutari(e);
-    if (!kdvOranBreakdown[oran]) kdvOranBreakdown[oran] = { matrah: 0, kdv: 0 };
-    kdvOranBreakdown[oran].matrah += matrah;
-    kdvOranBreakdown[oran].kdv += matrah * (oran / 100);
-  });
-  // Mikro satış faturaları oran bazında (2026-08-02): tablo journalEntries'ten
-  // türüyordu, o boş → tablo boştu. mikroFaturaSatirlari matrah/kdv/oran taşır.
-  mikroKdvDonem.filter(f => f.yon === 'giden').forEach(f => {
-    const karma = (f as { oranKarma?: boolean }).oranKarma;
-    const oran = karma ? 'karma' : String(Number((f as { oran?: number }).oran) || 0);
-    if (!kdvOranBreakdown[oran]) kdvOranBreakdown[oran] = { matrah: 0, kdv: 0 };
-    kdvOranBreakdown[oran].matrah += Number((f as { matrah?: number }).matrah) || 0;
-    kdvOranBreakdown[oran].kdv += Number((f as { kdv?: number }).kdv) || 0;
-  });
+  // KDV computation — hesap tek kaynakta (utils/muhasebe/kdvBeyan.kdvDonemi):
+  // dönem süzgeci, 391/191 KPI'ları, oran kırılımı (journal 6xx + Mikro giden bantları)
+  // ve drill-down listeleri orada; açıklamalar modülün docblock'una taşındı.
+  const kdvDonem = kdvDonemi(journalEntries, mikroFaturalar, kdvYear, kdvMonth);
+  const hesaplananKDV = ekranTutari(kdvDonem.hesaplanan);   // hiç bilinen yoksa NaN → formatTRY '—'; kısmi toplam + not
+  const indirilecekKDV = ekranTutari(kdvDonem.indirilecek);
+  const odenecekKDV = kdvDonem.odenecek;                    // TÜRETME (tamTutar farkı): bir taraf eksikse NaN
+  const kdvOranBreakdown = kdvDonem.oranKirilimi;
+  const kdvTutarsiz = kdvDonem.hesaplanan.bilinmeyen + kdvDonem.indirilecek.bilinmeyen;
 
   const tabs = [
-    { key: 'faturalar', label: currentLanguage === 'tr' ? 'Faturalar' : 'Invoices', icon: FileText },
-    { key: 'evrak_tasarimi', label: currentLanguage === 'tr' ? 'Evrak Tasarımı' : 'Doc Design', icon: Palette },
+    { key: 'faturalar', label: ac(currentLanguage).faturalar, icon: FileText },
+    { key: 'evrak_tasarimi', label: ac(currentLanguage).evrak_tasarimi, icon: Palette },
     { key: 'banka', label: t.bankAndCash, icon: Building2 },
     { key: 'yevmiye', label: t.journal, icon: BookOpen },
     { key: 'mizan', label: t.trialBalance, icon: ArrowUpDown },
     { key: 'gelir', label: t.incomeExpense, icon: BarChart3 },
     { key: 'kdv', label: t.vat, icon: Calculator },
-    { key: 'banka_hareketleri', label: currentLanguage === 'tr' ? 'Banka Hareketleri' : 'Bank Movements', icon: Landmark },
+    { key: 'banka_hareketleri', label: ac(currentLanguage).banka_hareketleri, icon: Landmark },
     { key: 'satislar', label: t.satislar, icon: ShoppingCart },
     { key: 'musteriler', label: t.musteriler, icon: Users },
     { key: 'tedarikciler', label: t.tedarikciler, icon: Truck },
@@ -2227,7 +1853,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     { key: 'tahsilat', label: t.tahsilat, icon: Wallet },
     { key: 'maliyet_merkezi', label: t.maliyet_merkezi, icon: Layers },
     { key: 'sabit_kiymet', label: t.sabit_kiymet, icon: Landmark },
-    { key: 'kasa', label: currentLanguage === 'tr' ? 'Kasa' : 'Cash Desk', icon: Wallet },
+    { key: 'kasa', label: ac(currentLanguage).kasa, icon: Wallet },
   ] as const;
 
   const visibleTabs = allowedTabs ? tabs.filter(t => allowedTabs.includes(t.key)) : tabs;
@@ -2294,7 +1920,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       {accountingTab === 'banka' && (
         <BankaTab
           t={t} currentLanguage={currentLanguage} bankAccounts={bankAccounts}
-          tryBalance={tryBalance} usdBalance={usdBalance} eurBalance={eurBalance} setDrillDown={setDrillDown}
+          tryBalance={tryBalance} usdBalance={usdBalance} eurBalance={eurBalance} bakiyeBilinmeyen={bakiyeBilinmeyen} setDrillDown={setDrillDown}
           handleBankFileImport={handleBankFileImport} openAddBank={openAddBank}
           bankSearch={bankSearch} setBankSearch={setBankSearch}
           bankImportStatus={bankImportStatus} setBankImportStatus={setBankImportStatus}
@@ -2328,7 +1954,11 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       {accountingTab === 'mizan' && (
         <MizanTab
           t={t} currentLanguage={currentLanguage} mizanRows={mizanRows} mizanTotals={mizanTotals}
-          mizanDengeli={mizanDengeli} hasMikroMizan={mikroMizanSatirlari.length > 0}
+          mizanDengeli={mizanDengeli} hasMikroMizan={mikroMizan.satirlar.length > 0}
+          mizanNotu={[
+            mizanBilinmeyen > 0 ? (currentLanguage === 'tr' ? `${mizanBilinmeyen} yevmiye kaydının tutarı bilinmiyor` : `${mizanBilinmeyen} journal entries have unknown amounts`) : null,
+            mizanMikroBilinmeyen > 0 ? (currentLanguage === 'tr' ? `${mizanMikroBilinmeyen} Mikro faturası mizana alınamadı (matrah/KDV bilinmiyor)` : `${mizanMikroBilinmeyen} Mikro invoices not posted (net/VAT unknown)`) : null,
+          ].filter(Boolean).join(' · ') || null}
           kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency} formatConv={formatConv} setDrillDown={setDrillDown}
           mizanSearch={mizanSearch} setMizanSearch={setMizanSearch}
           mizanSortKey={mizanSortKey} mizanSortDir={mizanSortDir} toggleMizanSort={toggleMizanSort}
@@ -2347,6 +1977,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
           gelirBreakdown={gelirBreakdown} giderBreakdown={giderBreakdown}
           toplamGelir={toplamGelir} toplamGider={toplamGider} netKar={netKar}
           monthlyData={monthlyData} maxChartVal={maxChartVal}
+          gelirTutarsiz={ggOzeti.gelir.bilinmeyen} giderTutarsiz={ggOzeti.gider.bilinmeyen} tarihsiz={ggOzeti.tarihsiz}
         />
       )}
 
@@ -2372,7 +2003,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         <KdvTab
           t={t} currentLanguage={currentLanguage} MONTHS={MONTHS}
           kdvMonth={kdvMonth} setKdvMonth={setKdvMonth} kdvYear={kdvYear} setKdvYear={setKdvYear}
-          journalEntries={journalEntries} hesaplananKDV={hesaplananKDV} indirilecekKDV={indirilecekKDV} odenecekKDV={odenecekKDV}
+          hesaplananKDV={hesaplananKDV} indirilecekKDV={indirilecekKDV} odenecekKDV={odenecekKDV}
+          kdvDonem={kdvDonem}
           setDrillDown={setDrillDown} kdvSearch={kdvSearch} setKdvSearch={setKdvSearch}
           kdvSortBy={kdvSortBy} kdvSortDir2={kdvSortDir2} setKdvSortBy={setKdvSortBy} setKdvSortDir2={setKdvSortDir2}
           kdvOranBreakdown={kdvOranBreakdown} downloadVatDeclaration={downloadVatDeclaration} downloadVatDeclarationCSV={downloadVatDeclarationCSV}
@@ -2388,11 +2020,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
       {accountingTab === 'satislar' && (
         <SatislarTab
-          t={t} currentLanguage={currentLanguage} orders={orders} satisKayitlari={satisKayitlari}
+          t={t} currentLanguage={currentLanguage} satisKayitlari={satisKayitlari}
           setDrillDown={setDrillDown} formatConv={formatConv} kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency}
           satisKaynak={satisKaynak} setSatisKaynak={setSatisKaynak}
-          mikroSatisToplam={mikroSatisToplam} mikroSatisAdet={mikroSatisAdet} mikroSatisCiro={mikroSatisCiro}
-          mikroSatisKdv={mikroSatisKdv} mikroDahil={mikroDahil} mikroSatisSatirlari={mikroSatisSatirlari}
+          satisOzet={satisOzet} mikroDahil={mikroDahil} mikroSatisSatirlari={mikroSatisSatirlari}
           satisSearch={satisSearch} setSatisSearch={setSatisSearch} satisYil={satisYil} setSatisYil={setSatisYil}
           satisSortKey={satisSortKey} satisSortDir={satisSortDir} toggleSatisSort={toggleSatisSort}
           displayedSatis={displayedSatis}
@@ -2466,7 +2097,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       {/* DEPOLAR ARASI TRANSFER */}
       {accountingTab === 'transfer' && (
         <TransferTab
-          t={t} transferSearch={transferSearch} setTransferSearch={setTransferSearch}
+          t={t} currentLanguage={currentLanguage} transferSearch={transferSearch} setTransferSearch={setTransferSearch}
           transferSortKey={transferSortKey} transferSortDir={transferSortDir} toggleTransferSort={toggleTransferSort}
           displayedTransfers={displayedTransfers} showTransferModal={showTransferModal} setShowTransferModal={setShowTransferModal}
           editingTransfer={editingTransfer} setEditingTransfer={setEditingTransfer}
@@ -2594,19 +2225,19 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                         setWaybillForm(prev => ({ ...prev, items: newItems }));
                       }} placeholder="Ürün adı" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-brand" />
                       <div className="grid grid-cols-3 gap-2">
-                        <input type="number" value={item.quantity} onChange={e => {
+                        <input type="number" value={Number.isFinite(item.quantity) ? item.quantity : ''} onChange={e => {
                           const newItems = [...waybillForm.items];
-                          newItems[idx].quantity = Number(e.target.value);
+                          newItems[idx].quantity = formSayisi(e.target.value) ?? NaN; // boş = bilinmiyor (Number('') === 0 tuzağı)
                           setWaybillForm(prev => ({ ...prev, items: newItems }));
                         }} placeholder="Miktar" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-brand" />
-                        <input type="number" value={item.unitPrice} onChange={e => {
+                        <input type="number" value={Number.isFinite(item.unitPrice) ? item.unitPrice : ''} onChange={e => {
                           const newItems = [...waybillForm.items];
-                          newItems[idx].unitPrice = Number(e.target.value);
+                          newItems[idx].unitPrice = formSayisi(e.target.value) ?? NaN; // boş = bilinmiyor (Number('') === 0 tuzağı)
                           setWaybillForm(prev => ({ ...prev, items: newItems }));
                         }} placeholder="B.Fiyat" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-brand" />
-                        <input type="number" value={item.taxRate} onChange={e => {
+                        <input type="number" value={Number.isFinite(item.taxRate) ? item.taxRate : ''} onChange={e => {
                           const newItems = [...waybillForm.items];
-                          newItems[idx].taxRate = Number(e.target.value);
+                          newItems[idx].taxRate = formSayisi(e.target.value) ?? NaN; // boş = bilinmiyor (Number('') === 0 tuzağı)
                           setWaybillForm(prev => ({ ...prev, items: newItems }));
                         }} placeholder="KDV" className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-brand" />
                       </div>
@@ -2620,7 +2251,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{t.total2}</label>
-                    <input type="number" value={waybillForm.items.reduce((s, i) => s + (i.quantity * i.unitPrice * (1 + i.taxRate / 100)), 0)} readOnly className="w-full bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" />
+                    <input type="number" value={irsaliyeToplami(waybillForm.items) ?? ''} placeholder="—" readOnly className="w-full bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{t.status2}</label>

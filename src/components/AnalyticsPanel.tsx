@@ -8,12 +8,16 @@ import { format, subMonths, startOfMonth } from 'date-fns';
 import { tr as trLocale, enUS } from 'date-fns/locale';
 import { TrendingUp, TrendingDown, ShoppingCart, Users, Package, DollarSign } from 'lucide-react';
 import { zamanMs } from '../utils/zaman';
-import { siparisTarih } from '../utils/siparis';
+import { siparisTarih, siparisTutari } from '../utils/siparis';
+import { toplaBilinen, ekranTutari, tamTutar } from '../utils/para';
 
 interface Order {
   status?: string;
   syncedAt?: unknown;   // kanonik src/types.ts ile ayni (bkz. zamanMs)
-  totalPrice?: number;
+  /** NaN/eksik = BİLİNMİYOR. `siparisTutari` ile oku — `Number(x) || 0` sahte sifir uretir. */
+  totalPrice?: unknown;
+  /** Mikro faturasindan turetilen sentetik siparis ikisini de yazar (RaporlarPage). */
+  totalAmount?: unknown;
   assignedTo?: string | null;   // kanonik tipte null da olabiliyor
   customerId?: string;
   customerName?: string;
@@ -61,7 +65,6 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
   /* ── KPI cards ── */
   const kpis = useMemo(() => {
     const activeOrders = orders.filter(o => o.status !== 'Cancelled');
-    const totalRevenue = activeOrders.reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
 
     const now = new Date();
     const thisMonth = startOfMonth(now);
@@ -74,16 +77,30 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
     // -> orderDate). Yalniz `syncedAt` okundugunda Mikro faturasindan turetilen
     // siparisler hicbir aya girmiyor ama totalRevenue'ya giriyordu; aylik toplamlar
     // genel toplami tutmuyordu.
-    const thisMonthRevenue = activeOrders
-      .filter(o => { const d = siparisTarih(o); return !!d && d.getTime() >= thisMonth.getTime(); })
-      .reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
-    const lastMonthRevenue = activeOrders
-      .filter(o => { const d = siparisTarih(o); return !!d && d.getTime() >= lastMonth.getTime() && d.getTime() < thisMonth.getTime(); })
-      .reduce((s, o) => s + (Number(o.totalPrice) || 0), 0);
+    //
+    // TUTAR 2026-09-18 (delta turu): eski `reduce((s, o) => s + (Number(o.totalPrice) || 0), 0)`
+    // tutari BILINMEYEN siparisi (RaporlarPage Mikro faturasini `totalPrice: f.tutar` ile
+    // sentetik siparise ceviriyor; hook artik NaN veriyor) ₺0'lik GERCEK bir satis sayiyordu.
+    // Ayni sayfanin Genel sekmesi o kaydi "N kayit tutarsiz" diye sayarken Analitik sekmesi
+    // sessizce ₺0 basiyordu — iki sekme ayni veriyi farkli gosteriyordu (yarim duzeltme).
+    // Artik `toplaBilinen`: bilinmeyen toplama girmez, SAYILIR; ekran `ekranTutari` ile.
+    const toplamT = toplaBilinen(activeOrders, siparisTutari);
+    const buAyT = toplaBilinen(
+      activeOrders.filter(o => { const d = siparisTarih(o); return !!d && d.getTime() >= thisMonth.getTime(); }),
+      siparisTutari,
+    );
+    const gecenAyT = toplaBilinen(
+      activeOrders.filter(o => { const d = siparisTarih(o); return !!d && d.getTime() >= lastMonth.getTime() && d.getTime() < thisMonth.getTime(); }),
+      siparisTutari,
+    );
 
-    const revenueGrowth = lastMonthRevenue > 0
-      ? ((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100
-      : 0;
+    // BUYUME bir TURETMEDIR (para.ts `tamTutar`): bir ayin tek bir siparisi bile bilinmiyorsa
+    // "kismi bu ay / tam gecen ay" orani bir buyume degil, bilinmeyen kadar yanlis bir sayidir.
+    // Payda bilinmiyor ya da ≤ 0 ise null → '—' ("%0 buyume" basilmaz; eskiden 0 basiyordu).
+    const buAyTam = tamTutar(buAyT), gecenAyTam = tamTutar(gecenAyT);
+    const revenueGrowth = Number.isFinite(buAyTam) && Number.isFinite(gecenAyTam) && gecenAyTam > 0
+      ? ((buAyTam - gecenAyTam) / gecenAyTam) * 100
+      : null;
 
     const activeLeads = leads.filter(l => l.status !== 'Lost' && l.status !== 'Closed');
     const convertedLeads = leads.filter(l => l.status === 'Won' || l.status === 'Closed');
@@ -91,12 +108,24 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
 
     const lowStockCount = inventory.filter(i => (i.stockLevel ?? 0) < 5).length;
 
-    return { totalRevenue, thisMonthRevenue, revenueGrowth, activeLeads: activeLeads.length, conversionRate, totalOrders: activeOrders.length, lowStockCount };
+    return {
+      // `totalRevenue` JSX'te basilmiyor (HEAD'de de basilmiyordu) — sozlesmeyi bozmamak icin
+      // ekran sozlesmesiyle hesaplanip birakildi; tuketicisi olursa '—' davranisi hazir.
+      totalRevenue: ekranTutari(toplamT),
+      thisMonthRevenue: ekranTutari(buAyT),
+      tutarsizBuAy: buAyT.bilinmeyen,
+      tutarsizToplam: toplamT.bilinmeyen,
+      revenueGrowth,
+      activeLeads: activeLeads.length,
+      conversionRate,
+      totalOrders: activeOrders.length,
+      lowStockCount,
+    };
   }, [orders, leads, inventory]);
 
   /* ── Monthly revenue trend (last 6 months) ── */
   const revenueByMonth = useMemo(() => {
-    const months: { name: string; date: Date; revenue: number; orders: number }[] = [];
+    const months: { name: string; date: Date; revenue: number; orders: number; bilinmeyen: number }[] = [];
     for (let i = 5; i >= 0; i--) {
       const d = subMonths(new Date(), i);
       months.push({
@@ -104,6 +133,7 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
         date: startOfMonth(d),
         revenue: 0,
         orders: 0,
+        bilinmeyen: 0,
       });
     }
     orders.filter(o => o.status !== 'Cancelled').forEach(o => {
@@ -111,12 +141,19 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
       if (!d) return;            // aylik grafige tarihsiz kayit girmez
       const idx = months.findIndex(m => format(d, 'MMM yyyy') === format(m.date, 'MMM yyyy'));
       if (idx !== -1) {
-        months[idx].revenue += Number(o.totalPrice) || 0;
+        // Tutari bilinmeyen siparis ciroya ₺0 olarak EKLENMEZ, ayri sayilir (eski
+        // `Number(o.totalPrice) || 0` onu gercek bir ₺0 satis yapiyordu). Siparis SAYISI
+        // yine artar — siparisin varligi biliniyor, yalniz tutari bilinmiyor.
+        const v = siparisTutari(o);
+        if (Number.isFinite(v)) months[idx].revenue += v; else months[idx].bilinmeyen += 1;
         months[idx].orders += 1;
       }
     });
     return months;
   }, [orders, locale]);
+
+  /** Son 6 ayda tutari okunamayan siparis adedi — ciro cizgisinin altindaki not. */
+  const aylikBilinmeyen = revenueByMonth.reduce((s, m) => s + m.bilinmeyen, 0);
 
   /* ── Order status distribution ── */
   const orderStatusData = useMemo(() => {
@@ -153,13 +190,16 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
       .map(([name, revenue]) => ({ name: name.length > 18 ? name.slice(0, 16) + '…' : name, revenue }));
   }, [orders, t]);
 
-  const fmt = (n: number) => n >= 1_000_000
+  // Bilinmeyen tutar '—' (eskiden `NaN.toFixed(0)` → "₺NaN"); bilinen degerlerde bicim AYNEN ayni.
+  const fmt = (n: number) => !Number.isFinite(n)
+    ? '—'
+    : n >= 1_000_000
     ? `₺${(n / 1_000_000).toFixed(1)}M`
     : n >= 1_000
     ? `₺${(n / 1_000).toFixed(0)}K`
     : `₺${n.toFixed(0)}`;
 
-  const KPICard = ({ icon: Icon, label, value, sub, up }: { icon: React.ElementType; label: string; value: string; sub?: string; up?: boolean }) => (
+  const KPICard = ({ icon: Icon, label, value, sub, up, not }: { icon: React.ElementType; label: string; value: string; sub?: string; up?: boolean; not?: string }) => (
     <div className="apple-card p-5 flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <div className="w-9 h-9 rounded-xl bg-brand/10 flex items-center justify-center">
@@ -174,6 +214,7 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
       </div>
       <p className="text-[11px] text-gray-400 font-medium">{label}</p>
       <p className="text-2xl font-black text-gray-900 leading-none">{value}</p>
+      {not && <p className="text-[10px] text-amber-600 leading-tight">{not}</p>}
     </div>
   );
 
@@ -188,10 +229,21 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
           icon={DollarSign}
           label={t ? 'Bu Ay Ciro' : 'This Month Revenue'}
           value={fmt(kpis.thisMonthRevenue)}
-          sub={`${kpis.revenueGrowth >= 0 ? '+' : ''}${kpis.revenueGrowth.toFixed(0)}%`}
-          up={kpis.revenueGrowth >= 0}
+          // Buyume hesaplanamiyorsa rozet HIC basilmaz ('—' yerine "+0%" gostermek sahte kesinlikti).
+          sub={kpis.revenueGrowth === null ? undefined : `${kpis.revenueGrowth >= 0 ? '+' : ''}${kpis.revenueGrowth.toFixed(0)}%`}
+          up={kpis.revenueGrowth !== null && kpis.revenueGrowth >= 0}
+          not={kpis.tutarsizBuAy > 0
+            ? (t ? `${kpis.tutarsizBuAy} kayıt tutarsız — toplama girmedi` : `${kpis.tutarsizBuAy} records without amount — excluded`)
+            : undefined}
         />
-        <KPICard icon={ShoppingCart} label={t ? 'Toplam Sipariş' : 'Total Orders'} value={String(kpis.totalOrders)} />
+        <KPICard
+          icon={ShoppingCart}
+          label={t ? 'Toplam Sipariş' : 'Total Orders'}
+          value={String(kpis.totalOrders)}
+          not={kpis.tutarsizToplam > 0
+            ? (t ? `${kpis.tutarsizToplam} kaydın tutarı bilinmiyor — ciro toplamlarına girmedi` : `${kpis.tutarsizToplam} record(s) without amount — excluded from revenue totals`)
+            : undefined}
+        />
         <KPICard
           icon={Users}
           label={t ? 'Aktif Lead' : 'Active Leads'}
@@ -217,6 +269,11 @@ const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
           {/* Revenue + Orders trend */}
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 text-sm mb-5">{t ? 'Aylık Ciro & Sipariş Trendi (Son 6 Ay)' : 'Monthly Revenue & Orders (Last 6 Months)'}</h3>
+            {aylikBilinmeyen > 0 && (
+              <p className="text-[10px] text-amber-600 -mt-3 mb-3">
+                {t ? `${aylikBilinmeyen} siparişin tutarı okunamadı — ciroya girmedi, sipariş sayısında var` : `${aylikBilinmeyen} order(s) with unreadable amount — excluded from revenue, counted in orders`}
+              </p>
+            )}
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={revenueByMonth} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>

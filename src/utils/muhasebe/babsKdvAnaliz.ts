@@ -22,16 +22,16 @@
  * düşmez, `tarihsiz` sayılır. Dönem anahtarı zaman.ts `gunAnahtari` (YEREL gün) üstünden — 'YYYY-MM-DD'
  * string'i `Date.parse` ile UTC'ye sabitlenip batı saat diliminde önceki aya kaymasın.
  *
- * ÜST AKIŞ UYARISI: `src/hooks/useMikroFaturalar.ts` (satır ~35/37) `tutar`/`kdv`'yi `Number(x ?? 0) || 0`
- * ile 0'a zorluyor — yani bu fonksiyonlara bilinmeyen ULAŞMIYOR; sayaçlar o hook düzelene kadar 0 kalır.
- * Buradaki tipler `unknown` alır ki hook düzeltildiğinde sayfa değişmeden doğru davransın.
- * Hakem turunda (2026-09-13) bilinçli ERTELENDİ: hook'un 8+ tüketicisi düz reduce ile topluyor, NaN sızarsa
- * 6+ ekran '—' basar — ayrı tur. Obsidian → Açık İşler / "useMikroFaturalar tutar-kdv-matrah 0'a zorluyor".
+ * ÜST AKIŞ DÜZELDİ (Faz 3 2/n, grup "hook", 2026-09-18): `src/hooks/useMikroFaturalar.ts` artık okunamayan
+ * `tutar`/`kdv`/`matrah`ı NaN (= bilinmiyor) veriyor ve sunucudaki `ISNULL(…, 0)` son yedeği kalktı — bilinmeyen
+ * bu fonksiyonlara GERÇEKTEN ulaşır, sayaçlar dolar. Tipler `unknown` kaldı: `number` demek dolu demek değildir.
+ * (2026-09-18 ÖNCESİ import edilmiş dokümanlar o eski yedeğin yazdığı ₺0'ı taşır; hook'taki "bayat ₺0"
+ * koruması onları da bilinmeyen sayar, ama kesin çözüm tam yeniden import — Açık İşler.)
  *
  * Girdi tipleri MİNİMAL ve yapısal (`MikroFatura`/`Order`'a bağlı DEĞİL) — yarım-düzeltme sınıfı
  * (bkz. siparis.ts) tekrarlanmasın.
  */
-import { bilinenSayi, toplaBilinen, ekranTutari, type Tutar, tamTutar } from '../para';
+import { bilinenSayi, toplaBilinen, type Tutar, tamTutar } from '../para';
 import { gunAnahtari } from '../zaman';
 
 const bosTutar = (): Tutar => ({ toplam: 0, bilinen: 0, bilinmeyen: 0 });

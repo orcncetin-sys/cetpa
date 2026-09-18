@@ -3,6 +3,8 @@ import { Download, Search, Plus, Eye, Edit2, Trash2, X, Save } from 'lucide-reac
 import { type JournalEntry } from '../../types';
 import { formatInCurrency, paraYaz } from '../../utils/currency';
 import { SortHeader, exportCSV, HESAP_PLANI, type AccountingT } from './shared';
+import { bilinenSayi } from '../../utils/para';
+import { kdvOranYaz } from '../../utils/muhasebe/mizan';
 import { oc } from '../../i18n/ortak';
 
 /**
@@ -28,7 +30,8 @@ const kurEtiketi = (
 type JournalForm = {
   date: string; fiş: string; aciklama: string;
   debitHesap: string; alacakHesap: string;
-  borc: number; alacak: number; kdvOran: number;
+  /** kdvOran null = ORAN BİLİNMİYOR (düzenlenen eski kayıt) — forma %0 yazılmaz. */
+  borc: number; alacak: number; kdvOran: number | null;
   kategori: JournalEntry['kategori'];
 };
 
@@ -71,7 +74,8 @@ export default function YevmiyeTab({
               <button
                 onClick={() => exportCSV('yevmiye.csv',
                   [t.date, t.receiptNo, t.description, t.debitAccount, t.creditAccount, t.debit, t.credit, t.vatRate, t.category],
-                  journalEntries.map(e => [e.date, e.fiş, e.aciklama, e.debitHesap, e.alacakHesap, e.borc, e.alacak, e.kdvOran ?? 0, e.kategori])
+                  // Bilinen oran ham sayı kalır (parite: 20); bilinmeyen '—' (para.ts tutarYaz sözleşmesi).
+                  journalEntries.map(e => [e.date, e.fiş, e.aciklama, e.debitHesap, e.alacakHesap, e.borc, e.alacak, bilinenSayi(e.kdvOran) ? Number(e.kdvOran) : '—', e.kategori])
                 )}
                 className="apple-button-secondary py-2 px-4 text-sm"
               >
@@ -198,7 +202,7 @@ export default function YevmiyeTab({
                     <td className="py-2.5 px-3 text-right font-semibold text-gray-800">{formatInCurrency(e.borc, yevmiyeCurrency, exchangeRates)}</td>
                     <td className="py-2.5 px-3 text-right text-gray-600 hidden sm:table-cell">{formatInCurrency(e.alacak, yevmiyeCurrency, exchangeRates)}</td>
                     <td className="py-2.5 px-3 text-center hidden sm:table-cell">
-                      <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">%{e.kdvOran ?? 0}</span>
+                      <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">{kdvOranYaz(e.kdvOran)}</span>
                     </td>
                     <td className="py-2.5 px-3 text-gray-500 text-xs hidden lg:table-cell">{e.kategori}</td>
                     <td className="py-2.5 px-3 text-center">
@@ -269,8 +273,10 @@ export default function YevmiyeTab({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{t.vatRateLabel}</label>
-                    <select value={journalForm.kdvOran} onChange={e => setJournalForm(prev => ({ ...prev, kdvOran: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                      <option value={0}>%0</option><option value={8}>%8</option><option value={18}>%18</option><option value={20}>%20</option>
+                    {/* `?? ''` bir JSX value ÖZNİTELİĞİ (metin), sayısal alan değil: oranı bilinmeyen eski kayıt
+                        düzenlenirken '—' görünür ve kullanıcı seçmezse null kalır (0'a zorlanmaz). */}
+                    <select value={journalForm.kdvOran ?? ''} onChange={e => setJournalForm(prev => ({ ...prev, kdvOran: e.target.value === '' ? null : Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
+                      <option value="">—</option><option value={0}>%0</option><option value={8}>%8</option><option value={18}>%18</option><option value={20}>%20</option>
                     </select>
                   </div>
                   <div>

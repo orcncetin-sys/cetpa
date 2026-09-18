@@ -1,9 +1,10 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Plus, Eye, Edit2, Trash2, X, Save } from 'lucide-react';
+import { Search, Plus, Eye, Edit2, Trash2, X, Save, AlertTriangle } from 'lucide-react';
 import { type Transfer, type Warehouse } from '../../types';
 import { SortHeader, type AccountingT } from './shared';
 import MikroPushButton from '../MikroPushButton';
 import { depoTransferPayload } from '../../services/mikroEvrak';
+import { mikroDepoNo } from '../../utils/muhasebe/depoNo';
 
 type TransferForm = { fromWarehouse: string; toWarehouse: string; productName: string; quantity: number; date: string; notes: string; status: Transfer['status'] };
 type TransferSortKey = 'productName' | 'quantity' | 'date' | 'status' | 'fromWarehouse' | 'toWarehouse';
@@ -25,12 +26,13 @@ interface TransferTabProps {
   saveTransfer: () => void;
   deleteTransfer: (id: string) => void;
   warehouses: Warehouse[];
+  currentLanguage: string;
 }
 
 export default function TransferTab({
   t, transferSearch, setTransferSearch, transferSortKey, transferSortDir, toggleTransferSort,
   displayedTransfers, showTransferModal, setShowTransferModal, editingTransfer, setEditingTransfer,
-  transferForm, setTransferForm, saveTransfer, deleteTransfer, warehouses,
+  transferForm, setTransferForm, saveTransfer, deleteTransfer, warehouses, currentLanguage,
 }: TransferTabProps) {
   return (
     <>
@@ -100,7 +102,15 @@ export default function TransferTab({
                 {displayedTransfers.length === 0 && (
                   <tr><td colSpan={7} className="text-center py-8 text-gray-400">{t.noRecords}</td></tr>
                 )}
-                {displayedTransfers.map(tr => (
+                {displayedTransfers.map(tr => {
+                  // Depo no KAYITTAN çözülür (hesap tek kaynakta: utils/muhasebe/depoNo.ts).
+                  // Satır başına BİR kez — hem Mikro payload kapısı hem uyarı işareti aynı sonucu kullanır.
+                  const cikisDepo = mikroDepoNo(warehouses, tr.fromWarehouse);
+                  const girisDepo = mikroDepoNo(warehouses, tr.toWarehouse);
+                  const depoUyari = currentLanguage === 'tr'
+                    ? 'Mikro depo no bilinmiyor — bu transfer Mikro’ya gönderilemez'
+                    : 'Mikro warehouse no unknown — this transfer cannot be sent to Mikro';
+                  return (
                   <tr key={tr.id} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="py-2.5 px-3 font-medium text-gray-800">
                       <div className="flex items-center gap-1.5">
@@ -111,14 +121,17 @@ export default function TransferTab({
                           entityType="transfer"
                           entityId={tr.id}
                           buildPayload={() => {
-                            const depoNo = (s: string) => parseInt((s.match(/\d+/) ?? ['1'])[0], 10);
                             const sku = (tr as unknown as { sku?: string }).sku;
                             if (!sku) return null; // SKU'suz transfer Mikro'ya gidemez
+                            // Depo ADINDAKİ rakamdan (ya da varsayılan 1'den) TAHMİN YOK: numara
+                            // yalnız warehouses kaydından gelir. Biri bile bilinmiyorsa payload
+                            // üretilmez — MikroPushButton null'u "Eksik veri — gönderilemedi" sayar.
+                            if (cikisDepo === undefined || girisDepo === undefined) return null;
                             return depoTransferPayload({
                               sku,
                               quantity: tr.quantity,
-                              fromDepo: depoNo(tr.fromWarehouse),
-                              toDepo: depoNo(tr.toWarehouse),
+                              fromDepo: cikisDepo,
+                              toDepo: girisDepo,
                               date: tr.date,
                               note: tr.notes,
                             });
@@ -126,8 +139,14 @@ export default function TransferTab({
                         />
                       </div>
                     </td>
-                    <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">{tr.fromWarehouse}</td>
-                    <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">{tr.toWarehouse}</td>
+                    <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs" title={cikisDepo === undefined ? depoUyari : undefined}>
+                      {tr.fromWarehouse}
+                      {cikisDepo === undefined && <AlertTriangle size={11} className="inline ml-1 text-amber-500" aria-label={depoUyari} />}
+                    </td>
+                    <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs" title={girisDepo === undefined ? depoUyari : undefined}>
+                      {tr.toWarehouse}
+                      {girisDepo === undefined && <AlertTriangle size={11} className="inline ml-1 text-amber-500" aria-label={depoUyari} />}
+                    </td>
                     <td className="py-2.5 px-3 text-right font-semibold">{tr.quantity}</td>
                     <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell">{tr.date}</td>
                     <td className="py-2.5 px-3 text-center"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tr.status === 'Tamamlandı' ? 'bg-green-100 text-green-600' : tr.status === 'İptal' ? 'bg-red-100 text-red-500' : 'bg-yellow-100 text-yellow-600'}`}>{tr.status}</span></td>
@@ -139,7 +158,8 @@ export default function TransferTab({
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

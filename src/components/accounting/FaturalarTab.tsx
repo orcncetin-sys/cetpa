@@ -6,22 +6,29 @@ import { doc, deleteDoc } from '../../lib/dbClient';
 import { db } from '../../firebase';
 import { type MikroFaturaDetayVerisi } from '../MikroFaturaDetay';
 import { type MikroFatura } from '../../hooks/useMikroFaturalar';
-import { SortHeader, formatTRY, type AccountingT } from './shared';
+import { SortHeader } from './shared';
 import { faturaTipiEtiketi } from '../../utils/durumEtiketi';
 import { paraYaz } from '../../utils/currency';
+import { bilinenSayi, ekranTutari } from '../../utils/para';
+import { faturaKpi, faturaSatirKarsilastir, faturaTutarlari } from '../../utils/muhasebe/faturalar';
 import { oc } from '../../i18n/ortak';
+import { ac } from '../../i18n/accounting';
 
 type InvoiceForm = {
   faturaNo: string; faturaTipi: 'e-fatura' | 'e-arsiv' | 'ihracat';
   customerName: string; customerEmail: string; taxId: string; taxOffice: string;
   address: string; kdvOran: number; date: string; notes: string; orderId: string;
+  /** Elle girilen toplam (KDV DAHİL) — sipariş bağlı değilken tutarın TEK kaynağı. Dokümana yazılmaz. */
+  tutar: string;
 };
 type MikroFaturaRow = MikroFatura & { musteri: string };
 
 // Kolon başlıkları invoices alanlarıyla aynı isimde değil (musteri/tarih/oran/
 // matrah/tutar) — sıralama tıklaması Mikro satırlarında hiç etki etmiyordu
 // (2026-08-17, kullanıcı bildirdi). Statik, bileşen dışında (her render'da
-// yeniden ayrılmasın).
+// yeniden ayrılmasın). `keyof MikroFaturaRow` bilerek: alan adı değişirse derleyici yakalar.
+// KARŞILAŞTIRMA KURALI burada DEĞİL — tek kaynak utils/muhasebe/faturalar.faturaSatirKarsilastir
+// (bilinmeyen sayı 0 sayılmaz, her iki yönde sonda; NaN ham `<`/`>` ile sıralamayı bozuyordu).
 const MIKRO_SORT_KEY: Record<string, keyof MikroFaturaRow> = {
   faturaNo: 'faturaNo', customerName: 'musteri', date: 'tarih',
   kdvOran: 'oran', kdvHaric: 'matrah', totalPrice: 'tutar', faturaTipi: 'yon',
@@ -78,8 +85,8 @@ export default function FaturalarTab({
               <div className="grid grid-cols-3 gap-2">
                 {([
                   { v:'e-fatura', l:'e-Fatura', d:oc(currentLanguage).kayitli_mukellef },
-                  { v:'e-arsiv', l:'e-Arşiv', d:currentLanguage==='tr'?'Bireysel / kayıtsız':'Individual / unregistered' },
-                  { v:'ihracat', l:oc(currentLanguage).ihracat, d:currentLanguage==='tr'?'Yurt dışı':'International' },
+                  { v:'e-arsiv', l:'e-Arşiv', d:ac(currentLanguage).bireysel_kayitsiz },
+                  { v:'ihracat', l:oc(currentLanguage).ihracat, d:ac(currentLanguage).yurt_disi },
                 ] as const).map(tp => (
                   <button key={tp.v} type="button" onClick={()=>setInvoiceForm(f=>({...f,faturaTipi:tp.v}))}
                     className={`p-2.5 rounded-xl border text-left transition-all ${invoiceForm.faturaTipi===tp.v?'border-[#ff4000] bg-[#ff4000]/5':'border-gray-200 hover:border-gray-300'}`}>
@@ -99,7 +106,7 @@ export default function FaturalarTab({
               <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{oc(currentLanguage).musteri_adi}</label>
                 <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.customerName} onChange={e=>setInvoiceForm(f=>({...f,customerName:e.target.value}))} /></div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{currentLanguage==='tr'?'Vergi No':'Tax ID'}</label>
+                <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{ac(currentLanguage).vergi_no}</label>
                   <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.taxId} onChange={e=>setInvoiceForm(f=>({...f,taxId:e.target.value}))} /></div>
                 <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{oc(currentLanguage).vergi_dairesi}</label>
                   <input className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]" value={invoiceForm.taxOffice} onChange={e=>setInvoiceForm(f=>({...f,taxOffice:e.target.value}))} /></div>
@@ -114,17 +121,39 @@ export default function FaturalarTab({
                   ))}
                 </div>
               </div>
-              {invoiceSource && (
-                <div className="bg-gray-50 rounded-xl p-3 text-xs space-y-1">
-                  <div className="flex justify-between"><span className="text-gray-500">{currentLanguage==='tr'?'Sipariş':'Order'}:</span><span className="font-semibold">#{(invoiceSource.id as string).slice(0,8)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">{oc(currentLanguage).matrah_kdv_haric}:</span><span className="font-semibold">{paraYaz((invoiceSource.totalPrice as number)/(1+invoiceForm.kdvOran/100))}</span></div>
-                  <div className="flex justify-between text-[#ff4000]"><span>KDV %{invoiceForm.kdvOran}:</span><span className="font-semibold">{paraYaz((invoiceSource.totalPrice as number)-(invoiceSource.totalPrice as number)/(1+invoiceForm.kdvOran/100))}</span></div>
-                  <div className="flex justify-between font-bold border-t border-gray-200 pt-1"><span>{oc(currentLanguage).toplam}:</span><span>{paraYaz(invoiceSource.totalPrice)}</span></div>
-                </div>
+              {/* Toplam — sipariş bağlıysa ondan, değilse elle. `setInvoiceSource` bugüne kadar
+                  yalnız null ile çağrıldığı için (2026-09-18 ölçümü) her fatura ₺0 kaydediliyordu;
+                  tutar bilinmeden fatura artık KESİLMEZ (AccountingModule.handleCreateInvoice). */}
+              {!invoiceSource && (
+                <div><label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{ac(currentLanguage).toplam_kdv_dahil}</label>
+                  <input type="number" min="0" step="0.01" inputMode="decimal"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#ff4000]"
+                    value={invoiceForm.tutar} onChange={e=>setInvoiceForm(f=>({...f,tutar:e.target.value}))} placeholder="0,00" />
+                  {/* `min="0"` tarayıcıda HİÇ zorlanmıyor (modalda <form> yok, buton doğrudan
+                      handleCreateInvoice çağırıyor) — eksi tutar uyarısı burada, elemesi
+                      faturaTutarlari'nda (2026-09-18). */}
+                  {!bilinenSayi(invoiceForm.tutar)
+                    ? <p className="text-[10px] text-gray-400 mt-1">{ac(currentLanguage).tutar_girilmeden_fatura_kesilemez}</p>
+                    : Number(invoiceForm.tutar) < 0
+                      ? <p className="text-[10px] text-red-500 mt-1">{ac(currentLanguage).tutar_eksi_olamaz_fatura_kesilemez}</p>
+                      : null}</div>
               )}
+              {(() => {
+                // Hesap tek kaynakta (utils/muhasebe/faturalar.faturaTutarlari) — kaydedilecek üç alanın aynısı.
+                const onizleme = faturaTutarlari(invoiceSource ? invoiceSource.totalPrice : invoiceForm.tutar, invoiceForm.kdvOran);
+                if (!onizleme) return null;
+                return (
+                  <div className="bg-gray-50 rounded-xl p-3 text-xs space-y-1">
+                    {!!invoiceSource && <div className="flex justify-between"><span className="text-gray-500">{ac(currentLanguage).siparis}:</span><span className="font-semibold">#{String(invoiceSource.id ?? '').slice(0,8)}</span></div>}
+                    <div className="flex justify-between"><span className="text-gray-500">{oc(currentLanguage).matrah_kdv_haric}:</span><span className="font-semibold">{paraYaz(onizleme.kdvHaric)}</span></div>
+                    <div className="flex justify-between text-[#ff4000]"><span>KDV %{invoiceForm.kdvOran}:</span><span className="font-semibold">{paraYaz(onizleme.kdvTutari)}</span></div>
+                    <div className="flex justify-between font-bold border-t border-gray-200 pt-1"><span>{oc(currentLanguage).toplam}:</span><span>{paraYaz(onizleme.toplam)}</span></div>
+                  </div>
+                );
+              })()}
             </div>
             <div className="flex gap-2 mt-5">
-              <button onClick={handleCreateInvoice} className="flex-1 bg-[#ff4000] hover:bg-[#cc3200] text-white py-2.5 rounded-xl text-sm font-bold transition-colors">{currentLanguage==='tr'?'Faturayı Kes':'Create Invoice'}</button>
+              <button onClick={handleCreateInvoice} className="flex-1 bg-[#ff4000] hover:bg-[#cc3200] text-white py-2.5 rounded-xl text-sm font-bold transition-colors">{ac(currentLanguage).faturayi_kes}</button>
               <button onClick={()=>setShowInvoiceModal(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-bold transition-colors">{oc(currentLanguage).iptal}</button>
             </div>
           </div>
@@ -134,46 +163,41 @@ export default function FaturalarTab({
       {/* KPI + header */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 sm:mr-4">
-          {/* KPI'lar KAYNAK FİLTRESİNE UYAR — 320 Mikro faturası varken
-              "Toplam Fatura 0" göstermek yanlıştı (2026-08-01).
-              Cetpa sayıları invoices'tan, Mikro sayısı mikroSatisSatirlari'ndan. */}
+          {/* Hesap tek kaynakta (utils/muhasebe/faturalar.faturaKpi) — KAYNAK FİLTRESİ
+              (2026-08-01) ve YÖN KIRILIMI (satış cirosu ile alış gideri toplanmaz;
+              alış toplamı cha_cinsi=6'ya dayanıyor, portal tie-out'u bekliyor)
+              gerekçeleri modülde. Bilinmeyen tutar toplama GİRMEZ, SAYILIR. */}
           {(() => {
-            const cetpaVar = faturaKaynak !== 'mikro';
-            const mikroVar = faturaKaynak !== 'cetpa';
-            const cetpaAdet = cetpaVar ? invoices.length : 0;
-            const mikroAdet = mikroVar ? mikroFaturaSatirlari.length : 0;
-            // YÖN KIRILIMI (2026-08-01): "Toplam Tutar" önce satış (giden) ve
-            // alış (gelen) faturalarının tutarlarını TOPLUYORDU → "Her Yön"de
-            // 148M gibi anlamsız bir birleşik rakam çıkıyordu (kullanıcı
-            // haklı olarak reddetti). Satış cirosu ile alış gideri toplanmaz.
-            // Cetpa + Mikro-giden = satış tarafı (doğrulanmış); Mikro-gelen =
-            // alış tarafı. ⚠️ Alış toplamı cha_cinsi=6 filtresine dayanıyor,
-            // henüz portal raporuyla tie-out edilmedi — o yüzden ayrı, satışa
-            // karıştırılmadan gösteriliyor.
-            const mikroGiden = mikroVar ? mikroFaturaSatirlari.filter(f => f.yon === 'giden') : [];
-            const mikroGelen = mikroVar ? mikroFaturaSatirlari.filter(f => f.yon === 'gelen') : [];
-            const cetpaToplam = cetpaVar ? invoices.reduce((a, i) => a + ((i.totalPrice as number) || 0), 0) : 0;
-            const satisToplam = cetpaToplam + mikroGiden.reduce((a, f) => a + f.tutar, 0);
-            const alisToplam  = mikroGelen.reduce((a, f) => a + f.tutar, 0);
+            const k = faturaKpi(invoices, mikroFaturaSatirlari, { kaynak: faturaKaynak });
+            const tutar = faturaYon==='gelen' ? k.alis : k.satis;
             const tutarLabel = faturaYon==='gelen'
-              ? (currentLanguage==='tr'?'Alış Tutarı':'Purchases')
-              : (currentLanguage==='tr'?'Satış Tutarı':'Sales');
-            const tutarValue = faturaYon==='gelen' ? formatTRY(alisToplam) : formatTRY(satisToplam);
-            const tutarAlt = faturaYon==='hepsi' && alisToplam > 0
-              ? `${currentLanguage==='tr'?'Alış':'Purch.'} ${formatTRY(alisToplam)}`
+              ? (ac(currentLanguage).alis_tutari)
+              : (ac(currentLanguage).satis_tutari);
+            // Hiç bilinen tutar yoksa ekranTutari NaN → paraYaz '—' (eskiden ₺0,00 basıyordu).
+            const tutarValue = paraYaz(ekranTutari(tutar));
+            const tutarsizNotu = tutar.bilinmeyen > 0
+              ? (currentLanguage==='tr'
+                  ? `${tutar.bilinmeyen} kayıt tutarsız — toplama girmedi`
+                  : `${tutar.bilinmeyen} records unknown — excluded from total`)
+              : null;
+            // Eski koşul `alisToplam > 0` idi; tutarı bilinmeyen alış faturası 0 sayıldığı için
+            // hepsi bilinmiyorsa alış satırı hiç görünmüyordu — bilinmeyen varken de göster ('—').
+            const tutarAlt = faturaYon==='hepsi' && (k.alis.toplam > 0 || k.alis.bilinmeyen > 0)
+              ? `${ac(currentLanguage).alis} ${paraYaz(ekranTutari(k.alis))}`
               : null;
             return [
-              { label: currentLanguage==='tr'?'Toplam Fatura':'Total Invoices',
-                value: cetpaAdet + mikroAdet,
-                alt: mikroAdet && cetpaAdet ? `${cetpaAdet} Cetpa · ${mikroAdet} Mikro`
-                  : (faturaYon==='hepsi' && mikroGiden.length && mikroGelen.length
-                      ? `${mikroGiden.length} ${currentLanguage==='tr'?'satış':'sales'} · ${mikroGelen.length} ${currentLanguage==='tr'?'alış':'purch.'}`
+              { label: ac(currentLanguage).toplam_fatura,
+                value: k.adet,
+                alt: k.mikroAdet && k.cetpaAdet ? `${k.cetpaAdet} Cetpa · ${k.mikroAdet} Mikro`
+                  : (faturaYon==='hepsi' && k.mikroGidenAdet && k.mikroGelenAdet
+                      ? `${k.mikroGidenAdet} ${ac(currentLanguage).satis} · ${k.mikroGelenAdet} ${ac(currentLanguage).alis_2}`
                       : null),
                 color: 'text-[#ff4000]' },
-              { label: tutarLabel, value: tutarValue, alt: tutarAlt, color: 'text-green-600' },
+              { label: tutarLabel, value: tutarValue,
+                alt: [tutarAlt, tutarsizNotu].filter(Boolean).join(' · ') || null, color: 'text-green-600' },
               { label: 'e-Fatura / e-Arşiv',
-                value: `${cetpaVar ? invoices.filter(i=>i.faturaTipi==='e-fatura').length : 0} / ${cetpaVar ? invoices.filter(i=>i.faturaTipi==='e-arsiv').length : 0}`,
-                alt: currentLanguage==='tr'?'yalnız Cetpa':'Cetpa only', color: 'text-purple-600' },
+                value: `${k.eFaturaAdet} / ${k.eArsivAdet}`,
+                alt: ac(currentLanguage).yalniz_cetpa, color: 'text-purple-600' },
             ];
           })().map((k,i)=>(
             <div key={i} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
@@ -185,7 +209,7 @@ export default function FaturalarTab({
         </div>
         {isAuthenticated && (
           <button onClick={()=>{setInvoiceSource(null);setShowInvoiceModal(true);}} className="flex items-center gap-2 bg-[#ff4000] hover:bg-[#cc3200] text-white px-4 py-2.5 rounded-full text-sm font-bold transition-colors shadow-sm shrink-0">
-            <Plus className="w-4 h-4"/>{currentLanguage==='tr'?'Yeni Fatura':'New Invoice'}
+            <Plus className="w-4 h-4"/>{ac(currentLanguage).yeni_fatura}
           </button>
         )}
       </div>
@@ -195,7 +219,7 @@ export default function FaturalarTab({
         <div className="relative w-full sm:flex-1 sm:w-auto">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"/>
           <input className="pl-9 w-full bg-white border border-gray-200 rounded-2xl px-4 py-2.5 text-sm outline-none focus:border-[#ff4000]"
-            placeholder={currentLanguage==='tr'?'Fatura ara...':'Search invoices...'}
+            placeholder={ac(currentLanguage).fatura_ara}
             value={invoiceSearch} onChange={e=>setInvoiceSearch(e.target.value)} />
         </div>
         <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
@@ -224,9 +248,9 @@ export default function FaturalarTab({
             Gelen faturalar 2026-08-01'e kadar hiç gösterilmiyordu. */}
         <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
           {([
-            ['hepsi', currentLanguage==='tr'?'Her Yön':'Both'],
-            ['giden', currentLanguage==='tr'?'Giden':'Outgoing'],
-            ['gelen', currentLanguage==='tr'?'Gelen':'Incoming'],
+            ['hepsi', ac(currentLanguage).her_yon],
+            ['giden', ac(currentLanguage).giden],
+            ['gelen', ac(currentLanguage).gelen],
           ] as const).map(([k,l]) => (
             <button key={k} onClick={()=>setFaturaYon(k)}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${faturaYon===k?'bg-teal-600 text-white':'text-gray-500 hover:text-gray-700'}`}>
@@ -244,7 +268,7 @@ export default function FaturalarTab({
           return (
             <select value={faturaYil} onChange={e => setFaturaYil(e.target.value)}
               className="px-3 py-1.5 rounded-2xl text-xs font-bold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#ff4000]">
-              <option value="hepsi">{currentLanguage==='tr'?'Tüm Yıllar':'All Years'}</option>
+              <option value="hepsi">{ac(currentLanguage).tum_yillar}</option>
               {yillar.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           );
@@ -262,7 +286,7 @@ export default function FaturalarTab({
                 <SortHeader label={oc(currentLanguage).tur} sortKey="faturaTipi" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
                 <SortHeader label={oc(currentLanguage).tarih} sortKey="date" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="hidden md:table-cell" />
                 <SortHeader label="KDV %" sortKey="kdvOran" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
-                <SortHeader label={currentLanguage==='tr'?'Matrah':'Net'} sortKey="kdvHaric" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
+                <SortHeader label={ac(currentLanguage).matrah} sortKey="kdvHaric" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
                 <SortHeader label={oc(currentLanguage).toplam} sortKey="totalPrice" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} className="text-right" />
                 <SortHeader label={oc(currentLanguage).durum} sortKey="status" currentSort={invoiceSort} onSort={k=>setInvoiceSort(p=>({key:k,direction:p.key===k&&p.direction==='asc'?'desc':'asc'}))} />
                 {isAuthenticated && <th className="px-4 py-3"/>}
@@ -274,13 +298,10 @@ export default function FaturalarTab({
                 // Türkçe-duyarlı arama: düz toLowerCase 'IŞIK'ı 'işık' yapıp
                 // 'ışık' aramasını sessizce boş döndürüyordu (bkz. utils/arama.ts).
                 .filter(inv => eslesir(invoiceSearch, inv.customerName, inv.faturaNo, inv.totalPrice))
-                .sort((a, b) => {
-                  const av = (a[invoiceSort.key as keyof typeof a] as string | number) ?? '';
-                  const bv = (b[invoiceSort.key as keyof typeof b] as string | number) ?? '';
-                  if (av < bv) return invoiceSort.direction === 'asc' ? -1 : 1;
-                  if (av > bv) return invoiceSort.direction === 'asc' ? 1 : -1;
-                  return 0;
-                })
+                // Sıralama tek kaynakta (utils/muhasebe/faturalar.faturaSatirKarsilastir) — Cetpa
+                // dokümanında alan adı kolon adıyla aynı, eşleme gerekmez. Tutarı/oranı olmayan ESKİ
+                // fatura 0 sayılıp başa dizilmez, sona gider.
+                .sort(faturaSatirKarsilastir(invoiceSort.key, invoiceSort.direction))
                 .map(inv => {
                   const tp = inv.faturaTipi as string;
                   const typeColor = tp==='ihracat'?'bg-blue-100 text-blue-600':tp==='e-arsiv'?'bg-purple-100 text-purple-600':'bg-green-100 text-green-600';
@@ -293,7 +314,8 @@ export default function FaturalarTab({
                       </td>
                       <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${typeColor}`}>{faturaTipiEtiketi(tp, currentLanguage)}</span></td>
                       <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{inv.date as string}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">%{inv.kdvOran as number}</td>
+                      {/* Oranı olmayan eski fatura '%undefined' basıyordu (2026-09-18). */}
+                      <td className="px-4 py-3 text-right text-gray-600">{bilinenSayi(inv.kdvOran) ? `%${Number(inv.kdvOran)}` : '—'}</td>
                       <td className="px-4 py-3 text-right text-gray-600">{paraYaz(inv.kdvHaric)}</td>
                       <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">{paraYaz(inv.totalPrice)}</td>
                       <td className="px-4 py-3"><span className="text-[10px] font-bold bg-green-100 text-green-600 px-2 py-0.5 rounded-full">{inv.status as string || 'Kesildi'}</span></td>
@@ -301,8 +323,8 @@ export default function FaturalarTab({
                         <td className="px-4 py-3">
                           <button onClick={async () => {
                             const ok = await confirmAction({
-                              title: currentLanguage==='tr'?'Faturayı Sil':'Delete Invoice',
-                              message: currentLanguage==='tr'?'Faturayı silmek istediğinize emin misiniz? Bu işlem geri alınamaz.':'Are you sure you want to delete this invoice? This cannot be undone.',
+                              title: ac(currentLanguage).faturayi_sil,
+                              message: ac(currentLanguage).faturayi_silmek_istediginize_emin_misiniz_bu_isl,
                               confirmLabel: oc(currentLanguage).sil,
                               variant: 'danger',
                             });
@@ -320,26 +342,24 @@ export default function FaturalarTab({
                   Mevcut mantık değişmedi, kaynak seçici opt-in. */}
               {/* Mikro satırlarında ARAMA HİÇ YOKTU (2026-08-28 kullanıcı bulgusu):
                   kutuya yazınca yalnız Cetpa faturaları süzülüyor, Mikro'dan
-                  gelen tüm satırlar ekranda kalıyordu. */}
+                  gelen tüm satırlar ekranda kalıyordu.
+                  Tutar metnine YALNIZ bilinen sayı girer: hook bilinmeyeni NaN veriyor
+                  (2026-09-18) ve `katla(NaN)` 'nan' üretip aramayla eşleşiyordu. */}
               {faturaKaynak !== 'cetpa' && [...mikroFaturaSatirlari]
-                .filter(f => eslesir(invoiceSearch, f.musteri, f.faturaNo, f.tutar))
-                .sort((a, b) => {
-                const key = MIKRO_SORT_KEY[invoiceSort.key];
-                if (!key) return 0;
-                const av = (a[key] as string | number) ?? '';
-                const bv = (b[key] as string | number) ?? '';
-                if (av < bv) return invoiceSort.direction === 'asc' ? -1 : 1;
-                if (av > bv) return invoiceSort.direction === 'asc' ? 1 : -1;
-                return 0;
-              }).map(f => (
+                .filter(f => eslesir(invoiceSearch, f.musteri, f.faturaNo, bilinenSayi(f.tutar) ? f.tutar : null))
+                // Sıralama tek kaynakta (utils/muhasebe/faturalar.faturaSatirKarsilastir): hook
+                // bilinmeyen tutar/kdv/matrahı NaN veriyor (2026-09-18) ve buradaki ham `<`/`>`
+                // karşılaştırması NaN'ı "her şeye eşit" sayıp BİLİNEN satırların da sırasını bozuyordu.
+                .sort(faturaSatirKarsilastir<MikroFaturaRow>(invoiceSort.key, invoiceSort.direction, MIKRO_SORT_KEY))
+                .map(f => (
                 <tr key={`mikro-fat-${f.id}`}
                   onClick={() => setFaturaDetay({ ...f, uuid: f.uuid })}
-                  title={currentLanguage==='tr'?'Detay ve XML/PDF için tıklayın':'Click for detail and XML/PDF'}
+                  title={ac(currentLanguage).detay_ve_xml_pdf_icin_tiklayin}
                   className="border-b border-gray-50 hover:bg-blue-50/60 bg-blue-50/20 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-mono font-semibold text-blue-600 underline decoration-dotted underline-offset-2">{f.faturaNo || '—'}</td>
                   <td className="px-4 py-3">
                     <p className="font-semibold text-[#1D1D1F]">{f.musteri}</p>
-                    <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Cari: ' : 'Account: '}{f.cariKod}</p>
+                    <p className="text-[10px] text-gray-400">{ac(currentLanguage).cari}{f.cariKod}</p>
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-600">mikro</span>
@@ -350,10 +370,12 @@ export default function FaturalarTab({
                   <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{f.tarih || '—'}</td>
                   <td className="px-4 py-3 text-right text-gray-600">
                     {f.oranKarma
-                      ? <span title={currentLanguage==='tr'?'Faturada birden fazla KDV oranı var (ör. %10 + %20) — matrah/toplam KDV bunları içerir, tek oran gösterilemez':'Multiple VAT rates on this invoice — net/total reflect all rates, a single % cannot be shown'} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{oc(currentLanguage).karma}</span>
+                      ? <span title={ac(currentLanguage).faturada_birden_fazla_kdv_orani_var_or_10_20_mat} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{oc(currentLanguage).karma}</span>
                       : (f.oran !== null ? `%${f.oran}` : '—')}
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-600">{f.matrah ? formatTRY(f.matrah) : '—'}</td>
+                  {/* `f.matrah ? … : '—'` idi: hook bilinmeyeni 0'a zorladığı için gerçek ₺0 matrah da
+                      gizleniyordu. Hook artık NaN veriyor (2026-09-18) → paraYaz bilinmeyene '—', ₺0'a ₺0,00 basar. */}
+                  <td className="px-4 py-3 text-right text-gray-600">{paraYaz(f.matrah)}</td>
                   <td className="px-4 py-3 text-right font-bold text-[#1D1D1F]">{paraYaz(f.tutar)}</td>
                   <td className="px-4 py-3"><span className="text-[10px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'Mikro' : 'Mikro'}</span></td>
                   {isAuthenticated && <td className="px-4 py-3" />}
@@ -362,8 +384,8 @@ export default function FaturalarTab({
               {invoices.length===0 && (faturaKaynak === 'cetpa' || mikroFaturaSatirlari.length === 0) && (
                 <tr><td colSpan={9} className="text-center py-12 text-gray-400">
                   <FileText className="w-10 h-10 mx-auto mb-2 opacity-20"/>
-                  <p className="text-sm">{currentLanguage==='tr'?'Henüz fatura kesilmedi.':'No invoices yet.'}</p>
-                  <p className="text-xs mt-1">{currentLanguage==='tr'?'Siparişler listesinden "Fatura Kes" butonunu kullanın.':'Use the "Create Invoice" button from the orders list.'}</p>
+                  <p className="text-sm">{ac(currentLanguage).henuz_fatura_kesilmedi}</p>
+                  <p className="text-xs mt-1">{ac(currentLanguage).siparisler_listesinden_fatura_kes_butonunu_kulla}</p>
                   {mikroFaturaSatirlari.length > 0 && (
                     <p className="text-xs mt-2 text-blue-600">
                       {currentLanguage==='tr'

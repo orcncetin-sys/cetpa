@@ -3,6 +3,9 @@ import { Plus, Eye, Edit2, Trash2, X, Save, MapPin, User, Home } from 'lucide-re
 import { type Warehouse, type WarehouseItem } from '../../types';
 import { formatTRY, type AccountingT } from './shared';
 import { oc } from '../../i18n/ortak';
+import { depoToplamlari, adetYaz } from '../../utils/muhasebe/depoDeger';
+import { ekranTutari, sayiSirala } from '../../utils/para';
+import { ac } from '../../i18n/accounting';
 
 type WarehouseForm = { name: string; location: string; manager: string; notes: string };
 
@@ -41,15 +44,16 @@ export default function WarehousesTab({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {warehouses.map(w => {
               const depoKalemleri = depoKalemleriIcin(w.id);
-              const toplamAdet = depoKalemleri.reduce((s, wi) => s + (Number(wi.quantity) || 0), 0);
+              // Hesap tek kaynakta (utils/muhasebe/depoDeger.ts)
+              const depoT = depoToplamlari(depoKalemleri);
               return (
               <div key={w.id} onClick={() => setDetayDepo(w)}
                 className="bg-gray-50 rounded-2xl p-4 border border-gray-100 relative group cursor-pointer hover:border-[#ff4000]/40 hover:shadow-sm transition-all"
-                title={currentLanguage === 'tr' ? 'Envanter detayını gör' : 'View inventory detail'}>
+                title={ac(currentLanguage).envanter_detayini_gor}>
                 <div className="flex justify-between items-start mb-2">
                   <h4 className="font-bold text-gray-800">{w.name}</h4>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={(e) => { e.stopPropagation(); setDetayDepo(w); }} className="p-1.5 hover:bg-white rounded-lg text-blue-500" title={currentLanguage === 'tr' ? 'Envanter detayı' : 'Inventory detail'}><Eye size={12} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); setDetayDepo(w); }} className="p-1.5 hover:bg-white rounded-lg text-blue-500" title={ac(currentLanguage).envanter_detayi}><Eye size={12} /></button>
                     <button onClick={(e) => { e.stopPropagation(); setEditingWarehouse(w); setWarehouseForm({ name: w.name, location: w.location || '', manager: w.manager || '', notes: w.notes || '' }); setShowWarehouseModal(true); }} className="p-1.5 hover:bg-white rounded-lg text-gray-500"><Edit2 size={12} /></button>
                     <button onClick={(e) => { e.stopPropagation(); deleteWarehouse(w.id); }} className="p-1.5 hover:bg-white rounded-lg text-red-500"><Trash2 size={12} /></button>
                   </div>
@@ -60,10 +64,11 @@ export default function WarehousesTab({
                 </div>
                 <div className="mt-3 pt-2 border-t border-gray-100 flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-gray-600">
-                    {depoKalemleri.length} {currentLanguage === 'tr' ? 'kalem' : 'items'}
+                    {depoKalemleri.length} {ac(currentLanguage).kalem_2}
                   </span>
-                  <span className="text-[11px] text-gray-400">
-                    {toplamAdet.toLocaleString('tr-TR')} {oc(currentLanguage).adet}
+                  <span className="text-[11px] text-gray-400"
+                    title={depoT.adet.bilinmeyen > 0 ? (currentLanguage === 'tr' ? `${depoT.adet.bilinmeyen} kalemin adedi bilinmiyor — toplama girmedi` : `${depoT.adet.bilinmeyen} items have unknown quantity — excluded from the total`) : undefined}>
+                    {adetYaz(ekranTutari(depoT.adet))} {oc(currentLanguage).adet}{depoT.adet.bilinmeyen > 0 ? ' *' : ''}
                   </span>
                 </div>
               </div>
@@ -74,9 +79,10 @@ export default function WarehousesTab({
 
         {detayDepo && (() => {
           const kalemler = depoKalemleriIcin(detayDepo.id)
-            .sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0));
-          const toplamAdet = kalemler.reduce((s, wi) => s + (Number(wi.quantity) || 0), 0);
-          const toplamDeger = kalemler.reduce((s, wi) => s + (Number(wi.quantity) || 0) * (Number((wi as unknown as { costPrice?: number }).costPrice) || 0), 0);
+            .sort((a, b) => sayiSirala(a.quantity, b.quantity, true)); // azalan; adedi bilinmeyen kalem sona
+          // Hesap tek kaynakta (utils/muhasebe/depoDeger.ts). costPrice, WarehouseItem tipinde YOK;
+          // DepoKalemi onu yapısal `unknown` alan olarak okur — `as unknown as {...}` cast'i GEREKMEZ.
+          const toplam = depoToplamlari(kalemler);
           return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDetayDepo(null)}>
               <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-xl" onClick={e => e.stopPropagation()}>
@@ -91,22 +97,22 @@ export default function WarehousesTab({
                 <div className="grid grid-cols-3 gap-3 p-5 border-b border-gray-100">
                   <div className="bg-gray-50 rounded-xl p-3 text-center">
                     <p className="text-xl font-bold text-[#1D1D1F]">{kalemler.length}</p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">{currentLanguage === 'tr' ? 'Kalem' : 'Items'}</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">{ac(currentLanguage).kalem_3}</p>
                   </div>
                   <div className="bg-gray-50 rounded-xl p-3 text-center">
-                    <p className="text-xl font-bold text-[#1D1D1F]">{toplamAdet.toLocaleString('tr-TR')}</p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">{oc(currentLanguage).toplam_adet}</p>
+                    <p className="text-xl font-bold text-[#1D1D1F]">{adetYaz(ekranTutari(toplam.adet))}</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">{oc(currentLanguage).toplam_adet}{toplam.adet.bilinmeyen > 0 ? (currentLanguage === 'tr' ? ` · ${toplam.adet.bilinmeyen} kalem adetsiz` : ` · ${toplam.adet.bilinmeyen} items without qty`) : ''}</p>
                   </div>
                   <div className="bg-gray-50 rounded-xl p-3 text-center">
-                    <p className="text-xl font-bold text-green-600">{toplamDeger > 0 ? formatTRY(toplamDeger) : '—'}</p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">{oc(currentLanguage).stok_degeri}</p>
+                    <p className="text-xl font-bold text-green-600">{formatTRY(ekranTutari(toplam.deger))}</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">{oc(currentLanguage).stok_degeri}{toplam.deger.bilinmeyen > 0 ? (currentLanguage === 'tr' ? ` · ${toplam.deger.bilinmeyen} kalem maliyetsiz` : ` · ${toplam.deger.bilinmeyen} items without cost`) : ''}</p>
                   </div>
                 </div>
 
                 <div className="overflow-y-auto flex-1 p-5">
                   {kalemler.length === 0 ? (
                     <div className="py-10 text-center text-sm text-gray-400">
-                      {currentLanguage === 'tr' ? 'Bu depoda kayıtlı envanter yok.' : 'No inventory recorded in this warehouse.'}
+                      {ac(currentLanguage).bu_depoda_kayitli_envanter_yok}
                     </div>
                   ) : (
                     <table className="w-full">
@@ -122,7 +128,7 @@ export default function WarehousesTab({
                           <tr key={wi.id} className="border-b border-gray-50">
                             <td className="py-2.5 text-sm font-medium text-gray-800">{wi.productName}</td>
                             <td className="py-2.5 font-mono text-xs text-gray-500 hidden sm:table-cell">{wi.sku || '—'}</td>
-                            <td className="py-2.5 text-right font-semibold text-sm">{(Number(wi.quantity) || 0).toLocaleString('tr-TR')}</td>
+                            <td className="py-2.5 text-right font-semibold text-sm">{adetYaz(wi.quantity)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -142,14 +148,14 @@ export default function WarehousesTab({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowWarehouseModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Depo Tanımı' : 'Warehouse'} — {editingWarehouse ? (oc(currentLanguage).duzenle) : t.add}</h3>
+                <h3 className="font-semibold text-gray-800">{ac(currentLanguage).depo_tanimi} — {editingWarehouse ? (oc(currentLanguage).duzenle) : t.add}</h3>
                 <button onClick={() => setShowWarehouseModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
                 {[
-                  { label: currentLanguage === 'tr' ? 'Depo Adı' : 'Warehouse Name', key: 'name', placeholder: 'Ana Depo' },
+                  { label: ac(currentLanguage).depo_adi, key: 'name', placeholder: 'Ana Depo' },
                   { label: t.location, key: 'location', placeholder: 'İstanbul' },
-                  { label: currentLanguage === 'tr' ? 'Sorumlu' : 'Manager', key: 'manager', placeholder: 'Ahmet Yılmaz' },
+                  { label: ac(currentLanguage).sorumlu, key: 'manager', placeholder: 'Ahmet Yılmaz' },
                   { label: oc(currentLanguage).not, key: 'notes', placeholder: '...' },
                 ].map(f => (
                   <div key={f.key}>

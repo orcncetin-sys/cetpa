@@ -3,12 +3,15 @@ import { Download, Search, Plus, Eye, Edit2, Trash2, X, Save, RefreshCw, ArrowRi
 import { type BankAccount, type BankTransaction } from '../../types';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
 import { paraYaz } from '../../utils/currency';
+import { bilinenSayi, sayiSirala } from '../../utils/para';
 import { oc } from '../../i18n/ortak';
+import { ac } from '../../i18n/accounting';
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type BankForm = {
   bankName: string; branch: string; accountHolder: string; accountNumber: string;
-  iban: string; currency: 'TRY' | 'USD' | 'EUR'; balance: number;
+  /** `''` = girilmedi (bilinmiyor) — saveBank bilinenSayi ile eler, 0 kaydedilmez. */
+  iban: string; currency: 'TRY' | 'USD' | 'EUR'; balance: number | '';
   accountType: 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa' | 'Akreditif (L/C)' | 'Teminat Mektubu';
 };
 
@@ -19,6 +22,8 @@ interface BankaTabProps {
   tryBalance: number;
   usdBalance: number;
   eurBalance: number;
+  /** Birim başına bakiyesi bilinmeyen hesap sayısı (bankaHesap.dovizBakiyeleri) — KPI kartı altına not. */
+  bakiyeBilinmeyen: Record<'TRY' | 'USD' | 'EUR', number>;
   setDrillDown: (d: DrillDown | null) => void;
   handleBankFileImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
   openAddBank: () => void;
@@ -55,13 +60,18 @@ interface BankaTabProps {
 }
 
 export default function BankaTab({
-  t, currentLanguage, bankAccounts, tryBalance, usdBalance, eurBalance, setDrillDown,
+  t, currentLanguage, bankAccounts, tryBalance, usdBalance, eurBalance, bakiyeBilinmeyen, setDrillDown,
   handleBankFileImport, openAddBank, bankSearch, setBankSearch, bankImportStatus, setBankImportStatus,
   bankSortKey, bankSortDir, toggleBankSort, displayedAccounts, openEditBank, deleteBank,
   mikroEnabled, mikroConnected, bankTxLastPull, bankTxAutoSync, setBankTxAutoSync, pullBankTransactions,
   bankTxPulling, bankTxSearch, setBankTxSearch, bankTxFilter, setBankTxFilter, bankTransactions,
   bankTxSort, setBankTxSort, showBankModal, setShowBankModal, editingBank, bankForm, setBankForm, saveBank,
 }: BankaTabProps) {
+  // Bakiyesi bilinmeyen hesap toplama girmedi (bankaHesap.dovizBakiyeleri) — kart altına açık not;
+  // hiç bilinen yoksa değer zaten '—' basılır (ekranTutari → NaN → paraYaz).
+  const bakiyeNotu = (n: number) => n > 0
+    ? (currentLanguage === 'tr' ? `${n} hesap tutarsız — toplama girmedi` : `${n} account(s) without balance — excluded from total`)
+    : null;
   return (
     <>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -70,19 +80,23 @@ export default function BankaTab({
           {[
             {
               label: t.tryBalance, value: formatTRY(tryBalance), symbol: '₺', color: 'text-green-600',
+              note: bakiyeNotu(bakiyeBilinmeyen.TRY),
               onClick: () => setDrillDown({ title: '₺ TRY Hesaplar', rows: bankAccounts.filter(a => a.currency === 'TRY').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: formatTRY(a.balance) })), total: formatTRY(tryBalance) })
             },
             {
               label: t.usdBalance, value: paraYaz(usdBalance, { birim: 'USD' }), symbol: '$', color: 'text-blue-600',
+              note: bakiyeNotu(bakiyeBilinmeyen.USD),
               onClick: () => setDrillDown({ title: '$ USD Hesaplar', rows: bankAccounts.filter(a => a.currency === 'USD').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: paraYaz(a.balance, { birim: 'USD' }) })), total: paraYaz(usdBalance, { birim: 'USD' }) })
             },
             {
               label: t.eurBalance, value: paraYaz(eurBalance, { birim: 'EUR' }), symbol: '€', color: 'text-purple-600',
+              note: bakiyeNotu(bakiyeBilinmeyen.EUR),
               onClick: () => setDrillDown({ title: '€ EUR Hesaplar', rows: bankAccounts.filter(a => a.currency === 'EUR').map(a => ({ label: a.bankName, sub: `${a.accountType} — ${a.accountHolder}`, value: paraYaz(a.balance, { birim: 'EUR' }) })), total: paraYaz(eurBalance, { birim: 'EUR' }) })
             },
             {
               label: t.accountCount, value: String(bankAccounts.length), symbol: '#', color: 'text-[#ff4000]',
-              onClick: () => setDrillDown({ title: currentLanguage === 'tr' ? 'Tüm Hesaplar' : 'All Accounts', rows: bankAccounts.map(a => ({ label: a.bankName, sub: `${a.accountHolder} — ${a.accountType}`, badge: a.currency, badgeColor: a.currency === 'TRY' ? 'bg-green-100 text-green-600' : a.currency === 'USD' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600', value: paraYaz(a.balance, { birim: a.currency }) })) })
+              note: null,
+              onClick: () => setDrillDown({ title: ac(currentLanguage).tum_hesaplar, rows: bankAccounts.map(a => ({ label: a.bankName, sub: `${a.accountHolder} — ${a.accountType}`, badge: a.currency, badgeColor: a.currency === 'TRY' ? 'bg-green-100 text-green-600' : a.currency === 'USD' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600', value: paraYaz(a.balance, { birim: a.currency }) })) })
             },
           ].map((kpi, i) => (
             <button key={i} onClick={kpi.onClick} className="apple-card p-4 text-left cursor-pointer group">
@@ -91,6 +105,7 @@ export default function BankaTab({
                 <span className={`text-base font-black ${kpi.color} group-hover:scale-110 transition-transform`}>{kpi.symbol}</span>
               </div>
               <div className={`text-xl font-bold ${kpi.color}`}>{kpi.value}</div>
+              {kpi.note && <div className="text-[10px] text-amber-600 mt-1">{kpi.note}</div>}
               <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{oc(currentLanguage).detay_icin_tikla}</div>
             </button>
           ))}
@@ -203,12 +218,12 @@ export default function BankaTab({
         <div className="apple-card p-4">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div>
-              <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Banka Hareketleri' : 'Bank Transactions'}</h3>
+              <h3 className="font-semibold text-gray-800">{ac(currentLanguage).banka_hareketleri_2}</h3>
               <p className="text-xs text-gray-400 mt-0.5">
                 {mikroEnabled && mikroConnected
-                  ? currentLanguage === 'tr' ? 'Mikro ERP üzerinden otomatik çekilir' : 'Auto-pulled via Mikro ERP'
-                  : currentLanguage === 'tr' ? 'Mikro entegrasyonu etkinleştirilerek otomatik çekilebilir' : 'Enable Mikro integration for auto-pull'}
-                {bankTxLastPull && <span className="ml-2 text-gray-300">· {currentLanguage === 'tr' ? 'Son çekim' : 'Last pull'}: {bankTxLastPull}</span>}
+                  ? ac(currentLanguage).mikro_erp_uzerinden_otomatik_cekilir
+                  : ac(currentLanguage).mikro_entegrasyonu_etkinlestirilerek_otomatik_ce}
+                {bankTxLastPull && <span className="ml-2 text-gray-300">· {ac(currentLanguage).son_cekim}: {bankTxLastPull}</span>}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -216,10 +231,10 @@ export default function BankaTab({
               <button
                 onClick={() => setBankTxAutoSync(v => !v)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${bankTxAutoSync ? 'bg-green-50 border-green-200 text-green-700' : 'apple-button-secondary py-1.5 px-3 text-xs'}`}
-                title={currentLanguage === 'tr' ? 'Otomatik Senkronizasyon' : 'Auto Sync'}
+                title={ac(currentLanguage).otomatik_senkronizasyon}
               >
                 <RefreshCw size={12} className={bankTxAutoSync ? 'animate-spin' : ''} />
-                {currentLanguage === 'tr' ? 'Oto Sync' : 'Auto Sync'}
+                {ac(currentLanguage).oto_sync}
                 {bankTxAutoSync && <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />}
               </button>
               <button
@@ -229,8 +244,8 @@ export default function BankaTab({
               >
                 <ArrowRightLeft size={12} className={bankTxPulling ? 'animate-spin' : ''} />
                 {bankTxPulling
-                  ? (currentLanguage === 'tr' ? 'Çekiliyor...' : 'Pulling...')
-                  : (currentLanguage === 'tr' ? 'Şimdi Çek' : 'Pull Now')}
+                  ? (ac(currentLanguage).cekiliyor)
+                  : (ac(currentLanguage).simdi_cek)}
               </button>
             </div>
           </div>
@@ -241,7 +256,7 @@ export default function BankaTab({
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
               <input
                 type="text"
-                placeholder={currentLanguage === 'tr' ? 'Hareket ara...' : 'Search transactions...'}
+                placeholder={ac(currentLanguage).hareket_ara}
                 value={bankTxSearch}
                 onChange={e => setBankTxSearch(e.target.value)}
                 className="apple-input w-full pl-8 py-2 text-xs"
@@ -254,7 +269,7 @@ export default function BankaTab({
                   onClick={() => setBankTxFilter(f)}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${bankTxFilter === f ? 'bg-brand text-white' : 'apple-button-secondary py-1.5'}`}
                 >
-                  {f === 'all' ? (oc(currentLanguage).tumu) : f === 'credit' ? (currentLanguage === 'tr' ? '↓ Alacak' : '↓ Credit') : (currentLanguage === 'tr' ? '↑ Borç' : '↑ Debit')}
+                  {f === 'all' ? (oc(currentLanguage).tumu) : f === 'credit' ? (ac(currentLanguage).alacak) : (ac(currentLanguage).borc)}
                 </button>
               ))}
             </div>
@@ -302,6 +317,9 @@ export default function BankaTab({
                       (!bankTxSearch || tx.description.toLowerCase().includes(bankTxSearch.toLowerCase()) || tx.accountName.toLowerCase().includes(bankTxSearch.toLowerCase()) || (tx.reference ?? '').toLowerCase().includes(bankTxSearch.toLowerCase()))
                     )
                     .sort((a, b) => {
+                      // Sayısal sütunlarda bilinmeyen (bakiyesi olmayan hareket) 0 sayılmaz, her iki yönde de
+                      // sona gider (utils/para.ts sayiSirala); eski `?? ''` artan sıralamada başa diziyordu.
+                      if (bankTxSort.key === 'amount' || bankTxSort.key === 'balance') return sayiSirala(a[bankTxSort.key], b[bankTxSort.key], bankTxSort.dir === 'desc');
                       const av = a[bankTxSort.key] ?? '';
                       const bv = b[bankTxSort.key] ?? '';
                       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
@@ -314,8 +332,8 @@ export default function BankaTab({
                           <Landmark size={28} className="text-gray-300" />
                           <span>
                             {bankTransactions.length === 0
-                              ? (currentLanguage === 'tr' ? '"Şimdi Çek" ile Mikro\'dan hareketleri çekin.' : 'Use "Pull Now" to fetch transactions from Mikro.')
-                              : (currentLanguage === 'tr' ? 'Arama veya filtre sonucu yok.' : 'No results match filter.')}
+                              ? (ac(currentLanguage).simdi_cek_ile_mikro_dan_hareketleri_cekin)
+                              : (ac(currentLanguage).arama_veya_filtre_sonucu_yok)}
                           </span>
                         </div>
                       </td>
@@ -354,15 +372,15 @@ export default function BankaTab({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowBankModal(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'Banka Hesabı' : 'Bank Account'} — {editingBank ? (oc(currentLanguage).duzenle) : t.add}</h3>
+                <h3 className="font-semibold text-gray-800">{ac(currentLanguage).banka_hesabi} — {editingBank ? (oc(currentLanguage).duzenle) : t.add}</h3>
                 <button onClick={() => setShowBankModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
                 {[
-                  { label: currentLanguage === 'tr' ? 'Banka Adı' : 'Bank Name', key: 'bankName', placeholder: 'Ziraat Bankası' },
+                  { label: ac(currentLanguage).bankName, key: 'bankName', placeholder: 'Ziraat Bankası' },
                   { label: oc(currentLanguage).sube, key: 'branch', placeholder: 'Merkez' },
-                  { label: currentLanguage === 'tr' ? 'Hesap Sahibi' : 'Account Holder', key: 'accountHolder', placeholder: 'Cetpa Ltd. Şti.' },
-                  { label: currentLanguage === 'tr' ? 'Hesap No' : 'Account No', key: 'accountNumber', placeholder: '1234-5678' },
+                  { label: ac(currentLanguage).accountHolder, key: 'accountHolder', placeholder: 'Cetpa Ltd. Şti.' },
+                  { label: ac(currentLanguage).hesap_no, key: 'accountNumber', placeholder: '1234-5678' },
                   { label: 'IBAN', key: 'iban', placeholder: 'TR00 0000 0000 0000 0000 0000 00' },
                 ].map(f => (
                   <div key={f.key}>
@@ -379,11 +397,12 @@ export default function BankaTab({
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).bakiye}</label>
-                    <input type="number" value={bankForm.balance} onChange={e => setBankForm(prev => ({ ...prev, balance: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                    {/* Boş alan 0 DEĞİL bilinmiyordur: '' olarak tutulur, saveBank kaydetmez (eski: Number('') → ₺0) */}
+                    <input type="number" value={bankForm.balance} onChange={e => setBankForm(prev => ({ ...prev, balance: bilinenSayi(e.target.value) ? Number(e.target.value) : '' }))} placeholder={ac(currentLanguage).orn_125000} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Hesap Tipi' : 'Account Type'}</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{ac(currentLanguage).hesap_tipi}</label>
                   <select value={bankForm.accountType} onChange={e => setBankForm(prev => ({ ...prev, accountType: e.target.value as 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa' | 'Akreditif (L/C)' | 'Teminat Mektubu' }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
                     {(['Vadesiz', 'Vadeli', 'Kredi', 'Kasa', 'Akreditif (L/C)', 'Teminat Mektubu'] as const).map(c => <option key={c} value={c}>{c}</option>)}
                   </select>

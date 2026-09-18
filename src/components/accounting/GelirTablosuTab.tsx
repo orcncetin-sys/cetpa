@@ -1,7 +1,10 @@
 import { motion } from 'motion/react';
 import { type Order, type Employee } from '../../types';
 import { kurCevir, paraYaz, tlYaz } from '../../utils/currency';
+import { gelirTablosu } from '../../utils/muhasebe/gelirTablosu';
+import { ekranTutari } from '../../utils/para';
 import { oc } from '../../i18n/ortak';
+import { ac } from '../../i18n/accounting';
 
 interface GelirTablosuTabProps {
   currentLanguage: string;
@@ -26,47 +29,27 @@ export default function GelirTablosuTab({
     ? ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık']
     : ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-  // Filter orders for selected period
-  const periodOrders = orders.filter(o => {
-    const raw = (o as unknown as Record<string,unknown>).createdAt;
-    const d: Date = raw && typeof (raw as {toDate?:()=>Date}).toDate === 'function'
-      ? (raw as {toDate:()=>Date}).toDate()
-      : new Date(raw as string);
-    return d.getFullYear() === gtYear && d.getMonth() + 1 === gtMonth;
-  });
-
-  // Revenue (Satış Gelirleri)
-  const brutSatislar = periodOrders.reduce((s, o) => s + o.totalPrice, 0);
-  const satisIadeleri = periodOrders.filter(o => o.status === 'Cancelled').reduce((s, o) => s + o.totalPrice, 0);
-  const netSatislar = brutSatislar - satisIadeleri;
-
-  // COGS (Satışların Maliyeti)
-  const satislarinMaliyeti = periodOrders.reduce((s, o) => {
-    return s + (o.lineItems || []).reduce((sc: number, li: {quantity: number; costPrice?: number; inventoryId?: string; sku?: string}) => {
-      return sc + (li.costPrice || 0) * li.quantity;
-    }, 0);
-  }, 0);
-
-  const brutKar = netSatislar - satislarinMaliyeti;
-  const brutKarMarji = netSatislar > 0 ? (brutKar / netSatislar * 100) : 0;
-
-  // Operating Expenses (Faaliyet Giderleri)
-  const personelGiderleri = (employeesProp || []).filter(e => e.status === 'Aktif').reduce((s, e) => s + (e.salary || 0), 0);
-  // Other op expenses approximated from journal entries if available
-  const pazarlamaGiderleri = 0; // would come from journal entries
-  const genelYonetimGiderleri = 0;
-  const toplamFaaliyetGiderleri = personelGiderleri + pazarlamaGiderleri + genelYonetimGiderleri;
-
-  const faaliyetKari = brutKar - toplamFaaliyetGiderleri;
-  const faaliyetKarMarji = netSatislar > 0 ? (faaliyetKari / netSatislar * 100) : 0;
-
-  // Financial items
-  const finansmanGiderleri = 0;
-  const diger = 0;
-  const vergionceKar = faaliyetKari + diger - finansmanGiderleri;
-  const vergiOrani = 0.20; // %20 kurumlar vergisi
-  const vergiKarsıligi = vergionceKar > 0 ? vergionceKar * vergiOrani : 0;
-  const netDonemKari = vergionceKar - vergiKarsıligi;
+  // Hesap tek kaynakta (utils/muhasebe/gelirTablosu.ts) — dönem süzgeci, brüt/iade/net satış,
+  // SMM, marjlar, personel gideri ve vergi bloğu oradan gelir (açıklama yorumları da taşındı).
+  const gt = gelirTablosu(orders, employeesProp, gtYear, gtMonth);
+  // Ekran sözleşmesi (para.ts): satır toplamları `ekranTutari` (kısmi toplam + "N kayıt tutarsız"
+  // notu; hiç bilinen yoksa NaN → '—'); türetmeler (net/kâr/vergi) NaN → '—'; marjlar null → '—'.
+  const brutSatislar = ekranTutari(gt.brutSatis);
+  const satisIadeleri = ekranTutari(gt.iade);
+  const netSatislar = gt.netSatis;
+  const satislarinMaliyeti = ekranTutari(gt.smm);
+  const brutKar = gt.brutKar;
+  const brutKarMarji = gt.brutKarMarji;          // number | null
+  const personelGiderleri = ekranTutari(gt.personel);
+  const pazarlamaGiderleri = gt.pazarlama;
+  const genelYonetimGiderleri = gt.genelYonetim;
+  const toplamFaaliyetGiderleri = ekranTutari(gt.faaliyetGideri);
+  const faaliyetKari = gt.faaliyetKari;
+  const faaliyetKarMarji = gt.faaliyetKarMarji;  // number | null
+  const finansmanGiderleri = gt.finansmanGideri;
+  const vergionceKar = gt.vergiOncesiKar;
+  const vergiKarsıligi = gt.vergiKarsiligi;
+  const netDonemKari = gt.netDonemKari;
 
   // Currency conversion
   //
@@ -83,23 +66,24 @@ export default function GelirTablosuTab({
   const kurYok = gelirCurrency !== 'TRY' && gecerliKur === null;
   // Tek kaynak (Faz 2 1/n): tlYaz = kurCevir + paraYaz; kur yoksa '—'.
   const fmt = (v: number) => tlYaz(v, { birim: gelirCurrency, rates: exchangeRates });
-  const fmtPct = (v: number) => `%${v.toFixed(1)}`;
+  // Marj bilinmiyorsa (ciro ≤ 0 ya da bir taraf bilinmiyor) '%0' DEĞİL '—'.
+  const fmtPct = (v: number | null) => v === null ? '—' : `%${v.toFixed(1)}`;
 
-  const rows: { label: string; value: number; indent?: number; bold?: boolean; separator?: boolean; isNeg?: boolean; pct?: number; highlight?: string }[] = [
-    { label: currentLanguage === 'tr' ? 'I. BRÜT SATIŞLAR' : 'I. GROSS SALES', value: brutSatislar, bold: true },
-    { label: currentLanguage === 'tr' ? '  Satış İadeleri ve İndirimleri (-)' : '  Sales Returns & Discounts (-)', value: -satisIadeleri, indent: 1, isNeg: true },
-    { label: currentLanguage === 'tr' ? 'II. NET SATIŞLAR' : 'II. NET SALES', value: netSatislar, bold: true, separator: true, highlight: 'blue' },
-    { label: currentLanguage === 'tr' ? 'III. SATIŞLARIN MALİYETİ (-)' : 'III. COST OF GOODS SOLD (-)', value: -satislarinMaliyeti, isNeg: true },
-    { label: currentLanguage === 'tr' ? 'IV. BRÜT SATIŞ KÂRI/ZARARI' : 'IV. GROSS PROFIT/LOSS', value: brutKar, bold: true, separator: true, pct: brutKarMarji, highlight: brutKar >= 0 ? 'green' : 'red' },
-    { label: currentLanguage === 'tr' ? 'V. FAALİYET GİDERLERİ (-)' : 'V. OPERATING EXPENSES (-)', value: -toplamFaaliyetGiderleri, isNeg: true },
-    { label: currentLanguage === 'tr' ? '  Personel Giderleri' : '  Payroll Expenses', value: -personelGiderleri, indent: 1, isNeg: true },
-    { label: currentLanguage === 'tr' ? '  Pazarlama, Satış ve Dağıtım Giderleri' : '  Marketing, Sales & Distribution', value: -pazarlamaGiderleri, indent: 1, isNeg: true },
-    { label: currentLanguage === 'tr' ? '  Genel Yönetim Giderleri' : '  General & Administrative', value: -genelYonetimGiderleri, indent: 1, isNeg: true },
-    { label: currentLanguage === 'tr' ? 'VI. FAALİYET KÂRI/ZARARI (EBIT)' : 'VI. OPERATING PROFIT/LOSS (EBIT)', value: faaliyetKari, bold: true, separator: true, pct: faaliyetKarMarji, highlight: faaliyetKari >= 0 ? 'green' : 'red' },
-    { label: currentLanguage === 'tr' ? 'VII. FİNANSMAN GİDERLERİ (-)' : 'VII. FINANCIAL EXPENSES (-)', value: -finansmanGiderleri, isNeg: true },
-    { label: currentLanguage === 'tr' ? 'VIII. VERGİ ÖNCESİ KÂR/ZARAR' : 'VIII. PRE-TAX PROFIT/LOSS', value: vergionceKar, bold: true, separator: true, highlight: vergionceKar >= 0 ? 'green' : 'red' },
-    { label: currentLanguage === 'tr' ? '  Kurumlar Vergisi Karşılığı (%20)' : '  Corporate Tax Provision (20%)', value: -vergiKarsıligi, indent: 1, isNeg: true },
-    { label: currentLanguage === 'tr' ? 'IX. NET DÖNEM KÂRI/ZARARI' : 'IX. NET PERIOD PROFIT/LOSS', value: netDonemKari, bold: true, separator: true, highlight: netDonemKari >= 0 ? 'emerald' : 'red' },
+  const rows: { label: string; value: number; indent?: number; bold?: boolean; separator?: boolean; isNeg?: boolean; pct?: number | null; highlight?: string }[] = [
+    { label: ac(currentLanguage).i_brut_satislar, value: brutSatislar, bold: true },
+    { label: ac(currentLanguage).satis_iadeleri_ve_indirimleri, value: -satisIadeleri, indent: 1, isNeg: true },
+    { label: ac(currentLanguage).ii_net_satislar, value: netSatislar, bold: true, separator: true, highlight: 'blue' },
+    { label: ac(currentLanguage).iii_satislarin_maliyeti, value: -satislarinMaliyeti, isNeg: true },
+    { label: ac(currentLanguage).iv_brut_satis_kari_zarari, value: brutKar, bold: true, separator: true, pct: brutKarMarji, highlight: Number.isFinite(brutKar) ? (brutKar >= 0 ? 'green' : 'red') : undefined },
+    { label: ac(currentLanguage).v_faaliyet_giderleri, value: -toplamFaaliyetGiderleri, isNeg: true },
+    { label: ac(currentLanguage).personel_giderleri, value: -personelGiderleri, indent: 1, isNeg: true },
+    { label: ac(currentLanguage).pazarlama_satis_ve_dagitim_giderleri, value: -pazarlamaGiderleri, indent: 1, isNeg: true },
+    { label: ac(currentLanguage).genel_yonetim_giderleri, value: -genelYonetimGiderleri, indent: 1, isNeg: true },
+    { label: ac(currentLanguage).vi_faaliyet_kari_zarari_ebit, value: faaliyetKari, bold: true, separator: true, pct: faaliyetKarMarji, highlight: Number.isFinite(faaliyetKari) ? (faaliyetKari >= 0 ? 'green' : 'red') : undefined },
+    { label: ac(currentLanguage).vii_finansman_giderleri, value: -finansmanGiderleri, isNeg: true },
+    { label: ac(currentLanguage).viii_vergi_oncesi_kar_zarar, value: vergionceKar, bold: true, separator: true, highlight: Number.isFinite(vergionceKar) ? (vergionceKar >= 0 ? 'green' : 'red') : undefined },
+    { label: ac(currentLanguage).kurumlar_vergisi_karsiligi_20, value: -vergiKarsıligi, indent: 1, isNeg: true },
+    { label: ac(currentLanguage).ix_net_donem_kari_zarari, value: netDonemKari, bold: true, separator: true, highlight: Number.isFinite(netDonemKari) ? (netDonemKari >= 0 ? 'emerald' : 'red') : undefined },
   ];
 
   const highlightColors: Record<string, string> = {
@@ -144,7 +128,7 @@ export default function GelirTablosuTab({
           )}
           {kurYok && (
             <span className="ml-2 text-[10px] text-amber-600 font-medium">
-              {currentLanguage === 'tr' ? 'Guncel kur alinamadi' : 'Exchange rate unavailable'}
+              {ac(currentLanguage).guncel_kur_alinamadi}
             </span>
           )}
         </div>
@@ -158,7 +142,8 @@ export default function GelirTablosuTab({
               ['Kalem', 'Tutar', 'Marj %'],
               ...rows.map(r => {
                 const cevrilen = kurCevir(r.value, gelirCurrency, exchangeRates);
-                return [r.label.trim(), cevrilen === null ? '' : cevrilen.toFixed(2), r.pct ? r.pct.toFixed(1) + '%' : ''];
+                // Marj bilinmiyorsa (null) hücre boş; GERÇEK %0 marj '0.0%' yazar (eski `r.pct ?` 0'ı da yutuyordu).
+                return [r.label.trim(), cevrilen === null ? '' : cevrilen.toFixed(2), typeof r.pct === 'number' ? r.pct.toFixed(1) + '%' : ''];
               })
             ];
             const csv = csvRows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
@@ -169,26 +154,38 @@ export default function GelirTablosuTab({
             a.click(); URL.revokeObjectURL(url);
           }}
           disabled={kurYok}
-          title={kurYok ? (currentLanguage === 'tr' ? 'Guncel kur alinamadigi icin disa aktarilamiyor' : 'Cannot export: exchange rate unavailable') : undefined}
+          title={kurYok ? (ac(currentLanguage).guncel_kur_alinamadigi_icin_disa_aktarilamiyor) : undefined}
           className="apple-button-secondary px-4 py-2 text-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-          CSV {currentLanguage === 'tr' ? 'İndir' : 'Export'}
+          CSV {ac(currentLanguage).indir}
         </button>
       </div>
 
       {/* Income Statement Table */}
       <div className="apple-card overflow-hidden">
         <div className="p-5 border-b border-gray-100">
-          <h2 className="font-black text-gray-800 text-lg">{currentLanguage === 'tr' ? 'GELİR TABLOSU' : 'INCOME STATEMENT'}</h2>
+          <h2 className="font-black text-gray-800 text-lg">{ac(currentLanguage).gelir_tablosu}</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            {monthNames[gtMonth - 1]} {gtYear} · {periodOrders.length} {oc(currentLanguage).siparis} · {sym === '₺' ? 'TRY' : gelirCurrency}
+            {monthNames[gtMonth - 1]} {gtYear} · {gt.siparisSayisi} {oc(currentLanguage).siparis} · {sym === '₺' ? 'TRY' : gelirCurrency}
           </p>
+          {/* Kısmi toplam basıldıysa kaç kaydın eksik olduğunu SÖYLE (para.ts ekran sözleşmesi).
+              iade.bilinmeyen brutSatis.bilinmeyen'in alt kümesi — ayrıca sayılmaz. */}
+          {(gt.brutSatis.bilinmeyen > 0 || gt.smm.bilinmeyen > 0 || gt.personel.bilinmeyen > 0 || gt.tarihsiz > 0) && (
+            <p className="text-xs text-amber-600 mt-1">
+              {[
+                gt.brutSatis.bilinmeyen > 0 ? (currentLanguage === 'tr' ? `${gt.brutSatis.bilinmeyen} sipariş tutarsız` : `${gt.brutSatis.bilinmeyen} orders without amount`) : null,
+                gt.smm.bilinmeyen > 0 ? (currentLanguage === 'tr' ? `${gt.smm.bilinmeyen} sipariş maliyetsiz` : `${gt.smm.bilinmeyen} orders without cost`) : null,
+                gt.personel.bilinmeyen > 0 ? (currentLanguage === 'tr' ? `${gt.personel.bilinmeyen} personel maaşsız` : `${gt.personel.bilinmeyen} employees without salary`) : null,
+                gt.tarihsiz > 0 ? (currentLanguage === 'tr' ? `${gt.tarihsiz} sipariş tarihsiz` : `${gt.tarihsiz} undated orders`) : null,
+              ].filter(Boolean).join(' · ')}
+            </p>
+          )}
         </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50/60">
-              <th className="text-left py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{currentLanguage === 'tr' ? 'Kalem' : 'Line Item'}</th>
+              <th className="text-left py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{ac(currentLanguage).kalem}</th>
               <th className="text-right py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{sym === '₺' ? 'TRY' : gelirCurrency}</th>
               <th className="text-right py-3 px-5 text-xs font-bold text-gray-500 uppercase tracking-wide">{oc(currentLanguage).marj}</th>
             </tr>
@@ -208,7 +205,7 @@ export default function GelirTablosuTab({
                   {fmt(row.value)}
                 </td>
                 <td className="py-2.5 px-5 text-right text-xs font-mono text-gray-400">
-                  {row.pct !== undefined ? (
+                  {typeof row.pct === 'number' ? (
                     <span className={`font-bold ${row.pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>{fmtPct(row.pct)}</span>
                   ) : '—'}
                 </td>
@@ -221,10 +218,11 @@ export default function GelirTablosuTab({
       {/* KPI summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: currentLanguage === 'tr' ? 'Net Satışlar' : 'Net Sales', value: fmt(netSatislar), color: '#3b82f6' },
-          { label: currentLanguage === 'tr' ? 'Brüt Kâr Marjı' : 'Gross Margin', value: fmtPct(brutKarMarji), color: brutKarMarji >= 30 ? '#10b981' : brutKarMarji >= 15 ? '#f59e0b' : '#ef4444' },
-          { label: currentLanguage === 'tr' ? 'Faaliyet Kârı' : 'Operating Profit', value: fmt(faaliyetKari), color: faaliyetKari >= 0 ? '#10b981' : '#ef4444' },
-          { label: currentLanguage === 'tr' ? 'Net Dönem Kârı' : 'Net Profit', value: fmt(netDonemKari), color: netDonemKari >= 0 ? '#065f46' : '#b91c1c' },
+          { label: ac(currentLanguage).net_satislar, value: fmt(netSatislar), color: '#3b82f6' },
+          // Bilinmeyen (null/NaN) değer 'zarar' kırmızısı ALMAZ — nötr gri.
+          { label: ac(currentLanguage).brut_kar_marji, value: fmtPct(brutKarMarji), color: brutKarMarji === null ? '#9ca3af' : brutKarMarji >= 30 ? '#10b981' : brutKarMarji >= 15 ? '#f59e0b' : '#ef4444' },
+          { label: ac(currentLanguage).faaliyet_kari, value: fmt(faaliyetKari), color: !Number.isFinite(faaliyetKari) ? '#9ca3af' : faaliyetKari >= 0 ? '#10b981' : '#ef4444' },
+          { label: ac(currentLanguage).net_donem_kari, value: fmt(netDonemKari), color: !Number.isFinite(netDonemKari) ? '#9ca3af' : netDonemKari >= 0 ? '#065f46' : '#b91c1c' },
         ].map((kpi, i) => (
           <div key={i} className="apple-card p-4 text-center">
             <div className="text-lg font-black" style={{ color: kpi.color }}>{kpi.value}</div>
@@ -233,9 +231,9 @@ export default function GelirTablosuTab({
         ))}
       </div>
 
-      {periodOrders.length === 0 && (
+      {gt.siparisSayisi === 0 && (
         <div className="apple-card p-10 text-center text-gray-400 text-sm">
-          {currentLanguage === 'tr' ? 'Seçilen dönemde sipariş bulunamadı.' : 'No orders found for the selected period.'}
+          {ac(currentLanguage).secilen_donemde_siparis_bulunamadi}
         </div>
       )}
     </motion.div>

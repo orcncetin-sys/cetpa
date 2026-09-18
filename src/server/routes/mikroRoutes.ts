@@ -45,6 +45,7 @@ import {
 import { pgServerTimestamp } from '../pgShim.js';
 import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
 import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
+import { bilinenSayi } from '../../utils/para.js';
 
 
 /** Bu rota grubunun server.ts'ten ihtiyac duydugu HER SEY - acik liste. */
@@ -1449,7 +1450,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             // kullanabiliyor (seri boş). evraktip'i de anahtara katmazsak
             // bir satış faturasına alış satırının KDV'si bağlanabilir.
             'AND sat.sth_evraktip = CASE WHEN cha.cha_tip = 0 THEN 4 ELSE 3 END',
-    secim: 'cha.*, ISNULL(sat.kdv, ISNULL(cha.cha_meblag - cha.cha_aratoplam, 0)) AS kdvTutari, ISNULL(sat.matrah, ISNULL(cha.cha_aratoplam, 0)) AS matrah, sat.vergiPntr, sat.oranSayisi',
+    // KDV/MATRAH ZINCIRI: satir JOIN'i (sat.*) -> baslik farki (cha_meblag - cha_aratoplam) -> NULL.
+    // SON `0` YEDEGI KALDIRILDI (Faz 3 2/n, 2026-09-18): ISNULL(..., 0) ile "satirlari da
+    // baslik aratoplami da okunamayan" fatura SQL'DE ₺0 KDV'ye zorlanıyordu; istemci (hook)
+    // bunu gercek bir sifir sanip Ba/Bs esigine, KDV Analizi'ne ve Sube P&L'ine yaziyordu.
+    // Artik NULL iner ve mapMikroFatura onu NaN (= bilinmiyor) yapar - ekranda '—' + sayac.
+    // Zincirin KENDISI durur: satir yoksa baslik farkindan turetme davranisi aynen korunur.
+    secim: 'cha.*, ISNULL(sat.kdv, cha.cha_meblag - cha.cha_aratoplam) AS kdvTutari, ISNULL(sat.matrah, cha.cha_aratoplam) AS matrah, sat.vergiPntr, sat.oranSayisi',
     siralama: 'cha.cha_Guid',
     collection: 'mikroFaturalar', label: 'Mikro Fatura Listesi',
     tarihKolonu: 'cha.cha_tarihi',
@@ -1482,8 +1489,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     ekKosul: '(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6)) AND ISNULL(cha.cha_iptal, 0) = 0',
     iptalKolonu: 'cha_iptal',
     postProcess: async (rows) => {
-      const kdvli = rows.filter(r => Number(r.kdvTutari ?? 0) > 0).length;
-      return `${kdvli}/${rows.length} faturada KDV eşleşti`;
+      // Tanilama sayaci: `Number(r.kdvTutari ?? 0) > 0` hem NULL'u hem mesru ₺0'i "eslesmedi"
+      // sayiyordu ve ikisini AYIRT EDEMIYORDU. `bilinenSayi` ile uc kova ayrilir: KDV'si okunan
+      // (0 dahil), KDV'si 0 OLAN, KDV'si hic okunamayan (NULL -> istemcide NaN).
+      const bilinen  = rows.filter(r => bilinenSayi(r.kdvTutari)).length;
+      const sifir    = rows.filter(r => bilinenSayi(r.kdvTutari) && Number(r.kdvTutari) === 0).length;
+      const okunmaz  = rows.length - bilinen;
+      return `${bilinen}/${rows.length} faturada KDV okundu` +
+             (sifir > 0 ? ` (${sifir}'i ₺0)` : '') +
+             (okunmaz > 0 ? ` · ${okunmaz} faturada KDV BİLİNMİYOR` : '');
     },
   });
 

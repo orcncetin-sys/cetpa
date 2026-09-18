@@ -2,16 +2,28 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Download, Search, Plus, Eye, Edit2, Trash2, Upload, X, Save } from 'lucide-react';
 import { type Customer } from '../../types';
 import { paraYaz } from '../../utils/currency';
+import { bilinenSayi } from '../../utils/para';
+import { bakiyeDurumu, bakiyeSayisi } from '../../utils/muhasebe/cariImport';
 import { SortHeader, exportCSV, type AccountingT } from './shared';
 import CariEkstrePanel from '../CariEkstrePanel';
 import { oc } from '../../i18n/ortak';
+import { ac } from '../../i18n/accounting';
 
+/**
+ * `creditLimit` / `balance` null = BİLİNMİYOR (0 DEĞİL) — 2026-09-18 delta turu.
+ * Eskiden ikisi de `number`dı ve düzenle düğmesi formu `c.creditLimit || 0` ile dolduruyordu:
+ * limiti bilinmeyen (Mikro'dan gelen, alanı hiç olmayan) bir cariyi yalnız telefonu düzeltmek
+ * için açıp kaydetmek `leads/<id>.creditLimit = 0` yazıyor ve bilinmeyen limit KALICI sahte
+ * ₺0'a dönüyordu (cariEkstreOnay.krediLimiti artık null yerine 0 döner, kart '—' yerine ₺0
+ * basar, export boş yerine 0 yazar). null → alan payload'a hiç girmez, mevcut değer ezilmez.
+ */
 type CustomerForm = {
   name: string; company: string; email: string; phone: string; address: string;
-  taxNo: string; taxOffice: string; notes: string; creditLimit: number; balance: number;
+  taxNo: string; taxOffice: string; notes: string; creditLimit: number | null; balance: number | null;
   riskGroup: 'Düşük' | 'Orta' | 'Yüksek';
 };
 type MusteriSortKey = 'name' | 'company' | 'phone' | 'balance' | 'riskGroup';
+/** bakiye: NaN = bilinmiyor (DekontModal '—' basar; Mikro payload'ına girmez). */
 type DekontHedef = { cariKod: string; ad: string; bakiye: number; id: string };
 
 interface MusterilerTabProps {
@@ -120,7 +132,7 @@ export default function MusterilerTab({
                   <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="py-2.5 px-3 font-medium text-gray-800">
                       <button onClick={() => setEkstreMusteri(c)} className="text-left hover:text-[#ff4000] hover:underline transition-colors block"
-                        title={currentLanguage === 'tr' ? 'Cari ekstre / hareketleri gör' : 'View account statement'}>
+                        title={ac(currentLanguage).cari_ekstre_hareketleri_gor}>
                         {c.name}
                       </button>
                       {(() => { const r = cariRol(c); return r ? <span className={`inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded ${r.cls}`}>{r.label}</span> : null; })()}
@@ -129,7 +141,7 @@ export default function MusterilerTab({
                     <td className="py-2.5 px-3 text-gray-500 hidden lg:table-cell text-xs">{c.email || '—'}</td>
                     <td className="py-2.5 px-3 text-gray-500 hidden md:table-cell text-xs">{c.phone || '—'}</td>
                     <td className="py-2.5 px-3 text-right hidden sm:table-cell">
-                      <span className={`text-xs font-bold ${(c.balance || 0) > 0 ? 'text-red-600' : (c.balance || 0) < 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                      <span className={`text-xs font-bold ${bakiyeDurumu(c.balance) === 'borclu' ? 'text-red-600' : bakiyeDurumu(c.balance) === 'alacakli' ? 'text-green-600' : 'text-gray-400'}`}>
                         {paraYaz(c.balance, { ondalik: 0 })}
                       </span>
                     </td>
@@ -150,13 +162,19 @@ export default function MusterilerTab({
                             tür/yön/tutar/tarih/açıklama girilir, kayıt sonrası
                             bakiye önizlenir. */}
                         {(() => {
+                          // Burada BİLEREK `??` var, `||` DEĞİL (cariImport.cariKodu ile kasıtlı ayrım):
+                          // dekont Mikro'ya YAZAR, Mikro cari kodu ≠ vergi no. Eşleme mikroCariKod'u hep
+                          // string ('' dahil) yazdığı için zincir taxNo'ya düşmez ve kodu bilinmeyen caride
+                          // düğme HİÇ çıkmaz — dış sisteme tahmin kod gitmez (CLAUDE.md: Mikro payload'ında
+                          // varsayılan yok). Salt-okunur ekstre paneli (aşağıda) `||` ile taxNo'ya düşebilir,
+                          // çünkü orası yalnız sorgular; yanlış kod boş panel verir, sahte kayıt değil.
                           const cariKod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
                             ?? (c as unknown as { code?: string }).code
                             ?? c.taxNo;
                           if (!cariKod) return null; // cari kod yoksa Mikro'ya gidemez
                           return (
                             <button
-                              onClick={() => setDekontHedef({ cariKod, ad: c.name, bakiye: c.balance || 0, id: c.id })}
+                              onClick={() => setDekontHedef({ cariKod, ad: c.name, bakiye: bakiyeSayisi(c.balance), id: c.id })}
                               title="Mikro'ya dekont/masraf gir"
                               className="p-2.5 -m-1 hover:bg-gray-100 rounded-lg transition-colors text-gray-600 flex flex-col items-center"
                             >
@@ -166,7 +184,9 @@ export default function MusterilerTab({
                           );
                         })()}
                         <button onClick={() => setEkstreMusteri(c)} title={oc(currentLanguage).cari_ekstre_hareketleri} className="p-2.5 -m-1 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                        <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: c.creditLimit || 0, balance: c.balance || 0, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} title={oc(currentLanguage).duzenle} className="p-2.5 -m-1 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
+                        {/* `creditLimit || 0` / `balance || 0` YOK: bilinmeyen limit/bakiye 0 DEĞİL bilinmiyordur
+                            (bkz. CustomerForm notu) — form boş açılır, kaydetme alanı payload'a koymaz. */}
+                        <button onClick={() => { setEditingCustomer(c); setCustomerForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '', address: c.address || '', taxNo: c.taxNo || '', taxOffice: c.taxOffice || '', notes: c.notes || '', creditLimit: bilinenSayi(c.creditLimit) ? Number(c.creditLimit) : null, balance: bilinenSayi(c.balance) ? Number(c.balance) : null, riskGroup: c.riskGroup || 'Düşük' }); setShowCustomerModal(true); }} title={oc(currentLanguage).duzenle} className="p-2.5 -m-1 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                         <button onClick={() => deleteCustomer(c.id)} className="p-2.5 -m-1 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
                       </div>
                     </td>
@@ -196,7 +216,7 @@ export default function MusterilerTab({
                     || (ekstreMusteri as unknown as { code?: string }).code
                     || ekstreMusteri.taxNo || '';
                   return cariKod
-                    ? <CariEkstrePanel currentLanguage={currentLanguage} cariKod={cariKod} balance={ekstreMusteri.balance || 0} customerName={ekstreMusteri.name} />
+                    ? <CariEkstrePanel currentLanguage={currentLanguage} cariKod={cariKod} balance={ekstreMusteri.balance} customerName={ekstreMusteri.name} />
                     : <CariEkstrePanel currentLanguage={currentLanguage} leadId={ekstreMusteri.id} customerName={ekstreMusteri.name} />;
                 })()}
               </div>
@@ -237,11 +257,13 @@ export default function MusterilerTab({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).kredi_limiti}</label>
-                      <input type="number" value={customerForm.creditLimit} onChange={e => setCustomerForm(prev => ({ ...prev, creditLimit: Number(e.target.value) }))} placeholder="500000" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                      {/* Boş alan = BİLİNMİYOR, ₺0 değil: `Number('')` 0 ettiği için eski sürümde alanı
+                          boşaltmak da sahte bir sıfır yazıyordu. */}
+                      <input type="number" value={customerForm.creditLimit ?? ''} onChange={e => setCustomerForm(prev => ({ ...prev, creditLimit: e.target.value === '' ? null : Number(e.target.value) }))} placeholder={ac(currentLanguage).bos_bilinmiyor_2} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).acik_bakiye}</label>
-                      <input type="number" value={customerForm.balance} onChange={e => setCustomerForm(prev => ({ ...prev, balance: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                      <input type="number" value={customerForm.balance ?? ''} onChange={e => setCustomerForm(prev => ({ ...prev, balance: e.target.value === '' ? null : Number(e.target.value) }))} placeholder={ac(currentLanguage).bos_bilinmiyor_2} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                     </div>
                   </div>
                   <div className="mt-3">

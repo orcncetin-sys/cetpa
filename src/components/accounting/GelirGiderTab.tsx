@@ -1,8 +1,12 @@
 import { motion } from 'motion/react';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { formatInCurrency, paraYaz } from '../../utils/currency';
+import { sayiSirala } from '../../utils/para';
+import { cubukYuzdesi } from '../../utils/muhasebe/gelirGider';
+import { gunBasi } from '../../utils/zaman';
 import { formatTRY, type AccountingT } from './shared';
 import { oc } from '../../i18n/ortak';
+import { ac } from '../../i18n/accounting';
 
 /**
  * Kur ETİKETİ ("1 USD = ₺41,20"). Kur yoksa RAKAM BASMAZ.
@@ -18,7 +22,8 @@ const kurEtiketi = (
   currentLanguage: string,
 ): string => {
   const kur = exchangeRates?.[currency];
-  if (!kur || !isFinite(kur) || kur <= 0) {
+  // `Number.isFinite`, global `isFinite` DEĞİL (CLAUDE.md): global sürüm null/'''i 0'a zorlar.
+  if (!kur || !Number.isFinite(kur) || kur <= 0) {
     return oc(currentLanguage).kur_bekleniyor;
   }
   return `1 ${currency} = ${paraYaz(kur)}`;
@@ -52,6 +57,11 @@ interface GelirGiderTabProps {
   netKar: number;
   monthlyData: MonthlyDatum[];
   maxChartVal: number;
+  /** Tutarı bilinmeyen (toplama girmeyen) gelir / gider kaydı adedi — KPI altı not. */
+  gelirTutarsiz: number;
+  giderTutarsiz: number;
+  /** Tarihi çözülemeyen kayıt adedi — hiçbir döneme dahil edilmedi. */
+  tarihsiz: number;
 }
 
 export default function GelirGiderTab({
@@ -59,7 +69,11 @@ export default function GelirGiderTab({
   gelirDateFrom, setGelirDateFrom, gelirDateTo, setGelirDateTo, gelirUseRange, setGelirUseRange,
   gelirCurrency, setGelirCurrency, exchangeRates, setDrillDown,
   gelirBreakdown, giderBreakdown, toplamGelir, toplamGider, netKar, monthlyData, maxChartVal,
+  gelirTutarsiz, giderTutarsiz, tarihsiz,
 }: GelirGiderTabProps) {
+  // NaN net ("bir kayıt bile bilinmiyor") `netKar >= 0` kıyasında false döner ve eskiden
+  // sessizce 'Zarar' rozeti + kırmızı basardı; nötr gri + '—' + not için ayrı bayrak.
+  const netBilinmiyor = !Number.isFinite(netKar);
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
       {/* Filters */}
@@ -78,9 +92,14 @@ export default function GelirGiderTab({
             setGelirDateFrom(e.target.value);
             if (e.target.value) {
               setGelirUseRange(true);
-              const d = new Date(e.target.value);
-              setGelirMonth(d.getMonth() + 1);
-              setGelirYear(d.getFullYear());
+              // `new Date(string)` DEĞİL (zaman.ts): tarih-only string UTC gece yarısına sabitlenir,
+              // UTC batısındaki tarayıcıda ay bir gün kayık okunurdu. Hesap katmanı (gelirGider.ts)
+              // YEREL gün anahtarı kullanıyor — seçici de aynı takvimde kalmalı. Çözülemezse dokunma.
+              const d = gunBasi(e.target.value);
+              if (d) {
+                setGelirMonth(d.getMonth() + 1);
+                setGelirYear(d.getFullYear());
+              }
             }
           }}
           className="apple-input py-2 px-3"
@@ -101,6 +120,7 @@ export default function GelirGiderTab({
           </button>
         )}
       </div>
+      {tarihsiz > 0 && <p className="text-[10px] text-amber-600 px-1">{tarihsiz} {ac(currentLanguage).kayit_tarihsiz_hicbir_doneme_dahil_edilmedi}</p>}
       {/* Currency switcher + KPI Cards */}
       <div className="flex items-center gap-1 apple-card px-3 py-2 w-fit">
         <span className="text-xs text-gray-400 font-medium mr-1">{oc(currentLanguage).para_birimi_2}</span>
@@ -120,7 +140,7 @@ export default function GelirGiderTab({
         )}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Gelir Detayı' : 'Income Detail', rows: Object.entries(gelirBreakdown).sort(([,a],[,b])=>(b as number)-(a as number)).map(([hesap,tutar])=>({ label: hesap, value: formatInCurrency(tutar as number, gelirCurrency, exchangeRates) })), total: formatInCurrency(toplamGelir, gelirCurrency, exchangeRates) })} className="apple-card p-4 text-left cursor-pointer group">
+        <button onClick={() => setDrillDown({ title: ac(currentLanguage).gelir_detayi, rows: Object.entries(gelirBreakdown).sort(([,a],[,b]) => sayiSirala(a, b, true)).map(([hesap,tutar])=>({ label: hesap, value: formatInCurrency(tutar, gelirCurrency, exchangeRates) })), total: formatInCurrency(toplamGelir, gelirCurrency, exchangeRates) })} className="apple-card p-4 text-left cursor-pointer group">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-gray-500 font-medium">{t.totalIncome}</span>
             <TrendingUp size={16} className="text-green-500" />
@@ -128,9 +148,10 @@ export default function GelirGiderTab({
           <div className="text-2xl font-bold text-green-600">
             {formatInCurrency(toplamGelir, gelirCurrency, exchangeRates)}
           </div>
-          <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{currentLanguage === 'tr' ? 'Detay için tıkla · Mikro satış faturaları dahil' : 'Click for details · includes Mikro sales invoices'}</div>
+          {gelirTutarsiz > 0 && <p className="text-[10px] text-amber-600">{gelirTutarsiz} {ac(currentLanguage).kayit_tutarsiz_toplama_girmedi}</p>}
+          <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{ac(currentLanguage).detay_icin_tikla_mikro_satis_faturalari_dahil}</div>
         </button>
-        <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Gider Detayı' : 'Expense Detail', rows: Object.entries(giderBreakdown).sort(([,a],[,b])=>(b as number)-(a as number)).map(([hesap,tutar])=>({ label: hesap, value: formatInCurrency(tutar as number, gelirCurrency, exchangeRates) })), total: formatInCurrency(toplamGider, gelirCurrency, exchangeRates) })} className="apple-card p-4 text-left cursor-pointer group">
+        <button onClick={() => setDrillDown({ title: ac(currentLanguage).gider_detayi, rows: Object.entries(giderBreakdown).sort(([,a],[,b]) => sayiSirala(a, b, true)).map(([hesap,tutar])=>({ label: hesap, value: formatInCurrency(tutar, gelirCurrency, exchangeRates) })), total: formatInCurrency(toplamGider, gelirCurrency, exchangeRates) })} className="apple-card p-4 text-left cursor-pointer group">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-gray-500 font-medium">{t.totalExpense}</span>
             <TrendingDown size={16} className="text-red-500" />
@@ -138,18 +159,20 @@ export default function GelirGiderTab({
           <div className="text-2xl font-bold text-red-600">
             {formatInCurrency(toplamGider, gelirCurrency, exchangeRates)}
           </div>
-          <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{currentLanguage === 'tr' ? 'Detay için tıkla · yalnız elle girilen kayıtlar (Mikro alışı stok, gider değil)' : 'Click for details · manual entries only (Mikro purchases post to inventory, not expense)'}</div>
+          {giderTutarsiz > 0 && <p className="text-[10px] text-amber-600">{giderTutarsiz} {ac(currentLanguage).kayit_tutarsiz_toplama_girmedi}</p>}
+          <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{ac(currentLanguage).detay_icin_tikla_yalniz_elle_girilen_kayitlar_mi}</div>
         </button>
-        <button onClick={() => setDrillDown({ title: currentLanguage === 'tr' ? 'Net Kâr/Zarar Özeti' : 'Net Profit/Loss Summary', rows: [{ label: currentLanguage === 'tr' ? 'Toplam Gelir' : 'Total Income', value: formatInCurrency(toplamGelir, gelirCurrency, exchangeRates) }, { label: currentLanguage === 'tr' ? 'Toplam Gider' : 'Total Expense', value: formatInCurrency(toplamGider, gelirCurrency, exchangeRates) }, { label: 'Net', badge: netKar >= 0 ? 'Kâr' : 'Zarar', badgeColor: netKar >= 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600', value: formatInCurrency(netKar, gelirCurrency, exchangeRates) }] })} className="apple-card p-4 text-left cursor-pointer group">
+        <button onClick={() => setDrillDown({ title: ac(currentLanguage).net_kar_zarar_ozeti, rows: [{ label: ac(currentLanguage).totalIncome, value: formatInCurrency(toplamGelir, gelirCurrency, exchangeRates) }, { label: ac(currentLanguage).totalExpense, value: formatInCurrency(toplamGider, gelirCurrency, exchangeRates) }, { label: 'Net', badge: netBilinmiyor ? '—' : netKar >= 0 ? 'Kâr' : 'Zarar', badgeColor: netBilinmiyor ? 'bg-gray-100 text-gray-500' : netKar >= 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600', value: formatInCurrency(netKar, gelirCurrency, exchangeRates) }] })} className="apple-card p-4 text-left cursor-pointer group">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-gray-500 font-medium">{t.netProfit}</span>
-            <span className={`text-base font-black ${netKar >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+            <span className={`text-base font-black ${netBilinmiyor ? 'text-gray-400' : netKar >= 0 ? 'text-green-500' : 'text-red-500'}`}>
               {gelirCurrency === 'USD' ? '$' : gelirCurrency === 'EUR' ? '€' : '₺'}
             </span>
           </div>
-          <div className={`text-2xl font-bold ${netKar >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+          <div className={`text-2xl font-bold ${netBilinmiyor ? 'text-gray-400' : netKar >= 0 ? 'text-green-600' : 'text-red-600'}`}>
             {formatInCurrency(netKar, gelirCurrency, exchangeRates)}
           </div>
+          {netBilinmiyor && <p className="text-[10px] text-amber-600">{ac(currentLanguage).net_hesaplanamadi_tutarsiz_kayit_var}</p>}
           <div className="text-[10px] text-gray-300 mt-1 group-hover:text-gray-400 transition-colors">{oc(currentLanguage).detay_icin_tikla}</div>
         </button>
       </div>
@@ -158,27 +181,39 @@ export default function GelirGiderTab({
         <h3 className="font-semibold text-gray-800 mb-4">{t.annualChart(gelirYear)}</h3>
         <div className="overflow-x-auto">
           <div className="flex items-end gap-2 min-w-[600px] h-48 px-2">
-            {monthlyData.map((d, i) => (
+            {monthlyData.map((d, i) => {
+              // Yükseklik hesabı tek kaynakta (utils/muhasebe/gelirGider.cubukYuzdesi): null =
+              // o ayın tutarı BİLİNMİYOR. Eskiden `(NaN / tavan) * 100` → `height: "NaN%"` (tarayıcı
+              // yok sayar) + `minHeight: 0` çıkıyor, çubuk HİÇ çizilmiyordu; tutarı okunamayan ay
+              // hareketsiz ayla aynı görünüyordu. DashboardPage'in 7 günlük eğiliminde verilen
+              // karar burada da: gri taban çubuğu + başlıkta '—'.
+              const gelirYuzde = cubukYuzdesi(d.gelir, maxChartVal);
+              const giderYuzde = cubukYuzdesi(d.gider, maxChartVal);
+              return (
               <div key={i} className="flex-1 flex flex-col items-center gap-1">
                 <div className="w-full flex items-end justify-center gap-0.5 h-36">
                   <div
-                    className="flex-1 bg-green-400 rounded-t-sm transition-all"
-                    style={{ height: `${maxChartVal > 0 ? (d.gelir / maxChartVal) * 100 : 0}%`, minHeight: d.gelir > 0 ? 4 : 0 }}
+                    className={`flex-1 rounded-t-sm transition-all ${gelirYuzde === null ? 'bg-gray-300' : 'bg-green-400'}`}
+                    style={{ height: `${gelirYuzde ?? 4}%`, minHeight: gelirYuzde === null || d.gelir > 0 ? 4 : 0 }}
                     title={`${t.income}: ${formatTRY(d.gelir)}`}
                   />
                   <div
-                    className="flex-1 bg-red-400 rounded-t-sm transition-all"
-                    style={{ height: `${maxChartVal > 0 ? (d.gider / maxChartVal) * 100 : 0}%`, minHeight: d.gider > 0 ? 4 : 0 }}
+                    className={`flex-1 rounded-t-sm transition-all ${giderYuzde === null ? 'bg-gray-300' : 'bg-red-400'}`}
+                    style={{ height: `${giderYuzde ?? 4}%`, minHeight: giderYuzde === null || d.gider > 0 ? 4 : 0 }}
                     title={`${t.expense}: ${formatTRY(d.gider)}`}
                   />
                 </div>
                 <span className="text-[10px] text-gray-500">{d.month.slice(0, 3)}</span>
               </div>
-            ))}
+              );
+            })}
           </div>
-          <div className="flex gap-4 mt-2 justify-center">
+          <div className="flex gap-4 mt-2 justify-center flex-wrap">
             <div className="flex items-center gap-1.5 text-xs text-gray-500"><div className="w-3 h-3 rounded-sm bg-green-400" /> {t.income}</div>
             <div className="flex items-center gap-1.5 text-xs text-gray-500"><div className="w-3 h-3 rounded-sm bg-red-400" /> {t.expense}</div>
+            {monthlyData.some(d => !Number.isFinite(d.gelir) || !Number.isFinite(d.gider)) && (
+              <div className="flex items-center gap-1.5 text-xs text-gray-500"><div className="w-3 h-3 rounded-sm bg-gray-300" /> {ac(currentLanguage).gri_tutar_bilinmiyor}</div>
+            )}
           </div>
         </div>
       </div>

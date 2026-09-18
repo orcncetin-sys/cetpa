@@ -2,6 +2,7 @@ import { motion } from 'motion/react';
 import { TrendingDown, TrendingUp, ArrowUpDown, Wallet, CheckCircle, AlertCircle, Search, Download } from 'lucide-react';
 import { SortHeader, formatTRY, exportCSV, type AccountingT } from './shared';
 import { oc } from '../../i18n/ortak';
+import { ac } from '../../i18n/accounting';
 
 type MizanRow = { hesap: string; borc: number; alacak: number; borcBakiye: number; alacakBakiye: number };
 type MizanSortKey = 'hesap' | 'borc' | 'alacak' | 'borcBakiye' | 'alacakBakiye';
@@ -12,7 +13,10 @@ interface MizanTabProps {
   currentLanguage: string;
   mizanRows: MizanRow[];
   mizanTotals: { borc: number; alacak: number; borcBakiye: number; alacakBakiye: number };
-  mizanDengeli: boolean;
+  /** null = bir taraf bilinmeyen tutar içeriyor; ne "Dengeli" ne "Dengesiz" rozeti verilir. */
+  mizanDengeli: boolean | null;
+  /** Bilinmeyen tutar sayaçlarının metni ("N yevmiye kaydının tutarı bilinmiyor · ..."); yoksa null. */
+  mizanNotu: string | null;
   hasMikroMizan: boolean;
   kpiCurrency: 'TRY' | 'USD' | 'EUR';
   setKpiCurrency: (c: 'TRY' | 'USD' | 'EUR') => void;
@@ -27,11 +31,12 @@ interface MizanTabProps {
 }
 
 export default function MizanTab({
-  t, currentLanguage, mizanRows, mizanTotals, mizanDengeli, hasMikroMizan,
+  t, currentLanguage, mizanRows, mizanTotals, mizanDengeli, mizanNotu, hasMikroMizan,
   kpiCurrency, setKpiCurrency, formatConv, setDrillDown,
   mizanSearch, setMizanSearch, mizanSortKey, mizanSortDir, toggleMizanSort, displayedMizan,
 }: MizanTabProps) {
-  const CurrencyPicker = () => (
+  // Düz fonksiyon (bileşen değil): render içinde bileşen tanımlamak her render'da yeniden bağlar.
+  const currencyPicker = () => (
     <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
       {(['TRY', 'USD', 'EUR'] as const).map(c => (
         <button key={c} onClick={e => { e.stopPropagation(); setKpiCurrency(c); }}
@@ -51,7 +56,7 @@ export default function MizanTab({
             <div className="w-8 h-8 rounded-xl bg-red-100 flex items-center justify-center">
               <TrendingDown size={15} className="text-red-600" />
             </div>
-            <CurrencyPicker />
+            {currencyPicker()}
           </div>
           <p className="text-xl font-bold text-red-600">{formatConv(mizanTotals.borc)}</p>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.totalDebit}</p>
@@ -62,7 +67,7 @@ export default function MizanTab({
             <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
               <TrendingUp size={15} className="text-green-600" />
             </div>
-            <CurrencyPicker />
+            {currencyPicker()}
           </div>
           <p className="text-xl font-bold text-green-600">{formatConv(mizanTotals.alacak)}</p>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.totalCredit}</p>
@@ -73,7 +78,7 @@ export default function MizanTab({
             <div className="w-8 h-8 rounded-xl bg-red-50 flex items-center justify-center">
               <ArrowUpDown size={15} className="text-red-500" />
             </div>
-            <CurrencyPicker />
+            {currencyPicker()}
           </div>
           <p className="text-xl font-bold text-red-500">{formatConv(mizanTotals.borcBakiye)}</p>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.debitBalance}</p>
@@ -84,7 +89,7 @@ export default function MizanTab({
             <div className="w-8 h-8 rounded-xl bg-green-50 flex items-center justify-center">
               <Wallet size={15} className="text-green-500" />
             </div>
-            <CurrencyPicker />
+            {currencyPicker()}
           </div>
           <p className="text-xl font-bold text-green-500">{formatConv(mizanTotals.alacakBakiye)}</p>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">{t.creditBalance}</p>
@@ -94,12 +99,15 @@ export default function MizanTab({
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div className="flex items-center gap-3">
             <h3 className="font-semibold text-gray-800">{t.trialBalanceTitle}</h3>
-            <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${mizanDengeli ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-              {mizanDengeli ? <><CheckCircle size={12} /> {t.balanced}</> : <><AlertCircle size={12} /> {t.notBalanced}</>}
+            <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${mizanDengeli === null ? 'bg-amber-50 text-amber-600' : mizanDengeli ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+              {mizanDengeli === null
+                ? <><AlertCircle size={12} /> {ac(currentLanguage).denge_belirlenemedi}</>
+                : mizanDengeli ? <><CheckCircle size={12} /> {t.balanced}</> : <><AlertCircle size={12} /> {t.notBalanced}</>}
             </span>
+            {mizanNotu && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-1 rounded-full">{mizanNotu}</span>}
             {hasMikroMizan && (
               <span className="text-[10px] font-semibold text-blue-500 bg-blue-50 px-2 py-1 rounded-full">
-                {currentLanguage === 'tr' ? 'Mikro faturaları dahil (120/391/153/191/320)' : 'Includes Mikro invoices (120/391/153/191/320)'}
+                {ac(currentLanguage).mikro_faturalari_dahil_120_391_153_191_320}
               </span>
             )}
           </div>
@@ -117,7 +125,8 @@ export default function MizanTab({
             <button
               onClick={() => exportCSV('mizan.csv',
                 ['Hesap', 'Borç Toplamı', 'Alacak Toplamı', 'Borç Bakiyesi', 'Alacak Bakiyesi'],
-                mizanRows.map(r => [r.hesap, r.borc, r.alacak, r.borcBakiye, r.alacakBakiye])
+                // Bilinen sayılar ham kalır (parite); türetilemeyen/bilinmeyen NaN CSV'ye 'NaN' yazılmaz.
+                mizanRows.map(r => [r.hesap, ...[r.borc, r.alacak, r.borcBakiye, r.alacakBakiye].map(n => Number.isFinite(n) ? n : '—')])
               )}
               className="apple-button-secondary py-2 px-4 text-sm"
             >
@@ -174,8 +183,9 @@ export default function MizanTab({
                   <td className="py-2.5 px-3 text-gray-700 font-medium text-xs">{r.hesap}</td>
                   <td className="py-2.5 px-3 text-right text-red-600 font-semibold">{formatTRY(r.borc)}</td>
                   <td className="py-2.5 px-3 text-right text-green-600 font-semibold">{formatTRY(r.alacak)}</td>
-                  <td className="py-2.5 px-3 text-right text-red-500 hidden sm:table-cell">{r.borcBakiye > 0 ? formatTRY(r.borcBakiye) : '-'}</td>
-                  <td className="py-2.5 px-3 text-right text-green-500 hidden sm:table-cell">{r.alacakBakiye > 0 ? formatTRY(r.alacakBakiye) : '-'}</td>
+                  {/* Türetilemeyen bakiye ('—', bir taraf bilinmiyor) ile gerçek sıfır bakiye ('-') ayrıdır. */}
+                  <td className="py-2.5 px-3 text-right text-red-500 hidden sm:table-cell">{Number.isFinite(r.borcBakiye) ? (r.borcBakiye > 0 ? formatTRY(r.borcBakiye) : '-') : '—'}</td>
+                  <td className="py-2.5 px-3 text-right text-green-500 hidden sm:table-cell">{Number.isFinite(r.alacakBakiye) ? (r.alacakBakiye > 0 ? formatTRY(r.alacakBakiye) : '-') : '—'}</td>
                 </tr>
               ))}
               {mizanRows.length > 0 && (

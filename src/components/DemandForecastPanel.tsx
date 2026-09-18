@@ -9,6 +9,7 @@
 
 import { sayiBicimleyici } from '../utils/recharts';
 import { kisaTutar, paraYaz } from '../utils/currency';
+import { bilinenSayi } from '../utils/para';
 import { useState } from 'react';
 import {
   TrendingUp, RefreshCw, AlertCircle, Package,
@@ -119,12 +120,19 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
       // ── 2. Aggregate product demand & monthly revenue ────────────────────
       const productMap: Record<string, { units: number; revenue: number; byMonth: Record<string, number> }> = {};
       const monthlyRevenue: Record<string, number> = {};
+      // Tutarı okunamayan sipariş/fatura ciroya ₺0 olarak EKLENMEZ, ay bazında SAYILIR (2026-09-18
+      // delta turu). Eski `(o.totalPrice || 0)` / `(Number(f.cha_meblag) || 0)` bunları gerçek ₺0 satış
+      // sayıyor ve eksik ayı Gemini'ye kesin bir sayı gibi veriyordu; aynı faturayı muhasebe sekmeleri
+      // '—' + "N kayıt tutarsız" diye gösteriyor (yarım düzeltme sınıfı). Not prompt'a da düşer.
+      const monthlyBilinmeyen: Record<string, number> = {};
+      const tutarsizSay = (mon: string) => { monthlyBilinmeyen[mon] = (monthlyBilinmeyen[mon] ?? 0) + 1; };
 
       for (const o of orders) {
         // Tarihsiz sipariş BUGÜN'e sayılmaz (eski `?? new Date()` cari ayı şişiriyordu) — hesaptan düşer.
         const mon = ayAnahtari(o.syncedAt);
         if (!mon) continue;
-        monthlyRevenue[mon] = (monthlyRevenue[mon] ?? 0) + (o.totalPrice || 0);
+        if (bilinenSayi(o.totalPrice)) monthlyRevenue[mon] = (monthlyRevenue[mon] ?? 0) + Number(o.totalPrice);
+        else tutarsizSay(mon);
 
         for (const item of o.lineItems ?? []) {
           const name = item.title ?? item.name ?? item.sku ?? 'Unknown';
@@ -141,7 +149,9 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
           const dStr = String(f.cha_tarihi || '');
           if (dStr.length >= 7) {
             const mon = dStr.slice(0, 7); // 'YYYY-MM'
-            monthlyRevenue[mon] = (monthlyRevenue[mon] ?? 0) + (Number(f.cha_meblag) || 0);
+            // Ham okuma (hook yok): meblağı NULL/bozuk fatura ciroya ₺0 girmez, o ayın sayacına yazılır.
+            if (bilinenSayi(f.cha_meblag)) monthlyRevenue[mon] = (monthlyRevenue[mon] ?? 0) + Number(f.cha_meblag);
+            else tutarsizSay(mon);
           }
         }
       }
@@ -174,8 +184,14 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
           months: Object.entries(d.byMonth).sort().map(([m, u]) => `${m}:${u}`).join('|'),
         }));
 
-      const monthlyArr = Object.entries(monthlyRevenue).sort()
-        .map(([m, r]) => `${m}: ${paraYaz(r, { ondalik: 0 })}`);
+      // Yalnız tutarsız kaydı olan ay da listede GÖRÜNÜR ('—' + sayaç): eskiden o ay ya hiç
+      // görünmüyor ya da ₺0 olarak geçiyordu, model "o ay satış yoktu" diye okuyordu.
+      const monthlyArr = [...new Set([...Object.keys(monthlyRevenue), ...Object.keys(monthlyBilinmeyen)])].sort()
+        .map(m => {
+          const bilinmeyen = monthlyBilinmeyen[m] ?? 0;
+          const tutar = m in monthlyRevenue ? paraYaz(monthlyRevenue[m], { ondalik: 0 }) : '—';
+          return bilinmeyen > 0 ? `${m}: ${tutar} (${bilinmeyen} ${tr ? 'kaydın tutarı bilinmiyor, dahil değil' : 'record(s) with unknown amount, excluded'})` : `${m}: ${tutar}`;
+        });
 
       const inventoryCtx = inventory.slice(0, 20)
         .map(i => `${i.name} (${i.quantity ?? '?'} units)`)

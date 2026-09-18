@@ -3,6 +3,8 @@ import { Search, FileText } from 'lucide-react';
 import { type JournalEntry } from '../../types';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
 import { oc } from '../../i18n/ortak';
+import { ekranTutari, sayiSirala } from '../../utils/para';
+import { type KdvDonemi, type OranKovasi } from '../../utils/muhasebe/kdvBeyan';
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type KdvSortKey = 'ay' | 'hesaplanan' | 'indirilecek' | 'odenecek' | 'oran' | 'matrah' | 'kdv';
@@ -15,10 +17,11 @@ interface KdvTabProps {
   setKdvMonth: (v: number) => void;
   kdvYear: number;
   setKdvYear: (v: number) => void;
-  journalEntries: JournalEntry[];
   hesaplananKDV: number;
   indirilecekKDV: number;
   odenecekKDV: number;
+  /** Dönemin tüm KDV hesabı (drill-down listeleri + bilinmeyen/tarihsiz sayaçları) — tek kaynak: utils/muhasebe/kdvBeyan. */
+  kdvDonem: KdvDonemi<JournalEntry>;
   setDrillDown: (d: DrillDown | null) => void;
   kdvSearch: string;
   setKdvSearch: (v: string) => void;
@@ -27,16 +30,17 @@ interface KdvTabProps {
   setKdvSortBy: (v: KdvSortKey) => void;
   setKdvSortDir2: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>;
   // 'karma': Mikro'da hem %10 hem %20'li ürün taşıyan faturalar (code-review
-  // bulgusu, task #27) — AccountingModule bu anahtarı üretiyor, burada da
+  // bulgusu, task #27) — kdvBeyan bu anahtarı üretiyor, burada da
   // ele alınmalı, aksi halde ekranda "%karma" gibi anlamsız bir etiket çıkar.
-  kdvOranBreakdown: Record<string, { matrah: number; kdv: number }>;
+  // 'bilinmiyor' anahtarı da gelebilir: journal fişinin kdvOran'ı ya da Mikro faturasının oranı çözülemeyen kayıtlar.
+  kdvOranBreakdown: Record<string, OranKovasi>;   // matrah/kdv: Tutar (bilinmeyen sayılır); adet; tutarsiz
   downloadVatDeclaration: () => void;
   downloadVatDeclarationCSV: () => void;
 }
 
 export default function KdvTab({
   t, currentLanguage, MONTHS, kdvMonth, setKdvMonth, kdvYear, setKdvYear,
-  journalEntries, hesaplananKDV, indirilecekKDV, odenecekKDV, setDrillDown,
+  hesaplananKDV, indirilecekKDV, odenecekKDV, kdvDonem, setDrillDown,
   kdvSearch, setKdvSearch, kdvSortBy, kdvSortDir2, setKdvSortBy, setKdvSortDir2,
   kdvOranBreakdown, downloadVatDeclaration, downloadVatDeclarationCSV,
 }: KdvTabProps) {
@@ -44,6 +48,14 @@ export default function KdvTab({
     if (kdvSortBy === key) setKdvSortDir2(d => d === 'asc' ? 'desc' : 'asc');
     else { setKdvSortBy(key as KdvSortKey); setKdvSortDir2('asc'); }
   };
+  // Net TÜRETMEDİR: bir taraf bir kayıt bile bilinmiyorsa NaN gelir. Guard'sız bırakılırsa
+  // `NaN >= 0` false olur ve bilinmeyen net ekranda yeşil "Devreden" gibi görünür (sahte kesinlik).
+  const kdvTutarsiz = kdvDonem.hesaplanan.bilinmeyen + kdvDonem.indirilecek.bilinmeyen;
+  const odenecekBilinmiyor = !Number.isFinite(odenecekKDV);
+  const tutarsizNotu = (n: number) => currentLanguage === 'tr' ? `${n} kayıt tutarsız` : `${n} records without amount`;
+  // Kova etiketi TEK yerde: hem satırda hem arama süzgecinde aynı metin görünür
+  // ('%bilinmiyor' diye aranmasın). Türkçe eşleştirme locale-duyarlı küçültmeyle.
+  const oranEtiketi = (oran: string) => oran === 'karma' ? oc(currentLanguage).karma : oran === 'bilinmiyor' ? oc(currentLanguage).bilinmiyor : `%${oran}`;
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -54,19 +66,22 @@ export default function KdvTab({
           {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
         </select>
         <input type="number" value={kdvYear} onChange={e => setKdvYear(Number(e.target.value))} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000] w-24" />
+        {kdvDonem.tarihsiz > 0 && (
+          <span className="text-xs text-amber-600">
+            {currentLanguage === 'tr'
+              ? `${kdvDonem.tarihsiz} tarihsiz KDV kaydı hiçbir döneme dahil değil`
+              : `${kdvDonem.tarihsiz} undated VAT records are in no period`}
+          </span>
+        )}
       </div>
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <button
           onClick={() => setDrillDown({
             title: t.calculatedVat,
-            rows: journalEntries
-              .filter(e => {
-                if (!e.date) return false;
-                const d = new Date(e.date);
-                return d.getMonth() + 1 === kdvMonth && d.getFullYear() === kdvYear && e.alacakHesap.startsWith('391');
-              })
-              .map(e => ({ label: e.alacakHesap, sub: e.aciklama, value: formatTRY(e.alacak || 0) })),
+            // Liste KPI ile AYNI süzgeçten gelir (kdvBeyan) — kart ile drill-down ayrışamaz;
+            // tutarı bilinmeyen fiş ₺0 değil '—' basar (satır tutarı NaN).
+            rows: kdvDonem.hesaplananListesi.map(r => ({ label: r.kayit.alacakHesap, sub: r.kayit.aciklama, value: formatTRY(r.tutar) })),
             total: formatTRY(hesaplananKDV)
           })}
           className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 text-left hover:shadow-md hover:border-gray-200 transition-all cursor-pointer group"
@@ -74,17 +89,12 @@ export default function KdvTab({
           <div className="text-xs text-gray-500 font-medium mb-1">{t.calculatedVat}</div>
           <div className="text-2xl font-bold text-[#ff4000]">{formatTRY(hesaplananKDV)}</div>
           <div className="text-[10px] text-gray-400 mt-1 group-hover:text-gray-500 transition-colors">391 - Hesaplanan KDV</div>
+          {kdvDonem.hesaplanan.bilinmeyen > 0 && <div className="text-[10px] text-amber-600 mt-0.5">{tutarsizNotu(kdvDonem.hesaplanan.bilinmeyen)}</div>}
         </button>
         <button
           onClick={() => setDrillDown({
             title: t.deductibleVat,
-            rows: journalEntries
-              .filter(e => {
-                if (!e.date) return false;
-                const d = new Date(e.date);
-                return d.getMonth() + 1 === kdvMonth && d.getFullYear() === kdvYear && e.debitHesap.startsWith('191');
-              })
-              .map(e => ({ label: e.debitHesap, sub: e.aciklama, value: formatTRY(e.borc || 0) })),
+            rows: kdvDonem.indirilecekListesi.map(r => ({ label: r.kayit.debitHesap, sub: r.kayit.aciklama, value: formatTRY(r.tutar) })),
             total: formatTRY(indirilecekKDV)
           })}
           className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 text-left hover:shadow-md hover:border-gray-200 transition-all cursor-pointer group"
@@ -92,6 +102,7 @@ export default function KdvTab({
           <div className="text-xs text-gray-500 font-medium mb-1">{t.deductibleVat}</div>
           <div className="text-2xl font-bold text-blue-600">{formatTRY(indirilecekKDV)}</div>
           <div className="text-[10px] text-gray-400 mt-1 group-hover:text-gray-500 transition-colors">191 - İndirilecek KDV</div>
+          {kdvDonem.indirilecek.bilinmeyen > 0 && <div className="text-[10px] text-amber-600 mt-0.5">{tutarsizNotu(kdvDonem.indirilecek.bilinmeyen)}</div>}
         </button>
         <button
           onClick={() => setDrillDown({
@@ -99,14 +110,23 @@ export default function KdvTab({
             rows: [
               { label: t.calculatedVat, value: formatTRY(hesaplananKDV) },
               { label: t.deductibleVat, value: formatTRY(indirilecekKDV) },
-              { label: 'Net', badge: odenecekKDV >= 0 ? 'Ödenecek' : 'Devreden', badgeColor: odenecekKDV >= 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600', value: formatTRY(Math.abs(odenecekKDV)) }
+              {
+                label: 'Net',
+                badge: odenecekBilinmiyor ? oc(currentLanguage).bilinmiyor : odenecekKDV >= 0 ? 'Ödenecek' : 'Devreden',
+                badgeColor: odenecekBilinmiyor ? 'bg-gray-100 text-gray-500' : odenecekKDV >= 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600',
+                value: formatTRY(Math.abs(odenecekKDV))
+              }
             ]
           })}
           className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 text-left hover:shadow-md hover:border-gray-200 transition-all cursor-pointer group"
         >
           <div className="text-xs text-gray-500 font-medium mb-1">{t.vatPayable}</div>
-          <div className={`text-2xl font-bold ${odenecekKDV >= 0 ? 'text-red-600' : 'text-green-600'}`}>{formatTRY(odenecekKDV)}</div>
-          <div className="text-[10px] text-gray-400 mt-1 group-hover:text-gray-500 transition-colors">{odenecekKDV >= 0 ? t.vatPayableDesc : t.vatRefundDesc}</div>
+          <div className={`text-2xl font-bold ${odenecekBilinmiyor ? 'text-gray-400' : odenecekKDV >= 0 ? 'text-red-600' : 'text-green-600'}`}>{formatTRY(odenecekKDV)}</div>
+          <div className="text-[10px] text-gray-400 mt-1 group-hover:text-gray-500 transition-colors">
+            {odenecekBilinmiyor
+              ? (currentLanguage === 'tr' ? `${kdvTutarsiz} kayıt tutarsız — net hesaplanamadı` : `${kdvTutarsiz} records without amount — net not derived`)
+              : odenecekKDV >= 0 ? t.vatPayableDesc : t.vatRefundDesc}
+          </div>
         </button>
       </div>
       <div className="apple-card p-4">
@@ -162,21 +182,23 @@ export default function KdvTab({
                 <tr><td colSpan={3} className="text-center py-8 text-gray-400">{t.noVatEntries}</td></tr>
               )}
               {Object.entries(kdvOranBreakdown)
-                .filter(([oran]) => !kdvSearch || `%${oran}`.includes(kdvSearch))
+                .filter(([oran]) => !kdvSearch || oranEtiketi(oran).toLocaleLowerCase('tr-TR').includes(kdvSearch.toLocaleLowerCase('tr-TR')))
                 .sort(([oranA, dataA], [oranB, dataB]) => {
-                  let cmp: number;
-                  // 'karma' Number()'da NaN verir — sıralamada sabit bir değere düş.
-                  const oranSayi = (o: string) => o === 'karma' ? -1 : Number(o);
-                  if (kdvSortBy === 'oran') cmp = oranSayi(oranA) - oranSayi(oranB);
-                  else if (kdvSortBy === 'matrah') cmp = dataA.matrah - dataB.matrah;
-                  else cmp = dataA.kdv - dataB.kdv;
-                  return kdvSortDir2 === 'asc' ? cmp : -cmp;
+                  const azalan = kdvSortDir2 === 'desc';
+                  // 'karma'/'bilinmiyor' Number()'da NaN verir — `sayiSirala` bilinmeyeni iki yönde de
+                  // SONA atar (yönü `-` ile çevirme, yoksa bilinmeyenler başa gelir).
+                  if (kdvSortBy === 'oran') return sayiSirala(Number(oranA), Number(oranB), azalan);
+                  if (kdvSortBy === 'matrah') return sayiSirala(ekranTutari(dataA.matrah), ekranTutari(dataB.matrah), azalan);
+                  return sayiSirala(ekranTutari(dataA.kdv), ekranTutari(dataB.kdv), azalan);
                 })
                 .map(([oran, data]) => (
                   <tr key={oran} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-2.5 px-3"><span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">{oran === 'karma' ? (oc(currentLanguage).karma) : `%${oran}`}</span></td>
-                    <td className="py-2.5 px-3 text-right text-gray-700 font-medium">{formatTRY(data.matrah)}</td>
-                    <td className="py-2.5 px-3 text-right font-semibold text-[#ff4000]">{formatTRY(data.kdv)}</td>
+                    <td className="py-2.5 px-3"><span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">{oranEtiketi(oran)}</span></td>
+                    <td className="py-2.5 px-3 text-right text-gray-700 font-medium">{formatTRY(ekranTutari(data.matrah))}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-[#ff4000]">
+                      {formatTRY(ekranTutari(data.kdv))}
+                      {data.tutarsiz > 0 && <span className="block text-[10px] text-amber-600 font-normal">{tutarsizNotu(data.tutarsiz)}</span>}
+                    </td>
                   </tr>
                 ))
               }

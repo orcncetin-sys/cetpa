@@ -3,6 +3,7 @@ import { Search, Plus, Eye, Edit2, Trash2, X, Save } from 'lucide-react';
 import { type Warehouse, type WarehouseItem } from '../../types';
 import { SortHeader, type AccountingT } from './shared';
 import { oc } from '../../i18n/ortak';
+import { ac } from '../../i18n/accounting';
 
 type StockForm = { productName: string; sku: string; quantity: number; warehouseId: string; category: string; notes: string };
 
@@ -138,7 +139,7 @@ export default function DepoTab({
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{t.location}</label>
                   <select value={stockForm.warehouseId} onChange={e => setStockForm(prev => ({ ...prev, warehouseId: e.target.value }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]">
-                    <option value="">{currentLanguage === 'tr' ? '— Depo seçin —' : '— Select warehouse —'}</option>
+                    <option value="">{ac(currentLanguage).depo_secin}</option>
                     {warehouses.map(wh => (
                       <option key={wh.id} value={wh.id}>{wh.name}</option>
                     ))}

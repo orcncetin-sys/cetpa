@@ -6,7 +6,7 @@
  * toplama girmez, sayılır; ekranda/PDF'te '—'. Bu dosya o sözleşmeyi kilitler.
  */
 import { describe, it, expect } from 'vitest';
-import { tutarYaz, kdvAyristir, satirTutari, toplaBilinen, siparisMaliyeti, tahsilatOrani, teklifToplamlari, ekranTutari, tamTutar, tutarBirlestir } from './para';
+import { tutarYaz, kdvAyristir, satirTutari, toplaBilinen, siparisMaliyeti, tahsilatOrani, teklifToplamlari, ekranTutari, tamTutar, tutarBirlestir, sayiSirala } from './para';
 
 describe('tutarYaz — PDF/CSV için tutar metni', () => {
   it("bilinen: Türk biçimi + birim ('1.234,56 TL'); 0 gerçek sıfırdır", () => {
@@ -161,5 +161,18 @@ describe('tutarBirlestir — toplam satırı: toplamlar ve iki sayaç toplanır'
     expect(tutarBirlestir({ toplam: 100, bilinen: 1, bilinmeyen: 0 }, { toplam: 50.5, bilinen: 2, bilinmeyen: 3 })).toEqual({ toplam: 150.5, bilinen: 3, bilinmeyen: 3 });
     expect(tutarBirlestir()).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 0 });
     expect(tutarBirlestir({ toplam: 7, bilinen: 1, bilinmeyen: 0 })).toEqual({ toplam: 7, bilinen: 1, bilinmeyen: 0 });
+  });
+});
+
+describe('sayiSirala — sıralamada bilinmeyen 0 sayılmaz, sona gider', () => {
+  it('bilinenler sayısal artan; bilinmeyen (null/undefined/NaN/"abc") hep sonda; azalan için çevrilir', () => {
+    const liste = [{ b: 500 }, { b: null }, { b: -20 }, { b: 'abc' }, { b: '30' }, { b: undefined }, { b: 0 }];
+    expect([...liste].sort((x, y) => sayiSirala(x.b, y.b)).map(o => o.b)).toEqual([-20, 0, '30', 500, null, 'abc', undefined]);
+    expect([...liste].sort((x, y) => sayiSirala(x.b, y.b, true)).map(o => o.b)).toEqual([500, '30', 0, -20, null, 'abc', undefined]);   // azalan: bilinmeyen YİNE sonda
+  });
+  it('eski kalıp `(a||0)-(b||0)` bilinmeyeni 0 gibi ortaya diziyordu — burada 0 ile bilinmeyen ayrışır', () => {
+    expect(sayiSirala(0, null)).toBe(-1);
+    expect(sayiSirala(null, 0)).toBe(1);
+    expect(sayiSirala(null, undefined)).toBe(0);
   });
 });

@@ -5,7 +5,8 @@ import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { zamanMs, tarihYaz } from '../utils/zaman';
 import { odemeTakipli, gorunenSiparisNo } from '../utils/siparis';
 import { tlYaz } from '../utils/currency';
-import { toplaBilinen, tahsilatOrani } from '../utils/para';
+import { toplaBilinen, tahsilatOrani, tutarBirlestir, ekranTutari, tamTutar } from '../utils/para';
+import { mikroFaturaSuz, mikroCiroMaliyet, nativeCiroMaliyet, birlesikKar } from '../utils/muhasebe/mikroCiro';
 import { oc } from '../i18n/ortak';
 
 interface Order {
@@ -72,23 +73,29 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   // düşüyor — orders tek başına kullanılınca panel hep ₺0 gösteriyordu, 2026-08-13).
   // Çift sayım koruması (2026-09-01): faturadan türetilen siparişler dışlanır —
   // aşağıda mikroCiro zaten aynı faturaları topluyor.
-  const totalRevenue = orders
-    .filter(o => odemeTakipli(o))   // cift sayim korumasi — mikroCiro ayni faturalari topluyor
-    .reduce((sum, o) => sum + (o.totalPrice || 0), 0);
-  const totalCost    = orders.reduce((sum, o) => sum + (o.cost || 0), 0);
-  const profit       = totalRevenue - totalCost;
+  // Tutarı/maliyeti bilinmeyen sipariş 0 SAYILMAZ, SAYILIR (`Tutar.bilinmeyen`) — eski
+  // `(o.totalPrice || 0)` / `(o.cost || 0)` reduce'ları ciroyu sessizce eksiltiyordu.
+  // KÜME BİRLİĞİ (2026-09-18 hakem turu): maliyet de CİROYLA AYNI kümeden sayılır — maliyet
+  // TÜM `orders` üzerinden sayılınca, cirodan bilerek dışlanan Mikro-türevi sipariş (maliyeti
+  // tasarım gereği yok) marjı ve Net Kâr'ı kalıcı olarak veto ediyordu.
+  // Hesap tek kaynakta (utils/muhasebe/mikroCiro.nativeCiroMaliyet).
+  const { ciro: nativeCiro, maliyet: nativeMaliyet } = nativeCiroMaliyet(orders);
 
   // Mikro faturaları — giden(satış)/gelen(alış). KDV Mutabakat/Satışlar sekmeleriyle
   // aynı desen: additive, native ile toplanır. "Toplam Maliyet" burada gerçek COGS
   // değil, alış faturaları toplamıdır (Mikro fatura satırında ürün maliyeti yok —
   // aynı kısıt Finansal Oranlar sekmesinde de var).
-  const mikroGiden = mikroFaturalar.filter(f => f.yon === 'giden');
-  const mikroGelen = mikroFaturalar.filter(f => f.yon === 'gelen');
-  const mikroCiro    = mikroGiden.reduce((s, f) => s + f.tutar, 0);
-  const mikroMaliyet = mikroGelen.reduce((s, f) => s + f.tutar, 0);
-  const combinedRevenue = totalRevenue + mikroCiro;
-  const combinedCost    = totalCost + mikroMaliyet;
-  const combinedProfit  = combinedRevenue - combinedCost;
+  // Hesap tek kaynakta (utils/muhasebe/mikroCiro.ts) — SubeModule ve DashboardPage aynı toplamı oradan alır.
+  const mikroGiden = mikroFaturaSuz(mikroFaturalar, { yon: 'giden' });
+  const { ciro: mikroCiro, maliyet: mikroMaliyet } = mikroCiroMaliyet(mikroFaturalar);
+  const ciroT    = tutarBirlestir(nativeCiro, mikroCiro);
+  const maliyetT = tutarBirlestir(nativeMaliyet, mikroMaliyet);
+  const combinedRevenue = ekranTutari(ciroT);        // EKRAN: kısmi toplam + "N kayıt tutarsız" notu
+  const combinedCost    = ekranTutari(maliyetT);
+  // TÜRETME: net kâr başka bir sayıdan doğuyor — bir kayıt bile bilinmiyorsa '—'
+  // ("kısmi ciro − tam maliyet" bir kâr değil, bilinmeyen kadar yanlış bir sayıdır).
+  const combinedProfit  = birlesikKar(ciroT, maliyetT);
+  const kpiBilinmeyen   = ciroT.bilinmeyen + maliyetT.bilinmeyen;
 
   const recentOrders = [...orders]
     .sort((a, b) => {
@@ -141,15 +148,27 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   // sessizce kaydırıyordu; izlenen ciro 0 iken "%0 tahsilat" basıyordu (sahte kesinlik → null).
   const odemeIzlenen  = orders.filter(o => odemeTakipli(o));
   const unpaidOrders  = odemeIzlenen.filter(o => !o.paid && o.status !== 'Cancelled');
-  const unpaidRevenue = toplaBilinen(unpaidOrders, o => o.totalPrice).toplam;
+  // EKRAN sözleşmesi: kısmi toplam + sayaç notu; HİÇ bilinen yoksa '—' (ham `.toplam` orada
+  // ₺0 basıyordu — "hiç alacak yok" ile "hepsi okunamadı" aynı şey değil).
+  const unpaidT       = toplaBilinen(unpaidOrders, o => o.totalPrice);
+  const unpaidRevenue = ekranTutari(unpaidT);
   const tahsilat      = tahsilatOrani(orders);
   const paidRevenue   = tahsilat.odenen;
   const collectionRate = tahsilat.oran;   // number | null
 
   // ── Phase 127: Financial Health Score ───────────────────────────────────
-  const marginPct = totalRevenue > 0 ? Math.round(((totalRevenue - totalCost) / totalRevenue) * 100) : 0;
+  // Marj TÜRETİLEN sayıdır (`tamTutar`): native ciro ya da maliyetin BİR kaydı bile
+  // bilinmiyorsa marj hesaplanmaz (null) — kısmi cirodan "%42 marj" üretmek sahte kesinliktir.
+  // Payda ≤ 0 iken de null: "%0 marj" basılmaz. (Kapsam AYNEN native — Mikro faturasında
+  // ürün maliyeti yok, o yüzden skora hiç girmiyordu; bu karar korunuyor.)
+  const marjCiro    = tamTutar(nativeCiro);
+  const marjMaliyet = tamTutar(nativeMaliyet);
+  const marginPct = Number.isFinite(marjCiro) && marjCiro > 0 && Number.isFinite(marjMaliyet)
+    ? Math.round(((marjCiro - marjMaliyet) / marjCiro) * 100)
+    : null;
   const deliveryRate = orders.length > 0 ? Math.round((orders.filter(o => o.status === 'Delivered').length / orders.length) * 100) : 0;
-  const healthScore = Math.round(((collectionRate ?? 0) * 0.4) + (Math.min(marginPct, 50) * 0.6) + (deliveryRate * 0.2)) ;
+  // Hesaplanamayan bileşen skora 0 katkı yapar (tahsilat oranıyla aynı kural) — not yukarıda basılır.
+  const healthScore = Math.round(((collectionRate ?? 0) * 0.4) + (Math.min(marginPct ?? 0, 50) * 0.6) + (deliveryRate * 0.2)) ;
   const clampedScore = Math.min(100, Math.max(0, healthScore));
   const scoreColor = clampedScore >= 70 ? 'text-emerald-600' : clampedScore >= 40 ? 'text-amber-600' : 'text-red-500';
   const scoreLabel = clampedScore >= 70
@@ -172,6 +191,14 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                 {collectionRate == null
                   ? (currentLanguage === 'tr' ? 'Tahsilat oranı hesaplanamıyor: ödemesi izlenen ve tutarı bilinen sipariş yok — skora 0 katkı.' : 'Collection rate unavailable: no tracked orders with a known amount — contributes 0 to the score.')
                   : (currentLanguage === 'tr' ? `${tahsilat.bilinmeyen} siparişin tutarı bilinmiyor, tahsilat oranına dahil edilmedi.` : `${tahsilat.bilinmeyen} order(s) have an unknown amount and are excluded from the collection rate.`)}
+              </p>
+            )}
+            {marginPct === null && (
+              <p className="text-[9px] text-amber-600 mt-1 flex items-center gap-1 max-w-xs">
+                <Info size={10} className="flex-shrink-0" />
+                {currentLanguage === 'tr'
+                  ? 'Kâr marjı hesaplanamıyor: tutarı ya da maliyeti bilinmeyen sipariş var (ya da ciro yok) — skora 0 katkı.'
+                  : 'Margin unavailable: some orders have an unknown amount or cost (or there is no revenue) — contributes 0 to the score.'}
               </p>
             )}
             {mikroGiden.length > 0 && (
@@ -261,9 +288,15 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
           else if (days <= 90) buckets[2].orders.push(o);
           else                 buckets[3].orders.push(o);
         });
-        const activeBuckets = buckets.filter(b => b.orders.length > 0);
-        if (activeBuckets.length === 0) return null;
-        const maxAmt = Math.max(...activeBuckets.map(b => b.orders.reduce((s, o) => s + (o.totalPrice || 0), 0)), 1);
+        // Kova tutarları: tutarı okunamayan sipariş 0 SAYILMAZ, SAYILIR (2026-09-18 hakem turu —
+        // aynı ekranda Ciro kartı "N kayıt tutarsız" derken bu kovalar o siparişi ₺0 sayıyordu).
+        // Kovanın TAMAMI tutarsızsa ekranda '—' (yoksa "bu vadede borç yok" gibi okunurdu).
+        const kovalar = buckets.map(b => ({ ...b, tutar: toplaBilinen(b.orders, o => o.totalPrice) }));
+        const aktifKovalar = kovalar.filter(b => b.orders.length > 0);
+        if (aktifKovalar.length === 0) return null;
+        const tutarsizKova = aktifKovalar.reduce((s, b) => s + b.tutar.bilinmeyen, 0);
+        // Bilinmeyen kova ölçeğe girmez; `, 1` sıfıra-bölme koruması (para iddiası değil).
+        const maxAmt = Math.max(...aktifKovalar.map(b => ekranTutari(b.tutar)).filter(v => Number.isFinite(v)), 1);
         return (
           <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
@@ -274,10 +307,10 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
               </span>
             </div>
             <div className="divide-y divide-gray-50">
-              {buckets.map((b, bi) => {
+              {kovalar.map((b, bi) => {
                 if (b.orders.length === 0) return null;
-                const amt = b.orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const barW = Math.round((amt / maxAmt) * 100);
+                const amt = ekranTutari(b.tutar);
+                const barW = Number.isFinite(amt) ? Math.round((amt / maxAmt) * 100) : 0;
                 return (
                   <div key={bi} className="px-5 py-3.5 flex items-center gap-4">
                     <div className="flex items-center gap-2 w-44 flex-shrink-0">
@@ -308,6 +341,15 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
               </span>
               <span className="text-xs font-black text-gray-800">{cvt(unpaidRevenue)}</span>
             </div>
+            {tutarsizKova > 0 && (
+              <div className="px-5 pb-3 -mt-1">
+                <p className="text-[10px] text-amber-600">
+                  {currentLanguage === 'tr'
+                    ? `${tutarsizKova} siparişin tutarı okunamadı — vade kovaları ve toplam kısmi toplamdır (o siparişler ₺0 sayılmadı).`
+                    : `${tutarsizKova} order(s) have an unreadable amount — the aging buckets and the total are partial sums (those orders were not counted as ₺0).`}
+                </p>
+              </div>
+            )}
           </div>
         );
       })()}
@@ -336,6 +378,16 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
           );
         })}
       </div>
+      {/* Tutarı okunamayan kayıt varsa KPI'lar KISMİ toplamdır — sessizce eksik göstermek yerine söylenir
+          (Net Kâr zaten '—' basar: türetilen sayı tek bir bilinmeyenle bile üretilmez). */}
+      {kpiBilinmeyen > 0 && (
+        <p className="text-[11px] text-amber-600 flex items-center gap-1 -mt-2">
+          <Info size={11} className="flex-shrink-0" />
+          {currentLanguage === 'tr'
+            ? `${kpiBilinmeyen} kaydın tutarı/maliyeti okunamadı — yukarıdaki toplamlar kısmi, Net Kâr hesaplanamıyor.`
+            : `${kpiBilinmeyen} record(s) have an unreadable amount/cost — the totals above are partial and Net Profit cannot be computed.`}
+        </p>
+      )}
 
       {/* Invoice / Order Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -390,16 +442,22 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
 
           // Tahsilat izlenmeyen (mikro-fatura turevi) kayitlar nakit akisina
           // "beklenen giris" olarak yazilamaz — o para Mikro'da tahsil edilmis olabilir.
-          const izlenen   = relevant.filter(o => odemeTakipli(o));
-          const collected = izlenen.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
-          const expected  = izlenen.filter(o => !o.paid && o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0);
-          const inflow    = isFuture ? expected : collected;
+          // Tutarı okunamayan sipariş haftaya ₺0 GİRMEZ, SAYILIR (2026-09-18 hakem turu) —
+          // eski `(o.totalPrice || 0)` nakit akışını sessizce eksiltiyordu.
+          const izlenen    = relevant.filter(o => odemeTakipli(o));
+          const collectedT = toplaBilinen(izlenen.filter(o => o.paid), o => o.totalPrice);
+          const expectedT  = toplaBilinen(izlenen.filter(o => !o.paid && o.status !== 'Cancelled'), o => o.totalPrice);
+          const inflowT    = isFuture ? expectedT : collectedT;
 
-          return { weekOffset, isCurrent, isFuture, inflow, collected, expected, label: weekLabel(weekOffset * 7) };
+          return { weekOffset, isCurrent, isFuture, inflowT, inflow: ekranTutari(inflowT), label: weekLabel(weekOffset * 7) };
         });
 
-        const maxVal = Math.max(...weeks.map(w => w.inflow), 1);
-        const totalForecast = weeks.filter(w => w.isFuture).reduce((s, w) => s + w.inflow, 0);
+        // Bilinmeyen hafta ölçeğe girmez; `, 1` sıfıra-bölme koruması (para iddiası değil).
+        const maxVal = Math.max(...weeks.map(w => w.inflow).filter(v => Number.isFinite(v)), 1);
+        const gelecekHaftalar = weeks.filter(w => w.isFuture);
+        const forecastT = tutarBirlestir(...gelecekHaftalar.map(w => w.inflowT));
+        const totalForecast = ekranTutari(forecastT);   // EKRAN: kısmi toplam + aşağıdaki not
+        const tutarsizHafta = weeks.reduce((s, w) => s + w.inflowT.bilinmeyen, 0);
 
         return (
           <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
@@ -415,7 +473,11 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
             <div className="px-5 py-4">
               <div className="flex items-end gap-1.5 h-28">
                 {weeks.map((w, i) => {
-                  const barH = maxVal > 0 ? Math.max((w.inflow / maxVal) * 100, w.inflow > 0 ? 8 : 0) : 0;
+                  // Tutarı hiç bilinmeyen hafta: çubuk çizilmez (0 yükseklik "o hafta para
+                  // girmedi" demekti); başlıkta `cvt` zaten '—' basar.
+                  const barH = Number.isFinite(w.inflow) && maxVal > 0
+                    ? Math.max((w.inflow / maxVal) * 100, w.inflow > 0 ? 8 : 0)
+                    : 0;
                   const barColor = w.isCurrent
                     ? 'bg-brand'
                     : w.isFuture
@@ -450,6 +512,13 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
                   <span className="text-[10px] text-gray-400">{oc(currentLanguage).beklenen}</span>
                 </div>
               </div>
+              {tutarsizHafta > 0 && (
+                <p className="text-[10px] text-amber-600 mt-2">
+                  {currentLanguage === 'tr'
+                    ? `${tutarsizHafta} siparişin tutarı okunamadı — haftalık çubuklar ve 4 haftalık tahmin kısmi toplamdır.`
+                    : `${tutarsizHafta} order(s) have an unreadable amount — the weekly bars and the 4-week projection are partial sums.`}
+                </p>
+              )}
             </div>
           </div>
         );

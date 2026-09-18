@@ -30,7 +30,7 @@
  * `cariBilinmeyen` olarak geçer ve tabloya "N kayıt tutarsız" diye yansır (AR/AP yönü bilinmediğinden
  * satıra değil, tablo sayacına girer — iki satıra yazmak çift sayardı).
  */
-import { bilinenSayi, toplaBilinen, satirTutari, ekranTutari, type Tutar, tamTutar } from '../para';
+import { bilinenSayi, toplaBilinen, satirTutari, type Tutar, tamTutar } from '../para';
 import { odemeTakipli, siparisTutari } from '../siparis';
 import { ayAnahtari } from '../zaman';
 import { tlyeCevir } from '../currency';
@@ -217,8 +217,10 @@ export interface KdvBorcu extends Toplam {
  * KDV borcu = faturalı siparişlerin KDV'si + max(0, cari ay Mikro giden−gelen KDV). Dönemsel kalem:
  * yalnız `ay` ('YYYY-MM') içindeki faturalar (sayfadaki 2026-08-13 düzeltmesi korunur).
  * Faturalı olup KDV tutarı bilinmeyen sipariş 0 DEĞİL — sayılır (eski `&& o.kdvTutari` süzgeci atıyordu).
- * ÜST AKIŞ: useMikroFaturalar `kdv`yi hâlâ 0'a zorluyor (Açık İşler) — Mikro faturasından bilinmeyen
- * şu an buraya ULAŞMIYOR; hook düzelince sayaç kendiliğinden dolar.
+ * ÜST AKIŞ DÜZELDİ (Faz 3 2/n, 2026-09-18): useMikroFaturalar `kdv`yi 0'a zorlamıyor ve sunucudaki
+ * ISNULL(…, 0) son yedeği kalktı — Mikro faturasından gelen bilinmeyen KDV buraya ULAŞIR ve sayılır.
+ * (2026-09-18 öncesi import edilmiş dokümanlardaki bayat ₺0'ı da hook'taki koruma yakalar; kesin
+ * çözüm tam yeniden import.)
  */
 export function kdvBorcu(siparisler: readonly KdvSiparisi[], faturalar: readonly KdvFaturasi[], ay: string): KdvBorcu {
   const s = toplaBilinen(siparisler.filter(o => o.faturali === true), o => o.kdvTutari);

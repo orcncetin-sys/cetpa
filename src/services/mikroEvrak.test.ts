@@ -8,7 +8,7 @@
  * üretilmez, hata satır numarasıyla yükselir.
  */
 import { describe, it, expect } from 'vitest';
-import { teklifPayload, izinTalepPayload, bakimTalepPayload, sayimPayload, stokHareketPayload, uretimTalepPayload, etiketPayload, MIKRO_IZIN_TIPI } from './mikroEvrak';
+import { teklifPayload, izinTalepPayload, bakimTalepPayload, sayimPayload, stokHareketPayload, uretimTalepPayload, etiketPayload, depoTransferPayload, MIKRO_IZIN_TIPI } from './mikroEvrak';
 
 const taban = { cariKod: 'CAR001', date: '2026-09-04' };
 
@@ -123,5 +123,19 @@ describe('depo bilinmiyorsa dış sisteme GİTMEZ — depo 1 (HAVALİMANI) varsa
   });
   it('bakım talebi: depoNo yok → throw (miktar koşulundan bağımsız)', () => {
     expect(() => bakimTalepPayload({ stokKod: 'YAG-01', quantity: 4 })).toThrow(/depo bilinmiyor/);
+  });
+  // 8. üretici — TransferTab'in KENDİ yerel regex'i (`(s.match(/\d+/) ?? ['1'])[0]`) bu kapıyı
+  // atlıyordu: depo adında rakam yoksa Mikro'ya ÇIKIŞ ve GİRİŞ ikisi de depo 1 (HAVALİMANI)
+  // gidiyor, "kendinden kendine transfer" hata vermeden yazılıyordu (Faz 3 2/n, 2026-09-14).
+  // Depo numarası artık kayıttan çözülür: src/utils/muhasebe/depoNo.ts `mikroDepoNo`.
+  it('depo transferi: çıkış/giriş deposu bilinmiyorsa throw (regex varsayılanı kaldırıldı)', () => {
+    expect(() => depoTransferPayload({ sku: 'CIM-42', quantity: 10, toDepo: 1 })).toThrow(/depo bilinmiyor/);
+    expect(() => depoTransferPayload({ sku: 'CIM-42', quantity: 10, fromDepo: 2 })).toThrow(/depo bilinmiyor/);
+    expect(() => depoTransferPayload({ sku: 'CIM-42', quantity: 10, fromDepo: 0, toDepo: 1 })).toThrow(/depo bilinmiyor/);
+    expect(() => depoTransferPayload({ sku: 'CIM-42', quantity: 10, fromDepo: 2, toDepo: NaN })).toThrow(/depo bilinmiyor/);
+  });
+  it('depo transferi: ESKİ SANAYİ(2) → HAVALİMANI(1) aynen gider (çıkış 2, giriş 1)', () => {
+    const satir = depoTransferPayload({ sku: 'CIM-42', quantity: 10, fromDepo: 2, toDepo: 1 }).evraklar[0].satirlar[0] as Record<string, unknown>;
+    expect(satir.ssip_cikdepo).toBe(2); expect(satir.ssip_girdepo).toBe(1);
   });
 });

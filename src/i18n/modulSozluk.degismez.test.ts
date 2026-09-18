@@ -21,12 +21,16 @@ const moduller: Modul[] = readdirSync(I18N)
   .filter(ad => /^[a-z][a-zA-Z0-9]*\.ts$/.test(ad) && ad !== 'ortak.ts')
   .flatMap(ad => {
     const icerik = readFileSync(join(I18N, ad), 'utf-8');
-    const bas = /ÜRETİLMİŞ — scripts\/modul-sozluk-kodmod\.py/.test(icerik) ? icerik.match(/— (\S+) modülünün/) : null;
-    if (!bas) return [];
+    // Kapsam: başlıktaki ` * Kapsam: a.tsx, b.tsx` satırı (kodmod her koştuğu dosyayı ekler); yoksa `— <dosya> modülünün`.
+    if (!/scripts\/modul-sozluk-kodmod\.py/.test(icerik)) return [];
+    const kapsam = icerik.match(/^ \* Kapsam: (.*)$/m)?.[1].split(',').map(x => x.trim()).filter(Boolean)
+      ?? [icerik.match(/— (\S+) modülünün/)?.[1]].filter((x): x is string => !!x);
+    if (!kapsam.length) return [];
     const blok = (etiket: 'tr' | 'en') => icerik.match(new RegExp(`^  ${etiket}: \\{\\n([\\s\\S]*?)\\n  \\},`, 'm'))?.[1] ?? '';
-    const oku = (b: string): Record<string, string> => Object.fromEntries([...b.matchAll(/^\s*([a-z0-9_]+): '((?:\\.|[^'\\])*)',$/gm)].map(m => [m[1], ac(m[2])]));
+    const oku = (b: string): Record<string, string> => Object.fromEntries([...b.matchAll(/^\s*([A-Za-z0-9_]+): '((?:\\.|[^'\\])*)',$/gm)].map(m => [m[1], ac(m[2])]));
     const tr = oku(blok('tr')), en = oku(blok('en'));
-    return [{ sozluk: ad, dosya: bas[1], cift: new Set(Object.keys(tr).filter(k => k in en).map(k => `${tr[k]}\u0000${en[k]}`)) }];
+    const cift = new Set(Object.keys(tr).filter(k => k in en).map(k => `${tr[k]}\u0000${en[k]}`));
+    return kapsam.map(dosya => ({ sozluk: ad, dosya, cift }));
   });
 
 describe('DEĞİŞMEZ: modül sözlüğündeki ifade modülde satır içinde yazılmaz', () => {

@@ -19,6 +19,12 @@ import {
 } from '../utils/export';
 import type { Order, Lead, InventoryItem, Employee, Quotation, InventoryMovement } from '../types';
 import { oc } from '../i18n/ortak';
+import { toplaBilinen, tutarBirlestir, ekranTutari, tamTutar, sayiSirala, type Tutar } from '../utils/para';
+import { siparisTutari } from '../utils/siparis';
+import { trendOzeti, hedefOrani } from '../utils/muhasebe/kpiTrend';
+
+/** Boş `Tutar` — gruplu toplamların başlangıcı (gerçek 0, bilinmeyen değil). */
+const bosTutar = (): Tutar => ({ toplam: 0, bilinen: 0, bilinmeyen: 0 });
 
 type RecurringOrder = {
   id: string; templateName: string; customerName: string; totalPrice: number;
@@ -157,7 +163,11 @@ export default function RaporlarPage({
                 // Section 1: Orders
                 pdf.setFontSize(12); pdf.setFont('Roboto', 'bold');
                 pdf.text(tr63 ? 'Sipariş Özeti' : 'Order Summary', 14, 52);
-                const totalRev = orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                // Tutarı okunamayan sipariş/fatura 0 SAYILMAZ, SAYILIR — yönetim raporunda
+                // sahte ₺0 hem ciroyu hem müşteri paylarını sessizce kaydırıyordu.
+                const ciro63 = toplaBilinen(orders, siparisTutari);
+                const totalRev = ekranTutari(ciro63);
+                const payPaydasi = tamTutar(ciro63);   // pay/oran TÜRETİLEN sayıdır: bir kayıt eksikse '—'
                 autoTable(pdf, {
                   ...pdfTabloStili(),
                   startY: 56,
@@ -172,16 +182,38 @@ export default function RaporlarPage({
                 const finalY = (pdf as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
                 pdf.setFontSize(12); pdf.setFont('Roboto', 'bold');
                 pdf.text(oc(tr63).en_yuksek_cirolu_musteriler, 14, finalY);
-                const custMap: Record<string, number> = {};
-                for (const o of orders) { custMap[o.customerName] = (custMap[o.customerName] ?? 0) + (o.totalPrice || 0); }
-                const top5 = Object.entries(custMap).sort(([, a], [, b]) => b - a).slice(0, 5);
+                const custMap = new Map<string, Tutar>();
+                for (const o of orders) {
+                  const ad = o.customerName || '—';
+                  custMap.set(ad, tutarBirlestir(custMap.get(ad) ?? bosTutar(), toplaBilinen([o], siparisTutari)));
+                }
+                // Sıralamada bilinmeyen SONA (para.sayiSirala) — `b - a` bilinmeyeni ₺0 gibi ortaya diziyordu.
+                const top5 = [...custMap.entries()]
+                  .sort((a, b) => sayiSirala(ekranTutari(a[1]), ekranTutari(b[1]), true))
+                  .slice(0, 5);
                 autoTable(pdf, {
                   ...pdfTabloStili(),
                   startY: finalY + 4,
                   head: [[oc(tr63).musteri, oc(tr63).ciro, oc(tr63).pay]],
-                  body: top5.map(([name, rev]) => [name, paraYaz(rev, { ondalik: 0 }), `${totalRev > 0 ? Math.round((rev / totalRev) * 100) : 0}%`]),
+                  body: top5.map(([name, t]) => [
+                    name + (t.bilinmeyen > 0 ? (tr63 ? ` (${t.bilinmeyen} tutarsız)` : ` (${t.bilinmeyen} unpriced)`) : ''),
+                    paraYaz(ekranTutari(t), { ondalik: 0 }),
+                    // Pay: payda ya da payın kendisi bilinmiyorsa '—' — "%0 pay" basılmaz.
+                    Number.isFinite(payPaydasi) && payPaydasi > 0 && t.bilinmeyen === 0
+                      ? `${Math.round((t.toplam / payPaydasi) * 100)}%`
+                      : '—',
+                  ]),
                   styles: { font: 'Roboto', fontSize: 9 },
                 });
+                if (ciro63.bilinmeyen > 0) {
+                  const notY = (pdf as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
+                  pdf.setFontSize(8); pdf.setFont('Roboto', 'normal');
+                  pdf.text(
+                    tr63 ? `Not: ${ciro63.bilinmeyen} kaydın tutarı okunamadı — ciro kısmi, paylar hesaplanamadı.`
+                         : `Note: ${ciro63.bilinmeyen} record(s) have an unreadable amount — revenue is partial and shares could not be computed.`,
+                    14, notY,
+                  );
+                }
                 // Section 3: Inventory highlights
                 const finalY2 = (pdf as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
                 pdf.setFontSize(12); pdf.setFont('Roboto', 'bold');
@@ -213,12 +245,17 @@ export default function RaporlarPage({
 
             const monthMap = new Map<string, MonthlySummaryRow>();
             let tarihsiz = 0;
+            let tutarsiz = 0;
             for (const o of orders) {
               const month = ayAnahtari(o.createdAt);
               if (!month) { tarihsiz++; continue; }
               const row = monthMap.get(month) ?? bosSatir(month);
               row.orderCount++;
-              row.revenue += Number(o.totalPrice) || 0;
+              // Tutarı okunamayan sipariş ciroya ₺0 OLARAK GİRMEZ, ayrıca sayılır: `Number(x) || 0`
+              // hem eksik alanı hem de meşru 0'ı aynı şeye çeviriyordu (sipariş sayısı ile ciro
+              // uyuşmuyor ama CSV bunu söylemiyordu).
+              const tutar = siparisTutari(o);
+              if (Number.isFinite(tutar)) row.revenue += tutar; else tutarsiz++;
               if (o.status === 'Delivered') row.delivered++;
               monthMap.set(month, row);
             }
@@ -245,6 +282,12 @@ export default function RaporlarPage({
             }
             if (tarihsiz > 0) {
               console.warn(`[aylık özet] ${tarihsiz} sipariş tarihi çözülemedi ve RAPORA DAHİL EDİLMEDİ.`);
+            }
+            if (tutarsiz > 0) {
+              // CSV'nin kolon şeması paylaşılan `exportMonthlySummaryCSV`'de — sayaç kolonu eklemek
+              // o dışa aktarıcıyı da değiştirir (ayrı iş, Açık İşler). Şimdilik ciro KISMİ ve bu uyarı
+              // verilir; eski davranışta bu kayıtlar sessizce ₺0 olarak ciroya giriyordu.
+              console.warn(`[aylık özet] ${tutarsiz} siparişin tutarı okunamadı — ciro sütunu KISMİ toplamdır.`);
             }
             exportMonthlySummaryCSV(
               [...monthMap.values()].sort((a, b) => a.month.localeCompare(b.month)),
@@ -298,17 +341,27 @@ export default function RaporlarPage({
           const ms = zamanMs(o.createdAt);
           return ms !== null && ms >= ayBasiMs570;
         });
-        const actRevenue570 = monthOrders570.reduce((s, o) => s + (o.totalPrice || 0), 0);
+        // Tutarı okunamayan sipariş ciroya 0 GİRMEZ, SAYILIR — hedef gerçekleşmesi sessizce düşüyordu.
+        const ciro570 = toplaBilinen(monthOrders570, siparisTutari);
+        const actRevenue570 = ekranTutari(ciro570);        // EKRAN: kısmi toplam (+ altta sayaç notu)
         const actOrders570 = monthOrders570.length;
-        const actAvgOrder570 = actOrders570 > 0 ? actRevenue570 / actOrders570 : 0;
+        // Ortalama sipariş değeri TÜRETİLEN sayıdır: bir siparişin tutarı bile bilinmiyorsa
+        // "toplam / adet" yanlış olur (payda tüm siparişleri sayar, pay saymaz) → '—'.
+        const tamCiro570 = tamTutar(ciro570);
+        const actAvgOrder570 = actOrders570 > 0 && Number.isFinite(tamCiro570) ? tamCiro570 / actOrders570 : NaN;
         const totalLeads570 = leads.length;
         const closedLeads570 = leads.filter(l => l.status === 'Closed Won' || l.status === 'Closed').length;
         const actLeadConv570 = totalLeads570 > 0 ? (closedLeads570 / totalLeads570) * 100 : 0;
+        // `oranGirdisi` AYRI bir alandır (2026-09-18 hakem turu): `actual` EKRANA basılan sayı
+        // (ciroda kısmi toplam olabilir), gerçekleşme yüzdesi ise TÜRETİLEN sayıdır — kısmi
+        // cirodan "%50 gerçekleşme" basmak, eksik faturanın büyüklüğü kadar yanlıştır.
+        // Ciroda kapı `tamTutar`; adet/dönüşüm zaten sayımdır (tutardan bağımsız), ortalama
+        // sipariş değeri de yukarıda `tamTutar` ile kapılı geliyor.
         const kpis570 = [
-          { label: oc(tr570).aylik_ciro, actual: actRevenue570, target: p570Targets.revenue, fmt: (v: number) => fmtKpi(v, 'K', 1), key: 'revenue' as const, color: 'blue' },
-          { label: oc(tr570).siparis_adedi, actual: actOrders570, target: p570Targets.orders, fmt: (v: number) => String(v), key: 'orders' as const, color: 'green' },
-          { label: tr570 ? 'Ort. Sipariş Değeri' : 'Avg Order Value', actual: actAvgOrder570, target: p570Targets.avgOrderVal, fmt: (v: number) => fmtKpi(v, 'full', 0), key: 'avgOrderVal' as const, color: 'purple' },
-          { label: tr570 ? 'Lead Dönüşüm %' : 'Lead Conv. %', actual: actLeadConv570, target: p570Targets.leadConv, fmt: (v: number) => v.toFixed(1) + '%', key: 'leadConv' as const, color: 'orange' },
+          { label: oc(tr570).aylik_ciro, actual: actRevenue570, oranGirdisi: tamCiro570, target: p570Targets.revenue, fmt: (v: number) => fmtKpi(v, 'K', 1), key: 'revenue' as const, color: 'blue' },
+          { label: oc(tr570).siparis_adedi, actual: actOrders570, oranGirdisi: actOrders570, target: p570Targets.orders, fmt: (v: number) => String(v), key: 'orders' as const, color: 'green' },
+          { label: tr570 ? 'Ort. Sipariş Değeri' : 'Avg Order Value', actual: actAvgOrder570, oranGirdisi: actAvgOrder570, target: p570Targets.avgOrderVal, fmt: (v: number) => fmtKpi(v, 'full', 0), key: 'avgOrderVal' as const, color: 'purple' },
+          { label: tr570 ? 'Lead Dönüşüm %' : 'Lead Conv. %', actual: actLeadConv570, oranGirdisi: actLeadConv570, target: p570Targets.leadConv, fmt: (v: number) => v.toFixed(1) + '%', key: 'leadConv' as const, color: 'orange' },
         ];
         const colorMap570: Record<string, string> = { blue: 'bg-blue-500', green: 'bg-green-500', purple: 'bg-purple-500', orange: 'bg-orange-500' };
         const colorText570: Record<string, string> = { blue: 'text-blue-600', green: 'text-green-600', purple: 'text-purple-600', orange: 'text-orange-600' };
@@ -317,20 +370,24 @@ export default function RaporlarPage({
             <h3 className="text-base font-bold text-gray-900 mb-4">{tr570 ? '🎯 KPI Hedef Takibi (Bu Ay)' : '🎯 KPI Target Tracking (This Month)'}</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               {kpis570.map(kpi => {
-                const pct = kpi.target > 0 ? Math.min(100, (kpi.actual / kpi.target) * 100) : 0;
-                const isGood = pct >= 80;
+                // Gerçekleşme oranı TÜRETİLEN sayıdır: gerçekleşen değer bilinmiyorsa (kısmi ciro,
+                // hesaplanamayan ortalama) "%0 gerçekleşme" basmak sahte kesinliktir → '—' + gri çubuk.
+                // Hesap tek kaynakta (utils/muhasebe/kpiTrend.hedefOrani); girdi `oranGirdisi`,
+                // ekrana basılan `actual` DEĞİL (kısmi ciro kapıyı açıyordu).
+                const pct = hedefOrani(kpi.oranGirdisi, kpi.target);
+                const isGood = pct !== null && pct >= 80;
                 return (
                   <div key={kpi.key} className="bg-gray-50 rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{kpi.label}</p>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isGood ? 'bg-green-100 text-green-700' : pct >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{pct.toFixed(0)}%</span>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${pct === null ? 'bg-gray-100 text-gray-500' : isGood ? 'bg-green-100 text-green-700' : pct >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{pct === null ? '—' : `${pct.toFixed(0)}%`}</span>
                     </div>
                     <div>
                       <p className={`text-xl font-bold ${colorText570[kpi.color]}`}>{kpi.fmt(kpi.actual)}</p>
                       <p className="text-xs text-gray-400 mt-0.5">{tr570 ? 'Hedef:' : 'Target:'} {kpi.fmt(kpi.target)}</p>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-1.5">
-                      <div className={`h-1.5 rounded-full transition-all ${colorMap570[kpi.color]}`} style={{ width: `${pct}%` }} />
+                      <div className={`h-1.5 rounded-full transition-all ${colorMap570[kpi.color]}`} style={{ width: `${pct ?? 0}%` }} />
                     </div>
                     <input type="number" value={p570Targets[kpi.key]} onChange={e => setP570Targets(prev => ({ ...prev, [kpi.key]: Number(e.target.value) }))}
                       className="w-full text-xs apple-input py-1 px-2" placeholder={tr570 ? 'Hedef girin...' : 'Set target...'} />
@@ -338,6 +395,13 @@ export default function RaporlarPage({
                 );
               })}
             </div>
+            {ciro570.bilinmeyen > 0 && (
+              <p className="text-[11px] text-amber-600 mt-3">
+                {tr570
+                  ? `${ciro570.bilinmeyen} siparişin tutarı okunamadı — Aylık Ciro kısmi toplamdır; hedef gerçekleşme oranı ve Ort. Sipariş Değeri hesaplanamıyor.`
+                  : `${ciro570.bilinmeyen} order(s) have an unreadable amount — Monthly Revenue is a partial total; its target progress and Avg Order Value cannot be computed.`}
+              </p>
+            )}
           </div>
         );
       })()}
@@ -351,14 +415,22 @@ export default function RaporlarPage({
           const d = new Date(now603.getFullYear(), now603.getMonth() - monthsBack + 1 + i, 1);
           return { date: d, label: d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short', year: '2-digit' }) };
         });
+        // Ay başına kaç kaydın tutarı okunamadı — grafiğin altındaki not bunu söyler.
+        let tutarsiz603 = 0;
         const getMonthValue = (m: typeof months603[number]) => {
           const start = m.date;
           const end = new Date(start.getFullYear(), start.getMonth() + 1, 0, 23, 59, 59);
           if (p603TrendMetric === 'revenue') {
-            return orders.filter(o => {
-              if (o.status === 'Cancelled' || !o.createdAt) return false;
-              const d = zamanDate(o.createdAt); return d !== null && d >= start && d <= end;
-            }).reduce((s, o) => s + (o.totalPrice || 0), 0);
+            // Tutarı okunamayan sipariş 0 SAYILMAZ, SAYILIR — eski `|| 0` o ayı sessizce düşürüyordu.
+            const t = toplaBilinen(
+              orders.filter(o => {
+                if (o.status === 'Cancelled' || !o.createdAt) return false;
+                const d = zamanDate(o.createdAt); return d !== null && d >= start && d <= end;
+              }),
+              siparisTutari,
+            );
+            tutarsiz603 += t.bilinmeyen;
+            return ekranTutari(t);
           }
           if (p603TrendMetric === 'orders') {
             return orders.filter(o => {
@@ -375,12 +447,19 @@ export default function RaporlarPage({
           return 0;
         };
         const data603 = months603.map(m => ({ ...m, value: getMonthValue(m) }));
-        const maxVal = Math.max(...data603.map(d => d.value), 1);
-        const totalVal = data603.reduce((s, d) => s + d.value, 0);
-        const avgVal = totalVal / data603.length;
-        const lastVal = data603[data603.length - 1]?.value || 0;
-        const prevVal = data603[data603.length - 2]?.value || 0;
-        const trend = prevVal > 0 ? ((lastVal - prevVal) / prevVal) * 100 : 0;
+        // Bilinmeyen ay ('—') ölçeğe/toplama girmez; `, 1` sıfıra-bölme koruması (para iddiası değil).
+        const maxVal = Math.max(...data603.map(d => d.value).filter(v => Number.isFinite(v)), 1);
+        // Dönem toplamı EKRAN sözleşmesi (kısmi + alttaki not); Aylık Ortalama ve Aylık Değişim
+        // TÜRETİLEN sayılardır. KAPI, AY TOPLAMINDAN DEĞİL TUTARSIZ KAYIT SAYACINDAN geçer
+        // (2026-09-18 hakem turu): `ekranTutari` kısmi bir ayı SONLU döndürdüğü için ay-içi
+        // bilinmeyen sayacı bir üst katta kayboluyor, `tamTutar(toplam603)` kapısı açılıyor ve
+        // ekran kendi notuyla çelişiyordu ("+100,0%" ile "hesaplanamıyor" yan yana). Satış
+        // Tahmini (620) bloğunun `tahminYapilabilir` kapısıyla aynı desen.
+        // Hesap tek kaynakta (utils/muhasebe/kpiTrend.trendOzeti).
+        const ozet603 = trendOzeti(data603.map(d => ({ deger: d.value })), tutarsiz603);
+        const totalVal = ozet603.toplam;
+        const avgVal = ozet603.ortalama;
+        const trend = ozet603.degisim;
         const fmt603 = (v: number) => p603TrendMetric === 'revenue' ? paraYaz(v, { ondalik: 0 }) : String(v);
         return (
           <div className="apple-card p-5">
@@ -402,8 +481,9 @@ export default function RaporlarPage({
             <div className="grid grid-cols-3 gap-3 mb-4">
               {[
                 { label: tr603 ? 'Dönem Toplamı' : 'Period Total', val: fmt603(totalVal), color: 'text-gray-800' },
-                { label: tr603 ? 'Aylık Ortalama' : 'Monthly Avg', val: fmt603(Math.round(avgVal)), color: 'text-blue-600' },
-                { label: tr603 ? 'Aylık Değişim' : 'MoM Change', val: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`, color: trend >= 0 ? 'text-emerald-600' : 'text-red-500' },
+                { label: tr603 ? 'Aylık Ortalama' : 'Monthly Avg', val: Number.isFinite(avgVal) ? fmt603(Math.round(avgVal)) : '—', color: 'text-blue-600' },
+                // Değişim hesaplanamıyorsa '—': "%0 değişim" ile "bilinmiyor" aynı şey değildir.
+                { label: tr603 ? 'Aylık Değişim' : 'MoM Change', val: trend === null ? '—' : `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`, color: trend === null ? 'text-gray-400' : trend >= 0 ? 'text-emerald-600' : 'text-red-500' },
               ].map(k => (
                 <div key={k.label} className="bg-gray-50 rounded-xl p-3">
                   <p className="text-[10px] text-gray-400 uppercase font-semibold">{k.label}</p>
@@ -414,16 +494,25 @@ export default function RaporlarPage({
             {/* Sparkline bars */}
             <div className="flex items-end gap-1 h-20">
               {data603.map((m, i) => {
-                const h = maxVal > 0 ? (m.value / maxVal) * 100 : 0;
+                // Tutarı hiç bilinmeyen ay: taban çubuğu (yüksekliği 0 çizmek "o ay ciro yoktu" demekti).
+                const bilinir = Number.isFinite(m.value);
+                const h = bilinir && maxVal > 0 ? (m.value / maxVal) * 100 : 0;
                 const isLast = i === data603.length - 1;
                 return (
-                  <div key={m.label} className="flex-1 flex flex-col items-center gap-1" title={`${m.label}: ${fmt603(m.value)}`}>
-                    <div className="w-full rounded-t-md transition-all" style={{ height: `${Math.max(h, 2)}%`, background: isLast ? '#ff4000' : '#e5e7eb' }} />
+                  <div key={m.label} className="flex-1 flex flex-col items-center gap-1" title={`${m.label}: ${bilinir ? fmt603(m.value) : '—'}`}>
+                    <div className="w-full rounded-t-md transition-all" style={{ height: `${Math.max(h, 2)}%`, background: !bilinir ? '#d1d5db' : isLast ? '#ff4000' : '#e5e7eb' }} />
                     <span className="text-[9px] text-gray-400 rotate-0">{m.label}</span>
                   </div>
                 );
               })}
             </div>
+            {p603TrendMetric === 'revenue' && tutarsiz603 > 0 && (
+              <p className="text-[11px] text-amber-600 mt-3">
+                {tr603
+                  ? `${tutarsiz603} siparişin tutarı okunamadı — aylık çubuklar ve dönem toplamı kısmi; ortalama ve aylık değişim hesaplanamıyor.`
+                  : `${tutarsiz603} order(s) have an unreadable amount — monthly bars and the period total are partial; the average and MoM change cannot be computed.`}
+              </p>
+            )}
           </div>
         );
       })()}
@@ -443,23 +532,35 @@ export default function RaporlarPage({
           const d = new Date(now620.getFullYear(), now620.getMonth() - histMonths + i + 1, 1);
           const label = tarihYaz(d, { month: 'short', year: '2-digit' });
           const ayD = ayAnahtari(d);
-          const rev = orders.filter(o => {
-            if (o.status === 'Cancelled' || !o.createdAt) return false;
-            return ayD !== null && ayAnahtari(o.createdAt) === ayD;
-          }).reduce((s, o) => s + (o.totalPrice || 0), 0);
-          return { label, rev };
+          // Tutarı okunamayan sipariş 0 SAYILMAZ, SAYILIR — tahminin girdisi buradan geliyor.
+          const t = toplaBilinen(
+            orders.filter(o => {
+              if (o.status === 'Cancelled' || !o.createdAt) return false;
+              return ayD !== null && ayAnahtari(o.createdAt) === ayD;
+            }),
+            siparisTutari,
+          );
+          return { label, rev: ekranTutari(t), bilinmeyen: t.bilinmeyen };
         });
-        const avgRev = history.reduce((s, m) => s + m.rev, 0) / histMonths;
+        const tutarsiz620 = history.reduce((s, m) => s + m.bilinmeyen, 0);
+        // TAHMİN, tanımı gereği TÜRETİLEN sayıdır: girdi aylarından biri bile eksikse regresyon
+        // eğimi ve ortalaması yanlış olur ve o yanlış geleceğe uzatılır. Bir kayıt bile
+        // okunamıyorsa tahmin ÜRETİLMEZ — geçmiş çubukları kısmi olarak gösterilir, sebebi yazılır.
+        const tahminYapilabilir = tutarsiz620 === 0;
         const n = history.length;
         const sumX = n * (n - 1) / 2, sumXX = n * (n - 1) * (2 * n - 1) / 6;
         const sumY = history.reduce((s, m, i) => s + m.rev * i, 0);
-        const slope = (n * sumY - sumX * history.reduce((s, m) => s + m.rev, 0)) / (n * sumXX - sumX * sumX) || 0;
-        const forecast = Array.from({ length: horizonMonths }, (_, i) => {
-          const d = new Date(now620.getFullYear(), now620.getMonth() + i + 1, 1);
-          const label = tarihYaz(d, { month: 'short', year: '2-digit' });
-          const val = Math.max(0, avgRev + slope * (histMonths + i));
-          return { label, val };
-        });
+        const toplamRev = history.reduce((s, m) => s + m.rev, 0);
+        const avgRev = toplamRev / histMonths;
+        const slope = (n * sumY - sumX * toplamRev) / (n * sumXX - sumX * sumX) || 0;
+        const forecast = tahminYapilabilir
+          ? Array.from({ length: horizonMonths }, (_, i) => {
+              const d = new Date(now620.getFullYear(), now620.getMonth() + i + 1, 1);
+              const label = tarihYaz(d, { month: 'short', year: '2-digit' });
+              const val = Math.max(0, avgRev + slope * (histMonths + i));
+              return { label, val };
+            })
+          : [];
         const fmtF = (v: number) => kisaTutar(v, { fmt: v >= 1_000_000 ? 'M' : v >= 1000 ? 'K' : 'full', ondalik: v >= 1_000_000 ? 1 : 0 });
         return (
           <div className="apple-card p-5 space-y-4">
@@ -472,27 +573,36 @@ export default function RaporlarPage({
               </div>
             </div>
             <div className="flex items-end gap-1 h-24">
-              {[...history, ...forecast.map(f => ({ label: f.label, rev: f.val, forecast: true }))].map((m, i) => {
-                const isF = 'forecast' in m && (m as { forecast?: boolean }).forecast;
-                const allVals = [...history.map(h => h.rev), ...forecast.map(f => f.val)];
-                const maxV = Math.max(...allVals, 1);
-                const h = ((isF ? (m as { val?: number }).val || 0 : m.rev) / maxV * 100);
+              {[...history.map(h => ({ label: h.label, deger: h.rev, forecast: false })),
+                ...forecast.map(f => ({ label: f.label, deger: f.val, forecast: true }))].map((m, i) => {
+                // Bilinmeyen ay ölçeğe girmez; `, 1` sıfıra-bölme koruması (para iddiası değil).
+                const maxV = Math.max(...history.map(h => h.rev).filter(v => Number.isFinite(v)), ...forecast.map(f => f.val), 1);
+                const bilinir = Number.isFinite(m.deger);
+                const h = bilinir ? (m.deger / maxV) * 100 : 0;
                 return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-0.5" title={isF ? fmtF((m as { val?: number }).val || 0) : fmtF(m.rev)}>
-                    <div className="w-full rounded-t-md" style={{ height: `${Math.max(h, 2)}%`, background: isF ? 'rgba(255,64,0,0.3)' : '#e5e7eb' }} />
+                  <div key={i} className="flex-1 flex flex-col items-center gap-0.5" title={bilinir ? fmtF(m.deger) : '—'}>
+                    <div className="w-full rounded-t-md" style={{ height: `${Math.max(h, 2)}%`, background: !bilinir ? '#d1d5db' : m.forecast ? 'rgba(255,64,0,0.3)' : '#e5e7eb' }} />
                     <span className="text-[8px] text-gray-400">{m.label}</span>
                   </div>
                 );
               })}
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {forecast.map(f => (
-                <div key={f.label} className="bg-orange-50 border border-orange-100 rounded-xl p-3">
-                  <p className="text-[10px] font-bold text-orange-400 uppercase">{f.label} {tr620 ? '(Tahmin)' : '(Forecast)'}</p>
-                  <p className="text-lg font-black text-orange-700">{fmtF(f.val)}</p>
-                </div>
-              ))}
-            </div>
+            {tahminYapilabilir ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {forecast.map(f => (
+                  <div key={f.label} className="bg-orange-50 border border-orange-100 rounded-xl p-3">
+                    <p className="text-[10px] font-bold text-orange-400 uppercase">{f.label} {tr620 ? '(Tahmin)' : '(Forecast)'}</p>
+                    <p className="text-lg font-black text-orange-700">{fmtF(f.val)}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-[11px] text-amber-800">
+                {tr620
+                  ? `Tahmin üretilemedi: son ${histMonths} ayda ${tutarsiz620} kaydın tutarı okunamadı. Eksik girdiyle kurulan trend geleceğe de yanlış uzatılır — geçmiş çubukları kısmi toplamdır.`
+                  : `Forecast unavailable: ${tutarsiz620} record(s) in the last ${histMonths} months have an unreadable amount. A trend built on missing input would be projected forward as well — the history bars are partial totals.`}
+              </div>
+            )}
             <p className="text-[10px] text-gray-400">* {tr620 ? 'Doğrusal trend ekstrapolasyonu. Gerçek sonuçlar farklılık gösterebilir.' : 'Linear trend extrapolation. Actual results may vary.'}</p>
           </div>
         );

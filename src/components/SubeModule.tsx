@@ -8,6 +8,9 @@ import { sortByCreatedAt } from '../utils/fsSort';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { paraYaz } from '../utils/currency';
 import { ayAnahtari } from '../utils/zaman';
+import { bilinenSayi, toplaBilinen, tutarBirlestir, ekranTutari, tamTutar } from '../utils/para';
+import { mikroToplam, birlesikKar } from '../utils/muhasebe/mikroCiro';
+import { oc } from '../i18n/ortak';
 import {
   Building2, ArrowRightLeft, BarChart3, Plus, X,
   MapPin, Phone, Mail, User, CheckCircle, Package
@@ -170,21 +173,46 @@ export default function SubeModule({ currentLanguage, isAuthenticated, inventory
   // faturasında YOK → maliyet yalnız Cetpa siparişinden (Mikro geliri maliyetsiz).
   const buAyYM    = `${tmYear}-${String(tmMonth + 1).padStart(2, '0')}`;
   const gecenAyYM = `${lmYear}-${String(lmMonth + 1).padStart(2, '0')}`;
-  const mikroGiden = mikroFaturalar.filter(f => f.yon === 'giden');
+  /** Siparişin maliyeti: gerçek `costTotal`, yoksa ciro × 0,65 TAHMİNİ (eski davranış aynen korunur);
+   *  ikisi de okunamıyorsa BİLİNMİYOR (NaN) — eskiden `(o.totalPrice ?? 0) * 0.65` ile ₺0 maliyet olup
+   *  o siparişi %100 marjlı gösteriyordu. (0,65 katsayısının kendisi ayrı bir açık madde.) */
+  const plMaliyet = (o: PLOrder): number =>
+    bilinenSayi(o.costTotal) ? Number(o.costTotal)
+    : bilinenSayi(o.totalPrice) ? Number(o.totalPrice) * 0.65
+    : NaN;
+
   const computedPL = subeler.map(s => {
     const bOrders = plOrders.filter(o => o.subeAdi === s.subeAdi && o.status !== 'Cancelled');
     const tmo = bOrders.filter(o => ayAnahtari(o.createdAt) === buAyYM);
     const lmo = bOrders.filter(o => ayAnahtari(o.createdAt) === gecenAyYM);
-    const subeNoNum = Number(s.subeKodu);
-    const mikroBu    = Number.isFinite(subeNoNum) ? mikroGiden.filter(f => f.subeNo === subeNoNum && f.tarih.startsWith(buAyYM)).reduce((a, f) => a + f.tutar, 0) : 0;
-    const mikroGecen = Number.isFinite(subeNoNum) ? mikroGiden.filter(f => f.subeNo === subeNoNum && f.tarih.startsWith(gecenAyYM)).reduce((a, f) => a + f.tutar, 0) : 0;
-    const buAyGelir     = tmo.reduce((s, o) => s + (o.totalPrice ?? 0), 0) + mikroBu;
-    const gecenAyGelir  = lmo.reduce((s, o) => s + (o.totalPrice ?? 0), 0) + mikroGecen;
-    const buAyMaliyet   = tmo.reduce((s, o) => s + (o.costTotal ?? (o.totalPrice ?? 0) * 0.65), 0);
-    const gecenAyMaliyet = lmo.reduce((s, o) => s + (o.costTotal ?? (o.totalPrice ?? 0) * 0.65), 0);
-    return { subeAdi: s.subeAdi, buAyGelir, buAyMaliyet, gecenAyGelir, gecenAyMaliyet };
+    // Şube eşleşmesi: cha_subeno == subeKodu (sayısal). Şube kodu çözülemezse Mikro geliri
+    // EKLENMEZ — `mikroToplam` süzgeci aynı kararı veriyor (bkz. utils/muhasebe/mikroCiro.ts).
+    // Hesap tek kaynakta (utils/muhasebe/mikroCiro.ts): tutarı okunamayan fatura 0 sayılmaz, SAYILIR.
+    const mikroBu    = mikroToplam(mikroFaturalar, { yon: 'giden', tarihOneki: buAyYM,    subeNo: s.subeKodu });
+    const mikroGecen = mikroToplam(mikroFaturalar, { yon: 'giden', tarihOneki: gecenAyYM, subeNo: s.subeKodu });
+    const buAyGelirT     = tutarBirlestir(toplaBilinen(tmo, o => o.totalPrice), mikroBu);
+    const gecenAyGelirT  = tutarBirlestir(toplaBilinen(lmo, o => o.totalPrice), mikroGecen);
+    const buAyMaliyetT   = toplaBilinen(tmo, plMaliyet);
+    const gecenAyMaliyetT = toplaBilinen(lmo, plMaliyet);
+    // EKRAN toplamı (kısmi olabilir, yanına sayaç düşer) ile TÜRETİLEN kâr/marj AYRI sözleşme:
+    // kâr `birlesikKar` ile tam kapıdan geçer, bir kayıt bile bilinmiyorsa '—'.
+    const buAyGelir      = ekranTutari(buAyGelirT);
+    const gecenAyGelir   = ekranTutari(gecenAyGelirT);
+    const buAyMaliyet    = ekranTutari(buAyMaliyetT);
+    const gecenAyMaliyet = ekranTutari(gecenAyMaliyetT);
+    const buAyKar    = birlesikKar(buAyGelirT, buAyMaliyetT);
+    const gecenAyKar = birlesikKar(gecenAyGelirT, gecenAyMaliyetT);
+    // Marj: payda bilinmiyor ya da ≤ 0 ise null ('—') — "%0 marj" ve "NaN%" basılmaz.
+    const tamGelir = tamTutar(buAyGelirT);
+    const marj = Number.isFinite(buAyKar) && Number.isFinite(tamGelir) && tamGelir > 0
+      ? Math.round((buAyKar / tamGelir) * 100)
+      : null;
+    const bilinmeyen = buAyGelirT.bilinmeyen + buAyMaliyetT.bilinmeyen + gecenAyGelirT.bilinmeyen + gecenAyMaliyetT.bilinmeyen;
+    return { subeAdi: s.subeAdi, buAyGelir, buAyMaliyet, gecenAyGelir, gecenAyMaliyet, buAyKar, gecenAyKar, marj, bilinmeyen };
   });
-  const plHasData = computedPL.some(p => p.buAyGelir > 0 || p.gecenAyGelir > 0);
+  // "Veri var mı" kararı: bilinen ciro ya da tutarı okunamayan kayıt — ikisi de yoksa gerçekten boş.
+  const plHasData = computedPL.some(p => p.buAyGelir > 0 || p.gecenAyGelir > 0 || p.bilinmeyen > 0);
+  const plBilinmeyen = computedPL.reduce((s, p) => s + p.bilinmeyen, 0);
 
   return (
     <div className="space-y-6">
@@ -331,6 +359,13 @@ export default function SubeModule({ currentLanguage, isAuthenticated, inventory
         <div className="space-y-4">
           <div className="apple-card p-5">
             <h3 className="text-sm font-bold text-gray-700 mb-4">Şube Kâr-Zarar Karşılaştırması</h3>
+            {plBilinmeyen > 0 && (
+              <p className="text-[11px] text-amber-600 mb-3">
+                {currentLanguage === 'tr'
+                  ? `${plBilinmeyen} kaydın tutarı/maliyeti okunamadı — gelir ve maliyet sütunları kısmi; o şubelerde kâr ve marj hesaplanamıyor ('—').`
+                  : `${plBilinmeyen} record(s) have an unreadable amount/cost — revenue and cost columns are partial; profit and margin cannot be computed for those branches ('—').`}
+              </p>
+            )}
             {!plHasData && (
               <div className="apple-card p-6 text-center text-gray-400">
                 <p className="text-sm font-medium mb-1">{currentLanguage === 'tr' ? 'Henüz şube bazlı sipariş yok' : 'No branch-tagged orders yet'}</p>
@@ -351,21 +386,28 @@ export default function SubeModule({ currentLanguage, isAuthenticated, inventory
               </thead>
               <tbody>
                 {computedPL.map(row => {
-                  const buAyKar = row.buAyGelir - row.buAyMaliyet;
-                  const gecenAyKar = row.gecenAyGelir - row.gecenAyMaliyet;
-                  const marj = Math.round((buAyKar / row.buAyGelir) * 100);
-                  const trend = buAyKar >= gecenAyKar;
+                  const { buAyKar, gecenAyKar, marj } = row;
+                  // Trend oku iki kâr da BİLİNİYORSA basılır — bilinmeyeni "düşüş" saymak yanlış sinyaldir.
+                  const trendBilinir = Number.isFinite(buAyKar) && Number.isFinite(gecenAyKar);
+                  const trend = trendBilinir && buAyKar >= gecenAyKar;
                   return (
                     <tr key={row.subeAdi} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-3 px-3 font-semibold text-gray-900">{row.subeAdi}</td>
+                      <td className="py-3 px-3 font-semibold text-gray-900">
+                        {row.subeAdi}
+                        {row.bilinmeyen > 0 && (
+                          <span className="ml-1 text-[10px] font-normal text-amber-600">
+                            · {row.bilinmeyen} {currentLanguage === 'tr' ? 'kayıt tutarsız' : 'record(s) unpriced'}
+                          </span>
+                        )}
+                      </td>
                       <td className="py-3 px-3 text-right text-gray-700">{paraYaz(row.buAyGelir, { ondalik: 0 })}</td>
                       <td className="py-3 px-3 text-right text-gray-500">{paraYaz(row.buAyMaliyet, { ondalik: 0 })}</td>
                       <td className="py-3 px-3 text-right font-bold text-green-600">{paraYaz(buAyKar, { ondalik: 0 })}</td>
                       <td className="py-3 px-3 text-right">
-                        <span className={`text-sm font-bold ${marj >= 35 ? 'text-green-600' : marj >= 25 ? 'text-amber-600' : 'text-red-500'}`}>{marj}%</span>
+                        <span className={`text-sm font-bold ${marj === null ? 'text-gray-400' : marj >= 35 ? 'text-green-600' : marj >= 25 ? 'text-amber-600' : 'text-red-500'}`}>{marj === null ? '—' : `${marj}%`}</span>
                       </td>
                       <td className="py-3 px-3 text-right text-gray-400">
-                        <span className={trend ? 'text-green-500' : 'text-red-400'}>{trend ? '▲' : '▼'}</span>
+                        {trendBilinir && <span className={trend ? 'text-green-500' : 'text-red-400'}>{trend ? '▲' : '▼'}</span>}
                         {' '}{paraYaz(gecenAyKar, { ondalik: 0 })}
                       </td>
                     </tr>
@@ -381,14 +423,18 @@ export default function SubeModule({ currentLanguage, isAuthenticated, inventory
             <h3 className="text-sm font-bold text-gray-700 mb-4">Şube Gelir Karşılaştırması (Bu Ay)</h3>
             <div className="space-y-3">
               {computedPL.map(row => {
-                const maxGelir = Math.max(...computedPL.map(r => r.buAyGelir), 1);
-                const pct = Math.round((row.buAyGelir / maxGelir) * 100);
-                const karPct = Math.round(((row.buAyGelir - row.buAyMaliyet) / row.buAyGelir) * 100);
+                // Bilinmeyen gelir ('—') ölçeğe girmez; `, 1` sıfıra-bölme koruması (para iddiası değil).
+                const maxGelir = Math.max(...computedPL.map(r => r.buAyGelir).filter(v => Number.isFinite(v)), 1);
+                const pct = Number.isFinite(row.buAyGelir) ? Math.round((row.buAyGelir / maxGelir) * 100) : 0;
                 return (
                   <div key={row.subeAdi}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-semibold text-gray-700">{row.subeAdi}</span>
-                      <span className="text-xs text-gray-500">{paraYaz(row.buAyGelir, { ondalik: 0 })} <span className="text-green-600 font-semibold">({karPct}% marj)</span></span>
+                      <span className="text-xs text-gray-500">{paraYaz(row.buAyGelir, { ondalik: 0 })}{' '}
+                        <span className={row.marj === null ? 'text-gray-400' : 'text-green-600 font-semibold'}>
+                          ({row.marj === null ? (currentLanguage === 'tr' ? 'marj hesaplanamıyor' : 'margin unavailable') : `${row.marj}% ${oc(currentLanguage).marj_2}`})
+                        </span>
+                      </span>
                     </div>
                     <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
                       <div className="h-full bg-brand rounded-full transition-all" style={{ width: `${pct}%` }} />

@@ -430,7 +430,8 @@ export interface BankTransaction {
   description: string;
   amount: number;
   type: 'credit' | 'debit';
-  balance: number;
+  /** İşlem sonrası bakiye — kaynak (Mikro/CSV) vermediyse anahtar YOK, ekran '—' (utils/muhasebe/bankaHesap.ts; 2026-09-14). DB'den null da gelebilir: okuyan taraf bilinenSayi ile elesin. */
+  balance?: number;
   currency: 'TRY' | 'USD' | 'EUR';
   reference?: string;
   source: 'mikro' | 'manual' | 'import';

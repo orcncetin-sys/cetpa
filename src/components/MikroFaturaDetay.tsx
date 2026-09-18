@@ -28,8 +28,11 @@ export interface MikroFaturaDetayVerisi {
   musteri: string;
   cariKod: string;
   tarih: string;
+  /** **NaN = BİLİNMİYOR** (useMikroFaturalar ile aynı sözleşme) — ekranda '—', toplama girmez. */
   tutar: number;
+  /** **NaN = BİLİNMİYOR.** */
   kdv: number;
+  /** **NaN = BİLİNMİYOR.** */
   matrah: number;
   oran: number | null;
   oranKarma?: boolean;
@@ -183,8 +186,11 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
           {satir(tr ? 'Müşteri / Cari' : 'Customer', fatura.musteri)}
           {satir(tr ? 'Cari kodu' : 'Account code', fatura.cariKod || '—')}
           {satir(oc(tr).tarih, fatura.tarih || '—')}
-          {satir(tr ? 'Matrah' : 'Base', typeof fatura.matrah === 'number' ? tl(fatura.matrah) : '—')}
-          {satir(oc(tr).kdv, typeof fatura.kdv === 'number' ? `${tl(fatura.kdv)}${fatura.oranKarma ? (tr ? ' (Karma oran)' : ' (Mixed rate)') : (fatura.oran !== null ? ` (%${fatura.oran})` : '')}` : '—')}
+          {/* `typeof === 'number'` NaN'ı SAYI SANIYORDU: hook grubu (2026-09-18) okunamayan
+              tutar/kdv/matrahı NaN yaptığından bu kontrol "biliniyor" deyip `tl(NaN)`e giriyordu.
+              `bilinenSayi` NaN'ı da eler — bilinmeyen alan '—' basar (oranı da yazılmaz). */}
+          {satir(tr ? 'Matrah' : 'Base', bilinenSayi(fatura.matrah) ? tl(fatura.matrah) : '—')}
+          {satir(oc(tr).kdv, bilinenSayi(fatura.kdv) ? `${tl(fatura.kdv)}${fatura.oranKarma ? (tr ? ' (Karma oran)' : ' (Mixed rate)') : (fatura.oran !== null ? ` (%${fatura.oran})` : '')}` : '—')}
           {fatura.oranKarma && oranKirilim && oranKirilim.length > 1 && (
             <div className="bg-amber-50 rounded-xl px-3 py-2 my-2 space-y-1">
               <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">{tr ? 'KDV Kırılımı' : 'VAT Breakdown'}</p>
@@ -196,7 +202,7 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
               ))}
             </div>
           )}
-          {satir(oc(tr).toplam, typeof fatura.tutar === 'number' ? tl(fatura.tutar) : '—')}
+          {satir(oc(tr).toplam, bilinenSayi(fatura.tutar) ? tl(fatura.tutar) : '—')}
 
           {/* ── Fatura kalemleri ── */}
           <div className="mt-4">

@@ -3,8 +3,10 @@ import { Search, Plus, Eye, Edit2, Trash2, X, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import { type Employee } from '../../types';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
+import { formSayisi, gorunenTutar } from '../../utils/muhasebe/irsaliyeCalisan';
+import { ac } from '../../i18n/accounting';
 
-type EmployeeForm = { name: string; employeeId: string; tcId: string; position: string; department: string; salary: number; startDate: string; email: string; phone: string };
+type EmployeeForm = { name: string; employeeId: string; tcId: string; position: string; department: string; salary: number | null; startDate: string; email: string; phone: string };
 
 interface CalisanlarTabProps {
   t: AccountingT;
@@ -68,12 +70,12 @@ export default function CalisanlarTab({
                     <td className="py-2.5 px-3 font-medium text-gray-800">{e.name}</td>
                     <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell">{e.position}</td>
                     <td className="py-2.5 px-3 text-gray-500 hidden md:table-cell text-xs">{e.department || '—'}</td>
-                    <td className="py-2.5 px-3 text-right font-semibold hidden sm:table-cell">{e.salary ? formatTRY(e.salary) : '—'}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold hidden sm:table-cell">{formatTRY(gorunenTutar(e.salary))}</td>
                     <td className="py-2.5 px-3 text-xs text-gray-500 hidden lg:table-cell">{e.startDate || '—'}</td>
                     <td className="py-2.5 px-3 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => { setEditingEmployee(e); setEmployeeForm({ name: e.name, employeeId: e.employeeId || '', tcId: e.tcId || '', position: e.position, department: e.department || '', salary: e.salary || 0, startDate: e.startDate || format(new Date(), 'yyyy-MM-dd'), email: e.email || '', phone: e.phone || '' }); setShowEmployeeModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                        <button onClick={() => { setEditingEmployee(e); setEmployeeForm({ name: e.name, employeeId: e.employeeId || '', tcId: e.tcId || '', position: e.position, department: e.department || '', salary: e.salary || 0, startDate: e.startDate || format(new Date(), 'yyyy-MM-dd'), email: e.email || '', phone: e.phone || '' }); setShowEmployeeModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
+                        <button onClick={() => { setEditingEmployee(e); setEmployeeForm({ name: e.name, employeeId: e.employeeId || '', tcId: e.tcId || '', position: e.position, department: e.department || '', salary: formSayisi(e.salary), startDate: e.startDate || format(new Date(), 'yyyy-MM-dd'), email: e.email || '', phone: e.phone || '' }); setShowEmployeeModal(true); }} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
+                        <button onClick={() => { setEditingEmployee(e); setEmployeeForm({ name: e.name, employeeId: e.employeeId || '', tcId: e.tcId || '', position: e.position, department: e.department || '', salary: formSayisi(e.salary), startDate: e.startDate || format(new Date(), 'yyyy-MM-dd'), email: e.email || '', phone: e.phone || '' }); setShowEmployeeModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                         <button onClick={() => deleteEmployee(e.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
                       </div>
                     </td>
@@ -102,11 +104,11 @@ export default function CalisanlarTab({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Çalışan ID' : 'Employee ID'}</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{ac(currentLanguage).calisan_id}</label>
                     <input type="text" value={employeeForm.employeeId} onChange={e => setEmployeeForm(prev => ({ ...prev, employeeId: e.target.value }))} placeholder="EMP-001" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'TC Kimlik No' : 'TC ID Number'}</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{ac(currentLanguage).tc_kimlik_no}</label>
                     <input type="text" value={employeeForm.tcId} onChange={e => setEmployeeForm(prev => ({ ...prev, tcId: e.target.value }))} placeholder="12345678901" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                   </div>
                 </div>
@@ -123,7 +125,7 @@ export default function CalisanlarTab({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{t.salary}</label>
-                    <input type="number" value={employeeForm.salary} onChange={e => setEmployeeForm(prev => ({ ...prev, salary: Number(e.target.value) }))} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                    <input type="number" value={employeeForm.salary ?? ''} onChange={e => setEmployeeForm(prev => ({ ...prev, salary: formSayisi(e.target.value) }))} placeholder={ac(currentLanguage).bos_bilinmiyor} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{t.startDate}</label>

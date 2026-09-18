@@ -1,5 +1,6 @@
 import { sayiBicimleyici } from '../utils/recharts';
-import { odemeTakipli, gorunenSiparisNo, siparisTarih } from '../utils/siparis';
+import { odemeTakipli, gorunenSiparisNo, siparisTarih, siparisTutari } from '../utils/siparis';
+import { toplaBilinen, tutarBirlestir, ekranTutari } from '../utils/para';
 import { gunAnahtari, zamanDate, zamanMs, ayAnahtari, tarihYaz, bugunAnahtari } from '../utils/zaman';
 import { siparisDurumEtiketi, sevkiyatDurumEtiketi } from '../utils/durumEtiketi';
 import KurUyarisi from '../components/KurUyarisi';
@@ -168,14 +169,19 @@ export default function DashboardPage(props: Props) {
     return d >= start && d <= end;
   });
 
-  const totalMikroRevenue = filteredMikroFaturalar.reduce((sum, f) => sum + (f.tutar || 0), 0);
+  // Tutarı okunamayan fatura 0 SAYILMAZ, SAYILIR (`Tutar.bilinmeyen`) — eski `(f.tutar || 0)`
+  // hook'un sahte sıfırını ekrana taşıyordu; hook artık NaN (= bilinmiyor) veriyor.
+  const mikroRevenueT = toplaBilinen(filteredMikroFaturalar, f => f.tutar);
   // ÇİFT SAYIM KORUMASI (2026-09-01): faturadan türetilen siparişler
   // (source:'mikro-fatura') native tarafında DIŞLANIR — aynı fatura hem
   // mikroFaturalar hem orders üzerinden iki kez ciroya girmesin.
-  const totalNativeRevenue = filteredOrders
-    .filter(o => (o as { source?: string }).source !== 'mikro-fatura')
-    .reduce((s, o) => s + (o.totalPrice || o.totalAmount || 0), 0);
-  const combinedRevenue = totalNativeRevenue + totalMikroRevenue;
+  // Sipariş tutarı TEK KAYNAK `siparisTutari` (`totalPrice ?? totalAmount`; ikisi de yoksa NaN).
+  const nativeRevenueT = toplaBilinen(
+    filteredOrders.filter(o => (o as { source?: string }).source !== 'mikro-fatura'),
+    siparisTutari,
+  );
+  const revenueT = tutarBirlestir(nativeRevenueT, mikroRevenueT);
+  const combinedRevenue = ekranTutari(revenueT);   // hiç bilinen yoksa NaN → fmtKpi '—'
   // 'orders' ve 'mikroFaturalar' SSE ile KADEMELİ akıyor (mikroFaturalar 600+
   // fatura olabiliyor). onSnapshot abone olur olmaz boş diziyle bile tetiklenir;
   // ilk anlık görüntü tam gelene kadar burada okunan toplam bir ARA DEĞERdir.
@@ -405,6 +411,12 @@ export default function DashboardPage(props: Props) {
                       <p className="text-[10px] text-gray-400 mt-0.5">
                         {aralikEtiketi}
                       </p>
+                      {/* Tutarı okunamayan kayıt varsa rakam KISMİ toplamdır — sessizce eksik göstermek yerine söylenir. */}
+                      {revenueReady && revenueT.bilinmeyen > 0 && (
+                        <p className="text-[10px] text-amber-600 mt-0.5">
+                          {revenueT.bilinmeyen} {currentLanguage === 'tr' ? 'kaydın tutarı okunamadı (kısmi toplam)' : 'record(s) unpriced (partial total)'}
+                        </p>
+                      )}
                       {/* Phase 35: 7 GÜNLÜK ciro sparkline — kartın büyük rakamı seçili
                           tarih aralığına, bu mini grafik BİLEREK son 7 güne bakar (kısa
                           vadeli eğilim göstergesi). Farklı pencere olduğu tooltip'te yazar.
@@ -419,29 +431,33 @@ export default function DashboardPage(props: Props) {
                           const d = new Date(); d.setDate(d.getDate() - (6 - i));
                           const dayStr = gunAnahtari(d);
 
-                          // Native revenue for this day
-                          const revNative = orders.filter(o => {
-                            if (!odemeTakipli(o)) return false;   // mikro türevi aşağıda sayılıyor
-                            return gunAnahtari(siparisTarih(o)) === dayStr;
-                          }).reduce((s, o) => s + (o.totalPrice || 0), 0);
-                          
-                          // Mikro revenue for this day
-                          const revMikro = mikroFaturalar.filter(f => {
-                            if (f.yon !== 'giden') return false;
-                            return gunAnahtari(f.tarih) === dayStr;
-                          }).reduce((s, f) => s + (f.tutar || 0), 0);
+                          // Native revenue for this day — tutarı bilinmeyen sipariş 0 sayılmaz, SAYILIR.
+                          const revNative = toplaBilinen(
+                            orders.filter(o => odemeTakipli(o) && gunAnahtari(siparisTarih(o)) === dayStr), // mikro türevi aşağıda sayılıyor
+                            siparisTutari,
+                          );
 
-                          return { day: d.getDate(), rev: revNative + revMikro };
+                          // Mikro revenue for this day
+                          const revMikro = toplaBilinen(
+                            mikroFaturalar.filter(f => f.yon === 'giden' && gunAnahtari(f.tarih) === dayStr),
+                            f => f.tutar,
+                          );
+
+                          const gun = tutarBirlestir(revNative, revMikro);
+                          return { day: d.getDate(), rev: ekranTutari(gun), bilinmeyen: gun.bilinmeyen };
                         });
-                        const maxRev = Math.max(...days.map(d => d.rev), 1);
+                        // Bilinmeyen gün ('—') ölçeğe girmez; `, 1` sıfıra-bölme koruması (para iddiası değil).
+                        const maxRev = Math.max(...days.map(d => d.rev).filter(v => Number.isFinite(v)), 1);
                         return (
                           <div className="flex items-end gap-0.5 mt-2 h-8">
                             {days.map((d, i) => (
                               <div key={i} className="flex-1 flex flex-col justify-end">
+                                {/* Tutarı hiç bilinmeyen gün: gri taban çubuğu — yüksekliği 0'mış gibi
+                                    YEŞİL çizmek "o gün ciro yoktu" demekti (sahte kesinlik). */}
                                 <div
-                                  className="bg-green-400 rounded-sm opacity-60 group-hover:opacity-100 transition-opacity"
-                                  style={{ height: `${Math.max((d.rev / maxRev) * 100, 4)}%` }}
-                                  title={`${d.day}. gün: ${fmtKpi(d.rev)} — ${currentLanguage === 'tr' ? 'son 7 gün eğilimi' : 'last 7 days trend'}`}
+                                  className={`rounded-sm opacity-60 group-hover:opacity-100 transition-opacity ${Number.isFinite(d.rev) ? 'bg-green-400' : 'bg-gray-300'}`}
+                                  style={{ height: `${Number.isFinite(d.rev) ? Math.max((d.rev / maxRev) * 100, 4) : 4}%` }}
+                                  title={`${d.day}. gün: ${fmtKpi(d.rev)}${d.bilinmeyen > 0 ? (currentLanguage === 'tr' ? ` · ${d.bilinmeyen} kaydın tutarı okunamadı` : ` · ${d.bilinmeyen} record(s) unpriced`) : ''} — ${currentLanguage === 'tr' ? 'son 7 gün eğilimi' : 'last 7 days trend'}`}
                                 />
                               </div>
                             ))}
@@ -480,20 +496,26 @@ export default function DashboardPage(props: Props) {
                 //
                 // Çift sayım koruması sparkline ile aynı: mikro-fatura türevleri
                 // `mikroFaturalar` üzerinden ayrıca sayılıyor.
-                const weekRevenue = orders
-                  .filter(o => {
-                    if (!odemeTakipli(o)) return false;
-                    const d = siparisTarih(o);
-                    return !!d && (Date.now() - d.getTime()) < 7 * 86400000;
-                  })
-                  .reduce((s, o) => s + (o.totalPrice || 0), 0)
-                  + mikroFaturalar
-                      .filter(f => {
-                        if (f.yon !== 'giden') return false;
-                        const ms = zamanMs(f.tarih);
-                        return ms !== null && (Date.now() - ms) < 7 * 86400000;
-                      })
-                      .reduce((s, f) => s + (f.tutar || 0), 0);
+                // Tutarı okunamayan kayıt 0 SAYILMAZ, SAYILIR — rakam kısmi kalır ve altına not düşer.
+                const weekRevenueT = tutarBirlestir(
+                  toplaBilinen(
+                    orders.filter(o => {
+                      if (!odemeTakipli(o)) return false;
+                      const d = siparisTarih(o);
+                      return !!d && (Date.now() - d.getTime()) < 7 * 86400000;
+                    }),
+                    siparisTutari,
+                  ),
+                  toplaBilinen(
+                    mikroFaturalar.filter(f => {
+                      if (f.yon !== 'giden') return false;
+                      const ms = zamanMs(f.tarih);
+                      return ms !== null && (Date.now() - ms) < 7 * 86400000;
+                    }),
+                    f => f.tutar,
+                  ),
+                );
+                const weekRevenue = ekranTutari(weekRevenueT);
 
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -528,6 +550,11 @@ export default function DashboardPage(props: Props) {
                           : 'Independent of the selected date range: always the last 7 days.'}>
                         {currentLanguage === 'tr' ? 'Son 7 gün (aralıktan bağımsız)' : 'Last 7 days (range-independent)'}
                       </p>
+                      {weekRevenueT.bilinmeyen > 0 && (
+                        <p className="text-[10px] text-amber-600">
+                          {weekRevenueT.bilinmeyen} {currentLanguage === 'tr' ? 'kaydın tutarı okunamadı' : 'record(s) unpriced'}
+                        </p>
+                      )}
                     </div>
 
                     {/* ── Remaining plain cards ── */}

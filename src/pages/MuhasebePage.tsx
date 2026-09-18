@@ -1577,8 +1577,10 @@ export default function MuhasebePage(props: Props) {
                     // şişiriyordu. Cari aya (henüz beyan edilmemiş varsayılan dönem) sınırlandı —
                     // aynı kapsam KDV Analizi/KDV Mutabakat sekmelerinde de kullanılıyor.
                     const guncelAy547 = bugunAnahtari().slice(0, 7); // yerel YYYY-MM (UTC ay kayması yok)
-                    // kdvT547.mikroNet negatifse devreden KDV (borca 0 girer). ÜST AKIŞ: useMikroFaturalar
-                    // `kdv`yi 0'a zorluyor — Mikro faturasından bilinmeyen buraya hook düzelince ulaşır (Açık İşler).
+                    // kdvT547.mikroNet negatifse devreden KDV (borca 0 girer). ÜST AKIŞ DÜZELDİ (Faz 3 2/n,
+                    // 2026-09-18): useMikroFaturalar artık bilinmeyen KDV'yi NaN veriyor (sunucudaki ISNULL(…,0)
+                    // yedeği de kalktı) — KDV'si okunamayan Mikro faturası buraya BİLİNMEYEN olarak ulaşır ve sayılır.
+                    // 2026-09-18 öncesi dokümanların bayat ₺0'ı da hook'taki korumayla yakalanır (tam import şart).
                     const kdvT547 = kdvBorcu(orders, mikroFaturalar, guncelAy547);
                     const b547 = bilanco({ kasa: kasaT547, banka: bankaT547, alacak: arT547, stok: stokT547, duranVarlik: duranT547, borc: apT547, kdv: kdvT547, cariBilinmeyen: cariBalanceToplam.bilinmeyen });
                     // ekranTutari: hiç bilinen kayıt yokken '—' ('₺0*' değil); özkaynak/pasif modülde zaten NaN-farkında.
@@ -1918,9 +1920,10 @@ export default function MuhasebePage(props: Props) {
                     // Ba = GELEN (alış) faturaları, cari bazında ≥ ₺5.000.
                     // Hesap tek kaynakta: babsKdvAnaliz.babsFormu — tutarı bilinmeyen fatura 0 sayılıp cari
                     // eşiğin altına düşürülmez (belirsiz listesi), tarihi çözülemeyen fatura sayılır (tarihsiz).
-                    // ÜST AKIŞ SINIRI (Açık İşler): useMikroFaturalar `tutar`ı hâlâ `Number(x ?? 0) || 0` ile 0'a
-                    // zorluyor — meblağı boş Mikro faturası buraya ₺0 olarak gelir; `belirsiz` listesi HOOK DÜZELİNCE
-                    // dolar. Bu panel ona hazır (tipler unknown), sayfa değişmeden doğru davranır.
+                    // ÜST AKIŞ DÜZELDİ (Faz 3 2/n, 2026-09-18): useMikroFaturalar meblağı okunamayan faturayı
+                    // artık NaN (= bilinmiyor) veriyor — `belirsiz` listesi GERÇEKTEN dolar ve eşiğin altına
+                    // düşürülemeyen cariler mali müşavire sorulmak üzere burada görünür.
+                    // 2026-09-18 öncesi dokümanların bayat ₺0'ı da hook'taki korumayla yakalanır (tam import şart).
                     const ba = babsFormu(mikroFaturalar, 'gelen', p555Period, k => cariAdMap.get(k));
                     const baRows = ba.satirlar.map(s => ({ name: s.ad, amount: ekranTutari(s.tutar), bilinmeyen: s.tutar.bilinmeyen }));
                     // Bs = GİDEN (satış) faturaları, cari bazında ≥ ₺5.000.
@@ -2119,8 +2122,9 @@ export default function MuhasebePage(props: Props) {
                     // artık gerçek alış faturası KDV'si — eski %30-tahmin kaldırıldı.
                     // Hesap tek kaynakta: babsKdvAnaliz.kdvAnalizi — KDV'si bilinmeyen fatura toplama girmez,
                     // SAYILIR (bilinmeyen); tarihi çözülemeyen fatura hiçbir yıla girmez (tarihsiz).
-                    // ÜST AKIŞ SINIRI (Açık İşler): useMikroFaturalar `kdv`yi 0'a zorluyor — `bilinmeyen` sayacı
-                    // Mikro faturaları için HOOK DÜZELİNCE dolar; panel ona hazır.
+                    // ÜST AKIŞ DÜZELDİ (Faz 3 2/n, 2026-09-18): useMikroFaturalar `kdv`yi 0'a zorlamıyor —
+                    // `bilinmeyen` sayacı Mikro faturaları için de dolar. 2026-09-18 öncesi dokümanların
+                    // bayat ₺0'ı da hook'taki korumayla yakalanır (kesin çözüm tam yeniden import).
                     const kdv = kdvAnalizi(mikroFaturalar, yearNum);
                     const monthlyData = kdv.aylar.map(a => ({ m: a.ay, collected: ekranTutari(a.tahsil), paidEst: ekranTutari(a.odenen), net: a.net, bilinmeyen: a.bilinmeyen }));
 

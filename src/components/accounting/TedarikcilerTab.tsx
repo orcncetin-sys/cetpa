@@ -2,11 +2,22 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Download, Search, Plus, Eye, Edit2, Trash2, X, Save } from 'lucide-react';
 import { type Supplier } from '../../types';
 import { paraYaz } from '../../utils/currency';
+import { bilinenSayi } from '../../utils/para';
+import { bakiyeDurumu } from '../../utils/muhasebe/cariImport';
 import { SortHeader, exportCSV, type AccountingT } from './shared';
 import CariEkstrePanel from '../CariEkstrePanel';
 import { oc } from '../../i18n/ortak';
+import { ac } from '../../i18n/accounting';
 
-type SupplierForm = { name: string; company: string; email: string; phone: string; address: string; taxNo: string; notes: string; balance: number; riskGroup: 'Düşük' | 'Orta' | 'Yüksek' };
+/**
+ * `balance` null = BİLİNMİYOR (0 DEĞİL) — 2026-09-18 delta turu.
+ * Eskiden `number`dı ve düzenle düğmesi formu `s.balance || 0` ile dolduruyordu. Bakiye alanı
+ * olmayan bir tedarikçiyi (Satın Alma'da sipariş formundan açılanlar `{name, createdAt}` olarak
+ * kaydediliyor) yalnız telefonu düzeltmek için açıp kaydetmek `suppliers/<id>.balance = 0`
+ * yazıyordu: kayıt kalıcı olarak '₺0 / sıfır bakiye' oluyor ve sıralamada sona değil ortaya
+ * diziliyordu. null → alan payload'a hiç girmez, mevcut değer ezilmez.
+ */
+type SupplierForm = { name: string; company: string; email: string; phone: string; address: string; taxNo: string; notes: string; balance: number | null; riskGroup: 'Düşük' | 'Orta' | 'Yüksek' };
 type TedarikciSortKey = 'name' | 'company' | 'phone' | 'email' | 'taxNo' | 'balance' | 'riskGroup';
 
 interface TedarikcilerTabProps {
@@ -132,7 +143,7 @@ export default function TedarikcilerTab({
                     <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell text-xs">{s.phone || '—'}</td>
                     <td className="py-2.5 px-3 text-gray-500 hidden lg:table-cell text-xs">{s.taxNo || '—'}</td>
                     <td className="py-2.5 px-3 text-right hidden sm:table-cell">
-                      <span className={`text-xs font-bold ${(s.balance || 0) > 0 ? 'text-red-600' : (s.balance || 0) < 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                      <span className={`text-xs font-bold ${bakiyeDurumu(s.balance) === 'borclu' ? 'text-red-600' : bakiyeDurumu(s.balance) === 'alacakli' ? 'text-green-600' : 'text-gray-400'}`}>
                         {paraYaz(s.balance, { ondalik: 0 })}
                       </span>
                     </td>
@@ -146,7 +157,8 @@ export default function TedarikcilerTab({
                     <td className="py-2.5 px-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={() => setEkstreTedarikci(s)} title={oc(currentLanguage).cari_ekstre_hareketleri} className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-blue-500"><Eye size={13} /></button>
-                        <button onClick={() => { setEditingSupplier(s); setSupplierForm({ name: s.name, company: s.company || '', email: s.email || '', phone: s.phone || '', address: s.address || '', taxNo: s.taxNo || '', notes: s.notes || '', balance: s.balance || 0, riskGroup: s.riskGroup || 'Düşük' }); setShowSupplierModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
+                        {/* `balance || 0` YOK: bilinmeyen bakiye 0 DEĞİL bilinmiyordur (bkz. SupplierForm notu). */}
+                        <button onClick={() => { setEditingSupplier(s); setSupplierForm({ name: s.name, company: s.company || '', email: s.email || '', phone: s.phone || '', address: s.address || '', taxNo: s.taxNo || '', notes: s.notes || '', balance: bilinenSayi(s.balance) ? Number(s.balance) : null, riskGroup: s.riskGroup || 'Düşük' }); setShowSupplierModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"><Edit2 size={13} /></button>
                         <button onClick={() => deleteSupplier(s.id)} className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-500"><Trash2 size={13} /></button>
                       </div>
                     </td>
@@ -175,7 +187,7 @@ export default function TedarikcilerTab({
                   const cariKod = ekstreTedarikci.mikroCariKod || ekstreTedarikci.taxNo || '';
                   return cariKod
                     ? <CariEkstrePanel currentLanguage={currentLanguage} cariKod={cariKod} customerName={ekstreTedarikci.name} />
-                    : <p className="text-center text-gray-400 text-sm py-8">{currentLanguage === 'tr' ? 'Bu tedarikçi bir Mikro cari koduna bağlı değil (elle eklenmiş).' : 'This supplier is not linked to a Mikro cari code (manually added).'}</p>;
+                    : <p className="text-center text-gray-400 text-sm py-8">{ac(currentLanguage).bu_tedarikci_bir_mikro_cari_koduna_bagli_degil_e}</p>;
                 })()}
               </div>
             </div>
@@ -213,7 +225,8 @@ export default function TedarikcilerTab({
                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">{oc(currentLanguage).finansal_risk}</p>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).acik_bakiye}</label>
-                    <input type="number" value={supplierForm.balance} onChange={e => setSupplierForm(prev => ({ ...prev, balance: Number(e.target.value) }))} placeholder="0" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                    {/* Boş alan = BİLİNMİYOR, ₺0 değil (`Number('')` 0 eder). */}
+                    <input type="number" value={supplierForm.balance ?? ''} onChange={e => setSupplierForm(prev => ({ ...prev, balance: e.target.value === '' ? null : Number(e.target.value) }))} placeholder={ac(currentLanguage).bos_bilinmiyor_2} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
                   </div>
                   <div className="mt-3">
                     <label className="block text-xs font-medium text-gray-600 mb-1.5">{oc(currentLanguage).risk_grubu}</label>

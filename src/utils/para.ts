@@ -71,6 +71,20 @@ export function tamTutar(t: Tutar): number {
   return t.bilinmeyen === 0 ? t.toplam : NaN;
 }
 
+/**
+ * Sıralama karşılaştırıcısı — bilinmeyen sayı (null/undefined/NaN/'abc') 0 SAYILMAZ, listenin SONUNA gider
+ * (artan da azalan da). `(a.balance || 0) - (b.balance || 0)` kalıbı bilinmeyeni ₺0 gibi ortaya diziyordu
+ * (Faz 3 2/n, 2026-09-14). Yönü `-` ile ÇEVİRME (bilinmeyenler başa gelir): `sayiSirala(x, y, azalan)` kullan.
+ */
+export function sayiSirala(a: unknown, b: unknown, azalan = false): number {
+  const x = sayi(a), y = sayi(b);
+  const xb = Number.isFinite(x), yb = Number.isFinite(y);
+  if (xb && yb) return azalan ? y - x : x - y;
+  if (xb) return -1;
+  if (yb) return 1;
+  return 0;
+}
+
 /** Birden çok `Tutar`ı birleştirir (toplam ve iki sayaç toplanır); boş → sıfır. Toplam satırları için. */
 export function tutarBirlestir(...t: readonly Tutar[]): Tutar {
   return t.reduce<Tutar>((a, b) => ({ toplam: a.toplam + b.toplam, bilinen: a.bilinen + b.bilinen, bilinmeyen: a.bilinmeyen + b.bilinmeyen }), { toplam: 0, bilinen: 0, bilinmeyen: 0 });

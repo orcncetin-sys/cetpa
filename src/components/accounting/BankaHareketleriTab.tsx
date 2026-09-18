@@ -2,6 +2,7 @@ import { motion } from 'motion/react';
 import { Landmark, Settings, RefreshCw, BookOpen, Save } from 'lucide-react';
 import { formatCurrency, type AccountingT } from './shared';
 import { oc } from '../../i18n/ortak';
+import { ac } from '../../i18n/accounting';
 
 interface BankaHareketleriTabProps {
   t: AccountingT;
@@ -46,25 +47,25 @@ export default function BankaHareketleriTab({
           <div>
             <h3 className="text-xl font-bold text-[#1D1D1F] flex items-center gap-2">
               <Landmark className="text-brand w-5 h-5" />
-              {currentLanguage === 'tr' ? 'Banka Hesap Hareketleri' : 'Bank Account Movements'}
+              {ac(currentLanguage).banka_hesap_hareketleri}
             </h3>
             <p className="text-xs text-gray-500 mt-1">
-              {currentLanguage === 'tr' ? 'Mikro ERP sisteminden çekilen canlı banka hareketleri.' : 'Live bank movements fetched from Mikro ERP.'}
+              {ac(currentLanguage).mikro_erp_sisteminden_cekilen_canli_banka_hareke}
             </p>
           </div>
           <div className="flex items-center gap-2">
             {mikroBankLastSync && (
               <span className="text-[10px] text-gray-400 font-medium">
-                {currentLanguage === 'tr' ? 'Son senkronizasyon:' : 'Last sync:'} {mikroBankLastSync}
+                {ac(currentLanguage).son_senkronizasyon} {mikroBankLastSync}
               </span>
             )}
             <button
               onClick={() => setShowErpConfig(v => !v)}
               className="apple-button-secondary"
-              title={currentLanguage === 'tr' ? 'Bağlantı Ayarları' : 'Connection Settings'}
+              title={ac(currentLanguage).baglanti_ayarlari}
             >
               <Settings className="w-4 h-4" />
-              {currentLanguage === 'tr' ? 'Bağlantı Ayarları' : 'Settings'}
+              {ac(currentLanguage).baglanti_ayarlari_2}
             </button>
             <button
               onClick={handleSyncMikroBank}
@@ -72,7 +73,7 @@ export default function BankaHareketleriTab({
               className="apple-button-primary"
             >
               <RefreshCw className={`w-4 h-4 ${mikroBankLoading ? 'animate-spin' : ''}`} />
-              {currentLanguage === 'tr' ? 'Mikro\'dan Çek' : 'Fetch from Mikro'}
+              {ac(currentLanguage).mikro_dan_cek}
             </button>
           </div>
         </div>
@@ -86,7 +87,7 @@ export default function BankaHareketleriTab({
                 <h4 className="font-semibold text-gray-800 text-sm flex items-center gap-2"><Landmark className="w-4 h-4 text-brand" /> Mikro ERP</h4>
                 <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
                   <input type="checkbox" checked={mikroEnabled} onChange={e => setMikroEnabled(e.target.checked)} className="accent-[#ff4000]" />
-                  {currentLanguage === 'tr' ? 'Aktif' : 'Enabled'}
+                  {ac(currentLanguage).aktif}
                 </label>
               </div>
               <div>
@@ -98,9 +99,9 @@ export default function BankaHareketleriTab({
                 <input type="text" value={mikroEndpoint} onChange={e => setMikroEndpoint(e.target.value)} placeholder="https://jumpbulutapigw.mikro.com.tr/..." className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000] font-mono text-[11px]" />
               </div>
               <button onClick={async () => { setErpConfigSaving('mikro'); try { await saveMikroConfig(); } finally { setErpConfigSaving(null); } }} disabled={erpConfigSaving !== null} className="apple-button-primary w-full justify-center disabled:opacity-50">
-                <Save size={14} /> {erpConfigSaving === 'mikro' ? (oc(currentLanguage).kaydediliyor_2) : (currentLanguage === 'tr' ? 'Mikro Ayarlarını Kaydet' : 'Save Mikro Settings')}
+                <Save size={14} /> {erpConfigSaving === 'mikro' ? (oc(currentLanguage).kaydediliyor_2) : (ac(currentLanguage).mikro_ayarlarini_kaydet)}
               </button>
-              {mikroEnabled && <p className="text-[10px] text-amber-600">{currentLanguage === 'tr' ? 'Mikro aktif edilince Luca otomatik kapanır (karşılıklı dışlama).' : 'Enabling Mikro disables Luca (mutual exclusion).'}</p>}
+              {mikroEnabled && <p className="text-[10px] text-amber-600">{ac(currentLanguage).mikro_aktif_edilince_luca_otomatik_kapanir_karsi}</p>}
             </div>
             {/* Luca */}
             <div className="border border-gray-200 rounded-xl p-4 space-y-3">
@@ -108,7 +109,7 @@ export default function BankaHareketleriTab({
                 <h4 className="font-semibold text-gray-800 text-sm flex items-center gap-2"><BookOpen className="w-4 h-4 text-indigo-500" /> Luca</h4>
                 <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
                   <input type="checkbox" checked={lucaEnabled} onChange={e => setLucaEnabled(e.target.checked)} className="accent-[#ff4000]" />
-                  {currentLanguage === 'tr' ? 'Aktif' : 'Enabled'}
+                  {ac(currentLanguage).aktif}
                 </label>
               </div>
               <div>
@@ -126,9 +127,9 @@ export default function BankaHareketleriTab({
                 </div>
               </div>
               <button onClick={async () => { setErpConfigSaving('luca'); try { await saveLucaConfig(); } finally { setErpConfigSaving(null); } }} disabled={erpConfigSaving !== null} className="apple-button-primary w-full justify-center disabled:opacity-50">
-                <Save size={14} /> {erpConfigSaving === 'luca' ? (oc(currentLanguage).kaydediliyor_2) : (currentLanguage === 'tr' ? 'Luca Ayarlarını Kaydet' : 'Save Luca Settings')}
+                <Save size={14} /> {erpConfigSaving === 'luca' ? (oc(currentLanguage).kaydediliyor_2) : (ac(currentLanguage).luca_ayarlarini_kaydet)}
               </button>
-              {lucaEnabled && <p className="text-[10px] text-amber-600">{currentLanguage === 'tr' ? 'Luca aktif edilince Mikro otomatik kapanır.' : 'Enabling Luca disables Mikro.'}</p>}
+              {lucaEnabled && <p className="text-[10px] text-amber-600">{ac(currentLanguage).luca_aktif_edilince_mikro_otomatik_kapanir}</p>}
             </div>
           </div>
         )}
@@ -150,9 +151,9 @@ export default function BankaHareketleriTab({
                 <tr>
                   <td colSpan={6} className="py-20 text-center text-gray-400">
                     <Landmark className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                    <p className="text-sm font-medium">{currentLanguage === 'tr' ? 'Henüz hareket bulunmuyor.' : 'No movements found yet.'}</p>
+                    <p className="text-sm font-medium">{ac(currentLanguage).henuz_hareket_bulunmuyor}</p>
                     <button onClick={handleSyncMikroBank} className="text-brand text-xs font-bold hover:underline mt-2">
-                      {currentLanguage === 'tr' ? 'Senkronizasyon başlat' : 'Start synchronization'}
+                      {ac(currentLanguage).senkronizasyon_baslat}
                     </button>
                   </td>
                 </tr>

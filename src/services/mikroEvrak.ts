@@ -254,9 +254,15 @@ export function satinAlmaTalepPayload(t: {
 }
 
 // ── 6. Depolar Arası Sipariş (Lojistik transfer) ─────────────────────────────
+// Çıkış ve giriş deposu ZORUNLU ve `depoGerekli`den geçer. Çağıran (TransferTab) depo
+// numarasını `utils/muhasebe/depoNo.ts` `mikroDepoNo` ile KAYITTAN çözer ve bilmiyorsa
+// payload'ı hiç üretmez; buradaki kapı, depo numarasını başka yoldan (regex/varsayılan)
+// uyduran bir çağıranın Mikro'ya "depo 1 → depo 1" yazmasını engeller.
 export function depoTransferPayload(t: {
-  sku: string; quantity: number; fromDepo: number; toDepo: number; date?: string; note?: string;
+  sku: string; quantity: number; fromDepo?: number; toDepo?: number; date?: string; note?: string;
 }) {
+  const cikDepo = depoGerekli(t.fromDepo, 'Depo transferi (çıkış deposu)');
+  const girDepo = depoGerekli(t.toDepo, 'Depo transferi (giriş deposu)');
   return {
     evraklar: [{
       satirlar: [{
@@ -269,8 +275,8 @@ export function depoTransferPayload(t: {
         ssip_b_fiyat: 0,
         ssip_miktar: t.quantity,
         ssip_tutar: 0,
-        ssip_girdepo: t.toDepo,
-        ssip_cikdepo: t.fromDepo,
+        ssip_girdepo: girDepo,
+        ssip_cikdepo: cikDepo,
         ssip_aciklama: (t.note ?? '').slice(0, 120),
         ssip_birim_pntr: 1,
       }],
