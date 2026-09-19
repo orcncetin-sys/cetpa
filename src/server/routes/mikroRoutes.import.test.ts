@@ -9,10 +9,15 @@
  * depo kodu boşsa '1' UYDURULMAZ; miktar yoksa stockLevel EZİLMEZ; fiyat yoksa prices'a
  * dokunulmaz ve Retail yoksa `price: 0` YAZILMAZ; Mikro unvanı (BÜYÜK, Türkçe İ) elle
  * açılmış lead'le Türkçe locale ile eşleşir. Ağ (`mikroPost`) ve ayna tabloları mock.
+ *
+ * 2026-09-19 (Faz 3 3/n hazırlık): sahte adminDb/app/bağlam/istek-yanıt düzeneği
+ * `./mikroRoutes.testDuzenegi.ts`'e TAŞINDI — dört gövde grubu paralel yazılırken aynı
+ * düzeneğin dört kopyası oluşmasın. İDDİALAR DEĞİŞMEDİ. Aşağıdaki vi.mock blokları
+ * burada KALMAK ZORUNDA: vitest onları test dosyasının tepesine hoist eder, başka bir
+ * modülden çağrılsalar modül grafiği çözüldükten sonra işlerler (tarif: `mikroMockTarifi`).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Express } from 'express';
-import { mikroRoutes, type MikroRouteCtx } from './mikroRoutes';
+import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
 import { mikroPost } from '../mikroClient.js';
 
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
@@ -32,59 +37,8 @@ vi.mock('../mikroClient.js', async (orig) => {
   };
 });
 
-type Handler = (req: unknown, res: unknown) => Promise<unknown> | unknown;
-type Ref = { id: string; coll: string };
-type Yazim = { op: 'set' | 'update' | 'delete'; ref: Ref; data?: Record<string, unknown> };
-type SnapDoc = { id: string; data: () => Record<string, unknown>; ref: Ref };
-
-let yazilan: Yazim[] = [];
-let snap: Record<string, SnapDoc[]> = {};
-let sayac = 0;
-let kilitVar = false;
-const gecir = () => (_r: unknown, _s: unknown, next: () => void) => next();
-const doc = (coll: string, id?: string) => {
-  const ref: Ref & { set: (d: Record<string, unknown>) => Promise<void> } = {
-    id: id ?? `yeni-${++sayac}`, coll,
-    set: async (d) => { yazilan.push({ op: 'set', ref: { id: ref.id, coll }, data: d }); },
-  };
-  return ref;
-};
-const adminDb = {
-  batch: () => ({
-    set: (ref: Ref, data: Record<string, unknown>) => { yazilan.push({ op: 'set', ref: { id: ref.id, coll: ref.coll }, data }); },
-    update: (ref: Ref, data: Record<string, unknown>) => { yazilan.push({ op: 'update', ref: { id: ref.id, coll: ref.coll }, data }); },
-    delete: (ref: Ref) => { yazilan.push({ op: 'delete', ref: { id: ref.id, coll: ref.coll } }); },
-    commit: async () => {},
-  }),
-  collection: (coll: string) => ({ doc: (id?: string) => doc(coll, id) }),
-};
-const snapDoc = (coll: string, id: string, veri: Record<string, unknown>): SnapDoc => ({ id, data: () => veri, ref: { id, coll } });
-const syncLog = vi.fn(async () => {});
-
-function sahteApp() {
-  const handlers: Record<string, Handler> = {};
-  const kaydet = (yol: string, ...mw: unknown[]) => { handlers[yol] = mw[mw.length - 1] as Handler; };
-  return { handlers, get: kaydet, post: kaydet, put: kaydet, patch: kaydet, delete: kaydet, use: kaydet };
-}
-const C: MikroRouteCtx = {
-  reqActor: () => ({ uid: 'u1', email: 'a@cetpa.com.tr' }),
-  writeSyncLog: syncLog,
-  reqCompanyId: async () => 'A',
-  writeAuditLog: vi.fn(async () => {}),
-  tenantSnap: vi.fn(async (coll: string) => ({ docs: snap[coll] ?? [] })),
-  mikroIdCozucu: async () => (a: string) => a,
-  loadCompanyDocs: vi.fn(async () => []),
-  mikroLimiter: gecir(),
-  requireCollectionAccess: () => gecir(),
-  requireAuth: gecir(),
-  requireMfaVerified: gecir(),
-  getAdminDb: () => adminDb as unknown as ReturnType<MikroRouteCtx['getAdminDb']>,
-  getPgPool: () => (kilitVar ? { query: async () => ({ rows: [{ data: { aciklama: 'lead-birlestir', baslangic: '2026-09-05T12:00:00.000Z' } }] }) } : null),
-  getUserCompanyId: async () => 'A',
-  mikroIdCozucuIds: () => (a: string) => a,
-  validate: () => null,
-  getBoss: () => null,
-};
+let d: Duzenek;
+beforeEach(() => { d = duzenekKur(); });
 
 function mikroYaniti(stok: Record<string, unknown>[], cari: Record<string, unknown>[] = []) {
   vi.mocked(mikroPost).mockImplementation((async (metot: string) => {
@@ -93,31 +47,23 @@ function mikroYaniti(stok: Record<string, unknown>[], cari: Record<string, unkno
     return { ok: false, data: null };
   }) as unknown as typeof mikroPost);
 }
-async function calistir(yol: string) {
-  const app = sahteApp();
-  mikroRoutes(app as unknown as Express, C);
-  const res = { kod: 200, govde: null as unknown, json(b: unknown) { res.govde = b; return res; }, status(n: number) { res.kod = n; return res; } };
-  await app.handlers[yol]({ params: {}, body: {} }, res);
-  return res;
-}
-const koleksiyon = (coll: string) => yazilan.filter(y => y.ref.coll === coll);
-
-beforeEach(() => { yazilan = []; snap = {}; sayac = 0; kilitVar = false; syncLog.mockClear(); });
+const calistir = (yol: string) => d.cagir('POST', yol);
+const koleksiyon = (coll: string) => d.koleksiyon(coll);
 
 describe('POST /api/mikro/import/stok', () => {
   it("yabancı kiracının aynı SKU'lu kaydına DOKUNULMAZ (yeni doküman); etiketsiz eski kayıt eşleşir ve companyId damgalanır", async () => {
-    snap.inventory = [snapDoc('inventory', 'yab', { sku: 'CMT-42', companyId: 'B' }), snapDoc('inventory', 'esk', { sku: 'KUM-01' })];
+    d.snapAyarla('inventory', { yab: { sku: 'CMT-42', companyId: 'B' }, esk: { sku: 'KUM-01' } });
     mikroYaniti([{ sto_kod: 'CMT-42', sto_isim: 'Çimento' }, { sto_kod: 'KUM-01', sto_isim: 'Kum' }]);
     const res = await calistir('/api/mikro/import/stok');
     const inv = koleksiyon('inventory');
     const cmt = inv.find(y => y.data?.sku === 'CMT-42');
     expect(cmt?.op).toBe('set');
-    expect(yazilan.some(y => y.ref.id === 'yab'), 'yabancı doküman yazılmamalı').toBe(false);
+    expect(d.yazilan.some(y => y.ref.id === 'yab'), 'yabancı doküman yazılmamalı').toBe(false);
     const kum = inv.find(y => y.data?.sku === 'KUM-01');
     expect(kum).toMatchObject({ op: 'update', ref: { id: 'esk' } });
     expect(kum?.data?.companyId).toBe('A');
     expect(res.govde).toMatchObject({ success: true, created: 1, updated: 1, errors: 0 });
-    expect(syncLog).toHaveBeenCalledWith('ImportStok', 'inventory', expect.stringContaining('1 yeni / 1 güncel'), true, null, null, expect.any(Number), expect.anything());
+    expect(d.syncLog).toHaveBeenCalledWith('ImportStok', 'inventory', expect.stringContaining('1 yeni / 1 güncel'), true, null, null, expect.any(Number), expect.anything());
   });
   it("sto_yer_kod boşsa depo UYDURULMAZ: warehouseId yok, 'Depo belirtilmemiş'; doluysa mikro-depo-<kod> + warehouses kaydı", async () => {
     mikroYaniti([{ sto_kod: 'A1' }, { sto_kod: 'A2', sto_yer_kod: '2' }]);
@@ -131,7 +77,7 @@ describe('POST /api/mikro/import/stok', () => {
     expect(koleksiyon('warehouses').map(y => y.data?.code)).toEqual(['2']);
   });
   it("miktar yoksa mevcut kaydın stockLevel'i EZİLMEZ; yeni kayıt 0 ile açılır (belgeli karar), warehouseItems quantity'siz", async () => {
-    snap.inventory = [snapDoc('inventory', 'esk', { sku: 'KUM-01', stockLevel: 40 })];
+    d.snapAyarla('inventory', { esk: { sku: 'KUM-01', stockLevel: 40 } });
     mikroYaniti([{ sto_kod: 'KUM-01' }, { sto_kod: 'YENI' }, { sto_kod: 'DOLU', sto_mevcut_mik: '5' }]);
     await calistir('/api/mikro/import/stok');
     const inv = koleksiyon('inventory');
@@ -157,14 +103,14 @@ describe('POST /api/mikro/import/stok', () => {
 
 describe('POST /api/mikro/import/cari', () => {
   it("yabancı kiracının aynı VKN'li lead'i EŞLEŞMEZ (yeni); etiketsiz aynı isimli lead Türkçe locale ile eşleşir ('ŞİRİN YAPI' ↔ 'Şirin Yapı')", async () => {
-    snap.leads = [snapDoc('leads', 'yabL', { taxId: '1234567890', companyId: 'B' }), snapDoc('leads', 'eskL', { name: 'Şirin Yapı' })];
+    d.snapAyarla('leads', { yabL: { taxId: '1234567890', companyId: 'B' }, eskL: { name: 'Şirin Yapı' } });
     mikroYaniti([], [
       { cari_kod: 'C1', cari_unvan1: 'Yeni Firma', cari_vdaire_no: '1234567890' },
       { cari_kod: 'C2', cari_unvan1: 'ŞİRİN YAPI' },
     ]);
     const res = await calistir('/api/mikro/import/cari');
     const leads = koleksiyon('leads');
-    expect(yazilan.some(y => y.ref.id === 'yabL'), 'yabancı lead yazılmamalı').toBe(false);
+    expect(d.yazilan.some(y => y.ref.id === 'yabL'), 'yabancı lead yazılmamalı').toBe(false);
     expect(leads.find(y => y.data?.mikroCariKod === 'C1')?.op).toBe('set');
     const c2 = leads.find(y => y.data?.mikroCariKod === 'C2');
     expect(c2).toMatchObject({ op: 'update', ref: { id: 'eskL' } });
@@ -175,7 +121,7 @@ describe('POST /api/mikro/import/cari', () => {
 
 describe('cari import — FİRMA anahtarı ve köken (source) koruması (lead-birlestir incelemesi, 2026-09-05)', () => {
   it("elle lead {name:'Ahmet Yılmaz' (yetkili), company:'Beta İnşaat'} Mikro şahıs carisi 'AHMET YILMAZ' ile EŞLEŞMEZ (yeni doküman); 'BETA İNŞAAT' unvanı ise eşleşir ve source EZİLMEZ", async () => {
-    snap.leads = [snapDoc('leads', 'beta', { name: 'Ahmet Yılmaz', company: 'Beta İnşaat', source: 'crm' })];
+    d.snapAyarla('leads', { beta: { name: 'Ahmet Yılmaz', company: 'Beta İnşaat', source: 'crm' } });
     mikroYaniti([], [{ cari_kod: 'C5', cari_unvan1: 'AHMET YILMAZ' }, { cari_kod: 'C6', cari_unvan1: 'BETA İNŞAAT' }]);
     await calistir('/api/mikro/import/cari');
     const leads = koleksiyon('leads');
@@ -186,13 +132,13 @@ describe('cari import — FİRMA anahtarı ve köken (source) koruması (lead-bi
     expect(leads.find(y => y.op === 'set')?.data?.source).toBe('mikro_import');
   });
   it('bakım kilidi varken import uçları 423 döner, hiçbir şey yazmaz', async () => {
-    kilitVar = true;
+    d.kilitAyarla({ aciklama: 'lead-birlestir', baslangic: '2026-09-05T12:00:00.000Z' });
     mikroYaniti([{ sto_kod: 'X' }], [{ cari_kod: 'C1', cari_unvan1: 'X' }]);
     for (const yol of ['/api/mikro/import/stok', '/api/mikro/import/cari']) {
       const res = await calistir(yol);
       expect(res.kod).toBe(423);
       expect(String((res.govde as { error?: string })?.error)).toMatch(/Bakım kilidi/);
     }
-    expect(yazilan).toEqual([]);
+    expect(d.yazilan).toEqual([]);
   });
 });

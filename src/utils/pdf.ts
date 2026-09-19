@@ -15,7 +15,8 @@ applyPlugin(jsPDF);
 import { Order, Lead } from '../types';
 import { registerTurkishFont } from './pdfFont';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz, VARSAYILAN_BASLIK, type BelgeTipi } from './belgeSablonu';
-import { tutarYaz, kdvAyristir, satirTutari, bilinenSayi, teklifToplamlari } from './para';
+import { tutarYaz, kdvAyristir, satirTutari, bilinenSayi, teklifToplamlari, toplaBilinen, ekranTutari } from './para';
+import { siparisTutari } from './siparis';
 // Başlık bandı / alt bant / bilgi kutusu / palet TEK KAYNAK (Faz 2 3/n, 2026-09-12): bu dosyadaki
 // 4 üretici eskiden her biri kendi bandını ve palet kopyasını yazıyordu (pdfTheme.degismez.test.ts kilitler).
 import { pdfBaslik, pdfAltBilgi, pdfBilgiKutusu, PDF_RENK, type RGB } from './pdfTheme';
@@ -318,18 +319,25 @@ export const exportCustomerStatement = async (
 
   const delivered    = sorted.filter(o => o.status === 'Delivered');
   const outstanding  = sorted.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled');
-  const totalDelivered   = delivered.reduce((s, o)   => s + o.totalPrice, 0);
-  const totalOutstanding = outstanding.reduce((s, o) => s + o.totalPrice, 0);
-  const grandTotal       = sorted.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + o.totalPrice, 0);
+  const gecerli      = sorted.filter(o => o.status !== 'Cancelled');
+  // TUTARI BİLİNMEYEN SİPARİŞ (2026-09-19): Mikro faturasından türetilen siparişte
+  // `cha_meblag` okunamazsa `totalPrice` alanı HİÇ YAZILMIYOR (eslemeFatura sözleşmesi:
+  // bilinmeyen 0 yazılmaz). Ham `s + o.totalPrice` toplamı bu durumda NaN üretir ve
+  // MÜŞTERİYE GİDEN ekstrenin üç satırını birden bozar. `toplaBilinen` + `ekranTutari`
+  // tek sözleşmedir: hiç bilinen yoksa NaN → tutarYaz '—'; kısmi bilinende kısmi toplam
+  // + aşağıdaki AÇIK NOT (CLAUDE.md: '—' VEYA açık not, sahte kesinlik YOK).
+  const tDelivered   = toplaBilinen(delivered,   siparisTutari);
+  const tOutstanding = toplaBilinen(outstanding, siparisTutari);
+  const tGrand       = toplaBilinen(gecerli,     siparisTutari);
 
   const sumY = finalY + 6;
   doc.setFillColor(...PDF_RENK.light);
   doc.roundedRect(W - 80, sumY, 66, 36, 2, 2, 'F');
 
   const rows = [
-    [oc(lang).teslim_edildi,   `${totalDelivered.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
-    [lang === 'tr' ? 'Bekleyen'     : 'Outstanding',  `${totalOutstanding.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
-    [oc(lang).toplam_2,        `${grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TRY`],
+    [oc(lang).teslim_edildi, tutarYaz(ekranTutari(tDelivered), 'TRY')],
+    [lang === 'tr' ? 'Bekleyen' : 'Outstanding', tutarYaz(ekranTutari(tOutstanding), 'TRY')],
+    [oc(lang).toplam_2, tutarYaz(ekranTutari(tGrand), 'TRY')],
   ];
   rows.forEach(([label, value], i) => {
     const y = sumY + 8 + i * 9;
@@ -340,6 +348,19 @@ export const exportCustomerStatement = async (
     doc.text(label, W - 76, y);
     doc.text(value, W - 18, y, { align: 'right' });
   });
+
+  // Kısmi toplamın KAPSAMI görünür olmalı: aksi hâlde eksik toplam tam toplam sanılır.
+  if (tGrand.bilinmeyen > 0) {
+    doc.setFont('Roboto', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(...PDF_RENK.grey);
+    doc.text(
+      lang === 'tr'
+        ? `${tGrand.bilinmeyen} siparişin tutarı bilinmiyor — toplama dâhil değil`
+        : `${tGrand.bilinmeyen} order(s) have an unknown amount — excluded from totals`,
+      W - 18, sumY + 40, { align: 'right' },
+    );
+  }
 
   // ── Footer (tek kaynak: pdfAltBilgi bant modu — HER sayfaya, gerçek sayfa no) ──
   // Eskiden yalnız son sayfaya çiziliyordu ve sağda `cetpa.com • tarih` yazıyordu.

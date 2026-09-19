@@ -8,7 +8,7 @@
  * üretilmez, hata satır numarasıyla yükselir.
  */
 import { describe, it, expect } from 'vitest';
-import { teklifPayload, izinTalepPayload, bakimTalepPayload, sayimPayload, stokHareketPayload, uretimTalepPayload, etiketPayload, depoTransferPayload, MIKRO_IZIN_TIPI } from './mikroEvrak';
+import { teklifPayload, izinTalepPayload, bakimTalepPayload, sayimPayload, stokHareketPayload, uretimTalepPayload, etiketPayload, depoTransferPayload, recetePayload, MIKRO_IZIN_TIPI } from './mikroEvrak';
 
 const taban = { cariKod: 'CAR001', date: '2026-09-04' };
 
@@ -137,5 +137,37 @@ describe('depo bilinmiyorsa dış sisteme GİTMEZ — depo 1 (HAVALİMANI) varsa
   it('depo transferi: ESKİ SANAYİ(2) → HAVALİMANI(1) aynen gider (çıkış 2, giriş 1)', () => {
     const satir = depoTransferPayload({ sku: 'CIM-42', quantity: 10, fromDepo: 2, toDepo: 1 }).evraklar[0].satirlar[0] as Record<string, unknown>;
     expect(satir.ssip_cikdepo).toBe(2); expect(satir.ssip_girdepo).toBe(1);
+  });
+});
+
+describe('recetePayload — tüketim miktarı bilinmiyorsa Mikro\'ya GİTMEZ', () => {
+  const recete = (miktar: unknown, anaMiktar: unknown = 1) => ({
+    anaKod: 'HAZIR-SIVA-25KG', anaMiktar: anaMiktar as number,
+    bilesenler: [{ sku: 'CIMENTO-50KG', miktar: 0.4 }, { sku: 'KUM-0-3', miktar: miktar as number }],
+  });
+
+  it('bilinen reçete: gövde eskiyle birebir (parite)', () => {
+    const p = recetePayload(recete(0.55));
+    expect(p.evraklar).toHaveLength(2);
+    expect(p.evraklar[1].satirlar[0]).toEqual({
+      rec_anatipi: 0, rec_anakod: 'HAZIR-SIVA-25KG', rec_cinsi: 0, rec_anabirim: 1, rec_anamiktar: 1,
+      rec_tuketim_tur: 0, rec_tuketim_kod: 'KUM-0-3', rec_tuketim_recete_cinsi: 0, rec_tuketim_miktar: 0.55, rec_tuketim_birim: 1,
+    });
+  });
+
+  // 2026-09-19 (Faz 3 3/n hakem bulgusu): Mikro'dan çekilen reçetede miktarı okunamayan bileşen artık `quantity`
+  // alanını HİÇ taşımıyor (eslemeVarlik.receteKalemiEsle). BOMPanel bunu `miktar: c.quantity` diye buraya geçiriyor;
+  // `undefined` JSON.stringify'da düşer ve Mikro'ya tüketim miktarı OLMAYAN reçete satırı giderdi.
+  it('bileşen miktarı undefined / null / NaN / 0 ise throw — bileşen adıyla (mutasyon-ayırt-edici)', () => {
+    for (const kotu of [undefined, null, NaN, 0, -1, '']) {
+      expect(() => recetePayload(recete(kotu))).toThrow(/KUM-0-3/);
+    }
+  });
+
+  it('ana ürün miktarı bilinmiyorsa da throw; bileşensiz reçete gönderilmez', () => {
+    // (`undefined` geçmek fikstürün varsayılan parametresini (= 1) tetikler — CLAUDE.md'deki varsayılan-parametre tuzağı; null ile dene)
+    expect(() => recetePayload(recete(0.55, null))).toThrow(/HAZIR-SIVA-25KG/);
+    expect(() => recetePayload(recete(0.55, NaN))).toThrow(/HAZIR-SIVA-25KG/);
+    expect(() => recetePayload({ anaKod: 'HAZIR-SIVA-25KG', anaMiktar: 1, bilesenler: [] })).toThrow(/bileşen/);
   });
 });

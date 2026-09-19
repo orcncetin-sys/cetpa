@@ -21,6 +21,13 @@ export interface MikroSyncResult {
   notConfigured?: boolean;
   error?: string;
   duration?: number;
+  /** Sunucunun eşleme notu: "3 satırın phone alanı bilinmiyor" ya da başında
+   *  "UYARI: … hiçbir satırda okunamadı" (okuma arızası — kolon adı/şema kontrol
+   *  edilmeli). Üreten modüller: server/mikro/eslemeStok.ts, eslemeCari.ts.
+   *  Ekranda GÖSTERİLMELİ — bu notu yutmak, sessiz-sıfır sınıfının import
+   *  karşılığını geri getirir ("2367 güncellendi" deyip alanların hiç gelmediğini
+   *  gizlemek, fiyat kapsamı vakasının tekrarıdır). */
+  note?: string;
 }
 
 export interface MikroStokSyncResult extends MikroSyncResult {
@@ -254,6 +261,8 @@ export interface MikroImportResult extends MikroSyncResult {
   /** Stok import'u: Mikro'dan en az bir satış fiyatı gelen ürün sayısı.
    *  0 ise sorun Cetpa'da değil — Mikro stok kartlarında fiyat tanımlı değildir. */
   fiyatliUrun?: number;
+  // `note` (bilinmeyen alan sayacı + okuma arızası uyarısı) artık MikroSyncResult'ta —
+  // cari/listesi de (MikroListResult) aynı notu döndürüyor (Faz 3 3/n, 2026-09-19).
 }
 
 /**

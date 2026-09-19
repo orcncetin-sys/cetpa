@@ -3245,7 +3245,11 @@ function AppContent() {
       // Auto-trigger e-İrsaliye when an order is marked as Shipped (fire-and-forget)
       if (status === 'Shipped') {
         const order = orders.find(o => o.id === orderId);
-        if (order) {
+        // FATURASIZ sipariş Mikro'ya GİTMEZ (sipariş kaydındaki kuralla aynı — handleAddOrder `faturali` koşulu).
+        // 2026-09-19 kapanış incelemesi: bu kapı hiç yoktu; rota eskiden her istekte gövde hatasıyla 400 döndüğü için
+        // açık görünmüyordu. Gövde geçerli hâle gelince faturasız sevkiyat e-İrsaliye olarak resmî deftere düşerdi.
+        // Alanı olmayan eski/kanal siparişi (`undefined`) eskisi gibi denenir. Sunucuda da aynı kapı var.
+        if (order && order.faturali !== false) {
           const lead = leads.find(l => l.id === order.leadId);
           authFetch('/api/mikro/irsaliye/kaydet', {
             method: 'POST',
@@ -3262,19 +3266,39 @@ function AppContent() {
                 // gönderiliyordu, şema quantity/price bekliyor → her istek 400,
                 // Shipped'te otomatik e-İrsaliye tamamen sessiz çalışmıyordu.
                 items: (order.lineItems || []).map(l => ({
+                  sku: l.sku,            // ESKİDEN GÖNDERİLMİYORDU → Mikro satırı stok kodsuz gidiyordu
                   name: l.title || l.name || l.sku,
                   quantity: l.quantity,
                   price: l.price,
                 })),
                 date: new Date().toISOString(),
+                // Sunucu bunları Mikro gövdesinde ZORUNLU kılar (varsayılan yok):
+                // kdvOran → vergi işaretçisi, depoNo → sth_*_depo_no.
+                // `?? 20` / `?? 1` EKLEMEYİN — eksikse istek 400 döner ve sebebi
+                // kullanıcıya söylenir (aşağıdaki toast).
+                kdvOran: order.kdvOran,
+                faturali: order.faturali,
+                // `Order.depoNo` artık gerçek alan (types.ts) — tip dökümü kaldırıldı.
+                // Değeri AddOrderModal'daki depo seçicisi üretir; seçilmemiş eski/kanal
+                // siparişinde alan YOKTUR ve sunucu bilerek 400 döner.
+                depoNo: order.depoNo,
               },
               firebaseId: orderId,
             }),
-          }).then(r => r.json()).then((d: { success: boolean; irsaliyeNo?: string; notConfigured?: boolean }) => {
-            if (d.success && d.irsaliyeNo) {
-              toast(`${currentLanguage === 'tr' ? 'İrsaliye oluşturuldu' : 'Waybill created'}: ${d.irsaliyeNo}`, 'success');
+          }).then(async r => ({ kod: r.status, d: await r.json() as { success: boolean; irsaliyeNo?: string; notConfigured?: boolean; error?: string } })).then(({ kod, d }) => {
+            if (d.success) {
+              toast(`${currentLanguage === 'tr' ? 'İrsaliye oluşturuldu' : 'Waybill created'}${d.irsaliyeNo ? ': ' + d.irsaliyeNo : ''}`, 'success');
+            } else if (!d.notConfigured) {
+              // SESSİZ GEÇME: e-İrsaliye oluşmadığı hâlde kullanıcı bunu hiçbir yerde görmüyordu (aynı sınıf
+              // 2026-08-22'de C15/P2 olarak yaşandı: her istek 400'dü, kimse fark etmedi). `d.error` ŞART DEĞİL —
+              // Mikro'nun reddi HTTP 200 + success:false döner. notConfigured hâlâ sessiz (Mikro kurulu değilse normal).
+              const sebep = d.error ?? (currentLanguage === 'tr' ? 'Mikro irsaliyeyi reddetti' : 'Mikro rejected the waybill');
+              // "Siparişi düzenle…" yönlendirmesi YALNIZ 400'de (eksik alan): Mikro reddi / 500 / MFA 403'te yanıltıcı olurdu.
+              const yonlendirme = kod === 400
+                ? (currentLanguage === 'tr' ? ' — Siparişi düzenle → Sevk Deposu / KDV oranını tamamla; sonra durumu yeniden "Kargoda" yap.' : ' — Edit the order → complete Shipping Warehouse / VAT rate, then set the status to "Shipped" again.')
+                : '';
+              toast(`${sebep}${yonlendirme}`, 'error');
             }
-            // notConfigured → silently skip; error → silently skip (fire-and-forget)
           }).catch(() => { /* Mikro not available — silent */ });
         }
       }
@@ -3345,7 +3369,16 @@ function AppContent() {
             })),
             totalPrice: order.totalPrice,
             faturaTipi: order.faturaTipi || 'e-arsiv',
-            kdvOran: order.kdvOran ?? 20,
+            // Sunucu bunu Mikro gövdesinde ZORUNLU kılar (varsayılan yok):
+            // kdvOran → vergi işaretçisi + sth_vergi. `?? 20` EKLEMEYİN — eksikse
+            // istek 400 döner ve sebebi aşağıdaki toast'ta kullanıcıya söylenir.
+            // 2026-09-19 delta bulgusu: bu satır `?? 20` ile kalmıştı, yani aynı
+            // sipariş irsaliyede 400 alırken faturada %20 KDV ile Mikro defterine
+            // YAZILIYORDU (ürün gerçekte %10'luksa yasal e-Fatura yanlış kesiliyor).
+            kdvOran: order.kdvOran,
+            // Siparişte sevk deposu seçilmişse fatura satırı da o depoya yazılır; yoksa alan JSON'da düşer ve
+            // sunucu pariteye (Mikro varsayılanı) döner — throw e-Fatura kesmeyi durdururdu (karar Açık İşler'de).
+            depoNo: order.depoNo,
           },
           firebaseId: order.id,
         }),
@@ -5985,6 +6018,7 @@ function AppContent() {
         setSelectedLead={setSelectedLead}
         leads={leads}
         inventory={inventory}
+        warehouses={warehouses}
         branchNames={branchNames}
         currentLanguage={currentLanguage}
         currentT={currentT}
@@ -6022,6 +6056,8 @@ function AppContent() {
         order={selectedOrder}
         currentT={currentT}
         onSubmit={handleEditOrderSubmit}
+        warehouses={warehouses}
+        currentLanguage={currentLanguage}
       />
       {/* Global search palette (⌘K) */}
       {globalSearchOpen && (

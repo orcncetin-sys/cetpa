@@ -31,6 +31,9 @@ export const FaturaKaydetSchema = z.object({
     })).min(1, 'En az bir satır gerekli.'),
     faturaTipi:   z.enum(['e-fatura', 'e-arsiv', 'ihracat']).optional(),
     kdvOran:      z.number().min(0).max(100).optional(),
+    // Siparişte seçilmiş sevk deposu (AddOrderModal/EditOrderModal). zod bilinmeyen alanı SİLER — şemada yoksa
+    // rotaya hiç ulaşmaz. Varsayılan YOK; yoksa gövde pariteye düşer (bkz. govdeFaturaIrsaliye başlığı).
+    depoNo:       z.number().int().positive().optional(),
     createdAt:    z.string().optional(),
   }),
 });
@@ -51,6 +54,14 @@ export const IrsaliyeKaydetSchema = z.object({
       price:    z.number().optional(),
     })).optional(),
     date:           z.string().optional(),
+    // Mikro gövdesinde ZORUNLU iki alan: kdvOran (vergi işaretçisi ters araması) ve
+    // depoNo (sth_giris/cikis_depo_no). Şemada optional — çünkü VARSAYILAN VERMEK
+    // Mikro defterine sahte kayıt demek; eksikse gövde kurucusu 400 ile reddeder
+    // (bkz. src/server/mikro/govdeFaturaIrsaliye.ts).
+    kdvOran:        z.number().min(0).max(100).optional(),
+    depoNo:         z.number().int().positive().optional(),
+    // Faturasız (`false`) sevkiyat Mikro'ya yazılmaz — rota 400 döner. Alan yoksa (eski/kanal siparişi) karışılmaz.
+    faturali:       z.boolean().optional(),
   }),
 });
 

@@ -12,7 +12,7 @@
  * payload üretilmez (TransferTab null döner, MikroPushButton "gönderilemez" sayar); tahmin yok.
  */
 import { describe, it, expect } from 'vitest';
-import { mikroDepoNo, transferDepoNolari, type DepoKaydi } from './depoNo';
+import { mikroDepoNo, transferDepoNolari, mikroDepoSecenekleri, type DepoKaydi } from './depoNo';
 
 // ── Fikstür: Mikro DEPOLAR import'u + elle açılmış Cetpa deposu ─────────────────────────────
 /** Sayfanın Warehouse'u daha geniş (location/manager/...); hesap yalnız id/name/depoNo okur. */
@@ -120,3 +120,21 @@ describe('transferDepoNolari — TransferTab buildPayload kapısı (SKU\'suz gib
     expect(transferDepoNolari(depolar, 'Bilinmeyen A', 'Bilinmeyen B')).toBeNull();
   });
 });
+
+describe('mikroDepoSecenekleri — "Sevk Deposu (Mikro)" seçicisinin listesi (sipariş ekle + düzenle TEK KAYNAK)', () => {
+  it('yalnız Mikro dep_no\'su ÇÖZÜLEBİLEN depolar, numaraya göre sıralı; aynı numara tek satır', () => {
+    const depolar: DepoKaydi[] = [
+      { id: 'mikro-depo-2', name: 'ESKİ SANAYİ' },
+      { id: 'elle-acilmis', name: 'Şantiye Konteyner' },          // Mikro'da yok → listelenmez
+      { id: 'mikro-depo-1', name: 'HAVALİMANI' },
+      { id: 'mikro-depo-2', name: 'ESKİ SANAYİ (kopya)' },        // aynı numara → tek satır (ilk ad)
+    ];
+    expect(mikroDepoSecenekleri(depolar)).toEqual([{ no: 1, ad: 'HAVALİMANI' }, { no: 2, ad: 'ESKİ SANAYİ' }]);
+  });
+  it('adsız depo "Depo N" olarak görünür; çözülebilen depo yoksa liste BOŞ (seçici gizlenir, varsayılan UYDURULMAZ)', () => {
+    expect(mikroDepoSecenekleri([{ id: 'mikro-depo-3', name: '  ' }])).toEqual([{ no: 3, ad: 'Depo 3' }]);
+    expect(mikroDepoSecenekleri([{ id: 'x', name: 'Ana Depo' }])).toEqual([]);
+    expect(mikroDepoSecenekleri([])).toEqual([]);
+  });
+});
+

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Plus } from 'lucide-react';
-import type { Order } from '../types';
+import type { Order, Warehouse } from '../types';
+import SevkDeposuSecici from './SevkDeposuSecici';
 
 interface EditOrderModalProps {
   isOpen: boolean;
@@ -9,6 +10,9 @@ interface EditOrderModalProps {
   order: Order | null;
   currentT: Record<string, string>;
   onSubmit: (updatedData: Partial<Order>) => Promise<void>;
+  /** "Sevk Deposu (Mikro)" seçicisinin kaynağı — eski/kanal siparişine depo eklemenin TEK yolu bu form (2026-09-19). */
+  warehouses: Warehouse[];
+  currentLanguage: string;
 }
 
 export default function EditOrderModal({
@@ -16,7 +20,9 @@ export default function EditOrderModal({
   onClose,
   order,
   currentT,
-  onSubmit
+  onSubmit,
+  warehouses,
+  currentLanguage,
 }: EditOrderModalProps) {
   const [formData, setFormData] = useState<Partial<Order>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -85,6 +91,19 @@ export default function EditOrderModal({
               </select>
             </div>
           </div>
+          {/* SEVK DEPOSU — eski/kanal siparişinde alan yoktur; Mikro'ya sipariş/e-İrsaliye yazımı onsuz 400 döner.
+              Bir kez seçilince "seçilmedi"ye dönülemez: kayıt PATCH-merge olduğundan alanı göndermemek eski depoyu
+              korur (sessiz no-op) — başka bir depoya ÇEVRİLEBİLİR. */}
+          <SevkDeposuSecici
+            warehouses={warehouses}
+            deger={formData.depoNo}
+            currentLanguage={currentLanguage}
+            bosSecenekYok
+            onDegis={depoNo => setFormData(prev => {
+              const { depoNo: _secilmemis, ...kalan } = prev;
+              return depoNo === undefined ? kalan : { ...kalan, depoNo };
+            })}
+          />
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.shipping_address}</label>
             <textarea value={formData.shippingAddress || ''} onChange={e => setFormData({ ...formData, shippingAddress: e.target.value })} rows={2}

@@ -398,18 +398,32 @@ export function uretimIsEmriPayload(u: { sku: string; quantity: number }) {
   return { Satirlar: [{ UrunKodu: u.sku, UretilecekMiktar: u.quantity }] };
 }
 
+/** Reçete miktarı kapısı: sıfırdan büyük, sonlu sayı değilse throw (kalem adıyla). `depoGerekli` ile aynı sözleşme. */
+function miktarGerekli(miktar: unknown, neyin: string): number {
+  if (typeof miktar !== 'number' || !Number.isFinite(miktar) || miktar <= 0) {
+    throw new Error(`Reçete: ${neyin} miktarı bilinmiyor — Mikro'ya miktarsız reçete satırı gönderilemez. Reçetede miktarı girin; kayıt Cetpa'da duruyor.`);
+  }
+  return miktar;
+}
+
 export function recetePayload(r: {
   anaKod: string; anaMiktar: number; bilesenler: { sku: string; miktar: number }[];
 }) {
+  // Dış sisteme varsayılan YOK (CLAUDE.md). 2026-09-19: Mikro'dan çekilen reçetede miktarı okunamayan bileşen
+  // artık `quantity` alanını hiç taşımıyor (server/mikro/eslemeVarlik); tip `number` dese de çalışma anında
+  // undefined gelebilir ve JSON'da düşüp Mikro'ya tüketim miktarı OLMAYAN satır giderdi.
+  if (!r.bilesenler.length) throw new Error(`Reçete: ${r.anaKod} için bileşen yok — Mikro'ya boş reçete gönderilemez.`);
+  const anaMiktar = miktarGerekli(r.anaMiktar, `ana ürün (${r.anaKod})`);
+  const bilesenler = r.bilesenler.map(b => ({ sku: b.sku, miktar: miktarGerekli(b.miktar, `bileşen ${b.sku}`) }));
   // Her bileşen ayrı reçete satırı evrakı olarak gönderilir (deneysel)
   return {
-    evraklar: r.bilesenler.map(b => ({
+    evraklar: bilesenler.map(b => ({
       satirlar: [{
         rec_anatipi: 0,
         rec_anakod: r.anaKod,
         rec_cinsi: 0,
         rec_anabirim: 1,
-        rec_anamiktar: r.anaMiktar,
+        rec_anamiktar: anaMiktar,
         rec_tuketim_tur: 0,
         rec_tuketim_kod: b.sku,
         rec_tuketim_recete_cinsi: 0,

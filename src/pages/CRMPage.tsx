@@ -1,6 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import type { IadeSatiri } from '../hooks/useSekmeVerileri';
 import { huniAsamasi } from '../lib/huni';
+// Arama süzgeci TEK KAYNAK (lib/leadArama): eksik alan çökertmez + tr-TR duyarlı.
+// Eskiden bu dosyada ÜÇ kopya `l.email.toLowerCase()` vardı; Mikro import'u bilinmeyen
+// alanı hiç yazmadığı için ada uymayan her aramada CRM sekmesi çöküyordu (2026-09-19).
+import { leadAramaEslesir } from '../lib/leadArama';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -2141,9 +2145,7 @@ export default function CRMPage({
                     {(() => {
                       const filtered = activeLeads.filter(l =>
                         (leadStatusFilter === 'All' || huniAsamasi(l) === leadStatusFilter) &&
-                        (l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
-                        l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
-                        l.email.toLowerCase().includes(crmSearch.toLowerCase()))
+                        leadAramaEslesir(l, crmSearch)
                       );
                       const sorted = sortData(filtered, crmSort.key, crmSort.dir);
                       // Phase 537: apply crmLeadSort secondary sort
@@ -2523,19 +2525,11 @@ export default function CRMPage({
                       <h3 className="font-bold text-sm mb-4 flex items-center justify-between">
                         {currentT[status.toLowerCase()] || status}
                         <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">
-                          {activeLeads.filter(l => huniAsamasi(l) === status && (
-                            l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
-                            l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
-                            l.email.toLowerCase().includes(crmSearch.toLowerCase())
-                          )).length}
+                          {activeLeads.filter(l => huniAsamasi(l) === status && leadAramaEslesir(l, crmSearch)).length}
                         </span>
                       </h3>
                       <div className="space-y-3">
-                        {activeLeads.filter(l => huniAsamasi(l) === status && (
-                          l.name.toLowerCase().includes(crmSearch.toLowerCase()) ||
-                          l.company.toLowerCase().includes(crmSearch.toLowerCase()) ||
-                          l.email.toLowerCase().includes(crmSearch.toLowerCase())
-                        )).map(lead => (
+                        {activeLeads.filter(l => huniAsamasi(l) === status && leadAramaEslesir(l, crmSearch)).map(lead => (
                           /* Phase 87: score bar kanban card */
                           <div key={lead.id} onClick={() => setSelectedLead(lead)} className="bg-white rounded-lg border border-gray-200 shadow-sm cursor-pointer hover:border-brand transition-colors overflow-hidden">
                             <div className="p-4">

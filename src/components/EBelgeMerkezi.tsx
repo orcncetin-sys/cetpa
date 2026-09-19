@@ -272,9 +272,13 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ilkTarih: yilBasi, sonTarih: bugun, ...body }),
       });
-      const d = await r.json() as { success?: boolean; total?: number; error?: string; uyari?: string };
+      const d = await r.json() as { success?: boolean; total?: number; error?: string; uyari?: string; note?: string };
       if (!r.ok || !d.success) { showToast(d.error || `${etiket} çekilemedi.`, 'error'); return; }
-      showToast(`${etiket}: ${d.total ?? 0} belge alındı.${d.uyari ? ' ' + d.uyari : ''}`);
+      // `note`: sunucunun okuma özeti ("N belgenin tutarı okunamadı" / "UYARI: tutar hiçbir belgede okunamadı…").
+      // Rota bunu döndürüyordu ama burada HİÇ okunmuyordu — okuma arızası yeşil "alındı" bildirimiyle geçiyordu
+      // (2026-09-19 kapanış incelemesi; "yazıldı ama bağlanmadı" sınıfı). Arıza kırmızı gösterilir.
+      const ek = [d.uyari, d.note].filter(Boolean).join(' · ');
+      showToast(`${etiket}: ${d.total ?? 0} belge alındı.${ek ? ' ' + ek : ''}`, d.note?.startsWith('UYARI:') ? 'error' : 'success');
     } catch {
       showToast(`${etiket} çekilemedi — sunucuya ulaşılamadı.`, 'error');
     } finally {

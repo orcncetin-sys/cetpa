@@ -137,6 +137,15 @@ export interface Order {
   kdvOran?: number;
   kdvTutari?: number;
   kdvHaricTutar?: number;
+  /**
+   * Mikro `dep_no` — siparişin/sevkiyatın SEVK DEPOSU. `sip_depono` ve
+   * `sth_giris/cikis_depo_no` bu değerden yazılır; sunucu bilinmiyorsa 400 döner
+   * (VARSAYILAN YOK — 2026-09-05'te sabit `1` her kaydı HAVALİMANI deposuna
+   * yazıyordu, stok depo 2'deydi). Kullanıcı AddOrderModal'daki depo seçicisinden
+   * seçer; seçilmemiş eski/kanal siparişlerinde alan YOKTUR ve Mikro'ya yazım
+   * bilerek reddedilir. Tip dökümü YOK: alan burada ilan edilir (CLAUDE.md).
+   */
+  depoNo?: number;
   hasInvoice?: boolean;
   mikroFaturaNo?: string;
   mikroFaturaDate?: string;
@@ -475,7 +484,9 @@ export interface Check { id: string; checkNo: string; bankName: string; amount: 
 export interface WaybillItem { productName: string; sku: string; quantity: number; unitPrice: number; taxRate: number; }
 export interface Waybill { id: string; waybillNo: string; invoiceNo?: string; party: string; date: string; items: WaybillItem[]; total?: number; status: 'Bekliyor' | 'Tamamlandı' | 'İptal'; type: 'giden' | 'gelen'; warehouseId?: string; createdAt?: unknown; }
 export interface Budget { id: string; category: string; amount: number; period: string; }
-export interface Warehouse { id: string; name: string; location?: string; manager?: string; notes?: string; createdAt?: unknown; }
+/** `depoNo`: Mikro `dep_no` — Depo Tanımları import'u yazar (mikroRoutes `warehouses` upsert'i).
+ *  Elle açılan depoda YOKTUR; çözümü `utils/muhasebe/depoNo.mikroDepoNo` yapar. */
+export interface Warehouse { id: string; name: string; location?: string; manager?: string; notes?: string; depoNo?: number; createdAt?: unknown; }
 
 // Araç filosu — kalıcı (Firestore 'vehicles'). QR-tabanlı depo/araç transferinde
 // araçlar da bir "lokasyon" olarak kullanılır (bkz. locationQrValue / parseLocationQr).

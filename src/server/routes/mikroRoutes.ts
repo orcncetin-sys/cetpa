@@ -35,17 +35,63 @@ import { findKey, kolonSec } from '../../lib/mikroKolon.js';
 import {
   MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, detectMikroGatewayBlock, v17MetoduKullanilabilir,
   getMikroCreds, mikroBugun, mikroData, mikroHata, mikroKolonlar, mikroPost,
-  mikroSatirlar, mikroSatisFiyatlari, mikroSql, mikroStokMiktari,
-  mikroVergiOranlari, sqlTarih, vergiOraniCoz, kolonBul, sqlTanimlayici,
+  mikroSatirlar, mikroSql, mikroStokMiktari,
+  mikroVergiOranlari, sqlTarih, kolonBul, sqlTanimlayici,
 } from '../mikroClient.js';
 import {
   CHA_COLS, STH_COLS, FIS_COLS, SIP_COLS, mirrorMikroCariler, mirrorMikroInsert,
   mirrorMikroStoklar,
 } from '../mikroMirror.js';
 import { pgServerTimestamp } from '../pgShim.js';
+import { mikroGovdeHatasiMi } from '../mikro/govdeHatasi.js';
+import { stokGovdesi, cariGovdesi } from '../mikro/govdeStokCari.js';
+import { siparisGovdesi } from '../mikro/govdeSiparis.js';
+import { faturaGovdesi, irsaliyeGovdesi } from '../mikro/govdeFaturaIrsaliye.js';
+import {
+  yevmiyeGovdesi, tahsilatGovdesi, cariHareketGovdesi,
+  type YevmiyeGovde, type TahsilatGovde, type CariHareketGovde,
+} from '../mikro/govdeMuhasebe.js';
 import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
 import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
 import { bilinenSayi } from '../../utils/para.js';
+// Varlık eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeVarlik.ts
+// (demirbaş / maliyet merkezi / personel / üretim reçetesi import gövdeleri)
+// ALIAS GEREKÇESİ: `okumaArizasi`/`okumaArizasiUyarisi` adları bu dosyada ZATEN
+// kullanılıyor — `okumaArizasiUyarisi` eslemeFatura'dan import edilmiş (satır ~69),
+// `okumaArizasi` ise bakiyeHaritasi'nın destructure edilen alanı (pull/bakiye rotası).
+// Takma ad koymadan biri diğerini sessizce gölgelerdi.
+import {
+  demirbasEsle, maliyetMerkeziEsle, personelEsle, receteKalemiEsle, receteBilesen,
+  mikroKod, ozetBaslat, ozetEkle, bilinmeyenNotu,
+  okumaArizasi as varlikArizalari, okumaArizasiUyarisi as varlikArizaUyarisi,
+  // Okuma arızası YALNIZ kritik alanlarda aranır (2026-09-19): meşru olarak boş
+  // kalabilen alanlar (personelde e-posta/TC/maaş, reçetede birim) her senkronda
+  // "kolon adı/şema kontrol edin" yanlış alarmı üretiyordu.
+  DEMIRBAS_KRITIK, MALIYET_MERKEZI_KRITIK, PERSONEL_KRITIK, RECETE_KRITIK,
+  type ReceteKalemi,
+} from '../mikro/eslemeVarlik.js';
+// Cari eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeCari.ts
+import {
+  cariEsle, cariEslemeOzeti, bakiyeHaritasi, cariBakiyesi,
+  adresSec, adresGuncellemesi, adresOzeti, type CariEsleme,
+} from '../mikro/eslemeCari.js';
+import {
+  stokEsle, fiyatEsle, stokMiktarEsle, depoSatiriCoz,
+  sayacOlustur, sayacaEkle, sayacNotu, okumaArizalari, okumaArizasiNotu,
+  // Okuma arızası YALNIZ kritik alanlarda aranır (2026-09-19 delta bulgusu):
+  // StokListesiV2 anlık miktar TAŞIMAZ ve bu kurulumda fiyat ayrı tablodadır, bu
+  // yüzden süzgeçsiz tarama HER stok import'unda "kolon adı/şema kontrol edin"
+  // yanlış alarmı üretiyordu. Her çağrı kendi kritik kümesini verir.
+  STOK_KRITIK, FIYAT_KRITIK, STOK_MIKTAR_KRITIK, DEPO_KRITIK,
+} from '../mikro/eslemeStok.js';
+// Fatura eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeFatura.ts
+import {
+  faturaYonu, faturalariEsle, kalemHaritasi, faturadanSiparis, siparisTuretmeNotu,
+  kalemleriBirimle, okumaArizasiUyarisi, OKUMA_ARIZASI_ESIK, type SiparisSatiri,
+} from '../mikro/eslemeFatura.js';
+import { eBelgeNormalize, eBelgeleriNormalize, cariHareketYonOzeti } from '../mikro/eBelge.js';
+// KDV özeti / mizan eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/raporKdvMizan.ts
+import { kdvKirilimi, mizanSatirlari, mizanToplami } from '../mikro/raporKdvMizan.js';
 
 
 /** Bu rota grubunun server.ts'ten ihtiyac duydugu HER SEY - acik liste. */
@@ -76,6 +122,26 @@ export interface MikroRouteCtx {
 }
 
 export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
+  /**
+   * İSTEMCİDEN GELEN doküman id'sinin sahipliği (2026-09-19, Faz 3 3/n kapanışı). Yedi rota `firebaseId`'yi
+   * doğrulamadan o dokümana yazıyordu; dördü üstüne çağıranın `companyId`'sini DAMGALIYORDU — başka kiracının
+   * fatura/sipariş dokümanının id'sini bilen kullanıcı onu sahiplenebiliyordu (2026-08-12'de 8 uçta kapatılan
+   * sınıfın kaçan üyeleri). Desen aynı: etiketsiz (companyId'siz) eski kayıt 'kendi' sayılır.
+   *   'kendi'   → yazılabilir        'yabanci' → 404, Mikro'ya da GİDİLMEZ
+   *   'yok'     → doküman yok: `set(merge)` ile KENDİ dokümanını yaratan rotalarda serbest (irsaliye → shipments),
+   *               var olması GEREKEN dokümanda (gelen fatura) 404.
+   * Kontrol `mikroPost`'tan ÖNCE yapılır — dış sisteme (GİB/Mikro) giden işlem, sonradan reddedilecek bir
+   * doküman için başlatılmaz.
+   */
+  const belgeSahipligi = async (coll: string, id: string | undefined, companyId: string): Promise<'kendi' | 'yabanci' | 'yok' | 'idsiz'> => {
+    if (!id || !C.getAdminDb()) return 'idsiz';
+    const snap = await C.getAdminDb().collection(coll).doc(id).get();
+    if (!snap.exists) return 'yok';
+    const dc = ((snap.data() as Record<string, unknown> | undefined)?.companyId as string | undefined) || '';
+    return dc && dc !== companyId ? 'yabanci' : 'kendi';
+  };
+  const YABANCI_BELGE = { success: false, error: 'Kayıt bulunamadı.' } as const;   // varlığı sızdırmamak için 'yabanci' ve 'yok' aynı yanıt
+
   // ── Mikro Jump API Routes ────────────────────────────────────────────────────
 
   /** GET /api/mikro/status — is Mikro configured and the FULL API context working?
@@ -178,26 +244,16 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { item, firebaseId } = req.body as { item: Record<string, unknown>; firebaseId: string };
+    if (await belgeSahipligi('inventory', firebaseId, await C.reqCompanyId(req)) === 'yabanci') return res.status(404).json(YABANCI_BELGE);
     const t0 = Date.now();
 
     try {
-      const prices = (item.prices as Record<string, number>) || {};
-      const stok = {
-        sto_kod:              (item.sku  as string) || `STK${Date.now()}`,
-        sto_isim:             (item.name as string) || '',
-        sto_kisa_ismi:        ((item.name as string) || '').substring(0, 24),
-        sto_cins:             0,
-        sto_doviz_cinsi:      0,
-        sto_birim1_ad:        'ADET',
-        sto_perakende_vergi:  20,
-        sto_toptan_vergi:     20,
-        satis_fiyatlari: [
-          { sfiyat_listesirano: 1, sfiyat_deposirano: 1, sfiyat_odemeplan: 0, sfiyat_birim_pntr: 1, sfiyat_fiyati: prices['Retail']       || 0, sfiyat_doviz: 0 },
-          { sfiyat_listesirano: 2, sfiyat_deposirano: 1, sfiyat_odemeplan: 0, sfiyat_birim_pntr: 1, sfiyat_fiyati: prices['B2B Standard'] || 0, sfiyat_doviz: 0 },
-          { sfiyat_listesirano: 3, sfiyat_deposirano: 1, sfiyat_odemeplan: 0, sfiyat_birim_pntr: 1, sfiyat_fiyati: prices['B2B Premium']  || 0, sfiyat_doviz: 0 },
-          { sfiyat_listesirano: 4, sfiyat_deposirano: 1, sfiyat_odemeplan: 0, sfiyat_birim_pntr: 1, sfiyat_fiyati: prices['Dealer']       || 0, sfiyat_doviz: 0 },
-        ].filter(p => p.sfiyat_fiyati > 0),
-      };
+      // Gövde TEK KAYNAKTA: src/server/mikro/govdeStokCari.ts (stokGovdesi) — Faz 3 3/n.
+      // `sto_perakende_vergi` YÜZDE DEĞİL, VergiListesiV2 sıra no'suna İŞARETÇİdir
+      // (mikroClient.ts mikroVergiOranlari başlığı, 2026-07-31 canlı bulgusu): eski sabit 20
+      // müşterinin tablosunda OLMAYAN bir sıraydı. Oran→işaretçi ters araması için tablo geçilir.
+      // Bilinmeyen SKU/ad/birim/KDV oranı/fiyat → MikroGovdeHatasi → 400 (mikroPost çağrılmaz).
+      const stok = stokGovdesi(item, await mikroVergiOranlari());
 
       const { ok, data, status } = await mikroPost('StokKaydetV2', { stoklar: [stok] }, true); // V17: stoklar Mikro objesi İÇİNDE (inMikro)
       const duration = Date.now() - t0;
@@ -218,11 +274,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         });
       }
 
-      res.json({ success, mikroStoKod, data, duration });
+      res.json({ success, mikroStoKod, error: errorMsg, data, duration });
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
       await C.writeSyncLog('StokKaydetV2', 'inventory', firebaseId || 'unknown', false, null, errorMsg, duration, C.reqActor(req));
+      if (mikroGovdeHatasiMi(err)) {   // gövde kurulamadı → Mikro'ya HİÇ gidilmedi: istemci hatası, sunucu arızası değil
+        console.warn('Mikro StokKaydetV2 gövdesi kurulamadı:', errorMsg);
+        return res.status(400).json({ success: false, error: errorMsg });
+      }
       console.error('Mikro StokKaydetV2 hatası:', err);
       res.status(500).json({ success: false, error: errorMsg });
     }
@@ -253,13 +313,20 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
       // Mirror matched items back to Firebase
       if (C.getAdminDb() && Array.isArray(stoklar)) {
+        const stokCompanyId = await C.reqCompanyId(req);
         for (const s of stoklar) {
           const sku = s.sto_kod as string;
           if (!sku) continue;
-          const snap = await C.getAdminDb().collection('inventory').where('sku', '==', sku).limit(1).get();
-          if (!snap.empty) {
+          // KİRACI İZOLASYONU (2026-09-19): eski `.limit(1)` ilk eşleşeni alıyordu — aynı SKU başka kiracıda da
+          // varsa ONUN ürününe stockLevel yazılabiliyordu. Çağıranın (ya da etiketsiz eski) kaydı seçilir.
+          const snap = await C.getAdminDb().collection('inventory').where('sku', '==', sku).get();
+          const hedef = snap.docs.find(dk => {
+            const dc = ((dk.data() as Record<string, unknown>).companyId as string | undefined) || '';
+            return !dc || dc === stokCompanyId;
+          });
+          if (hedef) {
             const qty = mikroStokMiktari(s);
-            await snap.docs[0].ref.update({
+            await hedef.ref.update({
               mikroStoKod:   sku,
               mikroSynced:   true,
               // Miktar alanı yoksa mevcut stockLevel'i EZME (bkz. mikroStokMiktari).
@@ -285,48 +352,20 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   app.post('/api/mikro/cari/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
-    const { lead, firebaseId, collection: targetCollection = 'leads' } = req.body as { lead: Record<string, unknown>; firebaseId: string; collection?: 'leads' | 'suppliers' };
+    const { lead, firebaseId } = req.body as { lead: Record<string, unknown>; firebaseId: string };
+    // Koleksiyon adı ÇALIŞMA ANINDA beyaz listeden: eski `as { collection?: 'leads' | 'suppliers' }` yalnız bir TİP
+    // iddiasıydı — istemci `collection: 'settings'` gönderip adminDb ile (RBAC dışı) herhangi bir koleksiyondaki
+    // dokümana mikroSynced/mikroCariKod yazdırabiliyordu (2026-09-19).
+    const targetCollection: 'leads' | 'suppliers' = (req.body as { collection?: unknown })?.collection === 'suppliers' ? 'suppliers' : 'leads';
+    if (await belgeSahipligi(targetCollection, firebaseId, await C.reqCompanyId(req)) === 'yabanci') return res.status(404).json(YABANCI_BELGE);
     const t0 = Date.now();
 
     try {
-      const cariKod = (lead.mikroCariKod as string) || `CAR${(firebaseId || Date.now().toString()).substring(0, 6).toUpperCase()}`;
-      const contactName = (lead.contactName as string) || '';
-      const nameParts   = contactName.split(' ');
-
-      const cari = {
-        cari_kod:                    cariKod,
-        cari_unvan1:                 (lead.company  as string) || (lead.name as string) || '',
-        cari_unvan2:                 '',
-        cari_vdaire_no:              (lead.taxId     as string) || (lead.taxNo as string) || (lead.vkn as string) || '',
-        cari_vdaire_adi:             (lead.taxOffice as string) || '',
-        cari_EMail:                  (lead.email     as string) || '',
-        cari_CepTel:                 (lead.phone     as string) || '',
-        cari_efatura_fl:             (lead.eFaturaKayitli as boolean) ? 1 : 0,
-        cari_def_efatura_cinsi:      0,
-        cari_doviz_cinsi1:           0,
-        cari_doviz_cinsi2:           255,
-        cari_doviz_cinsi3:           255,
-        cari_KurHesapSekli:          1,
-        cari_sevk_adres_no:          0,
-        cari_fatura_adres_no:        0,
-        adres: [{
-          adr_cadde:          (lead.address  as string) || '',
-          adr_ilce:           (lead.district as string) || '',
-          adr_il:             (lead.city     as string) || '',
-          adr_ulke:           'TÜRKİYE',
-          adr_tel_ulke_kodu:  '090',
-          adr_tel_bolge_kodu: '',
-          adr_tel_no1:        (lead.phone    as string) || '',
-          adr_posta_kodu:     0,
-          yetkili: contactName ? [{
-            mye_isim:         nameParts[0]  || '',
-            mye_soyisim:      nameParts.slice(1).join(' ') || '',
-            mye_email_adres:  (lead.email as string) || '',
-            mye_cep_telno:    (lead.phone as string) || '',
-            mye_dahili_telno: '',
-          }] : [],
-        }],
-      };
+      // Gövde TEK KAYNAKTA: src/server/mikro/govdeStokCari.ts (cariGovdesi) — Faz 3 3/n.
+      // Cari kodu (mikroCariKod yoksa CAR+firebaseId ilk 6) ve unvan orada ZORUNLU:
+      // firebaseId de yoksa zaman damgasından kod UYDURULMAZ, 400 döner.
+      const cari = cariGovdesi(lead, firebaseId);
+      const cariKod = cari.cari_kod;
 
       // inMikro: V17 evrak kalıbı — payload (cariler) Mikro objesi İÇİNDE gider.
       const { ok, data, status } = await mikroPost('CariKaydetV2', { cariler: [cari] }, true);
@@ -347,11 +386,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         });
       }
 
-      res.json({ success, cariKod, data, duration });
+      res.json({ success, cariKod, error: errorMsg, data, duration });
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
       await C.writeSyncLog('CariKaydetV2', targetCollection === 'suppliers' ? 'supplier' : 'lead', firebaseId || 'unknown', false, null, errorMsg, duration, C.reqActor(req));
+      if (mikroGovdeHatasiMi(err)) {   // gövde kurulamadı → Mikro'ya HİÇ gidilmedi
+        console.warn('Mikro CariKaydetV2 gövdesi kurulamadı:', errorMsg);
+        return res.status(400).json({ success: false, error: errorMsg });
+      }
       console.error('Mikro CariKaydetV2 hatası:', err);
       res.status(500).json({ success: false, error: errorMsg });
     }
@@ -436,44 +479,39 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       let yeni = 0, guncel = 0;
       let batch = C.getAdminDb().batch(); let ops = 0;
       const flush = async () => { if (ops > 0) { await batch.commit(); batch = C.getAdminDb()!.batch(); ops = 0; } };
+      // Gövde/eşleme TEK KAYNAKTA (server/mikro/eslemeCari.ts): bilinmeyen alan
+      // YAZILMAZ (update mevcut değeri korur), `status` YALNIZ yeni kayıtta.
+      const eslemeler: CariEsleme[] = [];
       for (const c of cariler) {
-        const kod = (c.cari_kod as string)?.trim();
-        if (!kod) continue;
-        const fields = {
-          name: (c.cari_unvan1 as string) || kod,
-          company: (c.cari_unvan1 as string) || '',
-          email: (c.cari_EMail as string) || '',
-          phone: (c.cari_CepTel as string) || '',
-          taxId: (c.cari_vdaire_no as string) || '',
-          taxOffice: (c.cari_vdaire_adi as string) || '',
-          eFaturaKayitli: Number(c.cari_efatura_fl) === 1,
-          type: Number(c.cari_hareket_tipi ?? 0) === 1 ? 'Supplier' : 'Customer',
-          mikroCariKod: kod,
-          mikroSynced: true, mikroSyncedAt: pgServerTimestamp(),
-          companyId,
-        };
-        const vkn = vknNorm(fields.taxId);
-        const nameKey = isimAnahtari(fields.name);
+        const esleme = cariEsle(c, { companyId, zamanDamgasi: pgServerTimestamp() });
+        if (!esleme) continue;                       // cari_kod yok → satır atlanır (eski `if (!kod) continue`)
+        eslemeler.push(esleme);
+        const { cariKod: kod, alanlar } = esleme;
+        const vkn = vknNorm(typeof alanlar.taxId === 'string' ? alanlar.taxId : '');
+        const nameKey = isimAnahtari(alanlar.name);
         const ref = leadByKod.get(kod)
           || (vkn ? leadByVkn.get(vkn) : undefined)
           || (nameKey ? leadByName.get(nameKey) : undefined);
-        if (ref) { batch.update(ref, fields); guncel++; }
+        if (ref) { batch.update(ref, alanlar); guncel++; }
         else {
           const newRef = C.getAdminDb().collection('leads').doc();
-          batch.set(newRef, { ...fields, status: 'Active', source: 'mikro_import', createdAt: pgServerTimestamp() });
+          batch.set(newRef, { ...alanlar, ...esleme.yeniKayitAlanlari, source: 'mikro_import', createdAt: pgServerTimestamp() });
           leadByKod.set(kod, newRef);
           yeni++;
         }
         if (++ops >= 400) await flush();
       }
       await flush();
+      const eslemeOzeti = cariEslemeOzeti(eslemeler);
+      if (eslemeOzeti.okumaArizasi.length) console.warn('[cari/listesi] okuma arızası:', eslemeOzeti.not);
 
       const duration = Date.now() - t0;
-      const ozet = `${cariler.length} cari çekildi — ${yeni} yeni, ${guncel} güncellendi${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}`;
+      const ozet = `${cariler.length} cari çekildi — ${yeni} yeni, ${guncel} güncellendi${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}${eslemeOzeti.not ? ` — ${eslemeOzeti.not}` : ''}`;
       await C.writeSyncLog('CariListesiV2', 'lead', ozet, true, null, null, duration, C.reqActor(req));
       await C.writeAuditLog(C.reqActor(req), 'Mikro Cari Listesi Çekme', ozet);
       res.json({ success: true, count: cariler.length, created: yeni, updated: guncel,
-                 ...(tavanaCarpti ? { truncated: true, limit: MAKS_SAYFA * SAYFA } : {}), duration });
+                 ...(tavanaCarpti ? { truncated: true, limit: MAKS_SAYFA * SAYFA } : {}),
+                 ...(eslemeOzeti.not ? { note: eslemeOzeti.not } : {}), duration });
     } catch (err) {
       console.error('Mikro CariListesiV2 hatası:', err);
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
@@ -485,6 +523,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { order, firebaseId } = req.body as { order: Record<string, unknown>; firebaseId: string };
+    if (await belgeSahipligi('orders', firebaseId, await C.reqCompanyId(req)) === 'yabanci') return res.status(404).json(YABANCI_BELGE);
     const t0 = Date.now();
 
     try {
@@ -493,35 +532,27 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         return res.status(400).json({ success: false, error: 'Sipariş satırı bulunamadı.' });
       }
 
-      // Format date as dd.MM.yyyy for Mikro
-      const rawDate   = order.createdAt ? new Date(order.createdAt as string) : new Date();
-      const orderDate = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
-
-      const satirlar = lineItems.map((item: Record<string, unknown>) => ({
-        sip_tarih:        orderDate,
-        // sip_tip='0' → SATIŞ (2026-08-22 denetim bulgusu C14). Eskiden '1' idi
-        // ('1' = ALIŞ/verilen sipariş). Bu uç bir MÜŞTERİ satış siparişini
-        // Mikro'ya yazıyor; okuma tarafı satışı tip 0 sayıyor
-        // (OrdersPage.tsx:209, DashboardPage.tsx:145), tip 1'i satın alma
-        // (PurchasingModule.tsx:76). '1' yazınca resmi satış Mikro'da alış
-        // siparişi oluyor VE Cetpa satış ekranında hiç görünmüyordu.
-        sip_tip:          '0',
-        sip_cins:         '0',
-        sip_evrakno_seri: 'T',
-        sip_musteri_kod:  (order.mikroCariKod as string) || '',
-        sip_stok_kod:     (item.sku as string) || (item.productId as string) || '',
-        sip_b_fiyat:      Number((item.unitPrice as number) || (item.price as number) || 0),
-        sip_miktar:       Number((item.quantity as number)  || 1),
-        sip_tutar:        Number((item.total    as number)  || ((item.unitPrice as number || 0) * (item.quantity as number || 1))),
-        sip_vergi_pntr:   4,     // 20% KDV (adjust per product if needed)
-        sip_depono:       1,
-        sip_vergisiz_fl:  false,
-      }));
+      // Gövde TEK KAYNAKTA: src/server/mikro/govdeSiparis.ts (siparisGovdesi) — Faz 3 3/n.
+      // Alan adları, sıra ve Mikro sabitleri (sip_tip '0' = SATIŞ / C14 canlı doğrulama
+      // notu dahil) orada; testi govdeSiparis.test.ts. Kapatılan sahte varsayılanlar:
+      //   sip_b_fiyat  price||0        → fiyatsız satır 0 TL yazılıyordu
+      //   sip_miktar   quantity||1     → miktarsız satır 1 adet
+      //   sip_tutar    total || (0*1)  → iki uydurmanın çarpımı
+      //   sip_vergi_pntr sabit 4       → artık kalemin KDV oranından TERS arama (VergiListesiV2)
+      //   sip_depono   sabit 1         → 2026-09-05: depo 1 = HAVALİMANI, stok depo 2'de
+      // ve `new Date(Timestamp)` → "NaN.NaN.NaN" tarihi. Bilinmeyen alan artık
+      // MikroGovdeHatasi fırlatır → aşağıdaki catch 400 döner, mikroPost HİÇ çağrılmaz.
+      //
+      // `mikroVergiOranlari()` bir AĞ çağrısıdır ve bilerek try içindedir: okunamazsa BOŞ
+      // Map döner ve gövde kurucu "vergi işaretçisi bilinmiyor (Mikro vergi tablosu
+      // okunamadı — VergiListesiV2)" ile 400 verir — sessizce 4 (=%20) yazmaz.
+      const vergiTablosu = await mikroVergiOranlari();
+      const { satirlar, govde } = siparisGovdesi(order, { vergiTablosu });
 
       // inMikro: V17 evrak kalıbı — payload (evraklar) Mikro objesi İÇİNDE gider.
-      const { ok, data, status } = await mikroPost('SiparisKaydetV2', {
-        evraklar: [{ satirlar }],
-      }, true);
+      // `govde.evraklar[0].satirlar === satirlar` (modül testiyle kilitli) — aşağıdaki
+      // ayna çağrısı aynı diziyi yazar.
+      const { ok, data, status } = await mikroPost('SiparisKaydetV2', govde, true);
 
       const duration = Date.now() - t0;
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
@@ -542,11 +573,18 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         });
       }
 
-      res.json({ success, mikroEvrakNo, data, duration });
+      res.json({ success, mikroEvrakNo, error: errorMsg, data, duration });
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
       await C.writeSyncLog('SiparisKaydetV2', 'order', firebaseId || 'unknown', false, null, errorMsg, duration, C.reqActor(req));
+      if (mikroGovdeHatasiMi(err)) {   // gövde kurulamadı → Mikro'ya HİÇ gidilmedi: veri eksik, sunucu arızası değil
+        // 500 "sunucu bozuk, tekrar dene" demek olurdu; burada eksik olan SİPARİŞTİR ve
+        // kullanıcı alanı doldurmadan tekrar denemenin anlamı yok. İstemci
+        // (mikroService.syncOrderToMikro → App.tsx syncOrderWithCari) `error` metnini toast'ta gösterir.
+        console.warn('Mikro SiparisKaydetV2 gövdesi kurulamadı:', errorMsg);
+        return res.status(400).json({ success: false, error: errorMsg });
+      }
       console.error('Mikro SiparisKaydetV2 hatası:', err);
       res.status(500).json({ success: false, error: errorMsg });
     }
@@ -585,6 +623,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     let skippedRecords = 0;
     /** Mikro'dan en az bir satış fiyatı gelen ürün sayısı (özet raporlanır). */
     let fiyatliUrun = 0;
+    /** Mikro'nun vermediği alanların satır sayacı — import notuna ve okuma arızası uyarısına girer. */
+    const stokSayac = sayacOlustur();
+    /** Görünen ad/kategori: stokEsle yazmıyorsa MEVCUT dokümandaki değeri kullan (warehouseItems
+     *  + kategori senkronu için lazım); o da yoksa undefined → alan hiç yazılmaz (merge:true
+     *  bayat değeri korur; '' ya da 'Genel' UYDURULMAZ). */
+    const coz = (yeni: string | undefined, eski: unknown): string | undefined =>
+      yeni ?? (typeof eski === 'string' && eski.trim() ? eski : undefined);
 
     try {
       // Prefetch ALL inventory docs → Map<sku, ref>. ETİKETSİZ (companyId boş)
@@ -596,13 +641,16 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // "Stokları İçeri Al" düğmesi). Yabancı SKU haritada yoksa YENİ doküman
       // açılır — kiracı başına ayrı kayıt, doğru multi-tenant davranışı.
       const existingSnap = invSnapOnce;   // yukarıda bir kez çekildi
-      const existingBySku = new Map<string, AdminDocRef>();
+      // Değer artık {ref, veri}: stokEsle MEVCUT dokümanı görmeli — Mikro bir alanı boş
+      // döndüğünde elle düzeltilmiş ad/kategori/birim ve kullanıcının girdiği stok eşiği
+      // EZİLMESİN diye (bkz. server/mikro/eslemeStok.ts başlığı, "bilinçli farklar").
+      const existingBySku = new Map<string, { ref: AdminDocRef; veri?: Record<string, unknown> }>();
       for (const docSnap of existingSnap.docs) {
         const veri = docSnap.data() as Record<string, unknown>;
         const dc = (veri.companyId as string | undefined) || '';
         if (dc && dc !== companyId) continue;
         const sku = (veri.sku as string)?.trim();
-        if (sku && !existingBySku.has(sku)) existingBySku.set(sku, docSnap.ref);
+        if (sku && !existingBySku.has(sku)) existingBySku.set(sku, { ref: docSnap.ref, veri });
       }
 
       // Vergi tablosunu bir kez çek: sto_perakende_vergi indeksini gerçek
@@ -687,53 +735,35 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           if (!sku) continue;
 
           try {
-            // Map Mikro fields → Cetpa InventoryItem shape.
-            // Fiyat mantığı ortak yardımcıda (cron import'u ile ayrışmasın).
-            const prices = mikroSatisFiyatlari(s);
-            if (Object.keys(prices).length) fiyatliUrun++;
+            // Gövde tek kaynakta (server/mikro/eslemeStok.ts → stokEsle): bilinmeyen alan
+            // YAZILMAZ (update mevcut değeri korur) ve sayaca girer. Taşınan canlı-doğrulama
+            // notları (sto_perakende_vergi İNDEKStir, fiyat kaynağı ayrı tablodur, boş `prices`
+            // elle girilen fiyatı ezerdi, Retail yoksa `price: 0` uydurulmaz) o dosyanın
+            // başlığında ve fonksiyon içi yorumlarında duruyor.
+            const mevcutKayit = existingBySku.get(sku);
+            const { alanlar, bilinmeyen } = stokEsle(s, mevcutKayit?.veri, { vergiTablosu });
+            sayacaEkle(stokSayac, bilinmeyen);
+            if (alanlar.prices) fiyatliUrun++;
+            const qty = alanlar.stockLevel ?? null;
+            const item = { companyId, ...alanlar, mikroSyncedAt: pgServerTimestamp() };
 
-            // Miktar alanı yoksa null — mevcut kaydın stockLevel'i EZİLMEZ
-            // (bkz. mikroStokMiktari). Yeni kayıtta 0 ile açılır, miktar
-            // /api/mikro/import/stok-miktar koşusunda dolar.
-            const qty = mikroStokMiktari(s);
-            const kdvOran = vergiOraniCoz(s.sto_perakende_vergi, vergiTablosu);
-            const item = {
-              companyId,
-              sku,
-              name:             (s.sto_isim as string)     || sku,
-              category:         (s.sto_grup_isim as string) || (s.sto_grup_kodu as string) || 'Genel',
-              unit:             (s.sto_birim1_ad as string) || 'ADET',
-              // sto_perakende_vergi İNDEKStir, yüzde değil (bkz. vergiOraniCoz).
-              ...(kdvOran !== null ? { vatRate: kdvOran } : {}),
-              ...(qty !== null ? { stockLevel: qty } : {}),
-              lowStockThreshold: 5,
-              // Fiyat gelmediyse `prices`e DOKUNMA. Eskiden koşulsuz `prices` (boş
-              // olabilen nesne) yazılıyordu: Mikro fiyat döndürmediği her senkronda
-              // elle girilmiş fiyatlar `{}` ile eziliyordu — stockLevel/vatRate'te
-              // düzeltilen sessiz-sıfır arıza sınıfının aynısı.
-              // Eski tekil `price` alanı yalnız Retail BİLİNİYORSA yazılır: `?? 0` başka kademe
-              // varken 0 TL basıyor, elle girilmiş perakende fiyatı eziyordu (Faz 1 4/n testi).
-              ...(Object.keys(prices).length ? { prices, ...(prices['Retail'] != null ? { price: prices['Retail'] } : {}) } : {}),
-              mikroStoKod:      sku,
-              mikroSynced:      true,
-              source:           'mikro_import',
-              mikroSyncedAt:    pgServerTimestamp(),
-            };
+            const urunAdi     = coz(alanlar.name,     mevcutKayit?.veri?.name);
+            const kategoriAdi = coz(alanlar.category, mevcutKayit?.veri?.category);
 
             // Upsert via batch: update if exists, create if not
-            const existingRef = existingBySku.get(sku);
-            if (existingRef) {
-              batch.update(existingRef, item);
+            if (mevcutKayit) {
+              batch.update(mevcutKayit.ref, item);
               updated++;
             } else {
               const newRef = C.getAdminDb().collection('inventory').doc();
               batch.set(newRef, { stockLevel: 0, ...item, createdAt: pgServerTimestamp() });
-              existingBySku.set(sku, newRef); // guard against duplicate SKUs across pages
+              // guard against duplicate SKUs across pages — ikinci kez YENİ doküman açılmasın
+              existingBySku.set(sku, { ref: newRef, veri: item as Record<string, unknown> });
               created++;
             }
             batchOps++;
 
-            categorySet.add(item.category);
+            if (kategoriAdi) categorySet.add(kategoriAdi);
 
             // Depo kaydı: Depo sekmesi warehouseItems koleksiyonundan okur
             // sto_yer_kod BOŞSA '1' UYDURMA (2026-08-01 düzeltmesi). Eski kod
@@ -750,13 +780,16 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
               .doc(whItemId(sku.replace(/[/\\]/g, '_')));
             batch.set(whItemRef, {
               companyId,
-              productName: item.name,
+              // Ad/kategori bilinmiyorsa (Mikro boş döndü, kayıt da yeni değil) alan
+              // yazılmaz — merge:true mevcut adı korur; boş metin yazmak ekranda
+              // ürünü isimsiz gösterirdi.
+              ...(urunAdi ? { productName: urunAdi } : {}),
               sku,
               // Miktar bilinmiyorsa depo kaydının quantity'sini de EZME.
               ...(qty !== null ? { quantity: qty } : {}),
               ...(yerKod ? { warehouseId: `mikro-depo-${yerKod}` } : {}),
               location:    depoAdi,
-              category:    item.category,
+              ...(kategoriAdi ? { category: kategoriAdi } : {}),
               source:      'mikro_import',
               updatedAt:   pgServerTimestamp(),
             }, { merge: true });
@@ -831,9 +864,19 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // hiç gelmediğini gizliyordu (kullanıcı ekranda 0 TL görünce fark etti).
       // fiyatliUrun = 0 ise sorun Cetpa'da değil, Mikro kartlarında fiyat yok demektir.
       const fiyatNot = `${fiyatliUrun}/${created + updated} üründe satış fiyatı bulundu`;
-      await C.writeSyncLog('ImportStok', 'inventory', `${created} yeni / ${updated} güncel — ${fiyatNot}${skippedRecords ? ` / ${skippedRecords} bozuk atlandı` : ''}`, true, null, null, duration, C.reqActor(req));
-      console.log(`Stok import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, ${fiyatNot}, hata: ${errors}, bozuk atlanan: ${skippedRecords}, süre: ${duration}ms`);
-      res.json({ success: true, created, updated, errors, skippedRecords, fiyatliUrun, duration });
+      // Bilinmeyen alan sayacı + OKUMA ARIZASI: bir alan satırların TAMAMINDA boşsa bu veri
+      // değil kolon adı/şema sorunudur — uyarı notun BAŞINA girer (sessiz-sıfır sınıfının
+      // import karşılığı; ekranda "2367 güncellendi" deyip alanın hiç gelmediğini gizlemesin).
+      // KRİTİK küme: STOK_KRITIK (ürün adı + KDV oranı). Miktar ve fiyat BİLEREK dışarıda —
+      // liste ucu miktar taşımıyor, fiyat kapsamını `fiyatNot` zaten ayrıca söylüyor.
+      const stokArizalari = okumaArizalari(stokSayac, STOK_KRITIK);
+      const uyari = okumaArizasiNotu(stokArizalari);
+      if (uyari) console.warn('[import/stok]', uyari);
+      const sayacMetni = sayacNotu(stokSayac, stokArizalari);
+      const note = [uyari, fiyatNot, sayacMetni].filter(Boolean).join(' — ');
+      await C.writeSyncLog('ImportStok', 'inventory', `${created} yeni / ${updated} güncel — ${note}${skippedRecords ? ` / ${skippedRecords} bozuk atlandı` : ''}`, true, null, null, duration, C.reqActor(req));
+      console.log(`Stok import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, ${note}, hata: ${errors}, bozuk atlanan: ${skippedRecords}, süre: ${duration}ms`);
+      res.json({ success: true, created, updated, errors, skippedRecords, fiyatliUrun, note, duration });
 
     } catch (err) {
       const duration = Date.now() - t0;
@@ -892,6 +935,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         if (batchOps > 0) { await batch.commit(); batch = C.getAdminDb()!.batch(); batchOps = 0; }
       };
 
+      // Tüm sayfaların eşlemeleri — döngü bitince `cariEslemeOzeti` ile sayaç/uyarı
+      // üretilir. Sayfalama döngüsünün DIŞINDA durmalı: içeride tanımlanırsa her
+      // sayfa sayacı sıfırlar ve "hiçbir satırda okunamadı" kararı yanlış çıkar.
+      const eslemeler: CariEsleme[] = [];
+
       while (hasMore) {
         const { ok, data } = await mikroPost('CariListesiV2', {
           FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi,cari_muh_kod',
@@ -906,48 +954,33 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         if (!Array.isArray(cariler) || cariler.length === 0) break;
 
         for (const c of cariler) {
-          const cariKod = (c.cari_kod as string)?.trim();
-          if (!cariKod) continue;
+          // Gövde/eşleme TEK KAYNAKTA (server/mikro/eslemeCari.ts).
+          const esleme = cariEsle(c, { companyId, zamanDamgasi: pgServerTimestamp() });
+          if (!esleme) continue;                     // cari_kod yok → satır atlanır
+          const { cariKod, alanlar } = esleme;       // `try` DIŞINDA: catch mesajı cariKod'u kullanıyor
 
           try {
-            const unvan = (c.cari_unvan1 as string) || cariKod;
-            // Determine if customer (0) or supplier (1) from hareket_tipi
-            const hareketTipi = Number(c.cari_hareket_tipi ?? 0);
-            const leadType = hareketTipi === 1 ? 'Supplier' : 'Customer';
-
-            const lead = {
-              companyId,
-              mikroCariKod:   cariKod,
-              company:        unvan,
-              name:           unvan,
-              email:          (c.cari_EMail   as string) || '',
-              phone:          (c.cari_CepTel  as string) || '',
-              taxId:          (c.cari_vdaire_no  as string) || '',
-              taxOffice:      (c.cari_vdaire_adi as string) || '',
-              eFaturaKayitli: Number(c.cari_efatura_fl) === 1,
-              type:           leadType,
-              status:         'Active',
-              mikroSynced:    true,
-              mikroSyncedAt:  pgServerTimestamp(),
-              // `source` YALNIZ yeni kayıtta (aşağıda): güncellemede elle açılan lead'in kökeni ezilmez —
-              // eskiden import'a bir kez yakalanan elle lead 'mikro_import' oluyor, birleştirme scripti
-              // onu Mikro kopyası sanıp SİLEBİLİRDİ (inceleme, 2026-09-05).
-            };
-
+            eslemeler.push(esleme);
             // Upsert oncelik sirasi: mikroCariKod (zaten Mikro'yla eslesmis) ->
             // VKN (en guvenilir kimlik) -> case-insensitive isim.
-            const vkn = normalizeVkn(lead.taxId);
-            const nameKey = isimAnahtari(unvan);
+            const vkn = normalizeVkn(typeof alanlar.taxId === 'string' ? alanlar.taxId : '');
+            const nameKey = isimAnahtari(alanlar.name);
             const existingRef = existingByKod.get(cariKod)
               || (vkn ? existingByVkn.get(vkn) : undefined)
               || (nameKey ? existingByName.get(nameKey) : undefined);
 
             const targetRef = existingRef ?? C.getAdminDb().collection('leads').doc();
             if (existingRef) {
-              batch.update(targetRef, { ...lead, companyId }); // güncellemede de etiketle (self-heal)
+              batch.update(targetRef, alanlar);      // companyId zaten alanlar'da (self-heal)
               updated++;
             } else {
-              batch.set(targetRef, { ...lead, source: 'mikro_import', companyId, createdAt: pgServerTimestamp() });
+              // `source`/`status` YALNIZ yeni kayıtta: güncellemede elle açılan lead'in kökeni
+              // ve kullanıcının işaretlediği durum EZİLMEZ. `source` için bu 2026-09-05
+              // incelemesinde düzeltilmişti (import'a bir kez yakalanan elle lead 'mikro_import'
+              // oluyor, birleştirme scripti onu Mikro kopyası sanıp SİLEBİLİRDİ); `status`
+              // aynı sınıftaydı ve atlanmıştı — her import kullanıcının işaretlediği durumu
+              // 'Active'e geri alıyordu. Artık ikisi de `yeniKayitAlanlari`/burada.
+              batch.set(targetRef, { ...alanlar, ...esleme.yeniKayitAlanlari, source: 'mikro_import', createdAt: pgServerTimestamp() });
               created++;
             }
             existingByKod.set(cariKod, targetRef);
@@ -969,9 +1002,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       await commitBatch();
 
       const duration = Date.now() - t0;
-      await C.writeSyncLog('ImportCari', 'lead', `${created} yeni / ${updated} güncel`, true, null, null, duration, C.reqActor(req));
+      const eslemeOzeti = cariEslemeOzeti(eslemeler);
+      if (eslemeOzeti.okumaArizasi.length) console.warn('[import/cari] okuma arızası:', eslemeOzeti.not);
+      await C.writeSyncLog('ImportCari', 'lead', `${created} yeni / ${updated} güncel${eslemeOzeti.not ? ` — ${eslemeOzeti.not}` : ''}`, true, null, null, duration, C.reqActor(req));
       console.log(`Cari import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, hata: ${errors}, süre: ${duration}ms`);
-      res.json({ success: true, created, updated, errors, duration });
+      res.json({ success: true, created, updated, errors, duration, ...(eslemeOzeti.not ? { note: eslemeOzeti.not } : {}) });
 
     } catch (err) {
       const duration = Date.now() - t0;
@@ -1536,8 +1571,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // PG aynası (off-server yedek + raporlama). Fatura import'uyla aynı tablo.
       await mirrorMikroInsert('mikro_cari_hesap_hareketleri',
         rows.map(r => ({ ...r, __kaynak: 'cari_hareket_import' })), CHA_COLS);
-      const borc = rows.filter(r => Number(r.cha_tip ?? 0) === 0).length;
-      return `${borc} borç / ${rows.length - borc} alacak hareketi`;
+      // Yönü okunamayan hareket borç SAYILMAZ (eski `?? 0`): tek kaynak server/mikro/eBelge.cariHareketYonOzeti.
+      return cariHareketYonOzeti(rows);
     },
   });
 
@@ -1625,12 +1660,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       );
       if (hata) return res.status(502).json({ success: false, error: hata });
       // Birimi sunucuda çöz — istemci işaretçi aritmetiği bilmesin.
-      const birimli = rows.map(r => {
-        const rec = r as Record<string, unknown>;
-        const p = Number(rec.sth_birim_pntr);
-        const ad = p >= 1 && p <= 3 ? rec[`sto_birim${p}_ad`] : undefined;
-        return { ...rec, birim: typeof ad === 'string' && ad.trim() ? ad.trim() : undefined };
-      });
+      // Gövde tek kaynakta (server/mikro/eslemeFatura.kalemleriBirimle).
+      const birimli = kalemleriBirimle(rows);
       res.json({ success: true, kalemler: birimli, total: birimli.length });
     } catch (err) {
       console.error('[fatura/kalemler]', err);
@@ -2219,6 +2250,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const TIER: Record<string, string> = { '1': 'Retail', '2': 'B2B Standard', '3': 'B2B Premium', '4': 'Dealer' };
       const bySku = new Map<string, Record<string, number>>();
       let atlananDoviz = 0;
+      /** Liste no DOLU ama TIER'de karşılığı olmayan satır sayısı (ör. liste 5). */
+      let atlananListe = 0;
       for (const r of rows) {
         const sku = String(r[skuKey] ?? '').trim();
         const fiyat = Number(r[fiyKey]);
@@ -2227,7 +2260,16 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         if (!sku || !Number.isFinite(fiyat) || fiyat <= 0) continue;
         const dov = dovKey ? Number(r[dovKey]) : 0;
         if (dovKey && Number.isFinite(dov) && dov !== 0) { atlananDoviz++; continue; }
-        const tier = TIER[String(listKey ? r[listKey] ?? '1' : '1')] ?? 'Retail';
+        // Liste no ÇÖZÜLEMEDİYSE (kolon yok ya da değer boş) tek liste varsayımı
+        // KORUNUR — bu kurulumda yalnız liste 1 dolu (2026-08-11 şema keşfi).
+        // AMA değer DOLU ve TIER'de karşılığı yoksa (ör. liste 5) eski `?? 'Retail'`
+        // o fiyatı SESSİZCE perakendeye yazıyordu: var olmayan bir kademenin fiyatı
+        // gerçek perakende fiyatını eziyordu. Böyle satır artık ATLANIR ve sayılır —
+        // yanlış kademeye yazmak, yazmamaktan kötüdür (sahte kesinlik).
+        const listeHam = listKey ? r[listKey] : null;
+        const listeNo = listeHam == null || String(listeHam).trim() === '' ? '1' : String(listeHam).trim();
+        const tier = TIER[listeNo];
+        if (!tier) { atlananListe++; continue; }
         const cur = bySku.get(sku) ?? {};
         // Aynı kademede birden çok satır varsa (depo/döviz kırılımı) İLKİ kalır.
         if (cur[tier] == null) { cur[tier] = fiyat; bySku.set(sku, cur); }
@@ -2242,6 +2284,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // tutarlı).
       const invSnap = await C.tenantSnap('inventory', companyId);
       let batch = C.getAdminDb().batch(); let ops = 0; let eslesen = 0; let yabanciAtlanan = 0;
+      const fiyatSayac = sayacOlustur();
       for (const d of invSnap.docs) {
         const veri = d.data() as Record<string, unknown>;
         const dc = (veri.companyId as string | undefined) || '';
@@ -2253,22 +2296,27 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         // fiyat senkronla silinmemeli).
         const mevcut = (veri.prices as Record<string, number>) || {};
         const birlesik = { ...mevcut, ...yeni };
-        batch.update(d.ref, {
-          prices: birlesik,
-          price: birlesik['Retail'] ?? mevcut['Retail'] ?? 0,
-          // Bu import yalnız TL fiyat yazar (döviz satırları atlanır) — kademe
-          // ne olursa olsun para birimi işaretini TL'ye SABİTLE. Aksi halde
-          // kullanıcının ProductForm'dan seçtiği eski priceCurrency (ör. USD)
-          // kalır ve ekran bu TL tutarı tekrar kurla çarpar (~kur katı yanlış).
-          priceCurrency: 'TRY',
-          mikroFiyatSyncedAt: pgServerTimestamp(),
-        });
+        // Gövde tek kaynakta (server/mikro/eslemeStok.ts → fiyatEsle): Retail HİÇ
+        // bilinmiyorsa `price` alanı YAZILMAZ — eski `?? 0` yalnız bayi/B2B kademesi
+        // tanımlı üründe elle girilen perakende fiyatını her senkronda 0 TL yapıyordu.
+        // priceCurrency:'TRY' sabiti ve gerekçesi (döviz satırları elendiği için TL'ye
+        // SABİTLEME, yoksa ekran TL tutarı bir kez daha kurla çarpar) o modülde.
+        const { alanlar: fiyatAlan, bilinmeyen } = fiyatEsle(birlesik, mevcut);
+        sayacaEkle(fiyatSayac, bilinmeyen);
+        batch.update(d.ref, { ...fiyatAlan, mikroFiyatSyncedAt: pgServerTimestamp() });
         eslesen++;
         if (++ops >= 400) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
       }
       if (ops > 0) await batch.commit();
-      return `${eslesen} ürünün fiyatı güncellendi (${bySku.size} SKU'da fiyat bulundu)` +
+      const fiyatArizaAlanlari = okumaArizalari(fiyatSayac, FIYAT_KRITIK);
+      const fiyatArizasi = okumaArizasiNotu(fiyatArizaAlanlari);
+      if (fiyatArizasi) console.warn('[import/fiyat]', fiyatArizasi);
+      const fiyatSayacMetni = sayacNotu(fiyatSayac, fiyatArizaAlanlari);
+      return (fiyatArizasi ? `${fiyatArizasi} ` : '') +
+        `${eslesen} ürünün fiyatı güncellendi (${bySku.size} SKU'da fiyat bulundu)` +
+        (fiyatSayacMetni ? ` — ${fiyatSayacMetni}` : '') +
         (atlananDoviz ? ` — ${atlananDoviz} satır TL dışı döviz olduğu için atlandı` : '') +
+        (atlananListe ? ` — ${atlananListe} satır tanınmayan fiyat listesi no'su taşıdığı için atlandı (kademe eşlemesi 1-4)` : '') +
         (dovKey ? '' : ' — UYARI: döviz kolonu çözülemedi, tüm tutarlar TL varsayıldı') +
         (yabanciAtlanan ? ` — ${yabanciAtlanan} ürün başka kiracıya ait olduğu için atlandı` : '');
     },
@@ -2313,16 +2361,6 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         return `demirbaş kodu kolonu ('${kod}') başka bir alanla çakışıyor — eşleme güvenilmez, veri yazılmadı. Mevcut kolonlar: ${cols.slice(0, 30).join(', ')}`;
       }
 
-      // SabitKiymetModule.tsx sözlük araması yapıyor — fallback YOK:
-      //   KATEGORI_CFG[kategori].icon (satır 262), DURUM_CFG[durum].bg (satır 272)
-      // `kategori`/`durum` bu iki sabit kümenin DIŞINDA bir değerse (Mikro grup
-      // kodu ham metin, örn. "MK-01") ya da hiç yazılmazsa ekran ilk satırda
-      // TypeError ile çöker — tam da BOM'da `components` eksikliğinin yarattığı
-      // sınıf. Mikro grup kodu bu kümelerden biriyle BİREBİR eşleşmiyor (farklı
-      // sözlük), o yüzden UYDURULMAZ: geçerli değilse 'Diğer'/'Aktif'e düşer, ham
-      // Mikro değeri ayrı alanda (mikroGrupKodu) saklanır — veri kaybolmaz.
-      const KATEGORI_GECERLI = new Set(['Taşıt', 'Makine', 'Bilgisayar', 'Mobilya', 'Bina', 'Diğer']);
-
       // Mevcut kayıtları bir kez oku: (a) YENİ dokümana zorunlu alanları varsayılanla
       // yaz (ekran çökmesin), (b) VAR OLAN dokümanda kullanıcının elle girdiği
       // durum/amortYontemi/departman gibi alanları EZME.
@@ -2332,40 +2370,37 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const mevcut = new Map(mevcutSnap.docs.map(d => [d.id, d.data() as Record<string, unknown>]));
 
       let batch = C.getAdminDb().batch(); let ops = 0; let yazilan = 0;
+      // Gövde TEK KAYNAKTA: src/server/mikro/eslemeVarlik.ts (demirbasEsle).
+      // Bilinmeyen sayı 0 YAZILMAZ (alisBedeli/faydaliOmur artık `|| 0` değil — amortisman
+      // 0 bedelden hesaplanmasın); sayaç note'a girer, tüm satırlarda bilinmeyen bir alan
+      // okuma arızası olarak note'un BAŞINA uyarı basar.
+      const ozetDem = ozetBaslat();
       for (const r of rows) {
-        const k = String(r[kod] ?? '').trim();
+        const k = mikroKod(r, kod);
         if (!k) continue;
         const docId = dbsId(k.replace(/[/\\]/g, '_'));
-        const eski = mevcut.get(docId);
-        const grupHam = grup ? String(r[grup] ?? '').trim() : '';
+        const { alanlar } = ozetEkle(ozetDem,
+          demirbasEsle(r, { kod, ad, tarih, bedel, omur, grup }, mevcut.get(docId)));
         batch.set(C.getAdminDb().collection('sabitKiymetler').doc(docId), {
           companyId,
-          demirbasNo: k,
-          ad:          ad    ? String(r[ad] ?? '').trim() || k : k,
-          kategori:    (eski?.kategori as string) || (KATEGORI_GECERLI.has(grupHam) ? grupHam : 'Diğer'),
-          mikroGrupKodu: grupHam,             // ham Mikro grup kodu — kategori eşleşmese de kaybolmasın
-          alisTarihi:  tarih ? String(r[tarih] ?? '').slice(0, 10) : '',
-          alisBedeli:  bedel ? Number(r[bedel]) || 0 : 0,
-          faydaliOmur: omur  ? Number(r[omur]) || 0 : 0,
-          // UI SÖZLÜK ANAHTARLARI — eksikse ekran çöker (KategoriBadge/DurumBadge
-          // fallback'siz). Yeni kayıtta varsayılan; mevcut kayıtta kullanıcı
-          // değeri korunur.
-          durum:           (eski?.durum as string) ?? 'Aktif',
-          amortYontemi:    (eski?.amortYontemi as string) ?? 'Doğrusal',
-          paraBirimi:      (eski?.paraBirimi as string) ?? 'TRY',
-          birikmisSalinma: Number(eski?.birikmisSalinma) || 0,
-          departman:       (eski?.departman as string) ?? '',
-          mikroHam: r,                        // eşleme eksikse veri yine de durur
-          source: 'mikro_import',
+          ...alanlar,
           mikroSyncedAt: pgServerTimestamp(),
         }, { merge: true });
         yazilan++;
         if (++ops >= 400) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
       }
       if (ops > 0) await batch.commit();
+
+      // İKİ FARKLI EKSİKLİK, İKİSİ DE GÖSTERİLİR:
+      //   `eksik`    = kolon ŞEMADA hiç çözülemedi (desen tutmadı),
+      //   `demSayac` = kolon var ama N satırda DEĞER yok (satır bazlı bilinmezlik).
+      const demAriza = varlikArizalari(ozetDem, DEMIRBAS_KRITIK);
+      if (demAriza.length) console.warn(`[import/demirbas] ${varlikArizaUyarisi(demAriza)}`);
+      const demOnEk  = demAriza.length ? `${varlikArizaUyarisi(demAriza)} ` : '';
+      const demSayac = bilinmeyenNotu(ozetDem, demAriza);
       const eksik = [!ad && 'ad', !tarih && 'alisTarihi', !bedel && 'alisBedeli', !omur && 'faydaliOmur', !grup && 'kategori']
         .filter(Boolean).join(', ');
-      if (!eksik) return `${yazilan} demirbaş sabitKiymetler'e yazıldı`;
+      if (!eksik) return `${demOnEk}${yazilan} demirbaş sabitKiymetler'e yazıldı` + (demSayac ? ` — ${demSayac}` : '');
 
       // ÇIKMAZ SOKAK DEĞİL, KANIT ÜRET: eskiden mesaj yalnız "şu alanlar
       // çözülemedi" diyordu ve DEMIRBASLAR'ın 135 kolonundan hangilerinin
@@ -2383,7 +2418,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         !ad    && `ad adayları: ${adaylar(/isim|ad|aciklama|tanim/i).join(', ') || '(yok)'}`,
       ].filter(Boolean).join(' · ');
 
-      return `${yazilan} demirbaş sabitKiymetler'e yazıldı — kolonu çözülemeyen alanlar: ${eksik}`
+      return `${demOnEk}${yazilan} demirbaş sabitKiymetler'e yazıldı — kolonu çözülemeyen alanlar: ${eksik}`
+        + (demSayac ? ` · ${demSayac}` : '')
         + ` (ham veri mikroHam'da). Toplam ${cols.length} kolon. ${ipucu}`;
     },
   });
@@ -2402,7 +2438,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     label: 'Mikro Maliyet Merkezleri',
     postProcess: async (rows, companyId) => {
       if (!C.getAdminDb() || !rows.length) return null;
-      const mmId = await C.mikroIdCozucu('maliyetMerkezleri', companyId);
+      // Demirbaş importundaki desen: TEK snapshot hem id çözücüyü hem VAR OLAN doküman
+      // verisini besler (mikroIdCozucu zaten aynı koleksiyonu okuyordu — ek sorgu YOK).
+      // Mevcut doküman verisi `aktif: true`yi yalnız YENİ kayda yazabilmek için gerekli:
+      // kullanıcının MaliyetMerkeziModule'den pasife aldığı merkez her senkronda diriliyordu.
+      const mmSnap   = await C.tenantSnap('maliyetMerkezleri', companyId);
+      const mmId     = C.mikroIdCozucuIds(mmSnap.docs.map(d => d.id), companyId);
+      const mmMevcut = new Map(mmSnap.docs.map(d => [d.id, d.data() as Record<string, unknown>]));
       const cols = Object.keys(rows[0]);
       const kod  = kolonSec(cols, [/^som_kodu$/i, /^som_kod$/i, /^som_.*kodu$/i, /kodu$/i]);
       const ad   = kolonSec(cols, [/^som_adi$/i, /^som_isim$/i, /^som_.*(isim|adi)$/i, /(isim|adi)$/i]);
@@ -2417,23 +2459,29 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       }
 
       let batch = C.getAdminDb().batch(); let ops = 0; let yazilan = 0;
+      // Gövde TEK KAYNAKTA: src/server/mikro/eslemeVarlik.ts (maliyetMerkeziEsle)
+      const ozetMM = ozetBaslat();
       for (const r of rows) {
-        const k = String(r[kod] ?? '').trim();
+        const k = mikroKod(r, kod);
         if (!k) continue;
-        batch.set(C.getAdminDb().collection('maliyetMerkezleri').doc(mmId(k.replace(/[/\\]/g, '_'))), {
+        const docId = mmId(k.replace(/[/\\]/g, '_'));
+        const { alanlar } = ozetEkle(ozetMM, maliyetMerkeziEsle(r, { kod, ad }, mmMevcut.get(docId)));
+        batch.set(C.getAdminDb().collection('maliyetMerkezleri').doc(docId), {
           companyId,
-          kod: k,
-          ad: ad ? String(r[ad] ?? '').trim() || k : k,
-          aktif: true,
-          mikroHam: r,
-          source: 'mikro_import',
+          ...alanlar,
           mikroSyncedAt: pgServerTimestamp(),
         }, { merge: true });
         yazilan++;
         if (++ops >= 400) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
       }
       if (ops > 0) await batch.commit();
-      return `${yazilan} maliyet merkezi maliyetMerkezleri'ne yazıldı` + (ad ? '' : ' — ad kolonu çözülemedi (ham veri mikroHam\'da)');
+      const mmAriza = varlikArizalari(ozetMM, MALIYET_MERKEZI_KRITIK);
+      if (mmAriza.length) console.warn(`[import/maliyet-merkezi] ${varlikArizaUyarisi(mmAriza)}`);
+      const mmSayac = bilinmeyenNotu(ozetMM, mmAriza);
+      return (mmAriza.length ? `${varlikArizaUyarisi(mmAriza)} ` : '')
+        + `${yazilan} maliyet merkezi maliyetMerkezleri'ne yazıldı`
+        + (ad ? '' : ' — ad kolonu çözülemedi (ham veri mikroHam\'da)')
+        + (mmSayac ? ` · ${mmSayac}` : '');
     },
   });
 
@@ -2558,6 +2606,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     (async () => {
       const t0 = Date.now();
       let processed = 0, updated = 0, failed = 0;
+      /** Mikro yanıtında okunamayan alanların satır sayacı (miktar/maliyet). */
+      const miktarSayac = sayacOlustur();
       // Per-depo dağılımı otoriter toplamla tutmayan SKU sayısı (bkz. mutabakat kontrolü).
       let depoUyusmazlik = 0;
       /** Dağılımı yazılan ürün sayısı — hareketi olmayan ürün hiç kontrol edilmez. */
@@ -2594,14 +2644,20 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         const { rows: perDepoRows, hata: sqlHata } = await mikroSql(sqlPerDepo);
         const depoMap = new Map<string, Record<string, number>>();
         if (!sqlHata && perDepoRows) {
+            // Gövde tek kaynakta (server/mikro/eslemeStok.ts → depoSatiriCoz): bakiye SAYI
+            // DEĞİLSE satır atlanır ve sayılır — eski `Number(row.bakiye ?? 0)` metin/NaN
+            // durumunda `NaN === 0` false olduğu için satırı ELEYEMİYOR ve depoBreakdown'a
+            // NaN düşürüyordu. Bakiye gerçekten 0 ise atlanır ama bilinmeyen SAYILMAZ.
+            const depoSayac = sayacOlustur();
             for (const row of perDepoRows) {
-                const sku = String(row.sth_stok_kod ?? '').trim();
-                const depoNo = String(row.depo ?? '');
-                const bakiye = Number(row.bakiye ?? 0);
-                if (!sku || !depoNo || bakiye === 0) continue;
-                if (!depoMap.has(sku)) depoMap.set(sku, {});
-                depoMap.get(sku)![depoNo] = bakiye;
+                const { satir, bilinmeyen } = depoSatiriCoz(row);
+                sayacaEkle(depoSayac, bilinmeyen);
+                if (!satir) continue;
+                if (!depoMap.has(satir.sku)) depoMap.set(satir.sku, {});
+                depoMap.get(satir.sku)![satir.depoNo] = satir.bakiye;
             }
+            const depoArizasi = okumaArizasiNotu(okumaArizalari(depoSayac, DEPO_KRITIK));
+            if (depoArizasi) console.warn('[import/stok-miktar] per-depo:', depoArizasi);
         }
         
         await jobRef.set({ running: true, processed: 0, updated: 0, failed: 0, total, startedAt: pgServerTimestamp(), finishedAt: null, error: null });
@@ -2614,9 +2670,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         for (let i = 0; i < items.length; i += CONCURRENCY) {
           const slice = items.slice(i, i + CONCURRENCY);
           const results = await Promise.all(slice.map(async (it) => {
+            // `okunamadi`: Mikro yanıtı HİÇ okunamadı (ağ/IsError/istisna) — bu satır
+            // "alan eksik" DEĞİL, "satır yok" demektir ve bilinmeyen-alan sayacına
+            // GİRMEZ. Girerse payda şişer (`n === satır` bozulur) ve "hiçbir satırda
+            // okunamadı" kapısı tek bir ağ hatasıyla susar: 2365 SKU'luk koşuda 1 SKU
+            // düşerse maliyet arızası uyarısı hiç basılmazdı (hakem bulgusu 2026-09-19).
+            // Satır yine `failed` sayılır (aşağıda `qty === null`), yani kaybolmaz.
             const bos = { it, qty: null as number | null, cost: null as number | null, depoQtys: null as Record<string, number> | null,
                           uyusmazlik: null as { sku: string; toplam: number; beklenen: number } | null,
-                          devirli: false };
+                          devirli: false, bilinmeyen: [] as string[], okunamadi: true };
             try {
               // 1) Toplam (tüm depolar) — stockLevel + maliyet. AUTHORITATIVE, değişmez.
               const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
@@ -2625,13 +2687,17 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
               const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
               if (!ok || !r0 || r0.IsError) return bos;
               const d = (r0.Data ?? {}) as Record<string, unknown>;
-              // Alan hiç yoksa "0 stok" DEĞİL, "yanıt okunamadı" demektir — 0 yazıp
-              // başarılı saymak gerçek stoğu siler. Başarısıza düşür.
-              if (d.EldekiMiktar == null) return bos;
-              const qty = Number(d.EldekiMiktar);
-              if (!Number.isFinite(qty)) return bos;
-              const totalCost = Number(d.MaliyetBedeli ?? 0);
-              const cost = qty > 0 ? totalCost / qty : null;
+              // Gövde tek kaynakta (server/mikro/eslemeStok.ts → stokMiktarEsle): miktar alanı
+              // hiç yoksa "0 stok" DEĞİL "yanıt okunamadı" demektir (0 yazıp başarılı saymak
+              // gerçek stoğu siler); MaliyetBedeli yoksa costPrice YAZILMAZ — eski `?? 0`
+              // ürünün gerçek maliyetini 0 TL yapıyordu (kâr/zarar ve teklif marjı bunu okur).
+              // Birim maliyet = toplam/miktar ve 2 hane yuvarlama da o modülde.
+              const { alanlar: miktarAlan, bilinmeyen } = stokMiktarEsle(d);
+              const qty = miktarAlan.stockLevel;
+              // Yanıt OKUNDU ama miktar alanı yok: bu satır sayaca GİRER (alan gerçekten
+              // eksik), yalnız yazım yapılmaz ve `failed` sayılır.
+              if (qty === undefined) return { ...bos, bilinmeyen, okunamadi: false };
+              const cost = miktarAlan.costPrice ?? null;
 
               // 2) Per-depo: stok GERÇEKTE nerede? code-review #7 ile tek bir SQL'de
               // STOK_HAREKETLERI'nden toplu çekildi (ağır polling yerine O(1) maliyet).
@@ -2673,12 +2739,14 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
                 }
               }
 
-              return { it, qty, cost, depoQtys, uyusmazlik, devirli };
+              return { it, qty, cost, depoQtys, uyusmazlik, devirli, bilinmeyen, okunamadi: false };
             } catch { return bos; }
           }));
 
           for (const r of results) {
             processed++;
+            // Yanıtı okunabilen satırlar sayaca girer (bkz. `okunamadi` gerekçesi).
+            if (!r.okunamadi) sayacaEkle(miktarSayac, r.bilinmeyen);
             if (r.uyusmazlik) {
               depoUyusmazlik++;
               // İlk birkaç örneği sakla — teşhis için (hepsini tutmak gereksiz).
@@ -2692,7 +2760,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             if (r.qty === null) { failed++; continue; }
             batch.update(r.it.ref, {
               stockLevel: r.qty,
-              ...(r.cost !== null ? { costPrice: Math.round(r.cost * 100) / 100 } : {}),
+              // Yuvarlama (2 hane) stokMiktarEsle'de yapılıyor — burada tekrar yuvarlanmaz.
+              ...(r.cost !== null ? { costPrice: r.cost } : {}),
               mikroSyncedAt: pgServerTimestamp(),
             });
             ops++;
@@ -2730,7 +2799,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           `, ${depoDagilimliUrun} üründe depo dağılımı yazıldı` +
           (depoDevirli > 0 ? ` (${depoDevirli}'inde devir kovası)` : '') +
           (depoUyusmazlik > 0 ? `, ${depoUyusmazlik} üründe toplam tutmadı (dağılım yazılmadı)` : '');
-        const miktarOzet = `${updated} ürünün miktarı güncellendi, ${failed} hata${depoNot} (${Math.round(duration / 1000)}sn)`;
+        // Burada miktar KRİTİKTİR: rotanın tek işi odur (stok kartı import'unun aksine).
+        const miktarArizaAlanlari = okumaArizalari(miktarSayac, STOK_MIKTAR_KRITIK);
+        const miktarArizasi = okumaArizasiNotu(miktarArizaAlanlari);
+        if (miktarArizasi) console.warn('[import/stok-miktar]', miktarArizasi);
+        const miktarSayacMetni = sayacNotu(miktarSayac, miktarArizaAlanlari);
+        const miktarOzet = (miktarArizasi ? `${miktarArizasi} ` : '') +
+          `${updated} ürünün miktarı güncellendi, ${failed} hata${depoNot}` +
+          (miktarSayacMetni ? `, ${miktarSayacMetni}` : '') +
+          ` (${Math.round(duration / 1000)}sn)`;
         await C.writeSyncLog('GenelAmacliMaliyetListesiV2', 'inventory', miktarOzet, failed === 0, null, failed ? `${failed} SKU okunamadı` : null, duration, actor);
         await C.writeAuditLog(actor, 'Mikro Stok Miktarları', miktarOzet);
         console.log(`Stok miktar import bitti: ${updated} güncellendi, ${failed} hata, depo uyuşmazlık ${depoUyusmazlik}, ${duration}ms`);
@@ -2805,30 +2882,34 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/cari-hareket/kaydet — cari hareket (dekont) → Mikro
    *  Body: { hareket: Record<string, unknown>, aciklama?: string }
-   *
-   *  2026-07-30: `CariHareketKaydetV2` çağırıyordu, o metot V17'de YOK.
-   *  V17 karşılığı `DekontKaydetV2` — AYNI `cha_*` alanlarını alır, yalnız zarf
-   *  farklı: alanlar Mikro objesi İÇİNDE `evraklar[].satirlar[]` altına girer
-   *  (mikroPost'un inMikro=true kalıbı). Çağıranın gönderdiği `hareket` nesnesi
-   *  olduğu gibi tek satır olarak sarmalanır — alan eşlemesi değişmedi.
+   *  Gövde tek kaynakta: server/mikro/govdeMuhasebe.ts → `cariHareketGovdesi`
+   *  (V17 DekontKaydetV2 zarfı + zorunlu beşli denetimi; 2026-07-30 canlı-doğrulama
+   *  notu oraya TAŞINDI).
    */
   app.post('/api/mikro/cari-hareket/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { hareket, aciklama } = req.body as { hareket: Record<string, unknown>; aciklama?: string };
-    if (!hareket) return res.status(400).json({ success: false, error: 'hareket alanı zorunlu.' });
+    if (!hareket || typeof hareket !== 'object') return res.status(400).json({ success: false, error: 'hareket alanı zorunlu.' });
     const t0 = Date.now();
+    let govde: CariHareketGovde;
     try {
-      const { ok, data, status } = await mikroPost('DekontKaydetV2', {
-        evraklar: [{
-          satirlar: [hareket],
-          ...(aciklama ? { evrak_aciklamalari: [{ aciklama }] } : {}),
-        }],
-      }, true); // inMikro: V17 evrak kalıbı — alanlar Mikro objesi İÇİNDE
+      govde = cariHareketGovdesi(hareket, aciklama);
+    } catch (e) {
+      if (!mikroGovdeHatasiMi(e)) {
+        console.error('[cari-hareket/kaydet] gövde', e);
+        return res.status(500).json({ success: false, error: 'Cari hareket kaydedilemedi.' });
+      }
+      // Sessiz kalmasın: gövde hatasında mikroPost çağrılmıyor, tek iz syncLog.
+      await C.writeSyncLog('DekontKaydetV2', 'payment', String(hareket.cha_kod ?? 'bilinmiyor'), false, null, e.message, Date.now() - t0, C.reqActor(req));
+      return res.status(400).json({ success: false, error: e.message });
+    }
+    try {
+      const { ok, data, status } = await mikroPost('DekontKaydetV2', govde.payload, true); // inMikro: V17 evrak kalıbı — alanlar Mikro objesi İÇİNDE
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       const success = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const errorMsg = success ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
-      await C.writeSyncLog('DekontKaydetV2', 'payment', String(hareket.cha_kod ?? 'unknown'), success, null, errorMsg, Date.now() - t0, C.reqActor(req));
-      if (success) void mirrorMikroInsert('mikro_cari_hesap_hareketleri', [{ ...hareket, __kaynak: 'hareket_push' }], CHA_COLS);
+      await C.writeSyncLog('DekontKaydetV2', 'payment', govde.cariKod, success, null, errorMsg, Date.now() - t0, C.reqActor(req));
+      if (success) void mirrorMikroInsert('mikro_cari_hesap_hareketleri', [{ ...govde.satir, __kaynak: 'hareket_push' }], CHA_COLS);
       res.json({ success, error: errorMsg, data });
     } catch (err) {
       console.error('[cari-hareket/kaydet]', err);
@@ -2885,6 +2966,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  Body: { entries: [{id, date(YYYY-MM-DD), aciklama, debitHesap, alacakHesap, borc, alacak}] }
    *  Her kayıt çift taraflı 2 satır olur: borç satırı (+meblag) ve alacak satırı (-meblag).
    *  Yalnızca Mikro'nun kabul ettiği fişlerin id'leri syncedIds olarak döner.
+   *  Gövde tek kaynakta: server/mikro/govdeMuhasebe.ts → yevmiyeGovdesi
    */
   app.post('/api/mikro/yevmiye/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
@@ -2893,38 +2975,29 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       return res.status(400).json({ success: false, error: 'entries dizisi zorunlu.' });
     }
     const t0 = Date.now();
-    const toTrDate = (iso: string) => { const [y, m, d] = String(iso).split('-'); return `${d}.${m}.${y}`; };
-    const hesapKodu = (s: unknown) => String(s ?? '').trim().split(/\s|-/)[0] || '100';
     const syncedIds: string[] = [];
     const errors: { id: string; error: string }[] = [];
     try {
+      let sira = 0;
       for (const e of entries) {
-        const meblag = Number(e.borc ?? e.alacak ?? 0) || 0;
-        const satirBase = {
-          fis_firmano: 0, fis_subeno: 0,
-          fis_tarih: toTrDate(String(e.date ?? '')),
-          fis_tur: 0,
-          fis_sorumluluk_kodu: '', fis_ticari_tip: 0, fis_kurfarkifl: 0,
-          fis_ticari_evraktip: 0, fis_tic_belgeno: String(e.fiş ?? e.fisNo ?? ''),
-          fis_tic_belgetarihi: toTrDate(String(e.date ?? '')),
-          fis_katagori: 0, fis_fmahsup_tipi: 0, user_tablo: [],
-        };
-        const { ok, data, status } = await mikroPost('MuhasebeFisKaydetV2', {
-          evraklar: [{
-            evrak_aciklamalari: [{ aciklama: String(e.aciklama ?? '') }],
-            satirlar: [
-              { ...satirBase, fis_hesap_kod: hesapKodu(e.debitHesap),  fis_aciklama1: String(e.aciklama ?? ''), fis_meblag0:  meblag },
-              { ...satirBase, fis_hesap_kod: hesapKodu(e.alacakHesap), fis_aciklama1: String(e.aciklama ?? ''), fis_meblag0: -meblag },
-            ],
-          }],
-        }, true);
+        sira++;
+        // Gövde tek kaynakta (server/mikro/govdeMuhasebe.ts → yevmiyeGovdesi): tutar,
+        // hesap kodu ya da tarih bilinmiyorsa bu fiş Mikro'ya HİÇ gitmez; hata errors[]'a
+        // düşer ve toplu aktarım kalan fişlerle sürer (rotanın mevcut per-fiş sözleşmesi).
+        // Eski `?? 0` ₺0 fiş, eski `|| '100'` hayalet 100-KASA kaydı yazıyordu.
+        let govde: YevmiyeGovde;
+        try {
+          govde = yevmiyeGovdesi(e, sira);
+        } catch (ge) {
+          if (!mikroGovdeHatasiMi(ge)) throw ge;
+          errors.push({ id: String(e.id), error: ge.message });
+          continue;
+        }
+        const { ok, data, status } = await mikroPost('MuhasebeFisKaydetV2', govde.payload, true);
         const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
         if (ok && r0 && !r0.IsError) {
           syncedIds.push(String(e.id));
-          void mirrorMikroInsert('mikro_muhasebe_fisleri', [
-            { ...satirBase, fis_hesap_kod: hesapKodu(e.debitHesap),  fis_aciklama1: String(e.aciklama ?? ''), fis_meblag0:  meblag },
-            { ...satirBase, fis_hesap_kod: hesapKodu(e.alacakHesap), fis_aciklama1: String(e.aciklama ?? ''), fis_meblag0: -meblag },
-          ], FIS_COLS);
+          void mirrorMikroInsert('mikro_muhasebe_fisleri', govde.satirlar, FIS_COLS);
         }
         else errors.push({ id: String(e.id), error: (r0?.ErrorMessage as string) || `HTTP ${status}` });
       }
@@ -2938,44 +3011,35 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/tahsilat/kaydet — kasa tahsilat/tediye → Mikro (TahsilatTediyeKaydetV2).
    *  Body: { tahsilat: { cariKod, tutar, tarih(YYYY-MM-DD), aciklama?, tip: 'tahsilat'|'tediye' } }
-   *  Alan eşlemesi V17 örneğinden — DENEYSEL: ilk gerçek kayıtla doğrulanmalı.
+   *  Gövde tek kaynakta: server/mikro/govdeMuhasebe.ts → `tahsilatGovdesi`
+   *  ("alan eşlemesi V17 örneğinden — DENEYSEL" notu oraya TAŞINDI).
    */
   app.post('/api/mikro/tahsilat/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { tahsilat } = req.body as { tahsilat: Record<string, unknown> };
-    if (!tahsilat?.cariKod || !tahsilat?.tutar) {
-      return res.status(400).json({ success: false, error: 'cariKod ve tutar zorunlu.' });
+    if (!tahsilat || typeof tahsilat !== 'object') {
+      return res.status(400).json({ success: false, error: 'tahsilat alanı zorunlu.' });
     }
     const t0 = Date.now();
-    const toTrDate = (iso: string) => { const [y, m, d] = String(iso).split('-'); return `${d}.${m}.${y}`; };
-    const tip = tahsilat.tip === 'tediye' ? 'tediye' : 'tahsilat';
+    let govde: TahsilatGovde;
     try {
-      const tahsilatSatiri = {
-        cha_tarihi: toTrDate(String(tahsilat.tarih ?? new Date().toISOString().slice(0, 10))),
-        cha_tip: tip === 'tahsilat' ? 1 : 0,
-        cha_cinsi: 19,
-        cha_normal_Iade: 0,
-        cha_evrak_tip: 34,
-        cha_evrakno_seri: tip === 'tahsilat' ? 'KSTAH' : 'KSTED',
-        cha_cari_cins: 0,
-        cha_kod: String(tahsilat.cariKod),
-        cha_d_cins: 0, cha_d_kur: 1, cha_d_kurtar: null,
-        cha_srmrkkodu: '', cha_projekodu: '',
-        cha_kasa_hizmet: 4,
-        cha_meblag: Number(tahsilat.tutar),
-        cha_aciklama: String(tahsilat.aciklama ?? ''),
-      };
-      const { ok, data, status } = await mikroPost('TahsilatTediyeKaydetV2', {
-        evraklar: [{
-          evrak_aciklamalari: [{ aciklama: String(tahsilat.aciklama ?? '') }],
-          satirlar: [tahsilatSatiri],
-        }],
-      }, true);
+      govde = tahsilatGovdesi(tahsilat);
+    } catch (e) {
+      if (!mikroGovdeHatasiMi(e)) {
+        console.error('[tahsilat/kaydet] gövde', e);
+        return res.status(500).json({ success: false, error: 'Tahsilat kaydedilemedi.' });
+      }
+      // İstemci (TahsilatModule) bu çağrıyı `.catch(() => {})` ile yutuyor — tek iz syncLog.
+      await C.writeSyncLog('TahsilatTediyeKaydetV2', 'payment', String(tahsilat.cariKod ?? 'bilinmiyor'), false, null, e.message, Date.now() - t0, C.reqActor(req));
+      return res.status(400).json({ success: false, error: e.message });
+    }
+    try {
+      const { ok, data, status } = await mikroPost('TahsilatTediyeKaydetV2', govde.payload, true);
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       const success = ok && !!r0 && !r0.IsError;
       const errorMsg = success ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
-      await C.writeSyncLog('TahsilatTediyeKaydetV2', 'payment', String(tahsilat.cariKod), success, null, errorMsg, Date.now() - t0, C.reqActor(req));
-      if (success) void mirrorMikroInsert('mikro_cari_hesap_hareketleri', [{ ...tahsilatSatiri, __kaynak: 'tahsilat_push' }], CHA_COLS);
+      await C.writeSyncLog('TahsilatTediyeKaydetV2', 'payment', govde.cariKod, success, null, errorMsg, Date.now() - t0, C.reqActor(req));
+      if (success) void mirrorMikroInsert('mikro_cari_hesap_hareketleri', [{ ...govde.satir, __kaynak: 'tahsilat_push' }], CHA_COLS);
       res.json({ success, error: errorMsg, data });
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
@@ -3021,22 +3085,25 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const rows = mikroSatirlar(data);
       void mirrorMikroInsert('mikro_cari_hesap_hareketleri',
         rows.map(r => ({ ...r, __kaynak: 'sql_import' })), CHA_COLS);
-      let satis = 0, alis = 0;
+      // Gövde tek kaynakta (server/mikro/eslemeFatura.faturalariEsle): yönü okunamayan
+      // fatura SATIŞ SAYILMAZ ve null kolonlar merge:true ile mevcut değerleri EZMEZ.
+      const ozet = faturalariEsle(rows);
+      const { satis, alis } = ozet;
       let batch = C.getAdminDb().batch(); let ops = 0;
-      for (const row of rows) {
-        const guid = String(row.cha_Guid ?? '') || C.getAdminDb().collection('mikroFaturalar').doc().id;
-        const yon = Number(row.cha_tip ?? 0) === 0 ? 'satis' : 'alis';
-        yon === 'satis' ? satis++ : alis++;
+      for (const k of ozet.kayitlar) {
+        const guid = k.guid || C.getAdminDb().collection('mikroFaturalar').doc().id;
         batch.set(C.getAdminDb().collection('mikroFaturalar').doc(guid), {
-          ...row, yon, companyId,
+          ...k.doc, companyId,
           source: 'mikro_import',
           syncedAt: pgServerTimestamp(),
         }, { merge: true });
         if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
       }
       if (ops > 0) await batch.commit();
-      await C.writeAuditLog(C.reqActor(req), 'Mikro Fatura Çekme', `${satis} satış + ${alis} alış faturası çekildi`);
-      res.json({ success: true, total: rows.length, satis, alis, duration: Date.now() - t0 });
+      if (ozet.okumaArizasi.length) console.warn('[import/faturalar]', okumaArizasiUyarisi(ozet.okumaArizasi));
+      await C.writeAuditLog(C.reqActor(req), 'Mikro Fatura Çekme',
+        `${satis} satış + ${alis} alış faturası çekildi${ozet.not ? ` — ${ozet.not}` : ''}`);
+      res.json({ success: true, total: rows.length, satis, alis, note: ozet.not, duration: Date.now() - t0 });
     } catch (err) {
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
     }
@@ -3111,39 +3178,50 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           error: `${period} döneminde STOK_HAREKETLERI'nde kayıt yok — taxSummary DEĞİŞTİRİLMEDİ.` });
       }
 
+      // Gövde/eşleme TEK KAYNAKTA: src/server/mikro/raporKdvMizan.ts (kdvKirilimi).
       // Satır oranını gerçek yüzdeye çevir (pntr indekstir, yüzde değil).
+      // Bilinmeyen KDV/yön ₺0 sayılmaz: satır kırılıma girmez, `note` sayacına düşer.
       const vergiTablosu = await mikroVergiOranlari();
-      let kdvHesaplanan = 0, kdvIndirilecek = 0;
-      const kirilim: Array<{ yon: string; oran: number | null; kdv: number; matrah: number | null }> = [];
-      for (const r of rows) {
-        const kdv    = Number(r.kdv ?? 0);
-        const matrah = r.matrah === undefined ? null : Number(r.matrah);
-        const cikis  = Number(r.tip) === 1;          // 1 = çıkış = satış
-        const oran   = pntrCol ? vergiOraniCoz(r.oranPntr, vergiTablosu) : null;
-        if (!Number.isFinite(kdv)) continue;
-        if (cikis) kdvHesaplanan += kdv; else kdvIndirilecek += kdv;
-        kirilim.push({ yon: cikis ? 'satis' : 'alis', oran, kdv, matrah });
+      const kdvSonuc = kdvKirilimi(rows, { vergiTablosu, oranKolonuVar: Boolean(pntrCol) });
+      const { kirilim, kdvHesaplanan, kdvIndirilecek } = kdvSonuc;
+      const kdvNot = kdvSonuc.ozet.not;
+      if (kdvSonuc.ozet.okumaArizasi.length) {
+        console.warn('[pull/kdv] okuma arızası:', kdvSonuc.ozet.okumaArizasi.join(', '), '— kolon adı/şema kontrol edin');
+      }
+
+      // Satır VAR ama hiçbirinin KDV'si/yönü okunamadıysa bu "₺0 KDV'li dönem" DEĞİL,
+      // okuma arızasıdır — taxSummary'yi sıfırlarla ezme (rotanın mevcut iki 'dur'
+      // kapısıyla aynı çizgide üçüncü kapı).
+      if (!kirilim.length) {
+        return res.status(502).json({ success: false,
+          error: `${period} döneminde okunabilen KDV satırı yok (${kdvSonuc.atlananSatir} satırın KDV'si/yönü alınamadı) — taxSummary DEĞİŞTİRİLMEDİ.`,
+          note: kdvNot || null });
       }
 
       await C.getAdminDb().collection('taxSummary').doc(period).set({
         companyId: await C.reqCompanyId(req),
         period, yil, ay,
         kdvHesaplanan, kdvIndirilecek,
-        kdvOdenmesi: Math.max(kdvHesaplanan - kdvIndirilecek, 0),
-        devredenKdv: Math.max(kdvIndirilecek - kdvHesaplanan, 0),
+        kdvOdenmesi: kdvSonuc.kdvOdenmesi,
+        devredenKdv: kdvSonuc.devredenKdv,
         oranKirilimi: kirilim,
         kaynak: `SQL:STOK_HAREKETLERI (${vergiCol}${pntrCol ? '/' + pntrCol : ''}) — TÜRETİLMİŞTİR; tevkifat/iade/devreden KAPSAM DIŞI, beyan öncesi Mikro KDV raporuyla karşılaştırın`,
         syncedAt: pgServerTimestamp(),
       }, { merge: true });
 
-      const kdvOzet = `${period} — hesaplanan ${kdvHesaplanan.toFixed(2)}, indirilecek ${kdvIndirilecek.toFixed(2)} (${kirilim.length} oran kırılımı)`;
+      const kdvOzet = `${period} — hesaplanan ${kdvHesaplanan.toFixed(2)}, indirilecek ${kdvIndirilecek.toFixed(2)} (${kirilim.length} oran kırılımı)` +
+                      (kdvNot ? ` · ${kdvNot}` : '');
       await C.writeSyncLog('SQL:STOK_HAREKETLERI(KDV)', 'taxSummary', kdvOzet, true, null, null, Date.now() - t0, C.reqActor(req));
       await C.writeAuditLog(C.reqActor(req), 'Mikro KDV Özeti Çekme', kdvOzet);
-      const kdvMatrahiSatis = kirilim.filter(k => k.yon === 'satis').reduce((acc, k) => acc + (k.matrah || 0), 0);
+      // `|| 0` KALDIRILDI: matrahı okunamayan oran kovası ₺0 sayılıp satış matrahını
+      // OLDUĞUNDAN AZ gösteriyordu. Hiç bilinen yoksa NaN → yanıtta null → istemci '—'.
+      // NOT: matrah TANIMI (SUM(sth_tutar)) burada DEĞİŞMEDİ — iskonto sorusu açık (2026-09-18).
+      const kdvMatrahiSatis = kdvSonuc.matrahSatis;
       res.json({ success: true, period, kdvHesaplanan, kdvIndirilecek,
-                 kdvOdenmesi: Math.max(kdvHesaplanan - kdvIndirilecek, 0),
+                 kdvOdenmesi: kdvSonuc.kdvOdenmesi,
                  oranKirilimi: kirilim,
-                 kdvMatrahi: kdvMatrahiSatis,
+                 kdvMatrahi: Number.isFinite(kdvMatrahiSatis) ? kdvMatrahiSatis : null,
+                 note: kdvNot || null,
                  hesaplananKdv: kdvHesaplanan,
                  uyari: 'Türetilmiş özet — tevkifat/iade/devreden kapsam dışı. Beyan öncesi Mikro KDV raporuyla karşılaştırın.',
                  duration: Date.now() - t0 });
@@ -3208,52 +3286,32 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // hep boş kalıyordu. doc id `mikro-<per_kodu>`: tekrar çekimde çoğaltmaz.
       if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
       const companyId = await C.reqCompanyId(req);
-      // HRModule.tsx arama filtresi `e.position.toLowerCase()` / `e.department.toLowerCase()`
-      // çağırıyor (fallback yok) — YENİ bir personel Mikro'da bu alanları boş
-      // bırakmışsa alan hiç yazılmaz (yukarıdaki guard), doküman `undefined` ile
-      // oluşur ve arama kutusuna yazılınca TypeError ile çöker (BOM'daki
-      // `components` çökmesiyle aynı sınıf). Yalnız YENİ kayıtta '' varsayılanı
-      // yaz; var olan kayda dokunma (mevcut değeri ezmeyelim).
+      // NEDEN mevcut id'ler okunuyor: HRModule.tsx arama filtresi
+      // `e.position.toLowerCase()` / `e.department.toLowerCase()` çağırıyor (fallback
+      // yok) — YENİ bir personel Mikro'da bu alanları boş bırakmışsa alan hiç
+      // yazılmasaydı doküman `undefined` ile oluşur ve arama kutusuna yazılınca
+      // TypeError ile çökerdi (BOM'daki `components` çökmesiyle aynı sınıf). Yalnız
+      // YENİ kayıtta '' varsayılanı yazılır; var olan kayda dokunulmaz (mevcut değer
+      // ezilmesin). Kararı `yeniKayit` bayrağıyla `personelEsle` veriyor — bu snapshot
+      // o bayrağın tek girdisi.
       const mevcutEmpSnap = await C.tenantSnap('employees', companyId);
       // Aynı koleksiyonu ikinci kez ÇEKME — yukarıdaki snapshot'ın id'leri yeter.
       const empId = C.mikroIdCozucuIds(mevcutEmpSnap.docs.map(d => d.id), companyId);
       const mevcutEmpIds = new Set(mevcutEmpSnap.docs.map(d => d.id));
       let batch = C.getAdminDb().batch(); let ops = 0; let yazilan = 0;
+      // Gövde TEK KAYNAKTA: src/server/mikro/eslemeVarlik.ts (personelEsle) — maaş/TC/durum
+      // bilinmiyorsa alan YAZILMAZ (0 ve null yok), satır bazlı boşaltma guard'ı orada.
+      // AD ÇAKIŞMASI: bu kapsamda `ozet` adlı bir yerel değişken ZATEN var (yanıt metni),
+      // sayaç bu yüzden `ozetPer`.
+      const ozetPer = ozetBaslat();
       for (const r of rows) {
-        const kod = String(r.mikroPersKod ?? '').trim();
+        const kod = mikroKod(r, 'mikroPersKod');
         if (!kod) continue;
-        const ad   = String(r.name ?? '').trim();
-        const soy  = String(r.surname ?? '').trim();
-        // Mikro durum kodu bilinmiyorsa 'Aktif' UYDURMA yerine gelen değeri
-        // koru; yalnız kesin bilinen eşleşme çevrilir.
-        const durum = String(r.status ?? '').trim();
-        // SATIR BAZLI BOŞALTMA guard'ı: eskiden email/phone/department/... KOŞULSUZ
-        // yazılıyordu. Kolon şemada bulunsa bile o PERSONELİN Mikro kaydında alan
-        // boşsa (çok normal — herkes e-posta/departman girmemiş olabilir),
-        // `String(undefined ?? '').trim()` boş string üretip HR'ın Cetpa'da elle
-        // girdiği değeri her senkronda sessizce siliyordu. Artık Mikro'da değer
-        // VARSA yazılır, yoksa alana hiç dokunulmaz (merge:true mevcut değeri korur).
-        const email = String(r.email ?? '').trim();
-        const phone = String(r.phone ?? '').trim();
-        const dept  = String(r.department ?? '').trim();
-        const pos   = String(r.position ?? '').trim();
-        const sal   = Number(r.salary);
-        const start = String(r.startDate ?? '').trim();
         const docId = empId(kod.replace(/[/\\]/g, '_'));
-        const yeniKayit = !mevcutEmpIds.has(docId);
+        const { alanlar } = ozetEkle(ozetPer, personelEsle(r, !mevcutEmpIds.has(docId)));
         batch.set(C.getAdminDb().collection('employees').doc(docId), {
           companyId,
-          mikroPersKod: kod,
-          name: [ad, soy].filter(Boolean).join(' ') || kod,
-          tcId: String(r.tcId ?? '').trim() || null,
-          ...(email ? { email } : (yeniKayit ? { email: '' } : {})),
-          ...(phone ? { phone } : (yeniKayit ? { phone: '' } : {})),
-          ...(dept  ? { department: dept } : (yeniKayit ? { department: '' } : {})),
-          ...(pos   ? { position: pos } : (yeniKayit ? { position: '' } : {})),
-          ...(Number.isFinite(sal) && sal > 0 ? { salary: sal } : (yeniKayit ? { salary: 0 } : {})),
-          ...(start ? { startDate: start.slice(0, 10) } : (yeniKayit ? { startDate: '' } : {})),
-          status:     durum === '0' || durum.toLowerCase() === 'aktif' ? 'Aktif' : durum || 'Aktif',
-          source: 'mikro_import',
+          ...alanlar,
           mikroSyncedAt: pgServerTimestamp(),
         }, { merge: true });
         yazilan++;
@@ -3261,11 +3319,17 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       }
       if (ops > 0) await batch.commit();
 
-      const ozet = `${yazilan} personel employees koleksiyonuna yazıldı` +
-        (eksik.length ? ` — şemada bulunamayan alanlar atlandı: ${eksik.join(', ')}` : '');
+      const perAriza = varlikArizalari(ozetPer, PERSONEL_KRITIK);
+      if (perAriza.length) console.warn(`[pull/personel] ${varlikArizaUyarisi(perAriza)}`);
+      const perSayac = bilinmeyenNotu(ozetPer, perAriza);
+      const ozet = (perAriza.length ? `${varlikArizaUyarisi(perAriza)} ` : '')
+        + `${yazilan} personel employees koleksiyonuna yazıldı`
+        + (eksik.length ? ` — şemada bulunamayan alanlar atlandı: ${eksik.join(', ')}` : '')
+        + (perSayac ? ` · ${perSayac}` : '');
       await C.writeSyncLog('SQL:PERSONEL_TANIMLARI', 'employees', ozet, true, null, null, 0, C.reqActor(req));
       await C.writeAuditLog(C.reqActor(req), 'Mikro Personel', ozet);
-      res.json({ success: true, total: rows.length, note: ozet, written: yazilan, cozulenAlanlar: cozulen, eksikAlanlar: eksik });
+      res.json({ success: true, total: rows.length, note: ozet, written: yazilan,
+                 cozulenAlanlar: cozulen, eksikAlanlar: eksik, okumaArizasi: perAriza });
     } catch (err) {
       console.error('[pull/personel]', err);
       res.status(500).json({ success: false, error: 'Personel çekimi başarısız.' });
@@ -3319,17 +3383,16 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // TEK doküman yaz. docId artık guid değil `mikro-<productSku>` — guid
       // satır bazlıydı (rastgele üretimi tetikliyordu, her senkron reçeteyi
       // çoğaltırdı); productSku ürün bazlı ve KARARLI, tekrar senkron ÜZERİNE yazar.
-      const gruplar = new Map<string, Array<{ sku: string; quantity: number; unit: string }>>();
+      const gruplar = new Map<string, ReceteKalemi[]>();
+      // Gövde TEK KAYNAKTA: src/server/mikro/eslemeVarlik.ts (receteKalemiEsle) — miktar
+      // bilinmiyorsa `quantity` ANAHTARI hiç yazılmaz ("0 çuval çimento" reçetesi üretilmez).
+      const ozetRec = ozetBaslat();
       for (const r of rows) {
-        const ana = anaKod ? String(r[anaKod] ?? '').trim() : '';
-        const alt = altKod ? String(r[altKod] ?? '').trim() : '';
-        if (!ana || !alt) continue;   // eşleme çözülemediyse reçete satırı anlamsız
+        const { ana, kalem } = ozetEkle(ozetRec,
+          receteKalemiEsle(r, { ana: anaKod, alt: altKod, miktar: miktarK, birim: birimK }));
+        if (!kalem) continue;   // eşleme çözülemediyse reçete satırı anlamsız
         const liste = gruplar.get(ana) ?? [];
-        liste.push({
-          sku: alt,
-          quantity: miktarK ? Number(r[miktarK]) || 0 : 0,
-          unit: birimK ? String(r[birimK] ?? '').trim() : '',
-        });
+        liste.push(kalem);
         gruplar.set(ana, liste);
       }
 
@@ -3358,13 +3421,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           productSku,
           unit: '',
           description: '',
-          components: bilesenler.map(b => ({
-            inventoryId: invBySku.get(b.sku)?.id || '',
-            name: invBySku.get(b.sku)?.name || b.sku,
-            sku: b.sku,
-            quantity: b.quantity,
-            unit: b.unit,
-          })),
+          // `receteBilesen` miktarı bilinmiyorsa `quantity` anahtarını HİÇ yazmaz
+          // (undefined/null JSON'a sızmaz) — `merge:true` dizi İÇİNİ korumadığı için
+          // tek koruma budur.
+          components: bilesenler.map(b => receteBilesen(b, invBySku.get(b.sku))),
           source: 'mikro_import',
           mikroSyncedAt: pgServerTimestamp(),
         }, { merge: true });
@@ -3380,11 +3440,17 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         !miktarK ? 'quantity'     : null,
         !birimK  ? 'unit'         : null,
       ].filter(Boolean);
-      const ozet = `${yazilan} ürün reçetesi (${rows.length} satırdan) bom koleksiyonuna yazıldı` +
-        (cozulemeyen.length ? ` — kolonu çözülemeyen alanlar: ${cozulemeyen.join(', ')} (ham veri satır düzeyinde kaybolmuş olabilir)` : '');
+      const recAriza = varlikArizalari(ozetRec, RECETE_KRITIK);
+      if (recAriza.length) console.warn(`[pull/uretim-receteleri] ${varlikArizaUyarisi(recAriza)}`);
+      const recSayac = bilinmeyenNotu(ozetRec, recAriza);
+      const ozet = (recAriza.length ? `${varlikArizaUyarisi(recAriza)} ` : '')
+        + `${yazilan} ürün reçetesi (${rows.length} satırdan) bom koleksiyonuna yazıldı`
+        + (cozulemeyen.length ? ` — kolonu çözülemeyen alanlar: ${cozulemeyen.join(', ')} (ham veri satır düzeyinde kaybolmuş olabilir)` : '')
+        + (recSayac ? ` · ${recSayac}` : '');
       await C.writeSyncLog('SQL:STOK_URETIM_RECETELERI', 'bom', ozet, true, null, null, 0, C.reqActor(req));
       await C.writeAuditLog(C.reqActor(req), 'Mikro Üretim Reçeteleri', ozet);
-      res.json({ success: true, total: rows.length, note: ozet, written: yazilan, cozulemeyenAlanlar: cozulemeyen });
+      res.json({ success: true, total: rows.length, note: ozet, written: yazilan,
+                 cozulemeyenAlanlar: cozulemeyen, okumaArizasi: recAriza });
     } catch (err) {
       console.error('[pull/uretim-receteleri]', err);
       res.status(500).json({ success: false, error: 'Reçete çekimi başarısız.' });
@@ -3431,10 +3497,31 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const cid = await C.reqCompanyId(req);
       const pool = C.getPgPool();
       const ham = await C.loadCompanyDocs('mikroFaturalar', cid);
-      const satisFaturalari = ham.filter(f => Number((f as Record<string, unknown>).cha_tip ?? 0) === 0);
+      // Yönü okunamayan fatura SATIŞ SAYILMAZ: eski `?? 0` bir ALIŞ faturasından
+      // sipariş türetip ciroyu şişiriyordu (server/mikro/eslemeFatura.faturaYonu).
+      const yonlu = ham.map(f => ({ f, yon: faturaYonu(f as Record<string, unknown>) }));
+      const satisFaturalari = yonlu.filter(y => y.yon === 'satis').map(y => y.f);
+      const yonsuz = yonlu.filter(y => y.yon === null).length;
       if (!satisFaturalari.length) {
+        // ERKEN DÖNÜŞ SAYACI YUTMAZ (2026-09-19 hakem bulgusu): yönü okunamayan N fatura
+        // tek iz bırakmadan "Satış faturası bulunamadı — önce Faturaları Çek çalıştırın"
+        // mesajına dönüşüyordu; kullanıcı ZATEN yaptığı adıma geri yollanıyor, gerçek
+        // neden (cha_tip okunamıyor) hiçbir yerde görünmüyordu. Üstelik MikroSyncPanel
+        // .handleExtraPull yalnız `note`u basar — `message` ekranda HİÇ görünmez.
+        const erkenNot: string[] = [];
+        // Faturaların TAMAMI yönsüz ve yeterince satır varsa bu veri değil okuma arızasıdır.
+        if (yonsuz === ham.length && ham.length >= OKUMA_ARIZASI_ESIK) {
+          const uyari = okumaArizasiUyarisi(['cha_tip']);
+          if (uyari) { console.warn('[faturadan-siparis]', uyari); erkenNot.push(uyari); }
+        }
+        const sayac = siparisTuretmeNotu({ turetilen: 0, tutarsiz: 0, yonsuz,
+          miktarsizKalem: 0, tutarsizKalem: 0, pgYok: !pool });
+        if (sayac) erkenNot.push(sayac);
         return res.json({ success: true, created: 0, skipped: 0, total: 0,
-          message: 'Satış faturası bulunamadı — önce "Faturaları Çek" çalıştırın.' });
+          note: erkenNot.join(' · ') || null,
+          message: yonsuz > 0
+            ? `${yonsuz} faturanın yönü okunamadı — satış faturası ayırt edilemedi.`
+            : 'Satış faturası bulunamadı — önce "Faturaları Çek" çalıştırın.' });
       }
 
       const mevcutSiparisler = await C.loadCompanyDocs('orders', cid);
@@ -3451,29 +3538,31 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
       // Cari adları + kalemler: ikişer toplu sorgu (fatura başına sorgu YOK).
       const cariAd = new Map<string, string>();
-      const kalemMap = new Map<string, Array<{ sku: string; name: string; quantity: number; total: number }>>();
+      // Kalem tipi tek kaynakta: quantity/total BİLİNMİYORSA null (0 DEĞİL).
+      let kalemMap = new Map<string, SiparisSatiri[]>();
+      let miktarsizKalem = 0, tutarsizKalem = 0;
       if (pool) {
         const cr = await pool.query(`SELECT cari_kod, COALESCE(cari_unvan1, '') AS unvan FROM mikro_cari_hesaplar`);
         for (const row of cr.rows) cariAd.set(String(row.cari_kod), String(row.unvan));
         const kr = await pool.query(
           `SELECT COALESCE(h.sth_evrakno_seri, '') AS seri, CAST(h.sth_evrakno_sira AS text) AS sira,
                   COALESCE(h.sth_stok_kod, '') AS sku, COALESCE(s.sto_isim, '') AS ad,
-                  COALESCE(h.sth_miktar, 0) AS miktar,
-                  (COALESCE(h.sth_tutar, 0) + COALESCE(h.sth_vergi, 0)) AS toplam
+                  h.sth_miktar AS miktar, h.sth_tutar AS tutar, h.sth_vergi AS vergi
              FROM mikro_stok_hareketleri h
              LEFT JOIN mikro_stoklar s ON s.sto_kod = h.sth_stok_kod
             WHERE h.sth_evraktip = 4`);
-        for (const row of kr.rows) {
-          const anahtar = `${String(row.seri).trim()}|${String(row.sira).trim()}`;
-          const liste = kalemMap.get(anahtar) ?? [];
-          liste.push({ sku: String(row.sku), name: String(row.ad) || String(row.sku),
-                       quantity: Number(row.miktar) || 0, total: Number(row.toplam) || 0 });
-          kalemMap.set(anahtar, liste);
-        }
+        // SAYISAL COALESCE(...,0) KALDIRILDI: KDV'si okunamayan satırın toplamı SESSİZCE
+        // EKSİK iniyordu (tutar + 0). Artık NULL iner ve kalem `total: null` olur + sayılır.
+        // Metin kolonlarındaki COALESCE(...,'') KALIR (anahtar/ad, sayı değil).
+        // Gövde tek kaynakta (server/mikro/eslemeFatura.kalemHaritasi).
+        const kh = kalemHaritasi(kr.rows);
+        kalemMap = kh.harita;
+        miktarsizKalem = kh.miktarsiz;
+        tutarsizKalem = kh.tutarsiz;
       }
 
       let batch = C.getAdminDb().batch();
-      let ops = 0, created = 0, skipped = 0, onarilan = 0;
+      let ops = 0, created = 0, skipped = 0, onarilan = 0, tutarsizSiparis = 0;
       for (const o of backfillGerekli) {
         const x = o as Record<string, unknown>;
         const ev = (x.mikroEvrak ?? {}) as { seri?: unknown; sira?: unknown };
@@ -3488,42 +3577,37 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       }
       for (const f of satisFaturalari) {
         const x = f as Record<string, unknown>;
-        const seri = String(x.cha_evrakno_seri ?? '').trim();
-        const sira = String(x.cha_evrakno_sira ?? '').trim();
-        if (!sira) { skipped++; continue; }
-        const id = `mikrofat__${cid}__${seri}-${sira}`.replace(/[/\\ ]/g, '_');
-        if (mevcutIdler.has(id)) { skipped++; continue; }
-        const tarih = String(x.cha_tarihi ?? '').slice(0, 10);
-        const cariKod = String(x.cha_kod ?? '').trim();
-        batch.set(C.getAdminDb().collection('orders').doc(id), {
-          orderNumber: `MF-${seri}${sira}`,
-          customerName: cariAd.get(cariKod) || cariKod || '—',
-          mikroCariKod: cariKod,
-          customerType: 'B2B',
-          status: 'Delivered', // faturası kesilmiş satış — tamamlanmış kabul
-          totalPrice: Number(x.cha_meblag ?? 0) || 0, // fatura toplamı (KDV dahil)
-          lineItems: kalemMap.get(`${seri}|${sira}`) ?? [],
-          orderDate: tarih || null,
+        const anahtar = `${String(x.cha_evrakno_seri ?? '').trim()}|${String(x.cha_evrakno_sira ?? '').trim()}`;
+        // Gövde tek kaynakta (server/mikro/eslemeFatura.faturadanSiparis): doküman id
+        // biçimi ve tüm alanlar BİREBİR aynı; tek fark tutar bilinmiyorsa totalPrice
+        // alanının HİÇ YAZILMAMASI. Okuyan tarafın durumu (hangi yüzey `siparisTutari`
+        // kullanıyor, hangisi hâlâ ham topluyor) eslemeFatura.ts'teki uyarıda.
+        const t = faturadanSiparis(x, kalemMap.get(anahtar) ?? [],
+          { companyId: cid, cariUnvan: cariAd.get(String(x.cha_kod ?? '').trim()) });
+        if (!t) { skipped++; continue; }                  // evrak sıra no yok
+        if (mevcutIdler.has(t.id)) { skipped++; continue; }
+        if (t.tutarBilinmiyor) tutarsizSiparis++;
+        batch.set(C.getAdminDb().collection('orders').doc(t.id), {
+          ...t.doc,
           // Fatura tarihi sipariş tarihi olarak işlenir (kullanıcının isteği).
-          createdAt: tarih ? `${tarih}T12:00:00.000Z` : pgServerTimestamp(),
-          source: 'mikro-fatura',
-          mikroEvrak: { seri, sira },
-          // Kaynak zaten kesilmiş bir satış faturası — listede "FATURASIZ" rozeti
-          // yanlıştı (2026-09-03 SS bulgusu); ✓ Mikro rozeti evrak no'sunu gösterir.
-          faturali: true,
-          mikroFaturaNo: `${seri}${sira}`,
-          companyId: cid,
+          createdAt: t.olusturmaTarihi ?? pgServerTimestamp(),
         });
         created++;
         if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
       }
       if (ops > 0) await batch.commit();
 
+      const not = siparisTuretmeNotu({ turetilen: created, tutarsiz: tutarsizSiparis, yonsuz,
+        miktarsizKalem, tutarsizKalem, pgYok: !pool });
+      if (not?.startsWith('UYARI:')) console.warn('[faturadan-siparis]', not);
       await C.writeAuditLog(C.reqActor(req), 'Faturadan Sipariş',
-        `${created} sipariş türetildi, ${skipped} atlandı, ${onarilan} eski kayıt onarıldı (${satisFaturalari.length} satış faturası)`);
+        `${created} sipariş türetildi, ${skipped} atlandı, ${onarilan} eski kayıt onarıldı (${satisFaturalari.length} satış faturası)${not ? ` — ${not}` : ''}`);
       await C.writeSyncLog('faturadan-siparis', 'orders', String(created), true, null, null, Date.now() - t0, C.reqActor(req));
       res.json({ success: true, created, skipped, onarilan, total: satisFaturalari.length,
-        kalemsiz: pool ? undefined : 'PG yok — kalemler ve cari adları eklenemedi (lokal dev)',
+        // `kalemsiz` alanı KALDIRILDI: MikroSyncPanel jenerik kartı yalnız `note`u basıyor
+        // (handleExtraPull, MikroSyncPanel.tsx 328-333) — bu uyarı ekranda HİÇ GÖRÜNMÜYORDU.
+        // Artık aynı cümle `note` içinde, diğer sayaçlarla birlikte.
+        note: not,
         duration: Date.now() - t0 });
     } catch (err) {
       console.error('[faturadan-siparis]', err);
@@ -3531,32 +3615,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     }
   });
 
-  /** Mikro'dan gelen e-belge satırını `eBelgeler` şemasına indirger.
-   *  Alan adları sürüme göre değiştiği için regex ile aranır; bulunamayan alan
-   *  BOŞ bırakılır, uydurulmaz. */
-  function eBelgeNormalize(
-    row: Record<string, unknown>,
-    tur: 'e-fatura' | 'e-arsiv' | 'e-irsaliye',
-    yon: 'gelen' | 'giden',
-  ): Record<string, unknown> {
-    const al = (re: RegExp): unknown => {
-      const k = Object.keys(row).find(x => re.test(x));
-      return k ? row[k] : undefined;
-    };
-    const tutar = Number(al(/tutar|meblag|toplam/i) ?? 0);
-    return {
-      belgeNo:   String(al(/fatura_?no|belge_?no|gib_?no|evrak_?no|ettn/i) ?? ''),
-      uuid:      String(al(/uuid|ettn/i) ?? ''),
-      alici:     String(al(/unvan|alici|gonderen|cari_?isim/i) ?? ''),
-      vergiNo:   String(al(/vkn|tckn|vergi/i) ?? ''),
-      tutar:     Number.isFinite(tutar) ? tutar : 0,
-      belgeDate: String(al(/tarih|date/i) ?? '').slice(0, 10),
-      tur, yon,
-      durum:     String(al(/durum|statu|status/i) ?? 'Bekliyor'),
-      kaynak:    'mikro',
-      raw:       row,
-    };
-  }
+  // e-belge satırı → `eBelgeler` şeması: tek kaynak server/mikro/eBelge.ts (eBelgeNormalize/eBelgeleriNormalize).
+  // Eski yerel işlev tutarı GEVŞEK regex'le (`/tutar|meblag|toplam/` — kdv_tutar / tutar_Guid de eşleşir) arayıp
+  // okunamayan tutara ₺0 yazıyordu; artık ödenecek tutar en-spesifikten-genele seçilir, okunamazsa `tutar`
+  // HİÇ yazılmaz ve yanıtın `note`una sayaç / okuma arızası uyarısı düşer.
 
   /** Normalize edilmiş belgeleri eBelgeler'e yaz. UUID varsa doc id olur
    *  (idempotent — aynı belge tekrar çekilince kopyalanmaz). */
@@ -3610,9 +3672,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         tumu.push(...rows);
         if (rows.length < SAYFA) break;
       }
-      const yazilan = await eBelgeYaz(tumu.map(r => eBelgeNormalize(r, 'e-fatura', 'gelen')), await C.reqCompanyId(req));
-      await C.writeAuditLog(C.reqActor(req), 'Gelen e-Fatura Listesi', `${yazilan} belge (${ilk} → ${son})`);
-      res.json({ success: true, total: yazilan, ilkTarih: ilk, sonTarih: son, duration: Date.now() - t0 });
+      const gelen = eBelgeleriNormalize(tumu, 'e-fatura', 'gelen');
+      if (gelen.okumaArizasi) console.warn('[ebelge/gelen] okuma arızası:', gelen.not);
+      const yazilan = await eBelgeYaz(gelen.kayitlar, await C.reqCompanyId(req));
+      await C.writeAuditLog(C.reqActor(req), 'Gelen e-Fatura Listesi', `${yazilan} belge (${ilk} → ${son})${gelen.not ? ' — ' + gelen.not : ''}`);
+      res.json({ success: true, total: yazilan, ilkTarih: ilk, sonTarih: son, ...(gelen.not ? { note: gelen.not } : {}), duration: Date.now() - t0 });
     } catch (err) {
       console.error('[ebelge/gelen]', err);
       res.status(500).json({ success: false, error: 'Gelen e-fatura listesi alınamadı.' });
@@ -3649,15 +3713,24 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // e-fatura mı e-arşiv mi: belge türü kolonundan ayır; kolon yoksa
       // hepsini 'e-fatura' saymak YANLIŞ olurdu -> tür bilinmiyorsa işaretle.
       const turCol = kolonBul(cols, /ebelge_?tur|belge_?tip|earsiv/i);
+      let gidenTutarsiz = 0;
       const kayitlar = rows.map(r => {
         const ham = turCol ? String(r[turCol] ?? '') : '';
         const tur: 'e-fatura' | 'e-arsiv' = /arsiv|arşiv|1/i.test(ham) ? 'e-arsiv' : 'e-fatura';
-        return { ...eBelgeNormalize(r, tur, 'giden'), turBelirsiz: !turCol };
+        const n = eBelgeNormalize(r, tur, 'giden');
+        if (n.bilinmeyen.includes('tutar')) gidenTutarsiz++;
+        return { ...n.kayit, turBelirsiz: !turCol };
       });
+      // Okuma arızası eşiği eBelge.eBelgeleriNormalize ile aynı: ≥ 5 belgenin TAMAMINDA tutar okunamadıysa kolon adı değişmiştir.
+      const gidenArizasi = rows.length >= 5 && gidenTutarsiz === rows.length;
+      const gidenNot = gidenArizasi ? 'UYARI: tutar hiçbir belgede okunamadı — Mikro kolon adı/şema kontrol edin'
+        : gidenTutarsiz > 0 ? `${gidenTutarsiz} belgenin tutarı okunamadı` : null;
+      if (gidenArizasi) console.warn('[ebelge/giden] okuma arızası:', gidenNot);
       const yazilan = await eBelgeYaz(kayitlar, await C.reqCompanyId(req));
-      await C.writeAuditLog(C.reqActor(req), 'Giden e-Belge Listesi', `${yazilan} belge (${ilk} → ${son})`);
+      await C.writeAuditLog(C.reqActor(req), 'Giden e-Belge Listesi', `${yazilan} belge (${ilk} → ${son})${gidenNot ? ' — ' + gidenNot : ''}`);
       res.json({ success: true, total: yazilan, ilkTarih: ilk, sonTarih: son,
                  ...(turCol ? {} : { uyari: 'Belge türü kolonu bulunamadı — hepsi e-fatura olarak işaretlendi.' }),
+                 ...(gidenNot ? { note: gidenNot } : {}),
                  duration: Date.now() - t0 });
     } catch (err) {
       console.error('[ebelge/giden]', err);
@@ -3691,9 +3764,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         tumu.push(...rows);
         if (rows.length < SAYFA) break;
       }
-      const yazilan = await eBelgeYaz(tumu.map(r => eBelgeNormalize(r, 'e-irsaliye', yon)), await C.reqCompanyId(req));
-      await C.writeAuditLog(C.reqActor(req), 'e-İrsaliye Listesi', `${yazilan} belge (${yon}, ${ilk} → ${son})`);
-      res.json({ success: true, total: yazilan, yon, duration: Date.now() - t0 });
+      const irsaliyeler = eBelgeleriNormalize(tumu, 'e-irsaliye', yon);
+      if (irsaliyeler.okumaArizasi) console.warn('[ebelge/eirsaliye] okuma arızası:', irsaliyeler.not);
+      const yazilan = await eBelgeYaz(irsaliyeler.kayitlar, await C.reqCompanyId(req));
+      await C.writeAuditLog(C.reqActor(req), 'e-İrsaliye Listesi', `${yazilan} belge (${yon}, ${ilk} → ${son})${irsaliyeler.not ? ' — ' + irsaliyeler.not : ''}`);
+      res.json({ success: true, total: yazilan, yon, ...(irsaliyeler.not ? { note: irsaliyeler.not } : {}), duration: Date.now() - t0 });
     } catch (err) {
       console.error('[ebelge/eirsaliye]', err);
       res.status(500).json({ success: false, error: 'e-İrsaliye listesi alınamadı.' });
@@ -3888,6 +3963,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     const parsed = C.validate(GelenFaturaActionSchema, req.body, res);
     if (!parsed) return;
     const { faturaGuid, firebaseId } = parsed;
+    { const sahip = await belgeSahipligi('mikroFaturalar', firebaseId, await C.reqCompanyId(req));
+      if (sahip === 'yabanci' || sahip === 'yok') return res.status(404).json(YABANCI_BELGE); }   // GİB'e gitmeden ÖNCE
     const t0 = Date.now();
     try {
       const { ok, data, status } = await mikroPost('GelenFaturalarKabulV2', { FaturaGuid: faturaGuid });
@@ -3917,6 +3994,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     const parsed = C.validate(GelenFaturaActionSchema, req.body, res);
     if (!parsed) return;
     const { faturaGuid, aciklama, firebaseId } = parsed;
+    { const sahip = await belgeSahipligi('mikroFaturalar', firebaseId, await C.reqCompanyId(req));
+      if (sahip === 'yabanci' || sahip === 'yok') return res.status(404).json(YABANCI_BELGE); }   // GİB'e gitmeden ÖNCE
     const t0 = Date.now();
     try {
       const { ok, data, status } = await mikroPost('GelenFaturalarRedV2', {
@@ -3959,95 +4038,42 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // basarisiz yapmaz (yoksa kullanici tekrar dener -> cift e-Fatura).
     let localUpdateFailed = false;
     const { order, firebaseId } = parsed;
+    if (await belgeSahipligi('orders', firebaseId, await C.reqCompanyId(req)) === 'yabanci') return res.status(404).json(YABANCI_BELGE);
     const t0 = Date.now();
     try {
-      const lineItems = order.lineItems;
-
-      const rawDate    = order.createdAt ? new Date(order.createdAt as string) : new Date();
-      const faturaDate = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
-      // faturaTipi: 1=e-Fatura, 2=e-Arşiv, 3=İhracat
-      const faturaType = order.faturaTipi === 'e-arsiv' ? 2 : order.faturaTipi === 'ihracat' ? 3 : 1;
-      const kdvOran    = Number(order.kdvOran ?? 20);
-
-      // V17 gerçek formatı (MikroAPI.postman_collection_V17.json ile doğrulandı,
-      // 2026-06-12): evrak başlığı cha_* (CARI_HESAP_HAREKETLERI), satırlar
-      // detay[] içinde sth_* (STOK_HAREKETLERI, sth_evraktip=4). Payload Mikro
-      // zarfının İÇİNDE gönderilir (inMikro=true).
-      const satirlar = lineItems.map((item: Record<string, unknown>) => {
-        const tutar = Number(item.price ?? 0) * Number(item.quantity ?? 1);
-        return {
-          sth_tarih:           faturaDate,
-          sth_tip:             1,
-          sth_cins:            0,
-          sth_normal_iade:     0,
-          sth_evraktip:        4,   // fatura
-          sth_evrakno_seri:    'F',
-          sth_stok_kod:        (item.sku as string) || '',
-          sth_cari_cinsi:      0,
-          sth_cari_kodu:       (order.mikroCariKod as string) || '',
-          sth_miktar:          Number(item.quantity ?? 1),
-          sth_birim_pntr:      1,
-          sth_tutar:           tutar,
-          sth_vergi:           Math.round(tutar * kdvOran) / 100,
-          sth_vergi_pntr:      kdvOran >= 20 ? 4 : kdvOran >= 10 ? 3 : 1,
-          sth_vergisiz_fl:     false,
-          sth_aciklama:        (item.name as string) || '',
-          sth_cari_srm_merkezi: '', sth_stok_srm_merkezi: '',
-          sth_subeno:          0,
-          sth_giris_depo_no:   1,
-          sth_cikis_depo_no:   1,
-        };
+      // Gövde TEK KAYNAKTA: src/server/mikro/govdeFaturaIrsaliye.ts (faturaGovdesi).
+      // V17 evrak formatı, cha_ebelge_turu'nun 2026-08-25 düzeltmesi ve onu sabitleyen
+      // iki bağımsız kaynak (okuma tarafı tie-out'u + Mikro API spec'i) o dosyanın
+      // başlığına TAŞINDI — silinmedi. Testi govdeFaturaIrsaliye.test.ts.
+      //
+      // Varsayılan YOK — bilinmeyen fiyat/miktar/KDV oranı/cari kod/tarih ya da
+      // kalemsiz fatura throw eder; aşağıdaki catch 400 döner ve mikroPost HİÇ
+      // çağrılmaz. Kapatılan sahte varsayılanlar:
+      //   sth_tutar     price ?? 0 × quantity ?? 1  → fiyatsız satır 0 TL, miktarsız 1 adet
+      //   sth_vergi     kdvOran ?? 20               → KDV TUTARI %20 varsayımıyla uyduruluyordu
+      //   sth_vergi_pntr kdvOran>=20?4:>=10?3:1     → artık Mikro'nun KENDİ vergi tablosundan
+      //                                               (VergiListesiV2) TERS arama
+      //   sth_stok_kod  sku boşsa ''                → SKU'suz kalem Mikro defterine kodu
+      //                                               boş, SAHİPSİZ stok hareketi yazıyordu
+      //                                               (şema `sku`yu optional bırakıyor)
+      // ve `new Date(bozuk)` → "NaN.NaN.NaN" tarihi.
+      //
+      // `mikroVergiOranlari()` bir AĞ çağrısıdır ve bilerek try içindedir: okunamazsa
+      // BOŞ Map döner ve gövde kurucu "vergi işaretçisi bilinmiyor (… VergiListesiV2
+      // okunamadı …)" ile 400 verir — sessizce 4 (=%20) yazmaz.
+      //
+      // AÇIK MADDE: fatura satırındaki sth_giris/cikis_depo_no hâlâ 1 (parite). Hiçbir
+      // çağıran depo göndermiyor ve throw'a çevirmek e-Fatura kesmeyi (yasal belge)
+      // tamamen durdururdu; depo kaynağı çözülünce `{ depoNo }` ile tek satırda bağlanır.
+      const { evrak, satirlar, toplamTutar, faturaDate } = faturaGovdesi(order, {
+        vergiTablosu: await mikroVergiOranlari(),
+        jumpSurum:    MIKRO_JUMP_SURUM,
+        // Siparişte SEVK DEPOSU seçilmişse fatura satırı da o depoya yazılır (2026-09-19). Seçilmemişse gövde
+        // pariteye (1) düşer — throw e-Fatura kesmeyi tamamen durdururdu; kullanıcı kararı Açık İşler'de.
+        depoNo:       order.depoNo,
       });
-      const toplamTutar = satirlar.reduce((t, s) => t + s.sth_tutar, 0);
-      const evrak = {
-        cha_tip:          0,   // satış
-        cha_cinsi:        7,   // V17 örnek değeri (toptan satış faturası)
-        cha_normal_Iade:  0,
-        cha_evrak_tip:    63,  // fatura
-        cha_cari_cins:    0,
-        // cha_ebelge_turu V17'de eklendi (V16 gövdesinde YOK) — yalnız V17+
-        // kurulumlarda gönderilir.
-        //
-        // ⚠️ ESKİDEN YANLIŞTI (2026-08-25'te düzeltildi). Eski eşleme
-        //    `faturaType === 2 ? 8 : faturaType === 3 ? 0 : 1` idi, yani
-        //    e-fatura için 1, e-arşiv için 8 yazıyordu. Bu, uygulamanın KENDİ
-        //    okuma tarafıyla çelişiyordu: Cetpa'dan kesilen bir e-Fatura,
-        //    Cetpa'nın kendi Faturalar ekranında "e-Arşiv" görünürdü; 8'in ise
-        //    okuma tarafında karşılığı yok, -1/bilinmiyor'a düşerdi.
-        //
-        //    Doğru eşleme İKİ BAĞIMSIZ kaynakla sabitlendi (tahmin değil):
-        //      1. Okuma tarafı — canlı tie-out ile ölçüldü (HANDOFF.md:119:
-        //         satış 200×tür0 / 5×tür1, alış 91×tür0 / 58×tür1) →
-        //         src/hooks/useMikroFaturalar.ts:21 «0=e-Fatura, 1=e-Arşiv,
-        //         2=e-İrsaliye».
-        //      2. Mikro API spec'i — bu dosyada :3528 «EBelgeTipi 0=EFatura
-        //         1=EArsiv 2=EIrsaliye» ve :3425 aynı eşlemeyi kullanıyor.
-        //
-        //    İhracat 0'da BIRAKILDI: ihracat faturası e-Fatura ailesindendir ve
-        //    okuma tarafında ayrı bir kodu yok (bkz. hafıza: "İhracat
-        //    cha_ebelge_turu'da yok"). Uydurma bir kod yazmaktansa e-Fatura
-        //    olarak işaretlemek hem doğru hem okuma tarafıyla tutarlı.
-        //
-        // ⚠️ ŞU AN ETKİSİZ: MIKRO_JUMP_SURUM varsayılanı 16, yani bu alan hiç
-        //    gönderilmiyor. V17'ye geçildiğinde AKTİFLEŞİR — ilk gerçek kayıtta
-        //    Mikro'da belge tipinin doğru göründüğü GÖZLE doğrulanmalı.
-        ...(MIKRO_JUMP_SURUM >= 17
-          ? { cha_ebelge_turu: faturaType === 2 ? 1 : 0 }  // 2=e-arşiv → 1, e-fatura & ihracat → 0
-          : {}),
-        cha_d_cins:       0,
-        cha_d_kur:        1,
-        cha_tarihi:       faturaDate,
-        cha_evrakno_seri: 'F',
-        cha_kod:          (order.mikroCariKod as string) || '',
-        cha_projekodu:    '',
-        cha_srmrkkodu:    '',
-        cha_vade:         0,
-        cha_subeno:       0,
-        cha_aciklama:     '',
-        kdv_istisna_kodu: '',
-        detay:            satirlar,
-      };
 
+      // inMikro: V17 evrak kalıbı — payload (evraklar) Mikro objesi İÇİNDE gider.
       const { ok, data, status } = await mikroPost('FaturaKaydetV2', { evraklar: [evrak] }, true);
       const duration   = Date.now() - t0;
       const envelope   = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
@@ -4105,11 +4131,18 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           }
         }
       }
-      res.json({ success, mikroFaturaNo, ettn, localUpdateFailed, data, duration });
+      res.json({ success, mikroFaturaNo, ettn, localUpdateFailed, error: errorMsg, data, duration });
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
       await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', false, null, errorMsg, duration, C.reqActor(req));
+      if (mikroGovdeHatasiMi(err)) {   // gövde kurulamadı → Mikro'ya HİÇ gidilmedi
+        // Eksik/bilinmeyen alan İSTEMCİ hatasıdır: 500 "sunucu bozuk, tekrar dene"
+        // demek olurdu, oysa tekrar denemek işe yaramaz — kullanıcı eksik alanı
+        // doldurmalı. İstemci (App.tsx handleMikroFatura) `error` metnini toast'lar.
+        console.warn('Mikro FaturaKaydetV2 gövdesi kurulamadı:', errorMsg);
+        return res.status(400).json({ success: false, error: errorMsg });
+      }
       res.status(500).json({ success: false, error: errorMsg });
     }
   });
@@ -4124,55 +4157,31 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     const parsed = C.validate(IrsaliyeKaydetSchema, req.body, res);
     if (!parsed) return;
     const { shipment, firebaseId } = parsed;
+    if (await belgeSahipligi('shipments', firebaseId, await C.reqCompanyId(req)) === 'yabanci') return res.status(404).json(YABANCI_BELGE);
+    // FATURASIZ sevkiyat Mikro'ya YAZILMAZ (savunma katmanı; asıl kapı istemcide — App.tsx Shipped akışı).
+    // Eskiden bu rota her istekte gövde hatasıyla 400 dönüyordu (sku/kdvOran/depoNo gönderilmiyordu) ve açık
+    // görünmüyordu; gövde geçerli hâle gelince faturasız sipariş e-İrsaliye olarak resmî deftere düşmeye başlardı.
+    if (shipment.faturali === false) return res.status(400).json({ success: false, error: "Faturasız sevkiyat Mikro'ya yazılmaz." });
     const t0 = Date.now();
     try {
-      const rawDate   = shipment.date ? new Date(shipment.date) : new Date();
-      const irsDate   = `${String(rawDate.getDate()).padStart(2,'0')}.${String(rawDate.getMonth()+1).padStart(2,'0')}.${rawDate.getFullYear()}`;
-      const items = (shipment.items || []) as Record<string, unknown>[];
-
-      // V17 gerçek formatı (MikroAPI.postman_collection_V17.json ile doğrulandı,
-      // 2026-06-12): irsaliye satırları sth_* alanlarıdır (STOK_HAREKETLERI,
-      // sth_evraktip=1); kargo/araç bilgisi e_irsaliye_detaylari'nda taşınır.
-      // Payload Mikro zarfının İÇİNDE gönderilir (inMikro=true).
-      const irsSatir = (item: Record<string, unknown> | null) => ({
-        sth_tarih:            irsDate,
-        sth_tip:              1,
-        sth_cins:             0,
-        sth_normal_iade:      0,
-        sth_evraktip:         1,   // irsaliye
-        sth_evrakno_seri:     'I',
-        sth_stok_kod:         item ? ((item.sku as string) || '') : '',
-        sth_cari_cinsi:       0,
-        sth_cari_kodu:        (shipment.mikroCariKod as string) || '',
-        sth_miktar:           item ? Number(item.quantity ?? 1) : 1,
-        sth_birim_pntr:       1,
-        sth_tutar:            item ? Number(item.price ?? 0) * Number(item.quantity ?? 1) : 0,
-        sth_vergi_pntr:       4,
-        sth_vergi:            0,
-        sth_vergisiz_fl:      false,
-        sth_iskonto1:         0,
-        sth_iskonto2:         0,
-        sth_aciklama:         item ? ((item.name as string) || '') : ((shipment.customerName as string) || ''),
-        sth_giris_depo_no:    1,
-        sth_cikis_depo_no:    1,
-        sth_subeno:           0,
-        sth_malkbl_sevk_tarihi: irsDate,
+      // Gövde TEK KAYNAKTA: src/server/mikro/govdeFaturaIrsaliye.ts (irsaliyeGovdesi).
+      // V17 satır formatı (sth_evraktip=1, kargo bilgisi e_irsaliye_detaylari'nda) ve
+      // 2026-06-12 Postman doğrulaması o dosyanın başlığına TAŞINDI. Testi
+      // govdeFaturaIrsaliye.test.ts.
+      //
+      // Varsayılan YOK: depo (eski SABİT 1 = HAVALİMANI, 2026-09-05), fiyat, miktar ve
+      // KDV oranı bilinmiyorsa throw → catch 400, mikroPost HİÇ çağrılmaz. Kalemsiz
+      // sevkiyat artık tek satırlık, stok kodsuz, 1 adet, 0 TL'lik SAHTE belge üretmez.
+      // Kalemin kendi STOK KODU da boş geçemez (2026-09-19): kalemsiz sevkiyatı kapatan
+      // gerekçe tek tek kalemler için de geçerli — kodsuz sth_* satırı sahipsiz harekettir.
+      // sth_vergi_pntr sabit 4 değil, Mikro'nun kendi VergiListesiV2 tablosundan.
+      const { evrak, satirlar } = irsaliyeGovdesi(shipment, {
+        vergiTablosu: await mikroVergiOranlari(),
+        depoNo:       shipment.depoNo,
       });
-      const satirlar = items.length > 0
-        ? items.map((item: Record<string, unknown>) => irsSatir(item))
-        : [irsSatir(null)];
 
-      const { ok, data, status } = await mikroPost('IrsaliyeKaydetV2', {
-        evraklar: [{
-          evrak_aciklamalari: [{ aciklama: (shipment.destination as string) || '' }],
-          e_irsaliye_detaylari: {
-            eir_tasiyici_firma_kodu: (shipment.cargoFirm as string) || '',
-            eir_tasiyici_arac_plaka: (shipment.trackingNo as string) || '',
-            eir_eirs_olrk_gonderilsin: 0,
-          },
-          satirlar,
-        }],
-      }, true);
+      // inMikro: V17 evrak kalıbı — payload (evraklar) Mikro objesi İÇİNDE gider.
+      const { ok, data, status } = await mikroPost('IrsaliyeKaydetV2', { evraklar: [evrak] }, true);
       const duration      = Date.now() - t0;
       const envelope      = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0            = envelope?.[0] as Record<string, unknown> | undefined;
@@ -4194,11 +4203,19 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           mikroSyncedAt:   pgServerTimestamp(),
         }, { merge: true });
       }
-      res.json({ success, irsaliyeNo, irsaliyeEttn, data, duration });
+      // `error`: Mikro'nun REDDİ (IsError) HTTP 200 + success:false döner; alan yokken istemci toast'ı `d.error`
+      // şartına takılıp reddi SESSİZ geçiyordu (2026-09-19 son parti incelemesi). Diğer kaydet rotalarıyla aynı sözleşme.
+      res.json({ success, irsaliyeNo, irsaliyeEttn, error: errorMsg, data, duration });
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
       await C.writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', false, null, errorMsg, duration, C.reqActor(req));
+      if (mikroGovdeHatasiMi(err)) {   // gövde kurulamadı → Mikro'ya HİÇ gidilmedi
+        // İstemci hatası (400). Bu rota App.tsx'te fire-and-forget çağrılıyor; hatanın
+        // kullanıcıya ulaşması için oradaki `.then` de 400'ü toast'lar (aynı düzeltmede).
+        console.warn('Mikro IrsaliyeKaydetV2 gövdesi kurulamadı:', errorMsg);
+        return res.status(400).json({ success: false, error: errorMsg });
+      }
       res.status(500).json({ success: false, error: errorMsg });
     }
   });
@@ -4259,15 +4276,19 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
                           note: 'Mikro hiç cari hareketi döndürmedi — bakiye yazılmadı.' });
       }
 
-      const bakiyeByKod = new Map<string, number>();
-      let unreadable = 0;
-      for (const row of rows) {
-        const kod = String(row.cha_kod ?? '').trim();
-        const raw = row.bakiye;
-        if (!kod) continue;
-        // Alan okunamıyorsa 0 yazma — atla ve say.
-        if (raw == null || !Number.isFinite(Number(raw))) { unreadable++; continue; }
-        bakiyeByKod.set(kod, Number(raw));
+      // Eşleme TEK KAYNAKTA (server/mikro/eslemeCari.ts): işaret KORUNUR (eksi = CETPA
+      // borçlu, `Math.abs` yok), bilinmeyen bakiye 0 değil — haritaya hiç girmez ve sayılır.
+      // `''` artık okunamayan sayılıyor: eski `Number.isFinite(Number(''))` BOŞ hücreyi
+      // geçerli sıfır bakiye kabul ediyordu (Number('') === 0).
+      const { harita: bakiyeByKod, okunamayan: unreadable, okunamayanKodlar, okumaArizasi, not: eslemeNotu } = bakiyeHaritasi(rows);
+      // TOPLU SIFIRLAMA KAPISI: bakiye HİÇBİR satırda okunamadıysa bu veri değil OKUMA
+      // ARIZASIDIR (kolon adı/şema değişmiş). Aşağıdaki döngü haritada olmayan her cariye
+      // 0 yazar, yani TÜM bakiyeleri sıfırlardı — uyarıp devam etmek yetmez. Rotanın kendi
+      // ilkesi zaten bu: "Sorgu başarısızsa bakiyeleri sıfırlamak, bilgi vermemekten çok
+      // daha kötü — tahsilat kararları bu rakama bakıyor."
+      if (okumaArizasi.length) {
+        console.warn('[pull/bakiye] okuma arızası:', eslemeNotu);
+        return res.status(502).json({ success: false, error: `${eslemeNotu}. Hiçbir bakiye değiştirilmedi.` });
       }
 
       const companyId = await C.reqCompanyId(req);
@@ -4276,13 +4297,27 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
       let batch = C.getAdminDb().batch(); let ops = 0;
       const flush = async () => { if (ops > 0) { await batch.commit(); batch = C.getAdminDb()!.batch(); ops = 0; } };
 
+      let bakiyeYabanci = 0;
       for (const leadDoc of leadsSnap.docs) {
-        const cariKod = String((leadDoc.data() as Record<string, unknown>).mikroCariKod ?? '').trim();
+        const leadVeri = leadDoc.data() as Record<string, unknown>;
+        // KİRACI İZOLASYONU (2026-09-19): sorgu TÜM kiracıların lead'lerini döndürür; yabancı kiracının kaydına
+        // bakiye YAZILMAZ (aynı cari kodu iki firmada olabilir). Etiketsiz eski kayıt hâlâ güncellenir.
+        const dc = (leadVeri.companyId as string | undefined) || '';
+        if (dc && dc !== companyId) { bakiyeYabanci++; continue; }
+        const cariKod = String(leadVeri.mikroCariKod ?? '').trim();
         if (!cariKod) { skipped++; continue; }
+        // Satırı GELDİ ama bakiyesi okunamadı → bu cariye HİÇ DOKUNMA. Aşağıdaki
+        // `cariBakiyesi` haritada olmayana 0 döner; o 0 yalnız "Mikro'da hiç hareketi
+        // yok" hâlinde doğrudur. İki hâl ayrılmazsa 48.000 TL borçlu bir cari tahsilat
+        // ekranında sıfır görünür (hakem bulgusu 2026-09-19). Yanıttaki `unreadable`
+        // ve `note` bunu zaten sayıyor; burada susup mevcut bakiyeyi KORUYORUZ
+        // ("bayat değer, silinmiş değerden iyidir").
+        if (okunamayanKodlar.has(cariKod)) { skipped++; continue; }
         // Mikro'da hiç hareketi olmayan cari: SQL'de satırı yok. Bu GERÇEKTEN
         // sıfır bakiyedir (hareket yok = borç yok), tespit edilememiş değil —
-        // sorgu başarılı döndüğü için bunu yazmak doğru.
-        const bakiye = bakiyeByKod.has(cariKod) ? bakiyeByKod.get(cariKod)! : 0;
+        // sorgu başarılı döndüğü için bunu yazmak doğru. (`cariBakiyesi` tam olarak bu
+        // kararı uygular — aynı gerekçe fonksiyonun doc yorumunda da duruyor.)
+        const bakiye = cariBakiyesi(bakiyeByKod, cariKod);
         batch.set(C.getAdminDb().collection('cariBalances').doc(cariKod), {
           companyId, cariKod, bakiye, updatedAt: pgServerTimestamp(),
         }, { merge: true });
@@ -4297,8 +4332,11 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
       const ozet = `${updated} cari bakiyesi güncellendi (Mikro'dan ${rows.length} satır, ${unreadable} okunamayan)`;
       await C.writeSyncLog('SQL:CARI_HESAP_HAREKETLERI', 'cariBalances', ozet, true, null, null, Date.now() - t0, C.reqActor(req));
       await C.writeAuditLog(C.reqActor(req), 'Mikro Bakiye Çekme', ozet);
-      res.json({ success: true, total: leadsSnap.size, updated, skipped, unreadable,
-                 mikroRows: rows.length, duration: Date.now() - t0 });
+      // `eslemeNotu` burada yalnız KISMİ eksiği anlatır ("3 satırın bakiye alanı
+      // bilinmiyor") — tam okuma arızası yukarıda 502 ile dönmüştür.
+      res.json({ success: true, total: leadsSnap.size, updated, skipped, unreadable, yabanciAtlanan: bakiyeYabanci,
+                 mikroRows: rows.length, duration: Date.now() - t0,
+                 ...(eslemeNotu ? { note: eslemeNotu } : {}) });
     } catch (err) {
       console.error('[pull/bakiye]', err);
       res.status(500).json({ success: false, error: 'Bakiye çekimi başarısız. Hiçbir bakiye değiştirilmedi.' });
@@ -4353,16 +4391,15 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
         return res.status(502).json({ success: false, error: `Adres sorgusu çalıştırılamadı: ${hata}. Hiçbir adres değiştirilmedi.` });
       }
 
-      // cari_kod başına en düşük adr_adres_no'lu satırı tut (ORDER BY ile artık
-      // deterministik — eşit no'larda SQL'in döndürdüğü ilk satır tutarlı kalır).
-      const byKod = new Map<string, Record<string, unknown>>();
-      for (const row of rows) {
-        const kod = String(row.adr_cari_kod ?? '').trim();
-        if (!kod) continue;
-        const mevcut = byKod.get(kod);
-        const no = Number(row.adr_adres_no ?? 0);
-        if (!mevcut || no < Number(mevcut.adr_adres_no ?? 0)) byKod.set(kod, row);
-      }
+      // cari_kod başına en küçük BİLİNEN adr_adres_no'lu satır; adres no'su okunamayan
+      // satır EN SONA gider (eski `Number(row.adr_adres_no ?? 0)` onu 0 sayıp yarışı
+      // DAİMA kazandırıyordu — şube adresi merkezin yerine geçiyordu). Eşitlikte ilk
+      // satır kalır; yukarıdaki ORDER BY o sırayı kararlı yapar. Seçim TEK KAYNAKTA:
+      // server/mikro/eslemeCari.ts
+      const byKod = adresSec(rows);
+      // Adres import'u hiçbir şeyi silmediği için burada durdurmaz, yalnız uyarır.
+      const adresOzet = adresOzeti(rows);
+      if (adresOzet.okumaArizasi.length) console.warn('[pull/cari-adres] okuma arızası:', adresOzet.not);
 
       const companyId = await C.reqCompanyId(req);
       const leadsSnap = await C.getAdminDb().collection('leads').where('mikroCariKod', '!=', '').get();
@@ -4378,21 +4415,16 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
         const adres = cariKod ? byKod.get(cariKod) : undefined;
         if (!adres) { skipped++; continue; }
 
-        // Boş sayılan: undefined/null/'' ve YALNIZ BOŞLUKTAN oluşan değer —
-        // salt falsy kontrolü ' ' gibi anlamsız-ama-truthy değeri "zaten dolu"
-        // sanıp Mikro'dan doldurmayı atlıyordu (code-review bulgusu).
-        const bos = (v: unknown) => !v || (typeof v === 'string' && !v.trim());
-        const guncelleme: Record<string, unknown> = {};
-        if (bos(veri.address) && adres.adr_cadde) guncelleme.address = String(adres.adr_cadde);
-        if (bos(veri.city) && adres.adr_il) guncelleme.city = String(adres.adr_il);
-        if (bos((veri as { district?: unknown }).district) && adres.adr_ilce) guncelleme.district = String(adres.adr_ilce);
-        if (bos((veri as { country?: unknown }).country) && adres.adr_ulke) guncelleme.country = String(adres.adr_ulke);
-        if (!Object.keys(guncelleme).length) { skipped++; continue; }
-        // Kaynak izi: "en düşük adres no = varsayılan" TAHMİNE dayalı (Mikro'da
-        // doğrulanmış bir kural değil) — sahte kesinlik göstermemek için hangi
-        // alanların bu sezgisel seçimden geldiği işaretleniyor (bkz. task #31,
-        // Satış Bölgesi otomatik ataması bu alanı okuyacak).
-        guncelleme.addressSource = 'mikro-heuristic';
+        // SADECE BOŞ ALANLARI DOLDURUR (EKLE, YERİNE KOYMA) + kaynak izi
+        // (`addressSource: 'mikro-heuristic'` — "en düşük adres no = varsayılan" TAHMİNDİR,
+        // Mikro'da doğrulanmış bir kural değil; Satış Bölgesi otomatik ataması bu alanı
+        // okuyacak, task #31). "Boş" sayılan: undefined/null/'' ve YALNIZ BOŞLUKTAN
+        // oluşan değer — salt falsy kontrolü ' ' gibi anlamsız-ama-truthy değeri "zaten
+        // dolu" sanıp doldurmayı atlıyordu (code-review bulgusu). Kural + gerekçeler TEK
+        // KAYNAKTA: server/mikro/eslemeCari.ts (Mikro'dan gelen değer orada ayrıca
+        // kırpılır ve yalnız boşluktan oluşan Mikro değeri yazılmaz).
+        const guncelleme = adresGuncellemesi(veri, adres);
+        if (!guncelleme) { skipped++; continue; }
 
         batch.set(leadDoc.ref, guncelleme, { merge: true });
         ops++; updated++;
@@ -4403,8 +4435,10 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
       const ozet = `${updated} cari adresi dolduruldu (Mikro'dan ${rows.length} adres satırı, ${yabanciAtlanan} yabancı kiracı atlandı)`;
       await C.writeSyncLog('SQL:CARI_HESAP_ADRESLERI', 'leads', ozet, true, null, null, Date.now() - t0, C.reqActor(req));
       await C.writeAuditLog(C.reqActor(req), 'Mikro Cari Adres Çekme', ozet);
+      // Okuma arızası uyarısı notun BAŞINA gelir (kural).
       res.json({ success: true, total: leadsSnap.size, updated, skipped, yabanciAtlanan,
-                 mikroRows: rows.length, duration: Date.now() - t0, note: `${updated} dolduruldu, ${skipped} atlandı` });
+                 mikroRows: rows.length, duration: Date.now() - t0,
+                 note: [adresOzet.not, `${updated} dolduruldu, ${skipped} atlandı`].filter(Boolean).join(' — ') });
     } catch (err) {
       console.error('[pull/cari-adres]', err);
       res.status(500).json({ success: false, error: 'Adres çekimi başarısız. Hiçbir adres değiştirilmedi.' });
@@ -4465,12 +4499,13 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
       );
       if (hata) return res.status(502).json({ success: false, error: `Mizan sorgusu başarısız: ${hata}. Hiçbir şey yazılmadı.` });
 
-      const satirlar = rows.map(r => ({
-        hesapKodu: String(r.hesapKodu ?? ''),
-        borc:   Number(r.borc ?? 0),
-        alacak: Number(r.alacak ?? 0),
-        bakiye: Number(r.borc ?? 0) - Number(r.alacak ?? 0),
-      })).filter(r => r.hesapKodu);
+      // Gövde/eşleme TEK KAYNAKTA: src/server/mikro/raporKdvMizan.ts (mizanSatirlari).
+      // Okunamayan borç/alacak 0 DEĞİL null; bakiye de null (eski kod çöp değerde NaN yazıyordu).
+      const mizan = mizanSatirlari(rows);
+      const satirlar = mizan.satirlar;
+      if (mizan.ozet.okumaArizasi.length) {
+        console.warn('[pull/mizan] okuma arızası:', mizan.ozet.okumaArizasi.join(', '), '— kolon adı/şema kontrol edin');
+      }
 
       // Hiç satır yoksa BOŞ MİZAN YAZMA. Bu "dönemde hareket yok" da olabilir,
       // "muhasebe modülü hiç kullanılmıyor / yanlış tablo" da — ikisi arasında
@@ -4484,14 +4519,15 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
       // ÇİFT TARAFLI KAYIT DENETİMİ — mizan tanımı gereği borç toplamı alacak
       // toplamına EŞİT olmalıdır. Tutmuyorsa işaret varsayımım (meblag>0=borç)
       // ya da grup seçimi yanlış demektir; yanlış mizan yazmaktansa dur.
-      const toplamBorc   = satirlar.reduce((t, r) => t + r.borc, 0);
-      const toplamAlacak = satirlar.reduce((t, r) => t + r.alacak, 0);
-      const fark = Math.abs(toplamBorc - toplamAlacak);
-      if (satirlar.length && fark > Math.max(1, (toplamBorc + toplamAlacak) * 0.0001)) {
-        return res.status(502).json({ success: false,
-          error: `Mizan dengesiz: borç ${toplamBorc.toFixed(2)} ≠ alacak ${toplamAlacak.toFixed(2)} (fark ${fark.toFixed(2)}). ` +
-                 `Borç/alacak işaret kuralı bu kurulumda farklı olabilir — hiçbir şey yazılmadı.` });
+      const toplam = mizanToplami(satirlar);
+      if (toplam.hata) {
+        // İki "dur" hâli: (a) tutarı okunamayan satır var → 0 sayılan satırlarla denge
+        // HİÇBİR ŞEY İSPAT ETMEZ (eski kod böyle "dengeli" deyip eksik mizan yazıyordu);
+        // (b) bilinen toplamlar tutmuyor → işaret/grup varsayımı yanlış.
+        if (toplam.bilinmeyenSatir) console.warn('[pull/mizan]', toplam.hata);
+        return res.status(502).json({ success: false, error: toplam.hata, note: mizan.ozet.not || null });
       }
+      const toplamBorc = toplam.borc, toplamAlacak = toplam.alacak;
 
       await C.getAdminDb().collection('accountingPeriods').doc(period).set({
         companyId: await C.reqCompanyId(req),
@@ -4501,10 +4537,13 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
         syncedAt: pgServerTimestamp(),
       }, { merge: true });
 
-      const mizanOzet = `${period} dönemi — ${satirlar.length} hesap satırı`;
+      // Sayaç senkron geçmişine de düşsün (kdvOzet ile aynı gerekçe): hesap kodu
+      // okunamadığı için DÜŞEN satırlar yalnız o anki yanıtta değil, `syncLogs`te de görünsün.
+      const mizanOzet = `${period} dönemi — ${satirlar.length} hesap satırı` +
+                        (mizan.ozet.not ? ` · ${mizan.ozet.not}` : '');
       await C.writeSyncLog('SQL:MUHASEBE_FISLERI', 'accountingPeriods', mizanOzet, true, null, null, Date.now() - t0, C.reqActor(req));
       await C.writeAuditLog(C.reqActor(req), 'Mikro Mizan Çekme', mizanOzet);
-      res.json({ success: true, period, rowCount: satirlar.length, duration: Date.now() - t0 });
+      res.json({ success: true, period, rowCount: satirlar.length, note: mizan.ozet.not || null, duration: Date.now() - t0 });
     } catch (err) {
       console.error('[pull/mizan]', err);
       res.status(500).json({ success: false, error: 'Mizan çekimi başarısız. Hiçbir şey yazılmadı.' });

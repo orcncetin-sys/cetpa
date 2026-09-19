@@ -43,7 +43,7 @@ vi.mock('./belgeSablonu', async (orijinal) => {
   return { ...gercek, sablonGetir: vi.fn(async () => null) };
 });
 import { sablonGetir } from './belgeSablonu';
-import { exportOrderPDF } from './pdf';
+import { exportOrderPDF, exportCustomerStatement } from './pdf';
 
 const basilan = () => kayit.basilan;
 const kaydedilenAd = () => kayit.kaydedilenAd;
@@ -190,5 +190,51 @@ describe('sahte kesinlik — Faz 1 4/n (para.ts bağlandı)', () => {
     expect(basilan().some(s => s === '0,00 TL')).toBe(false);
     expect(basilan().filter(s => s === '—').length).toBeGreaterThanOrEqual(3);   // ara toplam, KDV, genel toplam
     expect(basilan()).toContain('1.200,00 TL');   // satır tutarları yine basılır
+  });
+});
+
+/**
+ * 2026-09-19 delta bulgusu: Mikro faturasından TÜRETİLEN siparişte `cha_meblag`
+ * okunamazsa `totalPrice` alanı HİÇ YAZILMIYOR (eslemeFatura sözleşmesi: bilinmeyen
+ * 0 yazılmaz). Ekstrenin özet kutusu ham `reduce((s,o)=>s+o.totalPrice,0)` kullandığı
+ * için TEK BİR tutarsız sipariş üç satırı birden 'NaN' yapıyordu — hem de MÜŞTERİYE
+ * giden belgede. Satır hücresi zaten `tutarYaz` ile '—' basıyordu; özet kutusu yarım
+ * kalmıştı.
+ */
+describe('exportCustomerStatement — tutarı bilinmeyen sipariş toplamı bozmaz', () => {
+  const musteri = { id: 'lead1', name: 'Şirin İnşaat', company: 'ŞİRİN İNŞAAT LTD.', email: '', phone: '' };
+  const siparis = (ek: Record<string, unknown>) => ({
+    id: 'ord00001abcd', customerName: 'Şirin İnşaat', status: 'Delivered',
+    lineItems: [{ name: 'ÇİMENTO 50KG', quantity: 1, price: 1000 }], createdAt: '2026-09-01', ...ek,
+  });
+
+  it("tutarı bilinmeyen sipariş 'NaN' bastırmaz: bilinenler toplanır + kapsam notu basılır", async () => {
+    await exportCustomerStatement(
+      musteri as never,
+      [siparis({ totalPrice: 1000 }), siparis({ id: 'ord00002abcd', totalPrice: undefined })] as never,
+      'tr',
+    );
+    expect(basilan().some(s => s.includes('NaN')), basilan().join(' | ')).toBe(false);
+    expect(basilan()).toContain('1.000,00 TRY');                       // bilinen kısmi toplam
+    expect(basilan().some(s => s.includes('1 siparişin tutarı bilinmiyor'))).toBe(true);
+  });
+
+  it("HİÇBİR siparişin tutarı bilinmiyorsa özet '—' (0,00 TRY sahte kesinliği YOK)", async () => {
+    // Teslim + bekleyen kovalarının İKİSİ de dolu ama tutarsız olmalı: boş kova
+    // GERÇEK sıfırdır ve '0,00 TRY' basar (ekranTutari sözleşmesi) — bu bir arıza değil.
+    await exportCustomerStatement(musteri as never, [
+      siparis({ totalPrice: undefined }),
+      siparis({ id: 'ord00003abcd', status: 'Pending', totalPrice: undefined }),
+    ] as never, 'tr');
+    expect(basilan().some(s => s.includes('NaN'))).toBe(false);
+    expect(basilan().some(s => s === '0,00 TRY')).toBe(false);
+    expect(basilan().filter(s => s === '—').length).toBeGreaterThanOrEqual(3);   // teslim + bekleyen + toplam
+    expect(basilan().some(s => s.includes('2 siparişin tutarı bilinmiyor'))).toBe(true);
+  });
+
+  it('tümü biliniyorsa kapsam notu BASILMAZ (gereksiz uyarı gürültüsü yok)', async () => {
+    await exportCustomerStatement(musteri as never, [siparis({ totalPrice: 1000 })] as never, 'tr');
+    expect(basilan()).toContain('1.000,00 TRY');
+    expect(basilan().some(s => s.includes('tutarı bilinmiyor'))).toBe(false);
   });
 });

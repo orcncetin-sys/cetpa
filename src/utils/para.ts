@@ -72,6 +72,19 @@ export function tamTutar(t: Tutar): number {
 }
 
 /**
+ * İki dönemin (bu hafta / geçen hafta) karşılaştırması. EKRAN değeri `ekranTutari` (kısmi toplam gösterilebilir,
+ * hiç bilinen yokken NaN → '—'); SAPMA ise TÜRETMEDİR: iki dönemden birinde tek kayıt bile bilinmiyorsa
+ * hesaplanmaz (null) — kısmi toplamdan "▼ %30" oku üretilmez. Önceki dönem ≤ 0 ise yüzde yok (0'a bölme).
+ */
+export function donemKarsilastir(bu: Tutar, onceki: Tutar): { ekran: number; yuzde: number | null; yon: 'artis' | 'azalis' | null } {
+  const ekran = ekranTutari(bu);
+  const a = tamTutar(bu), b = tamTutar(onceki);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= 0) return { ekran, yuzde: null, yon: null };
+  const yuzde = Math.round(((a - b) / b) * 100);
+  return { ekran, yuzde, yon: a >= b ? 'artis' : 'azalis' };
+}
+
+/**
  * Sıralama karşılaştırıcısı — bilinmeyen sayı (null/undefined/NaN/'abc') 0 SAYILMAZ, listenin SONUNA gider
  * (artan da azalan da). `(a.balance || 0) - (b.balance || 0)` kalıbı bilinmeyeni ₺0 gibi ortaya diziyordu
  * (Faz 3 2/n, 2026-09-14). Yönü `-` ile ÇEVİRME (bilinmeyenler başa gelir): `sayiSirala(x, y, azalan)` kullan.

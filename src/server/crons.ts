@@ -25,7 +25,18 @@ import { getMikroCreds, mikroPost, mikroData, mikroBugun, mikroStokMiktari,
          mikroSatisFiyatlari, mikroVergiOranlari, vergiOraniCoz,
          MIKRO_JUMP_SURUM } from './mikroClient.js';
 import { mirrorMikroStoklar, mirrorMikroCariler } from './mikroMirror.js';
+// Cari eşlemesi TEK KAYNAK (saf + testli). 2026-09-19 delta bulgusu: bu dosya
+// eşlemenin KENDİ kopyasını taşıyordu (`email: (c.cari_EMail as string) || ''`,
+// `Number(c.cari_hareket_tipi ?? 0)`) ve rotalarda kapatılan "bilinmeyen alan
+// YAZILMAZ" sözleşmesini HER SAAT BAŞI geri alıyordu: elle girilmiş e-posta/
+// telefon/VKN `''` ile siliniyordu. İki yazıcının aynı `leads` dokümanına zıt
+// sözleşmeyle yazması "yarım düzeltme" sınıfının en pahalı hâli.
+import { cariEsle, cariEslemeOzeti, type CariEsleme } from './mikro/eslemeCari.js';
+import { sayacOlustur, sayacaEkle, okumaArizalari, STOK_KRITIK } from './mikro/eslemeStok.js';
 import { isimAnahtari, firmaAnahtari } from '../lib/isimAnahtari.js';
+// Sipariş tutarı TEK KAYNAK: bilinmeyen tutar 0 SAYILMAZ, ayrıca sayılır.
+import { toplaBilinen, donemKarsilastir } from '../utils/para.js';
+import { siparisTutari } from '../utils/siparis.js';
 import { bakimKilidiVar, yaziciOlarakCalistir, type SqlCalistirici } from './bakimKilidi.js';
 
 
@@ -148,6 +159,10 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         }
       }
       let stokYeni = 0, stokGuncel = 0;
+      // Okuma arızası sayacı — elle import (`/api/mikro/import/stok`) ile AYNI kural ve aynı kritik alan kümesi:
+      // ürün adı / KDV oranı satırların TAMAMINDA okunamıyorsa veri değil şema sorunudur. Cari tarafında bu uyarı
+      // vardı, stok tarafında yoktu (2026-09-19 kapanış incelemesi — yarım düzeltme).
+      const stokSayac = sayacOlustur();
       let batch = db.batch(); let ops = 0;
       const flush = async () => { if (ops > 0) { await batch.commit(); batch = db.batch(); ops = 0; } };
       const seenSku = new Set<string>();
@@ -163,9 +178,23 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         const mikroPrices = mikroSatisFiyatlari(s);
         const fiyatVar = Object.keys(mikroPrices).length > 0;
 
+        // Mikro ad/birim BOŞSA mevcut kaydı EZME (2026-09-19 delta bulgusu): eski
+        // `|| sku` / `|| 'ADET'` her saat başı elle düzeltilmiş adı SKU koduna,
+        // birimi 'ADET'e döndürüyordu — elle import'ta (`stokEsle`) kapatılan sınıf
+        // bu otomatik yüzeyde açık kalmıştı. Yedekler YALNIZ yeni kayıtta (aşağıda
+        // `batch.set`), çünkü doküman adsız açılamaz.
+        // `?.trim()` DEĞİL: kolon sayı dönerse `.trim` yok ve istisna TÜM saatlik
+        // senkronu düşürürdü (eski `|| sku` tipe bakmıyordu, bu yüzden dayanıklıydı).
+        const mikroMetin = (x: unknown): string =>
+          typeof x === 'string' ? x.trim()
+          : typeof x === 'number' && Number.isFinite(x) ? String(x)
+          : '';
+        const mikroAd    = mikroMetin(s.sto_isim);
+        const mikroBirim = mikroMetin(s.sto_birim1_ad);
+        sayacaEkle(stokSayac, [...(mikroAd ? [] : ['ürün adı']), ...(kdvOran !== null ? [] : ['KDV oranı'])]); // etiketler STOK_KRITIK ile birebir
         const fields = {
-          name: (s.sto_isim as string) || sku,
-          unit: (s.sto_birim1_ad as string) || 'ADET',
+          ...(mikroAd    ? { name: mikroAd }    : {}),
+          ...(mikroBirim ? { unit: mikroBirim } : {}),
           // sto_perakende_vergi İNDEKStir, yüzde değil (bkz. vergiOraniCoz).
           // Çözülemezse vatRate'e DOKUNMA — uydurma %20 yazmaktansa eskisi kalsın.
           ...(kdvOran !== null ? { vatRate: kdvOran } : {}),
@@ -203,6 +232,9 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         }
         else {
           batch.set(db.collection('inventory').doc(), {
+            // YENİ kayıt yedekleri ÖNCE: `...fields` bilineni her zaman EZER.
+            // (Doküman adsız/birimsiz açılamaz — `stokEsle` de aynı pariteyi korur.)
+            name: sku, unit: 'ADET',
             ...fields, sku, category: 'Genel',
             lowStockThreshold: 5,
             prices: mikroPrices,
@@ -218,6 +250,12 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         if (++ops >= 400) await flush();
       }
       await flush();
+      // Vergi tablosu BOŞSA (VergiListesiV2 kesintisi) KDV oranı hiçbir satırda çözülemez — bu stok ŞEMASI sorunu
+      // değildir; nedeni doğru adlandır, "kolon adı kontrol edin" diye yanlış yere yollama.
+      const vergiBos = vergiTablosu.size === 0;
+      if (vergiBos && stokSayac.satir >= 5) console.warn('[cron] Mikro vergi tablosu (VergiListesiV2) okunamadı — bu turda KDV oranı yazılmadı; stok şeması değil vergi listesi çağrısını kontrol edin');
+      const stokArizasi = okumaArizalari(stokSayac, STOK_KRITIK).filter(a => !(vergiBos && a === 'KDV oranı'));
+      if (stokArizasi.length) console.warn(`[cron] stok okuma arızası: ${stokArizasi.join(', ')} hiçbir satırda okunamadı — Mikro kolon adı/şema kontrol edin`);
 
       // ── Cariler: tam sayfalama + upsert (tedarikçi tipi dahil) ─────────────
       const cariler = await cronPullAll('CariListesiV2', 'CariListesi', {
@@ -241,36 +279,34 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
         if (nameKey && !leadByName.has(nameKey)) leadByName.set(nameKey, d.ref);
       }
       let cariYeni = 0, cariGuncel = 0;
+      // Eşlemeler özete girer: bir alan TÜM satırlarda okunamıyorsa bu veri değil
+      // kolon adı/şema sorunudur — elle import'ta olduğu gibi burada da yüksek sesle söylenir.
+      const cariEslemeleri: CariEsleme[] = [];
       for (const c of cariler) {
-        const kod = (c.cari_kod as string)?.trim();
-        if (!kod) continue;
-        const leadType = Number(c.cari_hareket_tipi ?? 0) === 1 ? 'Supplier' : 'Customer';
-        const fields = {
-          name: (c.cari_unvan1 as string) || kod,
-          company: (c.cari_unvan1 as string) || '',
-          email: (c.cari_EMail as string) || '',
-          phone: (c.cari_CepTel as string) || '',
-          taxId: (c.cari_vdaire_no as string) || '',
-          taxOffice: (c.cari_vdaire_adi as string) || '',
-          eFaturaKayitli: Number(c.cari_efatura_fl) === 1,
-          type: leadType, mikroCariKod: kod,
-          mikroSynced: true, mikroSyncedAt: deps().pgServerTimestamp(),
-          companyId, // güncellemede de etiketle (self-heal)
-        };
+        // TEK KAYNAK: bilinmeyen alan `alanlar`da HİÇ YOK → `batch.update` ona
+        // DOKUNMAZ (elle girilmiş e-posta/telefon/VKN korunur). Yeni kayıtta
+        // bilinmeyen metin alanları `yeniKayitAlanlari`nda '' ile açılır.
+        const esleme = cariEsle(c, { companyId, zamanDamgasi: deps().pgServerTimestamp() });
+        if (!esleme) continue;                 // cari kodu yok → eşleştirilemez
+        cariEslemeleri.push(esleme);
+        const kod = esleme.cariKod;
         // Oncelik: mikroCariKod -> VKN -> case-insensitive isim (bkz.
         // /api/mikro/import/cari'deki ayni fix - manuel olusturulmus leads'in
         // mikroCariKod'u olmadigi icin salt-kod eslesme onlari ikinci kez
-        // olusturuyordu).
-        const vkn = normalizeVknCron(fields.taxId);
-        const nameKey = isimAnahtari(fields.name);
+        // olusturuyordu). VKN bilinmiyorsa alan YOK — o kola hiç girilmez.
+        // `alanlar.taxId` ya kırpılmış bir string'tir ya da HİÇ YOKTUR (bilinmiyor) —
+        // tip dökümü yerine gerçek kontrol (CLAUDE.md: yaklaşık tip yazma).
+        const taxIdHam = esleme.alanlar.taxId;
+        const vkn = normalizeVknCron(typeof taxIdHam === 'string' ? taxIdHam : undefined);
+        const nameKey = isimAnahtari(esleme.alanlar.name);
         const ref = leadByKod.get(kod)
           || (vkn ? leadByVkn.get(vkn) : undefined)
           || (nameKey ? leadByName.get(nameKey) : undefined);
-        if (ref) { batch.update(ref, fields); cariGuncel++; }
+        if (ref) { batch.update(ref, esleme.alanlar); cariGuncel++; }
         else {
           const newRef = db.collection('leads').doc();
           batch.set(newRef, {
-            ...fields, status: 'Active', source: 'mikro_cron',
+            ...esleme.alanlar, ...esleme.yeniKayitAlanlari, source: 'mikro_cron',
             createdAt: deps().pgServerTimestamp(),
           });
           leadByKod.set(kod, newRef);
@@ -280,7 +316,11 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
       }
       await flush();
 
-      console.log(`Mikro cron tamamlandı — stok: ${stokYeni} yeni/${stokGuncel} güncel, cari: ${cariYeni} yeni/${cariGuncel} güncel`);
+      const cariOzet = cariEslemeOzeti(cariEslemeleri);
+      if (cariOzet.okumaArizasi.length) {
+        console.warn(`[cron] cari okuma arızası: ${cariOzet.okumaArizasi.join(', ')} hiçbir satırda okunamadı — kolon adı/şema kontrol edin.`);
+      }
+      console.log(`Mikro cron tamamlandı — stok: ${stokYeni} yeni/${stokGuncel} güncel, cari: ${cariYeni} yeni/${cariGuncel} güncel${cariOzet.not ? ` (${cariOzet.not})` : ''}`);
     } catch (err) {
       console.error('Mikro cron sync hatası:', err);
     }
@@ -388,15 +428,25 @@ if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
 
       const thisWeek = orders.filter(o => dateOf(o) >= d7);
       const prevWeek = orders.filter(o => dateOf(o) >= d14 && dateOf(o) < d7);
-      const thisRev  = thisWeek.reduce((s, o) => s + ((o.totalPrice as number) || 0), 0);
-      const prevRev  = prevWeek.reduce((s, o) => s + ((o.totalPrice as number) || 0), 0);
+      // TUTARI BİLİNMEYEN SİPARİŞ SESSİZCE ₺0 SAYILMAZ (2026-09-19): Mikro faturasından
+      // türetilen siparişte `cha_meblag` okunamazsa `totalPrice` alanı HİÇ YAZILMIYOR
+      // (eslemeFatura sözleşmesi). Eski `|| 0` o siparişi bedava satış sayıyor, haftalık
+      // ciro düşük çıkıyor ve yönetici "ciro %18 düştü" oklarını gerçek sanıyordu.
+      // Bilinenler toplanır, BİLİNMEYEN SAYISI rapora açıkça yazılır (CLAUDE.md: sahte
+      // kesinlik yok — '—' ya da açık not).
+      const thisTutar = toplaBilinen(thisWeek, siparisTutari);
+      const prevTutar = toplaBilinen(prevWeek, siparisTutari);
+      // EKRAN ≠ TÜRETME (para.donemKarsilastir): ciro kısmi toplam olabilir ('—' hiç bilinen yoksa), ama ok ve
+      // yüzde iki haftadan birinde TEK sipariş bile bilinmiyorsa HİÇ basılmaz — ilk düzeltme toplamı `toplaBilinen`e
+      // çevirmiş, sapmayı yine kısmi toplamdan türetmişti ("▼ %30" / "₺0 ▼ %100"; 2026-09-19 kapanış incelemesi).
+      const karsilastirma = donemKarsilastir(thisTutar, prevTutar);
+      const ciroMetni = Number.isFinite(karsilastirma.ekran) ? `₺${karsilastirma.ekran.toLocaleString('tr-TR')}` : '—';
+      const tutarsizSiparis = thisTutar.bilinmeyen + prevTutar.bilinmeyen;
       const lowStock = inventory.filter(i => ((i.stockLevel as number) || 0) <= ((i.lowStockThreshold as number) || 5));
       const newLeads = leads.filter(l => dateOf(l) >= d7).length;
 
-      const deltaRev = thisRev - prevRev;
-      const deltaPct = prevRev > 0 ? Math.round((deltaRev / prevRev) * 100) : 0;
-      const arrow    = deltaRev >= 0 ? '▲' : '▼';
-      const color    = deltaRev >= 0 ? '#10b981' : '#ef4444';
+      const arrow    = karsilastirma.yon === 'artis' ? '▲' : '▼';
+      const color    = karsilastirma.yon === 'artis' ? '#10b981' : '#ef4444';
 
       const weekStr = `${d7.toLocaleDateString('tr-TR')} – ${now.toLocaleDateString('tr-TR')}`;
 
@@ -420,8 +470,9 @@ if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
         <tr>
           <td style="padding:14px 0;border-bottom:1px solid #f0f0f0;">
             <span style="font-size:12px;color:#86868b;text-transform:uppercase;letter-spacing:.5px;">Ciro</span><br>
-            <span style="font-size:28px;font-weight:800;color:#1d1d1f;">₺${thisRev.toLocaleString('tr-TR')}</span>
-            <span style="color:${color};font-size:12px;font-weight:700;margin-left:8px;">${arrow} %${Math.abs(deltaPct)}</span>
+            <span style="font-size:28px;font-weight:800;color:#1d1d1f;">${ciroMetni}</span>
+            ${karsilastirma.yuzde !== null ? `<span style="color:${color};font-size:12px;font-weight:700;margin-left:8px;">${arrow} %${Math.abs(karsilastirma.yuzde)}</span>` : ''}
+            ${tutarsizSiparis > 0 ? `<br><span style="color:#86868b;font-size:11px;">Bu hafta ${thisTutar.bilinmeyen}, geçen hafta ${prevTutar.bilinmeyen} siparişin tutarı bilinmiyor — toplama dâhil değil, karşılaştırma yapılmadı</span>` : ''}
           </td>
         </tr>
         <tr>

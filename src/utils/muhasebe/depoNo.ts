@@ -115,6 +115,23 @@ export function mikroDepoNo(depolar: readonly DepoKaydi[], adVeyaId: unknown): n
   return bulunan.size === 1 ? [...bulunan][0] : undefined;
 }
 
+/**
+ * "Sevk Deposu (Mikro)" seçicisinin seçenekleri — sipariş EKLE ve DÜZENLE formlarının TEK KAYNAĞI.
+ * Yalnız Mikro `dep_no`su ÇÖZÜLEBİLEN depolar (elle açılmış depo Mikro'da yoktur); aynı numarayı veren kayıtlar
+ * tek satıra iner (ilk ad), numaraya göre sıralı. Çözülebilen depo yoksa liste BOŞTUR — çağıran seçiciyi gizler;
+ * "tek depo varsa onu varsay" gibi bir varsayılan burada ÜRETİLMEZ.
+ */
+export function mikroDepoSecenekleri(depolar: readonly DepoKaydi[]): Array<{ no: number; ad: string }> {
+  const gorulen = new Map<number, string>();
+  for (const w of depolar) {
+    const no = mikroDepoNo(depolar, w.id);
+    if (no === undefined || gorulen.has(no)) continue;
+    const ad = typeof w.name === 'string' ? w.name.trim() : '';
+    gorulen.set(no, ad || `Depo ${no}`);
+  }
+  return [...gorulen].sort((a, b) => a[0] - b[0]).map(([no, ad]) => ({ no, ad }));
+}
+
 /** Depolar arası sipariş için çözülmüş depo çifti. */
 export interface TransferDepolari {
   fromDepo: number;

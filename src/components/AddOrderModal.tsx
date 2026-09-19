@@ -5,7 +5,9 @@ import { cn } from '../lib/utils';
 import { paraYaz } from '../utils/currency';
 const BarcodeScanner = React.lazy(() => import('./BarcodeScanner'));
 import CustomerCombobox from './CustomerCombobox';
-import type { Lead, InventoryItem, Order, OrderLineItem } from '../types';
+import type { Lead, InventoryItem, Order, OrderLineItem, Warehouse } from '../types';
+// Depo numarası çözümü TEK KAYNAK — ad/id'den Mikro `dep_no`; belirsizse undefined.
+import SevkDeposuSecici from './SevkDeposuSecici';
 import { oc } from '../i18n/ortak';
 
 interface AddOrderModalProps {
@@ -15,6 +17,8 @@ interface AddOrderModalProps {
   setSelectedLead: (lead: Lead | null) => void;
   leads: Lead[];
   inventory: InventoryItem[];
+  /** Depo seçicisinin kaynağı — yalnız Mikro `dep_no`su ÇÖZÜLEBİLEN depolar listelenir. */
+  warehouses: Warehouse[];
   branchNames: string[];
   currentLanguage: 'tr' | 'en';
   currentT: Record<string, string>;
@@ -30,6 +34,7 @@ export default function AddOrderModal({
   setSelectedLead,
   leads,
   inventory,
+  warehouses,
   branchNames,
   currentLanguage,
   currentT,
@@ -45,6 +50,7 @@ export default function AddOrderModal({
   const [isOrderScannerOpen, setIsOrderScannerOpen] = useState(false);
 
   const computedTotal = orderLineItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
 
   // Modal kapanınca form durumunu sıfırla — `if (!isOpen) return null` unmount ETMEZ, state aksi halde
   // taşınır ve yeniden açılışta eski sipariş verisi görünür (yanlışlıkla mükerrer sipariş riski).
@@ -73,9 +79,12 @@ export default function AddOrderModal({
 
   // Handle adding a line item
   const handleAddLineItem = (item: InventoryItem) => {
-    // Automatically set KDV (vatRate) from product if not already set or if explicitly requested
-    const vatRate = (item.vatRate as number | undefined) || 20;
-    setNewOrder(prev => ({ ...prev, kdvOran: vatRate as number, faturali: true }));
+    // Ürünün KDV oranı BİLİNİYORSA sipariş oranı ona çekilir. Bilinmiyorsa %20 UYDURULMAZ (eski `|| 20`: oran
+    // kaleme yazılıp Mikro'ya "bilinen %20" diye gidiyordu, üstelik gerçek %0'ı da 20'ye çeviriyordu — `0 || 20`).
+    // O durumda kullanıcının formda seçtiği oran korunur ve kaleme oran YAZILMAZ; sunucu başlık oranına düşer
+    // (govdeSiparis: `sayi(k.vatRate) ?? sayi(siparis.kdvOran)`).
+    const urunOrani = typeof item.vatRate === 'number' && Number.isFinite(item.vatRate) ? item.vatRate : undefined;
+    setNewOrder(prev => ({ ...prev, ...(urunOrani !== undefined ? { kdvOran: urunOrani } : {}), faturali: true }));
 
     const existingIndex = orderLineItems.findIndex(i => i.inventoryId === item.id);
     if (existingIndex >= 0) {
@@ -91,7 +100,7 @@ export default function AddOrderModal({
         sku: item.sku,
         price: item.price || (typeof item.prices === 'object' && item.prices ? (item.prices as Record<string, number>).Retail || 0 : 0),
         quantity: 1,
-        vatRate: vatRate as number
+        ...(urunOrani !== undefined ? { vatRate: urunOrani } : {}),   // Firestore `undefined` alanı reddeder
       }]);
     }
     setProductSearch('');
@@ -434,11 +443,17 @@ export default function AddOrderModal({
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[10px] font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'KDV Oranı' : 'VAT Rate'}</label>
-                        {orderLineItems.length > 0 && (
+                        {/* Rozet yalnız oran GERÇEKTEN üründen geldiyse; KDV oranı bilinmeyen kalem varsa kullanıcı uyarılır
+                            (eski kod bilinmeyen oranı %20 sayıp "üründen otomatik" diyordu). */}
+                        {orderLineItems.length > 0 && (orderLineItems.every(k => typeof k.vatRate === 'number') ? (
                           <span className="text-[9px] font-bold text-brand bg-brand/10 px-1.5 py-0.5 rounded-full">
                             ↑ {currentLanguage === 'tr' ? 'üründen otomatik' : 'auto from product'}
                           </span>
-                        )}
+                        ) : (
+                          <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full">
+                            {currentLanguage === 'tr' ? 'Ürünün KDV oranı bilinmiyor — elle seçin' : 'Product VAT rate unknown — choose manually'}
+                          </span>
+                        ))}
                       </div>
                       <select
                         value={newOrder.kdvOran ?? 20}
@@ -486,6 +501,22 @@ export default function AddOrderModal({
                   </div>
                 )}
               </div>
+
+              {/* SEVK DEPOSU — tek kaynak bileşen (SevkDeposuSecici; sipariş düzenleme formu da aynısını kullanır).
+                  Kaydedilince Mikro'ya yazılacak siparişte (faturalı + carisi seçili — handleAddOrder koşulu) ZORUNLU:
+                  seçilmezse sunucu 400 döner ve sipariş Mikro'ya hiç düşmez (varsayılan depo YOK). */}
+              <SevkDeposuSecici
+                warehouses={warehouses}
+                deger={newOrder.depoNo}
+                currentLanguage={currentLanguage}
+                zorunlu={!!newOrder.faturali && !!selectedLead}
+                onDegis={depoNo => setNewOrder(prev => {
+                  // Boş seçim alanı KALDIRIR (undefined ATAMAZ): sipariş dokümanı `{...newOrder}` ile yazılıyor ve
+                  // Firestore `undefined` alan değerini reddeder. 0/NaN yazmak ise sahte bir depo numarasıdır.
+                  const { depoNo: _secilmemis, ...kalan } = prev;
+                  return depoNo === undefined ? kalan : { ...kalan, depoNo };
+                })}
+              />
 
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.notes}</label>

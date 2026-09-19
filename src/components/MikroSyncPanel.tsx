@@ -284,10 +284,12 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     setBakiyePull({ running: true, result: null, error: null });
     try {
       const r = await fetch('/api/mikro/pull/bakiye', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({}) });
-      const d = await r.json() as { success: boolean; updated?: number; skipped?: number; error?: string; notConfigured?: boolean };
+      // `note` KISMİ eksiği bildirir ("3 satırın bakiye alanı bilinmiyor"); bakiye HİÇ
+      // okunamadıysa sunucu 502 + `error` döner ve aşağıdaki throw ile kırmızı görünür.
+      const d = await r.json() as { success: boolean; updated?: number; skipped?: number; note?: string; error?: string; notConfigured?: boolean };
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
-      setBakiyePull({ running: false, result: `${t ? 'Güncellendi' : 'Updated'}: ${d.updated ?? 0} / ${t ? 'Atlandı' : 'Skipped'}: ${d.skipped ?? 0}`, error: null });
+      setBakiyePull({ running: false, result: `${t ? 'Güncellendi' : 'Updated'}: ${d.updated ?? 0} / ${t ? 'Atlandı' : 'Skipped'}: ${d.skipped ?? 0}${d.note ? ` · ${d.note}` : ''}`, error: null });
     } catch (e) {
       setBakiyePull({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
     }
@@ -297,10 +299,13 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     setMizanPull({ running: true, result: null, error: null });
     try {
       const r = await fetch('/api/mikro/pull/mizan', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ period: pullPeriod }) });
-      const d = await r.json() as { success: boolean; period?: string; rows?: number; error?: string; notConfigured?: boolean };
+      // ALAN ADI: rota `rowCount` döndürür. Burası `d.rows` okuyordu → her başarılı
+      // çekim "0 satır" yazıyordu (sessiz sıfırın EKRAN karşılığı, 2026-09-19'da bulundu).
+      // `?? 0` BİLEREK kalıyor: `rowCount` artık her başarılı yanıtta dolu.
+      const d = await r.json() as { success: boolean; period?: string; rowCount?: number; note?: string | null; error?: string; notConfigured?: boolean };
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
-      setMizanPull({ running: false, result: `${t ? 'Dönem' : 'Period'}: ${d.period ?? pullPeriod} · ${d.rows ?? 0} ${t ? 'satır' : 'rows'}`, error: null });
+      setMizanPull({ running: false, result: `${t ? 'Dönem' : 'Period'}: ${d.period ?? pullPeriod} · ${d.rowCount ?? 0} ${t ? 'satır' : 'rows'}` + (d.note ? ` · ${d.note}` : ''), error: null });
     } catch (e) {
       setMizanPull({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
     }
@@ -310,10 +315,13 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     setKdvPull({ running: true, result: null, error: null });
     try {
       const r = await fetch('/api/mikro/pull/kdv', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ period: pullPeriod }) });
-      const d = await r.json() as { success: boolean; period?: string; kdvMatrahi?: number; hesaplananKdv?: number; error?: string; notConfigured?: boolean };
+      // `kdvMatrahi` artık null olabilir (hiçbir oran kovasının matrahı okunamadı) —
+      // `paraYaz(null)` '—' basar. `note` GÖRÜNMEZSE düzeltme yarım kalır: sessiz
+      // sıfırı sessiz EKSİĞE çevirmiş oluruz.
+      const d = await r.json() as { success: boolean; period?: string; kdvMatrahi?: number | null; hesaplananKdv?: number; note?: string | null; error?: string; notConfigured?: boolean };
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
-      setKdvPull({ running: false, result: `${t ? 'Matrah' : 'Base'}: ${paraYaz(d.kdvMatrahi, { ondalik: 0 })} · KDV: ${paraYaz(d.hesaplananKdv, { ondalik: 0 })}`, error: null });
+      setKdvPull({ running: false, result: `${t ? 'Matrah' : 'Base'}: ${paraYaz(d.kdvMatrahi, { ondalik: 0 })} · KDV: ${paraYaz(d.hesaplananKdv, { ondalik: 0 })}` + (d.note ? ` · ${d.note}` : ''), error: null });
     } catch (e) {
       setKdvPull({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
     }
@@ -1124,6 +1132,12 @@ function ImportCard({
                     <span className="text-gray-400"> / {result.created + result.updated}</span>
                   </div>
                 )
+              )}
+              {/* Bilinmeyen alan sayacı / okuma arızası — sunucu 'note' olarak döner. */}
+              {result.note && (
+                <div className={`text-[11px] mt-1 ${result.note.startsWith('UYARI:') ? 'text-amber-800 bg-amber-50 rounded-lg px-2 py-1.5' : 'text-gray-500'}`}>
+                  {result.note}
+                </div>
               )}
             </>
           ) : (

@@ -6,7 +6,7 @@
  * toplama girmez, sayılır; ekranda/PDF'te '—'. Bu dosya o sözleşmeyi kilitler.
  */
 import { describe, it, expect } from 'vitest';
-import { tutarYaz, kdvAyristir, satirTutari, toplaBilinen, siparisMaliyeti, tahsilatOrani, teklifToplamlari, ekranTutari, tamTutar, tutarBirlestir, sayiSirala } from './para';
+import { tutarYaz, kdvAyristir, satirTutari, toplaBilinen, siparisMaliyeti, tahsilatOrani, teklifToplamlari, ekranTutari, tamTutar, tutarBirlestir, sayiSirala, donemKarsilastir } from './para';
 
 describe('tutarYaz — PDF/CSV için tutar metni', () => {
   it("bilinen: Türk biçimi + birim ('1.234,56 TL'); 0 gerçek sıfırdır", () => {
@@ -176,3 +176,25 @@ describe('sayiSirala — sıralamada bilinmeyen 0 sayılmaz, sona gider', () => 
     expect(sayiSirala(null, undefined)).toBe(0);
   });
 });
+
+describe('donemKarsilastir — iki dönemin cirosu: ekran ≠ türetme (haftalık rapor e-postası)', () => {
+  const t = (toplam: number, bilinen: number, bilinmeyen: number) => ({ toplam, bilinen, bilinmeyen });
+  it('iki dönem de tam biliniyorsa yüzde ve yön hesaplanır', () => {
+    expect(donemKarsilastir(t(120000, 8, 0), t(100000, 7, 0))).toEqual({ ekran: 120000, yuzde: 20, yon: 'artis' });
+    expect(donemKarsilastir(t(70000, 5, 0), t(100000, 7, 0))).toEqual({ ekran: 70000, yuzde: -30, yon: 'azalis' });
+  });
+  it('bir dönemde tek kayıt bile bilinmiyorsa SAPMA ÜRETİLMEZ — kısmi toplamdan "▼ %30" basılıyordu (mutasyon-ayırt-edici)', () => {
+    expect(donemKarsilastir(t(70000, 7, 3), t(100000, 7, 0))).toEqual({ ekran: 70000, yuzde: null, yon: null });
+    expect(donemKarsilastir(t(100000, 7, 0), t(60000, 4, 3))).toEqual({ ekran: 100000, yuzde: null, yon: null });
+  });
+  it('bu dönemin TÜM kayıtları bilinmiyorsa ekran NaN ("—") — "₺0 ▼ %100" basılmaz', () => {
+    const r = donemKarsilastir(t(0, 0, 4), t(100000, 7, 0));
+    expect(r.ekran).toBeNaN();
+    expect(r.yuzde).toBeNull();
+  });
+  it('önceki dönem 0 / boşsa yüzde yok (0\'a bölme); kayıtsız dönem gerçek 0', () => {
+    expect(donemKarsilastir(t(5000, 1, 0), t(0, 0, 0))).toEqual({ ekran: 5000, yuzde: null, yon: null });
+    expect(donemKarsilastir(t(0, 0, 0), t(0, 0, 0)).ekran).toBe(0);
+  });
+});
+
