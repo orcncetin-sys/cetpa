@@ -31,7 +31,8 @@ export const FaturaKaydetSchema = z.object({
     })).min(1, 'En az bir satır gerekli.'),
     faturaTipi:   z.enum(['e-fatura', 'e-arsiv', 'ihracat']).optional(),
     kdvOran:      z.number().min(0).max(100).optional(),
-    // Siparişte seçilmiş sevk deposu (AddOrderModal/EditOrderModal). zod bilinmeyen alanı SİLER — şemada yoksa
+    // Siparişte seçilmiş sevk deposu (AddOrderModal + OrdersPage sipariş düzenleme modalı).
+    // zod bilinmeyen alanı SİLER — şemada yoksa
     // rotaya hiç ulaşmaz. Varsayılan YOK; yoksa gövde pariteye düşer (bkz. govdeFaturaIrsaliye başlığı).
     depoNo:       z.number().int().positive().optional(),
     createdAt:    z.string().optional(),

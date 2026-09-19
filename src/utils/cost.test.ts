@@ -9,7 +9,7 @@
  * sayılıyordu — maliyet ~40 kat düşük, marj şişkin.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { itemCostTRY, itemPriceTRY, maliyetDurumu, cevrilemeyenler, cevrilemeyenMesaji, maliyetTarihleri } from './cost';
+import { itemCostTRY, itemPriceTRY, maliyetDurumu, kartMaliyetiTL, cevrilemeyenler, cevrilemeyenMesaji, maliyetTarihleri } from './cost';
 import { kurArsiviDoldur, kurArsiviTemizle } from './kurArsivi';
 import type { InventoryItem } from '../types';
 
@@ -149,5 +149,39 @@ describe('fatura tarihine göre kur (kullanıcı kararı 2026-08-26)', () => {
       urun({ costPrice: 1, costCurrency: 'USD' }),                          // tarihsiz
     ];
     expect(maliyetTarihleri(liste).sort()).toEqual(['2024-01-02', '2024-05-09']);
+  });
+});
+
+/**
+ * `kartMaliyetiTL` — "stok kartında maliyet GİRİLMEMİŞ" hâlini 0'dan ayıran kapı.
+ *
+ * NEDEN (2026-09-19 hakem bulgusu, OrdersPage.tsx:289): kârlılık çözücüsü
+ * `maliyetDurumu(...).durum === 'tl' ? tl : null` süzgecinden geçiyordu; o süzgeç yalnız
+ * KUR çevrilememesini eliyor, EKSİK maliyeti elemiyordu. `hamMaliyet` alanı olmayan kart için
+ * 0 döndüğünden `{durum:'tl', tl:0}` çıkıyor, çözücü 0 veriyor, modül 0'ı meşru maliyet sayıp
+ * marjı %100 yeşil gösteriyordu (Şirin İnşaat / ÇİMENTO 50KG x100 @ ₺110 → "Kâr %100,0").
+ */
+describe('kartMaliyetiTL — stok kartının BİLİNEN maliyeti (kartta 0 "girilmemiş"tir)', () => {
+  it('maliyet alanı YOKSA null — eski süzgeç burada 0 verip marjı %100 gösterirdi', () => {
+    const kart = urun({});
+    expect(itemCostTRY(kart, KURLAR)).toBe(0);                       // eski yol: sahte "maliyetsiz"
+    expect(maliyetDurumu(kart, KURLAR)).toEqual({ durum: 'tl', tl: 0 });
+    expect(kartMaliyetiTL(kart, KURLAR)).toBeNull();
+  });
+
+  it('kartta costPrice 0 / negatif → null (girilmemiş sayılır)', () => {
+    expect(kartMaliyetiTL(urun({ costPrice: 0 }), KURLAR)).toBeNull();
+    expect(kartMaliyetiTL(urun({ costPrice: -5 }), KURLAR)).toBeNull();
+  });
+
+  it('PARİTE: bilinen maliyette sayı itemCostTRY ile birebir aynı', () => {
+    expect(kartMaliyetiTL(urun({ costPrice: 110 }), KURLAR)).toBe(110);
+    expect(kartMaliyetiTL(urun({ costPrice: 100, costCurrency: 'USD' }), KURLAR)).toBe(4000);
+    expect(kartMaliyetiTL(urun({ cost: 250 }), KURLAR)).toBe(250);   // eski alan adı da okunur
+  });
+
+  it('kur yoksa / birim tanınmıyorsa null — 0 DEĞİL', () => {
+    expect(kartMaliyetiTL(urun({ costPrice: 100, costCurrency: 'USD' }), null)).toBeNull();
+    expect(kartMaliyetiTL(urun({ costPrice: 100, costCurrency: 'GBP' as 'USD' }), KURLAR)).toBeNull();
   });
 });

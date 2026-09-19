@@ -152,6 +152,13 @@ export interface Order {
   ettn?: string;
   irsaliyeNo?: string;
   irsaliyeEttn?: string;
+  /**
+   * "Bu sevkiyat için Mikro'ya e-İrsaliye YAZILDI." `irsaliyeNo`dan AYRI, çünkü Mikro
+   * başarı dönüp numara döndürmeyebilir; o durumda numara uydurulamaz ama mükerrer
+   * gönderim de açık bırakılamaz. Tek yazıcısı `irsaliyeSonucYamasi`
+   * (src/utils/siparisler/irsaliyeGonder.ts).
+   */
+  irsaliyeGonderildi?: boolean;
   mikroSynced?: boolean;
   iyzicoPaymentUrl?: string;
   iyzicoToken?: string;

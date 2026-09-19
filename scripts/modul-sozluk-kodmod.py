@@ -146,9 +146,9 @@ def main():
             f" * Kapsam: {dosya}\n */\n"
             f"export const {sabit} = {{\n  tr: {{\n"
             + "\n".join(f"    {k}: {js(a)}," for k, (a, b) in sozluk.items())
-            + "\n  }},\n  en: {{\n"
+            + "\n  },\n  en: {\n"   # DÜZ dizge (f değil): tek süslü — 2026-09-19: çift süslü sıfırdan üretimde bozuk TS yazıyordu (yol ilk kez 4/n'de koştu)
             + "\n".join(f"    {k}: {js(b)}," for k, (a, b) in sozluk.items())
-            + "\n  }},\n}} as const;\n\n"
+            + "\n  },\n} as const;\n\n"
             f"export type {sabit.title()}Anahtar = keyof typeof {sabit}.tr;\n"
             f"type Sozluk = {{ readonly [K in {sabit.title()}Anahtar]: string }};\n\n"
             f"export function {ad}(dil: 'tr' | 'en' | boolean | string | undefined): Sozluk {{\n"

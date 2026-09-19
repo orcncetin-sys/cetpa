@@ -1,11 +1,12 @@
-import { itemCostTRY } from '../utils/cost';
+import { kartMaliyetiTL } from '../utils/cost';
 const CanliSevkiyatPanel = React.lazy(() => import('../components/CanliSevkiyatPanel'));
 import { eslesir } from '../utils/arama';
 import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli } from '../utils/siparis';
+import { irsaliyeIstegi, irsaliyeNedenMetni } from '../utils/siparisler/irsaliyeGonder';
 import { zamanMs, zamanDate, gunBasi, gunAnahtari, ayAnahtari, tarihYaz, tarihSaatYaz, bugunAnahtari } from '../utils/zaman';
 import type { BinSatiri } from '../hooks/useSekmeVerileri';
 import type { VehiclePosition } from '../types';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { pdfBaslik, pdfAltBilgi, pdfTabloStili, PDF_RENK, PDF_ALT_BANT_YUKSEKLIK } from '../utils/pdfTheme';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
@@ -28,7 +29,7 @@ import { logFirestoreError as handleFirestoreError, OperationType } from '../uti
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { exportOrdersCSV } from '../utils/export';
-import { kurCevir, formatInCurrency, paraYaz, kisaTutar } from '../utils/currency';
+import { formatInCurrency, paraYaz, kisaTutar } from '../utils/currency';
 import { registerTurkishFont } from '../utils/pdfFont';
 import AIInlineNudge from '../components/AIInlineNudge';
 import ModuleHeader from '../components/ModuleHeader';
@@ -46,8 +47,16 @@ import LocationStockReport from '../components/LocationStockReport';
 import { faturaTipiEtiketi, siparisDurumEtiketi } from '../utils/durumEtiketi';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz } from '../utils/belgeSablonu';
 import { siparisStokPlani, stokGecisi, ATLANMA_SEBEBI } from '../utils/siparisStok';
-import { satirTutari } from '../utils/para';
+import { satirTutari, ekranTutari } from '../utils/para';
+import { teslimPerformansi, oranYuzde, ihracatToplami, ihracatToplamiYaz, memnuniyetOrtalamasi } from '../utils/siparisler/lojistikKpi';
+import { siparisKarliligi, mesajTutari, kalemlerTutari, stokKartiBul, BILINMIYOR } from '../utils/siparisler/siparisKarlilik';
+import { odenmemisOzeti, kovaTutari } from '../utils/siparisler/tahsilatVade';
+import { iadeTutariDogrula, iadeOnTutar, iadeTutarYamasi, iadeGorunenTutar } from '../utils/siparisler/iadeTalep';
+import { kdvEtiketi, sayiGirdisi, miktarDogrula, degerDogrula, gorunenDeger, sevkiyatDegeriKaydi, kdvOraniDogrula, siparisDuzenlemeYamasi, yerelTutar, yerelSayi } from '../utils/siparisler/formKayit';
+import SevkDeposuSecici from '../components/SevkDeposuSecici';
+import { formSayisi, girilenAlanYamasi } from '../utils/muhasebe/irsaliyeCalisan';
 import { oc } from '../i18n/ortak';
+import { op } from '../i18n/orders';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -58,7 +67,11 @@ const SortIcon = ({ col, config }: { col: string; config: { key: string; dir: 'a
   </span>
 );
 
-// itemCostTRY tek kaynaktan: src/utils/cost.ts (kopyasi 2026-08-26'da kaldirildi).
+// Maliyet sınıflandırması tek kaynaktan: src/utils/cost.ts (kopyasi 2026-08-26'da kaldirildi).
+// `itemCostTRY` BU SAYFADA KULLANILMAZ: çevrilemeyen kalem için 0 döner (cost.ts'te belgeli),
+// o kalem sessizce "maliyetsiz" olup marjı şişirirdi. `maliyetDurumu(...).durum === 'tl'` süzgeci
+// de YETMİYOR — maliyeti hiç girilmemiş kart {durum:'tl', tl:0} döndüğü için o süzgeci geçiyor ve
+// marj %100 çıkıyordu (2026-09-19 hakem bulgusu). Doğru kapı: `kartMaliyetiTL` (bilinmiyorsa null).
 
 type TimelineEntry = { action: string; actor: string; ts: number; note?: string };
 
@@ -85,7 +98,7 @@ function OrderStatusTimeline({ status, lang = 'tr' }: { status: string; lang?: s
           </div>
           <div>
             <p className="font-bold text-red-600 text-sm">{oc(isTR).siparis_iptal_edildi}</p>
-            <p className="text-[11px] text-red-400">{isTR ? 'Bu sipariş iptal edilmiştir.' : 'This order has been cancelled.'}</p>
+            <p className="text-[11px] text-red-400">{op(isTR).bu_siparis_iptal_edilmistir}</p>
           </div>
         </div>
       ) : (
@@ -162,6 +175,15 @@ interface Props {
   orderLineItems: OrderLineItem[];
   setOrderLineItems: React.Dispatch<React.SetStateAction<OrderLineItem[]>>;
   handleMikroFatura: (order: Order) => Promise<void>;
+  handleEIrsaliye: (order: Order) => Promise<void>;
+  /**
+   * id → e-İrsaliye gönderimi SÜRÜYOR. App.tsx'ten gelir (istek orada atılıyor).
+   * Düğme bunu okumazsa yanıt beklerken etkin kalır ve ikinci tıklama Mikro'da İKİNCİ
+   * resmî belge üretir. Sayfa-yerel `useState` ile taklit EDİLEMEZ: bu sayfadaki
+   * `faturaLoading` / `iyzicoLinkLoading` setter'sız yerel state, yani kalıcı `{}` —
+   * o düğmelerin "yükleniyor" koruması fiilen ÖLÜ (ayrı açık madde).
+   */
+  eIrsaliyeGonderiliyor: Record<string, boolean>;
   handleIyzicoPaymentLink: (order: Order) => Promise<void>;
   setRouteStops: React.Dispatch<React.SetStateAction<RouteStop[]>>;
   /**
@@ -192,7 +214,7 @@ export default function OrdersPage({
   orders, leads, inventory, exchangeRates, employees,
   userRole, user, kpiCurrency, setKpiCurrency, activeTab, darkMode, warehouses, vehicles, aracKonumlari, konumYazabilir, kullaniciUid, locationStocks, shipments,
   newOrder, setNewOrder, orderLineItems, setOrderLineItems,
-  handleMikroFatura, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute, p554Bins,
+  handleMikroFatura, handleEIrsaliye, eIrsaliyeGonderiliyor, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute, p554Bins,
   handleToggleOrderPaid, trackView, openConfirm,
   toast, setActiveTab, setSelectedLead, setIsAddingOrder,
   logAuditAction,
@@ -211,6 +233,11 @@ export default function OrdersPage({
   const [showInvoiceAging, setShowInvoiceAging] = useState(false);
   const [isEditingOrder, setIsEditingOrder] = useState(false);
   const [editingOrderData, setEditingOrderData] = useState<Partial<Order>>({});
+  // Tutar kutusunun HAM metni ayrı tutulur: Partial<Order>.totalPrice `number` olduğu için
+  // boş kutu ancak `Number('') === 0` ile temsil edilebiliyordu (sahte ₺0). '' = bilinmiyor.
+  const [editingTutarHam, setEditingTutarHam] = useState('');
+  /** KDV oranı kutusunun HAM metni — aynı sebeple ayrı: '' = bilinmiyor, `?? 20` uydurulmaz. */
+  const [editingKdvHam, setEditingKdvHam] = useState('');
   const [isAddingShipment, setIsAddingShipment] = useState(false);
   const [newShipment, setNewShipment] = useState<Partial<Shipment>>({ status: 'Pending' });
   const [editingShipmentId, setEditingShipmentId] = useState<string|null>(null);
@@ -225,9 +252,12 @@ export default function OrdersPage({
   const [returnModal, setReturnModal] = useState<{ open: boolean; order: Order | null }>({ open: false, order: null });
   const [returnReason, setReturnReason] = useState('');
   const [returnItems, setReturnItems] = useState<string>('');
-  const [returnAmount, setReturnAmount] = useState<number>(0);
+  // BOŞ = bilinmiyor (₺0 DEĞİL): ön-dolum sipariş toplamı bilinmeyince alanı boş bırakır.
+  const [returnAmount, setReturnAmount] = useState<number | null>(null);
   const [showRecurringForm, setShowRecurringForm] = useState(false);
-  const [recurringForm, setRecurringForm] = useState({ templateName: '', customerName: '', totalPrice: 0, frequency: 'monthly' as 'weekly' | 'monthly' | 'quarterly', nextDue: '' });
+  // `totalPrice` HAM metin tutulur ('' = bilinmiyor): sayı tutulduğunda boş kutu ancak
+  // `Number('') === 0` ile temsil edilebiliyordu ve ₺0 şablon sessizce ₺0 sipariş üretiyordu.
+  const [recurringForm, setRecurringForm] = useState({ templateName: '', customerName: '', totalPrice: '', frequency: 'monthly' as 'weekly' | 'monthly' | 'quarterly', nextDue: '' });
   const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   const [dragIndex, setDragIndex] = useState<number|null>(null);
 
@@ -253,11 +283,37 @@ export default function OrdersPage({
   
   const activeOrders = orderSourceTab === 'cetpa' ? orders : mappedMikroSiparisler;
 
+  // Faz 3 4/n: ödenmemiş (alacak) özetinin TEK hesabı — Phase 522 KPI şeridi ile Phase 521
+  // yaşlandırması artık AYNI kümeyi görüyor. Eskiden iki ayrı süzgeç vardı: KPI tarihi
+  // çözülemeyen siparişi sayıyor, yaşlandırma (565'teki `zamanMs(...) !== null`) onu sessizce
+  // düşürüyordu; iki panel farklı rakam basıyordu. Tarihsizler artık `vadeOzeti.tarihsiz`.
+  // useMemo YOK: `odenmemisOzeti` varsayılan `new Date()` alır, memolanırsa gece yarısını
+  // geçince yaş kovaları bayatlar (eski kod da her render'da `Date.now()` okuyordu).
+  const vadeOzeti = odenmemisOzeti(activeOrders);
+
+  // Sipariş kârlılığı TEK hesap: Phase 513 popup'ı ile Phase 74 kutusu ARTIK aynı sayıyı gösterir
+  // (eskiden iki ayrı kural aynı modalde iki farklı marj basabiliyordu). Kalemin kendi costPrice'ı
+  // yoksa stok kartına bakılır; çözüm `kartMaliyetiTL` ile yapılır — `itemCostTRY` ÇEVRİLEMEYEN
+  // kalem için 0 döner, `maliyetDurumu(...).durum === 'tl'` süzgeci ise maliyeti hiç GİRİLMEMİŞ
+  // kartı ({durum:'tl', tl:0}) eleyemez; ikisi de o kalemi sessizce "maliyetsiz" yapıp marjı
+  // %100'e çıkarıyordu (2026-09-19 hakem bulgusu). Uydurma %60 oranı da kalkmıştı.
+  // Kart eşleşmesi `stokKartiBul` ile: ham `i.sku === li.sku` kuralı BOŞ SKU'da ('' === '')
+  // serbest satırı (nakliye bedeli, kanal siparişi kalemi) katalogdaki SKU'suz İLK karta
+  // bağlıyor ve o ilgisiz kartın maliyetini "bilinen maliyet" sayıyordu (2026-09-19 delta).
+  const siparisKar = useMemo(
+    () => selectedOrder ? siparisKarliligi(selectedOrder, li => {
+      const inv = stokKartiBul(inventory, li);
+      if (!inv) return null;
+      return kartMaliyetiTL(inv, exchangeRates);
+    }) : null,
+    [selectedOrder, inventory, exchangeRates],
+  );
+
   const [p513Selected, setP513Selected] = useState<string|null>(null);
   const [p554AddForm, setP554AddForm] = useState(false);
   const [p554Draft, setP554Draft] = useState({ warehouseId: '', binCode: '', productSku: '', productName: '', quantity: '', minQty: '', notes: '' });
   const [p554Search, setP554Search] = useState('');
-  const [p575Returns, setP575Returns] = useState<Array<{id:string;orderId:string;customerName:string;reason:string;status:'Bekliyor'|'Onaylandı'|'Reddedildi'|'Tamamlandı';amount:number;createdAt?:unknown}>>([]);
+  const [p575Returns, setP575Returns] = useState<Array<{id:string;orderId:string;customerName:string;reason:string;status:'Bekliyor'|'Onaylandı'|'Reddedildi'|'Tamamlandı';amount:number|null;createdAt?:unknown}>>([]);
   const [p575ShowForm, setP575ShowForm] = useState(false);
   const [p575Draft, setP575Draft] = useState({orderId:'',customerName:'',reason:'',amount:''});
   const [p576Period, setP576Period] = useState<'7d'|'30d'|'90d'>('30d');
@@ -277,7 +333,9 @@ export default function OrdersPage({
   const [p621Demands] = useState<Array<{id:string;productName:string;sku:string;requestedQty:number;requestedBy:string;priority:'Düşük'|'Orta'|'Yüksek';status:'Bekliyor'|'Onaylandı'|'Reddedildi'|'Sipariş Verildi';notes?:string;createdAt:string}>>([]);
   const [p621ShowForm, setP621ShowForm] = useState(false);
   const [p621Draft, setP621Draft] = useState({productName:'',sku:'',requestedQty:'',requestedBy:'',priority:'Orta' as 'Düşük'|'Orta'|'Yüksek',notes:''});
-  const [p622Shipments, setP622Shipments] = useState<Array<{id:string;orderRef:string;destination:string;incoterm:'EXW'|'FOB'|'CIF'|'DDP';currency:'USD'|'EUR'|'TRY';value:number;status:'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi';exportDate:string;customsRef?:string}>>([]);
+  // `value: number | null` — null = tutar BİLİNMİYOR. Eski `Number(v) || 0` kaydı sahte $0
+  // yazıyordu; o kayıtların düzeltilebilmesi için alan açıkça null'lanabilmeli (2026-09-19 delta).
+  const [p622Shipments, setP622Shipments] = useState<Array<{id:string;orderRef:string;destination:string;incoterm:'EXW'|'FOB'|'CIF'|'DDP';currency:'USD'|'EUR'|'TRY';value:number|null;status:'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi';exportDate:string;customsRef?:string}>>([]);
   const [p622ShowForm, setP622ShowForm] = useState(false);
   const [p622Draft, setP622Draft] = useState({orderRef:'',destination:'',incoterm:'FOB' as 'EXW'|'FOB'|'CIF'|'DDP',currency:'USD' as 'USD'|'EUR'|'TRY',value:'',status:'Hazırlanıyor' as 'Hazırlanıyor'|'Gümrükte'|'Yolda'|'Teslim Edildi',exportDate:bugunAnahtari(),customsRef:''});
 
@@ -416,12 +474,15 @@ export default function OrdersPage({
     setOrderNoteSaving(true);
     try {
       await updateDoc(doc(db, 'orders', selectedOrder.id), { notes: orderNoteText, updatedAt: serverTimestamp() });
-      setSelectedOrder({ ...selectedOrder, notes: orderNoteText });
+      // İŞLEVSEL güncelleyici (bkz. sayfa başındaki "bayat selectedOrder" notu): `await`
+      // sırasında App.tsx e-İrsaliye işaretini yazmış olabilir; kapanıştaki nesneyi yaymak
+      // o işareti yerelde siler ve düğme yeniden etkinleşir.
+      setSelectedOrder(o => (o && o.id === selectedOrder.id ? { ...o, notes: orderNoteText } : o));
       setOrderNoteSaved(true);
       setTimeout(() => setOrderNoteSaved(false), 2000);
     } catch (e) {
       console.error('[handleSaveOrderNote]', e);
-      toast(currentLanguage === 'tr' ? 'Not kaydedilemedi.' : 'Could not save note.', 'error');
+      toast(op(currentLanguage).not_kaydedilemedi, 'error');
     } finally { setOrderNoteSaving(false); }
   };
 
@@ -501,7 +562,7 @@ export default function OrdersPage({
                         );
                       }}
                       className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 text-xs font-semibold transition-colors"
-                      title={currentLanguage === 'tr' ? 'Filtrelenmiş siparişleri CSV olarak indir' : 'Export filtered orders as CSV'}
+                      title={op(currentLanguage).filtrelenmis_siparisleri_csv_olarak_indir}
                     >
                       <Download className="w-3.5 h-3.5" />
                       {orderStatusFilter !== 'All'
@@ -521,14 +582,14 @@ export default function OrdersPage({
                   className={clsx("px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2", orderSourceTab === 'cetpa' ? "bg-white text-brand shadow-sm" : "text-gray-500 hover:text-gray-700")}
                 >
                   <Package className="w-4 h-4" />
-                  {currentLanguage === 'tr' ? 'Cetpa Siparişleri' : 'Cetpa Orders'}
+                  {op(currentLanguage).cetpa_siparisleri}
                 </button>
                 <button
                   onClick={() => setOrderSourceTab('mikro')}
                   className={clsx("px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2", orderSourceTab === 'mikro' ? "bg-white text-brand shadow-sm" : "text-gray-500 hover:text-gray-700")}
                 >
                   <RefreshCw className="w-4 h-4" />
-                  {currentLanguage === 'tr' ? 'Mikro Siparişleri' : 'Mikro Orders'}
+                  {op(currentLanguage).mikro_siparisleri}
                 </button>
               </div>
 
@@ -538,17 +599,49 @@ export default function OrdersPage({
                 const delivered522 = activeOrders.filter(o => o.status === 'Delivered').length;
                 const pending522 = activeOrders.filter(o => o.status === 'Pending').length;
                 const inProgress522 = activeOrders.filter(o => o.status === 'Processing' || o.status === 'Shipped').length;
-                const fulfillRate = total522 > 0 ? Math.round((delivered522 / total522) * 100) : 0;
-                const unpaidOrders = activeOrders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o));
-                const unpaidTotal = unpaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                // Teslimat oranı tek kaynaktan (`oranYuzde`): payda 0 → BİLİNMİYOR. Şerit
+                // `activeOrders.length >= 3` ile açılıyor ama payda İPTAL OLMAYAN siparişleri
+                // sayıyor — hepsi 'Cancelled' ise (yeni kiracının deneme siparişleri) eski
+                // `: 0` dalı KIRMIZI "0%" + "0 / 0" basıyor, ölçülemeyen oran "teslimat
+                // performansı sıfır" diye okunuyordu. Aynı sayfadaki Lojistik KPI kartları
+                // aynı durumda gri '—' basıyordu — iki yüzey iki sözleşme (2026-09-19 kapanış).
+                // PARİTE: bilinen paydada `Math.round(oranYuzde(...))` eski ifadeyle aynı sayı.
+                const fulfillRate = oranYuzde(delivered522, total522);
+                // Alacak toplamı: bilinenlerin KISMİ toplamı; hiç bilinen tutar yoksa NaN → kisaTutar '—' basar
+                // (eski `|| 0` tutarı bilinmeyen siparişi ₺0 sayıyor, toplam sessizce EKSİK çıkıyordu).
+                const unpaidTotal = ekranTutari(vadeOzeti.toplam);
+                // "Tahsilatı Cetpa'da izlenen kayıt var mı": Mikro sekmesinde (source 'mikro-*') HİÇ yok
+                // (odemeTakipli). Orada boş liste `ekranTutari` sözleşmesince gerçek 0'dır — ama ekranda
+                // yeşil "₺0K" = "alacağın yok" diye okunuyordu; oysa alacak Mikro cari hesapta YAŞIYOR,
+                // yalnız burada izlenmiyor. Bilinmeyeni 0 göstermemek için '—' + açık not basılır.
+                // Süzgeç veriden türetilir, sekmeden değil: hepsi ÖDENMİŞ olduğu için 0 çıkan gerçek
+                // "alacağın yok" durumu (izlenen kayıt VAR) eskisi gibi yeşil ₺0 kalır.
+                const izlenenVar = activeOrders.some(odemeTakipli);
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
-                      { label: currentLanguage === 'tr' ? 'Teslimat Oranı' : 'Fulfillment Rate', value: `${fulfillRate}%`, color: fulfillRate >= 80 ? 'text-emerald-600' : fulfillRate >= 60 ? 'text-amber-600' : 'text-red-600', bg: 'bg-white', sub: `${delivered522} / ${total522}` },
+                      { label: op(currentLanguage).teslimat_orani,
+                        // Ölçülemeyen oranda eşik RENGİ ÇİZİLMEZ (nötr gri) — kırmızı "%0" bir
+                        // ölçüm değil, uydurulmuş kötü haberdi.
+                        value: fulfillRate === null ? '—' : `${Math.round(fulfillRate)}%`,
+                        color: fulfillRate === null ? 'text-gray-400' : fulfillRate >= 80 ? 'text-emerald-600' : fulfillRate >= 60 ? 'text-amber-600' : 'text-red-600',
+                        bg: 'bg-white',
+                        sub: fulfillRate === null
+                          ? (op(currentLanguage).iptal_disi_siparis_yok)
+                          : `${delivered522} / ${total522}` },
                       { label: oc(currentLanguage).bekleyen, value: pending522.toString(), color: pending522 > 0 ? 'text-amber-600' : 'text-gray-400', bg: 'bg-white', sub: null },
-                      { label: currentLanguage === 'tr' ? 'Hazırlanıyor/Kargoda' : 'In Progress', value: inProgress522.toString(), color: inProgress522 > 0 ? 'text-blue-600' : 'text-gray-400', bg: 'bg-white', sub: null },
-                      { label: currentLanguage === 'tr' ? 'Alacak Toplam' : 'Outstanding', value: kisaTutar(unpaidTotal, { fmt: unpaidTotal >= 1e6 ? 'M' : 'K', ondalik: 1 }), color: unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600', bg: unpaidTotal > 0 ? 'bg-red-50' : 'bg-white',
-                        sub: unpaidOrders.length > 0 ? `${unpaidOrders.length} ${oc(currentLanguage).siparis}` : null },
+                      { label: op(currentLanguage).hazirlaniyor_kargoda, value: inProgress522.toString(), color: inProgress522 > 0 ? 'text-blue-600' : 'text-gray-400', bg: 'bg-white', sub: null },
+                      { label: op(currentLanguage).alacak_toplam,
+                        value: izlenenVar ? kisaTutar(unpaidTotal, { fmt: Number.isFinite(unpaidTotal) && unpaidTotal >= 1e6 ? 'M' : 'K', ondalik: 1 }) : '—',
+                        // BİLİNMİYOR yeşil DEĞİL: eski `unpaidTotal > 0 ? kırmızı : yeşil` kapısı, tutarların
+                        // hepsi bilinmediğinde (NaN > 0 === false) kartı yeşile çevirip "alacağın yok" diyordu.
+                        color: !izlenenVar || !Number.isFinite(unpaidTotal) ? 'text-gray-400' : unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600',
+                        bg: izlenenVar && Number.isFinite(unpaidTotal) && unpaidTotal > 0 ? 'bg-red-50' : 'bg-white',
+                        sub: !izlenenVar
+                          ? (op(currentLanguage).mikro_cari_hesapta_izleniyor)
+                          : vadeOzeti.adet > 0
+                            ? `${vadeOzeti.adet} ${oc(currentLanguage).siparis}${vadeOzeti.toplam.bilinmeyen > 0 ? (currentLanguage === 'tr' ? ` · ${vadeOzeti.toplam.bilinmeyen} kayıt tutarsız` : ` · ${vadeOzeti.toplam.bilinmeyen} without amount`) : ''}`
+                            : null },
                     ].map((k, i) => (
                       <div key={i} className={cn("rounded-xl border border-gray-100 shadow-sm px-4 py-3", k.bg)}>
                         <p className={cn("text-xl font-black", k.color)}>{k.value}</p>
@@ -562,30 +655,17 @@ export default function OrdersPage({
 
               {/* ── Phase 521: Invoice Aging Alert ── */}
               {(() => {
-                const unpaid521 = activeOrders.filter(o => !o.paid && o.status !== 'Cancelled' && zamanMs(o.createdAt ?? o.syncedAt) !== null && odemeTakipli(o)); // tarihi çözülemeyen fatura burada düşer → başlık sayacı ile kovalar aynı kümeyi görür
-                if (unpaid521.length === 0) return null;
-                const now521 = Date.now();
-                const buckets521 = [
-                  { label: '0–30', labelTR: '0–30 gün', items: [] as typeof unpaid521 },
-                  { label: '31–60', labelTR: '31–60 gün', items: [] as typeof unpaid521 },
-                  { label: '61–90', labelTR: '61–90 gün', items: [] as typeof unpaid521 },
-                  { label: '90+', labelTR: '90+ gün', items: [] as typeof unpaid521 },
-                ];
-                for (const o of unpaid521) {
-                  const ms = zamanMs(o.createdAt ?? o.syncedAt);
-                  if (ms === null) continue; // filtre zaten eledi; TS daraltması için korunuyor
-                  const age = Math.floor((now521 - ms) / 86400000);
-                  if (age <= 30) buckets521[0].items.push(o);
-                  else if (age <= 60) buckets521[1].items.push(o);
-                  else if (age <= 90) buckets521[2].items.push(o);
-                  else buckets521[3].items.push(o);
-                }
-                const hasOld = buckets521[1].items.length + buckets521[2].items.length + buckets521[3].items.length > 0;
+                // Kova sınırları (≤30/≤60/≤90/90+), aday süzgeci ve gecikme günü tek kaynakta:
+                // utils/siparisler/tahsilatVade → utils/muhasebe/arYaslandirma. Tarihi okunamayan
+                // ödenmemiş sipariş artık SESSİZCE DÜŞMÜYOR — `vadeOzeti.tarihsiz` ile ayrı gösterilir.
+                if (vadeOzeti.adet === 0) return null;
+                const buckets521 = vadeOzeti.kovalar;
+                const hasOld = vadeOzeti.eskiVar;
                 if (!hasOld && !showInvoiceAging) return (
                   <button onClick={() => setShowInvoiceAging(true)}
                     className="text-[10px] font-semibold text-gray-400 hover:text-red-600 transition-colors flex items-center gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    {unpaid521.length} {currentLanguage === 'tr' ? 'ödenmemiş sipariş — Alacak yaşlandırması görüntüle' : 'unpaid orders — Show aging'}
+                    {vadeOzeti.adet} {op(currentLanguage).odenmemis_siparis_alacak_yaslandirmasi_goruntule}
                   </button>
                 );
                 return (
@@ -594,25 +674,36 @@ export default function OrdersPage({
                       <div className="flex items-center gap-2">
                         <AlertTriangle className={cn("w-4 h-4", hasOld ? "text-red-500" : "text-amber-400")} />
                         <span className="text-xs font-bold text-gray-800">
-                          {currentLanguage === 'tr' ? 'Alacak Yaşlandırma Raporu' : 'Invoice Aging Report'}
+                          {op(currentLanguage).alacak_yaslandirma_raporu}
                         </span>
                         <span className={cn("text-[10px] font-black px-2 py-0.5 rounded-full", hasOld ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700")}>
-                          {unpaid521.length} {oc(currentLanguage).acik_2}
+                          {vadeOzeti.yaslandirilanAdet} {oc(currentLanguage).acik_2}
                         </span>
+                        {vadeOzeti.tarihsiz > 0 && (
+                          <span className="text-[10px] font-semibold text-gray-400"
+                            title={op(currentLanguage).tarihi_okunamadigi_icin_hicbir_yas_kovasina_konu}>
+                            +{vadeOzeti.tarihsiz} {op(currentLanguage).tarihsiz}
+                          </span>
+                        )}
                       </div>
                       <ChevronDown className={cn("w-4 h-4 text-gray-400 transition-transform", showInvoiceAging && "rotate-180")} />
                     </button>
                     {showInvoiceAging && (
                       <div className="px-5 pb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                         {buckets521.map(b => (
-                          <div key={b.label} className={cn("rounded-xl border p-3 text-center", b.items.length > 0 ? (b.label === '90+' ? 'bg-red-100 border-red-200' : b.label === '61–90' ? 'bg-orange-50 border-orange-100' : b.label === '31–60' ? 'bg-amber-50 border-amber-100' : 'bg-white border-gray-100') : 'bg-white border-gray-100 opacity-50')}>
-                            <p className={cn("text-2xl font-black", b.items.length > 0 && b.label === '90+' ? 'text-red-600' : b.items.length > 0 ? 'text-amber-700' : 'text-gray-300')}>
-                              {b.items.length}
+                          <div key={b.ad} className={cn("rounded-xl border p-3 text-center", b.adet > 0 ? (b.ad === 'b90p' ? 'bg-red-100 border-red-200' : b.ad === 'b61_90' ? 'bg-orange-50 border-orange-100' : b.ad === 'b31_60' ? 'bg-amber-50 border-amber-100' : 'bg-white border-gray-100') : 'bg-white border-gray-100 opacity-50')}>
+                            <p className={cn("text-2xl font-black", b.adet > 0 && b.ad === 'b90p' ? 'text-red-600' : b.adet > 0 ? 'text-amber-700' : 'text-gray-300')}>
+                              {b.adet}
                             </p>
-                            <p className="text-[10px] font-bold text-gray-400 uppercase mt-0.5">{currentLanguage === 'tr' ? b.labelTR : b.label}</p>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase mt-0.5">{currentLanguage === 'tr' ? b.etiketTR : b.etiket}</p>
                             <p className="text-[9px] text-gray-500 mt-1">
-                              {paraYaz(b.items.reduce((s,o)=>s+(o.totalPrice||0),0), { ondalik: 0 })}
+                              {paraYaz(kovaTutari(b), { ondalik: 0 })}
                             </p>
+                            {b.tutar.bilinmeyen > 0 && (
+                              <p className="text-[9px] text-gray-400">
+                                {b.tutar.bilinmeyen} {op(currentLanguage).kayit_tutarsiz}
+                              </p>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -624,15 +715,15 @@ export default function OrdersPage({
               {/* ── Bulk action bar (appears when orders are selected) ── */}
               {selectedOrderIds.size > 0 && (
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-[#1a3a5c] text-white px-5 py-3 rounded-2xl shadow-2xl border border-white/10">
-                  <span className="text-sm font-bold">{selectedOrderIds.size} {currentLanguage === 'tr' ? 'sipariş seçildi' : 'orders selected'}</span>
+                  <span className="text-sm font-bold">{selectedOrderIds.size} {op(currentLanguage).siparis_secildi}</span>
                   <div className="w-px h-5 bg-white/20" />
                   {(['Processing', 'Shipped', 'Delivered'] as Order['status'][]).map(s => (
                     <button
                       key={s}
                       disabled={bulkActionLoading}
                       onClick={() => openConfirm({
-                        title: currentLanguage === 'tr' ? 'Toplu Güncelleme' : 'Bulk Update',
-                        message: `${selectedOrderIds.size} ${currentLanguage === 'tr' ? 'siparişin durumunu' : "orders'"} "${s}" ${currentLanguage === 'tr' ? 'olarak güncellensin mi?' : 'status update?'}`,
+                        title: op(currentLanguage).toplu_guncelleme,
+                        message: `${selectedOrderIds.size} ${op(currentLanguage).siparisin_durumunu} "${s}" ${op(currentLanguage).olarak_guncellensin_mi}`,
                         onConfirm: async () => {
                           setBulkActionLoading(true);
                           for (const id of selectedOrderIds) {
@@ -652,9 +743,9 @@ export default function OrdersPage({
                   <button
                     disabled={bulkActionLoading}
                     onClick={() => openConfirm({
-                      title: currentLanguage === 'tr' ? 'Toplu Ödeme Onayla' : 'Bulk Mark Paid',
-                      message: `${selectedOrderIds.size} ${currentLanguage === 'tr' ? 'sipariş ödendi olarak işaretlensin mi?' : 'orders marked as paid?'}`,
-                      confirmLabel: currentLanguage === 'tr' ? '✓ Ödendi Yap' : '✓ Mark Paid',
+                      title: op(currentLanguage).toplu_odeme_onayla,
+                      message: `${selectedOrderIds.size} ${op(currentLanguage).siparis_odendi_olarak_isaretlensin_mi}`,
+                      confirmLabel: op(currentLanguage).odendi_yap,
                       onConfirm: async () => {
                         setBulkActionLoading(true);
                         const sel = activeOrders.filter(o => selectedOrderIds.has(o.id));
@@ -674,7 +765,7 @@ export default function OrdersPage({
                     className="text-xs font-bold px-3 py-1.5 rounded-xl bg-emerald-500/80 hover:bg-emerald-500 transition-colors disabled:opacity-50 flex items-center gap-1.5"
                   >
                     <CreditCard className="w-3.5 h-3.5" />
-                    {currentLanguage === 'tr' ? 'Ödendi' : 'Mark Paid'}
+                    {op(currentLanguage).odendi}
                   </button>
                   <div className="w-px h-5 bg-white/20" />
                   <button
@@ -689,7 +780,7 @@ export default function OrdersPage({
                           // Bu belge duz metin baslik ve autoTable'in VARSAYILAN
                           // MAVI tablosuyla cikiyordu.
                           const govdeY = pdfBaslik(pdf, {
-                            belgeAdi: currentLanguage === 'tr' ? 'SİPARİŞ LİSTESİ' : 'ORDER LIST',
+                            belgeAdi: op(currentLanguage).siparis_listesi,
                             meta: tarihYaz(new Date()),
                           });
                           autoTable(pdf, {
@@ -741,7 +832,7 @@ export default function OrdersPage({
                         <div className="flex items-center gap-2">
                           <RefreshCw size={14} className="text-gray-400" />
                           <h3 className="text-sm font-bold text-gray-700">
-                            {currentLanguage === 'tr' ? 'Tekrarlayan Siparişler' : 'Recurring Orders'}
+                            {op(currentLanguage).tekrarlayan_siparisler}
                           </h3>
                           {recurringOrders.length > 0 && (
                             <span className="text-[10px] bg-gray-100 text-gray-500 font-bold px-1.5 py-0.5 rounded-full">
@@ -753,7 +844,7 @@ export default function OrdersPage({
                           onClick={() => setShowRecurringForm(v => !v)}
                           className="text-[10px] font-bold text-brand hover:underline flex items-center gap-1"
                         >
-                          <Plus size={11} />{currentLanguage === 'tr' ? 'Şablon Ekle' : 'Add Template'}
+                          <Plus size={11} />{op(currentLanguage).sablon_ekle}
                         </button>
                       </div>
 
@@ -770,7 +861,7 @@ export default function OrdersPage({
                                 <div className="relative">
                                   <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">₺</span>
                                   <input type="number" className="apple-input text-sm pl-6 w-full" placeholder={oc(currentLanguage).tutar}
-                                    value={recurringForm.totalPrice || ''} onChange={e => setRecurringForm(f => ({ ...f, totalPrice: Number(e.target.value) }))} />
+                                    value={recurringForm.totalPrice} onChange={e => setRecurringForm(f => ({ ...f, totalPrice: e.target.value }))} />
                                 </div>
                                 <select className="apple-input text-sm" value={recurringForm.frequency} onChange={e => setRecurringForm(f => ({ ...f, frequency: e.target.value as typeof recurringForm.frequency }))}>
                                   <option value="weekly">{oc(currentLanguage).haftalik}</option>
@@ -779,16 +870,20 @@ export default function OrdersPage({
                                 </select>
                               </div>
                               <div className="flex items-center gap-2">
-                                <label className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Sonraki vade:' : 'Next due:'}</label>
+                                <label className="text-xs text-gray-500">{op(currentLanguage).sonraki_vade}</label>
                                 <input type="date" className="apple-input text-sm" value={recurringForm.nextDue} onChange={e => setRecurringForm(f => ({ ...f, nextDue: e.target.value }))} />
                                 <button
                                   disabled={!recurringForm.templateName || !recurringForm.customerName}
                                   onClick={async () => {
                                     if (!recurringForm.templateName) return;
-                                    await addDoc(collection(db, 'recurringOrders'), { ...recurringForm, active: true, createdAt: serverTimestamp() });
-                                    setRecurringForm({ templateName: '', customerName: '', totalPrice: 0, frequency: 'monthly', nextDue: '' });
+                                    const sablonTutar = degerDogrula(recurringForm.totalPrice);
+                                    if (!sablonTutar.gecerli) { toast(sablonTutar.hata === 'deger_bos'
+                                      ? (op(currentLanguage).sablon_tutari_girin_bos_alan_0_olarak_kaydedilme)
+                                      : (op(currentLanguage).sablon_tutari_0_dan_buyuk_olmali), 'error'); return; }
+                                    await addDoc(collection(db, 'recurringOrders'), { ...recurringForm, totalPrice: sablonTutar.deger, active: true, createdAt: serverTimestamp() });
+                                    setRecurringForm({ templateName: '', customerName: '', totalPrice: '', frequency: 'monthly', nextDue: '' });
                                     setShowRecurringForm(false);
-                                    toast(currentLanguage === 'tr' ? 'Şablon eklendi.' : 'Template added.', 'success');
+                                    toast(op(currentLanguage).sablon_eklendi, 'success');
                                   }}
                                   className="apple-button-primary text-xs px-4 ml-auto disabled:opacity-50"
                                 >{oc(currentLanguage).ekle}</button>
@@ -801,7 +896,7 @@ export default function OrdersPage({
                       {recurringOrders.length === 0 ? (
                         <div className="py-8 text-center">
                           <RefreshCw size={28} className="mx-auto mb-2 text-gray-200" />
-                          <p className="text-xs text-gray-400">{currentLanguage === 'tr' ? 'Tekrarlayan sipariş şablonu yok.' : 'No recurring order templates.'}</p>
+                          <p className="text-xs text-gray-400">{op(currentLanguage).tekrarlayan_siparis_sablonu_yok}</p>
                         </div>
                       ) : (
                         <div className="divide-y divide-gray-50">
@@ -831,7 +926,7 @@ export default function OrdersPage({
                                   }}
                                   className={`text-[9px] font-bold px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${r.active ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-700' : 'bg-gray-100 text-gray-500 hover:bg-emerald-100 hover:text-emerald-700'}`}
                                 >
-                                  {r.active ? (oc(currentLanguage).aktif) : (currentLanguage === 'tr' ? 'Pasif' : 'Paused')}
+                                  {r.active ? (oc(currentLanguage).aktif) : (op(currentLanguage).pasif)}
                                 </button>
                               </div>
                             );
@@ -888,7 +983,7 @@ export default function OrdersPage({
                         : darkMode ? "bg-white/5 border-white/10 text-white/60 hover:bg-white/10" : "bg-white border-gray-200 text-gray-500 hover:border-gray-300 hover:text-amber-600"
                     )}
                   >
-                    ★ {currentLanguage === 'tr' ? 'Yıldızlı' : 'Starred'}
+                    ★ {op(currentLanguage).yildizli}
                     <span className={cn("text-[9px] px-1 py-0.5 rounded-full", orderStatusFilter === '__starred__' ? "bg-white/20" : darkMode ? "bg-white/10" : "bg-gray-100")}>{starredOrders.size}</span>
                   </button>
                 )}
@@ -964,7 +1059,7 @@ export default function OrdersPage({
                       onClick={() => setOrderStatusFilter('Pending')}
                       className="text-[10px] font-bold text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 px-2.5 py-1 rounded-full transition-colors flex-shrink-0"
                     >
-                      {currentLanguage === 'tr' ? 'İncele' : 'Review'}
+                      {op(currentLanguage).incele}
                     </button>
                   </div>
                 );
@@ -1077,7 +1172,7 @@ export default function OrdersPage({
                                     setTimeout(() => setCopiedOrderId(null), 1500);
                                   }}
                                   className="text-gray-400 hover:text-brand transition-colors p-2 -m-2"
-                                  title={currentLanguage === 'tr' ? 'Sipariş ID\'yi kopyala' : 'Copy order ID'}
+                                  title={op(currentLanguage).siparis_id_yi_kopyala}
                                 >
                                   {copiedOrderId === order.id
                                     ? <Check className="w-3 h-3 text-emerald-500" />
@@ -1095,10 +1190,10 @@ export default function OrdersPage({
                                         : "bg-gray-100 text-gray-500 hover:bg-brand/10 hover:text-brand"
                                     )}
                                     title={expandedOrderId === order.id
-                                      ? (currentLanguage === 'tr' ? 'Ürünleri gizle' : 'Hide items')
-                                      : (currentLanguage === 'tr' ? 'Ürünleri göster' : 'Show items')}
+                                      ? (op(currentLanguage).urunleri_gizle)
+                                      : (op(currentLanguage).urunleri_goster)}
                                   >
-                                    {order.lineItems.length} {currentLanguage === 'tr' ? 'ürün' : 'item' + (order.lineItems.length !== 1 ? 's' : '')}
+                                    {order.lineItems.length} {op(currentLanguage).urun + (order.lineItems.length !== 1 ? 's' : '')}
                                     <ChevronDown className={cn("w-2.5 h-2.5 transition-transform", expandedOrderId === order.id && "rotate-180")} />
                                   </button>
                                 )}
@@ -1188,15 +1283,15 @@ export default function OrdersPage({
                                 {order.source === 'mikro-fatura' ? (
                                   <span className="text-[9px] font-bold bg-[#1a3a5c]/10 text-[#1a3a5c] px-1.5 py-0.5 rounded-full"
                                     title={currentLanguage === 'tr' ? `Mikro satış faturasından türetildi (${order.mikroEvrak ? order.mikroEvrak.seri + order.mikroEvrak.sira : ''})` : 'Derived from Mikro sales invoice'}>
-                                    {currentLanguage === 'tr' ? 'MİKRO FATURA' : 'MIKRO INVOICE'}
+                                    {op(currentLanguage).mikro_fatura}
                                   </span>
                                 ) : order.faturali ? (
                                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${order.faturaTipi==='ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi==='e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
-                                    {order.faturaTipi ? faturaTipiEtiketi(order.faturaTipi, currentLanguage) : 'e-FATURA'} • KDV%{order.kdvOran ?? 0}
+                                    {order.faturaTipi ? faturaTipiEtiketi(order.faturaTipi, currentLanguage) : 'e-FATURA'} • {kdvEtiketi(order.kdvOran)}
                                   </span>
                                 ) : (
                                   <span className="text-[9px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full">
-                                    {currentLanguage === 'tr' ? 'FATURASIZ' : 'NO INVOICE'}
+                                    {op(currentLanguage).faturasiz}
                                   </span>
                                 )}
                                 {/* Phase 67: Mikro sync badge */}
@@ -1205,7 +1300,7 @@ export default function OrdersPage({
                                     ✓ {order.mikroFaturaNo}
                                   </span>
                                 ) : order.faturali ? (
-                                  <span className="text-[9px] text-amber-500 font-medium inline-flex items-center gap-0.5" title={currentLanguage === 'tr' ? 'Mikro\'ya gönderilmedi' : 'Not pushed to Mikro'}>
+                                  <span className="text-[9px] text-amber-500 font-medium inline-flex items-center gap-0.5" title={op(currentLanguage).mikro_ya_gonderilmedi}>
                                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
                                     Mikro
                                   </span>
@@ -1214,7 +1309,7 @@ export default function OrdersPage({
                                 {odemeTakipli(order) ? (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleToggleOrderPaid(order); }}
-                                  title={order.paid ? (oc(currentLanguage).odendi_tikla_odenmedi_yap) : (currentLanguage === 'tr' ? 'Ödenmedi — tıkla: ödendi yap' : 'Unpaid — click to mark paid')}
+                                  title={order.paid ? (oc(currentLanguage).odendi_tikla_odenmedi_yap) : (op(currentLanguage).odenmedi_tikla_odendi_yap)}
                                   className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full transition-colors ${order.paid ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}
                                 >
                                   {order.paid ? (oc(currentLanguage).odendi_2) : (oc(currentLanguage).odenmedi)}
@@ -1222,15 +1317,15 @@ export default function OrdersPage({
                                 ) : (
                                   <span className="text-[9px] font-medium text-gray-400"
                                     title={oc(currentLanguage).tahsilat_durumu_mikro_cari_hesapta_izlenir_sipar}>
-                                    {currentLanguage === 'tr' ? 'Tahsilat: Mikro cari' : 'AR: Mikro ledger'}
+                                    {op(currentLanguage).tahsilat_mikro_cari}
                                   </span>
                                 )}
                                 {/* Phase 535: payment method micro-badge */}
                                 {order.paid && order.paymentMethod && (() => {
                                   const pmLabels: Record<string, string> = {
                                     cash: oc(currentLanguage).nakit,
-                                    bank_transfer: currentLanguage === 'tr' ? 'EFT' : 'Transfer',
-                                    credit_card: currentLanguage === 'tr' ? 'Kart' : 'Card',
+                                    bank_transfer: op(currentLanguage).eft,
+                                    credit_card: op(currentLanguage).kart,
                                     check: oc(currentLanguage).cek,
                                     other: oc(currentLanguage).diger,
                                   };
@@ -1261,12 +1356,12 @@ export default function OrdersPage({
                                     title={oc(currentLanguage).fatura_kes}
                                   >
                                     <FileText className="w-3.5 h-3.5"/>
-                                    {currentLanguage==='tr'?'Fatura Kes':'Invoice'}
+                                    {op(currentLanguage).fatura_kes}
                                   </button>
                                 )}
                                 {order.hasInvoice && (
                                   <span className="text-[10px] font-bold px-2 py-0.5 bg-green-100 text-green-600 rounded-full flex items-center gap-0.5">
-                                    <CheckCircle2 className="w-3 h-3"/>{currentLanguage==='tr'?'Faturalı':'Invoiced'}
+                                    <CheckCircle2 className="w-3 h-3"/>{op(currentLanguage).faturali}
                                   </span>
                                 )}
                                 {/* Mikro e-Fatura push */}
@@ -1275,7 +1370,7 @@ export default function OrdersPage({
                                     onClick={(e) => { e.stopPropagation(); void handleMikroFatura(order); }}
                                     disabled={!!faturaLoading[order.id]}
                                     className="text-xs font-bold px-2 py-1 bg-[#1a3a5c]/10 text-[#1a3a5c] hover:bg-[#1a3a5c] hover:text-white rounded-lg transition-all flex items-center gap-1 disabled:opacity-40"
-                                    title={currentLanguage==='tr'?'Mikro\'ya e-Fatura gönder':'Push e-Invoice to Mikro'}
+                                    title={op(currentLanguage).mikro_ya_e_fatura_gonder}
                                   >
                                     {faturaLoading[order.id]
                                       ? <RefreshCw className="w-3.5 h-3.5 animate-spin"/>
@@ -1299,7 +1394,7 @@ export default function OrdersPage({
                                     if (uid) setDoc(doc(db, 'userPrefs', uid), { starredOrders: [...next] }, { merge: true }).catch(() => {});
                                   }}
                                   className={cn("transition-colors", starredOrders.has(order.id) ? "text-amber-400 hover:text-amber-500" : "text-gray-200 hover:text-amber-300")}
-                                  title={starredOrders.has(order.id) ? (currentLanguage === 'tr' ? 'Yıldızı kaldır' : 'Unstar') : (currentLanguage === 'tr' ? 'Önemli olarak işaretle' : 'Star order')}
+                                  title={starredOrders.has(order.id) ? (op(currentLanguage).yildizi_kaldir) : (op(currentLanguage).onemli_olarak_isaretle)}
                                 >
                                   ★
                                 </button>
@@ -1393,7 +1488,7 @@ export default function OrdersPage({
                         <div className="flex items-center justify-end gap-1 mt-0.5">
                           {order.source === 'mikro-fatura' ? (
                             <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c]">
-                              {currentLanguage === 'tr' ? 'MİKRO FTR' : 'MIKRO INV'}
+                              {op(currentLanguage).mikro_ftr}
                             </span>
                           ) : order.faturali ? (
                             <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${order.faturaTipi === 'ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi === 'e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
@@ -1421,10 +1516,10 @@ export default function OrdersPage({
             return (
               <div className="apple-card p-5">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-gray-900 text-sm">{tr575?'↩️ İade & Şikayet Yönetimi':'↩️ Returns & Complaints'}</h3>
+                  <h3 className="font-bold text-gray-900 text-sm">{op(tr575).iade_sikayet_yonetimi}</h3>
                   {hasFullAccess('orders') && (
-                    <button onClick={()=>setActiveTab('iade')} className="apple-button-primary flex items-center gap-2 text-sm" title={tr575?'İade & Değişim sayfasında yönet':'Manage on Returns page'}>
-                      <Plus className="w-4 h-4"/>{tr575?'İade Talebi':'New Return'}
+                    <button onClick={()=>setActiveTab('iade')} className="apple-button-primary flex items-center gap-2 text-sm" title={op(tr575).iade_degisim_sayfasinda_yonet}>
+                      <Plus className="w-4 h-4"/>{op(tr575).iade_talebi}
                     </button>
                   )}
                 </div>
@@ -1439,7 +1534,12 @@ export default function OrdersPage({
                     <div className="flex gap-2">
                       <button onClick={async ()=>{
                         if(!p575Draft.customerName||!p575Draft.reason) return;
-                        const payload={orderId:p575Draft.orderId,customerName:p575Draft.customerName,reason:p575Draft.reason,amount:Number(p575Draft.amount)||0};
+                        // Tutar OPSİYONEL alan: boş = BİLİNMİYOR (eski `Number('')||0` ₺0 kaydediyordu).
+                        // Girildiyse pozitif olmalı. Bu formda sipariş seçili değil (orderId serbest metin) → üst sınır yok.
+                        const iade575 = iadeTutariDogrula(p575Draft.amount, null);
+                        if(iade575.hata === 'pozitifDegil'){ toast(op(tr575).iade_tutari_sifirdan_buyuk_olmali,'error'); return; }
+                        const onceki575 = p575EditId ? p575Returns.find(r=>r.id===p575EditId)?.amount : undefined;
+                        const payload={orderId:p575Draft.orderId,customerName:p575Draft.customerName,reason:p575Draft.reason,...iadeTutarYamasi(iade575,onceki575)};
                         try {
                           if(p575EditId){ await updateDoc(doc(db,'salesReturns',p575EditId),payload); }
                           else { await addDoc(collection(db,'salesReturns'),{...payload,status:'Bekliyor',createdAt:serverTimestamp()}); }
@@ -1453,7 +1553,7 @@ export default function OrdersPage({
                   </div>
                 )}
                 {p575Returns.length === 0 ? (
-                  <p className="text-center py-6 text-gray-400 text-sm">{tr575?'Henüz iade / şikayet kaydı yok.':'No returns or complaints logged yet.'}</p>
+                  <p className="text-center py-6 text-gray-400 text-sm">{op(tr575).henuz_iade_sikayet_kaydi_yok}</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
@@ -1468,7 +1568,10 @@ export default function OrdersPage({
                             <td className="px-3 py-2.5 font-medium text-gray-800">{r.customerName}</td>
                             <td className="px-3 py-2.5 font-mono text-gray-500">{r.orderId||'—'}</td>
                             <td className="px-3 py-2.5 text-gray-600 max-w-[200px] truncate">{r.reason}</td>
-                            <td className="px-3 py-2.5 font-bold font-mono text-gray-700">{r.amount>0?paraYaz(r.amount):'—'}</td>
+                            {/* Hücre ile düzenleme ön-dolumu AYNI "gösterilebilir tutar" tanımını kullanır
+                                (iadeGorunenTutar): hücre '—' gösterirken form '0' ile açılıyor ve kullanıcı
+                                tutara dokunmadan kaydedince doğrulama 'pozitifDegil' deyip kaydı durduruyordu. */}
+                            <td className="px-3 py-2.5 font-bold font-mono text-gray-700">{paraYaz(iadeGorunenTutar(r.amount))}</td>
                             <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">
                               <select value={r.status} onChange={async e=>{try{await updateDoc(doc(db,'salesReturns',r.id),{status:e.target.value});}catch(err){toast((oc(tr575).guncellenemedi)+(err instanceof Error?err.message:String(err)),'error');}}} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border-0 cursor-pointer ${statusColors575[r.status]}`}>
@@ -1476,7 +1579,7 @@ export default function OrdersPage({
                                   <option key={s} value={s}>{s}</option>
                                 ))}
                               </select>
-                              <button type="button" onClick={()=>{setP575Draft({orderId:r.orderId,customerName:r.customerName,reason:r.reason,amount:String(r.amount)});setP575EditId(r.id);setP575ShowForm(true);}} title={oc(tr575).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                              <button type="button" onClick={()=>{const gorunen=iadeGorunenTutar(r.amount);setP575Draft({orderId:r.orderId,customerName:r.customerName,reason:r.reason,amount:gorunen===null?'':String(gorunen)});setP575EditId(r.id);setP575ShowForm(true);}} title={oc(tr575).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
                               <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'salesReturns',r.id));}catch(e){toast((oc(tr575).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                               </div>
                             </td>
@@ -1498,10 +1601,10 @@ export default function OrdersPage({
             return (
               <div className="apple-card p-5">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-gray-900 text-sm">{tr583?'🔧 Garanti & Servis Talepleri':'🔧 Warranty & Service Requests'}</h3>
+                  <h3 className="font-bold text-gray-900 text-sm">{op(tr583).garanti_servis_talepleri}</h3>
                   {hasFullAccess('orders') && (
                     <button onClick={()=>setP583ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm">
-                      <Plus className="w-4 h-4"/>{tr583?'Talep Ekle':'New Request'}
+                      <Plus className="w-4 h-4"/>{op(tr583).talep_ekle}
                     </button>
                   )}
                 </div>
@@ -1509,15 +1612,15 @@ export default function OrdersPage({
                   <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                       <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr583).musteri} value={p583Draft.customerName} onChange={e=>setP583Draft(d=>({...d,customerName:e.target.value}))} />
-                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr583?'Ürün Adı':'Product'} value={p583Draft.productName} onChange={e=>setP583Draft(d=>({...d,productName:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={op(tr583).urun_adi} value={p583Draft.productName} onChange={e=>setP583Draft(d=>({...d,productName:e.target.value}))} />
                       <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr583).seri_no} value={p583Draft.serialNo} onChange={e=>setP583Draft(d=>({...d,serialNo:e.target.value}))} />
                       <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr583).garanti_bitis} value={p583Draft.warrantyEnd} onChange={e=>setP583Draft(d=>({...d,warrantyEnd:e.target.value}))} />
                       <select className="apple-input px-3 py-2 text-sm" value={p583Draft.priority} onChange={e=>setP583Draft(d=>({...d,priority:e.target.value as 'Düşük'|'Orta'|'Yüksek'}))}>
-                        <option value="Düşük">{tr583?'Düşük Öncelik':'Low Priority'}</option>
-                        <option value="Orta">{tr583?'Orta Öncelik':'Medium Priority'}</option>
-                        <option value="Yüksek">{tr583?'Yüksek Öncelik':'High Priority'}</option>
+                        <option value="Düşük">{op(tr583).dusuk_oncelik}</option>
+                        <option value="Orta">{op(tr583).orta_oncelik}</option>
+                        <option value="Yüksek">{op(tr583).yuksek_oncelik}</option>
                       </select>
-                      <input className="apple-input px-3 py-2 text-sm col-span-2 md:col-span-1" placeholder={tr583?'Sorun Açıklaması':'Issue Description'} value={p583Draft.description} onChange={e=>setP583Draft(d=>({...d,description:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm col-span-2 md:col-span-1" placeholder={op(tr583).sorun_aciklamasi} value={p583Draft.description} onChange={e=>setP583Draft(d=>({...d,description:e.target.value}))} />
                     </div>
                     <div className="flex gap-2">
                       <button onClick={async ()=>{
@@ -1536,7 +1639,7 @@ export default function OrdersPage({
                   </div>
                 )}
                 {p583Requests.length === 0 ? (
-                  <p className="text-center py-6 text-gray-400 text-sm">{tr583?'Henüz servis talebi yok.':'No service requests yet.'}</p>
+                  <p className="text-center py-6 text-gray-400 text-sm">{op(tr583).henuz_servis_talebi_yok}</p>
                 ) : (
                   <div className="space-y-2">
                     {p583Requests.map(r=>(
@@ -1569,8 +1672,8 @@ export default function OrdersPage({
             const tr609 = currentLanguage === 'tr';
             const openTickets = p609Tickets.filter(t=>t.status==='Açık'||t.status==='İşlemde');
             const resolvedTickets = p609Tickets.filter(t=>t.status==='Çözüldü'||t.status==='Kapatıldı');
-            const avgSatScore = resolvedTickets.filter(t=>t.satisfaction).length>0
-              ? (resolvedTickets.filter(t=>t.satisfaction).reduce((s,t)=>s+(t.satisfaction||0),0)/resolvedTickets.filter(t=>t.satisfaction).length).toFixed(1) : '—';
+            const memnuniyet609 = memnuniyetOrtalamasi(resolvedTickets);
+            const avgSatScore = memnuniyet609 === null ? '—' : memnuniyet609.toFixed(1);
             const slaBreached = p609Tickets.filter(t=>{
               if (t.status==='Kapatıldı'||t.status==='Çözüldü') return false;
               const createdMs = zamanMs(t.createdAt);
@@ -1582,8 +1685,8 @@ export default function OrdersPage({
             return (
               <div className="apple-card p-5 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <h3 className="font-bold text-gray-900 text-sm">🎫 {tr609?'SLA & Destek Biletleri':'SLA & Support Tickets'}</h3>
-                  <button onClick={()=>setP609ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{tr609?'Bilet Aç':'Open Ticket'}</button>
+                  <h3 className="font-bold text-gray-900 text-sm">🎫 {op(tr609).sla_destek_biletleri}</h3>
+                  <button onClick={()=>setP609ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{op(tr609).bilet_ac}</button>
                 </div>
                 {p609ShowForm && (
                   <div className="bg-gray-50 rounded-xl p-4 space-y-3">
@@ -1605,15 +1708,15 @@ export default function OrdersPage({
                         setP609ShowForm(false); setP609EditId(null);
                         toast(tr609?(p609EditId?'Bilet güncellendi.':'Bilet açıldı.'):(p609EditId?'Ticket updated.':'Ticket created.'),'success');
                       } catch(e){ toast((oc(tr609).kaydedilemedi)+(e instanceof Error?e.message:String(e)),'error'); }
-                    }} className="apple-button-primary text-xs px-6">{tr609?'Aç':'Create'}</button>
+                    }} className="apple-button-primary text-xs px-6">{op(tr609).ac}</button>
                   </div>
                 )}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
                     {label:oc(tr609).acik,val:openTickets.length,color:'text-blue-600',bg:'bg-blue-50'},
-                    {label:tr609?'SLA İhlali':'SLA Breach',val:slaBreached,color:'text-red-600',bg:'bg-red-50'},
-                    {label:tr609?'Çözülen':'Resolved',val:resolvedTickets.length,color:'text-emerald-600',bg:'bg-emerald-50'},
-                    {label:tr609?'Müşteri Skoru':'Sat. Score',val:avgSatScore,color:'text-amber-600',bg:'bg-amber-50'},
+                    {label:op(tr609).sla_ihlali,val:slaBreached,color:'text-red-600',bg:'bg-red-50'},
+                    {label:op(tr609).cozulen,val:resolvedTickets.length,color:'text-emerald-600',bg:'bg-emerald-50'},
+                    {label:op(tr609).musteri_skoru,val:avgSatScore,color:'text-amber-600',bg:'bg-amber-50'},
                   ].map(k=>(
                     <div key={k.label} className={`rounded-xl p-3 ${k.bg}`}><p className="text-[10px] font-bold text-gray-400 uppercase">{k.label}</p><p className={`text-xl font-black ${k.color}`}>{k.val}</p></div>
                   ))}
@@ -1641,7 +1744,7 @@ export default function OrdersPage({
                     })}
                   </div>
                 )}
-                {p609Tickets.length === 0 && <p className="text-center text-gray-400 text-xs py-4">{tr609?'Henüz destek bileti yok.':'No support tickets yet.'}</p>}
+                {p609Tickets.length === 0 && <p className="text-center text-gray-400 text-xs py-4">{op(tr609).henuz_destek_bileti_yok}</p>}
               </div>
             );
           })()}
@@ -1654,17 +1757,17 @@ export default function OrdersPage({
             return (
               <div className="apple-card p-5 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <h3 className="font-bold text-gray-900 text-sm">📋 {tr621?'Talep Yönetimi':'Demand Management'}</h3>
+                  <h3 className="font-bold text-gray-900 text-sm">📋 {op(tr621).talep_yonetimi}</h3>
                   <button onClick={()=>setP621ShowForm(v=>!v)} className="apple-button-secondary text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>{oc(tr621).talep_ekle}</button>
                 </div>
-                {pending621>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-amber-700">{pending621} {tr621?'bekleyen talep':'pending request(s)'}</div>}
+                {pending621>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-amber-700">{pending621} {op(tr621).bekleyen_talep}</div>}
                 {p621ShowForm && (
                   <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                       <input className="apple-input col-span-2 md:col-span-1" placeholder={oc(tr621).urun_adi} value={p621Draft.productName} onChange={e=>setP621Draft(d=>({...d,productName:e.target.value}))}/>
                       <input className="apple-input" placeholder="SKU" value={p621Draft.sku} onChange={e=>setP621Draft(d=>({...d,sku:e.target.value}))}/>
                       <input type="number" className="apple-input" placeholder={oc(tr621).miktar} value={p621Draft.requestedQty} onChange={e=>setP621Draft(d=>({...d,requestedQty:e.target.value}))}/>
-                      <input className="apple-input" placeholder={tr621?'Talep Eden':'Requested By'} value={p621Draft.requestedBy} onChange={e=>setP621Draft(d=>({...d,requestedBy:e.target.value}))}/>
+                      <input className="apple-input" placeholder={op(tr621).talep_eden} value={p621Draft.requestedBy} onChange={e=>setP621Draft(d=>({...d,requestedBy:e.target.value}))}/>
                       <select value={p621Draft.priority} onChange={e=>setP621Draft(d=>({...d,priority:e.target.value as typeof d.priority}))} className="apple-input">
                         {['Düşük','Orta','Yüksek'].map(p=><option key={p}>{p}</option>)}
                       </select>
@@ -1672,10 +1775,10 @@ export default function OrdersPage({
                     </div>
                     <button onClick={async ()=>{
                       if(!p621Draft.productName||!p621Draft.requestedQty) return;
-                      try { await addDoc(collection(db,'demandRequests'),{productName:p621Draft.productName,sku:p621Draft.sku,requestedQty:Number(p621Draft.requestedQty),requestedBy:p621Draft.requestedBy,priority:p621Draft.priority,status:'Bekliyor',notes:p621Draft.notes||'',createdAt:new Date().toISOString()}); toast(currentLanguage === 'tr' ? 'Talep oluşturuldu ✓' : 'Demand request created ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Talep oluşturulamadı.' : 'Failed to create request.', 'error');}
+                      try { await addDoc(collection(db,'demandRequests'),{productName:p621Draft.productName,sku:p621Draft.sku,requestedQty:Number(p621Draft.requestedQty),requestedBy:p621Draft.requestedBy,priority:p621Draft.priority,status:'Bekliyor',notes:p621Draft.notes||'',createdAt:new Date().toISOString()}); toast(op(currentLanguage).talep_olusturuldu, 'success'); } catch(e){console.error("[firestore]", e); toast(op(currentLanguage).talep_olusturulamadi, 'error');}
                       setP621Draft(d=>({...d,productName:'',sku:'',requestedQty:'',requestedBy:'',notes:''}));
                       setP621ShowForm(false);
-                      toast(tr621?'Talep oluşturuldu.':'Request created.','success');
+                      toast(op(tr621).talep_olusturuldu_2,'success');
                     }} className="apple-button-primary text-xs px-6">{oc(tr621).olustur}</button>
                   </div>
                 )}
@@ -1694,7 +1797,7 @@ export default function OrdersPage({
                     ))}
                   </div>
                 )}
-                {p621Demands.length===0&&<p className="text-center text-gray-400 text-xs py-4">{tr621?'Ürün talepleri ekleyin.':'Add product demand requests.'}</p>}
+                {p621Demands.length===0&&<p className="text-center text-gray-400 text-xs py-4">{op(tr621).urun_talepleri_ekleyin}</p>}
               </div>
             );
           })()}
@@ -1709,7 +1812,7 @@ export default function OrdersPage({
                   <ArrowLeft className="w-5 h-5" />
                 </button>
                 <ModuleHeader
-                  title={`${currentLanguage === 'tr' ? 'Sipariş' : 'Order'} ${gorunenSiparisNo(selectedOrder)}`}
+                  title={`${op(currentLanguage).siparis} ${gorunenSiparisNo(selectedOrder)}`}
                   subtitle={`Customer: ${selectedOrder.customerName}`}
                   className="mb-0 w-full"
                   actionButton={
@@ -1719,7 +1822,7 @@ export default function OrdersPage({
                           title: currentT.confirm_approve_title,
                           message: currentT.confirm_approve_msg,
                           confirmLabel: currentT.approve,
-                          onConfirm: () => { handleUpdateOrderStatus(selectedOrder.id, 'Processing'); setSelectedOrder({ ...selectedOrder, status: 'Processing' }); }
+                          onConfirm: () => { handleUpdateOrderStatus(selectedOrder.id, 'Processing'); setSelectedOrder(o => (o && o.id === selectedOrder.id ? { ...o, status: 'Processing' } : o)); }
                         })}
                           className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-emerald-200 transition-colors">
                           Approve
@@ -1733,12 +1836,52 @@ export default function OrdersPage({
                           className="bg-[#1a3a5c]/10 hover:bg-[#1a3a5c] text-[#1a3a5c] hover:text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20 transition-colors disabled:opacity-40"
                         >
                           {faturaLoading[selectedOrder.id] ? <RefreshCw className="w-4 h-4 animate-spin"/> : <FileUp className="w-4 h-4"/>}
-                          {currentLanguage === 'tr' ? 'Mikro\'ya Fatura' : 'Push Invoice'}
+                          {op(currentLanguage).mikro_ya_fatura}
                         </button>
                       )}
                       {selectedOrder.mikroFaturaNo && (
                         <span className="bg-[#1a3a5c]/10 text-[#1a3a5c] px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20">
                           <CheckCircle2 className="w-4 h-4"/> Mikro: {selectedOrder.mikroFaturaNo}
+                        </span>
+                      )}
+                      {/* e-İrsaliye — sevk edilmiş, irsaliyesi HENÜZ KESİLMEMİŞ siparişte.
+                          Gönderilemiyorsa düğme DEVRE DIŞI ve nedeni ipucunda yazar (sessizce
+                          çalışmayan düğme yok). Kapı, Shipped otomatiğiyle AYNI tanımdan
+                          (irsaliyeIstegi) türer.
+                          "Kesilmiş mi?" sorusunun yanıtı `irsaliyeNo` DEĞİL: Mikro başarı dönüp
+                          numara döndürmeyebilir; o durumda numara uydurulmadığı için tek işaret
+                          `irsaliyeGonderildi` olur. Yalnız numaraya bakmak düğmeyi açık bırakır
+                          ve aynı sevkiyat ikinci kez resmî belge olarak kesilir. */}
+                      {/* "Kesilmiş mi?" sorusu CANLI listeden (`orders`) de sorulur: `selectedOrder`
+                          bu sayfanın yerel kopyasıdır ve bir yazıcı onu bayat kapanıştan yayarsa
+                          işaret yerelde kaybolur, düğme yeniden etkin görünürdü (2026-09-19 delta).
+                          App.tsx'teki `eIrsaliyeKilidiAl` ikinci POST'u zaten durduruyor; bu kapı
+                          düğmeyi HİÇ göstermeyerek kullanıcıyı yanıltmayı da önler. */}
+                      {(selectedOrder.status === 'Shipped' || selectedOrder.status === 'Delivered')
+                        && !selectedOrder.irsaliyeNo && !selectedOrder.irsaliyeGonderildi
+                        && !orders.some(o => o.id === selectedOrder.id && (o.irsaliyeGonderildi === true || !!o.irsaliyeNo)) && (() => {
+                        const istek = irsaliyeIstegi(selectedOrder, leads.find(l => l.id === selectedOrder.leadId));
+                        const suruyor = !!eIrsaliyeGonderiliyor[selectedOrder.id];
+                        return (
+                          <span title={istek.neden ? irsaliyeNedenMetni(istek.neden, currentLanguage) : ''} className="inline-flex">
+                            <button
+                              onClick={() => void handleEIrsaliye(selectedOrder)}
+                              disabled={!istek.gonderilebilir || suruyor}
+                              className="bg-[#1a3a5c]/10 hover:bg-[#1a3a5c] text-[#1a3a5c] hover:text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#1a3a5c]/10 disabled:hover:text-[#1a3a5c]"
+                            >
+                              {suruyor ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Truck className="w-4 h-4"/>}
+                              {suruyor
+                                ? (op(currentLanguage).gonderiliyor)
+                                : (op(currentLanguage).e_irsaliye_gonder)}
+                            </button>
+                          </span>
+                        );
+                      })()}
+                      {/* Numara bilinmiyorsa UYDURULMAZ: rozet "kesildi ama numara gelmedi" der. */}
+                      {(selectedOrder.irsaliyeNo || selectedOrder.irsaliyeGonderildi) && (
+                        <span className="bg-[#1a3a5c]/10 text-[#1a3a5c] px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20">
+                          <CheckCircle2 className="w-4 h-4"/> e-İrsaliye: {selectedOrder.irsaliyeNo
+                            || (op(currentLanguage).gonderildi_numara_gelmedi)}
                         </span>
                       )}
                       {/* iyzico payment link */}
@@ -1784,13 +1927,13 @@ export default function OrdersPage({
                           setOrderLineItems((o.lineItems || []).map(li => ({ ...li, id: `${li.id}-clone-${Date.now()}` })));
                           setSelectedLead(leads.find(l => l.id === o.leadId) || null);
                           setIsAddingOrder(true);
-                          toast(currentLanguage === 'tr' ? 'Sipariş kopyalandı — düzenleyebilirsiniz' : 'Order cloned — you can now edit it', 'success');
+                          toast(op(currentLanguage).siparis_kopyalandi_duzenleyebilirsiniz, 'success');
                         }}
                         className="bg-white hover:bg-indigo-50 text-gray-700 hover:text-indigo-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-indigo-200 transition-colors"
-                        title={currentLanguage === 'tr' ? 'Siparişi klonla (yeni taslak olarak aç)' : 'Clone order as new draft'}
+                        title={op(currentLanguage).siparisi_klonla_yeni_taslak_olarak_ac}
                       >
                         <Copy className="w-4 h-4" />
-                        {currentLanguage === 'tr' ? 'Klonla' : 'Clone'}
+                        {op(currentLanguage).klonla}
                       </button>
                       {/* Phase 505: Print Order Receipt PDF */}
                       <button
@@ -1810,7 +1953,7 @@ export default function OrdersPage({
                           // cizen kopya vardi; 32 mm standardi bilincli, govde donen Y'den baslar.
                           // 'SİPARİŞ FIŞI' yaziyordu — noktasiz I yanlis, dogrusu 'FİŞİ'.
                           const govdeY505 = pdfBaslik(doc505, {
-                            belgeAdi: sablon505?.title?.trim() || (currentLanguage === 'tr' ? 'SİPARİŞ FİŞİ' : 'ORDER RECEIPT'),
+                            belgeAdi: sablon505?.title?.trim() || (op(currentLanguage).siparis_fisi),
                             meta: `${gorunenSiparisNo(o)}  |  ${oDate}`,
                             renk: marka505,
                           });
@@ -1851,8 +1994,8 @@ export default function OrdersPage({
                           const durum505 = siparisDurumEtiketi(o.status, currentLanguage);
                           const odeme505 = odemeTakipli(o)
                             ? (o.paid
-                                ? (currentLanguage === 'tr' ? 'Ödendi ✓' : 'Paid ✓')
-                                : (currentLanguage === 'tr' ? 'Ödeme Bekleniyor' : 'Payment Pending'))
+                                ? (op(currentLanguage).odendi_2)
+                                : (op(currentLanguage).odeme_bekleniyor))
                             : null;
                           doc505.text(
                             `${oc(currentLanguage).durum}: ${durum505}${odeme505 ? ` · ${odeme505}` : ''}`,
@@ -1866,7 +2009,7 @@ export default function OrdersPage({
                             baslangicY: finalY505 + 12,
                             banka: bankaBilgisiBasilir(sablon505),
                             footer: sablon505?.footer,
-                            etiket: currentLanguage === 'tr' ? 'BANKA BİLGİLERİ' : 'BANK DETAILS',
+                            etiket: op(currentLanguage).banka_bilgileri,
                           });
                           doc505.setFontSize(8); doc505.setTextColor(150,150,150);
                           doc505.text('CETPA Business Suite — app.cetpa.com.tr', W / 2, altY505 + 4, { align: 'center' });
@@ -1877,20 +2020,20 @@ export default function OrdersPage({
                             // Eskiden hata SESSIZDI: font/sablon/import basarisizliginda dosya
                             // inmiyor, kullanici butonu bozuk saniyordu.
                             console.error('Siparis fisi PDF hatasi:', e);
-                            toast(currentLanguage === 'tr' ? 'Fiş PDF oluşturulamadı.' : 'Receipt PDF failed.', 'error');
+                            toast(op(currentLanguage).fis_pdf_olusturulamadi, 'error');
                           }
                         }}
                         className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors"
-                        title={currentLanguage === 'tr' ? 'Sipariş fişi PDF indir' : 'Download order receipt PDF'}
+                        title={op(currentLanguage).siparis_fisi_pdf_indir}
                       >
                         <FileDown className="w-4 h-4" />
-                        {currentLanguage === 'tr' ? 'Fiş PDF' : 'Receipt'}
+                        {op(currentLanguage).fis_pdf}
                       </button>
                       {/* Phase 512: Quick Shipment from Order */}
                       <button
                         onClick={() => setShowQuickShipment(selectedOrder)}
                         className="bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-blue-200 transition-colors"
-                        title={currentLanguage === 'tr' ? 'Sevkiyat oluştur' : 'Create shipment'}
+                        title={op(currentLanguage).sevkiyat_olustur}
                       >
                         <Truck className="w-4 h-4" />
                         {oc(currentLanguage).sevkiyat}
@@ -1900,134 +2043,145 @@ export default function OrdersPage({
                         onClick={() => {
                           const url = `${window.location.origin}/?track=${selectedOrder.id}`;
                           navigator.clipboard.writeText(url).then(() =>
-                            toast(currentLanguage === 'tr' ? 'Takip linki kopyalandı ✓' : 'Tracking link copied ✓', 'success')
+                            toast(op(currentLanguage).takip_linki_kopyalandi, 'success')
                           ).catch(() => toast(oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'));
                         }}
                         className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors"
-                        title={currentLanguage === 'tr' ? 'Müşteri takip linkini kopyala' : 'Copy customer tracking link'}
+                        title={op(currentLanguage).musteri_takip_linkini_kopyala}
                       >
                         <Link className="w-4 h-4" />
-                        {currentLanguage === 'tr' ? 'Takip Linki' : 'Track Link'}
+                        {op(currentLanguage).takip_linki}
                       </button>
                       {/* Phase 57: Copy Order Summary (WhatsApp-ready) */}
                       <button
                         onClick={() => {
                           const o = selectedOrder;
                           const trackUrl = `${window.location.origin}/?track=${o.id}`;
-                          // Kur yoksa mesajı HİÇ üretme (2026-08-26): eskiden `||1` ile TL tutar '$' ile
-                          // basılıyordu (~38× şişkin). '—' de müşteriye giden metne akmamalı.
-                          const _waCv = kpiCurrency === 'TRY' ? (o.totalPrice||0) : kurCevir(o.totalPrice||0, kpiCurrency, exchangeRates);
-                          if (_waCv === null) {
+                          // Tutar ya da kur bilinmiyorsa mesaj HİÇ üretilmez: ne '—' ne de "₺0" müşteriye giden
+                          // metne akar. Eski `||0` tutarı bilinmeyen siparişi "₺0" diye müşteriye yazıyordu.
+                          const _waAmt = mesajTutari(o, kpiCurrency, exchangeRates);
+                          if (_waAmt === BILINMIYOR) {
                             toast(currentLanguage === 'tr'
-                              ? 'Kur bilgisi yok — tutar çevrilemediği için özet kopyalanmadı.'
-                              : 'Exchange rate unavailable — summary not copied.', 'error');
+                              ? 'Tutar ya da kur bilinmiyor — özet kopyalanmadı.'
+                              : 'Amount or exchange rate unknown — summary not copied.', 'error');
                             return;
                           }
-                          const _waAmt  = paraYaz(_waCv, { birim: kpiCurrency, ondalik: 0 });
                           const summary = currentLanguage === 'tr'
                             ? `📦 *Sipariş Özeti*\nSipariş No: ${gorunenSiparisNo(o)}\nMüşteri: ${o.customerName}\nDurum: ${o.status}\nTutar: ${_waAmt}\n${o.trackingNumber ? `Kargo Takip: ${o.trackingNumber}\n` : ''}Takip Linki: ${trackUrl}`
                             : `📦 *Order Summary*\nOrder: ${gorunenSiparisNo(o)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}\n${o.trackingNumber ? `Tracking: ${o.trackingNumber}\n` : ''}Link: ${trackUrl}`;
                           navigator.clipboard.writeText(summary).then(() =>
-                            toast(currentLanguage === 'tr' ? 'Sipariş özeti kopyalandı ✓' : 'Order summary copied ✓', 'success')
+                            toast(op(currentLanguage).siparis_ozeti_kopyalandi, 'success')
                           ).catch(() => toast(oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'));
                         }}
                         className="bg-white hover:bg-green-50 text-gray-700 hover:text-green-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-green-200 transition-colors"
-                        title={currentLanguage === 'tr' ? 'WhatsApp özeti kopyala' : 'Copy summary (WhatsApp-ready)'}
+                        title={op(currentLanguage).whatsapp_ozeti_kopyala}
                       >
                         <MessageSquare className="w-4 h-4" />
-                        {currentLanguage === 'tr' ? 'Özet Kopyala' : 'Copy Summary'}
+                        {op(currentLanguage).ozet_kopyala}
                       </button>
                       {/* Phase 511: Payment Reminder copy button */}
                       {!selectedOrder.paid && odemeTakipli(selectedOrder) && (
                         <button
                           onClick={() => {
                             const o = selectedOrder;
-                            // Ödeme hatırlatması MÜŞTERİYE gider: kur yoksa yanlış tutar (eskiden `||1`
-                            // → TL tutar '$' ile, ~38× şişkin) yerine mesajı hiç üretme.
-                            const cv = kpiCurrency === 'TRY' ? o.totalPrice : kurCevir(o.totalPrice, kpiCurrency, exchangeRates);
-                            if (cv === null) {
+                            // Ödeme hatırlatması MÜŞTERİYE gider: tutar ya da kur bilinmiyorsa mesaj üretilmez.
+                            // Eski TL dalı `kurCevir`i ATLIYORDU: tutarı bilinmeyen siparişte metne '—' akıyor,
+                            // müşteri "… için — tutarındaki ödemeniz" yazısını görüyordu.
+                            const amt = mesajTutari(o, kpiCurrency, exchangeRates, 2);
+                            if (amt === BILINMIYOR) {
                               toast(currentLanguage === 'tr'
-                                ? 'Kur bilgisi yok — tutar çevrilemediği için hatırlatma oluşturulmadı.'
-                                : 'Exchange rate unavailable — reminder not generated.', 'error');
+                                ? 'Tutar ya da kur bilinmiyor — hatırlatma oluşturulmadı.'
+                                : 'Amount or exchange rate unknown — reminder not generated.', 'error');
                               return;
                             }
-                            const amt = paraYaz(cv, { birim: kpiCurrency });
                             const msg = currentLanguage === 'tr'
                               ? `Sayın ${o.customerName},\n\nSipariş No: ${gorunenSiparisNo(o)} için ${amt} tutarındaki ödemeniz henüz tarafımıza ulaşmamıştır.\n\nÖdemenizi en kısa sürede gerçekleştirmenizi rica ederiz.\n\nSaygılarımızla,\nCETPA`
                               : `Dear ${o.customerName},\n\nPayment of ${amt} for Order ${gorunenSiparisNo(o)} has not yet been received.\n\nPlease arrange payment at your earliest convenience.\n\nBest regards,\nCETPA`;
                             navigator.clipboard.writeText(msg).then(() =>
-                              toast(currentLanguage === 'tr' ? 'Ödeme hatırlatması kopyalandı ✓' : 'Payment reminder copied ✓', 'success')
+                              toast(op(currentLanguage).odeme_hatirlatmasi_kopyalandi, 'success')
                             ).catch(() => toast(oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'));
                           }}
                           className="bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-amber-200 transition-colors"
-                          title={currentLanguage === 'tr' ? 'Ödeme hatırlatma mesajını kopyala' : 'Copy payment reminder message'}
+                          title={op(currentLanguage).odeme_hatirlatma_mesajini_kopyala}
                         >
                           <Bell className="w-4 h-4" />
-                          {currentLanguage === 'tr' ? 'Hatırlatma' : 'Reminder'}
+                          {op(currentLanguage).hatirlatma}
                         </button>
                       )}
                       {/* Phase 513: Order Profitability popup */}
-                      {selectedOrder.lineItems && selectedOrder.lineItems.length > 0 && (() => {
-                        const revenue = selectedOrder.totalPrice || 0;
-                        const cogs = selectedOrder.lineItems.reduce((s, li) => {
-                          const inv = inventory.find(i => i.id === li.inventoryId || i.sku === li.sku);
-                          return s + (li.costPrice ?? (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6)) * li.quantity;
-                        }, 0);
-                        const gp = revenue - cogs;
-                        const margin = revenue > 0 ? (gp / revenue * 100) : 0;
+                      {selectedOrder.lineItems && selectedOrder.lineItems.length > 0 && siparisKar && (() => {
+                        const { ciro: revenue, maliyet: cogs, kar: gp, marjYuzde, maliyetsizKalem } = siparisKar;
+                        const marjSinif = marjYuzde === null ? 'bg-gray-50 hover:bg-gray-100 text-gray-600 border-gray-200'
+                          : marjYuzde >= 30 ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                          : marjYuzde >= 10 ? 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
+                          : 'bg-red-50 hover:bg-red-100 text-red-700 border-red-200';
                         return (
                           <div className="relative">
                             <button
                               onClick={() => setP513Selected(p513Selected === selectedOrder.id ? null : selectedOrder.id)}
                               className={cn(
                                 "px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border transition-colors",
-                                margin >= 30 ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
-                                  : margin >= 10 ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200"
-                                  : "bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
+                                marjSinif
                               )}
-                              title={currentLanguage === 'tr' ? 'Kâr analizi' : 'Profit analysis'}
+                              title={op(currentLanguage).kar_analizi}
                             >
                               <TrendingUp className="w-4 h-4" />
-                              {currentLanguage === 'tr' ? `Kâr %${margin.toFixed(1)}` : `Margin ${margin.toFixed(1)}%`}
+                              {/* Rozet rengi bir YARGI bildirir: marj bilinmiyorken kırmızı '%0,0' basmak
+                                  (eski `revenue > 0 ? … : 0`) zarar iddiasıydı — bilinmeyende nötr gri + '—'. */}
+                              {marjYuzde === null
+                                ? (op(currentLanguage).kar)
+                                : (currentLanguage === 'tr' ? `Kâr %${marjYuzde.toFixed(1)}` : `Margin ${marjYuzde.toFixed(1)}%`)}
                             </button>
                             {p513Selected === selectedOrder.id && (
                               <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-gray-200 z-50 p-5">
                                 <div className="flex items-center justify-between mb-4">
-                                  <h4 className="font-bold text-sm">{currentLanguage === 'tr' ? 'Kâr Analizi' : 'Profit Analysis'}</h4>
+                                  <h4 className="font-bold text-sm">{op(currentLanguage).kar_analizi_2}</h4>
                                   <button onClick={() => setP513Selected(null)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
                                 </div>
                                 <div className="space-y-2.5 text-sm">
                                   <div className="flex justify-between">
-                                    <span className="text-gray-500">{oc(currentLanguage).gelir}</span>
+                                    {/* Etiket netleştirildi: taban artık kalem cirosu (Σ fiyat×miktar), başlık
+                                        `totalPrice` DEĞİL — maliyet kalemlerden geldiği için kârın iki tarafı
+                                        aynı tabanda olmalı. Mikro faturasından türetilen siparişte başlık tutarı
+                                        KDV dahildi ve marjı ~KDV kadar şişiriyordu. */}
+                                    <span className="text-gray-500">{op(currentLanguage).kalem_cirosu}</span>
                                     <span className="font-bold text-emerald-600">{paraYaz(revenue)}</span>
                                   </div>
                                   <div className="flex justify-between">
-                                    <span className="text-gray-500">{currentLanguage === 'tr' ? 'Maliyet (COGS)' : 'Cost (COGS)'}</span>
-                                    <span className="font-bold text-red-500">−{paraYaz(cogs)}</span>
+                                    <span className="text-gray-500">{op(currentLanguage).maliyet_cogs}</span>
+                                    {/* '−' öneki elle yazıldığı için bilinmeyende "−—" olurdu; guard şart. */}
+                                    <span className="font-bold text-red-500">{Number.isFinite(cogs) ? `−${paraYaz(cogs)}` : '—'}</span>
                                   </div>
                                   <div className="h-px bg-gray-100" />
                                   <div className="flex justify-between">
                                     <span className="font-bold">{oc(currentLanguage).brut_kar}</span>
-                                    <span className={cn("font-black", gp >= 0 ? "text-emerald-600" : "text-red-600")}>{paraYaz(gp)}</span>
+                                    {/* Renk de bir iddiadır: `NaN >= 0` false olduğu için bilinmeyen kâr KIRMIZI (zarar) görünüyordu. */}
+                                    <span className={cn("font-black", !Number.isFinite(gp) ? "text-gray-400" : gp >= 0 ? "text-emerald-600" : "text-red-600")}>{paraYaz(gp)}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span className="text-gray-500">{oc(currentLanguage).kar_marji}</span>
-                                    <span className={cn("font-bold px-2 py-0.5 rounded-full text-xs", margin >= 30 ? "bg-emerald-100 text-emerald-700" : margin >= 10 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700")}>
-                                      %{margin.toFixed(1)}
+                                    <span className={cn("font-bold px-2 py-0.5 rounded-full text-xs", marjYuzde === null ? "bg-gray-100 text-gray-500" : marjYuzde >= 30 ? "bg-emerald-100 text-emerald-700" : marjYuzde >= 10 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700")}>
+                                      {marjYuzde === null ? '—' : `%${marjYuzde.toFixed(1)}`}
                                     </span>
                                   </div>
+                                  {/* maliyeti bilinmeyen kalem varsa kâr/marj neden '—' — açık not (CLAUDE.md: '—' VEYA açık not) */}
+                                  {maliyetsizKalem > 0 && (
+                                    <p className="text-[10px] text-amber-600 pt-1">
+                                      {currentLanguage === 'tr'
+                                        ? `${maliyetsizKalem} kalemin maliyeti bilinmiyor — kâr ve marj hesaplanmadı.`
+                                        : `Cost unknown for ${maliyetsizKalem} item(s) — profit and margin not calculated.`}
+                                    </p>
+                                  )}
                                   {/* Item-level breakdown */}
                                   {selectedOrder.lineItems!.length > 0 && (
                                     <div className="mt-3 pt-3 border-t border-gray-100 space-y-1.5">
                                       {selectedOrder.lineItems!.map((li, i) => {
-                                        const inv2 = inventory.find(x => x.id === li.inventoryId || x.sku === li.sku);
-                                        const liCost = (li.costPrice ?? (inv2 ? itemCostTRY(inv2, exchangeRates) : li.price * 0.6)) * li.quantity;
-                                        const liRev = li.price * li.quantity;
+                                        const s = siparisKar.satirlar[i];   // aynı sırada, aynı çözücüyle hesaplandı
                                         return (
                                           <div key={i} className="flex justify-between text-[11px]">
                                             <span className="text-gray-500 truncate max-w-[160px]">{li.name} ×{li.quantity}</span>
-                                            <span className={liRev >= liCost ? "text-emerald-600 font-semibold" : "text-red-500 font-semibold"}>
-                                              {paraYaz(liRev - liCost)}
+                                            <span className={!Number.isFinite(s.kar) ? "text-gray-400" : s.kar >= 0 ? "text-emerald-600 font-semibold" : "text-red-500 font-semibold"}>
+                                              {paraYaz(s.kar)}
                                             </span>
                                           </div>
                                         );
@@ -2043,12 +2197,12 @@ export default function OrdersPage({
                       {/* Phase 112: RMA / Return button */}
                       {selectedOrder.status === 'Delivered' && (
                         <button
-                          onClick={() => { setReturnModal({ open: true, order: selectedOrder }); setReturnAmount(selectedOrder.totalPrice || 0); setReturnItems(''); setReturnReason(''); }}
+                          onClick={() => { setReturnModal({ open: true, order: selectedOrder }); setReturnAmount(iadeOnTutar(selectedOrder)); setReturnItems(''); setReturnReason(''); }}
                           className="bg-white hover:bg-orange-50 text-gray-700 hover:text-orange-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-orange-200 transition-colors"
-                          title={currentLanguage === 'tr' ? 'İade Talebi Oluştur' : 'Create Return Request'}
+                          title={op(currentLanguage).iade_talebi_olustur}
                         >
                           <RefreshCw className="w-4 h-4" />
-                          {currentLanguage === 'tr' ? 'İade' : 'Return'}
+                          {op(currentLanguage).iade}
                         </button>
                       )}
 
@@ -2063,7 +2217,7 @@ export default function OrdersPage({
                             ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
                             : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
                         }`}
-                        title={selectedOrder.paid ? (oc(currentLanguage).odendi_tikla_odenmedi_yap) : (currentLanguage === 'tr' ? 'Bekliyor — tıkla: ödendi yap' : 'Pending — click to mark paid')}
+                        title={selectedOrder.paid ? (oc(currentLanguage).odendi_tikla_odenmedi_yap) : (op(currentLanguage).bekliyor_tikla_odendi_yap)}
                       >
                         <CreditCard className="w-4 h-4" />
                         {selectedOrder.paid
@@ -2075,7 +2229,7 @@ export default function OrdersPage({
                         title: currentT.confirm_delete_title,
                         message: currentT.confirm_delete,
                         confirmLabel: currentT.edit,
-                        onConfirm: () => { setEditingOrderData(selectedOrder); setIsEditingOrder(true); }
+                        onConfirm: () => { setEditingOrderData(selectedOrder); setEditingTutarHam(sayiGirdisi(selectedOrder.totalPrice)); setEditingKdvHam(sayiGirdisi(selectedOrder.kdvOran)); setIsEditingOrder(true); }
                       })} className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors">
                         <Edit2 className="w-4 h-4" /> Edit
                       </button>
@@ -2103,11 +2257,18 @@ export default function OrdersPage({
                     <div className="space-y-4 text-sm">
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold mb-1">{currentT.status}</span>
-                        <select value={selectedOrder.status} onChange={(e) => openConfirm({
+                        {/* İŞLEVSEL güncelleyici ZORUNLU: onay penceresi açıkken (kullanıcı
+                            bekletebilir) e-İrsaliye yanıtı dönüp `irsaliyeGonderildi`
+                            yazılabilir; kapanıştaki bayat `selectedOrder`ı yaymak o işareti
+                            yerelde siler, düğme 'Delivered' koşuluyla yeniden ETKİN olur ve
+                            aynı sevkiyat için İKİNCİ resmî belge kesilir (2026-09-19 delta). */}
+                        <select value={selectedOrder.status} onChange={(e) => {
+                          const yeniDurum = e.target.value as 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled';
+                          openConfirm({
                           title: currentT.status,
-                          message: `Update status to "${e.target.value}"?`,
-                          onConfirm: () => { handleUpdateOrderStatus(selectedOrder.id, e.target.value as 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled'); setSelectedOrder({ ...selectedOrder, status: e.target.value as 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' }); }
-                        })}
+                          message: `Update status to "${yeniDurum}"?`,
+                          onConfirm: () => { handleUpdateOrderStatus(selectedOrder.id, yeniDurum); setSelectedOrder(o => (o && o.id === selectedOrder.id ? { ...o, status: yeniDurum } : o)); }
+                        }); }}
                           className="block w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-brand font-medium">
                           <option value="Pending">{currentT.pending}</option>
                           <option value="Processing">{currentT.processing}</option>
@@ -2147,7 +2308,7 @@ export default function OrdersPage({
                         ) : (
                           <span className="mt-0.5 inline-block text-xs font-medium text-gray-400"
                             title={oc(currentLanguage).tahsilat_durumu_mikro_cari_hesapta_izlenir_sipar}>
-                            {currentLanguage === 'tr' ? 'Tahsilat: Mikro cari hesapta' : 'AR: in Mikro ledger'}
+                            {op(currentLanguage).tahsilat_mikro_cari_hesapta}
                           </span>
                         )}
                       </div>
@@ -2164,7 +2325,7 @@ export default function OrdersPage({
                             <span className={`font-medium text-sm flex items-center gap-1.5 mt-0.5 ${isOverdue ? 'text-red-600' : 'text-gray-800'}`}>
                               {isOverdue && <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />}
                               {tarihYaz(ed)}
-                              {isOverdue && <span className="text-[9px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'GECİKTİ' : 'OVERDUE'}</span>}
+                              {isOverdue && <span className="text-[9px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{op(currentLanguage).gecikti}</span>}
                             </span>
                           </div>
                         );
@@ -2195,7 +2356,7 @@ export default function OrdersPage({
                       ...((() => {
                         const ts = zamanMs(selectedOrder.createdAt ?? selectedOrder.syncedAt);
                         if (ts === null) return [] as TimelineEntry[];
-                        return [{ action: currentLanguage === 'tr' ? 'Sipariş oluşturuldu' : 'Order created', actor: selectedOrder.customerName || '—', ts }] as TimelineEntry[];
+                        return [{ action: op(currentLanguage).siparis_olusturuldu, actor: selectedOrder.customerName || '—', ts }] as TimelineEntry[];
                       })()),
                       // Firestore-stored timeline entries
                       ...orderTimeline,
@@ -2206,7 +2367,7 @@ export default function OrdersPage({
                       <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
                         <h3 className="font-bold text-sm mb-4 flex items-center gap-2">
                           <History className="w-4 h-4 text-brand" />
-                          {currentLanguage === 'tr' ? 'Sipariş Geçmişi' : 'Order History'}
+                          {op(currentLanguage).siparis_gecmisi}
                         </h3>
                         <div className="relative pl-5">
                           {/* vertical line */}
@@ -2263,13 +2424,32 @@ export default function OrdersPage({
                               </tr>
                             ))}
                           </tbody>
+                          {/* İKİ ARIZA birden kalktı: (1) baştaki `$` JSX'te LİTERAL karakterdi — TL tutarı
+                              dolar sembolü + `toFixed(2)` ile ABD biçiminde basılıyordu ('$11000.00');
+                              (2) fiyatı/miktarı bilinmeyen kalemde toplam '$NaN' oluyordu. Bu alt toplam
+                              EKRAN sözleşmesidir (kısmi toplam + yazılı sayaç) — kârın ciro tabanından
+                              (TÜRETME, tek eksikte '—') BİLEREK ayrıdır. */}
                           <tfoot className="border-t border-gray-200 bg-gray-50">
-                            <tr>
-                              <td colSpan={3} className="px-4 py-3 font-bold text-gray-500 text-sm">{currentT.total}</td>
-                              <td className="px-4 py-3 text-right text-lg font-bold text-brand">
-                                ${selectedOrder.lineItems.reduce((s, l) => s + l.price * l.quantity, 0).toFixed(2)}
-                              </td>
-                            </tr>
+                            {(() => {
+                              const kalemT = kalemlerTutari(selectedOrder);
+                              return (
+                                <tr>
+                                  <td colSpan={3} className="px-4 py-3 font-bold text-gray-500 text-sm">
+                                    {currentT.total}
+                                    {kalemT.bilinmeyen > 0 && (
+                                      <span className="block text-[10px] font-normal text-amber-600">
+                                        {currentLanguage === 'tr'
+                                          ? `${kalemT.bilinmeyen} kalemin tutarı bilinmiyor — toplama girmedi.`
+                                          : `Amount unknown for ${kalemT.bilinmeyen} item(s) — excluded from total.`}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-lg font-bold text-brand">
+                                    {paraYaz(ekranTutari(kalemT))}
+                                  </td>
+                                </tr>
+                              );
+                            })()}
                           </tfoot>
                         </table>
                       </div>
@@ -2282,20 +2462,20 @@ export default function OrdersPage({
                     )}
 
                     {/* ── Phase 74: Gross Profit Summary ── */}
-                    {selectedOrder.lineItems && selectedOrder.lineItems.length > 0 && (() => {
-                      const hasCost = selectedOrder.lineItems.some(l => (l.costPrice ?? 0) > 0);
-                      if (!hasCost) return null;
-                      const revenue  = selectedOrder.lineItems.reduce((s, l) => s + l.price * l.quantity, 0);
-                      const cost     = selectedOrder.lineItems.reduce((s, l) => s + ((l.costPrice ?? 0) * l.quantity), 0);
-                      const gp       = revenue - cost;
-                      const gpPct    = revenue > 0 ? Math.round((gp / revenue) * 100) : 0;
-                      const gpColor  = gpPct >= 40 ? 'text-emerald-700' : gpPct >= 20 ? 'text-amber-700' : 'text-red-600';
-                      const gpBg     = gpPct >= 40 ? 'bg-emerald-50 border-emerald-100' : gpPct >= 20 ? 'bg-amber-50 border-amber-100' : 'bg-red-50 border-red-100';
-                      const barColor = gpPct >= 40 ? 'bg-emerald-400' : gpPct >= 20 ? 'bg-amber-400' : 'bg-red-400';
+                    {selectedOrder.lineItems && selectedOrder.lineItems.length > 0 && siparisKar && (() => {
+                      const { maliyet: cost, kar: gp, marjYuzde, maliyetsizKalem, satirlar } = siparisKar;
+                      // HİÇBİR kalemin maliyeti bilinmiyorsa kutu hiç çizilmez (eski `hasCost` davranışı korunur).
+                      // Eski kapı yalnız "HİÇ maliyet yok" hâlini eliyordu: KARIŞIK siparişte (biri biliniyor,
+                      // öteki bilinmiyor) kapı açılıyor, eksik maliyet 0 sayılıp marj şişiyordu.
+                      if (maliyetsizKalem === satirlar.length) return null;
+                      const gpPct    = marjYuzde === null ? null : Math.round(marjYuzde);
+                      const gpColor  = gpPct === null ? 'text-gray-400' : gpPct >= 40 ? 'text-emerald-700' : gpPct >= 20 ? 'text-amber-700' : 'text-red-600';
+                      const gpBg     = gpPct === null ? 'bg-gray-50 border-gray-100' : gpPct >= 40 ? 'bg-emerald-50 border-emerald-100' : gpPct >= 20 ? 'bg-amber-50 border-amber-100' : 'bg-red-50 border-red-100';
+                      const barColor = gpPct === null ? '' : gpPct >= 40 ? 'bg-emerald-400' : gpPct >= 20 ? 'bg-amber-400' : 'bg-red-400';
                       return (
                         <div className={`rounded-xl border px-4 py-3 ${gpBg} mt-3`}>
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-                            {currentLanguage === 'tr' ? 'Tahmini Brüt Kâr' : 'Est. Gross Profit'}
+                            {op(currentLanguage).tahmini_brut_kar}
                           </p>
                           <div className="flex items-center justify-between gap-4">
                             <div>
@@ -2303,17 +2483,27 @@ export default function OrdersPage({
                                 {paraYaz(gp)}
                               </p>
                               <p className="text-[10px] text-gray-500 mt-0.5">
-                                {currentLanguage === 'tr' ? 'Maliyet' : 'COGS'}: {paraYaz(cost)}
+                                {op(currentLanguage).maliyet}: {paraYaz(cost)}
                               </p>
+                              {maliyetsizKalem > 0 && (
+                                <p className="text-[10px] text-amber-600 mt-1">
+                                  {currentLanguage === 'tr'
+                                    ? `${maliyetsizKalem} kalemin maliyeti bilinmiyor — kâr hesaplanmadı.`
+                                    : `Cost unknown for ${maliyetsizKalem} item(s) — profit not calculated.`}
+                                </p>
+                              )}
                             </div>
                             <div className="flex-1 max-w-[120px]">
                               <div className="flex items-center justify-between mb-1">
                                 <span className="text-[10px] text-gray-400">{oc(currentLanguage).marj}</span>
-                                <span className={`text-sm font-black ${gpColor}`}>{gpPct}%</span>
+                                <span className={`text-sm font-black ${gpColor}`}>{gpPct === null ? '—' : `${gpPct}%`}</span>
                               </div>
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div className={`${barColor} h-2 rounded-full transition-all duration-700`} style={{ width: `${Math.min(gpPct, 100)}%` }} />
-                              </div>
+                              {/* Marj bilinmiyorken çubuk ÇİZİLMEZ — `Math.min(NaN, 100)` zaten `width: NaN%` üretiyordu. */}
+                              {gpPct !== null && (
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                  <div className={`${barColor} h-2 rounded-full transition-all duration-700`} style={{ width: `${Math.min(gpPct, 100)}%` }} />
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -2330,23 +2520,23 @@ export default function OrdersPage({
             <motion.div key="lojistik" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
               <ModuleHeader 
                 title={oc(currentLanguage).lojistik_depo} 
-                subtitle={currentLanguage === 'tr' ? 'Sevkiyatlar, depo yönetimi ve transferler' : 'Shipments, warehouse management and transfers'}
+                subtitle={op(currentLanguage).sevkiyatlar_depo_yonetimi_ve_transferler}
                 icon={Truck}
               />
               {/* Lojistik Sub-tabs (hidden on desktop — sidebar handles nav) */}
               <div className="lg:hidden overflow-x-auto scrollbar-none -mx-3 px-3">
                 <div className="flex gap-1 p-1 bg-white/80 border border-gray-100 rounded-2xl shadow-sm w-max mb-2">
                   {[
-                    { id: 'sevkiyat', label: currentLanguage === 'tr' ? 'Sevkiyatlar' : 'Shipments', icon: Truck },
-                    { id: 'kargo_takip', label: currentLanguage === 'tr' ? 'Kargo Takip' : 'Tracking', icon: Navigation },
+                    { id: 'sevkiyat', label: op(currentLanguage).sevkiyatlar, icon: Truck },
+                    { id: 'kargo_takip', label: op(currentLanguage).kargo_takip, icon: Navigation },
                     { id: 'depo', label: oc(currentLanguage).depo, icon: Building2 },
-                    { id: 'wms', label: currentLanguage === 'tr' ? 'Bin/Lokasyon' : 'Bin/Location', icon: MapPin },
-                    { id: 'transfer', label: currentLanguage === 'tr' ? 'Depolar Arası' : 'Transfer', icon: ArrowRightLeft },
+                    { id: 'wms', label: op(currentLanguage).bin_lokasyon, icon: MapPin },
+                    { id: 'transfer', label: op(currentLanguage).depolar_arasi, icon: ArrowRightLeft },
                     { id: 'qr-transfer', label: currentLanguage === 'tr' ? 'QR Transfer' : 'QR Transfer', icon: QrCode },
-                    { id: 'arac-takip', label: currentLanguage === 'tr' ? 'Araç Takip' : 'Vehicles', icon: Truck },
+                    { id: 'arac-takip', label: op(currentLanguage).arac_takip, icon: Truck },
                     { id: 'canli', label: oc(currentLanguage).canli_sevkiyat, icon: Navigation },
-                    { id: 'giden_irsaliye', label: currentLanguage === 'tr' ? 'Giden İrsaliye' : 'Outgoing', icon: FileUp },
-                    { id: 'gelen_irsaliye', label: currentLanguage === 'tr' ? 'Gelen İrsaliye' : 'Incoming', icon: FileDown },
+                    { id: 'giden_irsaliye', label: op(currentLanguage).giden_irsaliye, icon: FileUp },
+                    { id: 'gelen_irsaliye', label: op(currentLanguage).gelen_irsaliye, icon: FileDown },
                   ].map(tab => {
                     const Icon = tab.icon;
                     return (
@@ -2405,12 +2595,12 @@ export default function OrdersPage({
                 return (
                   <motion.div key="wms" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-10}} className="space-y-4">
                     <ModuleHeader
-                      title={tr554 ? 'Bin / Lokasyon Yönetimi' : 'Bin / Location Management'}
-                      subtitle={tr554 ? 'Depo içi raf ve lokasyon bazlı stok takibi' : 'Rack and bin-level stock tracking within warehouses'}
+                      title={op(tr554).bin_lokasyon_yonetimi}
+                      subtitle={op(tr554).depo_ici_raf_ve_lokasyon_bazli_stok_takibi}
                       icon={MapPin}
                       actionButton={hasFullAccess('lojistik') ? (
                         <button onClick={() => setP554AddForm(v => !v)} className="apple-button-primary px-4 py-2 text-sm flex items-center gap-1.5">
-                          <Plus className="w-3.5 h-3.5" />{tr554 ? 'Lokasyon Ekle' : 'Add Location'}
+                          <Plus className="w-3.5 h-3.5" />{op(tr554).lokasyon_ekle}
                         </button>
                       ) : undefined}
                     />
@@ -2418,10 +2608,10 @@ export default function OrdersPage({
                     {/* KPI strip */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {[
-                        { label: tr554 ? 'Toplam Bin' : 'Total Bins',          val: p554Bins.length,   color: 'text-blue-700',    bg: 'bg-blue-50',    icon: MapPin },
-                        { label: tr554 ? 'Depolar' : 'Warehouses',             val: Object.keys(warehouseGroups).length, color: 'text-purple-700', bg: 'bg-purple-50', icon: Building2 },
-                        { label: tr554 ? 'Düşük Stok Bin' : 'Low Stock Bins',  val: lowStock,          color: lowStock>0?'text-red-600':'text-emerald-600', bg: lowStock>0?'bg-red-50':'bg-emerald-50', icon: AlertTriangle },
-                        { label: tr554 ? 'Toplam SKU' : 'Unique SKUs',         val: new Set(p554Bins.map(b => b.productSku).filter(Boolean)).size, color: 'text-amber-700', bg: 'bg-amber-50', icon: Package },
+                        { label: op(tr554).toplam_bin,          val: p554Bins.length,   color: 'text-blue-700',    bg: 'bg-blue-50',    icon: MapPin },
+                        { label: op(tr554).depolar,             val: Object.keys(warehouseGroups).length, color: 'text-purple-700', bg: 'bg-purple-50', icon: Building2 },
+                        { label: op(tr554).dusuk_stok_bin,  val: lowStock,          color: lowStock>0?'text-red-600':'text-emerald-600', bg: lowStock>0?'bg-red-50':'bg-emerald-50', icon: AlertTriangle },
+                        { label: op(tr554).toplam_sku,         val: new Set(p554Bins.map(b => b.productSku).filter(Boolean)).size, color: 'text-amber-700', bg: 'bg-amber-50', icon: Package },
                       ].map(k => (
                         <div key={k.label} className={`apple-card p-4 flex items-center gap-3 ${k.bg}`}>
                           <k.icon className={`w-5 h-5 flex-shrink-0 ${k.color}`} />
@@ -2435,7 +2625,7 @@ export default function OrdersPage({
                       {p554AddForm && (
                         <motion.div initial={{opacity:0,height:0}} animate={{opacity:1,height:'auto'}} exit={{opacity:0,height:0}} className="overflow-hidden">
                           <div className="apple-card p-5 border-l-4 border-brand space-y-3">
-                            <h4 className="font-bold text-gray-800 text-sm">{tr554 ? 'Yeni Lokasyon' : 'New Bin Location'}</h4>
+                            <h4 className="font-bold text-gray-800 text-sm">{op(tr554).yeni_lokasyon}</h4>
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                               <div className="space-y-1">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr554).depo}</label>
@@ -2464,7 +2654,7 @@ export default function OrdersPage({
                                     serbest yazmaya da izin verir, çünkü Mikro'da
                                     olmayan bir SKU'yu elle girmek meşru olabilir. */}
                                 <input className="apple-input text-sm w-full" list="p554SkuListesi"
-                                  placeholder={tr554 ? 'SKU seçin veya yazın' : 'Pick or type a SKU'}
+                                  placeholder={op(tr554).sku_secin_veya_yazin}
                                   value={p554Draft.productSku}
                                   onChange={e => {
                                     const kod = e.target.value;
@@ -2494,18 +2684,27 @@ export default function OrdersPage({
                                   onChange={e => setP554Draft(d => ({ ...d, quantity: e.target.value }))} />
                               </div>
                               <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-gray-400 uppercase">{tr554 ? 'Min. Stok' : 'Min Stock'}</label>
+                                <label className="text-[10px] font-bold text-gray-400 uppercase">{op(tr554).min_stok}</label>
                                 <input type="number" min="0" className="apple-input text-sm w-full" placeholder="0" value={p554Draft.minQty}
                                   onChange={e => setP554Draft(d => ({ ...d, minQty: e.target.value }))} />
                               </div>
                             </div>
-                            <input className="apple-input text-sm w-full" placeholder={tr554 ? 'Not (opsiyonel)' : 'Notes (optional)'} value={p554Draft.notes}
+                            <input className="apple-input text-sm w-full" placeholder={op(tr554).not_opsiyonel} value={p554Draft.notes}
                               onChange={e => setP554Draft(d => ({ ...d, notes: e.target.value }))} />
                             <div className="flex gap-2 justify-end">
                               <button onClick={() => setP554AddForm(false)} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr554).iptal}</button>
                               <button
                                 disabled={!p554Draft.warehouseId || !p554Draft.binCode}
                                 onClick={async () => {
+                                  // Bilinen 0 GEÇERLİ (boş raf adresi önceden tanımlanır); yalnız
+                                  // boş alan ve negatif reddedilir — bkz. formKayit.miktarDogrula.
+                                  const miktar = miktarDogrula(p554Draft.quantity);
+                                  if (!miktar.gecerli) {
+                                    toast(miktar.hata === 'miktar_bos'
+                                      ? (op(tr554).miktar_girin_bos_birakilan_alan_0_adet_olarak_ka)
+                                      : (op(tr554).miktar_negatif_olamaz), 'error');
+                                    return;
+                                  }
                                   const wh = warehouses.find(w => w.id === p554Draft.warehouseId);
                                   await addDoc(collection(db, 'warehouseBins'), {
                                     warehouseId: p554Draft.warehouseId,
@@ -2513,15 +2712,15 @@ export default function OrdersPage({
                                     binCode: p554Draft.binCode,
                                     productSku: p554Draft.productSku,
                                     productName: p554Draft.productName,
-                                    quantity: Number(p554Draft.quantity) || 0,
-                                    minQty: p554Draft.minQty ? Number(p554Draft.minQty) : undefined,
+                                    quantity: miktar.deger,
+                                    ...girilenAlanYamasi('minQty', formSayisi(p554Draft.minQty), undefined),
                                     notes: p554Draft.notes || undefined,
                                     lastCounted: bugunAnahtari(),
                                     createdAt: serverTimestamp(),
                                   });
                                   setP554Draft({ warehouseId: '', binCode: '', productSku: '', productName: '', quantity: '', minQty: '', notes: '' });
                                   setP554AddForm(false);
-                                  toast(tr554 ? 'Lokasyon eklendi.' : 'Location added.', 'success');
+                                  toast(op(tr554).lokasyon_eklendi, 'success');
                                 }}
                                 className="apple-button-primary px-5 py-2 text-sm disabled:opacity-50"
                               >{oc(tr554).kaydet}</button>
@@ -2535,14 +2734,14 @@ export default function OrdersPage({
                     <div className="apple-card p-4">
                       <div className="relative mb-4">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                        <input className="apple-input pl-9 w-full text-sm" placeholder={tr554 ? 'Bin kodu, SKU veya ürün adı ara…' : 'Search bin code, SKU or product…'}
+                        <input className="apple-input pl-9 w-full text-sm" placeholder={op(tr554).bin_kodu_sku_veya_urun_adi_ara}
                           value={p554Search} onChange={e => setP554Search(e.target.value)} />
                       </div>
 
                       {p554Bins.length === 0 ? (
                         <div className="text-center py-12 space-y-3">
                           <MapPin className="w-10 h-10 text-gray-200 mx-auto" />
-                          <p className="text-gray-400 text-sm">{tr554 ? '"Lokasyon Ekle" ile depo içi bin takibine başlayın.' : 'Click "Add Location" to start tracking bin locations.'}</p>
+                          <p className="text-gray-400 text-sm">{op(tr554).lokasyon_ekle_ile_depo_ici_bin_takibine_baslayin}</p>
                         </div>
                       ) : (
                         <div className="space-y-4">
@@ -2557,7 +2756,7 @@ export default function OrdersPage({
                                 <table className="w-full text-sm">
                                   <thead>
                                     <tr className="border-b border-gray-100">
-                                      {[oc(tr554).bin_kodu, 'SKU', oc(tr554).urun, oc(tr554).miktar, tr554?'Min':'Min', tr554?'Son Sayım':'Last Count', ''].map(h => (
+                                      {[oc(tr554).bin_kodu, 'SKU', oc(tr554).urun, oc(tr554).miktar, tr554?'Min':'Min', op(tr554).son_sayim, ''].map(h => (
                                         <th key={h} className="py-2 px-3 text-left text-[10px] font-bold text-gray-400 uppercase">{h}</th>
                                       ))}
                                     </tr>
@@ -2580,14 +2779,22 @@ export default function OrdersPage({
                                           <td className="px-3 py-2.5 text-gray-400 text-xs">{b.lastCounted || '—'}</td>
                                           <td className="px-3 py-2.5">
                                             <button onClick={async () => {
-                                              const qty = window.prompt(tr554 ? 'Yeni miktar girin:' : 'Enter new quantity:', String(b.quantity));
-                                              if (qty === null) return;
-                                              const n = Number(qty);
-                                              if (isNaN(n)) return;
-                                              await updateDoc(doc(db, 'warehouseBins', b.id), { quantity: n, lastCounted: bugunAnahtari() });
-                                              toast(tr554 ? 'Miktar güncellendi.' : 'Quantity updated.', 'success');
+                                              const qty = window.prompt(op(tr554).yeni_miktar_girin, String(b.quantity));
+                                              if (qty === null) return;      // Vazgeç
+                                              // AYNI kapı ekleme formuyla: `Number('')` 0 verip `isNaN(0)` false döndüğü
+                                              // için prompt boş onaylanınca sahte `quantity: 0` yazılıyor ve "güncellendi"
+                                              // deniyordu; iki yüzey aynı alana çelişen sözleşme uyguluyordu (2026-09-19 delta).
+                                              const miktar = miktarDogrula(qty);
+                                              if (!miktar.gecerli) {
+                                                toast(miktar.hata === 'miktar_bos'
+                                                  ? (op(tr554).miktar_girin_bos_birakilan_alan_0_adet_olarak_ka)
+                                                  : (op(tr554).miktar_negatif_olamaz), 'error');
+                                                return;                      // `lastCounted` da YAZILMAZ: sayım yapılmadı
+                                              }
+                                              await updateDoc(doc(db, 'warehouseBins', b.id), { quantity: miktar.deger, lastCounted: bugunAnahtari() });
+                                              toast(op(tr554).miktar_guncellendi, 'success');
                                             }} className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg transition-colors">
-                                              {tr554 ? 'Düzelt' : 'Adjust'}
+                                              {op(tr554).duzelt}
                                             </button>
                                           </td>
                                         </tr>
@@ -2611,39 +2818,22 @@ export default function OrdersPage({
                 const now576 = new Date();
                 const daysBack = p576Period === '7d' ? 7 : p576Period === '30d' ? 30 : 90;
                 const from576 = new Date(now576.getTime() - daysBack * 86400000);
-                const periodOrders = orders.filter(o => {
-                  const d = zamanDate(o.createdAt);
-                  return !!d && d >= from576 && d <= now576;
-                });
-                const shipped576 = periodOrders.filter(o => o.status === 'Shipped' || o.status === 'Delivered');
-                const delivered576 = periodOrders.filter(o => o.status === 'Delivered');
-                const cancelled576 = periodOrders.filter(o => o.status === 'Cancelled');
-                const onTime576 = delivered576.filter(o => {
-                  const est = zamanDate(o.estimatedDelivery);
-                  if (!est) return true;
-                  const del = o.deliveryPhoto ? now576 : est; // approximation
-                  return del <= est;
-                });
-                const fillRate = periodOrders.length > 0 ? (shipped576.length / periodOrders.length) * 100 : 0;
-                const onTimeRate = delivered576.length > 0 ? (onTime576.length / delivered576.length) * 100 : 0;
-                const cancelRate = periodOrders.length > 0 ? (cancelled576.length / periodOrders.length) * 100 : 0;
-                // Average order processing time (created → shipped)
-                const avgProcessDays = shipped576.length > 0
-                  ? shipped576.reduce((s,o) => {
-                    const crMs = zamanMs(o.createdAt);
-                    if (crMs === null) return s;
-                    return s + (now576.getTime() - crMs) / 86400000;
-                  }, 0) / shipped576.length : 0;
-                // Low stock ratio
+                // Dönem filtresi + tüm sipariş KPI'ları tek sözleşmeden: src/utils/siparisler/lojistikKpi.ts
+                // (payda 0 → oran BİLİNMİYOR; tarihi okunamayan sipariş döneme girmez ama SAYILIR;
+                //  zamanında teslim artık gerçek `deliveredAt` ile ölçülür, tahmin yoksa ölçülemez sayılır).
+                const perf576 = teslimPerformansi(orders, { baslangic: from576, bitis: now576 });
+                const periodOrders = perf576.donem;
+                // Düşük stok oranı: katalog boşsa oran BİLİNMİYOR (eski `: 0` "%0" + YEŞİL rozet basıyordu).
                 const lowStockItems = inventory.filter(item => item.stockLevel <= item.lowStockThreshold);
-                const lowStockRatio = inventory.length > 0 ? (lowStockItems.length / inventory.length) * 100 : 0;
-                const kpis576 = [
-                  { label: tr576?'Sipariş Doluluk Oranı':'Order Fill Rate', value: fillRate, unit: '%', good: fillRate >= 90, icon: '📦' },
-                  { label: tr576?'Zamanında Teslimat':'On-Time Delivery', value: onTimeRate, unit: '%', good: onTimeRate >= 90, icon: '🚚' },
-                  { label: tr576?'İptal Oranı':'Cancellation Rate', value: cancelRate, unit: '%', good: cancelRate <= 5, icon: '❌', invertGood: true },
-                  { label: tr576?'Ort. İşlem Süresi':'Avg Processing Time', value: avgProcessDays, unit: tr576?' gün':' days', good: avgProcessDays <= 3, icon: '⏱', invertGood: true },
-                  { label: tr576?'Düşük Stok Oranı':'Low Stock Ratio', value: lowStockRatio, unit: '%', good: lowStockRatio <= 10, icon: '⚠️', invertGood: true },
-                  { label: oc(tr576).aktif_siparis, value: periodOrders.filter(o=>['Pending','Processing'].includes(o.status)).length, unit: '', good: true, icon: '📋' },
+                const lowStockRatio = oranYuzde(lowStockItems.length, inventory.length);
+                // `value: null` = ölçülemedi → '—' basılır, iyi/kötü ROZETİ ÇİZİLMEZ (good: null = nötr gri).
+                const kpis576: Array<{ label: string; value: number | null; unit: string; good: boolean | null; icon: string }> = [
+                  { label: op(tr576).siparis_doluluk_orani, value: perf576.dolulukOrani, unit: '%', good: perf576.dolulukOrani === null ? null : perf576.dolulukOrani >= 90, icon: '📦' },
+                  { label: op(tr576).zamaninda_teslimat, value: perf576.zamanindaOrani, unit: '%', good: perf576.zamanindaOrani === null ? null : perf576.zamanindaOrani >= 90, icon: '🚚' },
+                  { label: op(tr576).iptal_orani, value: perf576.iptalOrani, unit: '%', good: perf576.iptalOrani === null ? null : perf576.iptalOrani <= 5, icon: '❌' },
+                  { label: op(tr576).ort_islem_suresi, value: perf576.ortGecenGun, unit: op(tr576).gun, good: perf576.ortGecenGun === null ? null : perf576.ortGecenGun <= 3, icon: '⏱' },
+                  { label: op(tr576).dusuk_stok_orani, value: lowStockRatio, unit: '%', good: lowStockRatio === null ? null : lowStockRatio <= 10, icon: '⚠️' },
+                  { label: oc(tr576).aktif_siparis, value: perf576.aktif, unit: '', good: true, icon: '📋' },
                 ];
                 const cargoMap576: Record<string, number> = {};
                 periodOrders.forEach(o => {
@@ -2654,28 +2844,35 @@ export default function OrdersPage({
                 return (
                   <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                     <div className="flex items-center justify-between flex-wrap gap-3">
-                      <ModuleHeader title={oc(tr576).tedarik_zinciri_kpi} subtitle={tr576?'Sipariş, teslimat ve stok performans göstergeleri.':'Order, delivery and inventory performance indicators.'} icon={TrendingUp} />
+                      <ModuleHeader title={oc(tr576).tedarik_zinciri_kpi} subtitle={op(tr576).siparis_teslimat_ve_stok_performans_gostergeleri} icon={TrendingUp} />
                       <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
                         {(['7d','30d','90d'] as const).map(p=>(
                           <button key={p} onClick={()=>setP576Period(p)}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${p576Period===p?'bg-white shadow text-gray-900':'text-gray-500 hover:text-gray-700'}`}>
-                            {p==='7d'?tr576?'7 Gün':'7 Days':p==='30d'?tr576?'30 Gün':'30 Days':tr576?'90 Gün':'90 Days'}
+                            {p==='7d'?op(tr576)._7_gun:p==='30d'?op(tr576)._30_gun:op(tr576)._90_gun}
                           </button>
                         ))}
                       </div>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       {kpis576.map(k=>(
-                        <div key={k.label} className={`apple-card p-4 ${k.good?'':'border border-red-100'}`}>
+                        <div key={k.label} className={`apple-card p-4 ${k.good===false?'border border-red-100':''}`}>
                           <p className="text-lg mb-1">{k.icon}</p>
                           <p className="text-xs text-gray-500 font-semibold">{k.label}</p>
-                          <p className={`text-2xl font-bold mt-1 ${k.good?'text-emerald-600':'text-red-500'}`}>{typeof k.value==='number'?k.value.toFixed(k.unit===''?0:1):k.value}{k.unit}</p>
+                          <p className={`text-2xl font-bold mt-1 ${k.good===null?'text-gray-400':k.good?'text-emerald-600':'text-red-500'}`}>{k.value===null?'—':`${k.value.toFixed(k.unit===''?0:1)}${k.unit}`}</p>
                         </div>
                       ))}
                     </div>
+                    {(perf576.tarihsiz > 0 || perf576.zamanindaOlculemeyen > 0) && (
+                      <p className="text-[11px] text-gray-400">
+                        {tr576
+                          ? `${perf576.tarihsiz} siparişin tarihi okunamadı (döneme girmedi) · ${perf576.zamanindaOlculemeyen} teslimat ölçülemedi (tahmini ya da gerçek teslim tarihi eksik).`
+                          : `${perf576.tarihsiz} orders have an unreadable date (excluded) · ${perf576.zamanindaOlculemeyen} deliveries not measurable (missing estimated or actual delivery date).`}
+                      </p>
+                    )}
                     {cargos576.length > 0 && (
                       <div className="apple-card p-5">
-                        <h4 className="font-bold text-sm text-gray-800 mb-3">{tr576?'🚚 Kargo Firması Dağılımı':'🚚 Carrier Distribution'}</h4>
+                        <h4 className="font-bold text-sm text-gray-800 mb-3">{op(tr576).kargo_firmasi_dagilimi}</h4>
                         <div className="space-y-2">
                           {cargos576.map(([name,cnt])=>{
                             const pct = periodOrders.length>0?(cnt/periodOrders.length)*100:0;
@@ -2735,42 +2932,47 @@ export default function OrdersPage({
                 const stats = {müsait:p593Vehicles.filter(v=>v.status==='Müsait').length, yolda:p593Vehicles.filter(v=>v.status==='Yolda').length, bakimda:p593Vehicles.filter(v=>v.status==='Bakımda'||v.status==='Arızalı').length};
                 return (
                   <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
-                    <ModuleHeader title={tr593?'🚗 Araç Filosu Takibi':'🚗 Vehicle Fleet Tracking'} subtitle={tr593?'Araçların durum, sürücü ve bakım bilgilerini takip edin.':'Track vehicle status, drivers and maintenance schedules.'} icon={Truck}
-                      actionButton={hasFullAccess('lojistik')&&(<button onClick={()=>setP593ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr593?'Araç Ekle':'Add Vehicle'}</button>)} />
+                    <ModuleHeader title={op(tr593).arac_filosu_takibi} subtitle={op(tr593).araclarin_durum_surucu_ve_bakim_bilgilerini_taki} icon={Truck}
+                      actionButton={hasFullAccess('lojistik')&&(<button onClick={()=>setP593ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{op(tr593).arac_ekle}</button>)} />
                     <div className="grid grid-cols-3 gap-4">
-                      {[{label:tr593?'Müsait':'Available',val:stats.müsait,color:'text-green-700',bg:'bg-green-50'},{label:tr593?'Yolda':'On Route',val:stats.yolda,color:'text-blue-700',bg:'bg-blue-50'},{label:tr593?'Bakım/Arıza':'Maintenance',val:stats.bakimda,color:'text-amber-700',bg:'bg-amber-50'}].map(k=>(
+                      {[{label:op(tr593).musait,val:stats.müsait,color:'text-green-700',bg:'bg-green-50'},{label:op(tr593).yolda,val:stats.yolda,color:'text-blue-700',bg:'bg-blue-50'},{label:op(tr593).bakim_ariza,val:stats.bakimda,color:'text-amber-700',bg:'bg-amber-50'}].map(k=>(
                         <div key={k.label} className={`apple-card p-4 ${k.bg}`}><p className="text-xs text-gray-500">{k.label}</p><p className={`text-2xl font-bold ${k.color}`}>{k.val}</p></div>
                       ))}
                     </div>
-                    {maintenanceDue.length>0&&(<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3"><p className="text-sm font-bold text-amber-800">🔧 {maintenanceDue.length} {tr593?'araç bu hafta bakıma giriyor:':'vehicle(s) due for maintenance:'} {maintenanceDue.map(v=>v.plate).join(', ')}</p></div>)}
+                    {maintenanceDue.length>0&&(<div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3"><p className="text-sm font-bold text-amber-800">🔧 {maintenanceDue.length} {op(tr593).arac_bu_hafta_bakima_giriyor} {maintenanceDue.map(v=>v.plate).join(', ')}</p></div>)}
                     {p593ShowForm && (
                       <div className="apple-card p-5 space-y-3">
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Plaka':'Plate'} value={p593Draft.plate} onChange={e=>setP593Draft(d=>({...d,plate:e.target.value.toUpperCase()}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={op(tr593).plaka} value={p593Draft.plate} onChange={e=>setP593Draft(d=>({...d,plate:e.target.value.toUpperCase()}))} />
                           <input className="apple-input px-3 py-2 text-sm" placeholder={oc(tr593).surucu} value={p593Draft.driver} onChange={e=>setP593Draft(d=>({...d,driver:e.target.value}))} />
-                          <input className="apple-input px-3 py-2 text-sm" type="tel" placeholder={tr593?'Sürücü Telefonu':'Driver Phone'} value={p593Draft.driverPhone} onChange={e=>setP593Draft(d=>({...d,driverPhone:e.target.value}))} />
-                          <input className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Marka/Model':'Model'} value={p593Draft.model} onChange={e=>setP593Draft(d=>({...d,model:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" type="tel" placeholder={op(tr593).surucu_telefonu} value={p593Draft.driverPhone} onChange={e=>setP593Draft(d=>({...d,driverPhone:e.target.value}))} />
+                          <input className="apple-input px-3 py-2 text-sm" placeholder={op(tr593).marka_model} value={p593Draft.model} onChange={e=>setP593Draft(d=>({...d,model:e.target.value}))} />
                           <select className="apple-input px-3 py-2 text-sm" value={p593Draft.fuel} onChange={e=>setP593Draft(d=>({...d,fuel:e.target.value as typeof d.fuel}))}>
                             {(['Benzin','Dizel','LPG','Elektrik'] as const).map(f=><option key={f}>{f}</option>)}
                           </select>
                           <input type="number" className="apple-input px-3 py-2 text-sm" placeholder="KM" value={p593Draft.km} onChange={e=>setP593Draft(d=>({...d,km:e.target.value}))} />
-                          <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={tr593?'Son Bakım':'Last Service'} value={p593Draft.lastService} onChange={e=>setP593Draft(d=>({...d,lastService:e.target.value}))} />
+                          <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={op(tr593).son_bakim} value={p593Draft.lastService} onChange={e=>setP593Draft(d=>({...d,lastService:e.target.value}))} />
                           <input type="date" className="apple-input px-3 py-2 text-sm" placeholder={oc(tr593).sonraki_bakim} value={p593Draft.nextService} onChange={e=>setP593Draft(d=>({...d,nextService:e.target.value}))} />
                         </div>
                         <div className="flex gap-2">
                           <button onClick={async ()=>{
                             // Plaka boşken eskiden SESSİZCE return ediliyordu: düğme hiçbir
                             // şey yapmıyor, mesaj da çıkmıyordu → "araç ekle çalışmıyor".
-                            if(!p593Draft.plate.trim()){ toast(tr593?'Plaka zorunlu.':'Plate is required.','error'); return; }
+                            if(!p593Draft.plate.trim()){ toast(op(tr593).plaka_zorunlu,'error'); return; }
                             try {
-                              await addDoc(collection(db,'vehicles'),{plate:p593Draft.plate.trim(),driver:p593Draft.driver||'',model:p593Draft.model||'',status:p593Draft.status,lastService:p593Draft.lastService||'',nextService:p593Draft.nextService||'',km:Number(p593Draft.km)||0,fuel:p593Draft.fuel,createdAt:serverTimestamp()});
+                              // `km` kayıt kapısı DEĞİL, opsiyonel GİRİLEN alandır: 0 km meşrudur
+                              // (sıfır kilometre araç) ama BOŞ alan 0 km değil BİLİNMİYOR demektir —
+                              // bakım planlaması (`maintenanceDue`) o sahte sıfıra bakıyordu.
+                              // `driverPhone` formda toplanıyor ve CanliSevkiyatPanel'deki "Ara"
+                              // düğmesi onu okuyor, ama payload'a hiç konmamıştı (sessiz veri kaybı).
+                              await addDoc(collection(db,'vehicles'),{plate:p593Draft.plate.trim(),driver:p593Draft.driver||'',driverPhone:p593Draft.driverPhone||'',model:p593Draft.model||'',status:p593Draft.status,lastService:p593Draft.lastService||'',nextService:p593Draft.nextService||'',...girilenAlanYamasi('km', formSayisi(p593Draft.km), undefined),fuel:p593Draft.fuel,createdAt:serverTimestamp()});
                               setP593Draft({plate:'',driver:'',driverPhone:'',model:'',status:'Müsait',lastService:'',nextService:'',km:'',fuel:'Dizel'});
                               setP593ShowForm(false);
                             } catch(e){
                               // Sunucunun gerçek mesajını göster (örn. yetki reddi) — genel
                               // metin, RBAC 403'ünü "bilinmeyen hata" gibi gösteriyordu.
                               console.error('[vehicle add]',e);
-                              const msg = e instanceof Error && e.message ? e.message : (tr593?'Araç kaydedilemedi.':'Failed to save vehicle.');
+                              const msg = e instanceof Error && e.message ? e.message : (op(tr593).arac_kaydedilemedi);
                               toast(msg,'error');
                             }
                           }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr593).kaydet}</button>
@@ -2779,7 +2981,7 @@ export default function OrdersPage({
                       </div>
                     )}
                     {p593Vehicles.length===0?(
-                      <div className="apple-card p-12 text-center"><Truck className="w-12 h-12 text-gray-200 mx-auto mb-3"/><p className="text-gray-400 text-sm">{tr593?'"Araç Ekle" ile filo takibini başlatın.':'Click "Add Vehicle" to start fleet tracking.'}</p></div>
+                      <div className="apple-card p-12 text-center"><Truck className="w-12 h-12 text-gray-200 mx-auto mb-3"/><p className="text-gray-400 text-sm">{op(tr593).arac_ekle_ile_filo_takibini_baslatin}</p></div>
                     ):(
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {p593Vehicles.map(v=>{
@@ -2820,10 +3022,10 @@ export default function OrdersPage({
                     <div className="apple-card p-5">
                       <div className="flex items-center gap-2 mb-3">
                         <Building2 className="w-4 h-4 text-brand" />
-                        <h4 className="font-bold text-gray-900 text-sm">{tr593?'Depo QR Etiketleri':'Warehouse QR Labels'}</h4>
+                        <h4 className="font-bold text-gray-900 text-sm">{op(tr593).depo_qr_etiketleri}</h4>
                       </div>
                       {warehouses.length===0?(
-                        <p className="text-xs text-gray-400">{tr593?'Henüz depo tanımlı değil. Muhasebe → Depo bölümünden ekleyin.':'No warehouses yet. Add them under Accounting → Warehouse.'}</p>
+                        <p className="text-xs text-gray-400">{op(tr593).henuz_depo_tanimli_degil_muhasebe_depo_bolumunde}</p>
                       ):(
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                           {warehouses.map(w=>(
@@ -2848,21 +3050,22 @@ export default function OrdersPage({
               {lojistikTab === 'ihracat-gumruk' && (() => {
                 const tr622 = currentLanguage === 'tr';
                 const statusColor:{[k:string]:string} = {'Hazırlanıyor':'bg-gray-100 text-gray-600','Gümrükte':'bg-amber-100 text-amber-700','Yolda':'bg-blue-100 text-blue-700','Teslim Edildi':'bg-emerald-100 text-emerald-700'};
-                const totalValue = p622Shipments.reduce((s,sh)=>s+(sh.value||0),0);
+                // USD/EUR/TRY tek toplamda BİRLEŞMEZ (kur yok → çeviri yok): para birimi başına ayrı Tutar.
+                const ihracat622 = ihracatToplami(p622Shipments);
                 const inTransit = p622Shipments.filter(sh=>sh.status==='Yolda'||sh.status==='Gümrükte').length;
                 return (
                   <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
-                    <ModuleHeader title={tr622?'İhracat & Gümrük Takibi':'Export & Customs Tracking'} subtitle={tr622?'İhracat sevkiyatları ve gümrük süreçleri':'Export shipments and customs clearance tracking'} icon={Globe}
-                      actionButton={hasFullAccess('lojistik')&&(<button onClick={()=>setP622ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr622?'Sevkiyat Ekle':'Add Shipment'}</button>)} />
+                    <ModuleHeader title={op(tr622).ihracat_gumruk_takibi} subtitle={op(tr622).ihracat_sevkiyatlari_ve_gumruk_surecleri} icon={Globe}
+                      actionButton={hasFullAccess('lojistik')&&(<button onClick={()=>setP622ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{op(tr622).sevkiyat_ekle}</button>)} />
                     <div className="grid grid-cols-3 gap-4">
-                      <div className="apple-card p-4 bg-blue-50"><p className="text-xs text-gray-500">{tr622?'Toplam Sevkiyat':'Total Shipments'}</p><p className="text-2xl font-black text-blue-600">{p622Shipments.length}</p></div>
-                      <div className="apple-card p-4 bg-amber-50"><p className="text-xs text-gray-500">{tr622?'Yolda/Gümrük':'In Transit'}</p><p className="text-2xl font-black text-amber-600">{inTransit}</p></div>
-                      <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{oc(tr622).toplam_deger}</p><p className="text-lg font-black text-emerald-600">{paraYaz(totalValue, { birim: 'USD', ondalik: 0 })}</p></div>
+                      <div className="apple-card p-4 bg-blue-50"><p className="text-xs text-gray-500">{op(tr622).toplam_sevkiyat}</p><p className="text-2xl font-black text-blue-600">{p622Shipments.length}</p></div>
+                      <div className="apple-card p-4 bg-amber-50"><p className="text-xs text-gray-500">{op(tr622).yolda_gumruk}</p><p className="text-2xl font-black text-amber-600">{inTransit}</p></div>
+                      <div className="apple-card p-4 bg-emerald-50"><p className="text-xs text-gray-500">{oc(tr622).toplam_deger}</p><p className="text-lg font-black text-emerald-600 break-words">{ihracatToplamiYaz(ihracat622)}</p>{ihracat622.bilinmeyenTutar > 0 && (<p className="text-[10px] text-gray-400 mt-0.5">{tr622 ? `${ihracat622.bilinmeyenTutar} sevkiyatın tutarı bilinmiyor` : `${ihracat622.bilinmeyenTutar} shipments have no value`}</p>)}</div>
                     </div>
                     {p622ShowForm && (
                       <div className="apple-card p-5 space-y-3">
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                          <input className="apple-input" placeholder={tr622?'Sipariş Ref':'Order Ref'} value={p622Draft.orderRef} onChange={e=>setP622Draft(d=>({...d,orderRef:e.target.value}))}/>
+                          <input className="apple-input" placeholder={op(tr622).siparis_ref} value={p622Draft.orderRef} onChange={e=>setP622Draft(d=>({...d,orderRef:e.target.value}))}/>
                           <input className="apple-input" placeholder={oc(tr622).destinasyon} value={p622Draft.destination} onChange={e=>setP622Draft(d=>({...d,destination:e.target.value}))}/>
                           <select value={p622Draft.incoterm} onChange={e=>setP622Draft(d=>({...d,incoterm:e.target.value as typeof d.incoterm}))} className="apple-input">
                             {['EXW','FOB','CIF','DDP'].map(i=><option key={i}>{i}</option>)}
@@ -2875,11 +3078,19 @@ export default function OrdersPage({
                             {['Hazırlanıyor','Gümrükte','Yolda','Teslim Edildi'].map(s=><option key={s}>{s}</option>)}
                           </select>
                           <input type="date" className="apple-input" value={p622Draft.exportDate} onChange={e=>setP622Draft(d=>({...d,exportDate:e.target.value}))}/>
-                          <input className="apple-input" placeholder={tr622?'Gümrük Ref':'Customs Ref'} value={p622Draft.customsRef} onChange={e=>setP622Draft(d=>({...d,customsRef:e.target.value}))}/>
+                          <input className="apple-input" placeholder={op(tr622).gumruk_ref} value={p622Draft.customsRef} onChange={e=>setP622Draft(d=>({...d,customsRef:e.target.value}))}/>
                         </div>
                         <button onClick={async ()=>{
                           if(!p622Draft.orderRef||!p622Draft.destination) return;
-                          const payload={orderRef:p622Draft.orderRef,destination:p622Draft.destination,incoterm:p622Draft.incoterm,currency:p622Draft.currency,value:Number(p622Draft.value)||0,status:p622Draft.status,exportDate:p622Draft.exportDate,customsRef:p622Draft.customsRef||''};
+                          // Kapı DÜZENLEMEDE farklı davranır: boş bırakmak "tutarı bilmiyorum"dur ve
+                          // kayıt durmaz (eski `value: 0` sevkiyatı aksi hâlde kilitleniyordu — satırda
+                          // durum seçici yok, ilerletmenin tek yolu bu form). bkz. sevkiyatDegeriKaydi.
+                          const oncekiSevkiyat = p622EditId ? p622Shipments.find(s=>s.id===p622EditId) : undefined;
+                          const deger = sevkiyatDegeriKaydi(p622Draft.value, oncekiSevkiyat?.value, !!p622EditId);
+                          if(!deger.gecerli){ toast(deger.hata === 'deger_bos'
+                            ? (op(tr622).sevkiyat_degeri_girin_bos_alan_0_olarak_kaydedil)
+                            : (op(tr622).sevkiyat_degeri_0_dan_buyuk_olmali), 'error'); return; }
+                          const payload={orderRef:p622Draft.orderRef,destination:p622Draft.destination,incoterm:p622Draft.incoterm,currency:p622Draft.currency,...deger.yama,status:p622Draft.status,exportDate:p622Draft.exportDate,customsRef:p622Draft.customsRef||''};
                           try {
                             if(p622EditId){ await updateDoc(doc(db,'exportShipments',p622EditId),payload); }
                             else { await addDoc(collection(db,'exportShipments'),{...payload,createdAt:serverTimestamp()}); }
@@ -2905,11 +3116,13 @@ export default function OrdersPage({
                                 <td className="px-3 py-2.5 font-mono text-gray-700">{sh.orderRef}</td>
                                 <td className="px-3 py-2.5 font-medium text-gray-800">{sh.destination}</td>
                                 <td className="px-3 py-2.5 text-gray-500">{sh.incoterm}</td>
-                                <td className="px-3 py-2.5 font-bold text-gray-700">{paraYaz(sh.value, { birim: sh.currency })}</td>
+                                {/* Hücre ile düzenleme ön-dolumu AYNI tanımı kullanır (`gorunenDeger`):
+                                    eski sahte 0 kaydı '—' basar, kutu BOŞ açılır. */}
+                                <td className="px-3 py-2.5 font-bold text-gray-700">{paraYaz(gorunenDeger(sh.value), { birim: sh.currency })}</td>
                                 <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor[sh.status]}`}>{sh.status}</span></td>
                                 <td className="px-3 py-2.5 text-gray-500">{tarihYaz(sh.exportDate)}</td>
                                 <td className="px-3 py-2.5 text-right"><div className="flex items-center justify-end gap-2">
-                                  <button type="button" onClick={()=>{setP622Draft({orderRef:sh.orderRef,destination:sh.destination,incoterm:sh.incoterm,currency:sh.currency,value:String(sh.value),status:sh.status,exportDate:sh.exportDate,customsRef:sh.customsRef||''});setP622EditId(sh.id);setP622ShowForm(true);}} title={oc(tr622).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
+                                  <button type="button" onClick={()=>{const gd=gorunenDeger(sh.value);setP622Draft({orderRef:sh.orderRef,destination:sh.destination,incoterm:sh.incoterm,currency:sh.currency,value:gd===null?'':String(gd),status:sh.status,exportDate:sh.exportDate,customsRef:sh.customsRef||''});setP622EditId(sh.id);setP622ShowForm(true);}} title={oc(tr622).duzenle} className="text-gray-300 hover:text-blue-600 transition-colors"><Edit2 className="w-3.5 h-3.5"/></button>
                                   <button type="button" onClick={async ()=>{try{await deleteDoc(doc(db,'exportShipments',sh.id));}catch(e){toast((oc(tr622).silinemedi)+(e instanceof Error?e.message:String(e)),'error');}}} title="Sil" className="text-gray-300 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                                 </div></td>
                               </tr>
@@ -2918,7 +3131,7 @@ export default function OrdersPage({
                         </table>
                       </div>
                     )}
-                    {p622Shipments.length===0&&<div className="text-center py-10"><Globe className="w-10 h-10 text-gray-200 mx-auto mb-3"/><p className="text-gray-400 text-sm">{tr622?'İhracat sevkiyatı ekleyin.':'Add export shipments to track.'}</p></div>}
+                    {p622Shipments.length===0&&<div className="text-center py-10"><Globe className="w-10 h-10 text-gray-200 mx-auto mb-3"/><p className="text-gray-400 text-sm">{op(tr622).ihracat_sevkiyati_ekleyin}</p></div>}
                   </motion.div>
                 );
               })()}
@@ -2935,15 +3148,15 @@ export default function OrdersPage({
                 const pending = orders.filter(o => o.status === 'Processing');
                 const stats = [
                   { label: oc(currentLanguage).kargoda,      value: shipped.length,     color: 'text-blue-700',    bg: 'bg-blue-50',    icon: Truck        },
-                  { label: currentLanguage === 'tr' ? 'Bugün Gönderildi' : 'Shipped Today', value: todayShipped.length, color: 'text-purple-700', bg: 'bg-purple-50', icon: Package     },
-                  { label: currentLanguage === 'tr' ? 'Hazırlanıyor' : 'Preparing',   value: pending.length,     color: 'text-amber-700',   bg: 'bg-amber-50',   icon: Clock        },
+                  { label: op(currentLanguage).bugun_gonderildi, value: todayShipped.length, color: 'text-purple-700', bg: 'bg-purple-50', icon: Package     },
+                  { label: op(currentLanguage).hazirlaniyor,   value: pending.length,     color: 'text-amber-700',   bg: 'bg-amber-50',   icon: Clock        },
                   { label: oc(currentLanguage).teslim_edildi,  value: delivered.length,   color: 'text-emerald-700', bg: 'bg-emerald-50', icon: CheckCircle2 },
                 ];
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-4 flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
                       <Truck className="w-3.5 h-3.5" />
-                      {currentLanguage === 'tr' ? 'Sevkiyat Özeti' : 'Shipment Summary'}
+                      {op(currentLanguage).sevkiyat_ozeti}
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {stats.map((s, i) => {
@@ -2986,7 +3199,7 @@ export default function OrdersPage({
                     <div className="flex items-center justify-between mb-4">
                       <h3 className={cn("text-[10px] font-bold uppercase tracking-wider flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Teslimat SLA Performansı' : 'Delivery SLA Performance'}
+                        {op(currentLanguage).teslimat_sla_performansi}
                       </h3>
                       <span className="text-[10px] text-gray-400">
                         {currentLanguage === 'tr' ? `≤${SLA_DAYS} gün = zamanında` : `≤${SLA_DAYS} days = on-time`}
@@ -3005,9 +3218,9 @@ export default function OrdersPage({
                     {/* Metric grid */}
                     <div className="grid grid-cols-3 gap-3">
                       {[
-                        { label: currentLanguage === 'tr' ? 'Zamanında' : 'On-Time',      value: onTimeCount,             color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                        { label: op(currentLanguage).zamaninda,      value: onTimeCount,             color: 'text-emerald-600', bg: 'bg-emerald-50' },
                         { label: oc(currentLanguage).gecikmeli,         value: lateCount,               color: 'text-red-500',     bg: 'bg-red-50'     },
-                        { label: currentLanguage === 'tr' ? 'Ort. Gün'   : 'Avg Days',     value: avgDays.toFixed(1),      color: 'text-blue-600',    bg: 'bg-blue-50'    },
+                        { label: op(currentLanguage).ort_gun,     value: avgDays.toFixed(1),      color: 'text-blue-600',    bg: 'bg-blue-50'    },
                       ].map((m, i) => (
                         <div key={i} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : m.bg)}>
                           <p className={`text-xl font-black ${m.color}`}>{m.value}</p>
@@ -3031,6 +3244,10 @@ export default function OrdersPage({
                   if (o.status === 'Shipped')   cargoMap[k].inTransit += 1;
                 }
                 const cargoList = Object.entries(cargoMap)
+                  // `: 0` dalı burada ULAŞILAMAZ: bir anahtar ancak `cargoMap[k].total += 1`
+                  // ile oluşuyor, yani her kovada total >= 1. Sahte "%0 + yeşil rozet" sınıfının
+                  // (bkz. yukarıdaki Teslimat Oranı kartı) bu kopyası zararsız — dal, yapı
+                  // değişirse yanlış olmasın diye gerekçesiyle bırakıldı (2026-09-19 kapanış).
                   .map(([name, d]) => ({ name, ...d, rate: d.total > 0 ? Math.round((d.delivered / d.total) * 100) : 0 }))
                   .sort((a, b) => b.total - a.total)
                   .slice(0, 5);
@@ -3039,7 +3256,7 @@ export default function OrdersPage({
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-4 flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
                       <Truck className="w-3.5 h-3.5" />
-                      {currentLanguage === 'tr' ? 'Kargo Firması Performansı' : 'Cargo Company Performance'}
+                      {op(currentLanguage).kargo_firmasi_performansi}
                     </h3>
                     <div className="space-y-3">
                       {cargoList.map(c => (
@@ -3047,7 +3264,7 @@ export default function OrdersPage({
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-xs font-semibold text-gray-700 truncate flex-1">{c.name}</span>
                             <div className="flex items-center gap-3 flex-shrink-0 text-[10px]">
-                              <span className="text-blue-500 font-bold">{c.inTransit} {currentLanguage === 'tr' ? 'yolda' : 'transit'}</span>
+                              <span className="text-blue-500 font-bold">{c.inTransit} {op(currentLanguage).yolda_2}</span>
                               <span className="text-emerald-600 font-bold">{c.delivered}/{c.total}</span>
                               <span className={`font-black w-10 text-right ${c.rate >= 80 ? 'text-emerald-600' : c.rate >= 50 ? 'text-amber-600' : 'text-red-500'}`}>{c.rate}%</span>
                             </div>
@@ -3062,7 +3279,7 @@ export default function OrdersPage({
                       ))}
                     </div>
                     <p className="text-[10px] text-gray-400 mt-3">
-                      {currentLanguage === 'tr' ? 'Teslimat başarı oranı (tamamlanan / toplam)' : 'Delivery success rate (completed / total)'}
+                      {op(currentLanguage).teslimat_basari_orani_tamamlanan_toplam}
                     </p>
                   </div>
                 );
@@ -3254,7 +3471,7 @@ export default function OrdersPage({
                 {!isRouteOptimized && (
                   <div className="p-8 text-center text-gray-400">
                     <Route className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                    <p className="text-sm font-medium">{currentLanguage === 'tr' ? 'Tüm aktif siparişler için en verimli teslimat sırasını hesaplamak için "Rotayı Optimize Et"e tıklayın.' : 'Click "Optimize Route" to calculate the most efficient delivery sequence for all active orders.'}</p>
+                    <p className="text-sm font-medium">{op(currentLanguage).tum_aktif_siparisler_icin_en_verimli_teslimat_si}</p>
                   </div>
                 )}
               </div>
@@ -3323,15 +3540,20 @@ export default function OrdersPage({
               </div>
               <div className="p-5 space-y-3 flex-1 overflow-y-auto">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'İade Tutarı (₺)' : 'Return Amount (₺)'}</label>
-                  <input type="number" className="apple-input w-full text-sm" value={returnAmount || ''} onChange={e => setReturnAmount(Number(e.target.value))} />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).iade_tutari}</label>
+                  <input type="number" className="apple-input w-full text-sm" value={returnAmount === null ? '' : returnAmount} onChange={e => setReturnAmount(formSayisi(e.target.value))} />
+                  {iadeOnTutar(returnModal.order) === null ? (
+                    <p className="text-[11px] text-amber-600 mt-1">{op(currentLanguage).siparis_tutari_bilinmiyor_ust_sinir_dogrulanamiy}</p>
+                  ) : (
+                    <p className="text-[11px] text-gray-400 mt-1">{(op(currentLanguage).en_cok) + paraYaz(iadeOnTutar(returnModal.order))}</p>
+                  )}
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'İade Edilen Ürünler' : 'Returned Items'}</label>
-                  <input type="text" className="apple-input w-full text-sm" placeholder={currentLanguage === 'tr' ? 'Ürün adları / adet' : 'Item names / qty'} value={returnItems} onChange={e => setReturnItems(e.target.value)} />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).iade_edilen_urunler}</label>
+                  <input type="text" className="apple-input w-full text-sm" placeholder={op(currentLanguage).urun_adlari_adet} value={returnItems} onChange={e => setReturnItems(e.target.value)} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'İade Sebebi' : 'Reason'}</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).iade_sebebi}</label>
                   <textarea className="apple-input w-full text-sm resize-none" rows={3} value={returnReason} onChange={e => setReturnReason(e.target.value)} />
                 </div>
               </div>
@@ -3342,9 +3564,18 @@ export default function OrdersPage({
                   onClick={async () => {
                     const o = returnModal.order!;
                     // İade tutarı 0 < x ≤ sipariş toplamı olmalı (negatif/aşırı engeli).
-                    const maxRet = Number(o.totalPrice) || 0;
-                    if (returnAmount <= 0 || returnAmount > maxRet + 0.01) {
-                      toast(currentLanguage === 'tr' ? `İade tutarı 0 ile ${maxRet.toLocaleString('tr-TR')} arasında olmalı.` : `Return amount must be between 0 and ${maxRet}.`, 'error');
+                    // Sipariş toplamı BİLİNMİYORSA üst sınır uygulanmaz: eski `Number(o.totalPrice) || 0`
+                    // bilinmeyeni ₺0 sınıra çevirip HER iadeyi "0 ile 0 arasında olmalı" ile reddediyordu.
+                    const iade = iadeTutariDogrula(returnAmount, iadeOnTutar(o));
+                    if (!iade.gecerli || iade.tutar === null) {
+                      toast(
+                        iade.hata === 'bos'
+                          ? (op(currentLanguage).iade_tutarini_girin)
+                          : iade.hata === 'pozitifDegil'
+                            ? (op(currentLanguage).iade_tutari_sifirdan_buyuk_olmali)
+                            : (currentLanguage === 'tr' ? `İade tutarı sipariş toplamını (${paraYaz(iade.ustSinir)}) aşamaz.` : `Return amount cannot exceed the order total (${paraYaz(iade.ustSinir)}).`),
+                        'error',
+                      );
                       return;
                     }
                     try {
@@ -3355,15 +3586,15 @@ export default function OrdersPage({
                       // koleksiyonunu okuyan tek bir yer bile yoktu.
                       // Durum degeri de p575 sozlugune uyduruldu ('Pending' -> 'Bekliyor').
                       await addDoc(collection(db, 'salesReturns'), {
-                        orderId: o.id, customerName: o.customerName ?? '', amount: returnAmount,
+                        orderId: o.id, customerName: o.customerName ?? '', amount: iade.tutar,
                         items: returnItems, reason: returnReason, status: 'Bekliyor',
                         companyId: (o as unknown as { companyId?: string }).companyId ?? null,
                         createdAt: serverTimestamp(),
                       });
-                      createNotification(currentLanguage === 'tr' ? 'İade Oluşturuldu' : 'Return Created', `#${o.id.slice(0, 6)} — ${paraYaz(returnAmount)}`, 'info');
-                      toast(currentLanguage === 'tr' ? 'İade kaydı oluşturuldu.' : 'Return created.', 'success');
+                      createNotification(op(currentLanguage).iade_olusturuldu, `#${o.id.slice(0, 6)} — ${paraYaz(iade.tutar)}`, 'info');
+                      toast(op(currentLanguage).iade_kaydi_olusturuldu, 'success');
                       setReturnModal({ open: false, order: null });
-                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                    } catch { toast(op(currentLanguage).hata_olustu, 'error'); }
                   }}
                   className="apple-button-primary text-sm disabled:opacity-50"
                 >{oc(currentLanguage).iade_olustur}</button>
@@ -3380,7 +3611,7 @@ export default function OrdersPage({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{editingShipmentId ? (currentLanguage === 'tr' ? 'Sevkiyat Düzenle' : 'Edit Shipment') : (currentLanguage === 'tr' ? 'Yeni Sevkiyat' : 'New Shipment')}</h3>
+                <h3 className="font-semibold text-gray-800">{editingShipmentId ? (op(currentLanguage).sevkiyat_duzenle) : (op(currentLanguage).yeni_sevkiyat)}</h3>
                 <button onClick={() => { setIsAddingShipment(false); setEditingShipmentId(null); }} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
@@ -3391,7 +3622,7 @@ export default function OrdersPage({
                     value={newShipment.customerName ?? ''}
                     onChange={text => setNewShipment(s => ({ ...s, customerName: text }))}
                     onSelect={lead => setNewShipment(s => ({ ...s, customerName: lead.name }))}
-                    placeholder={currentLanguage === 'tr' ? 'Müşteri adı yazın veya seçin...' : 'Type or pick a customer...'}
+                    placeholder={op(currentLanguage).musteri_adi_yazin_veya_secin}
                     maxResults={20}
                     blurDelayMs={150}
                     showIcon={false}
@@ -3402,7 +3633,7 @@ export default function OrdersPage({
                 {[
                   { k: 'destination', label: oc(currentLanguage).varis_noktasi },
                   { k: 'driver', label: oc(currentLanguage).surucu },
-                  { k: 'cargoFirm', label: currentLanguage === 'tr' ? 'Kargo Firması' : 'Cargo Firm' },
+                  { k: 'cargoFirm', label: op(currentLanguage).kargo_firmasi },
                   { k: 'trackingNo', label: oc(currentLanguage).takip_no },
                 ].map(f => (
                   <div key={f.k}>
@@ -3431,13 +3662,13 @@ export default function OrdersPage({
                     try {
                       if (editingShipmentId) {
                         await updateDoc(doc(db, 'shipments', editingShipmentId), { ...newShipment, updatedAt: serverTimestamp() });
-                        toast(currentLanguage === 'tr' ? 'Sevkiyat güncellendi.' : 'Shipment updated.', 'success');
+                        toast(op(currentLanguage).sevkiyat_guncellendi, 'success');
                       } else {
                         await addDoc(collection(db, 'shipments'), { status: 'Pending', ...newShipment, createdAt: serverTimestamp() });
-                        toast(currentLanguage === 'tr' ? 'Sevkiyat eklendi.' : 'Shipment added.', 'success');
+                        toast(op(currentLanguage).sevkiyat_eklendi, 'success');
                       }
                       setIsAddingShipment(false); setEditingShipmentId(null); setNewShipment({ status: 'Pending' });
-                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                    } catch { toast(op(currentLanguage).hata_olustu, 'error'); }
                   }}
                   className="apple-button-primary text-sm disabled:opacity-50"
                 >{oc(currentLanguage).kaydet}</button>
@@ -3454,12 +3685,12 @@ export default function OrdersPage({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeliveryNoteOrder(null)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative z-10 overflow-hidden max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between p-5 border-b border-gray-100">
-                <h3 className="font-semibold text-gray-800">{currentLanguage === 'tr' ? 'İrsaliye / Teslimat Notu' : 'Delivery Note'} — #{deliveryNoteOrder.id.slice(0, 6)}</h3>
+                <h3 className="font-semibold text-gray-800">{op(currentLanguage).irsaliye_teslimat_notu} — #{deliveryNoteOrder.id.slice(0, 6)}</h3>
                 <button onClick={() => setDeliveryNoteOrder(null)} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 flex-1 overflow-y-auto">
-                <p className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'Sipariş teslim edildi olarak işaretlenecek. Teslimat notu ekleyebilirsiniz.' : 'Order will be marked Delivered. You may add a delivery note.'}</p>
-                <textarea className="apple-input w-full text-sm resize-none" rows={4} placeholder={currentLanguage === 'tr' ? 'Teslim alan, tarih, not...' : 'Received by, date, note...'} value={deliveryNoteText} onChange={e => setDeliveryNoteText(e.target.value)} />
+                <p className="text-xs text-gray-500">{op(currentLanguage).siparis_teslim_edildi_olarak_isaretlenecek_tesli}</p>
+                <textarea className="apple-input w-full text-sm resize-none" rows={4} placeholder={op(currentLanguage).teslim_alan_tarih_not} value={deliveryNoteText} onChange={e => setDeliveryNoteText(e.target.value)} />
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
                 <button onClick={() => setDeliveryNoteOrder(null)} className="apple-button-secondary text-sm">{oc(currentLanguage).iptal}</button>
@@ -3469,12 +3700,12 @@ export default function OrdersPage({
                     try {
                       await updateDoc(doc(db, 'orders', o.id), { status: 'Delivered', deliveryNote: deliveryNoteText, deliveredAt: serverTimestamp(), updatedAt: serverTimestamp() });
                       createNotification(oc(currentLanguage).teslim_edildi, `#${o.id.slice(0, 6)}`, 'info');
-                      toast(currentLanguage === 'tr' ? 'Teslimat kaydedildi.' : 'Delivery saved.', 'success');
+                      toast(op(currentLanguage).teslimat_kaydedildi, 'success');
                       setDeliveryNoteOrder(null);
-                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                    } catch { toast(op(currentLanguage).hata_olustu, 'error'); }
                   }}
                   className="apple-button-primary text-sm"
-                >{currentLanguage === 'tr' ? 'Teslim Et' : 'Mark Delivered'}</button>
+                >{op(currentLanguage).teslim_et}</button>
               </div>
             </motion.div>
           </div>
@@ -3492,9 +3723,58 @@ export default function OrdersPage({
                 <button onClick={() => setIsEditingOrder(false)} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 flex-1 overflow-y-auto">
+                {/* MÜŞTERİ — serbest metin DEĞİL, cari kaydına BAĞLAYAN seçici.
+                    2026-09-19 kapanış bulgusu: `handleAddOrder` müşteri adı elle yazılınca
+                    `leadId: null` yazıyor; o siparişte `leads.find(...)` undefined döner ve
+                    e-İrsaliye düğmesi kalıcı kilitli kalıyordu ('musteriBagliDegil'). Siparişe
+                    sonradan lead bağlayan HİÇBİR ekran yoktu — artık bu form o ekrandır.
+                    Ad ile OTOMATİK eşleştirme YAPILMIYOR (mükerrer lead riski, resmî belge):
+                    bağ yalnız listeden seçilerek kurulur.
+                    Belge kesildikten SONRA cari BAĞI değiştirilemez (kesilen e-İrsaliye/e-Fatura
+                    başka bir cariye taşınamaz); ad düzenlenebilir kalır — yazım hatası düzeltmek
+                    eski davranıştı ve kısıtlanması bu bulgunun kapsamı dışı. */}
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).musteri}</label>
-                  <input type="text" className="apple-input w-full text-sm" value={(editingOrderData.customerName as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, customerName: e.target.value }))} />
+                  {(() => {
+                    const belgeKesildi = !!selectedOrder && (selectedOrder.irsaliyeGonderildi === true || !!selectedOrder.irsaliyeNo || !!selectedOrder.mikroFaturaNo);
+                    const bagliCari = editingOrderData.leadId ? leads.find(l => l.id === editingOrderData.leadId) : undefined;
+                    if (belgeKesildi) {
+                      // Ad DÜZENLENEBİLİR kalır (eski davranış — yazım hatası düzeltilebilmeli);
+                      // kilitlenen yalnız CARİ BAĞIDIR: kesilmiş resmî belge başka bir cariye taşınamaz.
+                      return (
+                        <>
+                          <input type="text" className="apple-input w-full text-sm" value={(editingOrderData.customerName as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, customerName: e.target.value }))} />
+                          <p className="text-[10px] text-gray-400 mt-1">
+                            {currentLanguage === 'tr'
+                              ? `Resmî belge kesilmiş — cari bağı değiştirilemez${bagliCari ? ` (${bagliCari.name})` : ''}.`
+                              : `An official document was issued — the linked account cannot be changed${bagliCari ? ` (${bagliCari.name})` : ''}.`}
+                          </p>
+                        </>
+                      );
+                    }
+                    return (
+                      <>
+                        <CustomerCombobox
+                          leads={leads}
+                          value={(editingOrderData.customerName as string) ?? ''}
+                          onChange={v => setEditingOrderData(d => ({ ...d, customerName: v }))}
+                          onSelect={lead => setEditingOrderData(d => ({ ...d, customerName: lead.name, leadId: lead.id }))}
+                          inputClassName="apple-input w-full text-sm pl-9"
+                          placeholder={op(currentLanguage).musteri_adi_listeden_secin}
+                          renderSecondaryLine={l => l.mikroCariKod || l.cariKod || (op(currentLanguage).mikro_cari_kodu_yok)}
+                        />
+                        <p className={cn('text-[10px] mt-1', bagliCari ? 'text-gray-400' : 'text-amber-600')}>
+                          {!bagliCari
+                            ? (currentLanguage === 'tr'
+                                ? 'Müşteri kaydına bağlı değil — e-İrsaliye kesilemez. Listeden seçin.'
+                                : 'Not linked to a customer record — no e-waybill can be issued. Pick from the list.')
+                            : `${op(currentLanguage).cari}: ${bagliCari.name} · ${
+                                bagliCari.mikroCariKod || bagliCari.cariKod
+                                  || (op(currentLanguage).mikro_cari_kodu_yok)}`}
+                        </p>
+                      </>
+                    );
+                  })()}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).teslimat_adresi}</label>
@@ -3502,8 +3782,8 @@ export default function OrdersPage({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{currentLanguage === 'tr' ? 'Tutar (₺)' : 'Total (₺)'}</label>
-                    <input type="number" className="apple-input w-full text-sm" value={(editingOrderData.totalPrice as number) ?? 0} onChange={e => setEditingOrderData(d => ({ ...d, totalPrice: Number(e.target.value) }))} />
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).tutar}</label>
+                    <input type="number" className="apple-input w-full text-sm" placeholder={oc(currentLanguage).bilinmiyor} value={editingTutarHam} onChange={e => setEditingTutarHam(e.target.value)} />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).durum}</label>
@@ -3512,18 +3792,73 @@ export default function OrdersPage({
                     </select>
                   </div>
                 </div>
+                {/* SEVK DEPOSU + KDV ORANI — e-İrsaliye düğmesi bu iki alan eksikken DEVRE DIŞI kalıyor
+                    ve ipucu "siparişi düzenleyip depoyu/oranı tamamlayın" diyor. 2026-09-19 delta bulgusu:
+                    o alanlar yalnız hiçbir yerden AÇILAMAYAN bir formdaydı (components/EditOrderModal;
+                    `isEditingOrder` state'ini true yapan satır yoktu) — yönlendirme karşılıksız, düğme
+                    kalıcı kilitliydi. Eski/kanal siparişine depo eklemenin yolu artık BU form.
+                    Değişmez testi: utils/siparisler/formKayit.test.ts (kaynak taraması). */}
+                <SevkDeposuSecici
+                  warehouses={warehouses}
+                  deger={editingOrderData.depoNo}
+                  currentLanguage={currentLanguage}
+                  bosSecenekYok
+                  onDegis={depoNo => setEditingOrderData(d => {
+                    const { depoNo: _secilmemis, ...kalan } = d;
+                    return depoNo === undefined ? kalan : { ...kalan, depoNo };
+                  })}
+                />
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).kdv_orani}</label>
+                  {/* Boş = BİLİNMİYOR (`?? 20` uydurması Mikro'ya yanlış vergi işaretçisi yazar);
+                      bilinen 0 gerçek orandır (KDV'siz ihracat). */}
+                  <input type="number" min="0" max="100" className="apple-input w-full text-sm" placeholder={oc(currentLanguage).bilinmiyor}
+                    value={editingKdvHam} onChange={e => setEditingKdvHam(e.target.value)} />
+                </div>
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
                 <button onClick={() => setIsEditingOrder(false)} className="apple-button-secondary text-sm">{oc(currentLanguage).iptal}</button>
                 <button
                   onClick={async () => {
                     if (!selectedOrder) return;
+                    const kdv = kdvOraniDogrula(editingKdvHam);
+                    if (!kdv.gecerli) {
+                      toast(op(currentLanguage).kdv_orani_0_ile_100_arasinda_olmali, 'error');
+                      return;
+                    }
+                    const duzenlenenId = selectedOrder.id;
+                    const yama = siparisDuzenlemeYamasi({
+                      customerName: editingOrderData.customerName,
+                      shippingAddress: editingOrderData.shippingAddress,
+                      status: editingOrderData.status,
+                      tutarHam: editingTutarHam,
+                      kdvHam: editingKdvHam,
+                      depoNo: editingOrderData.depoNo,
+                      // Yalnız GERÇEKTEN değiştiyse yaz — aksi hâlde her kayıt aynı leadId'yi
+                      // gereksizce geri yazar (PATCH-merge'de eşzamanlı değişikliği ezme riski).
+                      leadId: editingOrderData.leadId === selectedOrder.leadId ? undefined : editingOrderData.leadId,
+                    }, selectedOrder);
                     try {
-                      await updateDoc(doc(db, 'orders', selectedOrder.id), { ...editingOrderData, updatedAt: serverTimestamp() });
-                      setSelectedOrder({ ...selectedOrder, ...editingOrderData } as Order);
-                      toast(currentLanguage === 'tr' ? 'Sipariş güncellendi.' : 'Order updated.', 'success');
+                      await updateDoc(doc(db, 'orders', duzenlenenId), { ...yama, updatedAt: serverTimestamp() });
+                      // İŞLEVSEL güncelleyici: `await` sırasında App.tsx e-İrsaliye işaretini yazmış
+                      // olabilir; bayat kapanışı yaymak işareti yerelde siler ve düğme yeniden
+                      // etkinleşir (aynı sevkiyat için ikinci resmî belge — 2026-09-19 delta).
+                      // `totalPrice` tipi `number` olduğu için silinen tutar NaN'la temsil edilir
+                      // (paraYaz NaN'ı '—' basar). OPSİYONEL alanlarda (kdvOran/kdvTutari/
+                      // kdvHaricTutar) NaN YANLIŞTIR: `JSON.stringify(NaN) === 'null'` ve o null
+                      // `handleMikroFatura` gövdesinde `z.number().optional()` kapısına takılıp
+                      // kullanıcıya alan-bazlı gerekçe yerine ham şema hatası gösteriyordu
+                      // (2026-09-19 kapanış). Bilinmeyen = alan YOK → `yerelSayi`.
+                      setSelectedOrder(o => (o && o.id === duzenlenenId ? {
+                        ...o, ...yama,
+                        totalPrice: yerelTutar(yama.totalPrice, o.totalPrice),
+                        kdvOran: yerelSayi(yama.kdvOran, o.kdvOran),
+                        kdvHaricTutar: yerelSayi(yama.kdvHaricTutar, o.kdvHaricTutar),
+                        kdvTutari: yerelSayi(yama.kdvTutari, o.kdvTutari),
+                      } : o));
+                      toast(op(currentLanguage).siparis_guncellendi, 'success');
                       setIsEditingOrder(false);
-                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                    } catch { toast(op(currentLanguage).hata_olustu, 'error'); }
                   }}
                   className="apple-button-primary text-sm"
                 >{oc(currentLanguage).kaydet}</button>
@@ -3544,7 +3879,7 @@ export default function OrdersPage({
                 <button onClick={() => setShowQuickShipment(null)} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-2 text-sm text-gray-600">
-                <p>{currentLanguage === 'tr' ? 'Bu siparişten sevkiyat oluşturulsun mu?' : 'Create a shipment from this order?'}</p>
+                <p>{op(currentLanguage).bu_siparisten_sevkiyat_olusturulsun_mu}</p>
                 <p className="font-semibold text-gray-800">{showQuickShipment.customerName} — #{showQuickShipment.id.slice(0, 6)}</p>
                 <p className="text-xs text-gray-400">{showQuickShipment.shippingAddress}</p>
               </div>
@@ -3561,9 +3896,9 @@ export default function OrdersPage({
                         companyId: (o as unknown as { companyId?: string }).companyId ?? null,
                         createdAt: serverTimestamp(),
                       });
-                      toast(currentLanguage === 'tr' ? 'Sevkiyat oluşturuldu.' : 'Shipment created.', 'success');
+                      toast(op(currentLanguage).sevkiyat_olusturuldu, 'success');
                       setShowQuickShipment(null);
-                    } catch { toast(currentLanguage === 'tr' ? 'Hata oluştu.' : 'Error.', 'error'); }
+                    } catch { toast(op(currentLanguage).hata_olustu, 'error'); }
                   }}
                   className="apple-button-primary text-sm"
                 >{oc(currentLanguage).olustur}</button>

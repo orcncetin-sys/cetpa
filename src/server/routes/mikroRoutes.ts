@@ -90,6 +90,7 @@ import {
   kalemleriBirimle, okumaArizasiUyarisi, OKUMA_ARIZASI_ESIK, type SiparisSatiri,
 } from '../mikro/eslemeFatura.js';
 import { eBelgeNormalize, eBelgeleriNormalize, cariHareketYonOzeti } from '../mikro/eBelge.js';
+import { belgeNoMetni } from '../mikro/belgeNo.js';
 // KDV özeti / mizan eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/raporKdvMizan.ts
 import { kdvKirilimi, mizanSatirlari, mizanToplami } from '../mikro/raporKdvMizan.js';
 
@@ -559,7 +560,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const r0 = envelope?.[0] as Record<string, unknown> | undefined;
       const success = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const md = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
-      const mikroEvrakNo = (md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
+      // Numara METNE normalize edilir (sayısal Mikro yanıtı sessizce düşmesin): src/server/mikro/belgeNo.ts
+      const mikroEvrakNo = belgeNoMetni(md?.evrakNo, md?.EvrakNo, md?.id);
       const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await C.writeSyncLog('SiparisKaydetV2', 'order', firebaseId, success, mikroEvrakNo, errorMsg, duration, C.reqActor(req));
@@ -4080,8 +4082,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const r0         = envelope?.[0] as Record<string, unknown> | undefined;
       const success    = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const md         = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
-      const mikroFaturaNo = (md?.faturaNo || md?.FaturaNo || md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
-      const ettn          = (md?.ettn || md?.Ettn || md?.uuid || null) as string | null;
+      // Numara/ETTN METNE normalize edilir (`as string` yalnız derleme zamanı dökümüydü; sayısal
+      // evrak no istemcinin metin kapısında sessizce düşüyordu) — src/server/mikro/belgeNo.ts
+      const mikroFaturaNo = belgeNoMetni(md?.faturaNo, md?.FaturaNo, md?.evrakNo, md?.EvrakNo, md?.id);
+      const ettn          = belgeNoMetni(md?.ettn, md?.Ettn, md?.uuid);
       const errorMsg   = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', success, mikroFaturaNo, errorMsg, duration, C.reqActor(req));
@@ -4162,6 +4166,30 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // Eskiden bu rota her istekte gövde hatasıyla 400 dönüyordu (sku/kdvOran/depoNo gönderilmiyordu) ve açık
     // görünmüyordu; gövde geçerli hâle gelince faturasız sipariş e-İrsaliye olarak resmî deftere düşmeye başlardı.
     if (shipment.faturali === false) return res.status(400).json({ success: false, error: "Faturasız sevkiyat Mikro'ya yazılmaz." });
+    // ── MÜKERRER RESMÎ BELGE KAPISI (2026-09-19) ─────────────────────────────
+    // Bu rota başarıda `shipments/{firebaseId}`ye `mikroSynced`/`irsaliyeNo` yazıyordu ama
+    // GÖNDERİM ÖNCESİ kimse okumuyordu: tek koruma istemcideki uçuş kilidiydi (bellekte,
+    // sekmeye özel). Sekme yenileme, proxy 502'si, ikinci sekme ya da ikinci kullanıcı o
+    // kilidi aşıyor ve aynı sevkiyat için Mikro'da İKİNCİ resmî e-İrsaliye oluşuyordu
+    // (gövdedeki `date` her istekte farklı olduğu için Mikro da ayırt edemiyor).
+    // İstemci 409'u `zatenGonderildi` ile tanır, siparişteki işareti yazıp durumu ONARIR.
+    // SINIR: bu kapı TAMAMLANMIŞ gönderimi görür, UÇUŞTAKİNİ değil — iki eşzamanlı istek
+    // için `mikroPost` öncesi atomik "gönderiliyor" kaydı gerekir (PG transaction; açık iş).
+    if (C.getAdminDb() && firebaseId) {
+      const snap = await C.getAdminDb().collection('shipments').doc(firebaseId).get();
+      const onceki = snap.exists ? (snap.data() as Record<string, unknown> | undefined) : undefined;
+      // Aynı normalizasyon: eski kayıtlarda numara SAYI olarak damgalanmış olabilir; `typeof
+      // === 'string'` kapısı onu görmeyip mükerrer belge riskini geri açardı.
+      const oncekiNo = belgeNoMetni(onceki?.irsaliyeNo) ?? '';
+      if (onceki && (onceki.mikroSynced === true || oncekiNo !== '')) {
+        return res.status(409).json({
+          success: false,
+          zatenGonderildi: true,
+          ...(oncekiNo !== '' ? { irsaliyeNo: oncekiNo } : {}),
+          error: 'Bu sevkiyat için e-İrsaliye zaten kesilmiş.',
+        });
+      }
+    }
     const t0 = Date.now();
     try {
       // Gövde TEK KAYNAKTA: src/server/mikro/govdeFaturaIrsaliye.ts (irsaliyeGovdesi).
@@ -4187,8 +4215,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const r0            = envelope?.[0] as Record<string, unknown> | undefined;
       const success       = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const md            = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
-      const irsaliyeNo    = (md?.irsaliyeNo || md?.IrsaliyeNo || md?.evrakNo || md?.EvrakNo || md?.id || null) as string | null;
-      const irsaliyeEttn  = (md?.ettn || md?.Ettn || md?.uuid || null) as string | null;
+      // Numara/ETTN METNE normalize edilir — src/server/mikro/belgeNo.ts. Sayısal `EvrakNo`
+      // döndüğünde eskiden numara istemciye sayı olarak gidiyor, `orders.irsaliyeNo` hiç
+      // yazılmıyor ve rozet kalıcı "gönderildi — numara gelmedi" diyordu (2026-09-19 kapanış).
+      const irsaliyeNo    = belgeNoMetni(md?.irsaliyeNo, md?.IrsaliyeNo, md?.evrakNo, md?.EvrakNo, md?.id);
+      const irsaliyeEttn  = belgeNoMetni(md?.ettn, md?.Ettn, md?.uuid);
       const errorMsg      = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
       await C.writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', success, irsaliyeNo, errorMsg, duration, C.reqActor(req));

@@ -92,6 +92,35 @@ export function maliyetDurumu(
 }
 
 /**
+ * Stok kartının BİLİNEN maliyeti, TL cinsinden — bilinmiyorsa **`null`**.
+ *
+ * `itemCostTRY`den farkı: 0 DÖNMEZ. Maliyet alanı hiç girilmemiş bir kartta
+ * `hamMaliyet` 0 verir ve `maliyetDurumu` onu `{durum:'tl', tl:0}` diye
+ * sınıflandırır — yani `durum === 'tl'` süzgeci yalnız KUR çevrilememesini eler,
+ * EKSİK maliyeti elemez. Kâr/marj gibi TÜRETİLEN bir sayıya girdi olurken bu fark
+ * belirleyicidir: 0 "bedelsiz" demektir, "bilinmiyor" değil. (2026-09-19 hakem
+ * bulgusu, OrdersPage.tsx:289 — ÇİMENTO 50KG x100 @ ₺110 siparişi, stok kartında
+ * maliyet yokken "Kâr %100,0" yeşil rozeti + dolu marj çubuğu basıyordu.)
+ *
+ * Kartta `costPrice: 0` de "girilmemiş" sayılır: bir stok kartının maliyeti
+ * tam olarak sıfır değil, doldurulmamıştır. GERÇEKTEN bedelsiz bir satır
+ * (promosyon/numune) kendi `costPrice: 0`'ını taşır ve o meşru sıfır
+ * `siparisKarlilik.ts`te ÖNCE okunur — buraya hiç düşmez.
+ *
+ * `itemCostTRY` toplamlarda (stok değeri, COGS) 0 dönmeye devam eder; orada
+ * eksik kalem `cevrilemeyenler()` ile ayrıca sayılıp kullanıcıya bildiriliyor.
+ */
+export function kartMaliyetiTL(
+  item: InventoryItem,
+  rates: Record<string, number> | null | undefined,
+): number | null {
+  const ham = item.costPrice ?? item.cost;
+  if (typeof ham !== 'number' || !Number.isFinite(ham) || ham <= 0) return null;
+  const d = maliyetDurumu(item, rates);
+  return d.durum === 'tl' ? d.tl : null;
+}
+
+/**
  * Kalemin maliyeti, TL cinsinden.
  *
  * ÇEVRİLEMİYORSA **0** döner — uydurma kur KULLANMAZ. Sıfır dönmesi "bu kalem

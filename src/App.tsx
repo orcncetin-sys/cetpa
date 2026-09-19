@@ -213,6 +213,7 @@ import { translations, type Language } from './translations';
 import { optimizeRoute } from './utils/logistics';
 import { itemCostTRY } from './utils/cost';
 import { kisaTutar, paraYaz } from './utils/currency';
+import { irsaliyeIstegi, irsaliyeNedenMetni, irsaliyeYanitMesaji, irsaliyeSonucYamasi, type IrsaliyeYaniti } from './utils/siparisler/irsaliyeGonder';
 import { useDataStore } from './store/dataStore';
 
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
@@ -255,7 +256,6 @@ import NewLeadModal, { type NewLeadData } from './components/NewLeadModal';
 import AddOrderModal from './components/AddOrderModal';
 import AddShipmentModal from './components/AddShipmentModal';
 import EditLeadModal from './components/EditLeadModal';
-import EditOrderModal from './components/EditOrderModal';
 import ApprovalQueue, { usePendingApprovalCount } from './components/ApprovalQueue';
 import {
   type UserSubscription,
@@ -1554,7 +1554,6 @@ function AppContent() {
   const [labelItems,         setLabelItems]         = useState<LabelItem[] | null>(null);
   // Public order tracking — read from URL on mount
   const trackOrderId = new URLSearchParams(window.location.search).get('track') ?? null;
-  const [isEditingOrder, setIsEditingOrder] = useState(false);
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [isAddingShipment, setIsAddingShipment] = useState(false);
   const [editingShipmentId, setEditingShipmentId] = useState<string | null>(null);
@@ -3178,6 +3177,64 @@ function AppContent() {
     return basarisiz;
   };
 
+  // ── e-İrsaliye: mükerrer gönderim kapıları ───────────────────────────────
+  // Sunucu rotasında gönderim ÖNCESİ mükerrer kontrolü yok ve gövdedeki `date` her
+  // istekte farklı — aynı sevkiyat iki kez POST edilirse Mikro'da İKİ resmî e-İrsaliye
+  // oluşur. Üç kapı gerekiyor, üçü de zorunlu:
+  //   1. UÇUŞTA olan istek (`eIrsaliyeSurenRef`): yanıt gelmeden ikinci tıklama.
+  //      `ref` çünkü kapı SENKRON kapanmalı — state güncellemesi bir sonraki render'a
+  //      kadar görünmez, iki hızlı tıklama arasındaki pencereyi kapatmaz.
+  //   2. TAMAMLANMIŞ gönderim (`orders.irsaliyeGonderildi` / `irsaliyeNo`):
+  //      `irsaliyeSonucunuYaz` yazar, düğmenin görünürlük koşulu okur.
+  //   3. TAMAMLANMIŞ gönderim, YEREL kopya bayatlasa da (`eIrsaliyeTamamlananRef`):
+  //      düğmenin koşulu YALNIZ `selectedOrder`a bakıyor ve o nesneyi yayan yazıcılar
+  //      (durum onayı, düzenleme kaydı) işareti yerelde silebiliyordu; canlı dinleyici
+  //      `orders`ı tazeleyene kadar düğme yeniden etkin oluyordu (2026-09-19 delta).
+  //      Bu kapı sayfanın yerel kopyasından BAĞIMSIZ: `orders` listesi + oturum içi Set.
+  //      Kalıcı çözüm SUNUCUDA: rota `mikroPost`tan önce `shipments/{firebaseId}` damgasına
+  //      bakıp 409 dönmeli — iki sekme / iki kullanıcı buradan kapatılamaz (`acikSorular`).
+  const eIrsaliyeSurenRef = useRef<Set<string>>(new Set());
+  const eIrsaliyeTamamlananRef = useRef<Set<string>>(new Set());
+  /** Düğmenin görsel kilidi (ref render tetiklemez). id → gönderim sürüyor. */
+  const [eIrsaliyeGonderiliyor, setEIrsaliyeGonderiliyor] = useState<Record<string, boolean>>({});
+
+  /** Bu sipariş için e-İrsaliye ZATEN kesilmiş mi? Yerel `selectedOrder` kopyasına GÜVENMEZ. */
+  const eIrsaliyeKesilmis = (orderId: string): boolean => {
+    if (eIrsaliyeTamamlananRef.current.has(orderId)) return true;
+    const o = orders.find(x => x.id === orderId);
+    return !!o && (o.irsaliyeGonderildi === true || !!o.irsaliyeNo);
+  };
+
+  /** Kilidi alır; gönderim sürüyorsa ya da belge zaten kesilmişse nedenini döner (çağıran VAZGEÇER). */
+  const eIrsaliyeKilidiAl = (orderId: string): 'alindi' | 'suruyor' | 'kesilmis' => {
+    if (eIrsaliyeSurenRef.current.has(orderId)) return 'suruyor';
+    if (eIrsaliyeKesilmis(orderId)) return 'kesilmis';
+    eIrsaliyeSurenRef.current.add(orderId);
+    setEIrsaliyeGonderiliyor(o => ({ ...o, [orderId]: true }));
+    return 'alindi';
+  };
+  const eIrsaliyeKilidiBirak = (orderId: string) => {
+    eIrsaliyeSurenRef.current.delete(orderId);
+    setEIrsaliyeGonderiliyor(o => { const yeni = { ...o }; delete yeni[orderId]; return yeni; });
+  };
+
+  /**
+   * Başarılı e-İrsaliye sonucunu siparişe yazar. Sunucu numarayı yalnız `shipments/{id}`'ye
+   * yazdığı için `orders` işaretini istemci koyar; işaret konmazsa detaydaki düğme etkin kalır
+   * ve aynı sevkiyat ikinci kez resmî belge olarak kesilir.
+   *
+   * SIRA ÖNEMLİ: oturum içi Set ÖNCE işaretlenir. `updateDoc` başarısız olsa bile (ağ/403)
+   * belge Mikro'da KESİLMİŞTİR — kullanıcı "başarısız" sanıp yeniden basarsa mükerrer belge
+   * oluşurdu. DB yazımı başarısızsa çağıran yüksek sesle uyarır (sessiz yutma yok).
+   */
+  const irsaliyeSonucunuYaz = async (orderId: string, d: IrsaliyeYaniti) => {
+    const yama = irsaliyeSonucYamasi(d);
+    if (!yama) return;
+    eIrsaliyeTamamlananRef.current.add(orderId);
+    await updateDoc(doc(db, 'orders', orderId), yama);
+    setSelectedOrder(onceki => (onceki && onceki.id === orderId ? { ...onceki, ...yama } : onceki));
+  };
+
   const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
     try {
       // Phase 101: append timeline entry
@@ -3242,66 +3299,18 @@ function AppContent() {
         }
       }
 
-      // Auto-trigger e-İrsaliye when an order is marked as Shipped (fire-and-forget)
-      if (status === 'Shipped') {
-        const order = orders.find(o => o.id === orderId);
-        // FATURASIZ sipariş Mikro'ya GİTMEZ (sipariş kaydındaki kuralla aynı — handleAddOrder `faturali` koşulu).
-        // 2026-09-19 kapanış incelemesi: bu kapı hiç yoktu; rota eskiden her istekte gövde hatasıyla 400 döndüğü için
-        // açık görünmüyordu. Gövde geçerli hâle gelince faturasız sevkiyat e-İrsaliye olarak resmî deftere düşerdi.
-        // Alanı olmayan eski/kanal siparişi (`undefined`) eskisi gibi denenir. Sunucuda da aynı kapı var.
-        if (order && order.faturali !== false) {
-          const lead = leads.find(l => l.id === order.leadId);
-          authFetch('/api/mikro/irsaliye/kaydet', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              shipment: {
-                mikroCariKod: lead?.mikroCariKod || lead?.cariKod || lead?.taxId || order.customerName,
-                customerName: order.customerName,
-                destination: order.shippingAddress || '',
-                trackingNo: order.trackingNumber || orderId.slice(0, 8),
-                cargoFirm: order.cargoCompany || '',
-                // Alan adları SUNUCU ŞEMASIYLA (IrsaliyeKaydetSchema) aynı olmalı:
-                // 2026-08-22 denetim bulgusu C15/P2 — eskiden qty/unitPrice
-                // gönderiliyordu, şema quantity/price bekliyor → her istek 400,
-                // Shipped'te otomatik e-İrsaliye tamamen sessiz çalışmıyordu.
-                items: (order.lineItems || []).map(l => ({
-                  sku: l.sku,            // ESKİDEN GÖNDERİLMİYORDU → Mikro satırı stok kodsuz gidiyordu
-                  name: l.title || l.name || l.sku,
-                  quantity: l.quantity,
-                  price: l.price,
-                })),
-                date: new Date().toISOString(),
-                // Sunucu bunları Mikro gövdesinde ZORUNLU kılar (varsayılan yok):
-                // kdvOran → vergi işaretçisi, depoNo → sth_*_depo_no.
-                // `?? 20` / `?? 1` EKLEMEYİN — eksikse istek 400 döner ve sebebi
-                // kullanıcıya söylenir (aşağıdaki toast).
-                kdvOran: order.kdvOran,
-                faturali: order.faturali,
-                // `Order.depoNo` artık gerçek alan (types.ts) — tip dökümü kaldırıldı.
-                // Değeri AddOrderModal'daki depo seçicisi üretir; seçilmemiş eski/kanal
-                // siparişinde alan YOKTUR ve sunucu bilerek 400 döner.
-                depoNo: order.depoNo,
-              },
-              firebaseId: orderId,
-            }),
-          }).then(async r => ({ kod: r.status, d: await r.json() as { success: boolean; irsaliyeNo?: string; notConfigured?: boolean; error?: string } })).then(({ kod, d }) => {
-            if (d.success) {
-              toast(`${currentLanguage === 'tr' ? 'İrsaliye oluşturuldu' : 'Waybill created'}${d.irsaliyeNo ? ': ' + d.irsaliyeNo : ''}`, 'success');
-            } else if (!d.notConfigured) {
-              // SESSİZ GEÇME: e-İrsaliye oluşmadığı hâlde kullanıcı bunu hiçbir yerde görmüyordu (aynı sınıf
-              // 2026-08-22'de C15/P2 olarak yaşandı: her istek 400'dü, kimse fark etmedi). `d.error` ŞART DEĞİL —
-              // Mikro'nun reddi HTTP 200 + success:false döner. notConfigured hâlâ sessiz (Mikro kurulu değilse normal).
-              const sebep = d.error ?? (currentLanguage === 'tr' ? 'Mikro irsaliyeyi reddetti' : 'Mikro rejected the waybill');
-              // "Siparişi düzenle…" yönlendirmesi YALNIZ 400'de (eksik alan): Mikro reddi / 500 / MFA 403'te yanıltıcı olurdu.
-              const yonlendirme = kod === 400
-                ? (currentLanguage === 'tr' ? ' — Siparişi düzenle → Sevk Deposu / KDV oranını tamamla; sonra durumu yeniden "Kargoda" yap.' : ' — Edit the order → complete Shipping Warehouse / VAT rate, then set the status to "Shipped" again.')
-                : '';
-              toast(`${sebep}${yonlendirme}`, 'error');
-            }
-          }).catch(() => { /* Mikro not available — silent */ });
-        }
-      }
+      // ── 'Kargoda' e-İrsaliye OTOMATİĞİ YOK (2026-09-19 delta bulgusu) ──────
+      // Burada bir `status === 'Shipped'` dalı vardı ve e-İrsaliye'yi kendiliğinden
+      // kesiyor "sayılıyordu". Gerçekte ÖLÜ KODDU: bu fonksiyonun tek çağıranı
+      // DeliveryNoteModal ve sabit `'Delivered'` geçiriyor; kullanıcı durumu 'Kargoda'
+      // yapınca SAYFA-YEREL `handleUpdateOrderStatus` (OrdersPage.tsx / CRMPage.tsx)
+      // çalışıyor ve e-İrsaliye isteği hiç atılmıyordu ("yazıldı ama bağlanmadı" sınıfı).
+      // Ölü dal, canlıymış gibi üstüne kod eklenen bir yanılsama üretiyordu; kaldırıldı.
+      // e-İrsaliye'nin TEK çağrı yüzeyi sipariş detayındaki düğme (`handleEIrsaliye`).
+      // Otomatiğin gerçekten bağlanması RESMÎ BELGE kesen bir yan etkidir → kullanıcı
+      // kararı; `acikSorular`da (sayfa-yerel kopyaların App sürümüyle birleştirilmesi de
+      // o işin parçası: yerel kopya `updatedAt`/`deliveredAt`, App sürümü `timeline` yazıyor).
+
       // Auto-send email + WhatsApp on Shipped / Delivered (fire-and-forget)
       if (status === 'Shipped' || status === 'Delivered') {
         const ord  = orders.find(o => o.id === orderId);
@@ -3349,6 +3358,69 @@ function AppContent() {
     }
   };
 
+  // ── Mikro: e-İrsaliye (sipariş detayı düğmesi) ────────────────────────────
+  // e-İrsaliye'nin TEK çağrı yüzeyi: depo/KDV/carisi SONRADAN tamamlanan siparişte
+  // durumu geri alıp tekrar 'Kargoda' yapmak gerekmesin (3/n açık maddesi).
+  const handleEIrsaliye = async (order: Order) => {
+    const istek = irsaliyeIstegi(order, leads.find(l => l.id === order.leadId));
+    if (!istek.gonderilebilir) {
+      if (istek.neden) toast(irsaliyeNedenMetni(istek.neden, currentLanguage), 'error');
+      return;
+    }
+    // Yanıt gelmeden ikinci tıklama = Mikro'da İKİNCİ resmî e-İrsaliye. Düğmenin
+    // görünürlük koşulu (`!irsaliyeNo`) burada koruma DEĞİL: numara ancak yanıt
+    // döndükten sonra yazılıyor, istek uçarken düğme hâlâ etkin; üstelik o koşul
+    // sayfanın BAYAT `selectedOrder` kopyasına bakıyor.
+    const kilit = eIrsaliyeKilidiAl(order.id);
+    if (kilit === 'suruyor') return;                       // görsel kilit zaten "Gönderiliyor…" diyor
+    if (kilit === 'kesilmis') {
+      toast(currentLanguage === 'tr'
+        ? 'Bu sevkiyat için e-İrsaliye zaten kesildi — ikinci resmî belge oluşmasın diye gönderilmedi.'
+        : 'An e-waybill was already issued for this shipment — not sent again to avoid a duplicate official document.', 'info');
+      return;
+    }
+    try {
+      const r = await authFetch('/api/mikro/irsaliye/kaydet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(istek.govde),
+      });
+      const d = await r.json() as IrsaliyeYaniti;
+      // `irsaliyeYanitMesaji` notConfigured'da SESSİZ döner — bu, isteği kullanıcı
+      // istemeden atan otomatik akış için doğru; ELLE basılan düğme için DEĞİL: kullanıcı
+      // tıklayıp ne başarı ne hata görürdü ("sessizce çalışmayan düğme yok" kuralının
+      // düğmenin kendi yolunda ihlali).
+      const m = irsaliyeYanitMesaji(r.status, d, currentLanguage);
+      if (m.tur) {
+        toast(m.metin, m.tur);
+      } else if (d.notConfigured) {
+        toast(currentLanguage === 'tr'
+          ? 'Mikro bağlantısı kurulu değil — e-İrsaliye gönderilemedi.'
+          : 'Mikro connection is not configured — the e-waybill was not sent.', 'info');
+      }
+      // Sunucu numarayı `shipments/{firebaseId}`'ye yazıyor, `orders`a DEĞİL — düğmenin
+      // görünürlük koşulu kendi başına kapanmaz ve aynı sevkiyat ikinci kez e-İrsaliye
+      // olarak kesilebilir. İşareti (ve varsa numarayı) siparişe de yaz.
+      try {
+        await irsaliyeSonucunuYaz(order.id, d);
+      } catch {
+        // Belge Mikro'da KESİLDİ ama sipariş işaretlenemedi (ağ/403). Sessiz kalmak ya da
+        // yalnız "hata" demek kullanıcıyı yeniden göndermeye iter → mükerrer resmî belge.
+        toast(currentLanguage === 'tr'
+          ? 'e-İrsaliye Mikro\'da oluşturuldu ama sipariş işaretlenemedi — YENİDEN GÖNDERMEYİN, sayfayı yenileyin.'
+          : 'The e-waybill was created in Mikro but the order could not be marked — DO NOT resend, refresh the page.', 'error');
+      }
+    } catch (e) {
+      // Yanıt okunamadı (proxy HTML'i, kopan bağlantı): sunucu isteği tamamlamış ve belgeyi
+      // kesmiş OLABİLİR. "Hata" demek yeterli değil — kullanıcı yeniden basarsa mükerrer olur.
+      toast(currentLanguage === 'tr'
+        ? `e-İrsaliye yanıtı alınamadı (${e instanceof Error ? e.message : String(e)}) — belge Mikro'da kesilmiş OLABİLİR, tekrar göndermeden önce Mikro'dan kontrol edin.`
+        : `No response for the e-waybill (${e instanceof Error ? e.message : String(e)}) — the document MAY have been issued in Mikro; check Mikro before resending.`, 'error');
+    } finally {
+      eIrsaliyeKilidiBirak(order.id);
+    }
+  };
+
   // ── e-Fatura: push order to Mikro ────────────────────────────────────────────
   const handleMikroFatura = async (order: Order) => {
     try {
@@ -3386,8 +3458,10 @@ function AppContent() {
       const d = await r.json() as { success: boolean; mikroFaturaNo?: string; notConfigured?: boolean; error?: string };
       if (d.success) {
         toast(`${currentLanguage === 'tr' ? 'Fatura kaydedildi' : 'Invoice recorded'}: ${d.mikroFaturaNo ?? ''}`, 'success');
-        // Optimistic update — Firestore onSnapshot will sync the real value shortly
-        if (selectedOrder?.id === order.id) setSelectedOrder({ ...selectedOrder, mikroFaturaNo: d.mikroFaturaNo, hasInvoice: true });
+        // Optimistic update — Firestore onSnapshot will sync the real value shortly.
+        // İŞLEVSEL güncelleyici: bu `await` sırasında e-İrsaliye işareti yazılmış olabilir;
+        // kapanıştaki bayat nesneyi yaymak onu yerelde siler (2026-09-19 delta).
+        setSelectedOrder(o => (o && o.id === order.id ? { ...o, mikroFaturaNo: d.mikroFaturaNo, hasInvoice: true } : o));
       } else if (d.notConfigured) {
         toast(currentLanguage === 'tr' ? 'Mikro bağlantısı yapılandırılmamış. Ayarlar\'dan girin.' : 'Mikro not configured. Go to Settings.', 'error');
       } else {
@@ -3427,7 +3501,7 @@ function AppContent() {
         window.open(d.paymentPageUrl, '_blank');
         navigator.clipboard?.writeText(d.paymentPageUrl).catch(() => {});
         toast(currentLanguage === 'tr' ? 'Ödeme linki oluşturuldu ve açıldı ✓' : 'Payment link created and opened ✓', 'success');
-        if (selectedOrder?.id === order.id) setSelectedOrder({ ...selectedOrder, iyzicoPaymentUrl: d.paymentPageUrl });
+        setSelectedOrder(o => (o && o.id === order.id ? { ...o, iyzicoPaymentUrl: d.paymentPageUrl } : o));
       } else if (d.notConfigured) {
         toast(currentLanguage === 'tr' ? 'iyzico yapılandırılmamış. Entegrasyonlar\'dan API anahtarını girin.' : 'iyzico not configured. Add API key in Integrations.', 'error');
       } else {
@@ -3446,17 +3520,6 @@ function AppContent() {
       setIsEditingLead(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `leads/${selectedLead.id}`);
-    }
-  };
-
-  const handleEditOrderSubmit = async (updatedData: Partial<Order>) => {
-    if (!selectedOrder) return;
-    try {
-      await updateDoc(doc(db, 'orders', selectedOrder.id), { ...updatedData, updatedAt: serverTimestamp() });
-      setSelectedOrder({ ...selectedOrder, ...updatedData } as Order);
-      setIsEditingOrder(false);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `orders/${selectedOrder.id}`);
     }
   };
 
@@ -5976,6 +6039,8 @@ function AppContent() {
                 orderLineItems={orderLineItems}
                 setOrderLineItems={setOrderLineItems}
                 handleMikroFatura={handleMikroFatura}
+                handleEIrsaliye={handleEIrsaliye}
+                eIrsaliyeGonderiliyor={eIrsaliyeGonderiliyor}
                 handleIyzicoPaymentLink={handleIyzicoPaymentLink}
                 setRouteStops={setRouteStops}
                 handleBuildRoute={handleBuildRoute}
@@ -6049,16 +6114,14 @@ function AppContent() {
         onSubmit={handleEditLeadSubmit}
       />
 
-      {/* ── Edit Order Modal ── */}
-      <EditOrderModal
-        isOpen={isEditingOrder}
-        onClose={() => setIsEditingOrder(false)}
-        order={selectedOrder}
-        currentT={currentT}
-        onSubmit={handleEditOrderSubmit}
-        warehouses={warehouses}
-        currentLanguage={currentLanguage}
-      />
+      {/* ── Sipariş düzenleme modalı OrdersPage.tsx'te ──────────────────────────
+          Burada `<EditOrderModal isOpen={isEditingOrder}>` duruyordu ama `isEditingOrder`
+          state'ini TRUE yapan tek bir satır yoktu (setter prop olarak da geçmiyordu): modal
+          hiçbir zaman açılamıyordu — "yazıldı ama bağlanmadı" sınıfı (yetim kaldığı commit:
+          `dab5a86` sayfa çıkarımı). Kullanıcının gördüğü Düzenle düğmesi OrdersPage'in kendi
+          modalını açıyor; Sevk Deposu ve KDV Oranı alanları 2026-09-19'da ORAYA taşındı
+          (patch sözleşmesi `siparisDuzenlemeYamasi` zaten orada). Bileşen + `handleEditOrderSubmit`
+          + `isEditingOrder` state'i silindi. */}
       {/* Global search palette (⌘K) */}
       {globalSearchOpen && (
         <GlobalSearch
@@ -6220,7 +6283,7 @@ function AppContent() {
             if (deliveryNoteText.trim()) {
               await updateDoc(doc(db, 'orders', ord.id), { deliveryNote: deliveryNoteText.trim(), deliveredAt: serverTimestamp() });
             }
-            if (selectedOrder?.id === ord.id) setSelectedOrder({ ...selectedOrder, status: 'Delivered' });
+            setSelectedOrder(o => (o && o.id === ord.id ? { ...o, status: 'Delivered' } : o));
             setDeliveryNoteOrder(null);
             setDeliveryNoteText('');
             toast(currentLanguage === 'tr' ? 'Sipariş teslim edildi ✓' : 'Order marked as delivered ✓', 'success');
