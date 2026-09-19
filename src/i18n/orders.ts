@@ -235,6 +235,7 @@ export const ORDERS = {
     musterinin_e_fatura_kaydi_bilinmiyor_secilmezse_: 'Müşterinin e-Fatura kaydı bilinmiyor — seçilmezse Mikro’ya fatura GÖNDERİLMEZ.',
     siparis_kargoda_e_irsaliye_icin_siparis_detayind: 'Sipariş kargoda — e-İrsaliye için sipariş detayındaki düğmeyi kullanın.',
     e_irsaliye_kesme_yetkiniz_yok_yonetici_lojistik_: 'e-İrsaliye kesme yetkiniz yok (Yönetici / Lojistik rolü gerekir).',
+    mikro_siparisi_durumu_mikro_da_izlenir: 'Mikro siparişi — durumu Mikro\'da izlenir',
   },
   en: {
     bu_siparis_iptal_edilmistir: 'This order has been cancelled.',
@@ -466,6 +467,7 @@ export const ORDERS = {
     musterinin_e_fatura_kaydi_bilinmiyor_secilmezse_: 'The customer’s e-Invoice registration is unknown — without a choice the invoice is NOT sent to Mikro.',
     siparis_kargoda_e_irsaliye_icin_siparis_detayind: 'Order shipped — use the e-waybill button in the order detail.',
     e_irsaliye_kesme_yetkiniz_yok_yonetici_lojistik_: 'You are not allowed to issue e-waybills (Admin / Logistics role required).',
+    mikro_siparisi_durumu_mikro_da_izlenir: 'Mikro order — status is tracked in Mikro',
   },
 } as const;
 

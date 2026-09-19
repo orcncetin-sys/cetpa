@@ -1,11 +1,33 @@
 import { sayiBicimleyici } from '../utils/recharts';
-import { odemeTakipli, gorunenSiparisNo, siparisTarih, siparisTutari } from '../utils/siparis';
-import { toplaBilinen, tutarBirlestir, ekranTutari } from '../utils/para';
+import { gorunenSiparisNo, siparisTutari } from '../utils/siparis';
+import { panoCirosu, panoMikroSiparisleri, panoSiparisleri } from '../utils/pano/mikroBirlesim';
+import { ekranTutari, sayiSirala } from '../utils/para';
+import {
+  odemeDavranisi, segmentCirosu, enIyiMusteriler, segmentKarliligi,
+  tipSegmenti, donutSegmenti, b2bSegmenti,
+} from '../utils/pano/musteriAnaliz';
+import { siparisKarliligi } from '../utils/siparisler/siparisKarlilik';
+import {
+  donemCirosu, ayCirosu, hedefGerceklesme, butceKarsilastir,
+  satisHizi, hizDegisimi, haftalikCiro, enBuyukHafta, hedefGirdisi, hedefOnDoldur,
+} from '../utils/pano/hedefButce';
+import { gunlukCiro, sonNGunToplami, aylikCiro, mtdKarsilastir, donemToplami, olcekTavani } from '../utils/pano/ciroDonem';
+import {
+  stokDurumu, stokSeviyesi, odenmemisSiparisler, gecikmisOdemeler, bekleyenSiparisler,
+  gecikmisAdaylar, aylikCiroDegisimi, finansKpilari, nakitPozisyonu, esikUyarilari,
+  huniKazanmaOrani,
+} from '../utils/pano/finansKpi';
 import { gunAnahtari, zamanDate, zamanMs, ayAnahtari, tarihYaz, bugunAnahtari } from '../utils/zaman';
-import { siparisDurumEtiketi, sevkiyatDurumEtiketi } from '../utils/durumEtiketi';
+import { siparisDurumEtiketi } from '../utils/durumEtiketi';
 import KurUyarisi from '../components/KurUyarisi';
+import {
+  stokDegeriOzeti, dusukStokKalemleri, stokEsikYaz, enCokSatanlar,
+  durumDagilimi, haftaIciIsiHaritasi, sonSevkiyatlar, PANO_DURUMLARI,
+} from '../utils/pano/stokSevkiyat';
+import { oranYuzde } from '../utils/siparisler/lojistikKpi';
+import { adetYaz } from '../utils/muhasebe/depoDeger';
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import {
   ChevronRight, ChevronDown, Users, Package, Truck, TrendingUp, Receipt, List, FileText,
   DollarSign, CheckCircle2, Calendar, BarChart3, AlertTriangle, LayoutDashboard,
@@ -16,18 +38,18 @@ import { YAxis, XAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, A
 import { db, auth } from '../firebase';
 import { doc, collection, addDoc, updateDoc, deleteDoc, setDoc, serverTimestamp, isCollectionReady } from '../lib/dbClient';
 import { cn } from '../lib/utils';
-import { itemCostTRY } from '../utils/cost';
+import { kartMaliyetiTL, kartSatisTL } from '../utils/cost';
 import { paraYaz, tlYaz } from '../utils/currency';
 import { confirmDelete } from '../lib/confirm';
-import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import ModuleHeader from '../components/ModuleHeader';
 import DashboardAnalysis from '../components/DashboardAnalysis';
 import DateRangePicker from '../components/DateRangePicker';
 import SonSenkronRozeti from '../components/SonSenkronRozeti';
-import type { Order, Lead, InventoryItem, Shipment } from '../types';
+import type { Order, Lead, InventoryItem, Shipment, OrderLineItem } from '../types';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
 import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
 import { oc } from '../i18n/ortak';
+import { dc } from '../i18n/dashboard';
 
 // KUR YEDEGI KALDIRILDI (2026-08-26) — burada `const FX_FALLBACK = { USD: 38,
 // EUR: 41 }` duruyordu. Canli kur gelmedigi her an TL tutarlar 2024'ten kalma
@@ -68,7 +90,7 @@ function DeltaBadge({ delta, prev, birim = 'adet' }: {
       className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${up ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}
       title={yuzde === null
         ? 'Önceki dönemde karşılaştırılacak veri yok — yüzde hesaplanamıyor, mutlak değişim gösteriliyor.'
-        : `Önceki dönem: ${birim === 'tutar' ? paraYaz(prev, { ondalik: 0 }) : (prev ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
+        : `Önceki dönem: ${birim === 'tutar' ? paraYaz(prev, { ondalik: 0 }) : Number(prev).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`}
     >
       {up ? '▲' : '▼'} {yuzde === null ? mutlak : `%${Math.abs(yuzde).toFixed(1)}`}
     </span>
@@ -169,19 +191,14 @@ export default function DashboardPage(props: Props) {
     return d >= start && d <= end;
   });
 
-  // Tutarı okunamayan fatura 0 SAYILMAZ, SAYILIR (`Tutar.bilinmeyen`) — eski `(f.tutar || 0)`
-  // hook'un sahte sıfırını ekrana taşıyordu; hook artık NaN (= bilinmiyor) veriyor.
-  const mikroRevenueT = toplaBilinen(filteredMikroFaturalar, f => f.tutar);
-  // ÇİFT SAYIM KORUMASI (2026-09-01): faturadan türetilen siparişler
-  // (source:'mikro-fatura') native tarafında DIŞLANIR — aynı fatura hem
-  // mikroFaturalar hem orders üzerinden iki kez ciroya girmesin.
-  // Sipariş tutarı TEK KAYNAK `siparisTutari` (`totalPrice ?? totalAmount`; ikisi de yoksa NaN).
-  const nativeRevenueT = toplaBilinen(
-    filteredOrders.filter(o => (o as { source?: string }).source !== 'mikro-fatura'),
-    siparisTutari,
-  );
-  const revenueT = tutarBirlestir(nativeRevenueT, mikroRevenueT);
-  const combinedRevenue = ekranTutari(revenueT);   // hiç bilinen yoksa NaN → fmtKpi '—'
+  // Tutarı okunamayan fatura/sipariş 0 SAYILMAZ, SAYILIR (`Tutar.bilinmeyen`).
+  // ÇİFT SAYIM KORUMASI (2026-09-01): Mikro'dan türeyen native sipariş (source 'mikro…')
+  // DIŞLANIR — aynı fatura hem mikroFaturalar hem orders üzerinden iki kez ciroya
+  // girmesin. Kural + toplama artık TEK YERDE: utils/pano/mikroBirlesim → panoCirosu
+  // (sparkline ve 7 günlük şerit de aynı fonksiyonu çağırır; üçü sessizce ayrışamaz).
+  const ciro = panoCirosu(filteredOrders, filteredMikroFaturalar);
+  const revenueT = ciro.tutar;
+  const combinedRevenue = ciro.ekran;   // hiç bilinen yoksa NaN → fmtKpi '—'
   // 'orders' ve 'mikroFaturalar' SSE ile KADEMELİ akıyor (mikroFaturalar 600+
   // fatura olabiliyor). onSnapshot abone olur olmaz boş diziyle bile tetiklenir;
   // ilk anlık görüntü tam gelene kadar burada okunan toplam bir ARA DEĞERdir.
@@ -194,22 +211,20 @@ export default function DashboardPage(props: Props) {
   const leadsCountReady = isCollectionReady('leads');
   const inventoryCountReady = isCollectionReady('inventory');
 
-  // Mikro siparişlerini Order formatına uyarlayıp grafiklerde kullanmak için birleştir
-  const mappedMikroSiparisler = mikroSiparisler.filter(ms => ms.tip === 0).map(ms => ({
-    id: ms.id,
-    orderNumber: ms.evrakNo,
-    customerName: ms.cariKodu,
-    totalPrice: ms.tutar,
-    status: 'Pending', // Mikro'daki açık siparişler
-    createdAt: ms.tarih,
-    // syncedAt = MİKRO'NUN TARİHİ, bugün DEĞİL (Faz 1 3/n): eskiden `new Date()` yazılıyordu →
-    // her Mikro siparişi Dashboard'da "bugün" görünüp 7 günlük ciro/KPI'ya sızıyordu.
-    // OrdersPage aynı eşlemede `ms.tarih` kullanıyor; tarih yoksa siparisTarih null döner.
-    syncedAt: ms.tarih,
-    source: 'mikro-siparis',   // odemeTakipli ayrımı için (OrdersPage ile aynı düzeltme)
-  })) as unknown as Order[];
-  
-  const combinedOrders = [...orders, ...mappedMikroSiparisler];
+  // Düşük stok kapısı TEK KAYNAK (Faz 3 5/n): Phase 24 ajandası ile aşağıdaki
+  // "Düşük Stok Uyarısı" paneli aynı listeyi okumalı — eskiden biri
+  // `(stockLevel ?? 0) <= (lowStockThreshold ?? 5)`, diğeri ham `<=` ile süzüyordu
+  // ve stoğu/eşiği bilinmeyen kalemde İKİ EKRAN FARKLI CEVAP veriyordu.
+  const dusukStok = React.useMemo(() => dusukStokKalemleri(inventory), [inventory]);
+
+  // Mikro siparişlerini Order biçimine uyarlayıp birleştir (ADDITIVE — EKLE, YERİNE KOYMA).
+  // Eşleme kuralı + "tutarı bilinmiyorsa `totalPrice` alanı YAZILMAZ" sözleşmesi tek yerde:
+  // utils/pano/mikroBirlesim. Eskiden `totalPrice: ms.tutar` idi ve hook o alanı
+  // `Number(d.sip_tutar || 0)` ile üretiyor — tutarı okunamayan Mikro siparişi panoda
+  // "bilinen ₺0" oluyordu. Modül HAM `sip_tutar` kolonunu okur, bilinmiyorsa alanı yazmaz
+  // (sunucudaki `faturadanSiparis` ile aynı sözleşme) → `siparisTutari` NaN döner, sayılır.
+  // `syncedAt` = MİKRO'NUN TARİHİ, bugün DEĞİL (Faz 1 3/n) — modülde korundu.
+  const combinedOrders = panoSiparisleri(orders, panoMikroSiparisleri(mikroSiparisler));
 
   return (
             <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
@@ -255,46 +270,43 @@ export default function DashboardPage(props: Props) {
                 const alerts: { id: string; color: string; icon: string; msg: string }[] = [];
 
                 // Orders stuck in Pending > 3 days (native + mikro)
-                const stuckPending = combinedOrders.filter(o => {
-                  if (o.status !== 'Pending') return false;
-                  const ms = zamanMs(o.createdAt ?? o.syncedAt);
-                  if (ms === null) return false;
-                  return (now528 - ms) > 3 * 86400000;
-                });
-                if (stuckPending.length > 0)
+                const bekleyen528 = bekleyenSiparisler(combinedOrders, { simdi: now528, gun: 3 });
+                if (bekleyen528.sayi > 0)
                   alerts.push({ id: 'stuckPending', color: 'amber', icon: '⏳',
                     msg: currentLanguage === 'tr'
-                      ? `${stuckPending.length} sipariş 3+ gündür bekliyor`
-                      : `${stuckPending.length} order${stuckPending.length > 1 ? 's' : ''} pending for 3+ days` });
+                      ? `${bekleyen528.sayi} sipariş 3+ gündür bekliyor`
+                      : `${bekleyen528.sayi} order${bekleyen528.sayi > 1 ? 's' : ''} pending for 3+ days` });
 
                 // Leads with no activity > 7 days
-                const inactiveLeads = leads.filter(l => {
-                  if (l.status === 'Closed') return false;
-                  const ms = zamanMs(l.updatedAt ?? l.createdAt);
-                  if (ms === null) return false;
-                  return (now528 - ms) > 7 * 86400000;
-                });
-                if (inactiveLeads.length > 0)
+                const adaylar528 = gecikmisAdaylar(leads, { simdi: now528, gun: 7 });
+                if (adaylar528.sayi > 0)
                   alerts.push({ id: 'inactiveLeads', color: 'blue', icon: '👤',
                     msg: currentLanguage === 'tr'
-                      ? `${inactiveLeads.length} aktif aday 7+ gündür güncellenmedi`
-                      : `${inactiveLeads.length} active lead${inactiveLeads.length > 1 ? 's' : ''} with no activity in 7+ days` });
+                      ? `${adaylar528.sayi} aktif aday 7+ gündür güncellenmedi`
+                      : `${adaylar528.sayi} active lead${adaylar528.sayi > 1 ? 's' : ''} with no activity in 7+ days` });
 
                 // Critical low stock
-                const criticalStock = inventory.filter(i => (i.stockLevel ?? 0) <= 0);
-                if (criticalStock.length > 0)
+                // Stok seviyesi OKUNAMAYAN ürün "sıfır stok" SAYILMAZ (utils/pano/finansKpi):
+                // eski `(i.stockLevel ?? 0) <= 0` her tutarsız kaydı KIRMIZI alarma çeviriyordu.
+                const stok528 = stokDurumu(inventory);
+                if (stok528.tukenen.length > 0)
                   alerts.push({ id: 'criticalStock', color: 'red', icon: '📦',
                     msg: currentLanguage === 'tr'
-                      ? `${criticalStock.length} ürün stokta kalmadı (sıfır stok)`
-                      : `${criticalStock.length} product${criticalStock.length > 1 ? 's' : ''} out of stock` });
+                      ? `${stok528.tukenen.length} ürün stokta kalmadı (sıfır stok)`
+                      : `${stok528.tukenen.length} product${stok528.tukenen.length > 1 ? 's' : ''} out of stock` });
+                if (stok528.seviyesiBilinmeyen > 0)
+                  alerts.push({ id: 'stokBilinmiyor', color: 'amber', icon: '❔',
+                    msg: currentLanguage === 'tr'
+                      ? `${stok528.seviyesiBilinmeyen} ürünün stok seviyesi okunamadı — stok durumu bilinmiyor`
+                      : `${stok528.seviyesiBilinmeyen} product(s) with unreadable stock level — status unknown` });
 
                 // Unpaid delivered orders
-                const unpaidDelivered = orders.filter(o => o.status === 'Delivered' && !o.paid && odemeTakipli(o));
-                if (unpaidDelivered.length > 0)
+                const teslimOdenmemis528 = odenmemisSiparisler(orders, { durum: 'Delivered' });
+                if (teslimOdenmemis528.sayi > 0)
                   alerts.push({ id: 'unpaidDelivered', color: 'rose', icon: '💳',
                     msg: currentLanguage === 'tr'
-                      ? `${unpaidDelivered.length} teslim edilmiş sipariş hâlâ ödenmedi`
-                      : `${unpaidDelivered.length} delivered order${unpaidDelivered.length > 1 ? 's' : ''} still unpaid` });
+                      ? `${teslimOdenmemis528.sayi} teslim edilmiş sipariş hâlâ ödenmedi`
+                      : `${teslimOdenmemis528.sayi} delivered order${teslimOdenmemis528.sayi > 1 ? 's' : ''} still unpaid` });
 
                 const visible = alerts.filter(a => !p528Dismissed.has(a.id));
                 if (visible.length === 0) return null;
@@ -314,7 +326,7 @@ export default function DashboardPage(props: Props) {
                         <button
                           onClick={() => setP528Dismissed(prev => new Set([...prev, alert.id]))}
                           className="ml-1 opacity-50 hover:opacity-100 transition-opacity font-bold text-[10px]"
-                          title={currentLanguage === 'tr' ? 'Kapat' : 'Dismiss'}
+                          title={dc(currentLanguage).kapat}
                         >✕</button>
                       </div>
                     ))}
@@ -329,7 +341,11 @@ export default function DashboardPage(props: Props) {
                 {[
                   { label: dashT.total_orders, value: filteredOrders.length, ready: ordersCountReady, icon: Package, color: 'text-blue-500', bg: 'bg-blue-50', sub: `${filteredOrders.filter(o => o.status === 'Pending').length} ${dashT.pending}`, tab: 'orders', delta: summaryData?.orders?.delta, prev: summaryData?.orders?.prevCount },
                   { label: dashT.active_leads, value: filteredLeads.filter(l => !['Closed Won','Closed Lost'].includes(l.status)).length, ready: leadsCountReady, icon: Users, color: 'text-brand', bg: 'bg-brand/10', sub: `${filteredLeads.length} ${dashT.total}`, tab: 'crm', delta: null },
-                  { label: dashT.inventory_label, value: inventory.length, ready: inventoryCountReady, icon: List, color: 'text-purple-500', bg: 'bg-purple-50', sub: `${inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length} ${dashT.low_stock}`, tab: 'inventory', delta: null },
+                  // Düşük stok sayısı TEK KAPIDAN (`dusukStok`): ham `i.stockLevel <= i.lowStockThreshold`
+                  // karşılaştırması alanlardan biri bilinmiyorken `undefined <= 5` → false veriyordu,
+                  // aşağıdaki uyarı karosu ise aynı kalemi `?? 0` ile "düşük" sayıyordu (2026-09-19
+                  // hakem turu: aynı ekranda üç farklı düşük-stok kapısı).
+                  { label: dashT.inventory_label, value: inventory.length, ready: inventoryCountReady, icon: List, color: 'text-purple-500', bg: 'bg-purple-50', sub: `${dusukStok.dusuk.length} ${dashT.low_stock}`, tab: 'inventory', delta: null },
                 ].map((kpi, i) => (
                   <button key={i} onClick={() => setActiveTab(kpi.tab)}
                     className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all duration-150 cursor-pointer group flex flex-col min-h-[130px]">
@@ -380,7 +396,7 @@ export default function DashboardPage(props: Props) {
                     return (y && a && g) ? `${g}.${a}.${y}` : '—';
                   };
                   const aralikEtiketi = araligVarsayilan
-                    ? (currentLanguage === 'tr' ? 'Son 30 gün' : 'Last 30 days')
+                    ? (dc(currentLanguage).son_30_gun)
                     : `${trTarih(dateRange.startDate)} – ${trTarih(dateRange.endDate)}`;
                   return (
                     <div className="apple-card p-4 text-left group flex flex-col min-h-[130px]">
@@ -405,7 +421,7 @@ export default function DashboardPage(props: Props) {
                       {revenueReady ? (
                         <p className="text-2xl font-bold mt-auto" style={{color:'var(--text-primary)'}}>{fmtKpi(combinedRevenue)}</p>
                       ) : (
-                        <p className="text-2xl font-bold mt-auto text-gray-300 animate-pulse" title={currentLanguage === 'tr' ? 'Veri yükleniyor…' : 'Loading…'}>{symbol}···</p>
+                        <p className="text-2xl font-bold mt-auto text-gray-300 animate-pulse" title={dc(currentLanguage).veri_yukleniyor}>{symbol}···</p>
                       )}
                       <p className="text-xs font-semibold text-gray-500 mt-1">{dashT.total_revenue}</p>
                       <p className="text-[10px] text-gray-400 mt-0.5">
@@ -414,7 +430,7 @@ export default function DashboardPage(props: Props) {
                       {/* Tutarı okunamayan kayıt varsa rakam KISMİ toplamdır — sessizce eksik göstermek yerine söylenir. */}
                       {revenueReady && revenueT.bilinmeyen > 0 && (
                         <p className="text-[10px] text-amber-600 mt-0.5">
-                          {revenueT.bilinmeyen} {currentLanguage === 'tr' ? 'kaydın tutarı okunamadı (kısmi toplam)' : 'record(s) unpriced (partial total)'}
+                          {revenueT.bilinmeyen} {dc(currentLanguage).kaydin_tutari_okunamadi_kismi_toplam}
                         </p>
                       )}
                       {/* Phase 35: 7 GÜNLÜK ciro sparkline — kartın büyük rakamı seçili
@@ -427,27 +443,14 @@ export default function DashboardPage(props: Props) {
                           çubuklar gerçeğin iki katına çıkıyordu. Kartın büyük rakamı
                           (combinedRevenue) bu korumaya zaten sahipti; sparkline değildi. */}
                       {(() => {
-                        const days = Array.from({ length: 7 }, (_, i) => {
-                          const d = new Date(); d.setDate(d.getDate() - (6 - i));
-                          const dayStr = gunAnahtari(d);
-
-                          // Native revenue for this day — tutarı bilinmeyen sipariş 0 sayılmaz, SAYILIR.
-                          const revNative = toplaBilinen(
-                            orders.filter(o => odemeTakipli(o) && gunAnahtari(siparisTarih(o)) === dayStr), // mikro türevi aşağıda sayılıyor
-                            siparisTutari,
-                          );
-
-                          // Mikro revenue for this day
-                          const revMikro = toplaBilinen(
-                            mikroFaturalar.filter(f => f.yon === 'giden' && gunAnahtari(f.tarih) === dayStr),
-                            f => f.tutar,
-                          );
-
-                          const gun = tutarBirlestir(revNative, revMikro);
-                          return { day: d.getDate(), rev: ekranTutari(gun), bilinmeyen: gun.bilinmeyen };
-                        });
-                        // Bilinmeyen gün ('—') ölçeğe girmez; `, 1` sıfıra-bölme koruması (para iddiası değil).
-                        const maxRev = Math.max(...days.map(d => d.rev).filter(v => Number.isFinite(v)), 1);
+                        // Gün kovaları + "tutarı bilinmeyen kayıt 0 sayılmaz, SAYILIR" kuralı
+                        // utils/pano/ciroDonem → gunlukCiro'da (testli); o da birleşim kuralını
+                        // KPI kartıyla AYNI yere (utils/pano/mikroBirlesim → panoCirosu) devrediyor.
+                        // Gün süzgeci orada, kural onun da altında: 2026-09-04'te sparkline korumayı
+                        // kaçırdığı için çubuklar gerçeğin iki katına çıkmıştı.
+                        const days = gunlukCiro(orders, mikroFaturalar, 7, new Date(), { iptalHaric: false });
+                        // Bilinmeyen gün ('—') ölçeğe girmez; alt sınır 1 sıfıra-bölme koruması (para iddiası değil).
+                        const maxRev = olcekTavani(days);
                         return (
                           <div className="flex items-end gap-0.5 mt-2 h-8">
                             {days.map((d, i) => (
@@ -455,9 +458,9 @@ export default function DashboardPage(props: Props) {
                                 {/* Tutarı hiç bilinmeyen gün: gri taban çubuğu — yüksekliği 0'mış gibi
                                     YEŞİL çizmek "o gün ciro yoktu" demekti (sahte kesinlik). */}
                                 <div
-                                  className={`rounded-sm opacity-60 group-hover:opacity-100 transition-opacity ${Number.isFinite(d.rev) ? 'bg-green-400' : 'bg-gray-300'}`}
-                                  style={{ height: `${Number.isFinite(d.rev) ? Math.max((d.rev / maxRev) * 100, 4) : 4}%` }}
-                                  title={`${d.day}. gün: ${fmtKpi(d.rev)}${d.bilinmeyen > 0 ? (currentLanguage === 'tr' ? ` · ${d.bilinmeyen} kaydın tutarı okunamadı` : ` · ${d.bilinmeyen} record(s) unpriced`) : ''} — ${currentLanguage === 'tr' ? 'son 7 gün eğilimi' : 'last 7 days trend'}`}
+                                  className={`rounded-sm opacity-60 group-hover:opacity-100 transition-opacity ${d.grafik !== null ? 'bg-green-400' : 'bg-gray-300'}`}
+                                  style={{ height: `${d.grafik !== null ? Math.max((d.grafik / maxRev) * 100, 4) : 4}%` }}
+                                  title={`${d.gun}. gün: ${fmtKpi(d.ekran)}${d.tutar.bilinmeyen > 0 ? (currentLanguage === 'tr' ? ` · ${d.tutar.bilinmeyen} kaydın tutarı okunamadı` : ` · ${d.tutar.bilinmeyen} record(s) unpriced`) : ''} — ${dc(currentLanguage).son_7_gun_egilimi}`}
                                 />
                               </div>
                             ))}
@@ -477,7 +480,16 @@ export default function DashboardPage(props: Props) {
               {/* ── Insight strip: revenue trend + alerts + search CTA ── */}
               {(() => {
                 const pendingCount   = combinedOrders.filter(o => o.status === 'Pending').length;
-                const lowStockCount  = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)).length;
+                // TEK KAPI (2026-09-19 hakem turu): bu karo eskiden kendi süzgecini kuruyordu
+                // (`(i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5)`), yani Mikro'dan stoğu
+                // gelmemiş kartı "stok 0" sayıp "Sipariş verilmeli" diye sayıyordu — aşağıdaki
+                // "Düşük Stok Uyarısı" paneli ise aynı kartı listelemeyip "denetlenemedi" diyordu.
+                // Kullanıcı aynı ekranda İKİ FARKLI düşük-stok sayısı görüyordu. Kaynak artık
+                // `dusukStok` (utils/pano/stokSevkiyat.dusukStokKalemleri, testli).
+                const lowStockCount  = dusukStok.dusuk.length;
+                // Stoğu ya da eşiği bilinmeyen kalem "düşük" DEĞİL, "denetlenemedi"dir — sayısı
+                // karonun alt metnine not düşer (sessizce yutulmaz).
+                const stokDenetlenemeyen = dusukStok.stokBilinmeyen.length + dusukStok.esikBilinmeyen.length;
                 const bugunKey = bugunAnahtari();
                 const shippedToday   = orders.filter(o =>
                   o.status === 'Shipped' && gunAnahtari(o.syncedAt) === bugunKey
@@ -494,27 +506,16 @@ export default function DashboardPage(props: Props) {
                 // ay" seçilince kart BOŞALIYORDU (kesişim boş), oysa etiket hâlâ
                 // "son 7 gün" diyordu (2026-09-04 son kontrol bulgusu).
                 //
-                // Çift sayım koruması sparkline ile aynı: mikro-fatura türevleri
-                // `mikroFaturalar` üzerinden ayrıca sayılıyor.
-                // Tutarı okunamayan kayıt 0 SAYILMAZ, SAYILIR — rakam kısmi kalır ve altına not düşer.
-                const weekRevenueT = tutarBirlestir(
-                  toplaBilinen(
-                    orders.filter(o => {
-                      if (!odemeTakipli(o)) return false;
-                      const d = siparisTarih(o);
-                      return !!d && (Date.now() - d.getTime()) < 7 * 86400000;
-                    }),
-                    siparisTutari,
-                  ),
-                  toplaBilinen(
-                    mikroFaturalar.filter(f => {
-                      if (f.yon !== 'giden') return false;
-                      const ms = zamanMs(f.tarih);
-                      return ms !== null && (Date.now() - ms) < 7 * 86400000;
-                    }),
-                    f => f.tutar,
-                  ),
-                );
+                // Çift sayım koruması (Mikro türevi native sipariş dışlanır, faturası
+                // `mikroFaturalar` üzerinden sayılır) ve "tutarı okunamayan kayıt 0
+                // SAYILMAZ, SAYILIR" kuralı sparkline + KPI kartıyla AYNI yerde:
+                // utils/pano/mikroBirlesim → panoCirosu. Rakam kısmi kalır, altına
+                // "N kaydın tutarı okunamadı" notu düşer.
+                //
+                // Pencere BU KARTA özel: KAYAN 7×24 saat (`sonNGunToplami`), yukarıdaki
+                // sparkline ise TAKVİM günü kovalıyor — ikisi de "son 7 gün" diyor ama
+                // rakamları eşit değil. Bilerek ayrı tutuldu (bkz. utils/pano/ciroDonem).
+                const weekRevenueT = sonNGunToplami(orders, mikroFaturalar, 7);
                 const weekRevenue = ekranTutari(weekRevenueT);
 
                 return (
@@ -543,16 +544,16 @@ export default function DashboardPage(props: Props) {
                       <p className="text-2xl font-bold text-emerald-600 mt-auto">
                         {fmtKpi(weekRevenue)}
                       </p>
-                      <p className="text-[10px] font-semibold text-gray-500 truncate mt-1">{currentLanguage === 'tr' ? '7 Günlük Ciro' : '7-Day Revenue'}</p>
+                      <p className="text-[10px] font-semibold text-gray-500 truncate mt-1">{dc(currentLanguage)._7_gunluk_ciro}</p>
                       <p className="text-[10px] text-gray-400"
                         title={currentLanguage === 'tr'
                           ? 'Bu kart seçili tarih aralığından bağımsızdır: her zaman son 7 günü gösterir.'
                           : 'Independent of the selected date range: always the last 7 days.'}>
-                        {currentLanguage === 'tr' ? 'Son 7 gün (aralıktan bağımsız)' : 'Last 7 days (range-independent)'}
+                        {dc(currentLanguage).son_7_gun_araliktan_bagimsiz}
                       </p>
                       {weekRevenueT.bilinmeyen > 0 && (
                         <p className="text-[10px] text-amber-600">
-                          {weekRevenueT.bilinmeyen} {currentLanguage === 'tr' ? 'kaydın tutarı okunamadı' : 'record(s) unpriced'}
+                          {weekRevenueT.bilinmeyen} {dc(currentLanguage).kaydin_tutari_okunamadi}
                         </p>
                       )}
                     </div>
@@ -561,11 +562,11 @@ export default function DashboardPage(props: Props) {
                     {[
                       {
                         icon: Clock,
-                        label: currentLanguage === 'tr' ? 'Bekleyen Sipariş' : 'Pending Orders',
+                        label: dc(currentLanguage).bekleyen_siparis,
                         value: pendingCount,
                         color: pendingCount > 5 ? 'text-amber-600' : 'text-gray-600',
                         bg:   pendingCount > 5 ? 'bg-amber-50' : 'bg-gray-50',
-                        sub:  pendingCount > 5 ? (currentLanguage === 'tr' ? '⚠ Acil' : '⚠ Urgent') : (currentLanguage === 'tr' ? 'Normal' : 'Normal'),
+                        sub:  pendingCount > 5 ? (dc(currentLanguage).acil) : (currentLanguage === 'tr' ? 'Normal' : 'Normal'),
                         onClick: () => setActiveTab('orders'),
                       },
                       {
@@ -574,16 +575,23 @@ export default function DashboardPage(props: Props) {
                         value: lowStockCount,
                         color: lowStockCount > 0 ? 'text-red-600' : 'text-gray-400',
                         bg:   lowStockCount > 0 ? 'bg-red-50' : 'bg-gray-50',
-                        sub:  lowStockCount > 0 ? (currentLanguage === 'tr' ? 'Sipariş verilmeli' : 'Reorder needed') : (currentLanguage === 'tr' ? 'Stok yeterli' : 'Stock OK'),
+                        // "Stok yeterli" ancak DENETLENEBİLEN kalemler için söylenebilir:
+                        // stoğu/eşiği bilinmeyen kalem varsa bunu açıkça yazar.
+                        sub:  (lowStockCount > 0
+                                ? (dc(currentLanguage).siparis_verilmeli)
+                                : (dc(currentLanguage).stok_yeterli))
+                              + (stokDenetlenemeyen > 0
+                                ? (currentLanguage === 'tr' ? ` · ${stokDenetlenemeyen} kalem denetlenemedi` : ` · ${stokDenetlenemeyen} unchecked`)
+                                : ''),
                         onClick: () => setActiveTab('inventory'),
                       },
                       {
                         icon: Truck,
-                        label: currentLanguage === 'tr' ? 'Bugün Kargolandı' : 'Shipped Today',
+                        label: dc(currentLanguage).bugun_kargolandi,
                         value: shippedToday,
                         color: 'text-blue-600',
                         bg:   'bg-blue-50',
-                        sub:  currentLanguage === 'tr' ? 'Kargoya verilen' : 'Dispatched',
+                        sub:  dc(currentLanguage).kargoya_verilen,
                         onClick: () => setActiveTab('lojistik'),
                       },
                     ].map((stat, i) => {
@@ -612,14 +620,18 @@ export default function DashboardPage(props: Props) {
                 const insights: { icon: string; text: string; color: string; bg: string; borderColor: string }[] = [];
 
                 // Insight 1: low-stock products
-                const lowStock = inventory.filter(i => (Number(i.stock) || 0) > 0 && (Number(i.stock) || 0) <= (Number(i.minStock) || 5));
-                if (lowStock.length > 0) {
-                  const top = lowStock.sort((a, b) => (Number(a.stock) || 0) - (Number(b.stock) || 0))[0];
+                // KANONİK ALAN (utils/pano/finansKpi): eski kod `i.stock` / `i.minStock` okuyordu —
+                // InventoryItem'da o adlar YOK (`stockLevel` / `lowStockThreshold`, types.ts 39/41),
+                // bu yüzden bu içgörü bugüne dek HİÇ çalışmadı. `|| 5` uydurma eşiği ve `?? 0` sahte
+                // adedi de kalktı: eşiği bilinmeyen ürüne kritik/normal kararı verilmez.
+                const stok90 = stokDurumu(inventory);
+                const enDusuk90 = stok90.enDusukKritik;
+                if (enDusuk90) {
                   insights.push({
                     icon: '📦',
                     text: currentLanguage === 'tr'
-                      ? `${top.name} kritik stokta (${top.stock ?? 0} adet kaldı)`
-                      : `${top.name} is low in stock (${top.stock ?? 0} left)`,
+                      ? `${enDusuk90.name} kritik stokta (${stokSeviyesi(enDusuk90)} adet kaldı)`
+                      : `${enDusuk90.name} is low in stock (${stokSeviyesi(enDusuk90)} left)`,
                     color: 'text-amber-700',
                     bg: 'bg-amber-50',
                     borderColor: 'border-amber-200',
@@ -627,14 +639,19 @@ export default function DashboardPage(props: Props) {
                 }
 
                 // Insight 2: unpaid orders total
-                const unpaidOrders = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o));
-                if (unpaidOrders.length > 0) {
-                  const unpaidTotal = unpaidOrders.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+                const odenmemis90 = odenmemisSiparisler(orders);
+                if (odenmemis90.sayi > 0) {
+                  // Tutarı okunamayan sipariş ₺0 SAYILMAZ, SAYILIR — rakam kısmi toplamsa söylenir.
+                  const notu90 = odenmemis90.tutar.bilinmeyen > 0
+                    ? (currentLanguage === 'tr'
+                        ? ` · ${odenmemis90.tutar.bilinmeyen} kaydın tutarı okunamadı (kısmi toplam)`
+                        : ` · ${odenmemis90.tutar.bilinmeyen} record(s) unpriced (partial total)`)
+                    : '';
                   insights.push({
                     icon: '💳',
                     text: currentLanguage === 'tr'
-                      ? `${unpaidOrders.length} siparişte ${fmtKpi(unpaidTotal)} ödeme bekliyor`
-                      : `${unpaidOrders.length} order${unpaidOrders.length > 1 ? 's' : ''} pending payment (${fmtKpi(unpaidTotal)})`,
+                      ? `${odenmemis90.sayi} siparişte ${fmtKpi(odenmemis90.ekran)} ödeme bekliyor${notu90}`
+                      : `${odenmemis90.sayi} order${odenmemis90.sayi > 1 ? 's' : ''} pending payment (${fmtKpi(odenmemis90.ekran)})${notu90}`,
                     color: 'text-red-700',
                     bg: 'bg-red-50',
                     borderColor: 'border-red-200',
@@ -642,49 +659,49 @@ export default function DashboardPage(props: Props) {
                 }
 
                 // Insight 3: overdue leads (no follow-up in 7+ days with Contacted status)
-                const now7 = Date.now();
-                const overdueleads = leads.filter(l => {
-                  if (l.status === 'Closed') return false;
-                  const raw = l.updatedAt ?? l.createdAt;
-                  if (!raw) return true;
-                  const ms = zamanMs(raw);
-                  return ms !== null && now7 - ms > 7 * 86400000;
-                });
-                if (overdueleads.length > 0) {
+                // TARİHSİZ ADAY "7+ gündür güncellenmedi" DEMEZ (utils/pano/finansKpi): eski
+                // `if (!raw) return true` tarihi hiç olmayan adayı KESİN gecikmiş sayıyordu —
+                // aynı sayfadaki Phase 528 şeridi ise onu hiç saymıyordu (iki panel iki cevap).
+                // Tarihsiz kayıtlar ayrı sayılır: içgörü şeridi `slice(0, 4)` ile kırpıldığı için
+                // not, gecikme içgörüsü varken ona ek olarak yazılır; yoksa kendi rozetini alır.
+                const gecikmisAday90 = gecikmisAdaylar(leads, { simdi: Date.now(), gun: 7 });
+                const adayNotu90 = gecikmisAday90.tarihsiz > 0
+                  ? (currentLanguage === 'tr'
+                      ? ` · ${gecikmisAday90.tarihsiz} adayda güncelleme tarihi yok (gecikme hesaplanamıyor)`
+                      : ` · ${gecikmisAday90.tarihsiz} lead(s) without an update date (overdue not computable)`)
+                  : '';
+                if (gecikmisAday90.sayi > 0) {
                   insights.push({
                     icon: '🎯',
                     text: currentLanguage === 'tr'
-                      ? `${overdueleads.length} müşteri adayı 7+ gündür güncellenmedi`
-                      : `${overdueleads.length} lead${overdueleads.length > 1 ? 's' : ''} haven't been updated in 7+ days`,
+                      ? `${gecikmisAday90.sayi} müşteri adayı 7+ gündür güncellenmedi${adayNotu90}`
+                      : `${gecikmisAday90.sayi} lead${gecikmisAday90.sayi > 1 ? 's' : ''} haven't been updated in 7+ days${adayNotu90}`,
                     color: 'text-purple-700',
                     bg: 'bg-purple-50',
                     borderColor: 'border-purple-200',
                   });
+                } else if (gecikmisAday90.tarihsiz > 0) {
+                  insights.push({
+                    icon: '❔',
+                    text: currentLanguage === 'tr'
+                      ? `${gecikmisAday90.tarihsiz} müşteri adayında güncelleme tarihi yok — gecikme hesaplanamıyor`
+                      : `${gecikmisAday90.tarihsiz} lead(s) without an update date — overdue not computable`,
+                    color: 'text-gray-600',
+                    bg: 'bg-gray-50',
+                    borderColor: 'border-gray-200',
+                  });
                 }
 
                 // Insight 4: top revenue month-over-month rise
-                const nowD = new Date();
-                const buAyKey = ayAnahtari(nowD);
-                const gecenAyKey = ayAnahtari(new Date(nowD.getFullYear(), nowD.getMonth() - 1, 1));
-                const thisMonthRev = orders
-                  .filter(o => {
-                    const k = ayAnahtari(o.syncedAt ?? o.createdAt);
-                    return k !== null && k === buAyKey;
-                  })
-                  .reduce((s, o) => s + (o.totalPrice ?? 0), 0);
-                const lastMonthRev = orders
-                  .filter(o => {
-                    const k = ayAnahtari(o.syncedAt ?? o.createdAt);
-                    return k !== null && k === gecenAyKey;
-                  })
-                  .reduce((s, o) => s + (o.totalPrice ?? 0), 0);
-                if (lastMonthRev > 0 && thisMonthRev > lastMonthRev * 1.1) {
-                  const pct = Math.round(((thisMonthRev - lastMonthRev) / lastMonthRev) * 100);
+                // TÜRETME KAPISI (utils/pano/finansKpi): iki ayın birinde tek kayıt bile okunamadıysa
+                // yüzde ÜRETİLMEZ — eski `?? 0` toplamları kısmi veriden kesin bir artış oranı basıyordu.
+                const aylik90 = aylikCiroDegisimi(orders, Date.now());
+                if (aylik90.belirginArtis && aylik90.yuzde !== null) {
                   insights.push({
                     icon: '📈',
                     text: currentLanguage === 'tr'
-                      ? `Bu ay gelir geçen aya göre %${pct} artışta`
-                      : `Revenue is up ${pct}% vs last month`,
+                      ? `Bu ay gelir geçen aya göre %${aylik90.yuzde} artışta`
+                      : `Revenue is up ${aylik90.yuzde}% vs last month`,
                     color: 'text-emerald-700',
                     bg: 'bg-emerald-50',
                     borderColor: 'border-emerald-200',
@@ -696,7 +713,7 @@ export default function DashboardPage(props: Props) {
                 return (
                   <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-gray-100 shadow-sm'}`}>
                     <p className={`text-[10px] font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5 ${darkMode ? 'text-white/65' : 'text-gray-400'}`}>
-                      ✨ {currentLanguage === 'tr' ? 'Akıllı İçgörüler' : 'Smart Insights'}
+                      ✨ {dc(currentLanguage).akilli_icgoruler}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {insights.slice(0, 4).map((ins, i) => (
@@ -721,7 +738,7 @@ export default function DashboardPage(props: Props) {
                     <div className="flex items-center justify-between mb-3">
                       <p className={cn('text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5', darkMode ? 'text-white/65' : 'text-amber-700')}>
                         <Receipt className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Yaklaşan Vergi Tarihleri' : 'Upcoming Tax Deadlines'}
+                        {dc(currentLanguage).yaklasan_vergi_tarihleri}
                       </p>
                       <button
                         onClick={() => setActiveTab('vergi')}
@@ -763,26 +780,22 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 56: MTD Revenue vs. Last Month ── */}
               {orders.length > 0 && (() => {
-                const now = new Date();
-                const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-                const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                const lastMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-                const mtdRev  = orders.filter(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return !!d && d >= thisMonthStart; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const lastRev = orders.filter(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return !!d && d >= lastMonthStart && d <= lastMonthEnd; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const pct = lastRev > 0 ? Math.round(((mtdRev - lastRev) / lastRev) * 100) : null;
-                const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-                const dayProgress = Math.round((now.getDate() / daysInMonth) * 100);
-                // On-pace projection
-                const projectedRev   = dayProgress > 0 ? Math.round(mtdRev * (100 / dayProgress)) : mtdRev;
+                // Tutarı okunamayan sipariş ₺0 SAYILMAZ, SAYILIR; sapma rozeti ve ay sonu
+                // projeksiyonu TÜRETME kapısından geçer (tek kayıt bile tutarsızsa hesaplanmaz,
+                // '—' basılır — eskiden kısmi toplamdan "▲ %25" ve "Projeksiyon ₺X" üretiliyordu).
+                // Ay sınırları / yuvarlamalar birebir korundu: utils/pano/ciroDonem → mtdKarsilastir.
+                // `iptalHaric: false` PARİTE: bu panel iptal siparişleri bugün ciroya sayıyor
+                // (yanındaki Phase 99 Satış Hedefi saymıyor — tutarsızlık açık iş olarak bildirildi).
+                const mtd = mtdKarsilastir(orders, new Date(), { iptalHaric: false });
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <h3 className={cn("text-[10px] font-bold uppercase tracking-wider", darkMode ? "text-white/50" : "text-gray-400")}>
-                          {currentLanguage === 'tr' ? 'Bu Ay Ciro (MTD)' : 'Revenue MTD'}
+                          {dc(currentLanguage).bu_ay_ciro_mtd}
                         </h3>
                         <p className={cn("text-xl font-black mt-0.5", darkMode ? "text-white" : "text-gray-900")}>
-                          {fmtKpi(mtdRev)}
+                          {fmtKpi(mtd.ekran)}
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-1.5">
@@ -795,32 +808,60 @@ export default function DashboardPage(props: Props) {
                             </button>
                           ))}
                         </div>
-                        {pct !== null && (
-                          <span className={cn("text-sm font-black px-2 py-1 rounded-xl", pct >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600")}>
-                            {pct >= 0 ? '▲' : '▼'} {Math.abs(pct)}%
-                          </span>
+                        {/* Rozet TÜRETMEDİR: iki dönemden biri bile tam bilinmiyorsa (ya da geçen ay
+                            cirosu 0 ise) çizilmez. Eskiden yalnız rozet gizleniyor, "Geçen aya göre"
+                            etiketi rakamsız yetim kalıyordu — kullanıcı karşılaştırmanın
+                            hesaplanamadığını değil, ekranın bozulduğunu görüyordu. */}
+                        {mtd.yuzde !== null ? (
+                          <>
+                            <span className={cn("text-sm font-black px-2 py-1 rounded-xl", mtd.yon === 'artis' ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600")}>
+                              {mtd.yon === 'artis' ? '▲' : '▼'} {Math.abs(mtd.yuzde)}%
+                            </span>
+                            <p className={cn("text-[10px]", darkMode ? "text-white/65" : "text-gray-400")}>
+                              {dc(currentLanguage).gecen_aya_gore}
+                            </p>
+                          </>
+                        ) : (
+                          <p className={cn("text-[10px] text-right", darkMode ? "text-white/65" : "text-gray-400")}>
+                            {dc(currentLanguage).gecen_aya_gore_karsilastirma_hesaplanamadi}
+                          </p>
                         )}
-                        <p className={cn("text-[10px]", darkMode ? "text-white/65" : "text-gray-400")}>
-                          {currentLanguage === 'tr' ? 'Geçen aya göre' : 'vs. last month'}
-                        </p>
                       </div>
                     </div>
                     {/* Month progress bar */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-[10px] text-gray-400">
-                        <span>{currentLanguage === 'tr' ? 'Ay ilerlemesi' : 'Month progress'}: {dayProgress}%</span>
-                        <span>{currentLanguage === 'tr' ? 'Projeksiyon' : 'Projected'}: {fmtKpi(projectedRev)}</span>
+                        <span>{dc(currentLanguage).ay_ilerlemesi}: {mtd.ayIlerlemesi}%</span>
+                        <span>{dc(currentLanguage).projeksiyon}: {fmtKpi(mtd.projeksiyon)}</span>
                       </div>
                       <div className={cn("h-2 rounded-full overflow-hidden", darkMode ? "bg-white/10" : "bg-gray-100")}>
                         <div
                           className="h-full rounded-full bg-gradient-to-r from-brand to-orange-400 transition-all duration-700"
-                          style={{ width: `${dayProgress}%` }}
+                          style={{ width: `${mtd.ayIlerlemesi}%` }}
                         />
                       </div>
-                      {lastRev > 0 && (
-                        <div className="flex justify-between text-[10px] text-gray-400">
-                          <span>{currentLanguage === 'tr' ? 'Geçen ay' : 'Last month'}: {fmtKpi(lastRev)}</span>
+                      {/* Geçen ayda HİÇ kayıt yoksa satır çizilmez — '₺0' yazmak "geçen ay ciro
+                          yoktu" iddiasıdır. Kayıt VARSA satır çizilir: hepsi tutarsızsa
+                          `gecenAyEkran` NaN'dır ve fmtKpi '—' basar (eskiden `bilinen > 0`
+                          kapısı bu hâli tümden gizliyordu, kullanıcı hiçbir şey göremiyordu). */}
+                      {(mtd.gecenAy.bilinen > 0 || mtd.gecenAy.bilinmeyen > 0) && (
+                        <div className="flex justify-between gap-2 text-[10px] text-gray-400">
+                          <span>{dc(currentLanguage).gecen_ay}: {fmtKpi(mtd.gecenAyEkran)}</span>
+                          {/* Geçen ayın kısmi toplamı da açıkça söylenir — bu sayacı modül zaten
+                              döndürüyordu ama sayfa hiç basmıyordu (yarım düzeltme). */}
+                          {mtd.gecenAy.bilinmeyen > 0 && (
+                            <span className="text-amber-600 text-right">
+                              {mtd.gecenAy.bilinmeyen} {dc(currentLanguage).kaydin_tutari_okunamadi_kismi_toplam}
+                            </span>
+                          )}
                         </div>
+                      )}
+                      {/* Kısmi toplam açıkça söylenir — sessizce eksik rakam gösterme (CLAUDE.md).
+                          Bu ay / geçen ay AYRIK dönemler: iki not aynı kaydı iki kez saymaz. */}
+                      {mtd.buAy.bilinmeyen > 0 && (
+                        <p className="text-[10px] text-amber-600">
+                          {mtd.buAy.bilinmeyen} {dc(currentLanguage).kaydin_tutari_okunamadi_kismi_toplam}
+                        </p>
                       )}
                     </div>
                   </div>
@@ -831,61 +872,74 @@ export default function DashboardPage(props: Props) {
               {(() => {
                 const now = new Date();
                 const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-                const mtdRev99 = orders.filter(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return !!d && d >= thisMonthStart && o.status !== 'Cancelled'; }).reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const pct99 = monthlyTarget > 0 ? Math.min(Math.round((mtdRev99 / monthlyTarget) * 100), 200) : 0;
-                const barColor99 = pct99 >= 100 ? 'bg-emerald-400' : pct99 >= 70 ? 'bg-brand' : pct99 >= 40 ? 'bg-amber-400' : 'bg-red-400';
+                const ay99 = donemCirosu(orders, thisMonthStart);
+                const hedef99 = hedefGerceklesme(ay99.ciro, monthlyTarget);
+                const pct99 = hedef99.oranYuzde;   // null = hedef yok YA DA ciroda tutarsız kayıt var → '—', çubuk çizilmez
+                const barColor99 = pct99 === null ? 'bg-gray-200' : pct99 >= 100 ? 'bg-emerald-400' : pct99 >= 70 ? 'bg-brand' : pct99 >= 40 ? 'bg-amber-400' : 'bg-red-400';
+                // FORM KAPISI: `Number('') === 0` / `Number('abc') === NaN` tuzağı — geçersiz hedef DB'ye yazılmaz.
+                // Düz fonksiyon (bileşen DEĞİL): render içinde bileşen tanımlanırsa her render'da yeniden bağlanır.
+                const hedefKaydet99 = () => {
+                  const girdi = hedefGirdisi(targetDraft);
+                  if (girdi.durum === 'gecersiz') {
+                    toast(dc(currentLanguage).hedefi_yalniz_rakamla_yazin_or_2500000_sifirdan_, 'error');
+                    return;
+                  }
+                  saveMonthlyTarget(bugunAnahtari().slice(0, 7), girdi.durum === 'temizle' ? 0 : girdi.deger);
+                  setIsEditingTarget(false);
+                };
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <h3 className={cn("text-[10px] font-bold uppercase tracking-wider", darkMode ? "text-white/50" : "text-gray-400")}>
-                          {currentLanguage === 'tr' ? 'Bu Ay Satış Hedefi' : 'Monthly Sales Target'}
+                          {dc(currentLanguage).bu_ay_satis_hedefi}
                         </h3>
                         {isEditingTarget ? (
                           <div className="flex items-center gap-2 mt-1">
                             <input
                               autoFocus
-                              type="number"
+                              // `type="number"` DEĞİL: tarayıcı çözemediği metni '' yapar, '' ise "hedefi sil"dir
+                              // (bkz. hedefGirdisi). Ham metin kapıya ulaşsın diye düz metin + sayısal klavye.
+                              type="text"
+                              inputMode="numeric"
                               value={targetDraft}
                               onChange={e => setTargetDraft(e.target.value)}
                               onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                  const v = Number(targetDraft);
-                                  const mk = bugunAnahtari().slice(0, 7);
-                                  saveMonthlyTarget(mk, v);
-                                  setIsEditingTarget(false);
-                                }
+                                if (e.key === 'Enter') hedefKaydet99();
                                 if (e.key === 'Escape') setIsEditingTarget(false);
                               }}
                               className="text-sm font-bold bg-gray-100 rounded-lg px-2 py-1 outline-none w-36"
                               placeholder="0"
                             />
-                            <button onClick={() => { const v = Number(targetDraft); const mk = bugunAnahtari().slice(0, 7); saveMonthlyTarget(mk, v); setIsEditingTarget(false); }}
+                            <button onClick={hedefKaydet99}
                               className="text-[10px] bg-brand text-white px-2 py-1 rounded-lg font-bold">{oc(currentLanguage).kaydet}</button>
                             <button onClick={() => setIsEditingTarget(false)} className="text-[10px] text-gray-400 hover:text-gray-600">{oc(currentLanguage).iptal}</button>
                           </div>
                         ) : (
-                          <button onClick={() => { setTargetDraft(String(monthlyTarget)); setIsEditingTarget(true); }}
+                          <button onClick={() => { setTargetDraft(hedefOnDoldur(hedef99.hedef)); setIsEditingTarget(true); }}
                             className="flex items-center gap-1 mt-0.5 group">
                             <p className={cn("text-xl font-black", darkMode ? "text-white" : "text-gray-900")}>
-                              {monthlyTarget > 0 ? fmtKpi(monthlyTarget) : (currentLanguage === 'tr' ? 'Hedef belirle…' : 'Set target…')}
+                              {hedef99.hedef !== null ? fmtKpi(hedef99.hedef) : (dc(currentLanguage).hedef_belirle)}
                             </p>
                             <span className="text-gray-300 group-hover:text-brand transition-colors text-[10px]">✎</span>
                           </button>
                         )}
                       </div>
                       <div className="text-right">
-                        <p className={`text-2xl font-black ${pct99 >= 100 ? 'text-emerald-600' : pct99 >= 70 ? 'text-brand' : pct99 >= 40 ? 'text-amber-600' : 'text-red-500'}`}>{pct99}%</p>
-                        <p className={cn("text-[10px]", darkMode ? "text-white/65" : "text-gray-400")}>{fmtKpi(mtdRev99)} {currentLanguage === 'tr' ? 'gerçekleşti' : 'achieved'}</p>
+                        <p className={`text-2xl font-black ${pct99 === null ? 'text-gray-400' : pct99 >= 100 ? 'text-emerald-600' : pct99 >= 70 ? 'text-brand' : pct99 >= 40 ? 'text-amber-600' : 'text-red-500'}`}>{pct99 === null ? '—' : `${pct99}%`}</p>
+                        <p className={cn("text-[10px]", darkMode ? "text-white/65" : "text-gray-400")}>
+                          {fmtKpi(hedef99.ekran)} {dc(currentLanguage).gerceklesti}
+                          {hedef99.bilinmeyen > 0 && (currentLanguage === 'tr' ? ` · ${hedef99.bilinmeyen} kayıt tutarsız` : ` · ${hedef99.bilinmeyen} record(s) unpriced`)}
+                        </p>
                       </div>
                     </div>
                     <div className={cn("h-2.5 rounded-full overflow-hidden", darkMode ? "bg-white/10" : "bg-gray-100")}>
-                      <div className={`h-full rounded-full transition-all duration-700 ${barColor99}`} style={{ width: `${Math.min(pct99, 100)}%` }} />
+                      {pct99 !== null && <div className={`h-full rounded-full transition-all duration-700 ${barColor99}`} style={{ width: `${Math.min(pct99, 100)}%` }} />}
                     </div>
                     <div className="flex justify-between mt-1.5">
                       <span className={cn("text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>0</span>
-                      {pct99 >= 100 && <span className="text-[10px] font-bold text-emerald-600">🎯 {currentLanguage === 'tr' ? 'Hedefe ulaşıldı!' : 'Target reached!'}</span>}
-                      <span className={cn("text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>{monthlyTarget > 0 ? fmtKpi(monthlyTarget) : '—'}</span>
+                      {pct99 !== null && pct99 >= 100 && <span className="text-[10px] font-bold text-emerald-600">🎯 {dc(currentLanguage).hedefe_ulasildi}</span>}
+                      <span className={cn("text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>{hedef99.hedef !== null ? fmtKpi(hedef99.hedef) : '—'}</span>
                     </div>
                   </div>
                 );
@@ -894,61 +948,52 @@ export default function DashboardPage(props: Props) {
               {/* ── Phase 174: Sales vs Budget – Last 3 Months ── */}
               {monthlyTarget > 0 && orders.length > 0 && (() => {
                 const now174 = new Date();
-                const months174 = Array.from({ length: 3 }, (_, i) => {
+                const months174 = butceKarsilastir(Array.from({ length: 3 }, (_, i) => {
                   const d = new Date(now174.getFullYear(), now174.getMonth() - (2 - i), 1);
-                  const label = tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en');
-                  const ayKey174 = ayAnahtari(d);
-                  const mOrders = orders.filter(o => {
-                    if (o.status === 'Cancelled') return false;
-                    const k = ayAnahtari(o.createdAt);
-                    return k !== null && k === ayKey174;
-                  });
-                  const actual = mOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-                  const pct = monthlyTarget > 0 ? Math.round((actual / monthlyTarget) * 100) : 0;
-                  return { label, actual, pct };
-                });
+                  return {
+                    etiket: tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en'),
+                    // PARİTE: Phase 174 yalnız `createdAt` okur (ayCirosu varsayılanı tarihYedegi=false).
+                    ciro: ayCirosu(orders, ayAnahtari(d) ?? '').ciro,
+                    hedef: monthlyTarget,   // sayfadaki mevcut davranış: üç aya da İÇİNDE BULUNULAN AYIN hedefi (bkz. açık sorular)
+                  };
+                }));
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-3", darkMode ? "text-white/50" : "text-gray-400")}>
-                      {currentLanguage === 'tr' ? 'Satış / Bütçe (3 Ay)' : 'Sales vs Budget (3M)'}
+                      {dc(currentLanguage).satis_butce_3_ay}
                     </h3>
                     <div className="flex items-end gap-4 h-20">
                       {months174.map((m, i) => {
-                        const h = Math.min(m.pct, 120);
-                        const barCls = m.pct >= 100 ? 'bg-emerald-400' : m.pct >= 70 ? 'bg-amber-400' : 'bg-red-400';
+                        const pct = m.oranYuzde;
+                        const h = pct === null ? null : Math.min(pct, 120);
+                        const barCls = pct === null ? 'bg-gray-200' : pct >= 100 ? 'bg-emerald-400' : pct >= 70 ? 'bg-amber-400' : 'bg-red-400';
                         return (
                           <div key={i} className="flex-1 flex flex-col items-center gap-1">
                             <div className="w-full flex flex-col justify-end relative" style={{ height: '60px' }}>
-                              <div className={`w-full rounded-t-lg transition-all ${barCls}`} style={{ height: `${Math.max(h * 0.5, 4)}%` }} />
+                              {h !== null && <div className={`w-full rounded-t-lg transition-all ${barCls}`} style={{ height: `${Math.max(h * 0.5, 4)}%` }} />}
                               <div className="absolute bottom-0 w-full border-t-2 border-dashed border-gray-300" style={{ bottom: '50%' }} />
                             </div>
-                            <span className="text-[9px] text-gray-400">{m.label}</span>
-                            <span className={`text-[9px] font-bold ${m.pct >= 100 ? 'text-emerald-600' : m.pct >= 70 ? 'text-amber-600' : 'text-red-500'}`}>%{m.pct}</span>
+                            <span className="text-[9px] text-gray-400">{m.etiket}</span>
+                            <span className={`text-[9px] font-bold ${pct === null ? 'text-gray-400' : pct >= 100 ? 'text-emerald-600' : pct >= 70 ? 'text-amber-600' : 'text-red-500'}`}
+                              title={m.bilinmeyen > 0 ? (currentLanguage === 'tr' ? `${m.bilinmeyen} kaydın tutarı okunamadı` : `${m.bilinmeyen} record(s) unpriced`) : undefined}>
+                              {pct === null ? '—' : `%${pct}`}</span>
                           </div>
                         );
                       })}
                     </div>
-                    <p className="text-[10px] text-gray-400 mt-1 text-center">{currentLanguage==='tr'?'Kesikli çizgi = hedef':'Dashed = target'}</p>
+                    <p className="text-[10px] text-gray-400 mt-1 text-center">{dc(currentLanguage).kesikli_cizgi_hedef}</p>
                   </div>
                 );
               })()}
 
               {/* ── Phase 42: Financial KPI mini-strip ── */}
               {(() => {
-                const aov = filteredOrders.length > 0
-                  ? filteredOrders.reduce((s, o) => s + (o.totalPrice || 0), 0) / filteredOrders.length
-                  : 0;
-                const deliveryRate = orders.length > 0
-                  ? Math.round((orders.filter(o => o.status === 'Delivered').length / orders.length) * 100)
-                  : 0;
-                const leadConvRate = leads.length > 0
-                  ? Math.round((leads.filter(l => l.status === 'Closed' || (l.status as string) === 'Closed Won').length / leads.length) * 100)
-                  : 0;
-                const repeatBuyers = (() => {
-                  const custMap: Record<string, number> = {};
-                  for (const o of orders) { custMap[o.customerName] = (custMap[o.customerName] ?? 0) + 1; }
-                  return Object.values(custMap).filter(c => c > 1).length;
-                })();
+                // SAHTE KESİNLİK YOK (utils/pano/finansKpi): AOV'de tutarı okunamayan sipariş paydaya
+                // girmez (eski hâli her tutarsız kaydı ₺0'lık sipariş sanıp ortalamayı aşağı çekiyordu);
+                // liste boşken oran 0 DEĞİL null ('—'); adı olmayan siparişler "undefined" kovasında
+                // birikip sahte "tekrar eden alıcı" üretmez.
+                const kpi42 = finansKpilari({ filtreliSiparisler: filteredOrders, siparisler: orders, adaylar: leads });
+                const aov = kpi42.aov, teslimat = kpi42.teslimat, donusum = kpi42.donusum, tekrar = kpi42.tekrarAlici;
                 return (
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {/* ── AOV card — with currency toggle ── */}
@@ -970,32 +1015,48 @@ export default function DashboardPage(props: Props) {
                         </div>
                       </div>
                       <p className="text-xl font-bold text-emerald-600">
-                        {fmtKpi(aov)}
+                        {fmtKpi(aov.deger)}
                       </p>
-                      <p className="text-[10px] font-semibold text-gray-500 mt-1">{currentLanguage === 'tr' ? 'Ort. Sipariş Değeri' : 'Avg. Order Value'}</p>
+                      {aov.bilinmeyen > 0 && (
+                        <p className="text-[10px] text-amber-600 mt-0.5">
+                          {aov.bilinmeyen} {dc(currentLanguage).kaydin_tutari_okunamadi_ortalamaya_girmedi}
+                        </p>
+                      )}
+                      <p className="text-[10px] font-semibold text-gray-500 mt-1">{dc(currentLanguage).ort_siparis_degeri}</p>
                       <p className="text-[10px] text-gray-400">AOV</p>
                     </div>
 
                     {/* ── Remaining plain KPI cards ── */}
                     {[
                       {
-                        label: currentLanguage === 'tr' ? 'Teslimat Oranı' : 'Delivery Rate',
-                        value: `${deliveryRate}%`,
-                        sub: `${orders.filter(o => o.status === 'Delivered').length} / ${orders.length}`,
-                        icon: CheckCircle2, color: deliveryRate > 80 ? 'text-emerald-600' : 'text-amber-600', bg: deliveryRate > 80 ? 'bg-emerald-50' : 'bg-amber-50',
+                        label: dc(currentLanguage).teslimat_orani,
+                        value: teslimat.oran === null ? '—' : `${teslimat.oran}%`,
+                        // Durumu okunamayan sipariş paydaya GİRMEZ — payda `orders.length`ten azsa söylenir.
+                        sub: teslimat.durumsuz > 0
+                          ? `${teslimat.pay} / ${teslimat.payda} · ${teslimat.durumsuz} ${dc(currentLanguage).durumsuz}`
+                          : `${teslimat.pay} / ${teslimat.payda}`,
+                        icon: CheckCircle2,
+                        color: teslimat.oran === null ? 'text-gray-400' : teslimat.oran > 80 ? 'text-emerald-600' : 'text-amber-600',
+                        bg: teslimat.oran === null ? 'bg-gray-50' : teslimat.oran > 80 ? 'bg-emerald-50' : 'bg-amber-50',
                         onClick: () => setActiveTab('orders'),
                       },
                       {
-                        label: currentLanguage === 'tr' ? 'Müşteri Dönüşümü' : 'Lead Conversion',
-                        value: `${leadConvRate}%`,
-                        sub: `${leads.filter(l => l.status === 'Closed' || (l.status as string) === 'Closed Won').length} ${currentLanguage === 'tr' ? 'kazanıldı' : 'won'}`,
-                        icon: TrendingUp, color: leadConvRate > 20 ? 'text-blue-600' : 'text-gray-400', bg: leadConvRate > 20 ? 'bg-blue-50' : 'bg-gray-50',
+                        label: dc(currentLanguage).musteri_donusumu,
+                        value: donusum.oran === null ? '—' : `${donusum.oran}%`,
+                        sub: donusum.durumsuz > 0
+                          ? `${donusum.kazanilan} ${dc(currentLanguage).kazanildi} · ${donusum.durumsuz} ${dc(currentLanguage).durumsuz}`
+                          : `${donusum.kazanilan} ${dc(currentLanguage).kazanildi}`,
+                        icon: TrendingUp,
+                        color: donusum.oran === null ? 'text-gray-400' : donusum.oran > 20 ? 'text-blue-600' : 'text-gray-400',
+                        bg: donusum.oran === null ? 'bg-gray-50' : donusum.oran > 20 ? 'bg-blue-50' : 'bg-gray-50',
                         onClick: () => setActiveTab('crm'),
                       },
                       {
-                        label: currentLanguage === 'tr' ? 'Tekrar Eden Alıcı' : 'Repeat Buyers',
-                        value: repeatBuyers,
-                        sub: currentLanguage === 'tr' ? 'birden fazla sipariş' : 'multiple orders',
+                        label: dc(currentLanguage).tekrar_eden_alici,
+                        value: tekrar.tekrarEden,
+                        sub: tekrar.isimsiz > 0
+                          ? (currentLanguage === 'tr' ? `${tekrar.isimsiz} siparişte müşteri adı yok` : `${tekrar.isimsiz} order(s) without customer name`)
+                          : (dc(currentLanguage).birden_fazla_siparis),
                         icon: Users, color: 'text-purple-600', bg: 'bg-purple-50',
                         onClick: () => setActiveTab('crm'),
                       },
@@ -1019,23 +1080,52 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 124: KPI Alert Thresholds ── */}
               {(() => {
-                const alerts125: Array<{ level: 'warn' | 'danger'; icon: string; message: string }> = [];
-                // Low stock items
-                const lowStockCount = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? i.minStock ?? 5)).length;
-                if (lowStockCount > 0) alerts125.push({ level: 'warn', icon: '📦', message: currentLanguage === 'tr' ? `${lowStockCount} ürün kritik stok seviyesinde` : `${lowStockCount} products at critical stock level` });
-                // Overdue payments
-                const now125 = Date.now();
-                const overdueCount = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o) && (() => {
-                  const ms = zamanMs(o.createdAt);
-                  return ms !== null && (now125 - ms) > 30 * 86400000;
-                })()).length;
-                if (overdueCount > 0) alerts125.push({ level: 'danger', icon: '💳', message: currentLanguage === 'tr' ? `${overdueCount} siparişin ödemesi 30+ gün gecikmiş` : `${overdueCount} orders have payment overdue 30+ days` });
-                // Pending price overrides
-                const pendingOverrides = priceOverrides.filter(p => p.status === 'pending').length;
-                if (pendingOverrides > 0) alerts125.push({ level: 'warn', icon: '🏷️', message: currentLanguage === 'tr' ? `${pendingOverrides} fiyat onay talebi bekliyor` : `${pendingOverrides} price override requests pending` });
-                // Pending leave requests
-                const pendingLeaves = leaveRequests.filter(l => l.status === 'pending').length;
-                if (pendingLeaves > 0) alerts125.push({ level: 'warn', icon: '📅', message: currentLanguage === 'tr' ? `${pendingLeaves} izin talebi onay bekliyor` : `${pendingLeaves} leave requests awaiting approval` });
+                // SAHTE ALARM YOK (utils/pano/finansKpi): değeri BİLİNMEYEN KPI için uyarı üretilmez
+                // ("0 < eşik" diye alarm çalmaz), "veri yok" diye listelenir. Stok seviyesi ya da eşiği
+                // okunamayan ürün "kritik stok" SAYILMAZ (eski `(i.stockLevel ?? 0) <= (… ?? 5)`).
+                const tr124 = currentLanguage === 'tr';
+                const stok124 = stokDurumu(inventory);
+                const gecikme124 = gecikmisOdemeler(orders, { simdi: Date.now(), gun: 30 });
+                const siniflanamayan124 = stok124.seviyesiBilinmeyen + stok124.esigiBilinmeyen;
+                const esik124 = esikUyarilari(
+                  {
+                    // Hiçbir ürün sınıflandırılamadıysa sayı 0 DEĞİL, BİLİNMİYOR.
+                    kritikStok: inventory.length > 0 && siniflanamayan124 === inventory.length ? null : stok124.esikAltinda.length,
+                    gecikmisOdeme: gecikme124.sayi,
+                    fiyatOnayi: priceOverrides.filter(p => p.status === 'pending').length,
+                    izinTalebi: leaveRequests.filter(l => l.status === 'pending').length,
+                  },
+                  [
+                    { id: 'kritikStok',    esik: 0, yon: 'ustunde', seviye: 'uyari'  },
+                    { id: 'gecikmisOdeme', esik: 0, yon: 'ustunde', seviye: 'kritik' },
+                    { id: 'fiyatOnayi',    esik: 0, yon: 'ustunde', seviye: 'uyari'  },
+                    { id: 'izinTalebi',    esik: 0, yon: 'ustunde', seviye: 'uyari'  },
+                  ],
+                );
+                const metin124: Record<string, { icon: string; mesaj: (n: number) => string; etiket: string }> = {
+                  kritikStok:    { icon: '📦', etiket: dc(tr124).kritik_stok,     mesaj: n => tr124 ? `${n} ürün kritik stok seviyesinde` : `${n} products at critical stock level` },
+                  gecikmisOdeme: { icon: '💳', etiket: dc(tr124).gecikmis_odeme, mesaj: n => tr124 ? `${n} siparişin ödemesi 30+ gün gecikmiş` : `${n} orders have payment overdue 30+ days` },
+                  fiyatOnayi:    { icon: '🏷️', etiket: dc(tr124).fiyat_onayi,    mesaj: n => tr124 ? `${n} fiyat onay talebi bekliyor` : `${n} price override requests pending` },
+                  izinTalebi:    { icon: '📅', etiket: dc(tr124).izin_talebi,      mesaj: n => tr124 ? `${n} izin talebi onay bekliyor` : `${n} leave requests awaiting approval` },
+                };
+                const alerts125: Array<{ level: 'warn' | 'danger'; icon: string; message: string }> =
+                  esik124.uyarilar.map(u => ({
+                    level: (u.seviye === 'kritik' ? 'danger' : 'warn') as 'warn' | 'danger',
+                    icon: metin124[u.id].icon,
+                    message: metin124[u.id].mesaj(u.deger),
+                  }));
+                if (esik124.veriYok.length > 0) alerts125.push({ level: 'warn', icon: '❔',
+                  message: tr124
+                    ? `Veri yok: ${esik124.veriYok.map(id => metin124[id].etiket).join(', ')} — uyarı üretilemedi`
+                    : `No data: ${esik124.veriYok.map(id => metin124[id].etiket).join(', ')} — no alert computed` });
+                if (siniflanamayan124 > 0 && !esik124.veriYok.includes('kritikStok')) alerts125.push({ level: 'warn', icon: '❔',
+                  message: tr124
+                    ? `${siniflanamayan124} ürünün stok/eşik bilgisi okunamadı — kritik stok sayısı kısmi`
+                    : `${siniflanamayan124} product(s) with unreadable stock/threshold — count is partial` });
+                if (gecikme124.tarihsiz > 0) alerts125.push({ level: 'warn', icon: '❔',
+                  message: tr124
+                    ? `${gecikme124.tarihsiz} ödenmemiş siparişin tarihi okunamadı — gecikme hesaplanamıyor`
+                    : `${gecikme124.tarihsiz} unpaid order(s) with unreadable date — overdue not computable` });
                 if (alerts125.length === 0) return null;
                 return (
                   <div className="space-y-2">
@@ -1049,7 +1139,7 @@ export default function DashboardPage(props: Props) {
                             onClick={() => setShowOverduePanel(true)}
                             className="text-[10px] font-bold underline underline-offset-2 opacity-80 hover:opacity-100 shrink-0"
                           >
-                            {currentLanguage === 'tr' ? 'Tümünü Gör' : 'View All'}
+                            {dc(currentLanguage).tumunu_gor}
                           </button>
                         )}
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.level === 'danger' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
@@ -1065,32 +1155,34 @@ export default function DashboardPage(props: Props) {
               {orders.length > 0 && (() => {
                 const today130 = new Date();
                 const todayStr = bugunAnahtari(today130);
-                const todayOrders = orders.filter(o =>
-                  gunAnahtari(o.createdAt ?? o.syncedAt) === todayStr && o.status !== 'Cancelled'
-                );
-                const todayRevenue = todayOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const todayPaid = todayOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const totalUnpaid = orders.filter(o => !o.paid && o.status !== 'Cancelled' && odemeTakipli(o)).reduce((s, o) => s + (o.totalPrice || 0), 0);
+                // SAHTE ₺0 YOK (utils/pano/finansKpi): tutarı okunamayan sipariş toplama GİRMEZ, SAYILIR;
+                // hiç bilinen tutar yoksa kart '—' basar (eski `(o.totalPrice || 0)` kısmi toplamı kesin
+                // rakam gibi gösteriyordu). `nakitPozisyonu` günü YEREL 'YYYY-MM-DD' anahtarıyla seçer.
+                const nakit130 = nakitPozisyonu(orders, { gun: todayStr });
+                // BENZERSİZ sayaç: iki sayacı TOPLAMA — bugünkü ciro ile açık alacak kümeleri
+                // kesişir (bugün açılan sipariş çoğu zaman ödenmemiştir) ve tek kayıt "2 kayıt"
+                // diye raporlanıyordu (Faz 3 5/n hakem bulgusu).
+                const tutarsiz130 = nakit130.tutarsizKayit;
                 return (
                   <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-2">
                         <span className="text-base">💵</span>
                         <div>
-                          <h3 className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? 'Günlük Nakit Pozisyonu' : 'Daily Cash Position'}</h3>
+                          <h3 className="text-sm font-bold text-gray-800">{dc(currentLanguage).gunluk_nakit_pozisyonu}</h3>
                           <p className="text-[10px] text-gray-400">{tarihYaz(today130, { weekday: 'long', day: 'numeric', month: 'long' }, currentLanguage === 'tr' ? 'tr' : 'en')}</p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-2xl font-black text-emerald-600">{fmtKpi(todayPaid)}</p>
-                        <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'bugün tahsil' : 'collected today'}</p>
+                        <p className="text-2xl font-black text-emerald-600">{fmtKpi(nakit130.ekran.bugunTahsil)}</p>
+                        <p className="text-[10px] text-gray-400">{dc(currentLanguage).bugun_tahsil}</p>
                       </div>
                     </div>
                     <div className="grid grid-cols-3 gap-3">
                       {[
-                        { label: currentLanguage === 'tr' ? 'Bugün Ciro' : "Today's Revenue", val: todayRevenue, color: 'text-gray-800' },
-                        { label: currentLanguage === 'tr' ? 'Bugün Tahsil' : 'Collected Today', val: todayPaid, color: 'text-emerald-600' },
-                        { label: oc(currentLanguage).toplam_alacak, val: totalUnpaid, color: 'text-amber-600' },
+                        { label: dc(currentLanguage).bugun_ciro, val: nakit130.ekran.bugunCiro, color: 'text-gray-800' },
+                        { label: dc(currentLanguage).bugun_tahsil_2, val: nakit130.ekran.bugunTahsil, color: 'text-emerald-600' },
+                        { label: oc(currentLanguage).toplam_alacak, val: nakit130.ekran.toplamAlacak, color: 'text-amber-600' },
                       ].map(c => (
                         <div key={c.label} className="text-center bg-gray-50 rounded-xl p-3">
                           <p className={`text-base font-bold ${c.color}`}>{fmtKpi(c.val)}</p>
@@ -1098,6 +1190,11 @@ export default function DashboardPage(props: Props) {
                         </div>
                       ))}
                     </div>
+                    {tutarsiz130 > 0 && (
+                      <p className="text-[10px] text-amber-600 mt-2 text-center">
+                        {tutarsiz130} {dc(currentLanguage).kaydin_tutari_okunamadi_kismi_toplam}
+                      </p>
+                    )}
                   </div>
                 );
               })()}
@@ -1108,24 +1205,13 @@ export default function DashboardPage(props: Props) {
                 // Last 30 days revenue vs prior 30 days
                 const d30ago = new Date(now159); d30ago.setDate(d30ago.getDate() - 30);
                 const d60ago = new Date(now159); d60ago.setDate(d60ago.getDate() - 60);
-                const last30 = orders.filter(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return !!d && d >= d30ago && o.status !== 'Cancelled'; });
-                const prev30 = orders.filter(o => { const d = zamanDate(o.createdAt ?? o.syncedAt); return !!d && d >= d60ago && d < d30ago && o.status !== 'Cancelled'; });
-                const rev30 = last30.reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const revPrev = prev30.reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const dailyRev = rev30 / 30;
-                const dailyPrev = revPrev / 30;
-                const velocityChange = dailyPrev > 0 ? Math.round(((dailyRev - dailyPrev) / dailyPrev) * 100) : null;
+                const son30 = donemCirosu(orders, d30ago);
+                const onceki30 = donemCirosu(orders, d60ago, d30ago);   // [d60ago, d30ago) — yarı açık, eski koşulun aynısı
+                const hiz30 = satisHizi(son30.ciro, 30);                // bölen TAKVİM günü (panel başlığı 'working day' diyor — bkz. açık sorular)
+                const velocityChange = hizDegisimi(hiz30.gunluk, satisHizi(onceki30.ciro, 30).gunluk);
                 // Weekly sparkline (last 8 weeks)
-                const weeks: number[] = Array(8).fill(0);
-                for (const o of orders) {
-                  if (o.status === 'Cancelled') continue;
-                  const d = zamanDate(o.createdAt ?? o.syncedAt);
-                  if (!d) continue;
-                  const daysAgo = Math.floor((now159.getTime() - d.getTime()) / 86400000);
-                  const weekIdx = 7 - Math.floor(daysAgo / 7);
-                  if (weekIdx >= 0 && weekIdx < 8) weeks[weekIdx] += o.totalPrice || 0;
-                }
-                const maxWeek = Math.max(...weeks, 1);
+                const weeks = haftalikCiro(orders, now159);
+                const maxWeek = enBuyukHafta(weeks);   // null = hiç bilinen değer yok → çubuk çizilmez ('Math.max(..., 1)' sahte ölçeği kalktı)
                 // Tek kaynak (2026-09-05): kur cevirisi + bicim tlYaz'da (kur yoksa '—').
                 // Eskiden calisma zamani yereliyle (`toLocaleString(undefined)`) basiyordu;
                 // artik birime gore yerel gruplama (TRY -> ₺1.234, USD -> $1,234).
@@ -1134,25 +1220,32 @@ export default function DashboardPage(props: Props) {
                   <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
                     <div className="flex items-center justify-between mb-3">
                       <div>
-                        <h3 className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? '⚡ Satış Hızı' : '⚡ Sales Velocity'}</h3>
-                        <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'Günlük ortalama ciro (son 30 gün)' : 'Avg. daily revenue (last 30 days)'}</p>
+                        <h3 className="text-sm font-bold text-gray-800">{dc(currentLanguage).satis_hizi}</h3>
+                        <p className="text-[10px] text-gray-400">{dc(currentLanguage).gunluk_ortalama_ciro_son_30_gun}</p>
                       </div>
                       {velocityChange !== null && (
                         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${velocityChange >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
-                          {velocityChange >= 0 ? '↑' : '↓'}{Math.abs(velocityChange)}% vs {currentLanguage==='tr'?'önceki 30g':'prev 30d'}
+                          {velocityChange >= 0 ? '↑' : '↓'}{Math.abs(velocityChange)}% vs {dc(currentLanguage).onceki_30g}
                         </span>
                       )}
                     </div>
-                    <p className="text-3xl font-black text-brand mb-3">{f159(dailyRev)}<span className="text-sm font-normal text-gray-400">/{currentLanguage==='tr'?'gün':'day'}</span></p>
+                    <p className="text-3xl font-black text-brand mb-3">{hiz30.gunluk === null ? '—' : f159(hiz30.gunluk)}<span className="text-sm font-normal text-gray-400">/{dc(currentLanguage).gun}</span></p>
+                    {hiz30.bilinmeyen > 0 && (
+                      <p className="text-[10px] text-amber-600 -mt-2 mb-2">
+                        {currentLanguage === 'tr' ? `${hiz30.bilinmeyen} siparişin tutarı okunamadı — günlük hız hesaplanamıyor` : `${hiz30.bilinmeyen} order(s) unpriced — daily velocity unavailable`}
+                      </p>
+                    )}
                     <div className="flex items-end gap-0.5 h-10">
                       {weeks.map((w, i) => (
                         <div key={i} className="flex-1 flex flex-col justify-end">
-                          <div className={`w-full rounded-sm transition-all ${i === 7 ? 'bg-brand' : 'bg-brand/25'}`}
-                            style={{ height: `${Math.max(Math.round((w / maxWeek) * 100), 4)}%` }} />
+                          {w.deger !== null && maxWeek !== null && (
+                            <div className={`w-full rounded-sm transition-all ${i === 7 ? 'bg-brand' : 'bg-brand/25'}`}
+                              style={{ height: `${Math.max(Math.round((w.deger / maxWeek) * 100), 4)}%` }} />
+                          )}
                         </div>
                       ))}
                     </div>
-                    <p className="text-[9px] text-gray-400 mt-1 text-right">{currentLanguage==='tr'?'Son 8 hafta':'Last 8 weeks'}</p>
+                    <p className="text-[9px] text-gray-400 mt-1 text-right">{dc(currentLanguage).son_8_hafta}</p>
                   </div>
                 );
               })()}
@@ -1167,13 +1260,12 @@ export default function DashboardPage(props: Props) {
                   const raw = (s as unknown as Record<string, unknown>).updatedAt ?? (s as unknown as Record<string, unknown>).date;
                   return gunAnahtari(raw) === todayStr539;
                 }).length;
-                const recent539 = [...shipments]
-                  .sort((a, b) => {
-                    // Tarihi bilinmeyen kayıt 0 (epoch) ile en sona düşer — sıralama yedeği, "şimdi" değil.
-                    const getT = (s: Shipment) => zamanMs((s as unknown as Record<string, unknown>).createdAt) ?? 0;
-                    return getT(b) - getT(a);
-                  })
-                  .slice(0, 5);
+                // Tarihi bilinmeyen kayıt epoch (0) DEĞİL: `sayiSirala` onu HER İKİ yönde sona koyar
+                // (eski `?? 0` yalnız azalan yönde doğruydu; yön çevrilse sessizce başa geçerdi).
+                // `Shipment` tipinde `createdAt` alanı YOK (DB kaydında var, sayfa onu zaten
+                // cast'leyerek okuyordu) — `as any` yerine GERÇEK yüzeyi ekleyen bir kesişimle
+                // geçiliyor, böylece listenin `id`/`status`/`customerName` alanları tipli kalıyor.
+                const recent539 = sonSevkiyatlar<Shipment & { createdAt?: unknown }>(shipments, 5);
                 const statusColor539 = (st: string) =>
                   st === 'Delivered' ? 'text-emerald-600 bg-emerald-50' :
                   st === 'In Transit' || st === 'Shipped' ? 'text-blue-600 bg-blue-50' :
@@ -1184,15 +1276,15 @@ export default function DashboardPage(props: Props) {
                       <div className="flex items-center gap-2">
                         <span className="text-base">🚚</span>
                         <div>
-                          <h3 className="text-sm font-bold text-gray-800">{currentLanguage === 'tr' ? 'Sevkiyat Durumu' : 'Shipments Overview'}</h3>
-                          <p className="text-[10px] text-gray-400">{shipments.length} {currentLanguage === 'tr' ? 'toplam sevkiyat' : 'total shipments'}</p>
+                          <h3 className="text-sm font-bold text-gray-800">{dc(currentLanguage).sevkiyat_durumu}</h3>
+                          <p className="text-[10px] text-gray-400">{shipments.length} {dc(currentLanguage).toplam_sevkiyat}</p>
                         </div>
                       </div>
                       <button
                         onClick={() => setShipmentsExpanded(e => !e)}
                         className="text-[10px] font-bold text-gray-400 hover:text-brand transition-colors flex items-center gap-1"
                       >
-                        {shipmentsExpanded ? (oc(currentLanguage).gizle) : (currentLanguage === 'tr' ? 'Detaylar' : 'Details')}
+                        {shipmentsExpanded ? (oc(currentLanguage).gizle) : (dc(currentLanguage).detaylar)}
                         <ChevronDown className={cn("w-3 h-3 transition-transform", shipmentsExpanded && "rotate-180")} />
                       </button>
                     </div>
@@ -1200,7 +1292,7 @@ export default function DashboardPage(props: Props) {
                       {[
                         { label: oc(currentLanguage).yolda,   value: inTransit,  color: 'text-blue-600',    bg: 'bg-blue-50' },
                         { label: oc(currentLanguage).bekliyor,       value: pending539, color: 'text-amber-600',   bg: 'bg-amber-50' },
-                        { label: currentLanguage === 'tr' ? 'Bugün Teslim' : 'Del. Today', value: delivToday, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                        { label: dc(currentLanguage).bugun_teslim, value: delivToday, color: 'text-emerald-600', bg: 'bg-emerald-50' },
                       ].map(c => (
                         <div key={c.label} className={`text-center rounded-xl p-3 ${c.bg}`}>
                           <p className={`text-xl font-black ${c.color}`}>{c.value}</p>
@@ -1226,7 +1318,7 @@ export default function DashboardPage(props: Props) {
                           className="text-[10px] text-brand font-bold flex items-center gap-1 mt-1"
                         >
                           <ChevronRight className="w-3 h-3" />
-                          {currentLanguage === 'tr' ? 'Tüm Sevkiyatlar' : 'All Shipments'}
+                          {dc(currentLanguage).tum_sevkiyatlar}
                         </button>
                       </div>
                     )}
@@ -1244,18 +1336,18 @@ export default function DashboardPage(props: Props) {
                         <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
                           <FileText className="w-3.5 h-3.5 text-indigo-600" />
                         </div>
-                        <span className="text-xs font-bold text-gray-500 uppercase truncate">{currentLanguage === 'tr' ? 'E-Belge' : 'E-Doc'}</span>
+                        <span className="text-xs font-bold text-gray-500 uppercase truncate">{dc(currentLanguage).e_belge}</span>
                       </div>
                       <p className="text-xl font-bold text-gray-900 mt-auto">
                         {gibConnected
-                          ? (currentLanguage === 'tr' ? 'GIB Bağlı' : 'GIB Connected')
-                          : (currentLanguage === 'tr' ? 'GIB Bağlı Değil' : 'GIB Not Connected')}
+                          ? (dc(currentLanguage).gib_bagli)
+                          : (dc(currentLanguage).gib_bagli_degil)}
                       </p>
-                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{currentLanguage === 'tr' ? 'E-Fatura · E-Arşiv · E-İrsaliye' : 'E-Invoice · E-Archive · E-Waybill'}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{dc(currentLanguage).e_fatura_e_arsiv_e_irsaliye}</p>
                       <div className="flex items-center gap-1 mt-1.5">
                         <span className={`w-1.5 h-1.5 rounded-full ${gibConnected ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`} />
                         <span className={`text-[10px] font-semibold ${gibConnected ? 'text-green-600' : 'text-red-500'}`}>
-                          {gibConnected ? (oc(currentLanguage).aktif) : (currentLanguage === 'tr' ? 'Bağlı Değil' : 'Disconnected')}
+                          {gibConnected ? (oc(currentLanguage).aktif) : (dc(currentLanguage).bagli_degil)}
                         </span>
                       </div>
                     </button>
@@ -1266,14 +1358,14 @@ export default function DashboardPage(props: Props) {
                         <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
                           <Wallet className="w-3.5 h-3.5 text-emerald-600" />
                         </div>
-                        <span className="text-xs font-bold text-gray-500 uppercase truncate">{currentLanguage === 'tr' ? 'Kasa' : 'Cash'}</span>
+                        <span className="text-xs font-bold text-gray-500 uppercase truncate">{dc(currentLanguage).kasa}</span>
                       </div>
                       <p className="text-xl font-bold text-gray-900 mt-auto">
-                        {currentLanguage === 'tr' ? 'Kasa Yönetimi' : 'Cash Desk'}
+                        {dc(currentLanguage).kasa_yonetimi}
                       </p>
-                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{currentLanguage === 'tr' ? 'Günlük kapanış ve hareketler' : 'Daily close and transactions'}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{dc(currentLanguage).gunluk_kapanis_ve_hareketler}</p>
                       <p className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
-                        <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'Kasaya git' : 'Go to cash desk'}
+                        <ChevronRight className="w-3 h-3" />{dc(currentLanguage).kasaya_git}
                       </p>
                     </button>
 
@@ -1286,11 +1378,11 @@ export default function DashboardPage(props: Props) {
                         <span className="text-xs font-bold text-gray-500 uppercase truncate">{oc(currentLanguage).vergi_takvimi}</span>
                       </div>
                       <p className="text-xl font-bold text-gray-900 mt-auto">
-                        {currentLanguage === 'tr' ? 'Beyanname Takibi' : 'Declaration Tracking'}
+                        {dc(currentLanguage).beyanname_takibi}
                       </p>
-                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{currentLanguage === 'tr' ? 'KDV · Muhtasar · SGK · Geçici Vergi' : 'VAT · WHT · SGK · Provisional Tax'}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{dc(currentLanguage).kdv_muhtasar_sgk_gecici_vergi}</p>
                       <p className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
-                        <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'Takvimi gör' : 'View calendar'}
+                        <ChevronRight className="w-3 h-3" />{dc(currentLanguage).takvimi_gor}
                       </p>
                     </button>
 
@@ -1300,14 +1392,14 @@ export default function DashboardPage(props: Props) {
                         <div className="w-7 h-7 rounded-lg bg-orange-50 flex items-center justify-center flex-shrink-0">
                           <Wrench className="w-3.5 h-3.5 text-orange-600" />
                         </div>
-                        <span className="text-xs font-bold text-gray-500 uppercase truncate">{currentLanguage === 'tr' ? 'Bakım' : 'Maintenance'}</span>
+                        <span className="text-xs font-bold text-gray-500 uppercase truncate">{dc(currentLanguage).bakim}</span>
                       </div>
                       <p className="text-xl font-bold text-gray-900 mt-auto">
-                        {currentLanguage === 'tr' ? 'Ekipman Bakımı' : 'Equipment Maint.'}
+                        {dc(currentLanguage).ekipman_bakimi}
                       </p>
-                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{currentLanguage === 'tr' ? 'Önleyici · Düzeltici · Acil iş emirleri' : 'Preventive · Corrective · Emergency orders'}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{dc(currentLanguage).onleyici_duzeltici_acil_is_emirleri}</p>
                       <p className="text-[10px] text-brand mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
-                        <ChevronRight className="w-3 h-3" />{currentLanguage === 'tr' ? 'İş emirlerine git' : 'View work orders'}
+                        <ChevronRight className="w-3 h-3" />{dc(currentLanguage).is_emirlerine_git}
                       </p>
                     </button>
                   </div>
@@ -1316,51 +1408,55 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 160: Customer Payment Behavior ── */}
               {orders.filter(o => o.paid).length >= 3 && (() => {
-                // For paid orders, estimate days to payment (createdAt → updatedAt/paidAt if available, else skip)
-                const custPay: Record<string, { name: string; totalPaid: number; totalOrders: number; lateCount: number }> = {};
-                for (const o of orders) {
-                  if (!o.paid || o.status === 'Cancelled') continue;
-                  const name = o.customerName || '—';
-                  if (!custPay[name]) custPay[name] = { name, totalPaid: 0, totalOrders: 0, lateCount: 0 };
-                  custPay[name].totalPaid += o.totalPrice || 0;
-                  custPay[name].totalOrders++;
-                  // Simplified late check: if order was old when marked paid (no paidAt field, just heuristic)
-                }
-                // Also track unpaid customers
-                const custUnpaid: Record<string, number> = {};
-                for (const o of orders) {
-                  if (o.paid || o.status === 'Cancelled' || !odemeTakipli(o)) continue;
-                  const name = o.customerName || '—';
-                  custUnpaid[name] = (custUnpaid[name] ?? 0) + (o.totalPrice || 0);
-                }
-                const topPayers = Object.values(custPay).sort((a, b) => b.totalPaid - a.totalPaid).slice(0, 5);
-                const topDebtors = Object.entries(custUnpaid).sort(([,a],[,b]) => b - a).slice(0, 5);
+                // SAHTE SIFIR KALDIRILDI (Faz 3 5/n): `+= o.totalPrice || 0` tutarı okunamayan
+                // siparişi ₺0 sayıyordu — müşteri "hiç ödememiş" gibi listenin dibine düşüyor,
+                // "Ödenmemiş Alacak" kartı da gerçekte olduğundan küçük görünüyordu. Sıralama da
+                // `b.totalPaid - a.totalPaid` idi; bilinmeyen artık HER İKİ yönde de sonda.
+                // Hesap: src/utils/pano/musteriAnaliz.ts (saf + testli). İptal filtresi ve
+                // `odemeTakipli` kapısı modülün İÇİNDE, eski blokla birebir.
+                const p160 = odemeDavranisi(orders, 5);
+                const topPayers = p160.odeyenler;
+                const topDebtors = p160.borclular;
                 // Tek kaynak — f159 ile ayni: tlYaz (kur yoksa '—').
                 const f160 = (v: number) => tlYaz(v, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 });
                 return (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4">
-                      <h4 className="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-3">✓ {currentLanguage==='tr'?'En Çok Ödeme Yapanlar':'Top Payers'}</h4>
+                      <h4 className="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-3">✓ {dc(currentLanguage).en_cok_odeme_yapanlar}</h4>
                       <div className="space-y-2">
                         {topPayers.map((c, i) => (
                           <div key={i} className="flex items-center justify-between">
-                            <span className="text-xs text-gray-700 truncate">{c.name}</span>
-                            <span className="text-xs font-bold text-emerald-600 shrink-0 ml-2">{f160(c.totalPaid)}</span>
+                            <span className="text-xs text-gray-700 truncate">{c.ad ?? '—'}</span>
+                            <span className="text-xs font-bold text-emerald-600 shrink-0 ml-2">{f160(c.tutar)}</span>
                           </div>
                         ))}
+                        {p160.odeyenTutarsiz > 0 && (
+                          <p className="text-[10px] text-gray-400 pt-1">
+                            {currentLanguage === 'tr'
+                              ? `${p160.odeyenTutarsiz} kaydın tutarı bilinmiyor — toplama dâhil değil.`
+                              : `${p160.odeyenTutarsiz} record(s) have no amount — excluded from the total.`}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="bg-white border border-amber-100 rounded-2xl shadow-sm p-4">
-                      <h4 className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-3">⚠ {currentLanguage==='tr'?'Ödenmemiş Alacak':'Outstanding Receivables'}</h4>
+                      <h4 className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-3">⚠ {dc(currentLanguage).odenmemis_alacak}</h4>
                       <div className="space-y-2">
                         {topDebtors.length === 0 ? (
-                          <p className="text-xs text-gray-400 text-center py-2">{currentLanguage==='tr'?'Bekleyen alacak yok':'No outstanding receivables'}</p>
-                        ) : topDebtors.map(([name, amt], i) => (
+                          <p className="text-xs text-gray-400 text-center py-2">{dc(currentLanguage).bekleyen_alacak_yok}</p>
+                        ) : topDebtors.map((c, i) => (
                           <div key={i} className="flex items-center justify-between">
-                            <span className="text-xs text-gray-700 truncate">{name}</span>
-                            <span className="text-xs font-bold text-amber-600 shrink-0 ml-2">{f160(amt)}</span>
+                            <span className="text-xs text-gray-700 truncate">{c.ad ?? '—'}</span>
+                            <span className="text-xs font-bold text-amber-600 shrink-0 ml-2">{f160(c.tutar)}</span>
                           </div>
                         ))}
+                        {p160.borcluTutarsiz > 0 && (
+                          <p className="text-[10px] text-gray-400 pt-1">
+                            {currentLanguage === 'tr'
+                              ? `${p160.borcluTutarsiz} kaydın tutarı bilinmiyor — toplama dâhil değil.`
+                              : `${p160.borcluTutarsiz} record(s) have no amount — excluded from the total.`}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1369,36 +1465,35 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 103: 6-Month Revenue Bar Chart ── */}
               {orders.length > 0 && (() => {
-                const now103 = new Date();
-                const months103 = Array.from({ length: 6 }, (_, i) => {
-                  const d = new Date(now103.getFullYear(), now103.getMonth() - (5 - i), 1);
-                  return { key: ayAnahtari(d), label: d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' }) };
-                });
-                const data103 = months103.map(m => ({
-                  label: m.label,
-                  rev: orders.filter(o => { const k = ayAnahtari(o.createdAt ?? o.syncedAt); return k !== null && k === m.key && o.status !== 'Cancelled'; }).reduce((s, o) => s + (o.totalPrice || 0), 0),
-                }));
-                const maxRev103 = Math.max(...data103.map(d => d.rev), 1);
+                // Tutarı okunamayan sipariş ₺0 SAYILMAZ; bilinmeyen ay ölçeğe girmez (eski
+                // `Math.max(...rev, 1)` tek bir NaN'la BÜTÜN çubuk yüksekliklerini NaN yapıyordu).
+                // `iptalHaric: true` PARİTE: bu çubuk iptal siparişleri bugün de dışlıyor.
+                const data103 = aylikCiro(orders, 6, new Date(), { iptalHaric: true }, currentLanguage === 'tr' ? 'tr' : 'en');
+                const maxRev103 = olcekTavani(data103);
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-4">
                       <h3 className={cn("text-[10px] font-bold uppercase tracking-wider flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
                         <BarChart3 className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Son 6 Ay Ciro' : 'Last 6 Months Revenue'}
+                        {dc(currentLanguage).son_6_ay_ciro}
                       </h3>
                     </div>
                     <div className="flex items-end gap-2 h-28">
                       {data103.map((m, i) => {
-                        const h = maxRev103 > 0 ? Math.max((m.rev / maxRev103) * 100, m.rev > 0 ? 4 : 0) : 0;
+                        // Tutarı hiç bilinmeyen ay (`grafik === null`): GRİ taban çubuğu — sıfır
+                        // yükseklikte marka rengiyle çizmek "o ay ciro yoktu" demekti (sahte
+                        // kesinlik; sparkline ile aynı kural). Yerel değişken daraltma içindir.
+                        const deger = m.grafik;
+                        const h = deger === null ? 4 : Math.max((deger / maxRev103) * 100, deger > 0 ? 4 : 0);
                         const isCurrentMonth = i === 5;
                         return (
                           <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
                             <div
-                              title={fmtKpi(m.rev)}
-                              className={`w-full rounded-t-lg transition-all duration-700 ${isCurrentMonth ? 'bg-brand' : darkMode ? 'bg-white/20 hover:bg-white/30' : 'bg-gray-200 hover:bg-gray-300'}`}
-                              style={{ height: `${h}%`, minHeight: m.rev > 0 ? '4px' : '0' }}
+                              title={`${fmtKpi(m.ekran)}${m.tutar.bilinmeyen > 0 ? (currentLanguage === 'tr' ? ` · ${m.tutar.bilinmeyen} kaydın tutarı okunamadı` : ` · ${m.tutar.bilinmeyen} record(s) unpriced`) : ''}`}
+                              className={`w-full rounded-t-lg transition-all duration-700 ${deger === null ? 'bg-gray-300' : isCurrentMonth ? 'bg-brand' : darkMode ? 'bg-white/20 hover:bg-white/30' : 'bg-gray-200 hover:bg-gray-300'}`}
+                              style={{ height: `${h}%`, minHeight: deger === null || deger > 0 ? '4px' : '0' }}
                             />
-                            <span className={cn("text-[9px] font-bold", isCurrentMonth ? 'text-brand' : darkMode ? 'text-white/65' : 'text-gray-400')}>{m.label}</span>
+                            <span className={cn("text-[9px] font-bold", isCurrentMonth ? 'text-brand' : darkMode ? 'text-white/65' : 'text-gray-400')}>{m.etiket}</span>
                           </div>
                         );
                       })}
@@ -1420,8 +1515,10 @@ export default function DashboardPage(props: Props) {
                   { key: 'Delivered',  labelTR: 'Teslim',     labelEN: 'Delivered',  color: 'bg-emerald-400',textColor: 'text-emerald-700', bg: 'bg-emerald-50'},
                   { key: 'Cancelled',  labelTR: 'İptal',      labelEN: 'Cancelled',  color: 'bg-gray-300',   textColor: 'text-gray-500',   bg: 'bg-gray-50'   },
                 ];
-                const total = orders.length;
-                const counts = statusConfig.map(s => ({ ...s, count: orders.filter(o => o.status === s.key).length }));
+                // Durumu eksik/tanınmayan sipariş eskiden çubuktan SESSİZCE düşüyordu: 5 dilim
+                // toplamı %100'e ulaşmıyordu ve kullanıcı eksiği göremiyordu. `diger` onu SAYAR.
+                const dagilim43 = durumDagilimi(orders, PANO_DURUMLARI);
+                const counts = statusConfig.map(s => ({ ...s, count: dagilim43.sayilar[s.key] }));
                 return (
                   <div className={cn("rounded-2xl border p-5 space-y-3", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between">
@@ -1429,19 +1526,33 @@ export default function DashboardPage(props: Props) {
                         {oc(currentLanguage).siparis_durumu}
                       </h3>
                       <button onClick={() => setActiveTab('orders')} className="text-[10px] font-semibold text-brand hover:underline">
-                        {currentLanguage === 'tr' ? 'Tümünü gör' : 'View all'}
+                        {dc(currentLanguage).tumunu_gor_2}
                       </button>
                     </div>
                     {/* Segmented bar */}
                     <div className="flex h-3 rounded-full overflow-hidden gap-0.5">
-                      {counts.filter(s => s.count > 0).map(s => (
-                        <div
-                          key={s.key}
-                          className={`${s.color} transition-all duration-700 first:rounded-l-full last:rounded-r-full`}
-                          style={{ width: `${(s.count / total) * 100}%` }}
-                          title={`${s.key}: ${s.count}`}
-                        />
-                      ))}
+                      {counts.filter(s => s.count > 0).map(s => {
+                        const pay = oranYuzde(s.count, dagilim43.toplam);
+                        if (pay === null) return null;   // toplam 0 — genişlik UYDURULMAZ
+                        return (
+                          <div
+                            key={s.key}
+                            className={`${s.color} transition-all duration-700 first:rounded-l-full last:rounded-r-full`}
+                            style={{ width: `${pay}%` }}
+                            title={`${s.key}: ${s.count}`}
+                          />
+                        );
+                      })}
+                      {dagilim43.diger > 0 && (() => {
+                        const pay = oranYuzde(dagilim43.diger, dagilim43.toplam);
+                        return pay === null ? null : (
+                          <div
+                            className="bg-gray-200 transition-all duration-700 last:rounded-r-full"
+                            style={{ width: `${pay}%` }}
+                            title={currentLanguage === 'tr' ? `Durumu bilinmeyen: ${dagilim43.diger}` : `Unknown status: ${dagilim43.diger}`}
+                          />
+                        );
+                      })()}
                     </div>
                     {/* Legend */}
                     <div className="flex flex-wrap gap-x-4 gap-y-1.5">
@@ -1454,6 +1565,13 @@ export default function DashboardPage(props: Props) {
                           <span className={cn("text-[11px] font-bold", darkMode ? "text-white/80" : "text-gray-800")}>{s.count}</span>
                         </button>
                       ))}
+                      {dagilim43.diger > 0 && (
+                        <span className={cn("flex items-center gap-1.5 text-[11px]", darkMode ? "text-white/60" : "text-gray-500")}>
+                          <span className="w-2 h-2 rounded-full bg-gray-200 flex-shrink-0" />
+                          {dc(currentLanguage).durumu_bilinmeyen}
+                          <span className={cn("font-bold", darkMode ? "text-white/80" : "text-gray-800")}>{dagilim43.diger}</span>
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
@@ -1464,40 +1582,52 @@ export default function DashboardPage(props: Props) {
                 // TARİH ARALIĞINA BAĞLANDI (2026-09-04): ham `orders` okunuyordu, yani
                 // kart TÜM ZAMANLARIN oranını gösteriyordu — kullanıcı üstteki tarih
                 // aralığını daraltsa bile pastanın dilimleri hiç değişmiyordu.
-                const b2bRev    = filteredOrders.filter(o => o.customerType === 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const retailRev = filteredOrders.filter(o => o.customerType !== 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0);
-                const totalRev  = b2bRev + retailRev;
-                if (totalRev === 0) return null;
-                const b2bPct    = Math.round((b2bRev    / totalRev) * 100);
-                const retailPct = 100 - b2bPct;
+                // PAY YÜZDESİ TÜRETMEDİR (Faz 3 5/n): tutarı okunamayan tek bir sipariş bile varsa
+                // toplam KISMİdir ve ondan çıkarılan "%100 B2B" sahte kesinliktir. `segmentCirosu`
+                // (src/utils/pano/musteriAnaliz.ts, testli) o durumda yuzde=null döner → çubuk
+                // ÇİZİLMEZ, yerine "N siparişin tutarı bilinmiyor" notu yazılır.
+                const s79 = segmentCirosu(filteredOrders, b2bSegmenti, ['B2B', 'Diger']);
+                const b2bSeg = s79.segmentler[0], perakendeSeg = s79.segmentler[1];
+                const b2bRev = b2bSeg.ciro, retailRev = perakendeSeg.ciro;
+                if (s79.toplam === 0) return null;   // gerçek ₺0 — eski davranış
+                const b2bPct    = b2bSeg.yuzde === null ? null : Math.round(b2bSeg.yuzde);
+                const retailPct = b2bPct === null ? null : 100 - b2bPct;   // eski parite: 100 - b2bPct
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-3">
                       <h3 className={cn("text-[10px] font-bold uppercase tracking-wider", darkMode ? "text-white/50" : "text-gray-400")}>
-                        {currentLanguage === 'tr' ? 'B2B vs Perakende Ciro' : 'B2B vs Retail Revenue'}
+                        {dc(currentLanguage).b2b_vs_perakende_ciro}
                       </h3>
                     </div>
-                    {/* Split bar */}
-                    <div className="flex h-3 rounded-full overflow-hidden gap-0.5 mb-3">
-                      {b2bPct > 0 && (
-                        <div className="bg-blue-500 transition-all duration-700 rounded-l-full" style={{ width: `${b2bPct}%` }} title={`B2B: ${b2bPct}%`} />
-                      )}
-                      {retailPct > 0 && (
-                        <div className="bg-gray-300 transition-all duration-700 rounded-r-full" style={{ width: `${retailPct}%` }} title={`Retail: ${retailPct}%`} />
-                      )}
-                    </div>
+                    {/* Split bar — yüzde türetilemiyorsa ÇİZİLMEZ (kısmi toplamdan pay çıkmaz) */}
+                    {b2bPct !== null && retailPct !== null ? (
+                      <div className="flex h-3 rounded-full overflow-hidden gap-0.5 mb-3">
+                        {b2bPct > 0 && (
+                          <div className="bg-blue-500 transition-all duration-700 rounded-l-full" style={{ width: `${b2bPct}%` }} title={`B2B: ${b2bPct}%`} />
+                        )}
+                        {retailPct > 0 && (
+                          <div className="bg-gray-300 transition-all duration-700 rounded-r-full" style={{ width: `${retailPct}%` }} title={`Retail: ${retailPct}%`} />
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-gray-400 mb-3">
+                        {currentLanguage === 'tr'
+                          ? `${s79.tutarsiz} siparişin tutarı bilinmiyor — pay yüzdesi hesaplanamıyor.`
+                          : `${s79.tutarsiz} order(s) have no amount — share cannot be computed.`}
+                      </p>
+                    )}
                     <div className="grid grid-cols-2 gap-3">
                       <div className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 flex-shrink-0" />
                         <div>
-                          <p className="text-xs font-bold text-blue-700">B2B — {b2bPct}%</p>
+                          <p className="text-xs font-bold text-blue-700">B2B — {b2bPct === null ? '—' : `${b2bPct}%`}</p>
                           <p className="text-[10px] text-gray-400">{fmtKpi(b2bRev)}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-sm bg-gray-300 flex-shrink-0" />
                         <div>
-                          <p className="text-xs font-bold text-gray-600">{oc(currentLanguage).perakende} — {retailPct}%</p>
+                          <p className="text-xs font-bold text-gray-600">{oc(currentLanguage).perakende} — {retailPct === null ? '—' : `${retailPct}%`}</p>
                           <p className="text-[10px] text-gray-400">{fmtKpi(retailRev)}</p>
                         </div>
                       </div>
@@ -1508,33 +1638,39 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 106: Revenue Donut by Customer Type ── */}
               {orders.length > 0 && (() => {
-                type Seg = { label: string; color: string; rev: number };
-                const ct106 = (o: Order) => (o.customerType as unknown as string) || '';
-                const segs: Seg[] = [
-                  { label: 'B2B',                                             color: '#3b82f6', rev: orders.filter(o => ct106(o) === 'B2B').reduce((s, o) => s + (o.totalPrice || 0), 0) },
-                  { label: oc(currentLanguage).bayi,      color: '#ff4000', rev: orders.filter(o => ct106(o) === 'Dealer').reduce((s, o) => s + (o.totalPrice || 0), 0) },
-                  { label: oc(currentLanguage).perakende, color: '#6b7280', rev: orders.filter(o => { const c = ct106(o); return !c || (c !== 'B2B' && c !== 'Dealer'); }).reduce((s, o) => s + (o.totalPrice || 0), 0) },
-                ];
-                const total106 = segs.reduce((s, seg) => s + seg.rev, 0);
-                if (total106 === 0) return null;
+                const s106 = segmentCirosu(orders, donutSegmenti, ['B2B', 'Dealer', 'Retail']);
+                const etiket106: Record<string, { label: string; color: string }> = {
+                  B2B:    { label: 'B2B',                          color: '#3b82f6' },
+                  Dealer: { label: oc(currentLanguage).bayi,       color: '#ff4000' },
+                  Retail: { label: oc(currentLanguage).perakende,  color: '#6b7280' },
+                };
+                const segs = s106.segmentler.map(s => ({ ...s, ...(etiket106[s.anahtar] ?? { label: s.anahtar, color: '#6b7280' }) }));
+                if (s106.toplam === 0) return null;
 
-                // SVG donut: r=40, circumference=251.3
+                // SVG donut: r=40, circumference=251.3. Dilimler PAY YÜZDESİne dayanır; toplam
+                // kısmiyse (yuzdelerGecerli false) halka ÇİZİLMEZ — eski kod eksik bir toplamı
+                // %100 kabul edip tüm çemberi dolduruyordu.
                 const R = 40, C = 2 * Math.PI * R;
                 let offset = 0;
-                const paths = segs.filter(s => s.rev > 0).map(s => {
-                  const pct = s.rev / total106;
-                  const dash = pct * C;
-                  const gap  = C - dash;
-                  const el = { ...s, pct, dash, gap, offset };
-                  offset += dash;
-                  return el;
-                });
-                const bigSeg = [...segs].sort((a, b) => b.rev - a.rev)[0];
+                // `flatMap` + erken dönüş, `filter(...).map(s => s.yuzde as number)` yerine:
+                // filter callback'i tipi daraltmaz, tip iddiası gerekirdi (CLAUDE.md: gerçek guard).
+                const paths = s106.yuzdelerGecerli
+                  ? segs.flatMap(s => {
+                      if (s.yuzde === null || !(s.ciro > 0)) return [];
+                      const pct = s.yuzde / 100;
+                      const dash = pct * C;
+                      const gap  = C - dash;
+                      const el = { ...s, pct, dash, gap, offset };
+                      offset += dash;
+                      return [el];
+                    })
+                  : [];
+                const bigSeg = s106.enBuyuk;
 
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-4", darkMode ? "text-white/50" : "text-gray-400")}>
-                      {currentLanguage === 'tr' ? 'Müşteri Tipi Bazında Ciro' : 'Revenue by Customer Type'}
+                      {dc(currentLanguage).musteri_tipi_bazinda_ciro}
                     </h3>
                     <div className="flex items-center gap-6">
                       {/* Donut */}
@@ -1557,17 +1693,20 @@ export default function DashboardPage(props: Props) {
                         {/* Center label */}
                         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                           <span className="text-[9px] font-bold text-gray-400 leading-none">
-                            {bigSeg.label}
+                            {bigSeg ? (etiket106[bigSeg.anahtar]?.label ?? bigSeg.anahtar) : '—'}
                           </span>
                           <span className="text-sm font-black text-gray-900 leading-none mt-0.5">
-                            {Math.round((bigSeg.rev / total106) * 100)}%
+                            {bigSeg && bigSeg.yuzde !== null ? `${Math.round(bigSeg.yuzde)}%` : '—'}
                           </span>
                         </div>
                       </div>
                       {/* Legend */}
                       <div className="flex-1 space-y-3">
-                        {segs.filter(s => s.rev > 0).map((s, i) => {
-                          const pct = Math.round((s.rev / total106) * 100);
+                        {/* Süzgeç `!Number.isFinite(s.ciro) || s.ciro > 0`: cirosu HİÇ bilinmeyen
+                            segment gizlenmez, '—' ile görünür (eski `s.rev > 0` onu ₺0 sanıp
+                            gizliyordu — "o segmentten hiç satış yok" demek sahte kesinlikti). */}
+                        {segs.filter(s => !Number.isFinite(s.ciro) || s.ciro > 0).map((s, i) => {
+                          const pct = s.yuzde === null ? null : Math.round(s.yuzde);
                           return (
                             <div key={i} className="space-y-1">
                               <div className="flex items-center justify-between">
@@ -1576,16 +1715,25 @@ export default function DashboardPage(props: Props) {
                                   <span className="text-xs font-semibold text-gray-700">{s.label}</span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[10px] text-gray-400">{fmtKpi(s.rev)}</span>
-                                  <span className="text-[10px] font-black text-gray-600 w-7 text-right">{pct}%</span>
+                                  <span className="text-[10px] text-gray-400">{fmtKpi(s.ciro)}</span>
+                                  <span className="text-[10px] font-black text-gray-600 w-7 text-right">{pct === null ? '—' : `${pct}%`}</span>
                                 </div>
                               </div>
-                              <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                                <div className="h-1.5 rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: s.color }} />
-                              </div>
+                              {pct !== null && (
+                                <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                  <div className="h-1.5 rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: s.color }} />
+                                </div>
+                              )}
                             </div>
                           );
                         })}
+                        {s106.tutarsiz > 0 && (
+                          <p className="text-[10px] text-gray-400">
+                            {currentLanguage === 'tr'
+                              ? `${s106.tutarsiz} siparişin tutarı bilinmiyor — pay yüzdeleri hesaplanamıyor.`
+                              : `${s106.tutarsiz} order(s) have no amount — shares cannot be computed.`}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1594,63 +1742,70 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 124: Customer Segment Profitability ── */}
               {orders.length > 0 && inventory.length > 0 && (() => {
-                // Build per-customer-type revenue vs estimated COGS
-                type SegProfit = { type: string; revenue: number; cogs: number; margin: number; orderCount: number; avgOrder: number };
-                const segMap: Record<string, SegProfit> = {};
-                for (const o of orders) {
-                  if (o.status === 'Cancelled') continue;
-                  const type = o.customerType || 'Retail';
-                  if (!segMap[type]) segMap[type] = { type, revenue: 0, cogs: 0, margin: 0, orderCount: 0, avgOrder: 0 };
-                  segMap[type].revenue += o.totalPrice || 0;
-                  segMap[type].orderCount++;
-                  // Estimate COGS from lineItems
-                  const cogsCost = (o.lineItems || []).reduce((s, li) => {
-                    const inv = inventory.find(i => i.id === li.inventoryId || i.name === li.name);
-                    return s + (inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity;
-                  }, 0);
-                  segMap[type].cogs += cogsCost;
-                }
-                const segs = Object.values(segMap).map(s => ({
-                  ...s,
-                  margin: s.revenue > 0 ? Math.round(((s.revenue - s.cogs) / s.revenue) * 100) : 0,
-                  avgOrder: s.orderCount > 0 ? s.revenue / s.orderCount : 0,
-                })).sort((a, b) => b.revenue - a.revenue);
+                // %60 UYDURMA MALİYET ORANI KALDIRILDI (Faz 3 5/n). Eski satır üç ayrı uydurma
+                // taşıyordu: (a) `li.price * 0.6` — maliyeti bilinmeyen kaleme hiçbir veriye
+                // dayanmayan sabit oran; (b) `itemCostTRY` kuru çevrilemeyen kalem için 0 döner
+                // (cost.ts'te belgeli) → kalem sessizce "bedelsiz" olup marjı şişiriyordu;
+                // (c) `revenue > 0 ? … : 0` cirosu bilinmeyen segmente "%0 marj" rozeti veriyordu.
+                // Hesap artık src/utils/pano/musteriAnaliz.ts + siparisKarlilik.ts (ikisi de testli).
+                const kalemMaliyeti124 = (li: OrderLineItem): number | null => {
+                  // BOŞ ANAHTAR EŞLEŞMEZ (stokKartiBul ile aynı kapı): '' === '' olduğu için
+                  // serbest satır ("Nakliye bedeli") katalogdaki adsız İLK karta bağlanıp o
+                  // ilgisiz kartın maliyetini "bilinen" sayıyordu.
+                  const kimlik = li.inventoryId, ad = li.name;
+                  const inv = inventory.find(i => (!!kimlik && i.id === kimlik) || (!!ad && i.name === ad));
+                  return inv ? kartMaliyetiTL(inv, exchangeRates) : null;   // bilinmiyor → null (0 DEĞİL)
+                };
+                const k124 = segmentKarliligi(orders, tipSegmenti, o => siparisKarliligi<OrderLineItem>(o, kalemMaliyeti124));
+                const segs = k124.segmentler;
                 if (segs.length === 0) return null;
                 const colors = { 'B2B': '#3b82f6', 'Retail': '#10b981', 'Dealer': '#f59e0b', 'Other': '#8b5cf6' };
-                const maxRev = Math.max(...segs.map(s => s.revenue));
                 return (
                   <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                     <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
                       <span className="text-base">💰</span>
-                      <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? 'Segment Kârlılığı' : 'Segment Profitability'}</h3>
+                      <h3 className="font-bold text-gray-800">{dc(currentLanguage).segment_karliligi}</h3>
                     </div>
                     <div className="divide-y divide-gray-50">
                       {segs.map(s => {
-                        const barColor = (colors as Record<string, string>)[s.type] || '#6b7280';
+                        const barColor = (colors as Record<string, string>)[s.anahtar] || '#6b7280';
+                        const marj = s.marjYuzde === null ? null : Math.round(s.marjYuzde);
                         return (
-                          <div key={s.type} className="px-5 py-4">
+                          <div key={s.anahtar} className="px-5 py-4">
                             <div className="flex items-center justify-between mb-1.5">
                               <div className="flex items-center gap-2">
                                 <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: barColor }} />
-                                <p className="text-sm font-bold text-gray-800">{s.type}</p>
-                                <span className="text-[10px] text-gray-400">{s.orderCount} {oc(currentLanguage).siparis}</span>
+                                <p className="text-sm font-bold text-gray-800">{s.anahtar}</p>
+                                <span className="text-[10px] text-gray-400">{s.siparisSayisi} {oc(currentLanguage).siparis}</span>
                               </div>
                               <div className="flex items-center gap-3 text-xs">
-                                <span className="text-gray-500">{fmtKpi(s.revenue,'K',1)}</span>
-                                <span className={`font-bold ${s.margin >= 30 ? 'text-emerald-600' : s.margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>
-                                  %{s.margin} {oc(currentLanguage).marj_2}
-                                </span>
+                                <span className="text-gray-500">{fmtKpi(s.ciro,'K',1)}</span>
+                                {marj === null ? (
+                                  <span className="font-bold text-gray-400" title={currentLanguage === 'tr'
+                                    ? `${s.maliyetsizSiparis} siparişin maliyeti bilinmiyor — marj hesaplanamıyor.`
+                                    : `Cost unknown for ${s.maliyetsizSiparis} order(s) — margin cannot be computed.`}>
+                                    — {oc(currentLanguage).marj_2}
+                                  </span>
+                                ) : (
+                                  <span className={`font-bold ${marj >= 30 ? 'text-emerald-600' : marj >= 15 ? 'text-amber-600' : 'text-red-500'}`}>
+                                    %{marj} {oc(currentLanguage).marj_2}
+                                  </span>
+                                )}
                               </div>
                             </div>
-                            <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                              <div className="h-2 rounded-full transition-all duration-700" style={{ width: `${(s.revenue / maxRev) * 100}%`, backgroundColor: barColor }} />
-                            </div>
+                            {s.barOrani !== null && (
+                              <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                                <div className="h-2 rounded-full transition-all duration-700" style={{ width: `${s.barOrani}%`, backgroundColor: barColor }} />
+                              </div>
+                            )}
                           </div>
                         );
                       })}
                     </div>
                     <div className="px-5 py-2 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-400">
-                      {currentLanguage === 'tr' ? 'Maliyet tahmini: Ürün maliyeti × miktar' : 'COGS estimated from product cost × quantity'}
+                      {currentLanguage === 'tr'
+                        ? 'Maliyet: siparişin kendi kayıtlı maliyeti, yoksa stok kartı × miktar. Bir kalemin maliyeti bilinmiyorsa o segmentin marjı hesaplanmaz.'
+                        : 'Cost: the order’s own recorded cost, else stock card × quantity. If any line cost is unknown, that segment’s margin is not computed.'}
                     </div>
                   </div>
                 );
@@ -1666,7 +1821,7 @@ export default function DashboardPage(props: Props) {
               >
                 <Search className="w-4 h-4 text-gray-400" />
                 <span className={cn("flex-1 text-sm", darkMode ? "text-white/65" : "text-gray-400")}>
-                  {currentLanguage === 'tr' ? 'Sipariş, müşteri veya ürün ara…' : 'Search orders, leads or products…'}
+                  {dc(currentLanguage).siparis_musteri_veya_urun_ara}
                 </span>
                 <kbd className="hidden sm:inline text-[10px] text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded font-mono shadow-sm">⌘K</kbd>
               </button>
@@ -1676,9 +1831,9 @@ export default function DashboardPage(props: Props) {
                 <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">{dashT.quick_access}</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
-                    { label: currentLanguage === 'tr' ? 'Kalite Yönetimi' : 'Quality', tab: 'kalite', icon: Activity, color: '#ff4000' },
-                    { label: currentLanguage === 'tr' ? 'Hukuk & Uyum' : 'Legal', tab: 'hukuk', icon: ShieldCheck, color: '#3b82f6' },
-                    { label: currentLanguage === 'tr' ? 'Proje Yönetimi' : 'Projects', tab: 'proje', icon: TargetIcon, color: '#8b5cf6' },
+                    { label: dc(currentLanguage).kalite_yonetimi, tab: 'kalite', icon: Activity, color: '#ff4000' },
+                    { label: dc(currentLanguage).hukuk_uyum, tab: 'hukuk', icon: ShieldCheck, color: '#3b82f6' },
+                    { label: dc(currentLanguage).proje_yonetimi, tab: 'proje', icon: TargetIcon, color: '#8b5cf6' },
                     { label: oc(currentLanguage).satin_alma, tab: 'satin-alma', icon: ShoppingCart, color: '#10b981' },
                     { label: dashT.new_order, tab: 'orders', icon: Package, color: '#f59e0b' },
                     { label: oc(currentLanguage).lojistik, tab: 'lojistik', icon: Truck, color: '#06b6d4' },
@@ -1704,7 +1859,11 @@ export default function DashboardPage(props: Props) {
                   const lastTouch = zamanMs(l.updatedAt || l.createdAt);
                   return lastTouch !== null && (Date.now() - lastTouch) > 30 * 86400000;
                 });
-                const lowStockItems = inventory.filter(i => (i.stockLevel ?? 0) <= (i.lowStockThreshold ?? 5));
+                // `?? 0` stoğu BİLİNMEYEN kalemi 0 sayıp sahte "Düşük stok" eylemi üretiyordu;
+                // `?? 5` ise eşiği olmayan kalemi uydurma bir eşikle kıyaslıyordu. İkisi de veri değil.
+                // Stoğu/eşiği bilinmeyen kalem AJANDA MADDESİ üretmez (ne yapılacağı bilinmiyor);
+                // sayıları "Düşük Stok Uyarısı" panelinde not olarak gösteriliyor.
+                const lowStockItems = dusukStok.dusuk;
                 const agendaItems = [
                   ...toShip.slice(0, 3).map(o => ({
                     key: `ship-${o.id}`,
@@ -1717,14 +1876,14 @@ export default function DashboardPage(props: Props) {
                     key: `lead-${l.id}`,
                     icon: Users, color: 'text-amber-600' as const, bg: 'bg-amber-50' as const,
                     title: currentLanguage === 'tr' ? `Hareketsiz: ${l.name}` : `Stale: ${l.name}`,
-                    sub: currentLanguage === 'tr' ? '30+ gündür iletişim yok' : '30+ days no contact',
+                    sub: dc(currentLanguage)._30_gundur_iletisim_yok,
                     onClick: () => setActiveTab('crm'),
                   })),
                   ...lowStockItems.slice(0, 2).map(i => ({
                     key: `stock-${i.id}`,
                     icon: AlertTriangle, color: 'text-red-600' as const, bg: 'bg-red-50' as const,
                     title: currentLanguage === 'tr' ? `Düşük stok: ${i.name}` : `Low stock: ${i.name}`,
-                    sub: `${i.stockLevel ?? 0} / ${i.lowStockThreshold ?? 5} ${oc(currentLanguage).adet}`,
+                    sub: `${stokEsikYaz(i)} ${oc(currentLanguage).adet}`,
                     onClick: () => setActiveTab('inventory'),
                   })),
                 ];
@@ -1734,10 +1893,10 @@ export default function DashboardPage(props: Props) {
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
                         <Calendar className="w-4 h-4" />
-                        {currentLanguage === 'tr' ? 'Bugünün Ajandası' : "Today's Agenda"}
+                        {dc(currentLanguage).bugunun_ajandasi}
                       </h3>
                       <span className="text-[10px] bg-amber-50 text-amber-600 font-bold px-2 py-0.5 rounded-full">
-                        {agendaItems.length} {currentLanguage === 'tr' ? 'eylem' : 'actions'}
+                        {agendaItems.length} {dc(currentLanguage).eylem}
                       </span>
                     </div>
                     <div className="space-y-1">
@@ -1767,11 +1926,11 @@ export default function DashboardPage(props: Props) {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
                     <FileText className="w-4 h-4" />
-                    {currentLanguage === 'tr' ? 'Hızlı Not' : 'Quick Note'}
+                    {dc(currentLanguage).hizli_not}
                   </h3>
                   {quickNote && (
                     <span className="text-[9px] text-gray-400 font-medium">
-                      {currentLanguage === 'tr' ? 'Otomatik kaydediliyor' : 'Auto-saving'}
+                      {dc(currentLanguage).otomatik_kaydediliyor}
                     </span>
                   )}
                 </div>
@@ -1779,7 +1938,7 @@ export default function DashboardPage(props: Props) {
                   value={quickNote}
                   onChange={e => handleQuickNoteChange(e.target.value)}
                   rows={4}
-                  placeholder={currentLanguage === 'tr' ? 'Hızlı notlarınızı buraya yazın… (otomatik kaydedilir)' : 'Jot something down… (auto-saved locally)'}
+                  placeholder={dc(currentLanguage).hizli_notlarinizi_buraya_yazin_otomatik_kaydedil}
                   className="w-full bg-gray-50 rounded-xl px-3 py-2.5 text-sm text-gray-700 placeholder-gray-300 outline-none focus:ring-2 focus:ring-brand/20 resize-none leading-relaxed"
                 />
               </div>
@@ -1799,14 +1958,19 @@ export default function DashboardPage(props: Props) {
                       // okuyucu ve Enter/Space kendiliginden calisir.
                       <button key={o.id} type="button"
                         onClick={() => setActiveTab('orders')}
-                        title={currentLanguage === 'tr' ? 'Siparişler ekranına git' : 'Go to orders'}
+                        title={dc(currentLanguage).siparisler_ekranina_git}
                         className="w-full text-left flex items-center justify-between py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50/70 rounded-lg px-1 -mx-1 transition-colors cursor-pointer">
                         <div>
                           <p className="text-sm font-semibold text-[#1D1D1F]">{o.customerName || currentT.customer}</p>
                           <p className="text-xs text-gray-400">{gorunenSiparisNo(o)}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm font-bold text-[#1D1D1F]">{fmtKpi(o.totalPrice||o.totalAmount||0)}</p>
+                          {/* Tutarı bilinmeyen sipariş ₺0 BASILMAZ: Mikro faturasından türetilen
+                              kayıtta (source:'mikro-fatura') `totalPrice` alanı BİLEREK yoktur
+                              (server/mikro/eslemeFatura.ts). `siparisTutari` NaN döner, `fmtKpi`
+                              (→ kisaTutar) onu '—' yapar. Eski `||` zinciri hem bunu ₺0 gösteriyor
+                              hem meşru ₺0 tutarı totalAmount'a düşürüyordu. */}
+                          <p className="text-sm font-bold text-[#1D1D1F]">{fmtKpi(siparisTutari(o))}</p>
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${o.status === 'Delivered' ? 'bg-green-100 text-green-700' : o.status === 'Cancelled' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>{siparisDurumEtiketi(o.status, currentLanguage)}</span>
                         </div>
                       </button>
@@ -1821,23 +1985,34 @@ export default function DashboardPage(props: Props) {
                     <button onClick={() => setActiveTab('inventory')} className="text-xs text-brand font-semibold hover:underline">{dashT.inventory_link}</button>
                   </div>
                   <div className="space-y-2">
-                    {inventory.filter(i => i.stockLevel <= i.lowStockThreshold).slice(0, 5).map(item => (
+                    {/* Ham `i.stockLevel <= i.lowStockThreshold` karşılaştırması undefined'da NaN
+                        üretip SESSİZCE false dönüyordu (kalem hiç görünmüyordu) ve hücre
+                        "undefined adet" basabiliyordu. Kapı artık Phase 24 ajandasıyla ORTAK. */}
+                    {dusukStok.dusuk.slice(0, 5).map(item => (
                       <button key={item.id} type="button"
                         onClick={() => setActiveTab('inventory')}
-                        title={currentLanguage === 'tr' ? 'Envanter ekranına git' : 'Go to inventory'}
+                        title={dc(currentLanguage).envanter_ekranina_git}
                         className="w-full text-left flex items-center justify-between py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50/70 rounded-lg px-1 -mx-1 transition-colors cursor-pointer">
                         <div>
                           <p className="text-sm font-semibold text-[#1D1D1F]">{item.name}</p>
                           <p className="text-xs text-gray-400">{item.sku}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm font-bold text-red-500">{item.stockLevel} {dashT.units}</p>
-                          <p className="text-[10px] text-gray-400">Min: {item.lowStockThreshold}</p>
+                          <p className="text-sm font-bold text-red-500">{adetYaz(item.stockLevel)} {dashT.units}</p>
+                          <p className="text-[10px] text-gray-400">Min: {adetYaz(item.lowStockThreshold)}</p>
                         </div>
                       </button>
                     ))}
-                    {inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length === 0 && (
+                    {dusukStok.dusuk.length === 0 && (
                       <p className="text-sm text-green-600 text-center py-4 flex items-center justify-center gap-2"><CheckCircle2 className="w-4 h-4" />{dashT.all_in_stock}</p>
+                    )}
+                    {/* Ölçülemeyen kalemler SESSİZCE düşmesin — "hepsi stokta" yanlış güven verir */}
+                    {(dusukStok.stokBilinmeyen.length > 0 || dusukStok.esikBilinmeyen.length > 0) && (
+                      <p className="text-[10px] text-amber-600 mt-2">
+                        {currentLanguage === 'tr'
+                          ? `${dusukStok.stokBilinmeyen.length} kalemin stoğu, ${dusukStok.esikBilinmeyen.length} kalemin min. eşiği bilinmiyor — bu kalemler denetlenemedi.`
+                          : `${dusukStok.stokBilinmeyen.length} item(s) missing stock and ${dusukStok.esikBilinmeyen.length} missing threshold — not checked.`}
+                      </p>
                     )}
                   </div>
                 </div>
@@ -1845,31 +2020,47 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 47: Inventory Value Summary ── */}
               {inventory.length > 0 && (() => {
-                const costValue   = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
-                const retailValue = inventory.reduce((s, i) => s + (i.prices?.['Retail'] ?? i.price ?? 0) * (i.stockLevel ?? 0), 0);
-                const margin      = retailValue > 0 ? Math.round(((retailValue - costValue) / retailValue) * 100) : 0;
-                const totalUnits  = inventory.reduce((s, i) => s + (i.stockLevel ?? 0), 0);
+                // `?? 0` üç yerde birden bilinmeyeni 0 sayıyordu (stok, fiyat, maliyet) ve marj
+                // TÜRETİLEN sayı olduğu hâlde eksik girdiyle hesaplanıp boş envanterde "%0" basıyordu.
+                // `kartMaliyetiTL` bilinmeyen maliyete null döner (itemCostTRY 0 dönüyordu — sessiz eksiltme).
+                // SATIŞ tarafı da AÇIK seçiciyle ve KURLA çevrilerek verilir (2026-09-19 delta bulgusu):
+                // seçici verilmediğinde modül `finansalOranlar.stokDegeri`ye düşüyor, o da
+                // `prices.Retail ?? price` değerini `priceCurrency`ye HİÇ BAKMADAN stokla çarpıyordu.
+                // USD fiyatlı kartta maliyet TL'ye çevrili, satış çevrilmemiş olduğu için panel iki
+                // para birimini topluyor ve marj eksiye çakılıyordu (₺328.000 maliyete "₺12.000" satış
+                // → ≈ −%2633) — üstelik hiçbir girdi "bilinmiyor" olmadığı için '—' kapısı da açılmıyordu.
+                // `itemPriceTRY` DOĞRUDAN geçilemez: kur/fiyat yokken 0 döner, yani kalemi sessizce
+                // eksiltir; `kartSatisTL` null döner ve kalem `satis.bilinmeyen`e düşüp not basılır.
+                const stok47 = stokDegeriOzeti(inventory, {
+                  maliyet: i => kartMaliyetiTL(i, exchangeRates),
+                  satis: i => kartSatisTL(i, 'Retail', exchangeRates),
+                });
                 return (
                   <>
-                  {/* costValue cevrilemeyen kalemleri DISLIYOR — eksikligi soyle. */}
+                  {/* Maliyet tarafi cevrilemeyen kalemleri DISLIYOR — eksikligi soyle. */}
                   <KurUyarisi inventory={inventory} exchangeRates={exchangeRates} currentLanguage={currentLanguage} className="mb-2" />
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-4">
                       <h3 className={cn("text-[10px] font-bold uppercase tracking-wider flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
                         <Package className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? 'Stok Değeri Özeti' : 'Inventory Value'}
+                        {dc(currentLanguage).stok_degeri_ozeti}
                       </h3>
                       <button onClick={() => setActiveTab('inventory')} className="text-[10px] font-semibold text-brand hover:underline">
-                        {currentLanguage === 'tr' ? 'Stoka git' : 'View inventory'}
+                        {dc(currentLanguage).stoka_git}
                       </button>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {(() => {
                         return [
-                        { label: currentLanguage === 'tr' ? 'Maliyet Değeri' : 'Cost Value',   value: fmtKpi(costValue),   color: 'text-gray-800',    sub: currentLanguage === 'tr' ? 'stok maliyeti' : 'at cost' },
-                        { label: currentLanguage === 'tr' ? 'Satış Değeri'  : 'Retail Value',  value: fmtKpi(retailValue),  color: 'text-emerald-700', sub: currentLanguage === 'tr' ? 'tavsiye fiyat' : 'at retail' },
-                        { label: oc(currentLanguage).brut_marj,  value: `${margin}%`,  color: margin >= 30 ? 'text-emerald-600' : margin >= 15 ? 'text-amber-600' : 'text-red-600', sub: currentLanguage === 'tr' ? 'teorik oran' : 'theoretical' },
-                        { label: oc(currentLanguage).toplam_adet,   value: totalUnits.toLocaleString('tr-TR'), color: 'text-blue-700', sub: currentLanguage === 'tr' ? 'stokta' : 'in stock' },
+                        { label: dc(currentLanguage).maliyet_degeri,   value: fmtKpi(ekranTutari(stok47.maliyet)),   color: 'text-gray-800',    sub: dc(currentLanguage).stok_maliyeti },
+                        { label: dc(currentLanguage).satis_degeri,  value: fmtKpi(ekranTutari(stok47.satis)),  color: 'text-emerald-700', sub: dc(currentLanguage).tavsiye_fiyat },
+                        // Marj null iken rozet rengi NÖTR — kırmızı/yeşil boyamak "hesaplandı" izlenimi verir.
+                        { label: oc(currentLanguage).brut_marj,
+                          value: stok47.marj === null ? '—' : `${stok47.marj}%`,
+                          color: stok47.marj === null ? 'text-gray-400'
+                               : stok47.marj >= 30 ? 'text-emerald-600' : stok47.marj >= 15 ? 'text-amber-600' : 'text-red-600',
+                          sub: dc(currentLanguage).teorik_oran },
+                        { label: oc(currentLanguage).toplam_adet,   value: adetYaz(ekranTutari(stok47.adet)), color: 'text-blue-700', sub: dc(currentLanguage).stokta },
                         ].map((stat, i) => (
                           <div key={i} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : "bg-gray-50")}>
                             <p className={`text-lg font-black ${stat.color}`}>{stat.value}</p>
@@ -1879,6 +2070,13 @@ export default function DashboardPage(props: Props) {
                         ));
                       })()}
                     </div>
+                    {(stok47.maliyet.bilinmeyen > 0 || stok47.satis.bilinmeyen > 0 || stok47.adet.bilinmeyen > 0) && (
+                      <p className="text-[10px] text-amber-600 mt-2">
+                        {currentLanguage === 'tr'
+                          ? `${stok47.maliyet.bilinmeyen} kalemin maliyeti, ${stok47.satis.bilinmeyen} kalemin satış fiyatı, ${stok47.adet.bilinmeyen} kalemin stoğu bilinmiyor — bu kalemler toplama dâhil değil, marj hesaplanamıyor.`
+                          : `${stok47.maliyet.bilinmeyen} item(s) missing cost, ${stok47.satis.bilinmeyen} missing price, ${stok47.adet.bilinmeyen} missing stock — excluded from totals; margin not computed.`}
+                      </p>
+                    )}
                   </div>
                   </>
                 );
@@ -1886,39 +2084,32 @@ export default function DashboardPage(props: Props) {
 
               {/* ── 6-Month Revenue Trend + Top Products ── */}
               {(() => {
-                // Build last-6-month buckets
-                const now6 = new Date();
-                const months: { key: string; label: string; revenue: number; orders: number }[] = [];
-                for (let i = 5; i >= 0; i--) {
-                  const d = new Date(now6.getFullYear(), now6.getMonth() - i, 1);
-                  const key = ayAnahtari(d);
-                  if (!key) continue;
-                  const short = d.toLocaleString(currentLanguage === 'tr' ? 'tr-TR' : 'en-US', { month: 'short' });
-                  months.push({ key, label: short, revenue: 0, orders: 0 });
-                }
-                for (const o of orders) {
-                  // Tarihi çözülemeyen sipariş kovaya girmez — eskiden `?? new Date()` ile BUGÜNe sayılıyordu.
-                  const key = ayAnahtari(o.createdAt);
-                  if (!key) continue;
-                  const bucket = months.find(m => m.key === key);
-                  if (bucket) { bucket.revenue += o.totalPrice; bucket.orders++; }
-                }
+                // Son 6 ayın kovaları — utils/pano/ciroDonem → aylikCiro (testli).
+                // Tarihi çözülemeyen sipariş kovaya girmez (eskiden `?? new Date()` ile BUGÜNe
+                // sayılıyordu); tutarı okunamayan sipariş ₺0 sayılmaz — grafik noktası `null` olur,
+                // çizgi sıfıra çakılmaz (`bucket.revenue += o.totalPrice` alan yoksa TÜM ayı NaN
+                // yapıp recharts alanını komple bozuyordu).
+                // BİLİNÇLİ FARK: tarih artık `createdAt ?? syncedAt` (eskiden yalnız `createdAt`) —
+                // yanındaki Phase 103 çubuğu o siparişleri zaten sayıyordu, iki grafik aynı ekranda
+                // farklı ciro veriyordu. `iptalHaric: false` PARİTE (trend bugün iptali sayıyor).
+                const aylar = aylikCiro(orders, 6, new Date(), { iptalHaric: false }, currentLanguage === 'tr' ? 'tr' : 'en');
+                const months: { label: string; revenue: number | null; orders: number }[] =
+                  aylar.map(a => ({ label: a.etiket, revenue: a.grafik, orders: a.adet }));
 
                 // Top-5 products by order line count
-                const productCount: Record<string, { name: string; count: number; revenue: number }> = {};
-                for (const o of orders) {
-                  for (const li of (o.lineItems || [])) {
-                    const k = (li as { sku?: string; name?: string; title?: string }).sku || (li as { name?: string }).name || 'Unknown';
-                    productCount[k] = productCount[k] || { name: (li as { name?: string; title?: string }).name || (li as { title?: string }).title || k, count: 0, revenue: 0 };
-                    productCount[k].count += (li as { quantity?: number }).quantity || 1;
-                    productCount[k].revenue += ((li as { price?: number }).price || 0) * ((li as { quantity?: number }).quantity || 1);
-                  }
-                }
-                const top5 = Object.values(productCount).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
-                const maxRevTop = Math.max(...top5.map(p => p.revenue), 1);
+                // `quantity || 1` adedi BİLİNMEYEN satırı 1 adet sayıyordu (uydurma miktar!),
+                // `price || 0` ise fiyatsız satırı ₺0 ciro yapıyordu. İkisi de artık SAYILIR.
+                // Çubuk oranı (`p.barOrani`) modülden gelir — sayfada ölçek hesabı KALMADI
+                // (2026-09-19 hakem turu): buradaki `maxRevTop` KISMİ bir tepeyi ölçek kabul
+                // ediyor, `oranYuzde(ekranTutari(p.ciro), maxRevTop)` ise kısmi satır cirosundan
+                // çubuk çiziyordu. Fiyatsız satırı olan ÇİMENTO, gerçekte listenin tepesindeyken
+                // %67'lik kısa bir çubukla ikinci sırada görünüyordu — üstelik aynı sayfadaki
+                // müşteri/segment panelleri (musteriAnaliz) tam tersi kuralı uyguluyordu.
+                const top5 = enCokSatanlar(orders, 5);
 
-                const totalRevAll = months.reduce((s, m) => s + m.revenue, 0);
-                const totalOrdAll = months.reduce((s, m) => s + m.orders, 0);
+                const toplamT = donemToplami(aylar);
+                const totalRevAll = ekranTutari(toplamT);
+                const totalOrdAll = aylar.reduce((s, a) => s + a.adet, 0);
 
                 return (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -1926,7 +2117,7 @@ export default function DashboardPage(props: Props) {
                     <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                       <div className="flex items-center justify-between mb-1">
                         <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
-                          {currentLanguage === 'tr' ? '6 Aylık Ciro Trendi' : '6-Month Revenue Trend'}
+                          {dc(currentLanguage)._6_aylik_ciro_trendi}
                         </h3>
                         <div className="flex items-center gap-3 text-[10px] text-gray-400">
                           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-brand inline-block" />{oc(currentLanguage).ciro}</span>
@@ -1936,12 +2127,18 @@ export default function DashboardPage(props: Props) {
                       <div className="flex items-center gap-4 mb-3">
                         <div>
                           <p className="text-xl font-bold text-gray-900">{fmtKpi(totalRevAll)}</p>
-                          <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? '6 ay toplam ciro' : '6-month total revenue'}</p>
+                          <p className="text-[10px] text-gray-400">{dc(currentLanguage)._6_ay_toplam_ciro}</p>
+                          {/* Kısmi toplam açıkça söylenir — sessizce eksik rakam gösterme (CLAUDE.md). */}
+                          {toplamT.bilinmeyen > 0 && (
+                            <p className="text-[10px] text-amber-600">
+                              {toplamT.bilinmeyen} {dc(currentLanguage).kaydin_tutari_okunamadi_kismi_toplam}
+                            </p>
+                          )}
                         </div>
                         <div className="w-px h-8 bg-gray-100" />
                         <div>
                           <p className="text-xl font-bold text-blue-600">{totalOrdAll}</p>
-                          <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? 'toplam sipariş' : 'total orders'}</p>
+                          <p className="text-[10px] text-gray-400">{dc(currentLanguage).toplam_siparis}</p>
                         </div>
                       </div>
                       <ResponsiveContainer width="100%" height={160}>
@@ -1977,27 +2174,43 @@ export default function DashboardPage(props: Props) {
                     {/* Top products — 1 col */}
                     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                       <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">
-                        {currentLanguage === 'tr' ? 'En Çok Satan Ürünler' : 'Top Products'}
+                        {dc(currentLanguage).en_cok_satan_urunler}
                       </h3>
                       {top5.length === 0 ? (
-                        <p className="text-xs text-gray-400 text-center py-6">{currentLanguage === 'tr' ? 'Sipariş verisi yok' : 'No order data'}</p>
+                        <p className="text-xs text-gray-400 text-center py-6">{dc(currentLanguage).siparis_verisi_yok}</p>
                       ) : (
                         <div className="space-y-3">
-                          {top5.map((p, i) => (
-                            <div key={i} className="space-y-1">
+                          {top5.map((p, i) => {
+                            // Oran hesaplanamazsa çubuk ÇİZİLMEZ (boş çubuk "%0 ciro" izlenimi
+                            // vermesin): satırın kendi cirosu kısmiysa ya da ölçek satırı kısmiysa
+                            // modül `null` döner (utils/pano/cubuk).
+                            const pay = p.barOrani;
+                            return (
+                            <div key={p.anahtar ?? `tanimsiz-${i}`} className="space-y-1">
                               <div className="flex items-center justify-between">
-                                <span className="text-xs font-semibold text-gray-700 truncate max-w-[140px]">{p.name}</span>
-                                <span className="text-[10px] font-bold text-gray-500">{fmtKpi(p.revenue)}</span>
+                                {/* Eski `'Unknown'` ekrana İngilizce sahte ürün adı basıyordu. */}
+                                <span className="text-xs font-semibold text-gray-700 truncate max-w-[140px]">
+                                  {p.ad ?? (dc(currentLanguage).tanimsiz_urun)}
+                                </span>
+                                <span className="text-[10px] font-bold text-gray-500">{fmtKpi(ekranTutari(p.ciro))}</span>
                               </div>
                               <div className="w-full bg-gray-100 rounded-full h-1.5">
-                                <div
-                                  className="bg-brand h-1.5 rounded-full transition-all"
-                                  style={{ width: `${Math.round((p.revenue / maxRevTop) * 100)}%` }}
-                                />
+                                {pay === null ? null : (
+                                  <div
+                                    className="bg-brand h-1.5 rounded-full transition-all"
+                                    style={{ width: `${Math.round(pay)}%` }}
+                                  />
+                                )}
                               </div>
-                              <p className="text-[10px] text-gray-400">{p.count} {oc(currentLanguage).adet}</p>
+                              <p className="text-[10px] text-gray-400">
+                                {adetYaz(ekranTutari(p.adet))} {oc(currentLanguage).adet}
+                                {p.ciro.bilinmeyen > 0 && (currentLanguage === 'tr'
+                                  ? ` · ${p.ciro.bilinmeyen} satır tutarsız`
+                                  : ` · ${p.ciro.bilinmeyen} line(s) unpriced`)}
+                              </p>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -2018,13 +2231,19 @@ export default function DashboardPage(props: Props) {
                 const counts = STAGES.map(s => leads.filter(l => l.status === s.key).length);
                 const maxCount = Math.max(...counts, 1);
                 const totalActive = counts.slice(0, 5).reduce((a, b) => a + b, 0);
-                const wonRate = totalActive > 0 ? ((counts[5] / (totalActive + counts[5])) * 100).toFixed(0) : '0';
+                // Oran `finansKpi.huniKazanmaOrani` ile (testli, TEK kural; burada KOPYA YAZILMAZ).
+                // Eski satır `totalActive > 0 ? … : '0'` idi: kapı YANLIŞ paydaya bakıyor, bölme
+                // ise `totalActive + counts[5]` ile yapılıyordu. Hepsi kapanmış bir huni
+                // (aktif 0, 'Closed Won' 4) gerçekte %100 iken rozete "Win Rate: 0%" basılıyor,
+                // hiç aday yokken de '—' yerine '0%' yazılıyordu (2026-09-19 delta bulgusu).
+                const wonRate = huniKazanmaOrani(counts.slice(0, 5), counts[5]);
                 return (
                   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">{dashT.lead_summary}</h3>
-                      <span className="text-xs font-bold text-green-600 bg-green-50 px-2.5 py-1 rounded-full">
-                        {currentLanguage === 'tr' ? `Win Rate: ${wonRate}%` : `Win Rate: ${wonRate}%`}
+                      {/* Oran hesaplanamıyorsa (hiç aday yok) rozet '—' basar — "%0" değil. */}
+                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${wonRate === null ? 'text-gray-400 bg-gray-50' : 'text-green-600 bg-green-50'}`}>
+                        {wonRate === null ? 'Win Rate: —' : `Win Rate: ${wonRate}%`}
                       </span>
                     </div>
                     <div className="space-y-2.5">
@@ -2057,7 +2276,7 @@ export default function DashboardPage(props: Props) {
                     <div className="mt-3 pt-3 border-t border-gray-50 flex items-center justify-between text-[10px] text-gray-400">
                       <span>{currentLanguage === 'tr' ? `Toplam: ${leads.length} müşteri adayı` : `Total: ${leads.length} leads`}</span>
                       <button onClick={() => setActiveTab('crm')} className="text-brand font-semibold hover:underline flex items-center gap-0.5">
-                        {currentLanguage === 'tr' ? 'CRM\'e git' : 'Open CRM'} <ChevronRight className="w-3 h-3" />
+                        {dc(currentLanguage).crm_e_git} <ChevronRight className="w-3 h-3" />
                       </button>
                     </div>
                   </div>
@@ -2073,18 +2292,18 @@ export default function DashboardPage(props: Props) {
                     const due = zamanDate(l.nextFollowUpDate);
                     return !!due && due >= today7 && due <= in7;
                   })
-                  // Süzgeçten geçenlerin tarihi çözülmüştür; `?? 0` yalnız tip daraltması, "şimdi" yedeği değil.
-                  .sort((a, b) => (zamanMs(a.nextFollowUpDate) ?? 0) - (zamanMs(b.nextFollowUpDate) ?? 0));
+                  // Süzgeçten geçenlerin tarihi çözülmüştür; `sayiSirala` yine de çözülemeyeni epoch (0) saymaz, sona koyar.
+                  .sort((a, b) => sayiSirala(zamanMs(a.nextFollowUpDate), zamanMs(b.nextFollowUpDate)));
                 if (upcoming.length === 0) return null;
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-3">
                       <h3 className={cn("text-[10px] font-bold uppercase tracking-wider flex items-center gap-2", darkMode ? "text-white/50" : "text-gray-400")}>
                         <Calendar className="w-3.5 h-3.5" />
-                        {currentLanguage === 'tr' ? '7 Günlük Takip Planı' : '7-Day Follow-up Plan'}
+                        {dc(currentLanguage)._7_gunluk_takip_plani}
                       </h3>
                       <button onClick={() => { setActiveTab('crm'); setCrmTab('leads'); }} className="text-[10px] font-semibold text-brand hover:underline">
-                        {currentLanguage === 'tr' ? 'CRM\'e git' : 'Go to CRM'}
+                        {dc(currentLanguage).crm_e_git_2}
                       </button>
                     </div>
                     <div className="space-y-2">
@@ -2096,7 +2315,7 @@ export default function DashboardPage(props: Props) {
                           <button key={l.id} onClick={() => { setActiveTab('crm'); setSelectedLead(l); }}
                             className={cn("w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors", darkMode ? "hover:bg-white/5" : "hover:bg-gray-50")}>
                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-black ${daysLeft === 0 ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}>
-                              {daysLeft === 0 ? (currentLanguage === 'tr' ? 'BUG' : 'NOW') : `${daysLeft}g`}
+                              {daysLeft === 0 ? (dc(currentLanguage).bug) : `${daysLeft}g`}
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className={cn("text-sm font-semibold truncate", darkMode ? "text-white/90" : "text-gray-800")}>{l.name}</p>
@@ -2115,19 +2334,14 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 77: Top Customers by Revenue ── */}
               {orders.length > 0 && (() => {
-                const custMap: Record<string, { revenue: number; orders: number }> = {};
-                for (const o of orders) {
-                  const k = o.customerName;
-                  custMap[k] = custMap[k] || { revenue: 0, orders: 0 };
-                  custMap[k].revenue += o.totalPrice || 0;
-                  custMap[k].orders  += 1;
-                }
-                const top5 = Object.entries(custMap)
-                  .map(([name, d]) => ({ name, ...d }))
-                  .sort((a, b) => b.revenue - a.revenue)
-                  .slice(0, 5);
+                // SAHTE SIFIR + SAHTE ÖLÇEK KALDIRILDI (Faz 3 5/n): `+= o.totalPrice || 0` tutarı
+                // okunamayan siparişi ₺0 sayıyor, `maxRev = top5[0].revenue` ise o ₺0'lı tepe
+                // değere göre TÜM çubukları çiziyordu. `custMap[o.customerName]` ayrıca adı
+                // olmayan siparişlerden "undefined" adlı sahte bir müşteri üretiyordu.
+                // Hesap: src/utils/pano/musteriAnaliz.ts (saf + testli).
+                const m77 = enIyiMusteriler(orders, 5);
+                const top5 = m77.musteriler;
                 if (top5.length === 0) return null;
-                const maxRev = top5[0].revenue;
                 return (
                   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
@@ -2135,36 +2349,46 @@ export default function DashboardPage(props: Props) {
                         {oc(currentLanguage).en_yuksek_cirolu_musteriler}
                       </h3>
                       <button onClick={() => setActiveTab('reports')} className="text-[10px] font-semibold text-brand hover:underline">
-                        {currentLanguage === 'tr' ? 'Raporlara git' : 'Open Reports'}
+                        {dc(currentLanguage).raporlara_git}
                       </button>
                     </div>
                     <div className="space-y-3">
                       {top5.map((c, i) => {
-                        const pct     = Math.round((c.revenue / maxRev) * 100);
                         const medal   = ['🥇','🥈','🥉','',''][i] || '';
                         return (
-                          <div key={c.name} className="space-y-1">
+                          // `ad` null olabildiği için React anahtarı olamaz; adsız kova TEK
+                          // olduğundan sabit anahtar çakışma üretmez.
+                          <div key={c.ad ?? '__adsiz'} className="space-y-1">
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-xs font-semibold text-gray-700 truncate flex items-center gap-1.5">
                                 {medal && <span className="text-sm leading-none">{medal}</span>}
-                                {c.name}
+                                {c.ad ?? '—'}
                               </span>
                               <div className="flex items-center gap-2 flex-shrink-0">
-                                <span className="text-[10px] text-gray-400">{c.orders} {oc(currentLanguage).sip}</span>
+                                <span className="text-[10px] text-gray-400">{c.siparisSayisi} {oc(currentLanguage).sip}</span>
                                 <span className="text-[10px] font-bold text-gray-700">
-                                  {fmtKpi(c.revenue)}
+                                  {fmtKpi(c.ciro)}
                                 </span>
                               </div>
                             </div>
-                            <div className="w-full bg-gray-100 rounded-full h-1.5">
-                              <div
-                                className={`h-1.5 rounded-full transition-all duration-700 ${i === 0 ? 'bg-brand' : 'bg-gray-300'}`}
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
+                            {c.barOrani !== null && (
+                              <div className="w-full bg-gray-100 rounded-full h-1.5">
+                                <div
+                                  className={`h-1.5 rounded-full transition-all duration-700 ${i === 0 ? 'bg-brand' : 'bg-gray-300'}`}
+                                  style={{ width: `${c.barOrani}%` }}
+                                />
+                              </div>
+                            )}
                           </div>
                         );
                       })}
+                      {m77.tutarsiz > 0 && (
+                        <p className="text-[10px] text-gray-400">
+                          {currentLanguage === 'tr'
+                            ? `${m77.tutarsiz} siparişin tutarı bilinmiyor — toplama dâhil değil.`
+                            : `${m77.tutarsiz} order(s) have no amount — excluded from the total.`}
+                        </p>
+                      )}
                     </div>
                   </div>
                 );
@@ -2174,30 +2398,34 @@ export default function DashboardPage(props: Props) {
               {orders.length > 0 && (() => {
                 const DAYS_TR = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
                 const DAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                const counts = Array(7).fill(0);
-                for (const o of orders) {
-                  const d = zamanDate(o.createdAt ?? o.syncedAt);
-                  if (!d) continue;
-                  counts[d.getDay()] += 1;
-                }
-                const maxC = Math.max(...counts, 1);
-                const totalO = counts.reduce((a, b) => a + b, 0);
-                const busiest = counts.indexOf(Math.max(...counts));
+                // `indexOf(Math.max(...))` tüm tarihler okunamazsa 0 döndürüp rozete "En yoğun: Paz"
+                // yazdırıyordu (veri yokken uydurma sonuç). Tarihi çözülemeyen sipariş artık SAYILIR.
+                // Tarih seçici varsayılanı `createdAt ?? syncedAt` — sayfayla BİREBİR aynı (parite).
+                const isi73 = haftaIciIsiHaritasi(orders);
+                const counts = isi73.sayilar;
+                const totalO = isi73.toplam;
+                const busiest = isi73.enYogunGun;   // null olabilir — rozet o zaman çizilmez
                 return (
                   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider">
-                        {currentLanguage === 'tr' ? 'Haftalık Sipariş Dağılımı' : 'Orders by Weekday'}
+                        {dc(currentLanguage).haftalik_siparis_dagilimi}
                       </h3>
-                      <span className="text-[10px] font-bold text-brand bg-brand/10 px-2 py-0.5 rounded-full">
-                        {currentLanguage === 'tr' ? `En yoğun: ${DAYS_TR[busiest]}` : `Busiest: ${DAYS_EN[busiest]}`}
-                      </span>
+                      {/* Türetilen rozet: tek ölçüm bile yoksa ÇİZİLMEZ. */}
+                      {busiest !== null && (
+                        <span className="text-[10px] font-bold text-brand bg-brand/10 px-2 py-0.5 rounded-full">
+                          {currentLanguage === 'tr' ? `En yoğun: ${DAYS_TR[busiest]}` : `Busiest: ${DAYS_EN[busiest]}`}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-end gap-2">
                       {counts.map((c, i) => {
-                        const pct = Math.round((c / maxC) * 100);
+                        const pay = oranYuzde(c, isi73.enYuksek);
+                        // Hiç ölçüm yoksa (enYuksek 0) her çubuk 6%'lik görsel kütük kalır — eski koddaki
+                        // `Math.max(pct, 6)` tabanının aynısı; uydurma bir yükseklik ÜRETİLMEZ.
+                        const yukseklik = pay === null ? 6 : Math.max(Math.round(pay), 6);
                         const isToday = i === new Date().getDay();
-                        const isBusiest = i === busiest;
+                        const isBusiest = busiest !== null && i === busiest;
                         return (
                           <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
                             {/* Bar */}
@@ -2206,7 +2434,7 @@ export default function DashboardPage(props: Props) {
                                 className={`w-full rounded-t-lg transition-all duration-700 ${
                                   isBusiest ? 'bg-brand' : isToday ? 'bg-brand/50' : 'bg-gray-200'
                                 }`}
-                                style={{ height: `${Math.max(pct, 6)}%` }}
+                                style={{ height: `${yukseklik}%` }}
                               />
                             </div>
                             {/* Count */}
@@ -2224,6 +2452,9 @@ export default function DashboardPage(props: Props) {
                       {currentLanguage === 'tr'
                         ? `${totalO} siparişin haftanın günlerine göre dağılımı`
                         : `Distribution of ${totalO} orders across weekdays`}
+                      {isi73.tarihsiz > 0 && (currentLanguage === 'tr'
+                        ? ` · ${isi73.tarihsiz} siparişin tarihi okunamadı, dağılıma girmedi`
+                        : ` · ${isi73.tarihsiz} order(s) with unreadable date, excluded`)}
                     </p>
                   </div>
                 );
@@ -2234,7 +2465,7 @@ export default function DashboardPage(props: Props) {
                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                   <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
                     <History className="w-4 h-4" />
-                    {currentLanguage === 'tr' ? 'Son Görüntülenenler' : 'Recently Viewed'}
+                    {dc(currentLanguage).son_goruntulenenler}
                   </h3>
                   <div className="flex flex-wrap gap-2">
                     {recentlyViewed.map(item => (
@@ -2280,19 +2511,19 @@ export default function DashboardPage(props: Props) {
               <div className="apple-card p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="font-bold text-gray-900 text-sm">{tr595?'📌 Görevler & Hatırlatıcılar':'📌 Tasks & Reminders'}</h3>
+                    <h3 className="font-bold text-gray-900 text-sm">{dc(tr595).gorevler_hatirlaticilar}</h3>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      {overdueTasks.length>0&&<span className="text-red-500 font-bold">{overdueTasks.length} {tr595?'gecikmiş · ':'overdue · '}</span>}
-                      {todayTasks.length>0&&<span className="text-amber-600 font-bold">{todayTasks.length} {tr595?'bugün vadeli · ':'due today · '}</span>}
-                      {p595Tasks.filter(t=>!t.done).length} {tr595?'açık görev':'open task(s)'}
+                      {overdueTasks.length>0&&<span className="text-red-500 font-bold">{overdueTasks.length} {dc(tr595).gecikmis}</span>}
+                      {todayTasks.length>0&&<span className="text-amber-600 font-bold">{todayTasks.length} {dc(tr595).bugun_vadeli}</span>}
+                      {p595Tasks.filter(t=>!t.done).length} {dc(tr595).acik_gorev}
                     </p>
                   </div>
-                  <button onClick={()=>setP595ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{tr595?'Görev Ekle':'Add Task'}</button>
+                  <button onClick={()=>setP595ShowForm(v=>!v)} className="apple-button-primary flex items-center gap-2 text-sm"><Plus className="w-4 h-4"/>{dc(tr595).gorev_ekle}</button>
                 </div>
                 {p595ShowForm && (
                   <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <input className="apple-input px-3 py-2 text-sm col-span-2" placeholder={tr595?'Görev başlığı...':'Task title...'} value={p595Draft.title} onChange={e=>setP595Draft(d=>({...d,title:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm col-span-2" placeholder={dc(tr595).gorev_basligi} value={p595Draft.title} onChange={e=>setP595Draft(d=>({...d,title:e.target.value}))} />
                       <input type="date" className="apple-input px-3 py-2 text-sm" value={p595Draft.dueDate} onChange={e=>setP595Draft(d=>({...d,dueDate:e.target.value}))} />
                       <select className="apple-input px-3 py-2 text-sm" value={p595Draft.priority} onChange={e=>setP595Draft(d=>({...d,priority:e.target.value as typeof d.priority}))}>
                         <option value="Düşük">{oc(tr595).dusuk}</option>
@@ -2300,13 +2531,13 @@ export default function DashboardPage(props: Props) {
                         <option value="Yüksek">{oc(tr595).yuksek}</option>
                         <option value="Kritik">{oc(tr595).kritik}</option>
                       </select>
-                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr595?'Atanan kişi':'Assigned to'} value={p595Draft.assignedTo} onChange={e=>setP595Draft(d=>({...d,assignedTo:e.target.value}))} />
-                      <input className="apple-input px-3 py-2 text-sm" placeholder={tr595?'Modül (ör. CRM, Stok)':'Module (e.g. CRM, Stock)'} value={p595Draft.module} onChange={e=>setP595Draft(d=>({...d,module:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={dc(tr595).atanan_kisi} value={p595Draft.assignedTo} onChange={e=>setP595Draft(d=>({...d,assignedTo:e.target.value}))} />
+                      <input className="apple-input px-3 py-2 text-sm" placeholder={dc(tr595).modul_or_crm_stok} value={p595Draft.module} onChange={e=>setP595Draft(d=>({...d,module:e.target.value}))} />
                     </div>
                     <div className="flex gap-2">
                       <button onClick={async ()=>{
                         if(!p595Draft.title) return;
-                        try { await addDoc(collection(db,'workflowTasks'),{title:p595Draft.title,dueDate:p595Draft.dueDate||today595,assignedTo:p595Draft.assignedTo,module:p595Draft.module,priority:p595Draft.priority,done:false,createdAt:serverTimestamp()}); toast(currentLanguage === 'tr' ? 'Görev eklendi ✓' : 'Task added ✓', 'success'); } catch(e){console.error("[firestore]", e); toast(currentLanguage === 'tr' ? 'Görev eklenemedi.' : 'Failed to add task.', 'error');}
+                        try { await addDoc(collection(db,'workflowTasks'),{title:p595Draft.title,dueDate:p595Draft.dueDate||today595,assignedTo:p595Draft.assignedTo,module:p595Draft.module,priority:p595Draft.priority,done:false,createdAt:serverTimestamp()}); toast(dc(currentLanguage).gorev_eklendi, 'success'); } catch(e){console.error("[firestore]", e); toast(dc(currentLanguage).gorev_eklenemedi, 'error');}
                         setP595Draft({title:'',dueDate:'',assignedTo:'',module:'',priority:'Orta'});
                         setP595ShowForm(false);
                       }} className="apple-button-primary text-sm px-4 py-1.5">{oc(tr595).kaydet}</button>
@@ -2315,7 +2546,7 @@ export default function DashboardPage(props: Props) {
                   </div>
                 )}
                 {p595Tasks.length===0 ? (
-                  <p className="text-center py-6 text-gray-400 text-sm">{tr595?'Henüz görev yok. "Görev Ekle" ile başlayın.':'No tasks yet. Click "Add Task" to start.'}</p>
+                  <p className="text-center py-6 text-gray-400 text-sm">{dc(tr595).henuz_gorev_yok_gorev_ekle_ile_baslayin}</p>
                 ) : (
                   <div className="space-y-2">
                     {p595Tasks.filter(t=>!t.done).sort((a,b)=>{
@@ -2337,7 +2568,7 @@ export default function DashboardPage(props: Props) {
                       </div>
                     ))}
                     {p595Tasks.filter(t=>t.done).length>0&&(
-                      <p className="text-xs text-gray-400 text-center pt-1">✓ {p595Tasks.filter(t=>t.done).length} {tr595?'tamamlanan görev':'completed task(s)'} &nbsp;
+                      <p className="text-xs text-gray-400 text-center pt-1">✓ {p595Tasks.filter(t=>t.done).length} {dc(tr595).tamamlanan_gorev} &nbsp;
                         <button onClick={async ()=>{if(!await confirmDelete(undefined, currentLanguage==='tr'?'tr':'en'))return;p595Tasks.filter(t=>t.done).forEach(t=>deleteDoc(doc(db,'workflowTasks',t.id)));}} className="text-red-400 hover:text-red-600">{oc(tr595).temizle}</button>
                       </p>
                     )}

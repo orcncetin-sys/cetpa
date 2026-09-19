@@ -244,7 +244,19 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         // aksi halde maliyet 0 sayilip marj %100'e sisiyordu.
         const calcMargin = (ordersList: Order[]) => {
           const m = brutMarj(ordersList, inventory, exchangeRates);
-          return { rev: m.ciro, cogs: m.maliyet, margin: m.marj, gross: m.ciro - m.maliyet, kapsamDisi: m.kapsamDisi };
+          // `gross` ARTIK `m.brutKar` (2026-09-19 delta bulgusu): eski `m.ciro - m.maliyet`
+          // KISMİ cirodan TAM maliyeti çıkarıyordu. `brutKar` iki taraf da tam bilinmiyorsa
+          // NaN döner; köprü zaten `margin === null` dalında çizilmiyor, ama formülün kendisi
+          // de artık asimetrik değil.
+          // `tutarsiz`: kapsamdaki siparişlerden kaçının TUTARI ya da MALİYETİ okunamadı —
+          // BENZERSİZ sayaç (`raporMarj.tutarsizSiparis`). İki sayacı TOPLAMAK, aynı `kapsamli`
+          // kümesinden çıktıkları için kesişimi iki kez sayıyordu: tutarı da maliyeti de
+          // okunamayan tek sipariş ekrana "2 sipariş" diye basılıyordu (2026-09-19 delta bulgusu;
+          // aynı arıza `finansKpi.nakitPozisyonu`da Phase 130'da Set ile kapatılmıştı).
+          return {
+            rev: m.ciro, cogs: m.maliyet, margin: m.marj, gross: m.brutKar,
+            kapsamDisi: m.kapsamDisi, tutarsiz: m.tutarsizSiparis,
+          };
         };
         const filterOrders = (start: Date, end: Date) => orders.filter(o => {
           if (o.status === 'Cancelled') return false;
@@ -255,9 +267,30 @@ export default function GenelBloklar2({ reportsTab, orders, inventory, employees
         const curr235 = calcMargin(filterOrders(currMonthStart235, new Date()));
         if (prev235.rev === 0 && curr235.rev === 0) return null;
         // Marj koprusu iki ayin da marjini BILMEYI gerektirir. Kalem verisi olmayan
-        // (Mikro turevi) siparislerden olusan bir ayda marj null'dur — o durumda
-        // koprü uydurma bir "etki" ayristirmasi yapmak yerine hic gosterilmez.
-        if (prev235.margin === null || curr235.margin === null) return null;
+        // (Mikro turevi) siparislerden olusan bir ayda marj null'dur — o durumda uydurma
+        // bir "etki" ayristirmasi YAPILMAZ. 2026-09-19 hakem turu: panel eskiden sessizce
+        // KAYBOLUYORDU; kullanici ne eksik oldugunu goremiyordu. Artik NEDENI yaziliyor.
+        if (prev235.margin === null || curr235.margin === null) {
+          const tutarsiz235 = prev235.tutarsiz + curr235.tutarsiz;
+          const kapsamDisi235 = prev235.kapsamDisi + curr235.kapsamDisi;
+          return (
+            <div className="apple-card p-6">
+              <h3 className="font-bold text-gray-800 mb-2">{currentLanguage === 'tr' ? '🌉 Marj Köprü Analizi (MoM)' : '🌉 Margin Bridge Analysis (MoM)'}</h3>
+              <p className="text-xs text-gray-500">
+                {currentLanguage === 'tr'
+                  ? 'Köprü, iki ayın da brüt marjı bilinmeden kurulamaz — eksik veriden "etki" ayrıştırması üretilmiyor.'
+                  : 'The bridge needs a known gross margin for both months — no effect split is produced from incomplete data.'}
+              </p>
+              {(tutarsiz235 > 0 || kapsamDisi235 > 0) && (
+                <p className="text-[11px] text-amber-600 mt-1">
+                  {currentLanguage === 'tr'
+                    ? `${tutarsiz235} siparişin tutarı ya da maliyeti okunamadı, ${kapsamDisi235} siparişin kalem (maliyet) verisi yok.`
+                    : `${tutarsiz235} order(s) with unknown amount or cost, ${kapsamDisi235} without line-item cost data.`}
+                </p>
+              )}
+            </div>
+          );
+        }
         const revChange = curr235.rev - prev235.rev;
         const grossChange = curr235.gross - prev235.gross;
         const marginChange = curr235.margin - prev235.margin;

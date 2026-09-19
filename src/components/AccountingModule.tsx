@@ -2430,7 +2430,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       {/* ── Sabit Kıymet / Demirbaş ── */}
       {accountingTab === 'sabit_kiymet' && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-          <SabitKiymetModule currentLanguage={currentLanguage} isAuthenticated={isAuthenticated} />
+          <SabitKiymetModule currentLanguage={currentLanguage} isAuthenticated={isAuthenticated} exchangeRates={exchangeRates} />
         </motion.div>
       )}
 

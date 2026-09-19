@@ -12,7 +12,9 @@ import {
   onSnapshot, query, serverTimestamp,
 } from '../lib/dbClient';
 import { paraYaz } from '../utils/currency';
-import { zamanDate, gunFarki, bugunAnahtari, tarihYaz } from '../utils/zaman';
+import { birikmisAmortisman, netDeger, yillikAmortisman, aylikAmortisman } from '../utils/muhasebe/amortisman';
+import { varlikToplami } from '../utils/muhasebe/varlikToplami';
+import { gunFarki, bugunAnahtari, tarihYaz } from '../utils/zaman';
 import { oc } from '../i18n/ortak';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -82,56 +84,23 @@ const cn = (...classes: unknown[]) => classes.filter(Boolean).join(' ');
 // Tek kaynak: utils/currency.paraYaz (0 ondalık, bilinmeyen tutar '—'). İmza korundu, çağrı yerleri değişmedi.
 const formatTRY = (val: number) => paraYaz(val, { ondalik: 0 });
 
-function calcYillikAmort(item: SabitKiymet): number {
-  if (item.faydaliOmur <= 0) return 0;
-  // Tamamen amortismana tabi tutulmuşsa yıllık amortisman 0 (önce azalan-bakiyede
-  // ömür sonrası sonsuz amortisman gösteriyordu).
-  if (calcBirikmisSalinma(item) >= item.alisBedeli) return 0;
-  if (item.amortYontemi === 'Doğrusal') {
-    return item.alisBedeli / item.faydaliOmur;
-  }
-  // Azalan Bakiyeler: oran = 2 / ömür, yıllık = (alisBedeli - birikmiş) * oran
-  const oran = 2 / item.faydaliOmur;
-  const kalanDeger = Math.max(0, item.alisBedeli - calcBirikmisSalinma(item));
-  return kalanDeger * oran;
-}
-
-function calcBirikmisSalinma(item: SabitKiymet): number {
-  // Manuel override (0 = otomatik hesapla) — önce sessizce yok sayılıyordu.
-  if (item.birikmisSalinma > 0) return Math.min(item.birikmisSalinma, item.alisBedeli);
-  if (!item.alisTarihi) return 0;
-  const alis = zamanDate(item.alisTarihi);
-  if (!alis) return 0;
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  const yilGecen = (now.getTime() - alis.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-  if (yilGecen <= 0) return 0;
-  const yilCapped = Math.min(yilGecen, item.faydaliOmur);
-  if (item.amortYontemi === 'Doğrusal') {
-    return (item.alisBedeli / item.faydaliOmur) * yilCapped;
-  }
-  // Azalan Bakiyeler DDB
-  const oran = 2 / item.faydaliOmur;
-  let kalan = item.alisBedeli;
-  let toplam = 0;
-  const tamYil = Math.floor(yilCapped);
-  for (let i = 0; i < tamYil; i++) {
-    const a = kalan * oran;
-    toplam += a;
-    kalan -= a;
-  }
-  const kesir = yilCapped - tamYil;
-  if (kesir > 0) toplam += kalan * oran * kesir;
-  return Math.min(toplam, item.alisBedeli);
-}
-
-function calcNetDeger(item: SabitKiymet): number {
-  return Math.max(0, item.alisBedeli - calcBirikmisSalinma(item));
-}
-
-function calcAylikAmort(item: SabitKiymet): number {
-  return calcYillikAmort(item) / 12;
-}
+/**
+ * Amortisman hesabı BU DOSYADA DEĞİL (2026-09-19): `src/utils/muhasebe/amortisman.ts`.
+ *
+ * Aynı hesabın Bilanço tarafında bir KOPYASI yoktu — `raporVeriKatmani.sabitKiymetOku`
+ * dokümandaki `birikmisSalinma` alanını ham okuyor, 0'ı "amortismanı yok" sayıyordu. Oysa 0
+ * "hesaplansın" demektir (tip yorumuna bakın) ve form varsayılanı tam olarak 0'dır: aynı
+ * demirbaş bu listede ₺240.000 net görünürken Bilanço'ya ₺1.200.000 brütle giriyordu.
+ * Kural artık tek yerde ve testli; buradaki sarmalayıcılar yalnız imzayı koruyor.
+ *
+ * DAVRANIŞ FARKI: girdisi eksik (alış tarihi/ömrü olmayan, ör. Mikro importundan kolonu
+ * çözülemeyen) varlıkta sayı artık 0 değil NaN'dır — `paraYaz` bunu '—' basar. Eskiden ekran
+ * "₺0 amortisman" diyordu, yani bilinmeyeni biliniyor gibi gösteriyordu.
+ */
+const calcYillikAmort = (item: SabitKiymet): number => yillikAmortisman(item);
+const calcBirikmisSalinma = (item: SabitKiymet): number => birikmisAmortisman(item);
+const calcNetDeger = (item: SabitKiymet): number => netDeger(item);
+const calcAylikAmort = (item: SabitKiymet): number => aylikAmortisman(item);
 
 function generateDemirbasNo(existing: SabitKiymet[]): string {
   const nums = existing
@@ -289,8 +258,13 @@ function SortTh({ label, sortKey, current, onSort }: {
   );
 }
 
-function StatCard({ icon: Icon, label, value, color }: {
-  icon: React.ElementType; label: string; value: string; color: string;
+/**
+ * `not`: rakamın KISMİ olduğunu (ya da hiç üretilemediğini) söyleyen alt satır. EKRAN
+ * sözleşmesi kısmi toplamı '—' VEYA açık not ile ister; kartta not alanı olmadığı için
+ * dışarıda kalan varlıklar sessiz kalıyordu (2026-09-19 delta bulgusu).
+ */
+function StatCard({ icon: Icon, label, value, color, not }: {
+  icon: React.ElementType; label: string; value: string; color: string; not?: string;
 }) {
   return (
     <motion.div className="apple-card p-5 flex items-center gap-4"
@@ -301,6 +275,7 @@ function StatCard({ icon: Icon, label, value, color }: {
       <div className="min-w-0">
         <p className="text-[11px] text-[#86868B] font-medium truncate">{label}</p>
         <p className="text-lg font-bold text-[#1D1D1F] leading-tight truncate">{value}</p>
+        {not && <p className="text-[10px] text-amber-600 leading-tight mt-0.5" title={not}>{not}</p>}
       </div>
     </motion.div>
   );
@@ -362,26 +337,24 @@ export default function SabitKiymetModule({
   // Ondan devralınan şey KARAR: kur yoksa uydurma, `null` dön.
   // Eskiden `?? 38` / `?? 41` vardı — 2024'ten kalma sabit kurlar KPI'yi
   // sessizce yanlış basıyordu (CLAUDE.md: "sahte kesinlik gösterme").
+  // `amount` buraya YALNIZ bilinen bir sayı olarak gelir (`varlikToplami` önce kapıdan geçirir),
+  // bu yüzden eski `Number(amount) || 0` yedeği kaldırıldı — NaN'ı sessizce ₺0 yapıyordu.
   const toTRY = (amount: number, currency?: string): number | null => {
-    const a = Number(amount) || 0;
-    if (!currency || currency === 'TRY') return a; // ₺ yolu: kur gerekmez
+    if (!currency || currency === 'TRY') return amount; // ₺ yolu: kur gerekmez
     const kur = exchangeRates?.[currency];
     if (!kur || !isFinite(kur) || kur <= 0) return null;
-    return a * kur;
+    return amount * kur;
   };
 
   /**
-   * Karışık para birimli varlıkları ₺'ye toplar. TEK bir kalem çevrilemiyorsa
-   * toplam da güvenilir değildir → null (KPI '—' basar). Eksik kalemi 0 sayıp
-   * yarım toplamı ₺ etiketiyle göstermek hatanın ta kendisi olurdu.
-   * Tüm varlıklar ₺ ise kur hiç sorulmaz, davranış eskisiyle birebir aynıdır.
+   * Karışık para birimli varlıkları ₺'ye toplar — kural `utils/muhasebe/varlikToplami.ts`te
+   * (saf + testli; burada KOPYA YAZILMAZ). Kart bir EKRAN toplamıdır: bilinenlerin kısmi
+   * toplamı + "N varlık dışarıda" notu. Eski gövde "tek kalem eksikse toplam null" diyordu ve
+   * Mikro importundan gelen TEK tarihsiz demirbaş 40 doğru varlığın kartını da boşaltıyordu
+   * (2026-09-19 delta bulgusu); iki dışlama nedeni de aynı '—' ile ayırt edilemiyordu.
    */
-  const toplaTRY = (list: SabitKiymet[], tutar: (v: SabitKiymet) => number): number | null =>
-    list.reduce<number | null>((s, v) => {
-      if (s === null) return null;
-      const d = toTRY(tutar(v), v.paraBirimi);
-      return d === null ? null : s + d;
-    }, 0);
+  const toplaTRY = (list: SabitKiymet[], tutar: (v: SabitKiymet) => number) =>
+    varlikToplami(list, tutar, (ham, v) => toTRY(ham, v.paraBirimi));
   const tr = currentLanguage === 'tr';
   const L = (key: LabelKey) => t(key, currentLanguage);
 
@@ -462,6 +435,23 @@ export default function SabitKiymetModule({
     toplamDeger: toplaTRY(aktifVarliklar, calcNetDeger),
     toplamBirikmiS: toplaTRY(aktifVarliklar, calcBirikmisSalinma),
   };
+  /**
+   * KPI kartının alt notu: kaç varlık NEDEN dışarıda kaldı. İki neden AYRI yazılır —
+   * kullanıcının yapacağı iş farklıdır (eksik veri girişi ↔ kur arşivi). Düz fonksiyon,
+   * bileşen DEĞİL: render içinde bileşen tanımlamak her render'da yeniden bağlar.
+   */
+  const kpiNotu = (s: ReturnType<typeof toplaTRY>): string | undefined => {
+    const parcalar: string[] = [];
+    if (s.hesaplanamayan > 0) {
+      parcalar.push(tr
+        ? `${s.hesaplanamayan} varlığın amortismanı hesaplanamıyor (alış tarihi / ömür / bedel eksik)`
+        : `${s.hesaplanamayan} asset(s) with underivable depreciation (missing purchase date / life / cost)`);
+    }
+    if (s.kursuz > 0) {
+      parcalar.push(tr ? `${s.kursuz} varlıkta kur bulunamadı` : `${s.kursuz} asset(s) with no exchange rate`);
+    }
+    return parcalar.length > 0 ? `${parcalar.join(' · ')}${Number.isNaN(s.ekran) ? '' : (tr ? ' — toplam bu kayıtları İÇERMEZ' : ' — total excludes them')}` : undefined;
+  };
 
   // ── Filtering & sorting (Varlıklar) ───────────────────────────────────────
   const filtered = varliklar.filter(v => {
@@ -537,11 +527,23 @@ export default function SabitKiymetModule({
   const handleDonemHesapla = async () => {
     const aktif = varliklar.filter(v => v.durum === 'Aktif');
     if (aktif.length === 0) return;
+    // KAYIT KAPISI (2026-09-19): amortismanı TÜRETİLEMEYEN varlık (alış tarihi / faydalı ömür /
+    // alış bedeli eksik — ör. kolonu çözülemeyen Mikro demirbaş importu) için defter kaydı
+    // YAZILMAZ. Eski hesap bu varlıklara 0 döndürüyordu ve "₺0 amortisman" kalıcı bir muhasebe
+    // kaydı olarak `amortismanKayitlari`na düşüyordu; NaN yazmak ise dokümanı bozardı.
+    const hesaplanabilir = aktif.filter(v => Number.isFinite(calcBirikmisSalinma(v)) && Number.isFinite(calcYillikAmort(v)));
+    const atlanan = aktif.length - hesaplanabilir.length;
+    if (hesaplanabilir.length === 0) {
+      showToast(tr
+        ? `${atlanan} varlığın amortismanı hesaplanamıyor (alış tarihi / faydalı ömür / alış bedeli eksik) — kayıt yazılmadı.`
+        : `Depreciation not computable for ${atlanan} asset(s) (missing purchase date / useful life / cost) — nothing written.`, 'error');
+      return;
+    }
     setAmortCalcing(true);
     try {
       const now = new Date();
       const donem = `${now.getFullYear()}-Q${Math.ceil((now.getMonth() + 1) / 3)}`;
-      await Promise.all(aktif.map(item =>
+      await Promise.all(hesaplanabilir.map(item =>
         addDoc(collection(db, 'amortismanKayitlari'), {
           varlikId: item.id,
           varlikAd: item.ad,
@@ -554,7 +556,11 @@ export default function SabitKiymetModule({
           createdAt: serverTimestamp(),
         })
       ));
-      showToast(L('hesaplandı'));
+      showToast(atlanan > 0
+        ? (tr
+            ? `${L('hesaplandı')} ${atlanan} varlık atlandı: amortismanı hesaplanamıyor.`
+            : `${L('hesaplandı')} ${atlanan} asset(s) skipped: depreciation not computable.`)
+        : L('hesaplandı'));
     } catch (err) {
       console.error(err);
       showToast(L('hata'), 'error');
@@ -707,8 +713,10 @@ export default function SabitKiymetModule({
       {activeTab === 'varliklar' && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <StatCard icon={Package}    label={L('toplamVarlik')}    value={`${kpi.count} ${L('adet')}`}    color="bg-blue-100 text-blue-700" />
-          <StatCard icon={BarChart3}  label={L('toplamDegerLabel')} value={kpi.toplamDeger === null ? '—' : formatTRY(kpi.toplamDeger)}       color="bg-green-100 text-green-700" />
-          <StatCard icon={TrendingDown} label={L('toplamAmort')}   value={kpi.toplamBirikmiS === null ? '—' : formatTRY(kpi.toplamBirikmiS)} color="bg-orange-100 text-orange-700" />
+          <StatCard icon={BarChart3}  label={L('toplamDegerLabel')} value={Number.isNaN(kpi.toplamDeger.ekran) ? '—' : formatTRY(kpi.toplamDeger.ekran)}
+            not={kpiNotu(kpi.toplamDeger)} color="bg-green-100 text-green-700" />
+          <StatCard icon={TrendingDown} label={L('toplamAmort')}   value={Number.isNaN(kpi.toplamBirikmiS.ekran) ? '—' : formatTRY(kpi.toplamBirikmiS.ekran)}
+            not={kpiNotu(kpi.toplamBirikmiS)} color="bg-orange-100 text-orange-700" />
         </div>
       )}
 

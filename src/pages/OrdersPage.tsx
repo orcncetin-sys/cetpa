@@ -46,11 +46,12 @@ import LocationQRModal from '../components/LocationQRModal';
 import TransferScanPanel from '../components/TransferScanPanel';
 import CustomerCombobox from '../components/CustomerCombobox';
 import { useMikroSiparisler } from "../hooks/useMikroSiparisler";
+import { mikroSiparisindenPanoSiparisi } from '../utils/pano/mikroBirlesim';
 import LocationStockReport from '../components/LocationStockReport';
 import { faturaTipiEtiketi, siparisDurumEtiketi } from '../utils/durumEtiketi';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz } from '../utils/belgeSablonu';
 import { siparisStokPlani, stokGecisi, ATLANMA_SEBEBI } from '../utils/siparisStok';
-import { satirTutari, ekranTutari } from '../utils/para';
+import { satirTutari, ekranTutari, sayiSirala } from '../utils/para';
 import { teslimPerformansi, oranYuzde, ihracatToplami, ihracatToplamiYaz, memnuniyetOrtalamasi } from '../utils/siparisler/lojistikKpi';
 import { siparisKarliligi, mesajTutari, kalemlerTutari, stokKartiBul, BILINMIYOR } from '../utils/siparisler/siparisKarlilik';
 import { odenmemisOzeti, kovaTutari } from '../utils/siparisler/tahsilatVade';
@@ -269,21 +270,24 @@ export default function OrdersPage({
   // ── MİKRO ENTEGRASYONU ──
   const [orderSourceTab, setOrderSourceTab] = useState<'cetpa' | 'mikro'>('cetpa');
   const mikroSiparisler = useMikroSiparisler(true);
+  // Eşleme KOPYASI KALDIRILDI (2026-09-19 delta bulgusu): burada elle yazılan
+  // `totalPrice: ms.tutar` alanı HER ZAMAN yazılıyordu ve hook o alanı `Number(sip_tutar || 0)`
+  // ile ürettiği için Mikro aynasında `sip_tutar` NULL gelen sipariş "₺0,00" tutarlı bir kayıt
+  // gibi listeleniyor, KPI ve CSV toplamlarına 0 olarak giriyordu. Aynı kayıt Pano'da (ham
+  // kolonu okuyan `mikroBirlesim`) "tutarı okunamadı" diye '—' basılıyordu — bir kayıt, iki
+  // ekran, iki farklı anlam. Tutar kuralı artık TEK yerde: `mikroSiparisindenPanoSiparisi`
+  // tutarı bilinmiyorsa `totalPrice` alanını HİÇ YAZMAZ (`siparisTutari` NaN döner, `toplaBilinen`
+  // kaydı toplama katmaz ama SAYAR).
+  //
+  // `tip === 0` süzgeci ve ekstra alanlar (belge no / açıklama / boş kalem listesi) bu sayfaya
+  // özgü olduğu için burada kaldı; modülün kendi `panoMikroSiparisleri` süzgeci `tip`i bilinmeyen
+  // kaydı da alıyor — davranışı değiştirmemek için parite korundu.
+  // NOT: `status: 'Pending'` sabiti de sahte kesinlik (Mikro sipariş durumu bilinmiyor) — Açık İş.
   const mappedMikroSiparisler = mikroSiparisler.filter(ms => ms.tip === 0).map(ms => ({
-    id: ms.id,
-    orderNumber: ms.evrakNo,
-    customerName: ms.cariKodu,
-    totalPrice: ms.tutar,
-    status: 'Pending',
-    createdAt: ms.tarih,
-    syncedAt: ms.tarih,
+    ...mikroSiparisindenPanoSiparisi(ms),
     mikroBelgeNo: ms.belgeNo,
     notes: ms.satirAciklamasi,
     lineItems: [],
-    // Kaynak etiketi (Faz 1 3/n): odemeTakipli bu kayıtları "ödeme Cetpa'da izlenmiyor"
-    // diye ayırsın — eskiden etiket yoktu, CSV'de her Mikro siparişi 'Bekliyor' çıkıyordu.
-    // NOT: `status: 'Pending'` sabiti de sahte kesinlik (Mikro sipariş durumu bilinmiyor) — Açık İş.
-    source: 'mikro-siparis',
   })) as unknown as Order[];
   
   const activeOrders = orderSourceTab === 'cetpa' ? orders : mappedMikroSiparisler;
@@ -388,6 +392,10 @@ export default function OrdersPage({
    *  türevlerinde syncedAt olmadığı için hepsi '' anahtarıyla aynı kovaya düşüp
    *  tarih sütunu dolu görünürken sıralama rastgele kalıyordu (2026-09-03). */
   const siparisSirala = (arr: Order[], key: string, dir: 'asc' | 'desc'): Order[] => {
+    // HÜCRE İLE SIRALAYICI AYNI TANIM: tutarı bilinmeyen siparişte `totalPrice` alanı YOKTUR (hücre '—' basar);
+    // genel `sortData` onu '' → 0 sayıp bilinen ₺0 gibi diziyordu. `sayiSirala` bilinmeyeni HER İKİ yönde sona
+    // koyar — yön `-fark` ile ÇEVRİLMEZ (para.ts uyarısı: çevrilirse bilinmeyen başa gelir).
+    if (key === 'totalPrice') return [...arr].sort((a, b) => sayiSirala(a.totalPrice, b.totalPrice, dir === 'desc'));
     if (key !== 'syncedAt') return sortData(arr, key, dir);
     return [...arr].sort((a, b) => {
       const av = siparisTarihMs(a), bv = siparisTarihMs(b);
@@ -483,10 +491,30 @@ export default function OrdersPage({
    * `irsaliyeSor: false` — TOPLU durum değişikliğinde sorulmaz (her sipariş için ayrı onay penceresi açılamaz;
    * toplu işlemde e-İrsaliye sipariş detayındaki düğmeyle tek tek gönderilir).
    */
-  const handleUpdateOrderStatus = async (orderId: string, status: Order['status'], secenek: { irsaliyeSor?: boolean } = {}) => {
+  /**
+   * YAZIM KAPISI — bu sayfa yalnız `orders` koleksiyonunda GERÇEKTEN var olan siparişe yazar.
+   *
+   * Mikro sekmesindeki satırlar (`source:'mikro-siparis'`) DOKÜMAN DEĞİLDİR: `mikroSiparisler` aynasından
+   * ekranda üretilen sözde siparişlerdir. İstemci `updateDoc`'u var olmayan dokümanı UPSERT eder
+   * (server.ts PATCH yolu; "update diriltmez" güvencesi yalnız sunucu içi `pgShim.update` içindir) → bu
+   * satırda durum/not/düzenleme yazmak `orders/<mikro id>` diye alansız bir HAYALET kayıt doğuruyordu:
+   * `customerName`'siz kayıt süzgeçleri düşürüyor, `panoSiparisleri` (native kazanır) gerçek Mikro satırını
+   * listeden atıyordu (2026-09-19 son inceleme). Dönen değer yoksa çağıran YAZMAZ.
+   */
+  const yazilabilirSiparis = (orderId: string): Order | undefined => {
+    const ord = orders.find(o => o.id === orderId);
+    if (!ord) toast(currentLanguage === 'tr'
+      ? "Bu sipariş Mikro'dan okunuyor — Cetpa'da değiştirilemez."
+      : 'This order is read from Mikro — it cannot be changed in Cetpa.', 'warning');
+    return ord;
+  };
+
+  /** Dönen değer: durum GERÇEKTEN yazıldı mı. Çağıran yerel (iyimser) durumu yalnız `true`da günceller. */
+  const handleUpdateOrderStatus = async (orderId: string, status: Order['status'], secenek: { irsaliyeSor?: boolean } = {}): Promise<boolean> => {
+    const ord = yazilabilirSiparis(orderId);
+    if (!ord) return false;
     try {
       await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: serverTimestamp(), ...(status === 'Delivered' ? { deliveredAt: serverTimestamp() } : {}) });
-      const ord = orders.find(o => o.id === orderId);
       const applied = (ord as unknown as Record<string, unknown> | undefined)?.stockApplied === true;
       // BAYRAK YALNIZ TAM BAŞARIDA (2026-08-22 denetim bulgusu P1→CONFIRMED):
       // eskiden satır hatası yutulup (console.error) bayrak KOŞULSUZ true
@@ -515,13 +543,16 @@ export default function OrdersPage({
       if (status === 'Shipped' && secenek.irsaliyeSor !== false && ord) {
         eIrsaliyeOnayiAc({ ...ord, status: 'Shipped' }, op(currentLanguage).siparis_kargoda_olarak_isaretlendi);
       }
+      return true;
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
+      return false;
     }
   };
 
   const handleSaveOrderNote = async () => {
     if (!selectedOrder || orderNoteText === (selectedOrder.notes ?? '')) return;
+    if (!yazilabilirSiparis(selectedOrder.id)) return;
     setOrderNoteSaving(true);
     try {
       await updateDoc(doc(db, 'orders', selectedOrder.id), { notes: orderNoteText, updatedAt: serverTimestamp() });
@@ -600,7 +631,7 @@ export default function OrdersPage({
                       onClick={() => {
                         const filtered = activeOrders.filter(o =>
                           (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
-                          (o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                          ((o.customerName ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
                           gorunenSiparisNo(o).toLowerCase().includes(orderSearch.toLowerCase()) ||
                           (o.shippingAddress ?? '').toLowerCase().includes(orderSearch.toLowerCase()))
                         );
@@ -1137,14 +1168,14 @@ export default function OrdersPage({
                             className="rounded accent-brand cursor-pointer"
                             checked={selectedOrderIds.size > 0 && (() => {
                               const filtered = activeOrders.filter(o =>
-                                o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                                (o.customerName ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
                                 gorunenSiparisNo(o).toLowerCase().includes(orderSearch.toLowerCase())
                               );
                               return filtered.every(o => selectedOrderIds.has(o.id));
                             })()}
                             onChange={e => {
                               const filtered = activeOrders.filter(o =>
-                                o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                                (o.customerName ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
                                 gorunenSiparisNo(o).toLowerCase().includes(orderSearch.toLowerCase())
                               );
                               if (e.target.checked) {
@@ -1182,7 +1213,7 @@ export default function OrdersPage({
                           // Phase 523: customer filter
                           if (orderCustomerFilter && o.customerName !== orderCustomerFilter) return false;
                           const q = orderSearch.toLowerCase();
-                          if (q && !o.customerName.toLowerCase().includes(q) && !gorunenSiparisNo(o).toLowerCase().includes(q) && !o.shippingAddress?.toLowerCase().includes(q)) return false;
+                          if (q && !(o.customerName ?? '').toLowerCase().includes(q) && !gorunenSiparisNo(o).toLowerCase().includes(q) && !o.shippingAddress?.toLowerCase().includes(q)) return false;
                           // Phase 501: date range filter
                           if (orderDateRange !== 'all') {
                             // Tarihi çözülemeyen sipariş eskisi gibi filtreden GEÇER (raw yokken de geçiyordu)
@@ -1304,7 +1335,11 @@ export default function OrdersPage({
                                   </span>
                                 );
                               })()}
-                              <select value={order.status} onChange={(e) => {
+                              <select value={order.status}
+                                // Sözde Mikro siparişinin durumu Cetpa'da tutulmaz ('Pending' sabit bir yer tutucudur) — kilitli.
+                                disabled={order.source === 'mikro-siparis'}
+                                title={order.source === 'mikro-siparis' ? (op(currentLanguage).mikro_siparisi_durumu_mikro_da_izlenir) : undefined}
+                                onChange={(e) => {
                                 e.stopPropagation();
                                 const newStatus = e.target.value as Order['status'];
                                 // Phase 506: delivery note modal
@@ -1401,7 +1436,7 @@ export default function OrdersPage({
                             </td>
                             <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-end gap-2">
-                                {order.status === 'Pending' && (
+                                {order.status === 'Pending' && order.source !== 'mikro-siparis' && (
                                   <button onClick={() => openConfirm({
                                     title: currentT.confirm_approve_title,
                                     message: currentT.confirm_approve_msg,
@@ -1521,7 +1556,7 @@ export default function OrdersPage({
               <div className="md:hidden space-y-4">
                 {siparisSirala(activeOrders.filter(o =>
                   (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
-                  (o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
+                  ((o.customerName ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
                   gorunenSiparisNo(o).toLowerCase().includes(orderSearch.toLowerCase()) ||
                   o.shippingAddress?.toLowerCase().includes(orderSearch.toLowerCase()))
                 ), orderSort.key, orderSort.dir).map(order => (
@@ -1879,13 +1914,15 @@ export default function OrdersPage({
                   className="mb-0 w-full"
                   actionButton={
                     <div className="flex gap-2 flex-wrap">
-                      {selectedOrder.status === 'Pending' && (
-                        <button onClick={() => openConfirm({
+                      {/* LİSTE İLE AYNI TANIM (son inceleme): sözde Mikro siparişinde onay yok; yerel durum yalnız yazım
+                          GERÇEKLEŞTİYSE değişir — eskiden kapı reddetse de detay "Processing" gösteriyordu. */}
+                      {selectedOrder.status === 'Pending' && selectedOrder.source !== 'mikro-siparis' && (
+                        <button onClick={() => { const id = selectedOrder.id; openConfirm({
                           title: currentT.confirm_approve_title,
                           message: currentT.confirm_approve_msg,
                           confirmLabel: currentT.approve,
-                          onConfirm: () => { handleUpdateOrderStatus(selectedOrder.id, 'Processing'); setSelectedOrder(o => (o && o.id === selectedOrder.id ? { ...o, status: 'Processing' } : o)); }
-                        })}
+                          onConfirm: async () => { if (await handleUpdateOrderStatus(id, 'Processing')) setSelectedOrder(o => (o && o.id === id ? { ...o, status: 'Processing' } : o)); }
+                        }); }}
                           className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-emerald-200 transition-colors">
                           Approve
                         </button>
@@ -2324,12 +2361,16 @@ export default function OrdersPage({
                             yazılabilir; kapanıştaki bayat `selectedOrder`ı yaymak o işareti
                             yerelde siler, düğme 'Delivered' koşuluyla yeniden ETKİN olur ve
                             aynı sevkiyat için İKİNCİ resmî belge kesilir (2026-09-19 delta). */}
-                        <select value={selectedOrder.status} onChange={(e) => {
+                        <select value={selectedOrder.status}
+                          disabled={selectedOrder.source === 'mikro-siparis'}
+                          title={selectedOrder.source === 'mikro-siparis' ? op(currentLanguage).mikro_siparisi_durumu_mikro_da_izlenir : undefined}
+                          onChange={(e) => {
                           const yeniDurum = e.target.value as 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled';
+                          const id = selectedOrder.id;
                           openConfirm({
                           title: currentT.status,
                           message: `Update status to "${yeniDurum}"?`,
-                          onConfirm: () => { handleUpdateOrderStatus(selectedOrder.id, yeniDurum); setSelectedOrder(o => (o && o.id === selectedOrder.id ? { ...o, status: yeniDurum } : o)); }
+                          onConfirm: async () => { if (await handleUpdateOrderStatus(id, yeniDurum)) setSelectedOrder(o => (o && o.id === id ? { ...o, status: yeniDurum } : o)); }
                         }); }}
                           className="block w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-brand font-medium">
                           <option value="Pending">{currentT.pending}</option>
@@ -3759,11 +3800,13 @@ export default function OrdersPage({
                 <button
                   onClick={async () => {
                     const o = deliveryNoteOrder;
+                    // Sözde Mikro siparişi: `handleUpdateOrderStatus` kapıda döner; not da YAZILMAZ, "kaydedildi" DENMEZ.
+                    if (!orders.some(x => x.id === o.id)) { yazilabilirSiparis(o.id); setDeliveryNoteOrder(null); return; }
                     try {
                       // Durum TEK yoldan değişir (`handleUpdateOrderStatus`: stok geçişi + stockApplied + deliveredAt). Eski ham
                       // `updateDoc({status:'Delivered', …})` bunu baypas ediyordu — 'Kargoda' atlanıp doğrudan 'Teslim Edildi'
                       // yapılan siparişin stoğu hiç düşmüyordu (2026-09-19 son parti incelemesi). Not ayrıca yazılır.
-                      await handleUpdateOrderStatus(o.id, 'Delivered');
+                      if (!(await handleUpdateOrderStatus(o.id, 'Delivered'))) return;
                       if (deliveryNoteText.trim()) await updateDoc(doc(db, 'orders', o.id), { deliveryNote: deliveryNoteText.trim(), updatedAt: serverTimestamp() });
                       createNotification(oc(currentLanguage).teslim_edildi, `#${o.id.slice(0, 6)}`, 'info');
                       toast(op(currentLanguage).teslimat_kaydedildi, 'success');
@@ -3929,6 +3972,7 @@ export default function OrdersPage({
                       // gereksizce geri yazar (PATCH-merge'de eşzamanlı değişikliği ezme riski).
                       leadId: editingOrderData.leadId === selectedOrder.leadId ? undefined : editingOrderData.leadId,
                     }, selectedOrder);
+                    if (!yazilabilirSiparis(duzenlenenId)) return;
                     try {
                       await updateDoc(doc(db, 'orders', duzenlenenId), { ...yama, updatedAt: serverTimestamp() });
                       // İŞLEVSEL güncelleyici: `await` sırasında App.tsx e-İrsaliye işaretini yazmış

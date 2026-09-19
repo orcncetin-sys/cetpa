@@ -14,6 +14,7 @@
  */
 import { useState, useMemo, useEffect } from 'react';
 import { parseTRNumber, parseTRDate } from '../utils/trParse';
+import { ekstreBakiyesi, ekstreBakiyeYamasi } from '../utils/pano/raporVeriKatmani';
 import { paraYaz } from '../utils/currency';
 import { motion } from 'motion/react';
 import Papa from 'papaparse';
@@ -101,7 +102,8 @@ export default function BankStatementImportModal({ isOpen, onClose, currentLangu
     date: parseTRDate(r[mapping.date] || ''),
     description: (r[mapping.description] || '').trim(),
     amount: parseTRNumber(r[mapping.amount] || ''),
-    balance: mapping.balance ? parseTRNumber(r[mapping.balance] || '') : undefined,
+    // Önizleme ile içe aktarma AYNI "bilinen bakiye" tanımını kullanır (hücre/sıralayıcı kuralı).
+    balance: ekstreBakiyesi(mapping.balance ? r[mapping.balance] : undefined),
   })), [rows, mapping]);
 
   const canImport = !!accountId && !!mapping.date && !!mapping.amount && rows.length > 0 && !importing;
@@ -134,7 +136,10 @@ export default function BankStatementImportModal({ isOpen, onClose, currentLangu
           description,
           amount,
           type: amount >= 0 ? 'credit' : 'debit',
-          balance: mapping.balance ? parseTRNumber(r[mapping.balance] || '') : 0,
+          // YENİ KAYIT kuralı: bakiye bilinmiyorsa alan HİÇ YAZILMAZ. Eskiden bakiye
+          // sütunu eşlenmemiş her ekstrede TÜM hareketlere `balance: 0` yazılıyordu ve
+          // BankBalanceReport bunu "bakiye sıfır" diye okuyordu.
+          ...ekstreBakiyeYamasi(mapping.balance ? r[mapping.balance] : undefined),
           currency: selectedAccount.currency || 'TRY',
           reference: mapping.reference ? (r[mapping.reference] || '').trim() : '',
           costCenterId: costCenterId || '',

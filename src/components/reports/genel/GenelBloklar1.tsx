@@ -10,6 +10,7 @@
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
 import { itemCostTRY, brutMarj, type ReportsCtx } from '../useReportsData';
+import { olcekReferansi, cubukOrani, tutarSatiri } from '../../../utils/pano/cubuk';
 import { paraYaz } from '../../../utils/currency';
 import { ayAnahtari, zamanDate, tarihYaz } from '../../../utils/zaman';
 import { oc } from '../../../i18n/ortak';
@@ -33,7 +34,19 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
           // Kalemi olmayan siparis (Mikro fatura turevi / sentetik) marj hesabina
           // GIRMEZ — aksi halde maliyet 0 sayilip marj %100'e sisiyordu (2026-09-04).
           const mm = brutMarj(mOrders, inventory, exchangeRates);
-          return { label, rev: mm.ciro, cogs: mm.maliyet, margin: mm.marj, kapsamDisi: mm.kapsamDisi, toplamCiro: mm.toplamCiro };
+          // Üç AYRI sayaç — hiçbiri toplanmaz (2026-09-19 delta bulgusu):
+          //  • `ciroBilinmeyen`  yalnız CİRO çubuğunun ölçeğini/oranını kapatır,
+          //  • `maliyetBilinmeyen` yalnız maliyet/kâr BÖLMESİNİ kapatır (ölçeği DEĞİL),
+          //  • `tutarsiz` karta basılacak BENZERSİZ sipariş sayısı (ikisinin toplamı değil —
+          //    aynı sipariş iki sayaca da düşebilir, tek kayıt "2 kayıt" diye raporlanıyordu).
+          return {
+            label, rev: mm.ciro, cogs: mm.maliyet, margin: mm.marj, brutKar: mm.brutKar,
+            kapsamDisi: mm.kapsamDisi, toplamCiro: mm.toplamCiro,
+            ciroTutar: mm.ciroTutar,
+            ciroBilinmeyen: mm.ciroTutar.bilinmeyen,
+            maliyetBilinmeyen: mm.maliyetTutar.bilinmeyen,
+            tutarsiz: mm.tutarsizSiparis,
+          };
         });
         // Marji BILINMEYEN ay (kalem verisi yok) ortalamaya katilmaz; hicbiri
         // bilinmiyorsa ortalama da null'dur ('—' gosterilir, 0 degil).
@@ -42,7 +55,27 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
           ? Math.round(marjliAylar.reduce((s, m) => s + (m.margin as number), 0) / marjliAylar.length)
           : null;
         const kapsamDisiToplam = months166.reduce((s, m) => s + m.kapsamDisi, 0);
-        const maxRev166 = Math.max(...months166.map(m => m.rev), 1);
+        // Aylar kesişmez, bu yüzden BENZERSİZ aylık sayaçların toplamı da benzersizdir.
+        const tutarsizToplam = months166.reduce((s, m) => s + m.tutarsiz, 0);
+        const ciroTutarsizToplam = months166.reduce((s, m) => s + m.ciroBilinmeyen, 0);
+        const maliyetTutarsizToplam = months166.reduce((s, m) => s + m.maliyetBilinmeyen, 0);
+        // ÇUBUK ÖLÇEĞİ — src/utils/pano/cubuk.ts (testli, TEK kural; burada KOPYA YAZILMAZ).
+        // Eski satır `Math.max(...months166.map(m => m.rev), 1)` idi: `m.rev` artık `ekranTutari`
+        // ile geldiği ve hiç bilinen tutarı olmayan ayda NaN döndüğü için `Math.max` NaN'a
+        // çakılıyor, `height: 'NaN%'` basılıyor ve TAM BİLİNEN diğer beş ayın çubukları da
+        // kayboluyordu. Kural: tepe satır kısmiyse ölçek YOKTUR ve hiçbir çubuk çizilmez;
+        // kısmi bir aya göre çizilen çubuk zaten alt satırları olduğundan uzun gösterirdi.
+        //
+        // KAPIYA YALNIZ CİRO BİLİNMEYENİ GİRER (2026-09-19 delta bulgusu): `cubuk.ts`in
+        // `tutarsizSiparis` alanı "bu satırda TUTARI bilinmeyen kayıt sayısı" diye belgeli.
+        // Maliyet bilinmeyenleri de buraya konunca, cirosu TAM bilinen tepe ayın tek bir
+        // siparişinin maliyeti çözülemediğinde ölçek NaN oluyor ve ALTI ayın da ciro çubuğu
+        // '—' görünüyordu — üstelik ekrana "tutar eksik" diye yanlış neden yazılıyordu.
+        // Maliyet/kâr bölmesi zaten AYRI kapılı (`bolunebilir` → `Number.isFinite(brutKar)`).
+        // Köprü elle kurulmaz: `tutarSatiri` (cubuk.ts, testli) `Tutar` → satır çevrimini yapar
+        // ve yapısal olarak YALNIZ o `Tutar`ın kendi sayacını taşır — başka bir sayaç karışamaz.
+        const cubukSatirlari166 = months166.map(m => tutarSatiri(m.ciroTutar));
+        const olcek166 = olcekReferansi(cubukSatirlari166);
         return (
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
@@ -54,16 +87,37 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
             </div>
             <div className="flex items-end gap-3 h-28 mb-3">
               {months166.map((m, i) => {
-                const revH = Math.round((m.rev / maxRev166) * 100);
-                const cogsH = m.rev > 0 ? Math.round((m.cogs / m.rev) * revH) : 0;
-                const gpH = Math.max(revH - cogsH, 0);
+                // Oran null → o ayın çubuğu ÇİZİLMEZ (ölçek yok, ya da ayın kendi CİROSU kısmi).
+                // Maliyetin bilinmemesi çubuğu kaldırmaz, yalnız bölmeyi kaldırır (aşağıda gri).
+                const oran166 = cubukOrani(cubukSatirlari166[i], olcek166);
+                const revH = oran166 === null ? null : Math.round(oran166);
+                // Maliyet/brüt kâr bölmesi yalnız İKİ taraf da tam bilinen ayda çizilir:
+                // `brutKar` TÜRETME kapısından geçer (NaN = hesaplanamadı).
+                const bolunebilir = revH !== null && revH > 0 && m.rev > 0 && Number.isFinite(m.brutKar);
+                const cogsH = bolunebilir ? Math.round((m.cogs / m.rev) * revH) : 0;
+                const gpH = bolunebilir ? Math.max(revH - cogsH, 0) : 0;
                 return (
                   <div key={i} className="flex-1 flex flex-col items-center gap-1 group cursor-default">
                     <div className="w-full flex flex-col justify-end overflow-hidden rounded-t-md" style={{ height: '88px' }}>
-                      <div className="w-full" style={{ height: `${revH}%` }}>
-                        <div className="w-full bg-blue-100 rounded-t-md" style={{ height: `${cogsH > 0 ? (cogsH/revH)*100 : 0}%` }} />
-                        <div className="w-full bg-emerald-400" style={{ height: `${gpH > 0 ? (gpH/revH)*100 : 0}%` }} />
-                      </div>
+                      {revH === null ? (
+                        <div className="w-full h-full flex items-end justify-center pb-1 text-[10px] text-gray-300">—</div>
+                      ) : (
+                        <div className="w-full" style={{ height: `${revH}%` }}>
+                          {bolunebilir ? (
+                            <>
+                              <div className="w-full bg-blue-100 rounded-t-md" style={{ height: `${cogsH > 0 ? (cogsH/revH)*100 : 0}%` }} />
+                              <div className="w-full bg-emerald-400" style={{ height: `${gpH > 0 ? (gpH/revH)*100 : 0}%` }} />
+                            </>
+                          ) : (
+                            // CİROSU bilinen ama maliyeti/kârı TÜRETİLEMEYEN ay: çubuk NÖTR gri
+                            // çizilir. `bolunebilir` false iken cogsH = gpH = 0 olduğu için iki
+                            // dilim de %0 yükseklikteydi ve çubuk görünmez kalıyordu — kullanıcı
+                            // "o ay hiç satış yok" sanıyordu (2026-09-19 delta bulgusu).
+                            <div className="w-full h-full bg-gray-200 rounded-t-md"
+                              title={currentLanguage === 'tr' ? 'Ciro biliniyor, maliyet çözülemedi — maliyet/kâr bölmesi yok' : 'Revenue known, cost unresolved — no cost/profit split'} />
+                          )}
+                        </div>
+                      )}
                     </div>
                     <span className="text-[9px] text-gray-400">{m.label}</span>
                     <span className={`text-[9px] font-bold ${m.margin === null ? 'text-gray-400' : m.margin >= 30 ? 'text-emerald-600' : m.margin >= 15 ? 'text-amber-600' : 'text-red-500'}`}>{m.margin === null ? '—' : `%${m.margin}`}</span>
@@ -75,6 +129,41 @@ export default function GenelBloklar1({ reportsTab, orders, inventory, exchangeR
               <span className="flex items-center gap-1"><span className="w-3 h-2 bg-emerald-400 rounded-sm inline-block" />{oc(currentLanguage).brut_kar}</span>
               <span className="flex items-center gap-1"><span className="w-3 h-2 bg-blue-100 rounded-sm inline-block" />{currentLanguage==='tr'?'Maliyet':'COGS'}</span>
             </div>
+            {/* Marj/çubuk '—' iken NEDENİ yazılır. İKİ AYRI cümle (2026-09-19 delta bulgusu):
+                tutar eksikliği ciro ÇUBUĞUNU, maliyet eksikliği yalnız maliyet/kâr BÖLMESİNİ
+                kapatır — tek cümlede toplamak kullanıcıya yanlış neden gösteriyordu. Parantezdeki
+                `tutarsizToplam` iki sayacın BENZERSİZ birleşimidir (kesişen kayıt bir kez sayılır). */}
+            {ciroTutarsizToplam > 0 && (
+              <p className="text-[10px] text-amber-600 mt-2">
+                {currentLanguage === 'tr'
+                  ? `${ciroTutarsizToplam} siparişin tutarı okunamadı — o aylarda ciro çubuğu gösterilmiyor.`
+                  : `${ciroTutarsizToplam} order(s) with unknown amount — revenue bar hidden for those months.`}
+              </p>
+            )}
+            {maliyetTutarsizToplam > 0 && (
+              <p className="text-[10px] text-amber-600 mt-1">
+                {currentLanguage === 'tr'
+                  ? `${maliyetTutarsizToplam} siparişin maliyeti çözülemedi — o aylarda marj ve maliyet/kâr bölmesi yok (çubuk gri).`
+                  : `${maliyetTutarsizToplam} order(s) with unresolved cost — margin and cost/profit split hidden (grey bar).`}
+              </p>
+            )}
+            {tutarsizToplam > 0 && ciroTutarsizToplam > 0 && maliyetTutarsizToplam > 0 && (
+              <p className="text-[10px] text-gray-400 mt-1">
+                {currentLanguage === 'tr'
+                  ? `Toplam ${tutarsizToplam} farklı sipariş etkileniyor.`
+                  : `${tutarsizToplam} distinct order(s) affected in total.`}
+              </p>
+            )}
+            {/* Tepe ayın TUTARI kısmiyse HİÇBİR çubuk çizilemez (ölçek yok) — kullanıcı boş
+                grafiği "veri yok" sanmasın, nedeni yazılır. Kapı artık yalnız ciro bilinmeyenine
+                bakıyor, metin de o nedene birebir karşılık geliyor. */}
+            {!Number.isFinite(olcek166) && ciroTutarsizToplam > 0 && (
+              <p className="text-[10px] text-amber-600 mt-1">
+                {currentLanguage === 'tr'
+                  ? 'En yüksek cirolu ayın tutarı eksik olduğu için çubuk ölçeği kurulamıyor — kısmi bir tepeye göre çizilen çubuklar yanıltıcı olurdu.'
+                  : 'The highest-revenue month has unknown amounts, so no bar scale can be established.'}
+              </p>
+            )}
           </div>
         );
       })()}

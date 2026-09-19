@@ -212,6 +212,7 @@ import PaymentMethodModal from './components/PaymentMethodModal';
 import { translations, type Language } from './translations';
 import { optimizeRoute } from './utils/logistics';
 import { itemCostTRY } from './utils/cost';
+import { hedefYamasi, hedefleriOku } from './utils/pano/hedefButce';
 import { kisaTutar, paraYaz } from './utils/currency';
 import { irsaliyeIstegi, irsaliyeNedenMetni, irsaliyeYanitMesaji, irsaliyeSonucYamasi, type IrsaliyeYaniti } from './utils/siparisler/irsaliyeGonder';
 import { siparisBelgeTipi, belgeTipiCelisiyor, musteriBelgeTipi } from './utils/siparisler/belgeTipi';
@@ -1606,13 +1607,32 @@ function AppContent() {
   const [targetDraft, setTargetDraft] = useState('');
   // Per-month target history: { "2026-05": 100000, ... } — synced from settings/targets
   const [monthlyTargets, setMonthlyTargets] = useState<Record<string, number>>({});
+  /**
+   * Aylık hedefi kaydeder / KALDIRIR. `value === 0` "hedefi kaldır" demektir (Phase 99'un
+   * `hedefGirdisi(...).durum === 'temizle'` yolu buraya 0 ile gelir).
+   *
+   * SİLME ARTIK GERÇEKLEŞİYOR (2026-09-19 delta bulgusu): eski kod anahtarı yamadan
+   * `delete` edip `{merge:true}` ile gönderiyordu, oysa merge'ün her katmanı yamada OLMAYAN
+   * anahtarı korur (sunucu `pgShim.mergeDocData`, istemci önbelleği `dbClient` — ikisi de
+   * `{...eski, ...yeni}`). Silme sessiz no-op kalıyor, dinleyici eski hedefi anında geri
+   * yazıyordu. `hedefYamasi` anahtarı yamaya AÇIKÇA `null` koyar (FORM KURALI) ve yalnız
+   * değişen ayı gönderir — tüm haritayı merge'lemek eşzamanlı düzenlemede başka ayları eziyordu.
+   */
   const saveMonthlyTarget = (monthKey: string, value: number) => {
-    const isCurrentMonth = monthKey === bugunAnahtari().slice(0, 7);
-    if (isCurrentMonth) setMonthlyTarget(value);
-    const updated = { ...monthlyTargets, [monthKey]: value };
-    if (value === 0) { delete updated[monthKey]; }
-    setMonthlyTargets(updated);
-    setDoc(doc(db, 'settings', 'targets'), updated, { merge: true }).catch(() => {});
+    const hedef = value === 0 ? null : value;
+    const oncekiHedefler = monthlyTargets, oncekiBuAy = monthlyTarget;
+    if (monthKey === bugunAnahtari().slice(0, 7)) setMonthlyTarget(value);
+    const { yerel, yama } = hedefYamasi(monthlyTargets, monthKey, hedef);
+    setMonthlyTargets(yerel);
+    // HATA GÖRÜNÜR (2026-09-19 son inceleme): eski boş `catch` yazım düşünce (ağ, 5xx, ya da `settings`
+    // yalnız Yönetici/Müdür'e yazılabildiği için 403) hiçbir şey söylemiyordu. İyimser state de GERİ ALINIR:
+    // doküman hiç yokken dinleyici `!snap.exists()` ile erken döner ve kaydedilmemiş hedef oturum boyunca
+    // Pano'da ve CRM'de kaydedilmiş gibi yüzdeyle çizilirdi. Tek kaydedici → Pano ve CRM aynı davranır.
+    setDoc(doc(db, 'settings', 'targets'), yama, { merge: true }).catch(() => {
+      setMonthlyTargets(oncekiHedefler);
+      setMonthlyTarget(oncekiBuAy);
+      toast(currentLanguage === 'tr' ? 'Hedef kaydedilemedi.' : 'Failed to save target.', 'error');
+    });
   };
   // ── Phase 551: Tedarikçi Portalı ─────────────────────────────────────────
   const [p551SelSupplier, setP551SelSupplier] = useState<string>('');
@@ -2722,10 +2742,14 @@ function AppContent() {
     // ── Monthly targets listener ──────────────────────────────────────────────
     const unsubTargets = onSnapshot(doc(db, 'settings', 'targets'), (snap) => {
       if (!snap.exists()) return;
-      const d = snap.data() as Record<string, number>;
-      setMonthlyTargets(d);
+      // Silinen ay dokümanda `null` olarak durur (bkz. saveMonthlyTarget) — `hedefleriOku`
+      // null/0/negatif/okunamayan değeri hedef SAYMAZ. Eski `d[curKey] !== undefined` kapısı
+      // hem null'ı hedef sanıyor hem de anahtar YOKKEN state'i hiç sıfırlamıyordu: hedef
+      // silindikten sonra kart eski yüzdeyi çizmeye devam ediyordu.
+      const hedefler = hedefleriOku(snap.data());
+      setMonthlyTargets(hedefler);
       const curKey = bugunAnahtari().slice(0, 7);
-      if (d[curKey] !== undefined) setMonthlyTarget(d[curKey]);
+      setMonthlyTarget(hedefler[curKey] ?? 0);     // 0 = "hedef yok" (hedefGerceklesme oranı null döner)
     }, () => { /* non-critical */ });
 
     // ── Budget vs Actuals listener ────────────────────────────────────────────
@@ -5992,6 +6016,9 @@ function AppContent() {
             <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
               <CRMPage
                 p549Iadeler={p549Iadeler}
+                monthlyTarget={monthlyTarget}
+                monthlyTargets={monthlyTargets}
+                saveMonthlyTarget={saveMonthlyTarget}
                 crmTab={crmTab}
                 setCrmTab={setCrmTab}
                 musteriAra={raporMusteriAra}

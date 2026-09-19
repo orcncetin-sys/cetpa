@@ -18,7 +18,7 @@ import {
 import { db, auth, storage } from '../firebase';
 import SatisAjaniPanel from '../components/SatisAjaniPanel';
 import {
-  doc, setDoc, addDoc, updateDoc, deleteDoc,
+  doc, addDoc, updateDoc, deleteDoc,
   collection, serverTimestamp, Timestamp, onSnapshot, query,
 } from '../lib/dbClient';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -27,6 +27,7 @@ import { twMerge } from 'tailwind-merge';
 import Papa from 'papaparse';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { odemeTakipli } from '../utils/siparis';
+import { hedefGirdisi, hedefOnDoldur } from '../utils/pano/hedefButce';
 import { zamanDate, zamanMs, gunFarki, ayAnahtari, gunAnahtari, tarihYaz } from '../utils/zaman';
 import { authFetch } from '../services/authFetch';
 import { exportLeadsCSV } from '../utils/export';
@@ -63,6 +64,16 @@ interface SupportTicket { id: string; title: string; customerName: string; descr
 interface Props {
   crmTab: string;
   setCrmTab: (tab: string) => void;
+  /**
+   * Aylık satış hedefleri — TEK KAYNAK App.tsx (`settings/targets` dinleyicisi + `saveMonthlyTarget`).
+   * Bu sayfa eskiden YEREL bir kopya tutuyordu ve onu DB'den HİÇ yüklemiyordu (2026-09-19 son inceleme):
+   * CRM > Hedefler her açılışta "hedef yok" gösteriyor, form uydurma '0' ile ön-dolduruluyordu; hedef
+   * silme `hedefYamasi` ile gerçek olduktan sonra "değiştirmeden Kaydet" Pano'da girilmiş GERÇEK hedefi
+   * siliyordu. Artık Pano ile aynı state'i okur ve aynı kaydediciyi çağırır.
+   */
+  monthlyTarget: number;
+  monthlyTargets: Record<string, number>;
+  saveMonthlyTarget: (monthKey: string, value: number) => void;
   /** Rapor kartından gelen müşteri-adı filtresi (2026-08-31) — Müşteriler alt sekmesine iletilir. */
   musteriAra?: string;
   /** AI kullanım onayı (aiConsents) — Satış Ajanı paneli için (2026-09-01). */
@@ -127,7 +138,7 @@ const DURUM_ETIKET_TR: Record<string, string> = {
 const durumEtiketi = (status: string, tr: boolean): string => (tr ? (DURUM_ETIKET_TR[status] ?? status) : status);
 
 export default function CRMPage({
-  crmTab, setCrmTab, musteriAra, aiOnayli, selectedLead, setSelectedLead,
+  crmTab, setCrmTab, monthlyTarget, monthlyTargets, saveMonthlyTarget, musteriAra, aiOnayli, selectedLead, setSelectedLead,
   hasFullAccess = () => true, currentLanguage, currentT,
   orders = [], leads = [], inventory = [], exchangeRates, employees = [],
   userRole, user, kpiCurrency, setKpiCurrency,
@@ -172,10 +183,8 @@ export default function CRMPage({
   const [p544QuickStatus, setP544QuickStatus] = useState<string|null>(null);
   const [p549Form, setP549Form] = useState(false);
   const [p549Draft, setP549Draft] = useState({ orderId: '', customerName: '', items: '', reason: 'Hasarlı Ürün', condition: 'Hasarlı' as const, notes: '' });
-  const [monthlyTarget, setMonthlyTarget] = useState<number>(0);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [targetDraft, setTargetDraft] = useState('');
-  const [monthlyTargets, setMonthlyTargets] = useState<Record<string, number>>({});
   const [editingMonthKey, setEditingMonthKey] = useState<string | null>(null);
   const [editingMonthDraft, setEditingMonthDraft] = useState('');
   const [p581RepPeriod, setP581RepPeriod] = useState<'30d'|'90d'|'ytd'>('30d');
@@ -273,14 +282,29 @@ export default function CRMPage({
     </div>
   );
 
-  const saveMonthlyTarget = (monthKey: string, value: number) => {
-    const curMonth = ayAnahtari(new Date()) ?? '';
-    if (monthKey === curMonth) setMonthlyTarget(value);
-    const updated = { ...monthlyTargets, [monthKey]: value };
-    if (value === 0) delete updated[monthKey];
-    setMonthlyTargets(updated);
-    setDoc(doc(db, 'settings', 'targets'), updated, { merge: true })
-      .catch(() => toast(currentLanguage === 'tr' ? 'Hedef kaydedilemedi.' : 'Failed to save target.', 'error'));
+  /**
+   * FORM KAPISI — CRM > Hedefler'deki DÖRT giriş yerinin TEK yolu (2026-09-19 delta bulgusu).
+   *
+   * `hedefGirdisi` kapısı DashboardPage:881'e bağlanmış, bu sayfadaki formlara bağlanmamıştı
+   * (yarım düzeltme sınıfı): girdiler ham `Number(draft)` ile doğrudan `saveMonthlyTarget`e
+   * gidiyordu. '-500000' yazılınca `value === 0` olmadığı için yama `{ '2026-09': -500000 }`
+   * olup DB'deki GEÇERLİ hedefin üzerine yazılıyor, toast çıkmıyor; `hedefleriOku` negatifi
+   * hedef saymadığı için Pano "Hedef belirle…" durumuna düşerken CRM'in yerel kopyası
+   * truthy `-500000` ile yüzde hesaplamaya devam ediyordu. '1e400' ise Infinity → JSON null,
+   * yani hedef SESSİZCE siliniyordu. Kapı ham metni GÖRMEK zorunda: kutular bu yüzden
+   * `type="text" inputMode="numeric"` (`type="number"` çözemediği metni '' yapar = "hedefi sil").
+   *
+   * Düz fonksiyon (bileşen DEĞİL): render içinde bileşen tanımlanırsa her render'da yeniden
+   * bağlanır ve girdi odağı kaybolur.
+   */
+  const hedefKaydet = (monthKey: string, ham: string): boolean => {
+    const girdi = hedefGirdisi(ham);
+    if (girdi.durum === 'gecersiz') {
+      toast(currentLanguage === 'tr' ? 'Hedefi yalnız rakamla yazın (ör. 2500000) — sıfırdan büyük olmalı' : 'Enter the target using digits only (e.g. 2500000) — must be greater than zero', 'error');
+      return false;
+    }
+    saveMonthlyTarget(monthKey, girdi.durum === 'temizle' ? 0 : girdi.deger);
+    return true;
   };
 
   const createNotification = async (title: string, message: string, type: 'info' | 'warning' | 'success' = 'info') => {
@@ -1526,7 +1550,7 @@ export default function CRMPage({
                         <p className="text-sm text-gray-500">{tarihYaz(now, { month: 'long', year: 'numeric' }, currentLanguage === 'tr' ? 'tr' : 'en')}</p>
                       </div>
                       {!isEditingTarget && (
-                        <button onClick={() => { setIsEditingTarget(true); setTargetDraft(String(monthlyTarget)); }}
+                        <button onClick={() => { setIsEditingTarget(true); /* hedef yoksa kutu BOŞ açılır — uydurma '0' ile değil */ setTargetDraft(hedefOnDoldur(monthlyTarget)); }}
                           className="apple-button-secondary text-xs">{currentLanguage === 'tr' ? 'Bu Ay Hedef Güncelle' : 'Update This Month'}</button>
                       )}
                     </div>
@@ -1544,13 +1568,14 @@ export default function CRMPage({
                       {isEditingTarget ? (
                         <div className="flex items-center gap-2 mb-4 flex-wrap">
                           <span className="text-sm text-gray-500">₺</span>
-                          <input autoFocus type="number" value={targetDraft} onChange={e => setTargetDraft(e.target.value)}
+                          <input autoFocus type="text" inputMode="numeric" value={targetDraft} onChange={e => setTargetDraft(e.target.value)}
                             onKeyDown={e => {
-                              if (e.key === 'Enter') { const v = Number(targetDraft); saveMonthlyTarget(thisMonthKey, v); setIsEditingTarget(false); }
+                              // Geçersiz girdi DB'ye gitmez ve form AÇIK kalır (düzeltilebilsin).
+                              if (e.key === 'Enter') { if (hedefKaydet(thisMonthKey, targetDraft)) setIsEditingTarget(false); }
                               if (e.key === 'Escape') setIsEditingTarget(false);
                             }}
                             className="apple-input text-lg font-bold w-48 px-3 py-1.5" placeholder="0" />
-                          <button onClick={() => { const v = Number(targetDraft); saveMonthlyTarget(thisMonthKey, v); setIsEditingTarget(false); }}
+                          <button onClick={() => { if (hedefKaydet(thisMonthKey, targetDraft)) setIsEditingTarget(false); }}
                             className="apple-button-primary text-xs px-4 py-1.5">{oc(currentLanguage).kaydet}</button>
                           <button onClick={() => setIsEditingTarget(false)} className="text-sm text-gray-400 hover:text-gray-600">{oc(currentLanguage).iptal}</button>
                         </div>
@@ -1675,7 +1700,7 @@ export default function CRMPage({
                               return (
                                 <tr key={m.key}
                                   className={`hover:bg-gray-50 cursor-pointer transition-colors ${isCurrent ? 'bg-brand/5 font-semibold' : ''}`}
-                                  onClick={() => { if (!isEditingThis) { setEditingMonthKey(m.key); setEditingMonthDraft(String(target || '')); } }}>
+                                  onClick={() => { if (!isEditingThis) { setEditingMonthKey(m.key); setEditingMonthDraft(hedefOnDoldur(target)); } }}>
                                   <td className="px-4 py-3">
                                     <span className={`${isCurrent ? 'text-brand font-bold' : 'text-gray-700'}`}>{m.label}</span>
                                     {isCurrent && <span className="ml-1.5 text-[9px] bg-brand text-white px-1.5 py-0.5 rounded-full">{currentLanguage === 'tr' ? 'Bu ay' : 'Now'}</span>}
@@ -1685,17 +1710,19 @@ export default function CRMPage({
                                       <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
                                         <input
                                           autoFocus
-                                          type="number"
+                                          type="text"
+                                          inputMode="numeric"
                                           value={editingMonthDraft}
                                           onChange={e => setEditingMonthDraft(e.target.value)}
                                           onKeyDown={e => {
-                                            if (e.key === 'Enter') { saveMonthlyTarget(m.key, Number(editingMonthDraft)); setEditingMonthKey(null); }
+                                            // Aynı kapı (12 aylık tablo satırı) — ham `Number(draft)` YOK.
+                                            if (e.key === 'Enter') { if (hedefKaydet(m.key, editingMonthDraft)) setEditingMonthKey(null); }
                                             if (e.key === 'Escape') setEditingMonthKey(null);
                                           }}
                                           className="w-28 text-right bg-white border border-brand rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand"
                                           placeholder="0"
                                         />
-                                        <button onClick={e => { e.stopPropagation(); saveMonthlyTarget(m.key, Number(editingMonthDraft)); setEditingMonthKey(null); }}
+                                        <button onClick={e => { e.stopPropagation(); if (hedefKaydet(m.key, editingMonthDraft)) setEditingMonthKey(null); }}
                                           className="bg-brand text-white rounded-lg px-2 py-1 text-[10px] font-bold whitespace-nowrap">{oc(currentLanguage).kaydet}</button>
                                         <button onClick={e => { e.stopPropagation(); setEditingMonthKey(null); }}
                                           className="text-gray-400 hover:text-gray-600 text-[10px]">✕</button>

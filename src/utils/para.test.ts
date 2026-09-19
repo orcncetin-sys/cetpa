@@ -175,6 +175,18 @@ describe('sayiSirala — sıralamada bilinmeyen 0 sayılmaz, sona gider', () => 
     expect(sayiSirala(null, 0)).toBe(1);
     expect(sayiSirala(null, undefined)).toBe(0);
   });
+  /**
+   * MUTASYON AYIRT EDİCİ — "alan hiç yazılmadı" (undefined) hâli. Satın Alma > Mikro sekmesinde
+   * `sip_tutar` NULL gelen alış siparişinde `totalAmount` artık HİÇ yazılmıyor; tablonun kendi
+   * `karsilastir`ı `undefined` ile sayı kıyaslayınca 0 döndürüyor ve karşılaştırıcı GEÇİŞSİZ
+   * oluyordu: [50, —, 100] azalan sıralandığında ₺100 en altta kalıyordu (2026-09-19 delta).
+   * `-fark` ile çevirme de bilinmeyeni BAŞA getirirdi — yön `sayiSirala`nın üçüncü argümanıdır.
+   */
+  it('[₺50, —, ₺100]: artan → [50, 100, —]; azalan → [100, 50, —] (yön `-` ile çevrilmez)', () => {
+    const liste = [{ t: 50 }, { t: undefined }, { t: 100 }];
+    expect([...liste].sort((x, y) => sayiSirala(x.t, y.t)).map(o => o.t)).toEqual([50, 100, undefined]);
+    expect([...liste].sort((x, y) => sayiSirala(x.t, y.t, true)).map(o => o.t)).toEqual([100, 50, undefined]);
+  });
 });
 
 describe('donemKarsilastir — iki dönemin cirosu: ekran ≠ türetme (haftalık rapor e-postası)', () => {

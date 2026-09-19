@@ -390,7 +390,8 @@ interface PurchaseOrderDoc {
   supplier: string;
   status: string;
   items: POItem[];
-  totalAmount: number;
+  /** Tutar BİLİNMİYORSA alan yoktur (Mikro `sip_tutar` NULL) — `tutarYaz` zaten '—' basar. */
+  totalAmount?: number;
   expectedDate?: string | { toDate?: () => Date };
   createdAt?: string | number | Date | { toDate?: () => Date };
   notes?: string;

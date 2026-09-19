@@ -41,6 +41,7 @@ import {
   type InventoryMovement,
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx, brutMarj } from './useReportsData';
+import { toplaBilinen, tamTutar } from '../../utils/para';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
 import { oc } from '../../i18n/ortak';
 
@@ -628,29 +629,70 @@ export default function IKRapor(ctx: ReportsCtx) {
         // Ortak brutMarj (2026-09-04): kalem verisi olmayan siparisler kapsam disi;
         // aksi halde brut kar = ciro sayilip calisan basi katma deger sisiyordu.
         const marj253 = brutMarj(orders.filter(o => o.status !== 'Cancelled'), inventory, exchangeRates);
-        const totalGross253 = marj253.ciro - marj253.maliyet;
-        const grossPerEmp = Math.round(totalGross253 / activeEmps253);
-        const revPerEmp253 = Math.round(orders.filter(o => o.status !== 'Cancelled').reduce((s, o) => s + (o.totalPrice || 0), 0) / activeEmps253);
+        // BRÜT KÂR TÜRETMEDİR (2026-09-19 delta bulgusu): eski satır `marj253.ciro - marj253.maliyet`
+        // ile KISMİ cirodan TAM maliyeti çıkarıyordu — tutarı okunamayan sipariş ciroya girmiyor
+        // ama maliyeti düşülüyordu, yani kâr o siparişin maliyeti kadar EKSİK çıkıyordu (rozet
+        // 2,1× yeşilden 1,9× sarıya düşebiliyordu). Tüm kalemli siparişler tutarsızsa `ciro` NaN
+        // olduğu için ekrana "NaN×" basılıyordu (NaN her karşılaştırmada false → kırmızı sınıf).
+        // `brutKar` iki taraf da tam bilinmiyorsa NaN döner; türetilenler o hâlde ÇİZİLMEZ.
+        const totalGross253 = marj253.brutKar;
+        const karBiliniyor253 = Number.isFinite(totalGross253);
+        const grossPerEmp = karBiliniyor253 ? Math.round(totalGross253 / activeEmps253) : null;
+        // ÇALIŞAN BAŞI CİRO bir ORTALAMADIR → TÜRETME kapısı `tamTutar` (2026-09-19 delta
+        // bulgusu). Eski satır `ekranTutari` ile KISMİ toplamı bölüyordu: Mikro faturasından
+        // türetilen kalemsiz 3 siparişin (~₺300.000) tutarı okunamayınca kart mavi renkte kesin
+        // bir ₺70K basıyor, gerçek değer ₺100K oluyordu. Alttaki not da `marj253.ciroTutar`ı
+        // kullandığı için "0 siparişin tutarı okunamadı" diyordu — o sayaç yalnız KALEMLİ
+        // siparişleri sayar, kalemsiz kayıt `kapsamDisi`ne düşer ve oraya hiç girmez.
+        const revTutar253 = toplaBilinen(orders.filter(o => o.status !== 'Cancelled'), o => o.totalPrice);
+        const revTam253 = tamTutar(revTutar253);
+        const revPerEmp253 = Number.isFinite(revTam253) ? Math.round(revTam253 / activeEmps253) : null;
         const totalPayroll253 = employees.filter(e => e.status === 'Aktif').reduce((s, e) => s + (e.salary || 0), 0);
-        const grossToPayroll = totalPayroll253 > 0 ? Math.round((totalGross253 / totalPayroll253) * 10) / 10 : 0;
+        const grossToPayroll = karBiliniyor253 && totalPayroll253 > 0
+          ? Math.round((totalGross253 / totalPayroll253) * 10) / 10
+          : null;
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '💹 Çalışan Başı Brüt Kâr' : '💹 Gross Margin per Employee'}</h3>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-emerald-50 rounded-2xl p-4">
                 <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wide mb-1">{currentLanguage === 'tr' ? 'Çalışan Başı Brüt Kâr' : 'Gross Profit / Employee'}</p>
-                <p className="text-3xl font-black text-emerald-700">{fmtAna(grossPerEmp,'K',0)}</p>
+                {/* Türetilen sayı: brüt kâr bilinmiyorsa '—' (renkli rakam "hesaplandı" izlenimi verir). */}
+                <p className={`text-3xl font-black ${grossPerEmp === null ? 'text-gray-400' : 'text-emerald-700'}`}>{grossPerEmp === null ? '—' : fmtAna(grossPerEmp,'K',0)}</p>
               </div>
               <div className="bg-blue-50 rounded-2xl p-4">
                 <p className="text-[10px] text-blue-700 font-bold uppercase tracking-wide mb-1">{oc(currentLanguage).calisan_basi_ciro}</p>
-                <p className="text-3xl font-black text-blue-700">{fmtAna(revPerEmp253,'K',0)}</p>
+                <p className={`text-3xl font-black ${revPerEmp253 === null ? 'text-gray-400' : 'text-blue-700'}`}>{revPerEmp253 === null ? '—' : fmtAna(revPerEmp253,'K',0)}</p>
               </div>
             </div>
             <div className="p-3 bg-gray-50 rounded-xl flex items-center justify-between">
               <span className="text-xs text-gray-600">{currentLanguage === 'tr' ? 'Brüt Kâr / Maaş Kütlesi' : 'Gross Profit / Payroll'}</span>
-              <span className={`text-lg font-black ${grossToPayroll >= 2 ? 'text-emerald-600' : grossToPayroll >= 1 ? 'text-amber-500' : 'text-red-500'}`}>{grossToPayroll}×</span>
+              {/* Oran null iken renk rozeti ÇİZİLMEZ: NaN her karşılaştırmada false döndüğü için
+                  eski kod bilinmeyen kârı KIRMIZI "NaN×" diye basıyordu. */}
+              <span className={`text-lg font-black ${grossToPayroll === null ? 'text-gray-400' : grossToPayroll >= 2 ? 'text-emerald-600' : grossToPayroll >= 1 ? 'text-amber-500' : 'text-red-500'}`}>
+                {grossToPayroll === null ? '—' : `${grossToPayroll}×`}
+              </span>
             </div>
             <p className="text-[10px] text-gray-400 mt-2">{currentLanguage === 'tr' ? 'Benchmark: 2x+ iyi (maaş kütlesi başına 2x brüt kâr)' : 'Benchmark: 2x+ healthy (2x gross profit per payroll dollar)'}</p>
+            {/* NOT METNİ DÜZELTİLDİ (2026-09-19): eski metin "brüt kâr bu kayıtları İÇERMEZ"
+                diyordu, oysa tutarı okunamayan siparişin MALİYETİ kârdan düşülüyordu. Brüt kâr
+                artık ya TAM hesaplanır ya da hiç hesaplanmaz; not hangisi olduğunu söyler. */}
+            {(marj253.ciroTutar.bilinmeyen > 0 || marj253.maliyetTutar.bilinmeyen > 0 || marj253.kapsamDisi > 0) && (
+              <p className="text-[10px] text-amber-600 mt-1">
+                {currentLanguage === 'tr'
+                  ? `${marj253.ciroTutar.bilinmeyen} siparişin tutarı, ${marj253.maliyetTutar.bilinmeyen} siparişin maliyeti okunamadı; ${marj253.kapsamDisi} siparişin kalem verisi yok — brüt kâr ${karBiliniyor253 ? 'bu kayıtların dışında hesaplandı' : 'HESAPLANMADI'}.`
+                  : `${marj253.ciroTutar.bilinmeyen} order(s) unpriced, ${marj253.maliyetTutar.bilinmeyen} with unknown cost, ${marj253.kapsamDisi} without line items — gross profit ${karBiliniyor253 ? 'computed excluding them' : 'NOT computed'}.`}
+              </p>
+            )}
+            {/* ÇALIŞAN BAŞI CİRO'nun kendi sayacı: `marj253.ciroTutar` yalnız KALEMLİ siparişleri
+                sayar, ciro kartı ise TÜM siparişleri toplar — üstteki not bu kartı açıklayamaz. */}
+            {revTutar253.bilinmeyen > 0 && (
+              <p className="text-[10px] text-amber-600 mt-1">
+                {currentLanguage === 'tr'
+                  ? `${revTutar253.bilinmeyen} siparişin tutarı okunamadı — çalışan başı ciro HESAPLANMADI.`
+                  : `${revTutar253.bilinmeyen} order(s) with unknown amount — revenue per employee NOT computed.`}
+              </p>
+            )}
           </div>
         );
       })()}

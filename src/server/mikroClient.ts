@@ -16,6 +16,7 @@
  */
 import type { AdminDbLike } from './adminDbTypes.js';
 import { createHash } from 'crypto';
+import { jumpSurumOku } from './mikro/jumpSurum.js';
 
 export interface MikroDeps {
   /** `settings/mikro` dokumanini okumak icin. server.ts'te SONRADAN atanan bir
@@ -43,7 +44,13 @@ export function initMikroClient(d: MikroDeps): void { D = d; }
  *  gectiginde .env.production'a MIKRO_JUMP_SURUM=17 eklemek yeterli.
  *  server.ts'ten sabitle BIRLIKTE tasindi (2026-08-24): yorum orada kalinca
  *  V17 gecis talimati, yonettigi koddan kopuk kaliyordu. */
-export const MIKRO_JUMP_SURUM = Number(process.env.MIKRO_JUMP_SURUM || 16);
+const jumpSurumOkunan = jumpSurumOku(process.env.MIKRO_JUMP_SURUM);
+if (jumpSurumOkunan.gecersiz) {
+  // Değerin KENDİSİ basılmaz (ortam dosyası içeriği log'a düşmesin) — yalnız anahtar adı ve sonuç.
+  console.warn(`[V17] MIKRO_JUMP_SURUM ortam değeri bir sürüm sayısı DEĞİL — ${jumpSurumOkunan.surum} varsayıldı. Yalnız ana sürümü yazın: MIKRO_JUMP_SURUM=17`);
+}
+/** Ana sürüm (tam sayı). "17.07d(jump)" gibi Mikro 'Hakkında' metni de 17 okunur — bkz. mikro/jumpSurum.ts. */
+export const MIKRO_JUMP_SURUM = jumpSurumOkunan.surum;
 /**
  * V17 GERÇEĞİ ≠ V17 BAYRAĞI (2026-09-03 canlı bulgu).
  * Kullanıcının SS'inde stok-miktar ucu "V17+ gerekir" 501'i verirken hemen altında

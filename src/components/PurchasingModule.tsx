@@ -18,6 +18,7 @@ import { submitApprovalRequest } from './ApprovalQueue';
 import { pullCariFromMikro, syncSupplierToMikro, type MikroCariItem } from '../services/mikroService';
 import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
 import { kurCevir, paraYaz } from '../utils/currency';
+import { toplaBilinen, ekranTutari, sayiSirala } from '../utils/para';
 import { basHarf } from '../utils/buyukHarf';
 import { oc } from '../i18n/ortak';
 
@@ -52,7 +53,8 @@ interface PurchaseOrder {
   supplier: string;
   status: 'Taslak' | 'Beklemede' | 'Sipariş Edildi' | 'Teslim Alındı' | 'İptal Edildi';
   items: PurchaseOrderItem[];
-  totalAmount: number;
+  /** Tutar BİLİNMİYORSA alan HİÇ YOKTUR (Mikro `sip_tutar` NULL) — `paraYaz` '—' basar. */
+  totalAmount?: number;
   expectedDate?: string | { toDate?: () => Date };
   createdAt: string | number | Date | { toDate?: () => Date };
   notes?: string;
@@ -83,13 +85,17 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   // ── MİKRO ENTEGRASYONU (Alış Siparişleri) ──
   const [poSourceTab, setPoSourceTab] = useState<'cetpa' | 'mikro'>('cetpa');
   const mikroSiparisler = useMikroSiparisler(true);
+  // `totalAmount` yalnız BİLİNİYORSA yazılır (2026-09-19 delta bulgusu): hook eskiden
+  // `Number(sip_tutar || 0)` ile bilinmeyeni ₺0 yapıyor, Mikro aynasında `sip_tutar` NULL gelen
+  // alış siparişi "₺0 alış" gibi listeleniyor ve KPI toplamına 0 olarak giriyordu. Alanı hiç
+  // yazmamak `paraYaz`ı '—' yaptırır ve `toplaBilinen` kaydı SAYAR (toplama katmaz).
   const mappedMikroSiparisler = mikroSiparisler.filter(ms => ms.tip === 1).map(ms => ({
     id: ms.id,
     orderNumber: ms.evrakNo,
     supplier: ms.cariKodu,
     status: 'Sipariş Edildi' as const,
     items: [], // Detay eklenecekse burası doldurulmalı
-    totalAmount: ms.tutar,
+    ...(Number.isFinite(ms.tutar) ? { totalAmount: ms.tutar } : {}),
     createdAt: ms.tarih,
     expectedDate: ms.tarih,
     notes: ms.satirAciklamasi
@@ -501,7 +507,14 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     const { key, direction } = sortConfig;
     let aVal = (a as unknown as Record<string, unknown>)[key];
     let bVal = (b as unknown as Record<string, unknown>)[key];
-    
+
+    // TUTAR SÜTUNU — `sayiSirala` (para.ts, testli): bilinmeyen tutar HER İKİ yönde de sonda.
+    // 2026-09-19 delta bulgusu: Mikro aynasında `sip_tutar` NULL gelince `totalAmount` alanı
+    // artık HİÇ yazılmıyor (`?: number`). Aşağıdaki `karsilastir` `undefined` ile sayıyı
+    // kıyaslayınca 0 döndürüyor, karşılaştırıcı geçişsiz oluyor ve [₺50, —, ₺100] azalan
+    // sıralandığında ₺100 en altta kalıyordu. Sonucu `-fark` ile ÇEVİRME: bilinmeyen başa gelir.
+    if (key === 'totalAmount') return sayiSirala(a.totalAmount, b.totalAmount, direction === 'desc');
+
     if (key === 'createdAt') {
       aVal = a.createdAt && typeof (a.createdAt as { toDate?: () => Date }).toDate === 'function' ? (a.createdAt as { toDate: () => Date }).toDate() : (a.createdAt || 0);
       bVal = b.createdAt && typeof (b.createdAt as { toDate?: () => Date }).toDate === 'function' ? (b.createdAt as { toDate: () => Date }).toDate() : (b.createdAt || 0);
@@ -622,7 +635,11 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
 
       {/* Stats */}
       {(() => {
-        const totalTRY = activePurchaseOrders.reduce((acc, curr) => acc + (curr.totalAmount || 0), 0);
+        // `|| 0` KALDIRILDI (2026-09-19): tutarı bilinmeyen sipariş toplama 0 olarak giriyor,
+        // KPI "eksik ama dolu" bir rakam basıyordu. `ekranTutari` kısmi toplamı verir, hiç bilinen
+        // yoksa NaN döner ve `kurCevir`/`paraYaz` zinciri '—' gösterir; sayaç da altta yazılır.
+        const alisTutar = toplaBilinen(activePurchaseOrders, o => o.totalAmount);
+        const totalTRY = ekranTutari(alisTutar);
         // KUR UYDURMA YOK (2026-08-26). Eskiden `exchangeRates?.USD || 1` vardı:
         // kur gelmemişse TL tutar OLDUĞU GİBİ kalıp başına '$' konuyordu
         // (₺40.000 → "$40.000", ~38× şişkin). `kurCevir` kur yoksa null döner,
@@ -666,9 +683,20 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
               </div>
               <p className="text-xl font-black text-green-600">
                 {convertedTotal === null
-                  ? <span className="text-gray-400" title={currentLanguage === 'tr' ? 'Güncel kur alınamadı' : 'Exchange rate unavailable'}>—</span>
+                  ? <span className="text-gray-400" title={!Number.isFinite(totalTRY)
+                      // '—'nin İKİ nedeni AYRI yazılır: toplam hiç yoksa (tüm tutarlar okunamadı) sorun kur DEĞİLDİR.
+                      ? (currentLanguage === 'tr' ? 'Sipariş tutarları okunamadı' : 'Order amounts unavailable')
+                      : (currentLanguage === 'tr' ? 'Güncel kur alınamadı' : 'Exchange rate unavailable')}>—</span>
                   : paraYaz(convertedTotal, { birim: kpiCurrency, ondalik: 0 })}
               </p>
+              {/* Kısmi toplamın EKSİKLİĞİ yazılır (2026-09-19): sessiz eksiltme yapmıyoruz. */}
+              {alisTutar.bilinmeyen > 0 && (
+                <p className="text-[10px] text-amber-600 mt-0.5">
+                  {currentLanguage === 'tr'
+                    ? `${alisTutar.bilinmeyen} siparişin tutarı okunamadı — ${alisTutar.bilinen === 0 ? 'toplam hesaplanamadı' : 'toplama dahil değil'}.`
+                    : `${alisTutar.bilinmeyen} order(s) unpriced — ${alisTutar.bilinen === 0 ? 'total not computable' : 'excluded from the total'}.`}
+                </p>
+              )}
             </div>
           </div>
         );

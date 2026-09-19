@@ -9,7 +9,7 @@
  * sayılıyordu — maliyet ~40 kat düşük, marj şişkin.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { itemCostTRY, itemPriceTRY, maliyetDurumu, kartMaliyetiTL, cevrilemeyenler, cevrilemeyenMesaji, maliyetTarihleri } from './cost';
+import { itemCostTRY, itemPriceTRY, maliyetDurumu, kartMaliyetiTL, kartSatisTL, cevrilemeyenler, cevrilemeyenMesaji, maliyetTarihleri } from './cost';
 import { kurArsiviDoldur, kurArsiviTemizle } from './kurArsivi';
 import type { InventoryItem } from '../types';
 
@@ -183,5 +183,54 @@ describe('kartMaliyetiTL — stok kartının BİLİNEN maliyeti (kartta 0 "giril
   it('kur yoksa / birim tanınmıyorsa null — 0 DEĞİL', () => {
     expect(kartMaliyetiTL(urun({ costPrice: 100, costCurrency: 'USD' }), null)).toBeNull();
     expect(kartMaliyetiTL(urun({ costPrice: 100, costCurrency: 'GBP' as 'USD' }), KURLAR)).toBeNull();
+  });
+});
+
+/**
+ * `kartSatisTL` — maliyetin AYNASI: satış fiyatının TL karşılığı, bilinmiyorsa null.
+ *
+ * NEDEN (2026-09-19 delta bulgusu, DashboardPage.tsx:2024 "Stok Değeri Özeti"): kartın MALİYET
+ * tarafı `kartMaliyetiTL` ile TL'ye çevriliyor, SATIŞ tarafı ise `finansalOranlar.stokDegeri`ye
+ * devrediliyordu; o fonksiyon `prices.Retail ?? price` değerini `priceCurrency`ye HİÇ BAKMADAN
+ * stokla çarpıyor. USD fiyatlı kartta panel iki farklı para birimini topluyordu:
+ *
+ *     priceCurrency 'USD', Retail 12, costCurrency 'USD' 8, stok 1000, kur 41
+ *       Maliyet Değeri  8 × 41 × 1000 = ₺328.000
+ *       Satış Değeri    12 × 1000     = "₺12.000"   ← dolar rakamı ₺ diye basılıyor (gerçeği ₺492.000)
+ *       Brüt marj       (12.000 − 328.000) / 12.000 ≈ −%2633, kırmızı rozetle
+ *
+ * Hiçbir girdi "bilinmiyor" olmadığı için '—' kapısı da devreye girmiyordu. Aynı hata
+ * Raporlar'da 2026-08-22'de `itemPriceTRY` ile kapatılmıştı — burası yarım kalmıştı.
+ *
+ * `itemPriceTRY` DOĞRUDAN kullanılamaz: kur/fiyat yokken 0 döner, yani kalem sessizce
+ * "bedelsiz" olur ve toplamı eksiltir. `kartSatisTL` o hâlde null döner → kalem
+ * `Tutar.bilinmeyen`e düşer ve ekran "N kalem tutarsız" der.
+ */
+describe('kartSatisTL — satış fiyatının BİLİNEN TL karşılığı', () => {
+  it('PARİTE: TL fiyatlı kartta sayı `prices.Retail ?? price` ile birebir aynı', () => {
+    expect(kartSatisTL(urun({ prices: { Retail: 150 } as InventoryItem['prices'] }), 'Retail', KURLAR)).toBe(150);
+    expect(kartSatisTL(urun({ price: 90 } as Partial<InventoryItem>), 'Retail', KURLAR)).toBe(90);
+    // Retail BİLİNİYORSA `price` yedeğine DÜŞMEZ (meşru 0 dahil — finansalOranlar.stokDegeri kuralı).
+    expect(kartSatisTL(urun({ prices: { Retail: 0 } as InventoryItem['prices'], price: 90 } as Partial<InventoryItem>), 'Retail', KURLAR)).toBe(0);
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: USD fiyat kurla çevrilir — dolar rakamı ₺ diye basılmaz', () => {
+    const kart = urun({ prices: { Retail: 12 } as InventoryItem['prices'], priceCurrency: 'USD' } as Partial<InventoryItem>);
+    expect(kartSatisTL(kart, 'Retail', { USD: 41 })).toBe(492);
+    expect(kartSatisTL(kart, 'Retail', { USD: 41 })).not.toBe(12);   // eski davranışın ta kendisi
+  });
+
+  it('kur yoksa / birim tanınmıyorsa null — 0 DEĞİL (itemPriceTRY 0 dönüyordu: sessiz eksiltme)', () => {
+    const usd = urun({ prices: { Retail: 12 } as InventoryItem['prices'], priceCurrency: 'USD' } as Partial<InventoryItem>);
+    expect(itemPriceTRY(usd, 'Retail', null)).toBe(0);               // eski yol
+    expect(kartSatisTL(usd, 'Retail', null)).toBeNull();
+    expect(kartSatisTL(usd, 'Retail', { USD: 0 })).toBeNull();
+    const gbp = urun({ prices: { Retail: 12 } as InventoryItem['prices'], priceCurrency: 'GBP' as 'USD' } as Partial<InventoryItem>);
+    expect(kartSatisTL(gbp, 'Retail', KURLAR)).toBeNull();
+  });
+
+  it('fiyat alanı hiç yoksa null (0 DEĞİL)', () => {
+    expect(kartSatisTL(urun({}), 'Retail', KURLAR)).toBeNull();
+    expect(kartSatisTL(urun({ prices: {} as InventoryItem['prices'] }), 'Retail', KURLAR)).toBeNull();
   });
 });

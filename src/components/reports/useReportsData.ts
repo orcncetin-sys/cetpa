@@ -9,24 +9,14 @@
  * olarak alır. ReportsCtx tipi ReturnType ile OTOMATİK türetilir — 47 alanı
  * elle yazıp senkron tutma yükü yok.
  */
-import { itemCostTRY, itemPriceTRY } from '../../utils/cost';
+import { itemCostTRY, itemPriceTRY, kartMaliyetiTL } from '../../utils/cost';
+import { brutMarjHesabi, stokMaliyetCozucu, type BrutMarjSonucu } from '../../utils/pano/raporMarj';
 import { siparisTarih } from '../../utils/siparis';
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { zamanMs } from '../../utils/zaman';
 import { pdfBaslik, pdfAltBilgi, pdfTabloStili } from '../../utils/pdfTheme';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area,
-} from 'recharts';
-import {
-  LayoutDashboard, List, Truck, UserCheck, Package, Users, BarChart3,
-  AlertCircle, Calendar, Download, CheckCircle2, ChevronRight,
-  CreditCard,
-} from 'lucide-react';
 import { format } from 'date-fns';
 import { tr, enUS } from 'date-fns/locale';
-import { cn } from '../../lib/utils';
-import { motion } from 'motion/react';
 // jspdf + Türkçe font TIKLAMA ANINDA dinamik yüklenir (2026-08-31 performans):
 // statik import, Raporlar sekmesi açılır açılmaz 1.5 MB indiriyordu.
 import {
@@ -36,8 +26,8 @@ import { db, auth } from '../../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../../utils/firebase';
 import { sortByCreatedAt } from '../../utils/fsSort';
 import { formatInCurrency, kisaTutar } from '../../utils/currency';
-import { tutarYaz } from '../../utils/para';
-import ModuleHeader from '../ModuleHeader';
+import { tutarYaz, ekranTutari, sayiSirala, type Tutar } from '../../utils/para';
+import { raporSiparisi, raporCirosu, ortalamaSiparis, BOS_TUTAR, kovayaEkle, grafikDegeri } from '../../utils/pano/raporVeriKatmani';
 import {
   type Order,
   type Employee,
@@ -151,9 +141,12 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
   }, [reportsTab, userRole]);
 
   // KPI Calculations
-  const totalRevenueTRY = useMemo(() => orders
-    .filter(o => o.status !== 'Cancelled')
-    .reduce((sum, o) => sum + (Number(o.totalPrice) || 0), 0), [orders]);
+  // Ciro artık `Tutar`: EKRAN kısmi toplamı gösterebilir (+ "N kayıt tutarsız" notu),
+  // TÜRETME (ortalama sipariş) gösteremez. İptal süzgeci `raporCirosu` içinde.
+  // Eski `Number(o.totalPrice) || 0`, Mikro pseudo-siparişinden gelen NaN'ı
+  // "₺0 biliniyor"a çevirip ciroyu sessizce EKSİK gösteriyordu.
+  const ciroTutar = useMemo(() => raporCirosu(orders), [orders]);
+  const totalRevenueTRY = ekranTutari(ciroTutar);
   const revenueSymbol = revenueCurrency === 'USD' ? '$' : revenueCurrency === 'EUR' ? '€' : '₺';
   // `exchangeRates` prop'u kur YOKKEN null; formatInCurrency imzasi `?: ExchangeRates`.
   // `?? undefined` yalniz TIP koprusu: iki degerde de `exchangeRates?.[currency]`
@@ -161,12 +154,14 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
   const fxKurlari = exchangeRates ?? undefined;
   const revenueFormatted = formatInCurrency(totalRevenueTRY, revenueCurrency, fxKurlari);
   const totalOrders = orders.length;
-  const avgOrderValueTRY = totalOrders > 0 ? totalRevenueTRY / totalOrders : 0;
+  // TÜRETME (`tamTutar`): tek sipariş bile tutarsızsa ortalama HESAPLANMAZ ('—').
+  // Bölen PARİTE için değiştirilmedi (`totalOrders` iptalleri de sayıyor; pay saymıyor).
+  const avgOrderValueTRY = ortalamaSiparis(ciroTutar, totalOrders);
   const avgOrderFormatted = formatInCurrency(avgOrderValueTRY, revenueCurrency, fxKurlari);
   const lowStockItems = inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length;
 
   // Sales Trend Data
-  const salesByDate = useMemo(() => orders.reduce((acc: Record<string, { label: string; total: number }>, o) => {
+  const salesByDate = useMemo(() => orders.reduce((acc: Record<string, { label: string; tutar: Tutar }>, o) => {
     let dateKey = 'unknown';
     let label = currentT.unknown;
     // syncedAt YOKSA createdAt'e dus (2026-08-24 tarih denetimi): pazaryeri
@@ -185,8 +180,10 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
         console.error("Error formatting date:", e);
       }
     }
-    if (!acc[dateKey]) acc[dateKey] = { label, total: 0 };
-    acc[dateKey].total += (Number(o.totalPrice) || 0);
+    // Kova: bilinenler toplanır, tutarı okunamayan sipariş ₺0 sayılmaz — SAYILIR.
+    // `BOS_TUTAR` donuk; `kovayaEkle` her zaman YENİ nesne döndürür (kovalar kirlenmez).
+    if (!acc[dateKey]) acc[dateKey] = { label, tutar: BOS_TUTAR };
+    acc[dateKey].tutar = kovayaEkle(acc[dateKey].tutar, raporSiparisi(o));
     return acc;
   }, {}), [orders, currentT, currentLanguage]);
 
@@ -196,7 +193,9 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
       if (keyB === 'unknown') return -1;
       return keyA.localeCompare(keyB);
     })
-    .map(([, val]) => ({ name: val.label, value: val.total }))
+    // recharts: hiç bilinen tutarı olmayan gün `null` — 0 DEĞİL. 0, çizgiyi sıfıra
+    // çakıp "o gün satış yok" diye YANLIŞ bilgi verirdi; `null` noktayı atlatır.
+    .map(([, val]) => ({ name: val.label, value: grafikDegeri(val.tutar), bilinmeyen: val.tutar.bilinmeyen }))
     .slice(-30), [salesByDate]);
 
   // Category Data
@@ -210,15 +209,19 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
   // --- CRM sub-data ---
   const ordersByStatus = useMemo(() => orders.reduce((acc: Record<string, number>, o) => { acc[o.status] = (acc[o.status]||0)+1; return acc; }, {}), [orders]);
   const statusChartData = useMemo(() => Object.entries(ordersByStatus).map(([name, value]) => ({ name, value: Number(value) })), [ordersByStatus]);
+  // `name`/`total`/`count` KORUNDU (CrmOzetBolumu bunları okuyor; `total` → formatInCurrency → NaN'da '—').
+  // Sıralama `sayiSirala(..., true)`: tutarı bilinmeyen müşteri AZALANDA DA sonda — eski
+  // `b.total - a.total` NaN üretip sıralamayı bozuyordu. Yönü `-cmp` ile ÇEVİRME.
   const topCustomers = useMemo(() => Object.values(
-    orders.reduce((acc: Record<string, { name: string; total: number; count: number }>, o) => {
+    orders.reduce((acc: Record<string, { name: string; tutar: Tutar; count: number }>, o) => {
       const k = o.customerName || '—';
-      if (!acc[k]) acc[k] = { name: k, total: 0, count: 0 };
-      acc[k].total += Number(o.totalPrice) || 0;
+      if (!acc[k]) acc[k] = { name: k, tutar: BOS_TUTAR, count: 0 };
+      acc[k].tutar = kovayaEkle(acc[k].tutar, raporSiparisi(o));
       acc[k].count += 1;
       return acc;
     }, {})
-  ).sort((a, b) => b.total - a.total).slice(0, 8), [orders]);
+  ).map(c => ({ name: c.name, total: ekranTutari(c.tutar), count: c.count, bilinmeyen: c.tutar.bilinmeyen }))
+   .sort((a, b) => sayiSirala(a.total, b.total, true)).slice(0, 8), [orders]);
 
   // --- Inventory sub-data ---
   // itemPriceTRY ŞART (2026-08-22 denetim bulgusu C3): buradaki iki toplam
@@ -272,7 +275,7 @@ export function useReportsData({ orders, inventory, exchangeRates, currentT, cur
   };
 
 
-  return { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, onMusteriAc, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF };
+  return { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, onMusteriAc, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, ciroTutar, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF };
 }
 
 /** Sekme bileşenlerinin aldığı bağlam — hook'un dönüşünden otomatik türer. */
@@ -297,24 +300,28 @@ export { itemCostTRY, itemPriceTRY, cevrilemeyenler, cevrilemeyenMesaji } from '
  *
  * Bu hesap dört ayrı kartta kopyalanmıştı (GenelBloklar1/2, IKRapor,
  * EnvanterRapor); her birine ayrı süzgeç eklemek "yarım düzeltme" üretirdi.
+ *
+ * ## 2026-09-19 düzeltici turu — hesap `src/utils/pano/raporMarj.ts`e TAŞINDI
+ *
+ * Buradaki gövde testsizdi ve üç sahte kesinlik taşıyordu; üçü de orada (testli) kapatıldı:
+ *   • **Ciro/maliyet asimetrisi** — ciro `ekranTutari` ile tutarsız siparişi dışlarken maliyet
+ *     aynı siparişi topluyordu; `ciro − maliyet` yazan tüketiciler kısmi cirodan TAM maliyeti
+ *     çıkarıyordu. Artık `brutKar` alanı var ve İKİ taraf da tam bilinmiyorsa NaN döner —
+ *     tüketiciler farkı ELLE HESAPLAMAMALI.
+ *   • **`li.price * 0.6`** — katalogda eşleşmeyen kaleme uydurma %60 maliyet oranı.
+ *   • **`itemCostTRY` 0 döner** — kuru çevrilemeyen / kartında maliyet olmayan kalem sessizce
+ *     "bedelsiz" sayılıyordu. Artık `kartMaliyetiTL` (null = bilinmiyor) kullanılıyor.
+ * Son ikisi Pano'nun Phase 124 panelinde zaten kaldırılmıştı: aynı sipariş Pano'da '— marj',
+ * burada "%40" gösteriyordu. Yeni `maliyetTutar.bilinmeyen` sayacı kaç siparişin maliyetinin
+ * çözülemediğini söyler; ekranlar bunu kullanıcıya YAZAR.
  */
 export function brutMarj(
-  list: Array<{ totalPrice?: number; lineItems?: Array<{ inventoryId?: string; name?: string; price: number; quantity: number }> }>,
+  list: Array<{ totalPrice?: number; lineItems?: Array<{ inventoryId?: string; name?: string; price: number; quantity: number; costPrice?: number }> }>,
   inventory: Parameters<typeof itemCostTRY>[0][],
   exchangeRates: Parameters<typeof itemCostTRY>[1],
-): { ciro: number; maliyet: number; marj: number | null; kapsamDisi: number; toplamCiro: number } {
-  const toplamCiro = list.reduce((s, o) => s + (o.totalPrice || 0), 0);
-  const kapsamli = list.filter(o => (o.lineItems ?? []).length > 0);
-  const kapsamDisi = list.length - kapsamli.length;
-  const ciro = kapsamli.reduce((s, o) => s + (o.totalPrice || 0), 0);
-  const maliyet = kapsamli.reduce((s, o) =>
-    s + (o.lineItems ?? []).reduce((ls, li) => {
-      const inv = inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name);
-      // Kalem envanterde bulunamazsa fiyatın %60'ı yedeği KORUNDU (mevcut davranış):
-      // bu, kalemi olan ama eşleşmeyen ürün içindir — kalemi HİÇ OLMAYAN sipariş
-      // yukarıda zaten kapsam dışına alındı.
-      return ls + ((inv ? itemCostTRY(inv, exchangeRates) : li.price * 0.6) * li.quantity);
-    }, 0), 0);
-  const marj = ciro > 0 ? Math.round(((ciro - maliyet) / ciro) * 100) : null;
-  return { ciro, maliyet, marj, kapsamDisi, toplamCiro };
+): BrutMarjSonucu {
+  // Hesap `src/utils/pano/raporMarj.ts`te (saf + testli). Burada yalnız kur çevrimi bağlanır:
+  // `kartMaliyetiTL` bilinmeyen maliyete null döner — `itemCostTRY` 0 döndüğü için DOĞRUDAN
+  // geçilemez (o 0 kalemi "bedelsiz" yapıp marjı şişiriyordu, cost.ts'te belgeli).
+  return brutMarjHesabi(list, stokMaliyetCozucu(inventory, i => kartMaliyetiTL(i, exchangeRates)));
 }

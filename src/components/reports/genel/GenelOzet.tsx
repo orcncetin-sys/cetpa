@@ -19,12 +19,34 @@ import { itemCostTRY, type ReportsCtx, brutMarj } from '../useReportsData';
 import { odemeTakipli, siparisTarih } from '../../../utils/siparis';
 import { KpiCard, KpiGrid, KpiCurrencyToggle } from '../ReportKit';
 import { paraYaz } from '../../../utils/currency';
+import { stokDevirGunu } from '../../../utils/pano/raporMarj';
 import { zamanDate } from '../../../utils/zaman';
 import { oc } from '../../../i18n/ortak';
 
-type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentT' | 'currentLanguage' | 'onNavigate' | 'recurringOrders' | 'fmtAna' | 'totalOrders' | 'revenueSymbol' | 'revenueFormatted' | 'avgOrderFormatted' | 'lowStockItems' | 'trendData' | 'categoryChartData' | 'COLORS' | 'revenueCurrency' | 'setRevenueCurrency'>;
+/**
+ * `ciroTutar`: ciro kartının KISMİ olup olmadığını söyleyen sayaç (`useReportsData`).
+ * `revenueFormatted` `ekranTutari` ile üretilir — tutarı okunamayan sipariş toplamın
+ * DIŞINDADIR — ama 2026-09-19'a kadar bu sayaç hiçbir ekrana geçmiyordu: kullanıcı
+ * kısmi ciroyu kesin rakam sanıyordu (EKRAN sözleşmesi: '—' VEYA açık not).
+ */
+type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentT' | 'currentLanguage' | 'onNavigate' | 'recurringOrders' | 'fmtAna' | 'totalOrders' | 'revenueSymbol' | 'revenueFormatted' | 'avgOrderFormatted' | 'ciroTutar' | 'lowStockItems' | 'trendData' | 'categoryChartData' | 'COLORS' | 'revenueCurrency' | 'setRevenueCurrency'>;
 
-export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates, currentT, currentLanguage, onNavigate, recurringOrders, fmtAna, totalOrders, revenueSymbol, revenueFormatted, avgOrderFormatted, lowStockItems, trendData, categoryChartData, COLORS, revenueCurrency, setRevenueCurrency }: Props) {
+export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates, currentT, currentLanguage, onNavigate, recurringOrders, fmtAna, totalOrders, revenueSymbol, revenueFormatted, avgOrderFormatted, ciroTutar, lowStockItems, trendData, categoryChartData, COLORS, revenueCurrency, setRevenueCurrency }: Props) {
+  // Tutarı okunamayan sipariş sayısı — ciro toplamına GİRMEZ, ortalamayı da hesaplatmaz.
+  const tutarsizSiparis = ciroTutar.bilinmeyen;
+  const ciroNotu = tutarsizSiparis > 0
+    ? (currentLanguage === 'tr'
+        ? `${tutarsizSiparis} siparişin tutarı bilinmiyor — toplama dâhil değil`
+        : `${tutarsizSiparis} order(s) unpriced — excluded from the total`)
+    : undefined;
+  const ortalamaNotu = tutarsizSiparis > 0
+    ? (currentLanguage === 'tr'
+        ? `${tutarsizSiparis} siparişin tutarı bilinmiyor — ortalama hesaplanamıyor`
+        : `${tutarsizSiparis} order(s) unpriced — average not computed`)
+    : undefined;
+  // Trend grafiğinin GÖSTERİLEN 30 gününde tutarı okunamayan sipariş sayısı (ciro kartının
+  // sayacından AYRI: grafik son 30 kovayla sınırlı, kart tüm dönemi kapsıyor).
+  const trendGunlukTutarsiz = trendData.reduce((s, g) => s + g.bilinmeyen, 0);
   return (
     <>
       {reportsTab === 'genel' && (
@@ -32,16 +54,17 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
           {/* KPI Cards — ortak KpiCard/KpiGrid (ReportKit) ile tek tip */}
           <KpiGrid>
             {([
-              { label: currentT.kpi_revenue, value: revenueFormatted, icon: undefined, symbol: revenueSymbol, accent: 'text-brand', accentBg: 'bg-brand/10', tab: 'crm', money: true },
-              { label: currentT.kpi_orders, value: String(totalOrders), icon: Package, symbol: undefined, accent: 'text-blue-500', accentBg: 'bg-blue-50', tab: 'crm', money: false },
-              { label: currentT.kpi_avg_order, value: avgOrderFormatted, icon: undefined, symbol: revenueSymbol, accent: 'text-green-500', accentBg: 'bg-green-50', tab: 'crm', money: false },
-              { label: currentT.kpi_low_stock, value: String(lowStockItems), icon: AlertCircle, symbol: undefined, accent: 'text-orange-500', accentBg: 'bg-orange-50', tab: 'inventory', money: false },
-            ] as { label: string; value: string; icon?: React.ElementType; symbol?: string; accent: string; accentBg: string; tab: string; money: boolean }[]).map((kpi, i) => (
+              { label: currentT.kpi_revenue, value: revenueFormatted, hint: ciroNotu, icon: undefined, symbol: revenueSymbol, accent: 'text-brand', accentBg: 'bg-brand/10', tab: 'crm', money: true },
+              { label: currentT.kpi_orders, value: String(totalOrders), hint: undefined, icon: Package, symbol: undefined, accent: 'text-blue-500', accentBg: 'bg-blue-50', tab: 'crm', money: false },
+              { label: currentT.kpi_avg_order, value: avgOrderFormatted, hint: ortalamaNotu, icon: undefined, symbol: revenueSymbol, accent: 'text-green-500', accentBg: 'bg-green-50', tab: 'crm', money: false },
+              { label: currentT.kpi_low_stock, value: String(lowStockItems), hint: undefined, icon: AlertCircle, symbol: undefined, accent: 'text-orange-500', accentBg: 'bg-orange-50', tab: 'inventory', money: false },
+            ] as { label: string; value: string; hint?: string; icon?: React.ElementType; symbol?: string; accent: string; accentBg: string; tab: string; money: boolean }[]).map((kpi, i) => (
               <KpiCard
                 key={kpi.tab + i}
                 index={i}
                 label={kpi.label}
                 value={kpi.value}
+                hint={kpi.hint}
                 icon={kpi.icon}
                 symbol={kpi.symbol}
                 accent={kpi.accent}
@@ -73,6 +96,16 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
+              {/* Grafikte tutarı okunamayan gün `null` olduğu için nokta ATLANIR (çizgi
+                  sıfıra çakılmaz) — ama atlandığı da söylenmeli: sayaç veri katmanında
+                  (`trendData[].bilinmeyen`) üretiliyor, 2026-09-19'a dek basılmıyordu. */}
+              {trendGunlukTutarsiz > 0 && (
+                <p className="text-[11px] text-amber-600 mt-2">
+                  {currentLanguage === 'tr'
+                    ? `${trendGunlukTutarsiz} siparişin tutarı okunamadı — grafikteki günlere dâhil değil.`
+                    : `${trendGunlukTutarsiz} order(s) unpriced — not included in the daily points.`}
+                </p>
+              )}
             </div>
             <div className="apple-card p-8">
               <h3 className="text-lg font-bold mb-6">{currentT.category_dist}</h3>
@@ -196,12 +229,22 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
         // DIO: stok degeri / gunluk GERCEK maliyet.
         // Eskiden `monthly90Rev * 0.6` ile "%60 COGS varsayimi" kullaniliyordu —
         // gercek kalem maliyeti elde varken uydurma orandi (sahte kesinlik).
-        // Kalem verisi olmayan siparisler kapsam disi; hic kapsamli siparis yoksa
-        // DIO ve dolayisiyla CCC BILINMIYOR ('—'), 0 DEGIL.
+        // DIO'nun PAYI tum stok, PAYDASI yalniz KALEMLI siparislerin COGS'u: kalem verisi olmayan
+        // (Mikro faturasindan turetilen) TEK siparis bile COGS'u eksik birakir → DIO ve dolayisiyla
+        // CCC BILINMIYOR ('—'), 0 DEGIL. Kural + nedenler: `raporMarj.stokDevirGunu` (testli).
+        // ACIK (rapor ekranlari turu): PAY hala kismi — `itemCostTRY` cevrilemeyen/girilmemis maliyete 0
+        // doner, `stockLevel ?? 0` bilinmeyen stogu 0 sayar; `kartMaliyetiTL` + bilinmeyen sayaciyla kapatilacak.
         const inventoryVal185 = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
         const marj90 = brutMarj(son90(orders), inventory, exchangeRates);
-        const dailyCOGS185 = marj90.maliyet > 0 ? marj90.maliyet / days90 : 0;
-        const dio = dailyCOGS185 > 0 ? Math.round(inventoryVal185 / dailyCOGS185) : null;
+        // DIO ve CCC TÜRETİLEN sayılardır → `stokDevirGunu` (içinde `tamTutar`; 2026-09-19 delta bulgusu).
+        // `marj90.maliyet` bir EKRAN toplamıdır: maliyeti çözülemeyen sipariş toplama GİRMEZ,
+        // SAYILIR. O kısmi COGS'tan DIO üretmek günlük maliyeti olduğundan küçük gösterir ve
+        // DIO'yu şişirir — 100 siparişin 40'ında katalogda olmayan bir kalem varsa ~45 günlük
+        // gerçek DIO ekranda ~75 gün çıkıyor, CCC kırmızı basılıyor ve "nakit sıkışıklığı riski
+        // var" HÜKMÜ kısmi veriden üretiliyordu. Tek kayıt bile eksikse hesaplanmaz ('—').
+        // Kapı artık `kapsamDisi`yi de görür (son inceleme: 300 kalemsiz fatura + 10 kalemli sipariş
+        // "1350 gün — nakit sıkışıklığı riski var" basıyordu).
+        const { dio, neden: dioNedeni } = stokDevirGunu(inventoryVal185, marj90, days90);
         const ccc = (dso !== null && dio !== null) ? dso + dio : null;
         const cccColor = ccc === null ? 'text-gray-400' : ccc <= 30 ? 'text-emerald-600' : ccc <= 60 ? 'text-amber-500' : 'text-red-500';
         return (
@@ -224,14 +267,39 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
             </div>
             <div className="flex items-center gap-1.5 bg-blue-50 rounded-xl p-3">
               <span className="text-blue-500 text-sm">💡</span>
+              {/* '—' nedenini AYIRT EDEREK yaz (2026-09-19): "kalem maliyeti olan sipariş yok"
+                  cümlesi, maliyeti çözülemeyen sipariş VARKEN yanlıştı. */}
               <p className="text-[11px] text-blue-700">{ccc === null
-                ? (currentLanguage === 'tr'
-                    ? 'CCC = DSO + DIO. Şu an hesaplanamıyor: kalem maliyeti olan sipariş yok (Mikro faturasından türetilen kayıtlarda kalem bilgisi bulunmuyor).'
-                    : 'CCC = DSO + DIO. Not computable: no orders with line-item cost data.')
+                ? (dioNedeni === 'maliyet-bilinmiyor'
+                    ? (currentLanguage === 'tr'
+                        ? `CCC = DSO + DIO. Şu an hesaplanamıyor: ${marj90.maliyetTutar.bilinmeyen} siparişin maliyeti çözülemedi — DIO kısmi bir maliyetten üretilmez.`
+                        : `CCC = DSO + DIO. Not computable: ${marj90.maliyetTutar.bilinmeyen} order(s) with unresolved cost — DIO is not derived from a partial COGS.`)
+                    : dioNedeni === 'kalemsiz-siparis'
+                    ? (currentLanguage === 'tr'
+                        ? `CCC = DSO + DIO. Şu an hesaplanamıyor: ${marj90.kapsamDisi} siparişin kalem verisi yok (Mikro faturasından türetilen kayıtlar) — satılan malın maliyeti eksik, DIO kısmi bir maliyetten üretilmez.`
+                        : `CCC = DSO + DIO. Not computable: ${marj90.kapsamDisi} order(s) have no line items (derived from Mikro invoices) — COGS is incomplete, DIO is not derived from a partial COGS.`)
+                    : dioNedeni === 'maliyetli-siparis-yok'
+                    ? (currentLanguage === 'tr'
+                        ? 'CCC = DSO + DIO. Şu an hesaplanamıyor: son 90 günde kalem maliyeti olan sipariş yok.'
+                        : 'CCC = DSO + DIO. Not computable: no orders with line-item cost data in the last 90 days.')
+                    : (currentLanguage === 'tr'
+                        ? 'CCC = DSO + DIO. Şu an hesaplanamıyor: DSO ya da DIO için yeterli veri yok.'
+                        : 'CCC = DSO + DIO. Not computable: not enough data for DSO or DIO.'))
                 : (currentLanguage === 'tr'
                     ? `CCC = DSO + DIO. Hedef: 30 günün altı. Şu an: ${ccc} gün${ccc > 60 ? ' — nakit sıkışıklığı riski var.' : ccc > 30 ? ' — iyileştirilebilir.' : ' — sağlıklı.'}`
                     : `CCC = DSO + DIO. Target: under 30 days. Now: ${ccc} days.`)}</p>
             </div>
+            {/* DIO artık KISMİ bir COGS'tan ÜRETİLMİYOR (2026-09-19): maliyeti çözülemeyen tek
+                sipariş bile varsa hesaplanmaz. Not, hangi kayıtların eksik olduğunu söyler —
+                eski metin "DIO bu kayıtları İÇERMEZ (daha düşük olabilir)" diyerek kısmi
+                COGS'tan üretilmiş bir sayıyı meşrulaştırıyordu. */}
+            {(marj90.maliyetTutar.bilinmeyen > 0 || marj90.kapsamDisi > 0) && (
+              <p className="text-[10px] text-amber-600 mt-2">
+                {currentLanguage === 'tr'
+                  ? `${marj90.maliyetTutar.bilinmeyen} siparişin maliyeti çözülemedi, ${marj90.kapsamDisi} siparişin kalem verisi yok — DIO ve CCC HESAPLANMADI.`
+                  : `${marj90.maliyetTutar.bilinmeyen} order(s) with unresolved cost, ${marj90.kapsamDisi} without line items — DIO and CCC NOT computed.`}
+              </p>
+            )}
           </div>
         );
       })()}

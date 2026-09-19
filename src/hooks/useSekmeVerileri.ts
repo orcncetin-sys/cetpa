@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { collection, query, orderBy, limit, onSnapshot } from '../lib/dbClient';
 import { db } from '../firebase';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { bankaHesabiOku, sabitKiymetOku } from '../utils/pano/raporVeriKatmani';
 import type { WebhookConfig, VehiclePosition } from '../types';
 
 /**
@@ -127,20 +128,15 @@ export function useSekmeVerileri({
 
   useEffect(() => {
     if (activeTab !== 'muhasebe' || muhasebeTab !== 'bilanco') return;
+    // Eşleme TEK KAYNAK `utils/pano/raporVeriKatmani` (Faz 3 5/n): dönen ŞEKİL aynı,
+    // tek fark bilinmeyen sayının artık ₺0 DEĞİL NaN olması — Bilanço tüketicileri
+    // (`dovizTopla`/`duranVarlik`) NaN'ı zaten "bilinmeyen" sayıp '—' + satır notu basıyor,
+    // ama okuma anında doğan sahte sıfır o kapıyı etkisiz kılıyordu.
     const unsubBank = onSnapshot(collection(db, 'bankAccounts'), snap => {
-      setP547BankAccounts(sortByCreatedAt(snap.docs.map(d => ({
-        id: d.id, bankName: d.data().bankName || d.data().bank || '—',
-        accountType: d.data().accountType || 'Vadesiz',
-        balance: Number(d.data().balance) || 0,
-        currency: d.data().currency || 'TRY',
-      }))));
+      setP547BankAccounts(sortByCreatedAt(snap.docs.map(d => bankaHesabiOku({ id: d.id, ...d.data() }))));
     }, () => setP547BankAccounts([]));
     const unsubFA = onSnapshot(collection(db, 'sabitKiymetler'), snap => {
-      setP547FixedAssets(sortByCreatedAt(snap.docs.map(d => ({
-        id: d.id, name: d.data().name || '—',
-        cost: Number(d.data().cost) || Number(d.data().edinimBedeli) || 0,
-        depreciation: Number(d.data().birikimliAmortisman) || 0,
-      }))));
+      setP547FixedAssets(sortByCreatedAt(snap.docs.map(d => sabitKiymetOku({ id: d.id, ...d.data() }))));
     }, () => setP547FixedAssets([]));
     return () => { unsubBank(); unsubFA(); };
    

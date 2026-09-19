@@ -42,6 +42,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         revenueSymbol={ctx.revenueSymbol}
         revenueFormatted={ctx.revenueFormatted}
         avgOrderFormatted={ctx.avgOrderFormatted}
+        ciroTutar={ctx.ciroTutar}
         lowStockItems={ctx.lowStockItems}
         trendData={ctx.trendData}
         categoryChartData={ctx.categoryChartData}

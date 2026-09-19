@@ -124,7 +124,21 @@ export default function CrmOzetBolumu({ orders, currentLanguage, currentT, reven
                 <div className="w-6 h-6 rounded-full bg-brand/10 flex items-center justify-center text-[10px] font-bold text-brand flex-shrink-0">{i+1}</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
-                  <p className="text-xs text-gray-400">{c.count} {oc(currentLanguage).siparis}</p>
+                  {/* KISMİ TOPLAM AÇIKÇA SÖYLENİR (2026-09-19 hakem turu): `c.total`
+                      `ekranTutari` ile üretilir, yani tutarı okunamayan siparişler
+                      toplamın DIŞINDADIR. Sayaç (`c.bilinmeyen`) veri katmanında
+                      zaten üretiliyordu ama hiçbir ekran basmıyordu — rakam kesin
+                      sanılıyordu (EKRAN sözleşmesi: '—' VEYA açık not). */}
+                  <p className="text-xs text-gray-400">
+                    {c.count} {oc(currentLanguage).siparis}
+                    {c.bilinmeyen > 0 && (
+                      <span className="text-amber-600">
+                        {currentLanguage === 'tr'
+                          ? ` · ${c.bilinmeyen} siparişin tutarı bilinmiyor, toplamda yok`
+                          : ` · ${c.bilinmeyen} order(s) unpriced, excluded`}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <span className="text-sm font-bold text-brand">{formatInCurrency(c.total, revenueCurrency, fxKurlari)}</span>
               </button>

@@ -136,6 +136,46 @@ export function itemCostTRY(
 }
 
 /**
+ * Stok kartının BİLİNEN satış fiyatı, TL cinsinden — bilinmiyorsa **`null`**.
+ *
+ * `kartMaliyetiTL`in SATIŞ tarafındaki ikizi. `itemPriceTRY`den farkı: kur yokken,
+ * birim tanınmazken ya da fiyat alanı hiç yokken 0 DÖNMEZ. 0 "bedelsiz" demektir,
+ * "bilinmiyor" değil — `Tutar` toplamında biri kalemi sessizce eksiltir, diğeri
+ * `bilinmeyen` sayacına düşürüp ekrana "N kalem tutarsız" yazdırır.
+ *
+ * NEDEN (2026-09-19 delta bulgusu, DashboardPage.tsx:2024 "Stok Değeri Özeti"): kartın maliyet
+ * tarafı `kartMaliyetiTL` ile TL'ye çevriliyor, satış tarafı ise `finansalOranlar.stokDegeri`ye
+ * devrediliyordu ve o fonksiyon `prices.Retail ?? price` değerini `priceCurrency`ye HİÇ BAKMADAN
+ * stokla çarpıyor. USD fiyatlı kartta panel iki para birimini topluyor, üstelik hiçbir girdi
+ * "bilinmiyor" olmadığı için marj '—' kapısına da takılmıyordu (₺328.000 maliyete karşı
+ * "₺12.000" satış → ≈ −%2633 kırmızı rozet). Raporlar tarafı 2026-08-22'de `itemPriceTRY` ile
+ * düzeltilmişti; pano yarım kalmıştı.
+ *
+ * FİYAT KADEMESİ SEÇİMİ `finansalOranlar.stokDegeri` ile BİREBİR: kademe biliniyorsa o,
+ * yoksa kartın düz `price` alanı. Meşru ₺0 fiyat burada BİLİNEN 0'dır (maliyet tarafındaki
+ * "0 = girilmemiş" kuralı bilerek uygulanmadı — `stokDegeri` 0 fiyatı hep bilinen saydı,
+ * çevirmek sessiz bir rakam değişikliği olurdu; bkz. Açık İşler).
+ */
+export function kartSatisTL(
+  item: InventoryItem,
+  tier: string,
+  rates: Record<string, number> | null | undefined,
+): number | null {
+  const kademe = item.prices?.[tier] as unknown;
+  const ham = (typeof kademe === 'number' && Number.isFinite(kademe))
+    ? kademe
+    : (item as unknown as { price?: unknown }).price;
+  if (typeof ham !== 'number' || !Number.isFinite(ham)) return null;
+
+  const cur = (item as unknown as { priceCurrency?: string }).priceCurrency;
+  if (!cur || cur === 'TRY') return ham;
+  if (!BILINEN_BIRIMLER.has(cur)) return null;
+  const kur = rates?.[cur];
+  if (typeof kur !== 'number' || !Number.isFinite(kur) || kur <= 0) return null;
+  return ham * kur;
+}
+
+/**
  * Kalemin SATIS fiyati, TL cinsinden. Maliyet tarafiyla AYNI kural:
  * `priceCurrency` biliniyor ama kuru yoksa uydurma yapmaz, 0 doner (kalem
  * toplama katilmaz) ve `cevrilemeyenler()` bunu raporlar.
