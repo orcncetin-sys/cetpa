@@ -252,6 +252,24 @@ export function kalemleriCoz(kalemler: readonly StokHareketi[], meblag?: unknown
   });
 }
 
+/**
+ * Net birim fiyat ekranda kaç ondalıkla basılır: (yuvarlanmış birim × miktar) satırın NET tutarını yarım kuruş içinde
+ * geri üreten EN AZ ondalık (2…6). Örnek: ₺183,34 / 20 = 9,167 → "₺9,17" yazılırsa 20 × 9,17 = ₺183,40 olur ve
+ * kullanıcı faturayı elle sağlayamaz; "₺9,167" yazılır. Çok adetli satırda 4 de yetmez: 5.000 vida / ₺418,37 →
+ * "₺0,0837" × 5.000 = ₺418,50; 6 ondalık ("₺0,083674") tutar. Hiçbiri tutmuyorsa 6. Yuvarlanmış birim fiyat bir
+ * GÖSTERİMDİR — hiçbir hesaba girmez (hesap `KalemCozumu.birimFiyat`'ın tam değeriyle yapılır). Girdi bilinmiyorsa 2
+ * (sütun zaten '—' basar).
+ */
+export function birimFiyatOndaligi(birimFiyat: unknown, miktar: unknown, net: unknown): number {
+  if (!bilinenSayi(birimFiyat) || !bilinenSayi(miktar) || !bilinenSayi(net)) return 2;
+  for (let ondalik = 2; ondalik < 6; ondalik++) {
+    const kat = 10 ** ondalik;
+    const yuvarlak = Math.round(Number(birimFiyat) * kat) / kat;
+    if (Math.abs(yuvarlak * Number(miktar) - Number(net)) <= 0.005) return ondalik;
+  }
+  return 6;
+}
+
 export interface StokFiyatSatiri {
   sku: string;
   /** NET ağırlıklı ortalama (Σnet / Σmiktar); o yönde hesaplanabilir satır yoksa null. */

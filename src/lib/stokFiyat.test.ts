@@ -8,7 +8,7 @@
  * miktarla ortalamaya sokup fiyatı aşağı çekiyordu (CLAUDE.md: sayısal alanda `|| 0` yasak).
  */
 import { describe, it, expect } from 'vitest';
-import { satirNet, stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, kalemleriCoz } from './stokFiyat';
+import { satirNet, stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, kalemleriCoz, birimFiyatOndaligi } from './stokFiyat';
 
 const alis = (p: Record<string, unknown>) => ({ sth_stok_kod: 'CIM-50', sth_tip: 0, sth_miktar: 10, sth_tutar: 1000, ...p });
 const satis = (p: Record<string, unknown>) => ({ sth_stok_kod: 'CIM-50', sth_tip: 1, sth_miktar: 4, sth_tutar: 600, ...p });
@@ -235,5 +235,34 @@ describe('kalemleriCoz — fatura modalı: tek evrakın kalemleri + başlık top
     expect(c[0].net).toBeCloseTo(2016, 2);
     expect(c[0].kaynak).toBe('faturaAltiKdvden');     // tutarı bilinmeyen kalem varken başlık sağlaması yapılamaz → satır sonucu
     expect(c[1]).toMatchObject({ net: null, brut: null, kaynak: null });
+  });
+});
+
+describe('birimFiyatOndaligi — net birim fiyat kaç ondalıkla basılır (fatura modalı, 2026-09-19)', () => {
+  it('2 ondalık net tutarı GERİ ÜRETİYORSA 2: 18 × 187,50 = 3.375,00', () => {
+    expect(birimFiyatOndaligi(3375 / 18, 18, 3375)).toBe(2);
+  });
+
+  it('2 ondalık net tutarı TUTMUYORSA tutan EN AZ ondalık: 183,34 / 20 = 9,167 → 3 ("9,17" × 20 = 183,40 ≠ 183,34)', () => {
+    expect(birimFiyatOndaligi(183.34 / 20, 20, 183.34)).toBe(3);
+  });
+
+  it('kesirli miktar (2,5 ton): 437,68 / 2,5 = 175,072 → 3; 437,50 / 2,5 = 175,00 → 2', () => {
+    expect(birimFiyatOndaligi(437.68 / 2.5, 2.5, 437.68)).toBe(3);
+    expect(birimFiyatOndaligi(437.5 / 2.5, 2.5, 437.5)).toBe(2);
+  });
+
+  it('[İNCELEME] çok adetli satırda 4 ondalık da YETMEZ: 5.000 vida / ₺418,37 → "0,0837" × 5.000 = 418,50; 6 tutar', () => {
+    expect(birimFiyatOndaligi(418.37 / 5000, 5000, 418.37)).toBe(6);
+  });
+
+  it('hiçbir ondalık tutmuyorsa 6 (devirli kesir + dev miktar) — sonsuza gitmez', () => {
+    expect(birimFiyatOndaligi(1 / 3, 3_000_000, 1_000_000)).toBe(6);
+  });
+
+  it('girdi bilinmiyorsa varsayılan 2 (sütun zaten — basar)', () => {
+    expect(birimFiyatOndaligi(null, 20, 183.34)).toBe(2);
+    expect(birimFiyatOndaligi(9.167, null, 183.34)).toBe(2);
+    expect(birimFiyatOndaligi(NaN, 20, NaN)).toBe(2);
   });
 });

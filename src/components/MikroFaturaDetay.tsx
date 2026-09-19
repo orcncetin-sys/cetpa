@@ -18,7 +18,7 @@ import { eBelgeIndir } from '../services/ebelgeIndir';
 import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
 import { VERGI_PNTR_ORAN } from '../hooks/useMikroFaturalar';
-import { kalemleriCoz, satirMasrafi } from '../lib/stokFiyat';
+import { kalemleriCoz, satirMasrafi, birimFiyatOndaligi } from '../lib/stokFiyat';
 import { bilinenSayi } from '../utils/para';
 import { oc } from '../i18n/ortak';
 
@@ -168,7 +168,8 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
     // kalıyordu (2026-09-18 kullanıcı bildirimi). Bildirim/toast katmanları z-[100]+ — onların altında kalır.
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       {/* Kalem tablosu eklendiği için genişletildi; uzun faturada gövde kaydırılır. */}
-      <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      {/* max-w-2xl (eski: max-w-lg): kalem tablosu 8 sütun oldu (Net Birim eklendi) — 512px'te ürün adı 3-4 satıra kırılıyordu. */}
+      <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between p-5 border-b border-gray-100">
           <div>
             <h3 className="font-bold text-[#1D1D1F]">
@@ -245,6 +246,7 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                       <th className="text-right font-semibold py-1.5 px-1">{oc(tr).brut}</th>
                       <th className="text-right font-semibold py-1.5 px-1">{tr ? 'İskonto' : 'Discount'}</th>
                       <th className="text-right font-semibold py-1.5 px-1">{tr ? 'Net' : 'Net'}</th>
+                      <th className="text-right font-semibold py-1.5 px-1 whitespace-nowrap">{tr ? 'Net Birim' : 'Net Unit'}</th>
                       <th className="text-right font-semibold py-1.5 px-1">{oc(tr).kdv}</th>
                     </tr>
                   </thead>
@@ -257,6 +259,11 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                       const miktar = bilinenSayi(k.sth_miktar) ? Number(k.sth_miktar) : null;
                       const kdv = bilinenSayi(k.sth_vergi) ? Number(k.sth_vergi) : null;
                       const fa = n?.kaynak === 'faturaAltiKdvden' || n?.kaynak === 'faturaAltiBasliktan';
+                      // ANA BİRİM DIŞI satır (sth_birim_pntr 2/3): Birim sütunu o işaretçinin ADINI (ör. PALET) basar, ama
+                      // `sth_miktar`ın o birimde mi yoksa ana birimde mi tutulduğu bu kod tabanında TEYİTSİZ (Mikro alanının
+                      // anlamı tahmin edilmez). Ana birimdeyse "80 · PALET · ₺200" satırı palet değil TORBA fiyatıdır. Sayı
+                      // gizlenmez (net ÷ Miktar sütunu olarak DOĞRUDUR), hangi birime ait olduğu belirsiz diye İŞARETLENİR.
+                      const anaBirimDisi = bilinenSayi(k.sth_birim_pntr) && Number(k.sth_birim_pntr) !== 1;
                       return (
                         <tr key={`${sku}-${i}`} className="border-b border-gray-50 last:border-0">
                           <td className="py-1.5 px-1 text-[#1D1D1F]">
@@ -275,12 +282,28 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                             {n?.iskonto != null ? (n.iskonto > 0 ? `−${tl(n.iskonto)}` : tl(0)) : '—'}
                           </td>
                           <td className="py-1.5 px-1 text-right tabular-nums font-semibold text-[#1D1D1F]">{n?.net != null ? tl(n.net) : '—'}</td>
+                          {/* Net birim fiyat = iskonto düşülmüş net ÷ miktar (lib/stokFiyat.kalemleriCoz — KDV HARİÇ). Miktarı 0/bilinmeyen
+                              satırda (fiyat farkı) '—'. 2 ondalık net tutarı geri üretmiyorsa 4 ondalık basılır (birimFiyatOndaligi). */}
+                          <td className="py-1.5 px-1 text-right tabular-nums text-[#1D1D1F] whitespace-nowrap"
+                            title={anaBirimDisi
+                              ? (tr ? 'Net ÷ Miktar sütunu (KDV hariç). DİKKAT: bu satır ana birim dışında girilmiş — Mikro miktarı ana birimde tutuyorsa bu fiyat Birim sütunundaki birime DEĞİL, ana birime aittir.' : 'Net ÷ Quantity column (excl. VAT). NOTE: this line uses a non-base unit — if Mikro stores quantity in the base unit, this price is per BASE unit, not the unit shown.')
+                              : (tr ? 'İskonto düşülmüş net tutar ÷ miktar (KDV hariç)' : 'Net amount after discount ÷ quantity (excl. VAT)')}>
+                            {n?.birimFiyat != null ? paraYaz(n.birimFiyat, { ondalik: birimFiyatOndaligi(n.birimFiyat, n.miktar, n.net) }) : '—'}
+                            {n?.birimFiyat != null && anaBirimDisi && <span className="text-amber-600" aria-hidden="true"> *</span>}
+                          </td>
                           <td className="py-1.5 px-1 text-right tabular-nums text-gray-500">{kdv === null ? '—' : tl(kdv)}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+                {kalemler.some((k, i) => cozumler[i]?.birimFiyat != null && bilinenSayi(k.sth_birim_pntr) && Number(k.sth_birim_pntr) !== 1) && (
+                  <p className="mt-2 text-[10px] text-amber-700">
+                    {tr
+                      ? '* Bu satır ana birim dışında girilmiş. Net birim fiyat, Miktar sütunundaki sayıya bölünerek hesaplandı; Mikro miktarı ana birimde tutuyorsa fiyat ana birime aittir.'
+                      : '* This line uses a non-base unit. Net unit price = net ÷ the Quantity shown; if Mikro stores quantity in the base unit, the price is per base unit.'}
+                  </p>
+                )}
                 {saglama && (
                   <p className={`mt-2 text-[11px] rounded-lg px-2.5 py-1.5 ${saglama.tutuyor ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50 border border-amber-200'}`}>
                     {saglama.tutuyor
