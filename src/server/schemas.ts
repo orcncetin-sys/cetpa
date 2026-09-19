@@ -27,7 +27,8 @@ export const FaturaKaydetSchema = z.object({
       sku:      z.string().optional(),
       name:     z.string().min(1),
       price:    z.number().nonnegative(),
-      quantity: z.number().int().positive(),
+      // KESİRLİ miktar geçerli (2,5 ton / 0,75 m³ — 2026-09-19 kullanıcı kararı); eski `.int()` bunları 400'lüyordu.
+      quantity: z.number().positive().finite(),
     })).min(1, 'En az bir satır gerekli.'),
     faturaTipi:   z.enum(['e-fatura', 'e-arsiv', 'ihracat']).optional(),
     kdvOran:      z.number().min(0).max(100).optional(),
@@ -51,7 +52,8 @@ export const IrsaliyeKaydetSchema = z.object({
     items:          z.array(z.object({
       sku:      z.string().optional(),
       name:     z.string().min(1),
-      quantity: z.number().int().positive(),
+      // KESİRLİ miktar geçerli (2,5 ton / 0,75 m³ — 2026-09-19 kullanıcı kararı); eski `.int()` bunları 400'lüyordu.
+      quantity: z.number().positive().finite(),
       price:    z.number().optional(),
     })).optional(),
     date:           z.string().optional(),

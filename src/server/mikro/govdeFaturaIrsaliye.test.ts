@@ -110,8 +110,18 @@ describe('faturaGovdesi — parite', () => {
     expect(faturaGovdesi({ ...SIPARIS, faturaTipi: 'e-arsiv' },  v17).evrak.cha_ebelge_turu).toBe(1);
     expect(faturaGovdesi({ ...SIPARIS, faturaTipi: 'e-fatura' }, v17).evrak.cha_ebelge_turu).toBe(0);
     expect(faturaGovdesi({ ...SIPARIS, faturaTipi: 'ihracat' },  v17).evrak.cha_ebelge_turu).toBe(0);
-    // faturaTipi hiç yoksa e-Fatura (1) sayılır → ebelge 0
-    expect(faturaGovdesi({ ...SIPARIS, faturaTipi: undefined }, v17).evrak.cha_ebelge_turu).toBe(0);
+    // faturaTipi hiç yoksa / tanınmıyorsa belge KESİLMEZ (2026-09-19 kullanıcı kararı): eskiden sunucu e-FATURA,
+    // istemci `|| 'e-arsiv'` ile e-ARŞİV varsayıyordu — aynı sipariş iki tarafta iki ayrı belge tipiydi (mutasyon-ayırt-edici).
+    expect(() => faturaGovdesi({ ...SIPARIS, faturaTipi: undefined }, v17)).toThrow(/belge tipi/);
+    expect(() => faturaGovdesi({ ...SIPARIS, faturaTipi: 'E-FATURA' as never }, v17)).toThrow(/belge tipi/);
+  });
+
+  it('KESİRLİ miktar: satır tutarı KURUŞA yuvarlanır ve KDV yuvarlanmış matrahtan hesaplanır (2,5 × 175,07 → 437,68 / KDV 87,54) — mutasyon-ayırt-edici', () => {
+    const { satirlar, toplamTutar } = faturaGovdesi({ ...SIPARIS, lineItems: [{ sku: 'BRD-8', name: 'BORDÜR 8cm', quantity: 2.5, price: 175.07 }] }, SECENEK);
+    expect(satirlar[0].sth_miktar).toBe(2.5);
+    expect(satirlar[0].sth_tutar).toBe(437.68);       // ham 437.67499999999995 DEĞİL
+    expect(satirlar[0].sth_vergi).toBe(87.54);        // 437,68 × %20 = 87,536 → 87,54
+    expect(toplamTutar).toBe(437.68);
   });
 
   it('V16de cha_ebelge_turu alanı gövdede HİÇ yok (undefined değil — anahtar yok)', () => {

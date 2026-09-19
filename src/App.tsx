@@ -214,6 +214,7 @@ import { optimizeRoute } from './utils/logistics';
 import { itemCostTRY } from './utils/cost';
 import { kisaTutar, paraYaz } from './utils/currency';
 import { irsaliyeIstegi, irsaliyeNedenMetni, irsaliyeYanitMesaji, irsaliyeSonucYamasi, type IrsaliyeYaniti } from './utils/siparisler/irsaliyeGonder';
+import { siparisBelgeTipi, belgeTipiCelisiyor, musteriBelgeTipi } from './utils/siparisler/belgeTipi';
 import { useDataStore } from './store/dataStore';
 
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
@@ -3029,7 +3030,10 @@ function AppContent() {
           } as unknown as Order);
           shopifyOrderId = draft.shopifyDraftOrderId || shopifyOrderId;
         } catch (shopifyErr) {
-          console.warn('Shopify draft order failed, saving locally only:', shopifyErr instanceof Error ? shopifyErr.message : String(shopifyErr));
+          const shopifyNedeni = shopifyErr instanceof Error ? shopifyErr.message : String(shopifyErr);
+          console.warn('Shopify draft order failed, saving locally only:', shopifyNedeni);
+          // SESSİZ GEÇME: sipariş Cetpa'ya yine kaydedilir ama Shopify taslağı YOK — kullanıcı nedenini görsün.
+          toast(currentLanguage === 'tr' ? `Shopify taslağı oluşturulmadı: ${shopifyNedeni} — sipariş Cetpa'ya kaydediliyor.` : `Shopify draft not created: ${shopifyNedeni} — the order is saved in Cetpa.`, 'info');
         }
       }
 
@@ -3049,7 +3053,9 @@ function AppContent() {
           totalPrice: finalTotal,
           lineItems: orderLineItems,
           faturali: newOrder.faturali ?? false,
-          faturaTipi: (newOrder as Order & {faturaTipi?: string}).faturaTipi || (newOrder.faturali ? 'e-fatura' : null),
+          // Varsayılan YOK (2026-09-19): eski `|| (faturali ? 'e-fatura' : null)` tip seçilmemiş faturalı siparişi e-Fatura
+          // sayıyordu. Form (AddOrderModal) faturalı siparişte tipi zorunlu kılar; tip müşterinin e-Fatura kaydından türer.
+          faturaTipi: newOrder.faturali ? (newOrder.faturaTipi ?? null) : null,
           kdvOran,
           kdvHaricTutar,
           kdvTutari,
@@ -3425,6 +3431,31 @@ function AppContent() {
   const handleMikroFatura = async (order: Order) => {
     try {
       const lead = leads.find(l => l.id === order.leadId);
+      // BELGE TİPİ: sipariş üzerindeki seçim → müşterinin e-Fatura kaydı → bilinmiyorsa GÖNDERME (utils/siparisler/
+      // belgeTipi). Eski `order.faturaTipi || 'e-arsiv'` tipi bilinmeyen siparişi e-ARŞİV sayıyordu; sunucu ise aynı
+      // siparişi e-FATURA sayıyordu. e-Fatura'ya kayıtlı alıcıya e-Arşiv kesmek usulsüz belgedir.
+      const belgeTipi = siparisBelgeTipi(order, lead);
+      if (!belgeTipi) {
+        toast(currentLanguage === 'tr'
+          ? 'Belge tipi bilinmiyor: müşterinin e-Fatura kaydı okunamadı. Siparişi düzenleyip belge tipini (e-Fatura / e-Arşiv) seçin ya da Mikro cari importunu çalıştırın.'
+          : 'Document type unknown: the customer’s e-Invoice registration could not be read. Edit the order and choose the type, or run the Mikro customer import.', 'error');
+        return;
+      }
+      // ONAY (2026-09-19 kullanıcı kararı "onay alsın" — resmî belge): gönderilecek belge TİPİ açıkça söylenir. Siparişteki
+      // tip müşterinin BİLİNEN e-Fatura kaydıyla çelişiyorsa (mevcut siparişlerdeki tip kullanıcı seçimi değil, kaldırılan
+      // sezgilerle yazıldı) bu, onay metninde UYARI olarak öne çıkar — sessizce yanlış belge kesilmez.
+      const tipAdi = (t: string) => (t === 'e-fatura' ? 'e-Fatura' : t === 'e-arsiv' ? 'e-Arşiv' : currentLanguage === 'tr' ? 'İhracat faturası' : 'Export invoice');
+      const celiski = belgeTipiCelisiyor(order, lead);
+      const kayitTipi = musteriBelgeTipi(lead);
+      const onaylandi = await confirmAction({
+        title: currentLanguage === 'tr' ? `${tipAdi(belgeTipi)} kesilsin mi?` : `Issue ${tipAdi(belgeTipi)}?`,
+        message: currentLanguage === 'tr'
+          ? `${order.customerName} — belge tipi: ${tipAdi(belgeTipi)}.${celiski && kayitTipi ? ` DİKKAT: müşterinin e-Fatura kaydına göre ${tipAdi(kayitTipi)} olmalı; siparişte ${tipAdi(belgeTipi)} yazıyor. Emin değilseniz vazgeçip siparişi düzenleyin.` : ''} Bu işlem Mikro'da RESMÎ belge keser ve geri alınamaz.`
+          : `${order.customerName} — document type: ${tipAdi(belgeTipi)}.${celiski && kayitTipi ? ` WARNING: the customer's registration says ${tipAdi(kayitTipi)}; the order says ${tipAdi(belgeTipi)}. If unsure, cancel and edit the order.` : ''} This issues an OFFICIAL document in Mikro and cannot be undone.`,
+        confirmLabel: currentLanguage === 'tr' ? 'Faturayı kes' : 'Issue invoice',
+        variant: celiski ? 'warning' : 'default',
+      });
+      if (!onaylandi) return;
       const r = await authFetch('/api/mikro/fatura/kaydet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3440,7 +3471,7 @@ function AppContent() {
               price: l.price,
             })),
             totalPrice: order.totalPrice,
-            faturaTipi: order.faturaTipi || 'e-arsiv',
+            faturaTipi: belgeTipi,
             // Sunucu bunu Mikro gövdesinde ZORUNLU kılar (varsayılan yok):
             // kdvOran → vergi işaretçisi + sth_vergi. `?? 20` EKLEMEYİN — eksikse
             // istek 400 döner ve sebebi aşağıdaki toast'ta kullanıcıya söylenir.
@@ -3455,9 +3486,13 @@ function AppContent() {
           firebaseId: order.id,
         }),
       });
-      const d = await r.json() as { success: boolean; mikroFaturaNo?: string; notConfigured?: boolean; error?: string };
+      const d = await r.json() as { success: boolean; mikroFaturaNo?: string; notConfigured?: boolean; error?: string; belgeTipiIletildi?: boolean };
       if (d.success) {
         toast(`${currentLanguage === 'tr' ? 'Fatura kaydedildi' : 'Invoice recorded'}: ${d.mikroFaturaNo ?? ''}`, 'success');
+        // Belge tipi Mikro gövdesine yalnız V17 zarfında girer; sunucu ortamı V16 ise seçim Mikro'ya GİTMEDİ — söyle.
+        if (d.belgeTipiIletildi === false) toast(currentLanguage === 'tr'
+          ? `DİKKAT: belge tipi (${tipAdi(belgeTipi)}) Mikro'ya İLETİLEMEDİ (sunucu Mikro V16 zarfında çalışıyor). Mikro'da belgenin tipini kontrol edin.`
+          : `WARNING: the document type (${tipAdi(belgeTipi)}) was NOT passed to Mikro (server runs the V16 envelope). Check the type in Mikro.`, 'error');
         // Optimistic update — Firestore onSnapshot will sync the real value shortly.
         // İŞLEVSEL güncelleyici: bu `await` sırasında e-İrsaliye işareti yazılmış olabilir;
         // kapanıştaki bayat nesneyi yaymak onu yerelde siler (2026-09-19 delta).
@@ -6006,6 +6041,7 @@ function AppContent() {
                 p554Bins={p554Bins}
                 aracKonumlari={aracKonumlari}
                 konumYazabilir={isAllowed(userRole, 'vehiclePositions', 'write')}
+                irsaliyeKesebilir={isAllowed(userRole, 'shipments', 'write')}
                 kullaniciUid={user?.uid}
                 selectedOrder={selectedOrder}
                 setSelectedOrder={setSelectedOrder}

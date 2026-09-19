@@ -429,7 +429,8 @@ describe('DEĞİŞMEZ: sipariş düzenleme formu, e-İrsaliye ipucunun işaret e
   /** Düzenleme modalının gövdesi: `{isEditingOrder && (` … `siparisDuzenlemeYamasi(` arası. */
   const modalDilimi = (() => {
     const bas = ordersPage.indexOf('{isEditingOrder && (');
-    const bit = ordersPage.indexOf('siparisDuzenlemeYamasi(', bas);
+    // Parantezsiz ara: çağrı açık tip argümanı alabilir (`siparisDuzenlemeYamasi<Order['status']>(`).
+    const bit = ordersPage.indexOf('siparisDuzenlemeYamasi', bas);
     return bas >= 0 && bit > bas ? ordersPage.slice(bas, bit) : '';
   })();
 
@@ -448,6 +449,16 @@ describe('DEĞİŞMEZ: sipariş düzenleme formu, e-İrsaliye ipucunun işaret e
 
   it('düzenleme formunda KDV oranı girdisi state\'e BAĞLI (kdvYok ipucunun karşılığı)', () => {
     expect(modalDilimi).toMatch(/value=\{editingKdvHam\}/);
+  });
+
+  it('düzenleme formunda BELGE TİPİ seçicisi var (e-Fatura "belge tipi bilinmiyor — siparişi düzenleyin" yönlendirmesinin karşılığı)', () => {
+    expect(modalDilimi).toMatch(/faturaTipi/);
+    expect(modalDilimi).toMatch(/value="e-fatura"/);
+    expect(modalDilimi).toMatch(/value="e-arsiv"/);
+  });
+
+  it('düzenleme formu DURUM yazmaz: durum yalnız handleUpdateOrderStatus yolundan değişir (stok düşümü + e-İrsaliye teklifi orada)', () => {
+    expect(modalDilimi).not.toMatch(/editingOrderData\.status/);
   });
 
   it('düzenleme formunda müşteri (cari) seçicisi var (musteriBagliDegil ipucunun karşılığı)', () => {
@@ -501,3 +512,18 @@ describe('yerelSayi — OPSİYONEL sayı alanı (kdvOran/kdvTutari/kdvHaricTutar
     expect(JSON.parse(govde)).not.toHaveProperty('kdvOran');
   });
 });
+
+// 2026-09-19 (kullanıcı kararı "e-Fatura mükellefiyiz"): belge tipi bilinmeyen siparişte e-Fatura gönderimi artık
+// "siparişi düzenleyip belge tipini seçin" diyor — o alanı ÜRETEN yüzey düzenleme penceresidir (üretici yüzey şartı).
+describe('siparisDuzenlemeYamasi — faturaTipi (belge tipi seçimi)', () => {
+  it('geçerli seçim yamaya girer; seçilmediyse (undefined / boş) alan YAZILMAZ — mevcut tip ezilmez', () => {
+    expect(siparisDuzenlemeYamasi({ tutarHam: '1000', faturaTipi: 'e-arsiv' }, { totalPrice: 1000 }).faturaTipi).toBe('e-arsiv');
+    expect(siparisDuzenlemeYamasi({ tutarHam: '1000', faturaTipi: 'ihracat' }, { totalPrice: 1000 }).faturaTipi).toBe('ihracat');
+    expect('faturaTipi' in siparisDuzenlemeYamasi({ tutarHam: '1000' }, { totalPrice: 1000 })).toBe(false);
+    expect('faturaTipi' in siparisDuzenlemeYamasi({ tutarHam: '1000', faturaTipi: '' as never }, { totalPrice: 1000 })).toBe(false);
+  });
+  it('tanınmayan metin yamaya GİRMEZ (DB\'ye bozuk belge tipi yazılmaz) — mutasyon-ayırt-edici', () => {
+    expect('faturaTipi' in siparisDuzenlemeYamasi({ tutarHam: '1000', faturaTipi: 'E-FATURA' as never }, { totalPrice: 1000 })).toBe(false);
+  });
+});
+

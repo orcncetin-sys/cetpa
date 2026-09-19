@@ -135,6 +135,15 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
     try {
       const { customerName, email, shippingAddress, lineItems, note } = req.body;
 
+      // Shopify `line_items.quantity` TAM SAYIDIR. Cetpa'da kesirli miktar 2026-09-19'da açıldı (2,5 ton / 0,75 m³);
+      // o sipariş Shopify'a kırpılarak/yuvarlanarak GÖNDERİLMEZ (dış sisteme uydurma değer yok) — açıkça reddedilir.
+      if (Array.isArray(lineItems)) {
+        const kesirli = lineItems.findIndex((item: Record<string, unknown>) => typeof item.quantity !== 'number' || !Number.isInteger(item.quantity) || item.quantity <= 0);
+        if (kesirli >= 0) {
+          return res.status(422).json({ error: `Shopify kesirli ya da geçersiz miktar kabul etmez (kalem ${kesirli + 1}) — Shopify taslağı oluşturulmadı.`, satir: kesirli });
+        }
+      }
+
       const shopifyPayload: Record<string, unknown> = {
         draft_order: {
           note: note || '',

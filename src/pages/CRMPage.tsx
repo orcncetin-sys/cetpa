@@ -616,25 +616,20 @@ export default function CRMPage({
                                   {order.syncedAt ? tarihYaz(order.syncedAt) : 'Unknown Date'}
                                 </td>
                                 <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
-                                  <select value={order.status} onChange={(e) => {
-                                    e.stopPropagation(); openConfirm({
-                                      title: currentT.status,
-                                      message: `Update status to "${e.target.value}"?`,
-                                      onConfirm: () => handleUpdateOrderStatus(order.id, e.target.value as Order['status'])
-                                    });
-                                  }}
-                                    className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full outline-none cursor-pointer appearance-none",
+                                  {/* SALT-OKUNUR rozet (2026-09-19): buradaki <select> sayfa-yerel `handleUpdateOrderStatus`'a bağlıydı
+                                      (yalnız `{status}` yazar — stok düşümü, stockApplied, deliveredAt ve e-İrsaliye teklifi YOK).
+                                      Seçici onay anında `e.target.value` okuduğu için zaten HİÇ durum yazmıyordu; o hata
+                                      düzeltilince bu baypas canlanacaktı. Durum Siparişler sayfasından değişir. */}
+                                  <span title={currentLanguage === 'tr' ? 'Durum Siparişler sayfasından değiştirilir (stok ve e-İrsaliye oradan yürür).' : 'Change the status from the Orders page (stock and e-waybill run there).'}
+                                    className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full",
                                       order.status === 'Pending' ? "bg-amber-50 text-amber-600" :
                                         order.status === 'Processing' ? "bg-purple-50 text-purple-600" :
                                           order.status === 'Shipped' ? "bg-blue-50 text-blue-600" :
                                             order.status === 'Delivered' ? "bg-emerald-50 text-emerald-600" : "bg-gray-50 text-gray-600"
                                     )}>
-                                    <option value="Pending">{currentT.pending}</option>
-                                    <option value="Processing">{currentT.processing}</option>
-                                    <option value="Shipped">{currentT.shipped}</option>
-                                    <option value="Delivered">{currentT.delivered}</option>
-                                    <option value="Cancelled">{currentT.cancelled}</option>
-                                  </select>
+                                    {order.status === 'Pending' ? currentT.pending : order.status === 'Processing' ? currentT.processing
+                                      : order.status === 'Shipped' ? currentT.shipped : order.status === 'Delivered' ? currentT.delivered : currentT.cancelled}
+                                  </span>
                                 </td>
                                 <td className="px-6 py-4 text-right font-bold text-[#1D2226]">
                                   <div className="flex items-center justify-end gap-1.5">
@@ -3225,11 +3220,16 @@ export default function CRMPage({
                     <div className="space-y-4 text-sm">
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold mb-1">{currentT.status}</span>
-                        <select value={selectedLead.status} onChange={(e) => openConfirm({
-                          title: currentT.status,
-                          message: `Update status to "${e.target.value}"?`,
-                          onConfirm: () => handleUpdateLeadStatus(selectedLead.id, e.target.value as 'New' | 'Contacted' | 'Qualified' | 'Closed')
-                        })}
+                        <select value={selectedLead.status} onChange={(e) => {
+                          // Değeri ŞİMDİ yakala — onay anında `e.target.value` kontrollü <select>'te ESKİ değerdir
+                          // (müşteri adayı durumu bu seçiciden hiç değişmiyordu; değişmez testi: lib/onayDegismez.test.ts).
+                          const yeniDurum = e.target.value as 'New' | 'Contacted' | 'Qualified' | 'Closed';
+                          openConfirm({
+                            title: currentT.status,
+                            message: `Update status to "${yeniDurum}"?`,
+                            onConfirm: () => handleUpdateLeadStatus(selectedLead.id, yeniDurum)
+                          });
+                        }}
                           className="block w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-brand font-medium">
                           <option value="New">{currentT.new}</option>
                           <option value="Contacted">{currentT.contacted}</option>

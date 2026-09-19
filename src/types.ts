@@ -272,6 +272,14 @@ export interface Lead {
    * denetim bulgusu C15). Eski adı geriye dönük uyumluluk için bıraktım.
    */
   mikroCariKod?: string;
+  /**
+   * Müşteri e-Fatura'ya KAYITLI mı (Mikro `cari_efatura_fl` aynası — cari importu yazar; okunamazsa alan HİÇ yazılmaz).
+   * Satış belgesinin tipini bu belirler: kayıtlı → e-Fatura, kayıtsız → e-Arşiv, bilinmiyor → kullanıcıya sorulur
+   * (src/utils/siparisler/belgeTipi.ts). Tipte yoktu; okuyanlar cast kullanıyordu.
+   */
+  eFaturaKayitli?: boolean;
+  /** Cari Cetpa'dan Mikro'ya e-Fatura kaydı BİLİNMEDEN gönderildi; `eFaturaKayitli:false` teyitsizdir (belgeTipi.ts). */
+  eFaturaKaydiTeyitsiz?: boolean;
   /** @deprecated Yazılmıyor — `mikroCariKod` kullan. */
   cariKod?: string;
 }

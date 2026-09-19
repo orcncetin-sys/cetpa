@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Search, Scan, Package, Trash2, FileText, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -8,6 +8,9 @@ import CustomerCombobox from './CustomerCombobox';
 import type { Lead, InventoryItem, Order, OrderLineItem, Warehouse } from '../types';
 // Depo numarası çözümü TEK KAYNAK — ad/id'den Mikro `dep_no`; belirsizse undefined.
 import SevkDeposuSecici from './SevkDeposuSecici';
+import { musteriBelgeTipi } from '../utils/siparisler/belgeTipi';
+import { formSayisi } from '../utils/muhasebe/irsaliyeCalisan';
+import { miktarDuzelt } from '../utils/para';
 import { oc } from '../i18n/ortak';
 
 interface AddOrderModalProps {
@@ -45,6 +48,11 @@ export default function AddOrderModal({
   const [newOrder, setNewOrder] = useState<Partial<Order>>({ status: 'Pending', shippingAddress: '', faturali: true, kdvOran: 20 });
   const [orderLineItems, setOrderLineItems] = useState<OrderLineItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [belgeTipiEksik, setBelgeTipiEksik] = useState(false);
+  /** Belge tipi seçicisi kaydırılabilir gövdenin içinde; kapı tetiklenince GÖRÜNÜR olsun diye kaydırılır. */
+  const belgeTipiRef = useRef<HTMLDivElement>(null);
+  /** Kalem miktarı girdisinin HAM metni (kalem id → metin): "2," / "0." yazılırken sayıya çevrilip silinmesin. */
+  const [miktarHam, setMiktarHam] = useState<Record<string, string>>({});
   const [showProductPicker, setShowProductPicker] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [isOrderScannerOpen, setIsOrderScannerOpen] = useState(false);
@@ -60,20 +68,30 @@ export default function AddOrderModal({
       setOrderLineItems([]);
       setProductSearch('');
       setShowProductPicker(false);
+      setBelgeTipiEksik(false);   // kapanışta sıfırla: bileşen unmount OLMAZ, kırmızı uyarı sonraki açılışa taşınırdı
+      setMiktarHam({});
     }
   }, [isOpen]);
 
   // Auto-fill from selectedLead — açılışta (veya seçili lead değişince) müşteri bilgisini doldur
   useEffect(() => {
     if (isOpen && selectedLead) {
-      const isEFatura = selectedLead.customerType === 'B2B' || (selectedLead.taxId && selectedLead.taxId.length >= 10);
-      setNewOrder(prev => ({
-        ...prev,
-        customerName: selectedLead.name,
-        shippingAddress: selectedLead.company || prev.shippingAddress,
-        faturali: true,
-        faturaTipi: isEFatura ? 'e-fatura' : 'e-arsiv'
-      }));
+      // Belge tipi MÜŞTERİNİN e-Fatura kaydından türer (utils/siparisler/belgeTipi). Eski sezgi — "B2B ya da VKN ≥ 10
+      // hane → e-fatura" — kayıtlı olmayan firmaya e-Fatura, kayıtlı olana e-Arşiv kestirebiliyordu. Kayıt BİLİNMİYORSA
+      // tip seçilmez (önceki müşteriden kalan seçim de TEMİZLENİR); kullanıcı aşağıdaki seçiciden seçer.
+      const tip = musteriBelgeTipi(selectedLead);
+      setNewOrder(prev => {
+        const { faturaTipi: oncekiTip, ...kalan } = prev;
+        // 'ihracat' yalnız ELLE seçilir (müşteri kaydından türemez) — müşteri değişince sessizce ezilmez.
+        const yeniTip = oncekiTip === 'ihracat' ? 'ihracat' : tip;
+        return {
+          ...kalan,
+          customerName: selectedLead.name,
+          shippingAddress: selectedLead.company || prev.shippingAddress,
+          faturali: true,
+          ...(yeniTip ? { faturaTipi: yeniTip } : {}),
+        };
+      });
     }
   }, [isOpen, selectedLead]);
 
@@ -114,17 +132,27 @@ export default function AddOrderModal({
   };
 
   const handleUpdateLineItemQty = (idx: number, newQty: number) => {
-    if (newQty <= 0) {
+    // Tek boğaz: '+/−' düğmeleri `quantity ± 1` yapıyor — kesirli miktarda 1.1 − 1 = 0.10000000000000009 kaleme,
+    // oradan siparişe, Mikro gövdesine ve PDF'e akardı (2026-09-19). Artık temizlenir: 0.1.
+    const miktar = miktarDuzelt(newQty);
+    if (miktar <= 0) {
       setOrderLineItems(orderLineItems.filter((_, i) => i !== idx));
     } else {
       const items = [...orderLineItems];
-      items[idx].quantity = newQty;
+      items[idx].quantity = miktar;
       setOrderLineItems(items);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Faturalı siparişte belge tipi ZORUNLU ve varsayılanı YOK (eski kayıt yolu tip yoksa 'e-fatura' yazıyordu).
+    if (newOrder.faturali && !newOrder.faturaTipi) {
+      setBelgeTipiEksik(true);
+      // Seçici kaydırılabilir gövdede, gönder düğmesi sabit alt bantta: kaydırmazsak kullanıcı NEDEN kaydedemediğini görmez.
+      belgeTipiRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     setIsSubmitting(true);
     try {
       await onSubmit(newOrder, orderLineItems, computedTotal);
@@ -193,13 +221,15 @@ export default function AddOrderModal({
                     value={newOrder.customerName || ''}
                     onChange={text => setNewOrder({ ...newOrder, customerName: text })}
                     onSelect={lead => {
-                      const isEFatura = lead.customerType === 'B2B' || (lead.taxId && lead.taxId.length >= 10);
+                      const tip = musteriBelgeTipi(lead);   // kayıt bilinmiyorsa tip SEÇİLMEZ (bkz. yukarıdaki effect)
+                      const { faturaTipi: oncekiTip, ...kalan } = newOrder;
+                      const yeniTip = oncekiTip === 'ihracat' ? 'ihracat' : tip;   // elle seçilmiş ihracat ezilmez
                       setNewOrder({
-                        ...newOrder,
+                        ...kalan,
                         customerName: lead.name,
                         shippingAddress: lead.company || '',
                         faturali: true,
-                        faturaTipi: isEFatura ? 'e-fatura' : 'e-arsiv'
+                        ...(yeniTip ? { faturaTipi: yeniTip } : {}),
                       });
                       setSelectedLead(lead);
                     }}
@@ -331,7 +361,20 @@ export default function AddOrderModal({
                               <div className="flex items-center justify-center gap-1">
                                 <button type="button" onClick={() => handleUpdateLineItemQty(idx, item.quantity - 1)}
                                   className="w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center font-bold text-sm leading-none">−</button>
-                                <input type="number" value={item.quantity} onChange={e => handleUpdateLineItemQty(idx, parseInt(e.target.value) || 0)}
+                                {/* KESİRLİ miktar (2,5 ton / 0,75 m³ — 2026-09-19): eski `parseInt(...) || 0` kesri atıyor, alan boşaltılınca
+                                    0 üretip KALEMİ SİLİYORDU. Ham metin ayrı tutulur; yalnız geçerli pozitif sayı kaleme yazılır. */}
+                                <input type="number" step="any" min="0" inputMode="decimal"
+                                  value={miktarHam[item.id] ?? String(item.quantity)}
+                                  onChange={e => {
+                                    const ham = e.target.value;
+                                    setMiktarHam(prev => ({ ...prev, [item.id]: ham }));
+                                    // Kapı YUVARLANMIŞ değere bakar: 0 < n < 0,00005 girdisi 4 ondalıkta 0 olur ve
+                                    // `handleUpdateLineItemQty` kalemi SİLERDİ. Yazarken kalem hiç silinmez — silme yalnız '−' düğmesinden.
+                                    const sayi = formSayisi(ham);
+                                    const duzgun = sayi === null ? 0 : miktarDuzelt(sayi);
+                                    if (duzgun > 0) handleUpdateLineItemQty(idx, duzgun);
+                                  }}
+                                  onBlur={() => setMiktarHam(prev => { const { [item.id]: _birak, ...kalan } = prev; return kalan; })}
                                   className="w-10 text-center font-bold text-sm bg-transparent border-none focus:ring-0 p-0" />
                                 <button type="button" onClick={() => handleUpdateLineItemQty(idx, item.quantity + 1)}
                                   className="w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center font-bold text-sm leading-none">+</button>
@@ -421,7 +464,7 @@ export default function AddOrderModal({
                 </div>
                 {newOrder.faturali && (
                   <div className="space-y-3">
-                    <div>
+                    <div ref={belgeTipiRef}>
                       <label className="text-[10px] font-bold text-gray-500 uppercase mb-1.5 block">{oc(currentLanguage).fatura_turu}</label>
                       <div className="grid grid-cols-3 gap-2">
                         {([
@@ -430,15 +473,24 @@ export default function AddOrderModal({
                           { value: 'ihracat', label: oc(currentLanguage).ihracat, desc: currentLanguage==='tr'?'Yurt dışı satış':'International sale' },
                         ] as const).map(type => (
                           <button key={type.value} type="button"
-                            onClick={() => setNewOrder(prev => ({ ...prev, faturaTipi: type.value } as any))}
+                            onClick={() => { setBelgeTipiEksik(false); setNewOrder(prev => ({ ...prev, faturaTipi: type.value })); }}
                             className={cn('p-2 rounded-xl border text-left transition-all',
-                              (newOrder as any).faturaTipi === type.value ? 'border-brand bg-brand/5' : 'border-gray-200 hover:border-gray-300'
+                              newOrder.faturaTipi === type.value ? 'border-brand bg-brand/5' : belgeTipiEksik ? 'border-red-300' : 'border-gray-200 hover:border-gray-300'
                             )}>
-                            <p className={`text-[10px] font-bold ${(newOrder as any).faturaTipi === type.value ? 'text-brand' : 'text-gray-700'}`}>{type.label}</p>
+                            <p className={`text-[10px] font-bold ${newOrder.faturaTipi === type.value ? 'text-brand' : 'text-gray-700'}`}>{type.label}</p>
                             <p className="text-[9px] text-gray-400 leading-tight mt-0.5">{type.desc}</p>
                           </button>
                         ))}
                       </div>
+                      {!newOrder.faturaTipi && (
+                        <p className={`text-[10px] mt-1.5 ${belgeTipiEksik ? 'text-red-600 font-bold' : 'text-amber-600'}`}>
+                          {selectedLead
+                            ? (currentLanguage === 'tr'
+                                ? 'Bu müşterinin e-Fatura kaydı bilinmiyor — belge tipini seçin. (Kayıt Mikro cari importuyla gelir; kayıtlı müşteriye e-Fatura, kayıtsıza e-Arşiv kesilir.)'
+                                : 'This customer’s e-Invoice registration is unknown — choose the document type. (It comes with the Mikro customer import.)')
+                            : (currentLanguage === 'tr' ? 'Belge tipini seçin.' : 'Choose the document type.')}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <div className="flex items-center justify-between mb-1">
@@ -542,6 +594,11 @@ export default function AddOrderModal({
                 <p className="text-[11px] text-center text-gray-400 flex items-center justify-center gap-1">
                   <RefreshCw className="w-3 h-3" />
                   {currentT.create_draft_order_shopify}
+                </p>
+              )}
+              {newOrder.faturali && !newOrder.faturaTipi && (
+                <p className={`text-[11px] text-center font-bold ${belgeTipiEksik ? 'text-red-600' : 'text-amber-600'}`}>
+                  {currentLanguage === 'tr' ? 'Belge tipi seçilmedi — e-Fatura / e-Arşiv seçin.' : 'Document type not selected — choose e-Invoice / e-Archive.'}
                 </p>
               )}
               <button type="submit" disabled={isSubmitting}

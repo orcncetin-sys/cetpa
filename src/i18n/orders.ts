@@ -228,6 +228,13 @@ export const ORDERS = {
     siparis_guncellendi: 'Sipariş güncellendi.',
     bu_siparisten_sevkiyat_olusturulsun_mu: 'Bu siparişten sevkiyat oluşturulsun mu?',
     sevkiyat_olusturuldu: 'Sevkiyat oluşturuldu.',
+    e_irsaliye_gonderilsin_mi: 'e-İrsaliye gönderilsin mi?',
+    siparis_kargoda_olarak_isaretlendi: 'Sipariş "Kargoda" olarak işaretlendi.',
+    belge_tipi: 'Belge Tipi',
+    secilmedi: 'Seçilmedi',
+    musterinin_e_fatura_kaydi_bilinmiyor_secilmezse_: 'Müşterinin e-Fatura kaydı bilinmiyor — seçilmezse Mikro’ya fatura GÖNDERİLMEZ.',
+    siparis_kargoda_e_irsaliye_icin_siparis_detayind: 'Sipariş kargoda — e-İrsaliye için sipariş detayındaki düğmeyi kullanın.',
+    e_irsaliye_kesme_yetkiniz_yok_yonetici_lojistik_: 'e-İrsaliye kesme yetkiniz yok (Yönetici / Lojistik rolü gerekir).',
   },
   en: {
     bu_siparis_iptal_edilmistir: 'This order has been cancelled.',
@@ -452,6 +459,13 @@ export const ORDERS = {
     siparis_guncellendi: 'Order updated.',
     bu_siparisten_sevkiyat_olusturulsun_mu: 'Create a shipment from this order?',
     sevkiyat_olusturuldu: 'Shipment created.',
+    e_irsaliye_gonderilsin_mi: 'Send the e-waybill?',
+    siparis_kargoda_olarak_isaretlendi: 'The order was marked as "Shipped".',
+    belge_tipi: 'Document Type',
+    secilmedi: 'Not selected',
+    musterinin_e_fatura_kaydi_bilinmiyor_secilmezse_: 'The customer’s e-Invoice registration is unknown — without a choice the invoice is NOT sent to Mikro.',
+    siparis_kargoda_e_irsaliye_icin_siparis_detayind: 'Order shipped — use the e-waybill button in the order detail.',
+    e_irsaliye_kesme_yetkiniz_yok_yonetici_lojistik_: 'You are not allowed to issue e-waybills (Admin / Logistics role required).',
   },
 } as const;
 

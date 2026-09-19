@@ -23,7 +23,11 @@ export const createShopifyDraftOrder = async (order: Order): Promise<{ shopifyDr
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(order)
   });
-  if (!res.ok) throw new Error('Draft order creation failed');
+  // Sunucunun gerekçesini OKU (ör. 422 "Shopify kesirli miktar kabul etmez") — eskiden gövde atılıp sabit metin fırlatılıyordu.
+  if (!res.ok) {
+    const govde = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(govde.error || 'Draft order creation failed');
+  }
   return res.json();
 };
 

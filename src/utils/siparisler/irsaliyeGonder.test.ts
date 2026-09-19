@@ -159,8 +159,9 @@ describe('irsaliyeIstegi — kalemsiz / eksik kalemli sevkiyat SAHTE belge üret
     expect(irsaliyeIstegi(siparis({ lineItems: [kalem({ sku: 50 })] }), cari(), { simdi: SIMDI }).neden).toBe('kalemYok');
   });
 
-  it('miktarı bilinmeyen / 0 / negatif / kesirli kalem → gönderilemez (mutasyon-ayırt-edici: `?? 1` yok)', () => {
-    for (const m of [undefined, null, NaN, '100', 0, -3, 2.5]) {
+  // KESİRLİ miktar artık GEÇERLİ (2026-09-19 kullanıcı kararı — aşağıdaki 'KESİRLİ miktar geçerlidir' bloğu); listeden çıkarıldı.
+  it('miktarı bilinmeyen / 0 / negatif kalem → gönderilemez (mutasyon-ayırt-edici: `?? 1` yok)', () => {
+    for (const m of [undefined, null, NaN, '100', 0, -3]) {
       expect(irsaliyeIstegi(siparis({ lineItems: [kalem({ quantity: m })] }), cari(), { simdi: SIMDI }).neden).toBe('kalemYok');
     }
   });
@@ -373,3 +374,32 @@ describe('irsaliyeSonucYamasi — başarıdan sonra siparişe ne yazılır', () 
     }
   });
 });
+
+// 2026-09-19 kullanıcı kararı: İNŞAAT MALZEMESİNDE miktar kesirlidir (2,5 ton demir, 0,75 m³ beton). Eski kapı
+// `Number.isInteger(quantity)` istiyordu → bu siparişlerde düğme "kalem eksik" deyip kalıyor, sunucu şeması da 400 dönüyordu.
+describe('irsaliyeIstegi — KESİRLİ miktar geçerlidir', () => {
+  const lead = { mikroCariKod: '120.01.001' };
+  const siparis = (quantity: unknown) => ({
+    id: 'SIP-KESIR', faturali: true, depoNo: 2, kdvOran: 20,
+    lineItems: [{ sku: 'DMR-12', name: 'NERVÜRLÜ DEMİR Ø12', quantity: quantity as number, price: 24500 }],
+  });
+  it('2,5 ton / 0,75 m³ gönderilebilir ve gövdeye AYNEN (yuvarlanmadan) girer (mutasyon-ayırt-edici)', () => {
+    const r = irsaliyeIstegi(siparis(2.5), lead);
+    expect(r.gonderilebilir).toBe(true);
+    expect(r.govde?.shipment.items?.[0].quantity).toBe(2.5);
+    expect(irsaliyeIstegi(siparis(0.75), lead).govde?.shipment.items?.[0].quantity).toBe(0.75);
+  });
+  it('0, eksi, NaN ve metin miktar hâlâ reddedilir', () => {
+    for (const kotu of [0, -1, NaN, Infinity, '2.5', null, undefined]) {
+      expect(irsaliyeIstegi(siparis(kotu), lead).neden).toBe('kalemYok');
+    }
+  });
+});
+
+describe('irsaliyeNedenMetni — ipucu VAR OLMAYAN bir kurala yönlendirmez', () => {
+  it('kalemYok metni "tam sayı" demez (kesirli miktar 2026-09-19\'da açıldı — yarım düzeltme kalmasın)', () => {
+    expect(irsaliyeNedenMetni('kalemYok', 'tr')).not.toMatch(/tam sayı/i);
+    expect(irsaliyeNedenMetni('kalemYok', 'en')).not.toMatch(/whole-number/i);
+  });
+});
+

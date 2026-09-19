@@ -28,6 +28,17 @@ export function setConfirmLanguage(l: 'tr' | 'en'): void {
   confirmLang = l;
 }
 
+/**
+ * Şu an kullanıcının önünde AÇIK bir onay penceresi var mı? `confirmAction` bekleyen diyaloğu sessizce iptal edip
+ * yerine geçer — bu, kullanıcı HAREKETİYLE açılan pencerelerde zararsızdır (tam ekran pencere açıkken ikinci bir
+ * tıklama yapılamaz). Ama bir `await` zincirinin sonunda KENDİLİĞİNDEN açılan onay (ör. "Kargoda" sonrası e-İrsaliye
+ * teklifi) o sırada açık olan BAŞKA bir onayın yerine geçebilir; kullanıcının diğer iş için vereceği "Onayla" tıklaması
+ * resmî belge onayına dönüşür (2026-09-19 uçtan uca inceleme). Kendiliğinden açan çağıran ÖNCE bunu sorar.
+ */
+export function onayAcikMi(): boolean {
+  return resolver !== null;
+}
+
 /** Onay diyaloğunu açar; kullanıcı onaylarsa true, vazgeçerse false döner. */
 export function confirmAction(opts: ConfirmOpts): Promise<boolean> {
   // Host (GlobalConfirm) bağlı değilse GÜVENLİ TARAF "hayır"dır.

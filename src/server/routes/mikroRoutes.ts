@@ -384,6 +384,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           mikroCariKod:  cariKod,
           mikroSynced:   true,
           mikroSyncedAt: pgServerTimestamp(),
+          // e-Fatura kaydı BİLİNMEDEN gönderilen cari: gövdeye `cari_efatura_fl: 0` gitti ve saatlik cron onu
+          // `eFaturaKayitli: false` = "kayıtlı değil, BİLİNİYOR" diye geri yazacak. O bilgi sahtedir ve artık belge
+          // tipini (e-Arşiv!) belirliyor — işaretle ki `musteriBelgeTipi` güvenmesin (utils/siparisler/belgeTipi).
+          ...(typeof lead.eFaturaKayitli === 'boolean' ? {} : { eFaturaKaydiTeyitsiz: true }),
         });
       }
 
@@ -4135,7 +4139,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           }
         }
       }
-      res.json({ success, mikroFaturaNo, ettn, localUpdateFailed, error: errorMsg, data, duration });
+      // `belgeTipiIletildi`: belge tipi (e-Fatura/e-Arşiv) Mikro gövdesine YALNIZ V17 zarfında (`cha_ebelge_turu`) girer.
+      // Ortamda MIKRO_JUMP_SURUM 16 ise seçim Mikro'ya HİÇ gitmez — istemci kullanıcıyı uyarır (sessiz kalmasın).
+      res.json({ success, mikroFaturaNo, ettn, localUpdateFailed, belgeTipiIletildi: MIKRO_JUMP_SURUM >= 17, error: errorMsg, data, duration });
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -4156,12 +4162,20 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   // Body: { shipment: Record<string, unknown>, firebaseId: string }
   //   shipment must have: mikroCariKod, customerName, destination, trackingNo, items[]
   // On success writes back: irsaliyeNo, irsaliyeEttn to shipments/{firebaseId}
-  app.post('/api/mikro/irsaliye/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // ROL KAPISI (2026-09-19 uçtan uca inceleme): rota yalnız requireAuth + MFA istiyordu — `orders`ı salt-okunur gören
+  // (Muhasebe/Satın Alma) ya da DIŞ rol (B2B/Dealer; `orders` yazma yetkileri var!) RESMÎ belge kesebiliyordu.
+  // e-İrsaliye bir SEVKİYAT işlemidir → `shipments` yazma yetkisi (Admin/Manager/Logistics — src/lib/rbac.ts).
+  // Satış rolü de kessin istenirse rbac'ta `shipments.write`'a eklenir; burada ayrı liste tutulmaz.
+  app.post('/api/mikro/irsaliye/kaydet', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('shipments', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const parsed = C.validate(IrsaliyeKaydetSchema, req.body, res);
     if (!parsed) return;
     const { shipment, firebaseId } = parsed;
     if (await belgeSahipligi('shipments', firebaseId, await C.reqCompanyId(req)) === 'yabanci') return res.status(404).json(YABANCI_BELGE);
+    // `firebaseId` SİPARİŞ id'sidir (istemci `orders/{id}` gönderir): o siparişin sahipliği de doğrulanır, çünkü başarıda
+    // işaret `orders/{id}`'ye SUNUCU tarafından yazılır (aşağıda). 'yok' serbest — id bir sipariş olmayabilir.
+    const siparisSahipligi = await belgeSahipligi('orders', firebaseId, await C.reqCompanyId(req));
+    if (siparisSahipligi === 'yabanci') return res.status(404).json(YABANCI_BELGE);
     // FATURASIZ sevkiyat Mikro'ya YAZILMAZ (savunma katmanı; asıl kapı istemcide — App.tsx Shipped akışı).
     // Eskiden bu rota her istekte gövde hatasıyla 400 dönüyordu (sku/kdvOran/depoNo gönderilmiyordu) ve açık
     // görünmüyordu; gövde geçerli hâle gelince faturasız sipariş e-İrsaliye olarak resmî deftere düşmeye başlardı.
@@ -4181,11 +4195,17 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // Aynı normalizasyon: eski kayıtlarda numara SAYI olarak damgalanmış olabilir; `typeof
       // === 'string'` kapısı onu görmeyip mükerrer belge riskini geri açardı.
       const oncekiNo = belgeNoMetni(onceki?.irsaliyeNo) ?? '';
-      if (onceki && (onceki.mikroSynced === true || oncekiNo !== '')) {
+      // İKİNCİ KAYNAK: siparişin kendi işareti. `shipments/{id}` Lojistik → Sevkiyatlar tablosunda görünen ve oradan
+      // SİLİNEBİLEN bir satırdır; yalnız ona bakan kapı, satır silinince kalkıyordu (2026-09-19 uçtan uca inceleme).
+      const sipSnap = siparisSahipligi === 'kendi' ? await C.getAdminDb().collection('orders').doc(firebaseId).get() : null;
+      const sip = sipSnap?.exists ? (sipSnap.data() as Record<string, unknown> | undefined) : undefined;
+      const sipNo = belgeNoMetni(sip?.irsaliyeNo) ?? '';
+      const kesilmisNo = oncekiNo !== '' ? oncekiNo : sipNo;
+      if ((onceki && (onceki.mikroSynced === true || oncekiNo !== '')) || (sip && (sip.irsaliyeGonderildi === true || sipNo !== ''))) {
         return res.status(409).json({
           success: false,
           zatenGonderildi: true,
-          ...(oncekiNo !== '' ? { irsaliyeNo: oncekiNo } : {}),
+          ...(kesilmisNo !== '' ? { irsaliyeNo: kesilmisNo } : {}),
           error: 'Bu sevkiyat için e-İrsaliye zaten kesilmiş.',
         });
       }
@@ -4225,18 +4245,45 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       await C.writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', success, irsaliyeNo, errorMsg, duration, C.reqActor(req));
       if (success) void mirrorMikroInsert('mikro_stok_hareketleri',
         (satirlar as unknown as Record<string, unknown>[]).map(s => ({ ...s, __kaynak: 'irsaliye_push' })), STH_COLS);
+      // YEREL YAZIMLAR KENDİ try/catch'inde (fatura rotasındaki `localUpdateFailed` deseni): Mikro BAŞARILI olduktan
+      // sonra bir DB yazımı düşerse rota 500 dönüyor, kullanıcı "hata" görüp YENİDEN gönderiyor ve Mikro'da İKİNCİ resmî
+      // e-İrsaliye oluşuyordu (işaret yazılamadığı için 409 kapısı da kördü). Artık yanıt success:true kalır, istemci
+      // işareti kendisi de dener; o da düşerse App.tsx "YENİDEN GÖNDERMEYİN" der (2026-09-19 son parti incelemesi).
+      let localUpdateFailed = false;
       if (C.getAdminDb() && firebaseId && success) {
-        await C.getAdminDb().collection('shipments').doc(firebaseId).set({
-          companyId: await C.reqCompanyId(req),
-          irsaliyeNo,
-          irsaliyeEttn,
-          mikroSynced:     true,
-          mikroSyncedAt:   pgServerTimestamp(),
-        }, { merge: true });
+        try {
+          await C.getAdminDb().collection('shipments').doc(firebaseId).set({
+            companyId: await C.reqCompanyId(req),
+            // Sevkiyatlar tablosunda BOŞ iskelet satır olmasın: gövdede gelen tanımlayıcı alanlar da yazılır
+            // (yalnız DOLU olanlar — merge mevcut değeri korur).
+            ...(shipment.customerName ? { customerName: shipment.customerName } : {}),
+            ...(shipment.destination ? { destination: shipment.destination } : {}),
+            ...(shipment.trackingNo ? { trackingNo: shipment.trackingNo } : {}),
+            orderId: firebaseId,
+            irsaliyeNo,
+            irsaliyeEttn,
+            mikroSynced:     true,
+            mikroSyncedAt:   pgServerTimestamp(),
+          }, { merge: true });
+          // SİPARİŞ işaretini SUNUCU yazar: istemcinin `updateDoc(orders/{id})` yazımı RBAC'a takılırsa (ya da sekme
+          // kapanırsa) işaret hiç düşmüyor, düğme yeniden etkin görünüyordu. Yalnız çağıranın KENDİ siparişine ve
+          // `update` ile (set-merge DEĞİL): sahiplik kontrolü `mikroPost`'tan ÖNCE yapıldı; arada silinmiş siparişi
+          // upsert 3 alanlı, companyId'siz zombi olarak diriltirdi (pgShim.update var olmayan dokümana yazmaz).
+          if (siparisSahipligi === 'kendi') {
+            await C.getAdminDb().collection('orders').doc(firebaseId).update({
+              irsaliyeGonderildi: true,
+              ...(irsaliyeNo ? { irsaliyeNo } : {}),
+              irsaliyeGonderimAt: pgServerTimestamp(),
+            });
+          }
+        } catch (yazimHatasi) {
+          localUpdateFailed = true;
+          console.error(`[irsaliye/kaydet] e-İRSALİYE MİKRO'DA OLUŞTU (no: ${irsaliyeNo ?? '—'}) ama yerel işaret yazılamadı — sipariş ${firebaseId}:`, yazimHatasi);
+        }
       }
       // `error`: Mikro'nun REDDİ (IsError) HTTP 200 + success:false döner; alan yokken istemci toast'ı `d.error`
       // şartına takılıp reddi SESSİZ geçiyordu (2026-09-19 son parti incelemesi). Diğer kaydet rotalarıyla aynı sözleşme.
-      res.json({ success, irsaliyeNo, irsaliyeEttn, error: errorMsg, data, duration });
+      res.json({ success, irsaliyeNo, irsaliyeEttn, localUpdateFailed, error: errorMsg, data, duration });
     } catch (err) {
       const duration = Date.now() - t0;
       const errorMsg = err instanceof Error ? err.message : String(err);

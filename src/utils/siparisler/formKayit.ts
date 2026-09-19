@@ -68,6 +68,7 @@
  */
 import { bilinenSayi } from '../para';
 import { formSayisi, girilenAlanYamasi, pozitifSayi } from '../muhasebe/irsaliyeCalisan';
+import type { BelgeTipi } from './belgeTipi';
 
 /* ── KDV rozeti ───────────────────────────────────────────────────────────── */
 
@@ -214,6 +215,11 @@ export interface SiparisDuzenlemeGirdileri<D extends string = string> {
    * yani e-İrsaliye düğmesi kalıcı kilitli kalıyordu (`musteriBagliDegil`).
    */
   leadId?: string;
+  /**
+   * Belge tipi seçimi ('e-fatura' | 'e-arsiv' | 'ihracat'). Seçilmediyse `undefined` — alan yazılmaz, mevcut tip
+   * korunur; tanınmayan metin yamaya GİRMEZ. Kural ve kaynak: utils/siparisler/belgeTipi.ts.
+   */
+  faturaTipi?: BelgeTipi;
 }
 
 /** `updateDoc(doc(db,'orders',id), …)` gövdesi. `totalPrice: null` = kullanıcı tutarı bilerek sildi. */
@@ -229,6 +235,7 @@ export interface SiparisYamasi<D extends string = string> {
   kdvTutari?: number | null;
   depoNo?: number;
   leadId?: string;
+  faturaTipi?: BelgeTipi;
 }
 
 /** Düzenlenen siparişin ÖNCEKİ hâli — türevleri tazelemek için girdiler ve fatura durumu okunur. */
@@ -313,6 +320,8 @@ export function siparisDuzenlemeYamasi<D extends string>(
   if (form.status !== undefined) yama.status = form.status;
   if (form.depoNo !== undefined) yama.depoNo = form.depoNo;
   if (form.leadId !== undefined) yama.leadId = form.leadId;
+  // Belge tipi: yalnız GEÇERLİ açık seçim yazılır (siparisBelgeTipi ile aynı geçerlilik kümesi).
+  if (form.faturaTipi === 'e-fatura' || form.faturaTipi === 'e-arsiv' || form.faturaTipi === 'ihracat') yama.faturaTipi = form.faturaTipi;
 
   const temel: SiparisYamasi<D> = {
     ...yama,

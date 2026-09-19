@@ -336,3 +336,18 @@ describe('siparisGovdesi — kalem listesi', () => {
     expect(() => siparisGovdesi(siparis({ lineItems: [null] }), { vergiTablosu: VERGI })).toThrow(/1\. kalem/);
   });
 });
+
+// 2026-09-19: kesirli miktar satır tutarını kuruş-altına taşıyor. Fatura/irsaliye gövdesi yuvarlanmıştı, SİPARİŞ gövdesi
+// ham `satirTutari` gönderiyordu (yarım düzeltme — para.ts `kurusaYuvarla` başlığı `sip_tutar`ı da sayıyor).
+describe('siparisGovdesi — KESİRLİ miktarda sip_tutar KURUŞA yuvarlanır', () => {
+  it('2,5 × 175,07 → 437,68 (ham 437,67499… gitmez) — mutasyon-ayırt-edici', () => {
+    const { satirlar } = siparisGovdesi(siparis({ lineItems: [{ sku: 'BRD-8', name: 'BORDÜR 8cm', quantity: 2.5, price: 175.07, vatRate: 20 }] }), { vergiTablosu: VERGI });
+    expect(satirlar[0].sip_miktar).toBe(2.5);
+    expect(satirlar[0].sip_tutar).toBe(437.68);
+  });
+  it('tam sayılı miktarda değer DEĞİŞMEZ', () => {
+    const { satirlar } = siparisGovdesi(siparis(), { vergiTablosu: VERGI });
+    expect(satirlar[0].sip_tutar).toBe(750);
+  });
+});
+

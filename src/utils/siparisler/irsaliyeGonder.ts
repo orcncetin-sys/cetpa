@@ -41,10 +41,9 @@
  *   2. Kapılar zod ŞEMASININ tip sözleşmesine göre (`IrsaliyeKaydetSchema`): sayılar
  *      gerçekten `number` olmalı — sayısal metin ('20', '100') zod'u geçemez. Bu yüzden
  *      `bilinenSayi`ın metin toleransı burada bilerek daraltıldı (`sayiAlani`).
- *   3. `quantity` tam sayı ve > 0 olmalı (şema `.int().positive()`), `depoNo` tam sayı
- *      ve > 0. Kesirli miktar (2,5 ton) bugün de SUNUCUDA reddediliyor — kapı bunu
- *      erkene alır, davranışı değiştirmez. Şemanın kesirli miktara kapalı olması
- *      inşaat malzemesi için ayrı bir açık madde.
+ *   3. `quantity` sonlu sayı ve > 0 olmalı (şema `z.number().positive().finite()`); KESİRLİ miktar
+ *      GEÇERLİDİR — 2026-09-19 kullanıcı kararıyla açıldı (2,5 ton demir, 0,75 m³ beton). `depoNo`
+ *      tam sayı ve > 0 kalır.
  *   4. `d.error` boş/boşluk metinse eski kod BOŞ bir hata toast'ı basardı (`??` yalnız
  *      null/undefined'ı yakalar); artık varsayılan gerekçeye düşer.
  *   5. **Cari kod yedek zincirinden `taxId` ve `customerName` ÇIKARILDI** (2026-09-19 delta).
@@ -195,7 +194,9 @@ function govdeKalemi(k: IrsaliyeKalemi): IrsaliyeGovdeKalemi | null {
   if (!doluMetin(k.sku)) return null;
   const ad = ilkDoluDeger(k.title, k.name, k.sku);
   if (!doluMetin(ad)) return null;                                   // şema: name min(1)
-  if (!sayiAlani(k.quantity) || !Number.isInteger(k.quantity) || k.quantity <= 0) return null;
+  // KESİRLİ miktar GEÇERLİ (2026-09-19 kullanıcı kararı): inşaat malzemesinde 2,5 ton / 0,75 m³ gerçektir. Eski
+  // `Number.isInteger` kapısı bu siparişlerde düğmeyi "kalem eksik" diye kilitliyordu; sunucu şeması da 400 dönüyordu.
+  if (!sayiAlani(k.quantity) || k.quantity <= 0) return null;
   // BİLİNEN ₺0 geçerli (numune/bedelsiz sevkiyat) — `!k.price` ile kapatılamaz.
   if (!sayiAlani(k.price)) return null;
   return { sku: k.sku, name: ad, quantity: k.quantity, price: k.price };
@@ -295,8 +296,8 @@ export function irsaliyeNedenMetni(neden: IrsaliyeEngeli, dil: ArayuzDili): stri
       return tr ? 'Cari kod bilinmiyor — müşteriyi Mikro carisiyle eşleştirin.'
                 : 'Customer account code unknown — match the customer to a Mikro account.';
     case 'kalemYok':
-      return tr ? 'Sevkiyat kalemleri eksik: her satırda stok kodu, tam sayı miktar ve birim fiyat olmalı.'
-                : 'Shipment lines incomplete: every line needs a stock code, a whole-number quantity and a unit price.';
+      return tr ? 'Sevkiyat kalemleri eksik: her satırda stok kodu, sıfırdan büyük miktar (kesirli olabilir) ve birim fiyat olmalı.'
+                : 'Shipment lines incomplete: every line needs a stock code, a quantity greater than zero (fractions allowed) and a unit price.';
     case 'depoYok':
       return tr ? 'Sevk Deposu seçilmemiş — siparişi düzenleyip depoyu tamamlayın.'
                 : 'Shipping Warehouse not selected — edit the order and complete it.';

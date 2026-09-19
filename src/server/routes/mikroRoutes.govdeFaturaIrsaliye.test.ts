@@ -354,7 +354,9 @@ describe('POST /api/mikro/irsaliye/kaydet — bilinen sevkiyat: eski gövdeyle B
     expect(d.koleksiyon('shipments')).toEqual([{
       op: 'set', ref: { id: 'shp1', coll: 'shipments' },
       data: {
-        companyId: 'A', irsaliyeNo: 'IRS-000777', irsaliyeEttn: 'E-2222',
+        // Tanımlayıcı alanlar + `orderId` (2026-09-19): Sevkiyatlar tablosunda BOŞ iskelet satır olmasın.
+        companyId: 'A', customerName: 'Şirin İnşaat Ltd. Şti.', destination: 'Organize Sanayi 5. Cadde No:12, Kocaeli',
+        trackingNo: '41 ABC 123', orderId: 'shp1', irsaliyeNo: 'IRS-000777', irsaliyeEttn: 'E-2222',
         mikroSynced: true, mikroSyncedAt: 'TS',
       },
     }]);

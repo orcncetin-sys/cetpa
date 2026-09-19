@@ -85,6 +85,8 @@ export interface SahteYanit {
 export interface SahteApp {
   /** Anahtar: `"POST /api/mikro/import/stok"`. Değer: zincirin SON ara katmanı = handler. */
   handlers: Record<string, Handler>;
+  /** Rotanın tüm ara katman zinciri — erişim kapısının VARLIĞI buradan doğrulanır (`erisimKapisi` etiketi). */
+  zincirler: Record<string, unknown[]>;
   get: KayitFn; post: KayitFn; put: KayitFn; patch: KayitFn; delete: KayitFn; use: KayitFn;
 }
 type KayitFn = (yol: unknown, ...mw: unknown[]) => void;
@@ -228,7 +230,9 @@ export function duzenekKur(secenek: DuzenekSecenek = {}): Duzenek {
     mikroIdCozucu: async () => (a: string) => a,
     loadCompanyDocs: vi.fn(async () => []),
     mikroLimiter: gecir(),
-    requireCollectionAccess: () => gecir(),
+    // Kapı ETİKETLİ döner: düzenek ara katmanları koşturmaz (yalnız son halkayı), ama bir rotanın zincirinde
+    // HANGİ erişim kapısının durduğu `d.app.zincirler[...]` üzerinden doğrulanabilir (2026-09-19: e-İrsaliye rol kapısı).
+    requireCollectionAccess: (coll: string, islem: string) => Object.assign(gecir(), { erisimKapisi: `${coll}:${islem}` }),
     requireAuth: gecir(),
     requireMfaVerified: gecir(),
     getAdminDb: () => adminDb as unknown as ReturnType<MikroRouteCtx['getAdminDb']>,
@@ -312,15 +316,18 @@ export function duzenekKur(secenek: DuzenekSecenek = {}): Duzenek {
 /** Express yerine geçen toplayıcı: ara katman zincirinin SON halkasını handler sayar. */
 export function sahteApp(): SahteApp {
   const handlers: Record<string, Handler> = {};
+  /** Rotanın TÜM ara katman zinciri (son halka dâhil) — erişim kapısı gibi halkaların VARLIĞINI doğrulamak için. */
+  const zincirler: Record<string, unknown[]> = {};
   let anonim = 0;
   const kaydet = (metot: Metot) => (yol: unknown, ...mw: unknown[]) => {
     // `app.use(fn)` (yolsuz) da kaydedilsin ki rota SAYISI/sırası incelenebilsin.
     const anahtar = typeof yol === 'string' ? `${metot} ${yol}` : `${metot} *${++anonim}`;
     const zincir = typeof yol === 'string' ? mw : [yol, ...mw];
     handlers[anahtar] = zincir[zincir.length - 1] as Handler;
+    zincirler[anahtar] = zincir;
   };
   return {
-    handlers,
+    handlers, zincirler,
     get: kaydet('GET'), post: kaydet('POST'), put: kaydet('PUT'),
     patch: kaydet('PATCH'), delete: kaydet('DELETE'), use: kaydet('USE'),
   };

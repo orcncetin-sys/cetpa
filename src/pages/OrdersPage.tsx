@@ -3,6 +3,9 @@ const CanliSevkiyatPanel = React.lazy(() => import('../components/CanliSevkiyatP
 import { eslesir } from '../utils/arama';
 import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli } from '../utils/siparis';
 import { irsaliyeIstegi, irsaliyeNedenMetni } from '../utils/siparisler/irsaliyeGonder';
+import { mikroDepoSecenekleri } from '../utils/muhasebe/depoNo';
+import { onayAcikMi } from '../lib/confirm';
+import { siparisBelgeTipi, type BelgeTipi } from '../utils/siparisler/belgeTipi';
 import { zamanMs, zamanDate, gunBasi, gunAnahtari, ayAnahtari, tarihYaz, tarihSaatYaz, bugunAnahtari } from '../utils/zaman';
 import type { BinSatiri } from '../hooks/useSekmeVerileri';
 import type { VehiclePosition } from '../types';
@@ -166,6 +169,8 @@ interface Props {
   aracKonumlari: VehiclePosition[];
   /** Konum YAZMA yetkisi (Admin/Manager/Logistics) — yoksa 403 alınırdı. */
   konumYazabilir: boolean;
+  /** e-İrsaliye kesme yetkisi — sunucudaki kapıyla AYNI kural: `shipments` yazma (Admin/Manager/Logistics). */
+  irsaliyeKesebilir: boolean;
   /** Konumu kimin paylastigi kaydedilsin (izlenebilirlik). */
   kullaniciUid?: string;
   locationStocks: LocationStock[];
@@ -212,7 +217,7 @@ export default function OrdersPage({
   routeStops, isRouteOptimized, selectedDepot, setSelectedDepot, DEPOTS,
   recurringOrders, hasFullAccess, currentLanguage, currentT,
   orders, leads, inventory, exchangeRates, employees,
-  userRole, user, kpiCurrency, setKpiCurrency, activeTab, darkMode, warehouses, vehicles, aracKonumlari, konumYazabilir, kullaniciUid, locationStocks, shipments,
+  userRole, user, kpiCurrency, setKpiCurrency, activeTab, darkMode, warehouses, vehicles, aracKonumlari, konumYazabilir, irsaliyeKesebilir, kullaniciUid, locationStocks, shipments,
   newOrder, setNewOrder, orderLineItems, setOrderLineItems,
   handleMikroFatura, handleEIrsaliye, eIrsaliyeGonderiliyor, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute, p554Bins,
   handleToggleOrderPaid, trackView, openConfirm,
@@ -438,7 +443,47 @@ export default function OrdersPage({
     return basarisiz;
   };
 
-  const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
+  /**
+   * e-İrsaliye HER ZAMAN ONAYLA gider (2026-09-19 kullanıcı kararı: "kendiliğinden gitmesin, onay alsın").
+   * Mikro'da RESMÎ belge keser ve geri alınamaz; onay penceresi NEYİN gönderileceğini söyler (müşteri, kalem sayısı,
+   * sevk deposu, KDV). Gönderilemeyen siparişte pencere AÇILMAZ (false döner) — nedeni düğmenin ipucunda yazar.
+   */
+  const eIrsaliyeOnayiAc = (order: Order, giris?: string): boolean => {
+    if (!irsaliyeKesebilir) return false;                                  // sunucu da 403 döner (shipments:write)
+    const cari = leads.find(l => l.id === order.leadId);
+    const istek = irsaliyeIstegi(order, cari);
+    if (!istek.gonderilebilir || !istek.govde || order.irsaliyeNo || order.irsaliyeGonderildi) return false;
+    // KENDİLİĞİNDEN açılan teklif ("Kargoda" akışı — `giris` dolu) başka bir onayın YERİNE GEÇMEZ: `confirmAction`
+    // bekleyen diyaloğu sessizce iptal eder; kullanıcının o pencere için vereceği tıklama resmî belge onayına dönüşürdü.
+    if (giris && onayAcikMi()) {
+      toast(op(currentLanguage).siparis_kargoda_e_irsaliye_icin_siparis_detayind, 'info');
+      return false;
+    }
+    const depo = mikroDepoSecenekleri(warehouses).find(d => d.no === order.depoNo);
+    const depoMetni = depo ? `${depo.no} — ${depo.ad}` : String(order.depoNo);
+    const kalem = istek.govde.shipment.items?.length ?? 0;
+    // Belgenin GERÇEK alıcısı: sipariş üzerindeki serbest metin ad değil, bağlı CARİ (ad + Mikro cari kodu) — kod
+    // gönderilecek GÖVDEDEN okunur ki pencere ile istek aynı kaynaktan beslensin. Adlar ayrışıyorsa açıkça uyarılır.
+    const cariAdi = (cari?.company || cari?.name || '').trim();
+    const cariKodu = istek.govde.shipment.mikroCariKod;
+    const adFarkli = cariAdi !== '' && order.customerName.trim() !== '' && cariAdi !== order.customerName.trim() && (cari?.name || '').trim() !== order.customerName.trim();
+    const tr = currentLanguage === 'tr';
+    openConfirm({
+      title: op(tr).e_irsaliye_gonderilsin_mi,
+      message: tr
+        ? `${giris ? giris + ' ' : ''}Alıcı cari: ${cariAdi || '—'} (${cariKodu})${adFarkli ? ` — DİKKAT: siparişteki ad "${order.customerName}"` : ''} · ${kalem} kalem · sevk deposu: ${depoMetni} · KDV %${order.kdvOran}. Bu işlem Mikro'da RESMÎ e-İrsaliye keser ve geri alınamaz.`
+        : `${giris ? giris + ' ' : ''}Recipient: ${cariAdi || '—'} (${cariKodu})${adFarkli ? ` — NOTE: the order says "${order.customerName}"` : ''} · ${kalem} line(s) · warehouse: ${depoMetni} · VAT ${order.kdvOran}%. This issues an OFFICIAL e-waybill in Mikro and cannot be undone.`,
+      confirmLabel: op(tr).e_irsaliye_gonder,
+      onConfirm: () => { void handleEIrsaliye(order); },
+    });
+    return true;
+  };
+
+  /**
+   * `irsaliyeSor: false` — TOPLU durum değişikliğinde sorulmaz (her sipariş için ayrı onay penceresi açılamaz;
+   * toplu işlemde e-İrsaliye sipariş detayındaki düğmeyle tek tek gönderilir).
+   */
+  const handleUpdateOrderStatus = async (orderId: string, status: Order['status'], secenek: { irsaliyeSor?: boolean } = {}) => {
     try {
       await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: serverTimestamp(), ...(status === 'Delivered' ? { deliveredAt: serverTimestamp() } : {}) });
       const ord = orders.find(o => o.id === orderId);
@@ -463,6 +508,12 @@ export default function OrdersPage({
         if (hatalilar.length) createNotification(oc(currentLanguage).stok_uyarisi, currentLanguage === 'tr'
           ? `DİKKAT: ${hatalilar.length} ürünün stoğu geri yüklenemedi: ${hatalilar.join(', ')} — elle düzeltin.`
           : `WARNING: stock not restored for ${hatalilar.length} item(s): ${hatalilar.join(', ')} — fix manually.`, 'warning');
+      }
+      // "KARGODA" → e-İrsaliye OTOMATİK GİTMEZ, SORULUR (kullanıcı kararı 2026-09-19). Durum güncellemesi ve stok
+      // düşümü BİTTİKTEN sonra, yalnız gönderilebilir (faturalı + carili + depolu + KDV'li) ve irsaliyesi kesilmemiş
+      // siparişte. Gönderilemiyorsa sessiz kalınır: nedeni sipariş detayındaki düğmenin ipucunda yazar.
+      if (status === 'Shipped' && secenek.irsaliyeSor !== false && ord) {
+        eIrsaliyeOnayiAc({ ...ord, status: 'Shipped' }, op(currentLanguage).siparis_kargoda_olarak_isaretlendi);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
@@ -726,9 +777,17 @@ export default function OrdersPage({
                         message: `${selectedOrderIds.size} ${op(currentLanguage).siparisin_durumunu} "${s}" ${op(currentLanguage).olarak_guncellensin_mi}`,
                         onConfirm: async () => {
                           setBulkActionLoading(true);
+                          // Toplu işlemde e-İrsaliye SORULMAZ; kaç siparişin onay beklediği söylenir (sessiz kalmasın).
+                          const irsaliyeBekleyen = s === 'Shipped' && irsaliyeKesebilir
+                            ? orders.filter(o => selectedOrderIds.has(o.id) && !o.irsaliyeNo && !o.irsaliyeGonderildi
+                                && irsaliyeIstegi(o, leads.find(l => l.id === o.leadId)).gonderilebilir).length
+                            : 0;
                           for (const id of selectedOrderIds) {
-                            await handleUpdateOrderStatus(id, s);
+                            await handleUpdateOrderStatus(id, s, { irsaliyeSor: false });
                           }
+                          if (irsaliyeBekleyen > 0) toast(currentLanguage === 'tr'
+                            ? `${irsaliyeBekleyen} sipariş e-İrsaliye bekliyor — sipariş detayından onaylayarak gönderin.`
+                            : `${irsaliyeBekleyen} order(s) await an e-waybill — send them from the order detail.`, 'info');
                           setSelectedOrderIds(new Set());
                           setBulkActionLoading(false);
                         },
@@ -1252,8 +1311,11 @@ export default function OrdersPage({
                                 if (newStatus === 'Delivered') { setDeliveryNoteOrder(order); setDeliveryNoteText(''); return; }
                                 openConfirm({
                                   title: currentT.status,
-                                  message: `Update status to "${e.target.value}"?`,
-                                  onConfirm: () => handleUpdateOrderStatus(order.id, e.target.value as Order['status'])
+                                  // `newStatus` KULLAN — `e.target.value` onay ANINDA okunursa kontrollü <select> çoktan eski
+                                  // değere dönmüştür ve ESKİ durum yazılır (2026-06-12'den beri liste seçicisi durumu
+                                  // hiç değiştirmiyordu; 2026-09-19 uçtan uca inceleme). Değişmez testi: onayDegismez.test.ts
+                                  message: `${siparisDurumEtiketi(newStatus, currentLanguage)}?`,
+                                  onConfirm: () => handleUpdateOrderStatus(order.id, newStatus)
                                 });
                               }}
                                 className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full outline-none cursor-pointer appearance-none",
@@ -1863,10 +1925,10 @@ export default function OrdersPage({
                         const istek = irsaliyeIstegi(selectedOrder, leads.find(l => l.id === selectedOrder.leadId));
                         const suruyor = !!eIrsaliyeGonderiliyor[selectedOrder.id];
                         return (
-                          <span title={istek.neden ? irsaliyeNedenMetni(istek.neden, currentLanguage) : ''} className="inline-flex">
+                          <span title={!irsaliyeKesebilir ? (op(currentLanguage).e_irsaliye_kesme_yetkiniz_yok_yonetici_lojistik_) : istek.neden ? irsaliyeNedenMetni(istek.neden, currentLanguage) : ''} className="inline-flex">
                             <button
-                              onClick={() => void handleEIrsaliye(selectedOrder)}
-                              disabled={!istek.gonderilebilir || suruyor}
+                              onClick={() => { eIrsaliyeOnayiAc(selectedOrder); }}
+                              disabled={!istek.gonderilebilir || suruyor || !irsaliyeKesebilir}
                               className="bg-[#1a3a5c]/10 hover:bg-[#1a3a5c] text-[#1a3a5c] hover:text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#1a3a5c]/10 disabled:hover:text-[#1a3a5c]"
                             >
                               {suruyor ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Truck className="w-4 h-4"/>}
@@ -3698,7 +3760,11 @@ export default function OrdersPage({
                   onClick={async () => {
                     const o = deliveryNoteOrder;
                     try {
-                      await updateDoc(doc(db, 'orders', o.id), { status: 'Delivered', deliveryNote: deliveryNoteText, deliveredAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                      // Durum TEK yoldan değişir (`handleUpdateOrderStatus`: stok geçişi + stockApplied + deliveredAt). Eski ham
+                      // `updateDoc({status:'Delivered', …})` bunu baypas ediyordu — 'Kargoda' atlanıp doğrudan 'Teslim Edildi'
+                      // yapılan siparişin stoğu hiç düşmüyordu (2026-09-19 son parti incelemesi). Not ayrıca yazılır.
+                      await handleUpdateOrderStatus(o.id, 'Delivered');
+                      if (deliveryNoteText.trim()) await updateDoc(doc(db, 'orders', o.id), { deliveryNote: deliveryNoteText.trim(), updatedAt: serverTimestamp() });
                       createNotification(oc(currentLanguage).teslim_edildi, `#${o.id.slice(0, 6)}`, 'info');
                       toast(op(currentLanguage).teslimat_kaydedildi, 'success');
                       setDeliveryNoteOrder(null);
@@ -3785,12 +3851,9 @@ export default function OrdersPage({
                     <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).tutar}</label>
                     <input type="number" className="apple-input w-full text-sm" placeholder={oc(currentLanguage).bilinmiyor} value={editingTutarHam} onChange={e => setEditingTutarHam(e.target.value)} />
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).durum}</label>
-                    <select className="apple-input w-full text-sm" value={(editingOrderData.status as string) ?? 'Pending'} onChange={e => setEditingOrderData(d => ({ ...d, status: e.target.value as Order['status'] }))}>
-                      {(['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'] as const).map(st => <option key={st} value={st}>{st}</option>)}
-                    </select>
-                  </div>
+                  {/* DURUM alanı BURADAN KALDIRILDI (2026-09-19): bu pencere durumu yamayla doğrudan yazıyordu —
+                      `handleUpdateOrderStatus`'tan GEÇMEDİĞİ için 'Kargoda' yapılınca stok DÜŞMÜYOR, `stockApplied`
+                      işaretlenmiyor ve e-İrsaliye teklifi çıkmıyordu. Durum tek yoldan değişir: liste / detay seçicisi. */}
                 </div>
                 {/* SEVK DEPOSU + KDV ORANI — e-İrsaliye düğmesi bu iki alan eksikken DEVRE DIŞI kalıyor
                     ve ipucu "siparişi düzenleyip depoyu/oranı tamamlayın" diyor. 2026-09-19 delta bulgusu:
@@ -3808,6 +3871,32 @@ export default function OrdersPage({
                     return depoNo === undefined ? kalan : { ...kalan, depoNo };
                   })}
                 />
+                {/* BELGE TİPİ — e-Fatura gönderimi tipi bilinmeyen siparişte "siparişi düzenleyip belge tipini seçin" der;
+                    o alanı ÜRETEN yüzey burasıdır (üretici yüzey şartı). Seçilmemişse müşterinin e-Fatura kaydından
+                    türeyen tip ipucu olarak gösterilir, o da bilinmiyorsa kullanıcı uyarılır. Boş seçim yazılmaz. */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).belge_tipi}</label>
+                  <select className="apple-input w-full text-sm" value={editingOrderData.faturaTipi ?? ''}
+                    onChange={e => setEditingOrderData(d => {
+                      const { faturaTipi: _secilmemis, ...kalan } = d;
+                      return e.target.value === '' ? kalan : { ...kalan, faturaTipi: e.target.value as BelgeTipi };
+                    })}>
+                    {!editingOrderData.faturaTipi && <option value="">{op(currentLanguage).secilmedi}</option>}
+                    <option value="e-fatura">e-Fatura</option>
+                    <option value="e-arsiv">e-Arşiv</option>
+                    <option value="ihracat">{oc(currentLanguage).ihracat}</option>
+                  </select>
+                  {!editingOrderData.faturaTipi && (() => {
+                    const turetilen = siparisBelgeTipi({}, leads.find(l => l.id === editingOrderData.leadId));
+                    return (
+                      <p className={`text-[10px] mt-1 ${turetilen ? 'text-gray-500' : 'text-amber-600'}`}>
+                        {turetilen
+                          ? (currentLanguage === 'tr' ? `Seçilmezse müşterinin e-Fatura kaydına göre: ${turetilen === 'e-fatura' ? 'e-Fatura' : 'e-Arşiv'}.` : `If not selected, from the customer’s registration: ${turetilen === 'e-fatura' ? 'e-Invoice' : 'e-Archive'}.`)
+                          : (op(currentLanguage).musterinin_e_fatura_kaydi_bilinmiyor_secilmezse_)}
+                      </p>
+                    );
+                  })()}
+                </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).kdv_orani}</label>
                   {/* Boş = BİLİNMİYOR (`?? 20` uydurması Mikro'ya yanlış vergi işaretçisi yazar);
@@ -3827,13 +3916,15 @@ export default function OrdersPage({
                       return;
                     }
                     const duzenlenenId = selectedOrder.id;
-                    const yama = siparisDuzenlemeYamasi({
+                    // Açık tip argümanı: `status` artık bu formdan yazılmıyor, çıkarım `string`e düşerdi.
+                    const yama = siparisDuzenlemeYamasi<Order['status']>({
                       customerName: editingOrderData.customerName,
                       shippingAddress: editingOrderData.shippingAddress,
-                      status: editingOrderData.status,
                       tutarHam: editingTutarHam,
                       kdvHam: editingKdvHam,
                       depoNo: editingOrderData.depoNo,
+                      // Yalnız GERÇEKTEN değiştiyse yaz (leadId ile aynı gerekçe).
+                      faturaTipi: editingOrderData.faturaTipi && editingOrderData.faturaTipi !== selectedOrder.faturaTipi ? editingOrderData.faturaTipi : undefined,
                       // Yalnız GERÇEKTEN değiştiyse yaz — aksi hâlde her kayıt aynı leadId'yi
                       // gereksizce geri yazar (PATCH-merge'de eşzamanlı değişikliği ezme riski).
                       leadId: editingOrderData.leadId === selectedOrder.leadId ? undefined : editingOrderData.leadId,

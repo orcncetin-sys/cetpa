@@ -6,7 +6,7 @@
  * toplama girmez, sayılır; ekranda/PDF'te '—'. Bu dosya o sözleşmeyi kilitler.
  */
 import { describe, it, expect } from 'vitest';
-import { tutarYaz, kdvAyristir, satirTutari, toplaBilinen, siparisMaliyeti, tahsilatOrani, teklifToplamlari, ekranTutari, tamTutar, tutarBirlestir, sayiSirala, donemKarsilastir } from './para';
+import { tutarYaz, kdvAyristir, satirTutari, toplaBilinen, siparisMaliyeti, tahsilatOrani, teklifToplamlari, ekranTutari, tamTutar, tutarBirlestir, sayiSirala, donemKarsilastir, kurusaYuvarla, miktarDuzelt } from './para';
 
 describe('tutarYaz — PDF/CSV için tutar metni', () => {
   it("bilinen: Türk biçimi + birim ('1.234,56 TL'); 0 gerçek sıfırdır", () => {
@@ -195,6 +195,34 @@ describe('donemKarsilastir — iki dönemin cirosu: ekran ≠ türetme (haftalı
   it('önceki dönem 0 / boşsa yüzde yok (0\'a bölme); kayıtsız dönem gerçek 0', () => {
     expect(donemKarsilastir(t(5000, 1, 0), t(0, 0, 0))).toEqual({ ekran: 5000, yuzde: null, yon: null });
     expect(donemKarsilastir(t(0, 0, 0), t(0, 0, 0)).ekran).toBe(0);
+  });
+});
+
+// Kesirli miktar (2026-09-19) satır tutarını ilk kez kuruş-altına taşıdı: 2,5 × 175,07 = 437,675.
+describe('kurusaYuvarla — float-güvenli kuruş yuvarlaması (resmî belge satır tutarı)', () => {
+  it('yarım kuruş YUKARI: 2.5 × 175.07 → 437.68 (düz Math.round(t*100)/100 437.67 verir — mutasyon-ayırt-edici)', () => {
+    expect(2.5 * 175.07).not.toBe(437.675);            // IEEE-754: 437.67499999999995
+    expect(kurusaYuvarla(2.5 * 175.07)).toBe(437.68);
+    expect(kurusaYuvarla(1.005)).toBe(1.01);
+  });
+  it('tam kuruşlu tutar DEĞİŞMEZ; kayan nokta artığı temizlenir', () => {
+    expect(kurusaYuvarla(12500)).toBe(12500);
+    expect(kurusaYuvarla(0.1 * 3)).toBe(0.3);
+    expect(kurusaYuvarla(2.5 * 24500)).toBe(61250);
+    expect(kurusaYuvarla(-437.675)).toBe(-437.68);
+  });
+  it('bilinmeyen NaN kalır (0 olmaz)', () => {
+    expect(kurusaYuvarla(NaN)).toBeNaN();
+    expect(kurusaYuvarla(Infinity)).toBeNaN();
+  });
+});
+
+describe('miktarDuzelt — "+/−" düğmesinin kayan nokta artığı', () => {
+  it('1.1 − 1 → 0.1 (0.10000000000000009 değil); 4 ondalık korunur', () => {
+    expect(miktarDuzelt(1.1 - 1)).toBe(0.1);
+    expect(miktarDuzelt(2.5 + 1)).toBe(3.5);
+    expect(miktarDuzelt(0.7525)).toBe(0.7525);
+    expect(miktarDuzelt(0.75251)).toBe(0.7525);
   });
 });
 

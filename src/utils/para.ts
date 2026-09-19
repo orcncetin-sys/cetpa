@@ -72,6 +72,23 @@ export function tamTutar(t: Tutar): number {
 }
 
 /**
+ * Float-güvenli KURUŞ yuvarlaması — resmî belge satır tutarı (Mikro `sth_tutar`, `sip_tutar`). Kesirli miktar
+ * (2026-09-19) tutarı ilk kez kuruş-altına taşıdı: 2,5 × 175,07 = 437,675 ama IEEE-754'te 437,67499999999995'tir ve
+ * düz `Math.round(t * 100) / 100` onu 437,67'ye YUVARLAR (yarım kuruş kaybı). `toPrecision(12)` artığı temizler.
+ * Bilinmeyen (NaN/Infinity) NaN kalır — 0 olmaz.
+ */
+export function kurusaYuvarla(t: number): number {
+  if (!Number.isFinite(t)) return NaN;
+  const isaret = t < 0 ? -1 : 1;
+  return isaret * Math.round(Number((Math.abs(t) * 100).toPrecision(12))) / 100;
+}
+
+/** Miktar aritmetiğinin ("+/−" düğmesi) kayan nokta artığını temizler: 1.1 − 1 → 0.1. 4 ondalık (kg/ton/m³ için yeterli). */
+export function miktarDuzelt(n: number): number {
+  return Math.round(Number((n * 1e4).toPrecision(12))) / 1e4;
+}
+
+/**
  * İki dönemin (bu hafta / geçen hafta) karşılaştırması. EKRAN değeri `ekranTutari` (kısmi toplam gösterilebilir,
  * hiç bilinen yokken NaN → '—'); SAPMA ise TÜRETMEDİR: iki dönemden birinde tek kayıt bile bilinmiyorsa
  * hesaplanmaz (null) — kısmi toplamdan "▼ %30" oku üretilmez. Önceki dönem ≤ 0 ise yüzde yok (0'a bölme).

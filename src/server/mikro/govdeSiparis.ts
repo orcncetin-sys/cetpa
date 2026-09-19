@@ -39,7 +39,7 @@
  * tip 1'i satın alma (PurchasingModule.tsx:76). '1' yazınca resmi satış Mikro'da
  * alış siparişi oluyordu VE Cetpa satış ekranında hiç görünmüyordu.
  */
-import { bilinenSayi, satirTutari } from '../../utils/para.js';
+import { bilinenSayi, satirTutari, kurusaYuvarla } from '../../utils/para.js';
 import { gunBasi } from '../../utils/zaman.js';
 import { MikroGovdeHatasi } from './govdeHatasi.js';
 import { vergiIsaretcisiCoz } from './vergiIsaretci.js';
@@ -170,7 +170,8 @@ export function siparisGovdesi(siparis: SiparisGirdisi, secenek: SiparisSecenekl
     // iskontosu total'de duruyor olabilir). Fark: bilinmeyen/0 total artık `0` yazmaz,
     // fiyat × miktara döner — ve çarpım para.ts'ten (null*qty = 0 tuzağı yok).
     const hamTutar = sayi(k.total);
-    const tutar = hamTutar !== null && hamTutar > 0 ? hamTutar : satirTutari(fiyat, miktar);
+    // KURUŞA yuvarla (2026-09-19): kesirli miktar tutarı kuruş-altına taşır; fatura/irsaliye gövdesiyle AYNI kural.
+    const tutar = kurusaYuvarla(hamTutar !== null && hamTutar > 0 ? hamTutar : satirTutari(fiyat, miktar));
     if (!Number.isFinite(tutar)) throw new MikroGovdeHatasi('satır tutarı', no);
 
     // KDV: kalemin oranı, yoksa siparişin başlık oranı (AddOrderModal ikisini de yazar).

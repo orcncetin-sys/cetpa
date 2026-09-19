@@ -52,7 +52,7 @@
  * kullanıcıya açık madde olarak taşındı. Ayrıca çıkış faturasında giriş deposunun 0
  * olması gerekip gerekmediği TEYİTSİZ (`mikroEvrak.ts` deseni `type==='in' ? depo : 0`).
  */
-import { bilinenSayi, satirTutari } from '../../utils/para.js';
+import { bilinenSayi, satirTutari, kurusaYuvarla } from '../../utils/para.js';
 import { zamanDate } from '../../utils/zaman.js';
 import { MikroGovdeHatasi } from './govdeHatasi.js';
 import { vergiIsaretcisiCoz } from './vergiIsaretci.js';
@@ -262,7 +262,10 @@ function vergiIsaretcisiGerekli(oran: number, tablo: ReadonlyMap<number, number>
 function kalemMiktarTutar(kalem: GovdeKalemi, satirNo: number): { miktar: number; tutar: number } {
   const miktar = sayiGerekli(kalem.quantity, 'miktarı', satirNo);
   sayiGerekli(kalem.price, 'birim fiyatı', satirNo);
-  const tutar = satirTutari(kalem.price, miktar);  // utils/para tek kaynak
+  // KURUŞA yuvarla (2026-09-19): kesirli miktar satır tutarını ilk kez kuruş-altına taşıdı (2,5 × 175,07 = 437,675;
+  // IEEE-754'te 437,67499…). Resmî belgeye ham kayan nokta gitmez; KDV de yuvarlanmış matrahtan hesaplanır.
+  // Tam sayılı miktarda değer DEĞİŞMEZ (yalnız float artığı temizlenir).
+  const tutar = kurusaYuvarla(satirTutari(kalem.price, miktar));  // utils/para tek kaynak
   if (!Number.isFinite(tutar)) throw new MikroGovdeHatasi('satır tutarı', satirNo);
   return { miktar, tutar };
 }
@@ -321,7 +324,15 @@ export function faturaGovdesi(fatura: FaturaGirdisi, secenek: FaturaSecenekleri)
   const toplamTutar = satirlar.reduce((t, s) => t + s.sth_tutar, 0);
 
   // faturaTipi: 1=e-Fatura, 2=e-Arşiv, 3=İhracat (eski eşleme birebir)
-  const faturaType = fatura.faturaTipi === 'e-arsiv' ? 2 : fatura.faturaTipi === 'ihracat' ? 3 : 1;
+  // VARSAYILAN YOK (2026-09-19): eskiden tip 'e-arsiv'/'ihracat' değilse 1 (e-FATURA) sayılıyordu; istemci ise
+  // aynı siparişi `|| 'e-arsiv'` ile e-ARŞİV sayıyordu. e-Fatura'ya kayıtlı OLMAYAN alıcıya e-Fatura kesilemez,
+  // kayıtlı olana e-Arşiv kesmek usulsüz belgedir — tip bilinmiyorsa belge kesilmez. Tipin kaynağı:
+  // src/utils/siparisler/belgeTipi.ts (sipariş üzerindeki seçim → müşterinin `eFaturaKayitli` kaydı).
+  const FATURA_TIPLERI: Readonly<Record<string, 1 | 2 | 3>> = { 'e-fatura': 1, 'e-arsiv': 2, 'ihracat': 3 };
+  const faturaType = typeof fatura.faturaTipi === 'string' ? FATURA_TIPLERI[fatura.faturaTipi] : undefined;
+  if (faturaType === undefined) {
+    throw new MikroGovdeHatasi('belge tipi', undefined, "belge tipi (e-Fatura / e-Arşiv / ihracat) bilinmiyor — müşterinin e-Fatura kaydı okunamadı; siparişte belge tipini seçin");
+  }
 
   const evrak: FaturaEvraki = {
     cha_tip:          0,   // satış

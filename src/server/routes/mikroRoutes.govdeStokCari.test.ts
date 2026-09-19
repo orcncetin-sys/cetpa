@@ -210,7 +210,9 @@ describe('POST /api/mikro/cari/kaydet — bilinen cari: eski gövdeyle BİREBİR
     }, true);
     expect(res.govde).toMatchObject({ success: true, cariKod: 'CARABC123' });
     expect(d.koleksiyon('suppliers')).toEqual([
-      { op: 'update', ref: { id: 'abc123xyz', coll: 'suppliers' }, data: { mikroCariKod: 'CARABC123', mikroSynced: true, mikroSyncedAt: 'TS' } },
+      // `eFaturaKaydiTeyitsiz`: e-Fatura kaydı BİLİNMEDEN gönderildi (gövdede cari_efatura_fl: 0) — cron'un geri yazacağı
+      // `eFaturaKayitli:false` teyitsizdir ve belge tipini belirlememeli (2026-09-19; utils/siparisler/belgeTipi).
+      { op: 'update', ref: { id: 'abc123xyz', coll: 'suppliers' }, data: { mikroCariKod: 'CARABC123', mikroSynced: true, mikroSyncedAt: 'TS', eFaturaKaydiTeyitsiz: true } },
     ]);
   });
 
