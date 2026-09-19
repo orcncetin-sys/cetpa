@@ -45,7 +45,7 @@ describe('MikroFaturaDetay — Net Birim sütunu', () => {
     // Sütun sırası: … Net, Net Birim, KDV
     const basliklar = screen.getAllByRole('columnheader').map(h => h.textContent);
     expect(basliklar.slice(-3)).toEqual(['Net', 'Net Birim', 'KDV']);
-    expect(screen.queryByText(/ana birim dışında/)).toBeNull();   // ana birimde uyarı YOK
+    expect(screen.queryByText(/ile girilmiş/)).toBeNull();        // ana birimle girilen satırda giriş notu YOK
   });
 
   it("miktarı 0 olan satırda (fiyat farkı) birim fiyat '—' — sıfıra bölünmez, ₺0 basılmaz", async () => {
@@ -58,13 +58,15 @@ describe('MikroFaturaDetay — Net Birim sütunu', () => {
     expect(h[6]).toBe('—');         // Net Birim
   });
 
-  it('[İNCELEME] ANA BİRİM DIŞI satır (sth_birim_pntr = 2) işaretlenir: "80 · PALET · ₺200" torba fiyatı olabilir', async () => {
+  it('[CANLI ÖLÇÜM] başka birimle girilen satır: Birim = ANA birim, giriş birimi bilgi notu; belirsizlik işareti YOK', async () => {
+    // Alış faturası 234 (Kalekim 3131, 20 kg kova): sunucu birim='ADET', girisBirimi='KILOGRAM' yollar.
     authFetch.mockReturnValue(yanit([
-      { sth_stok_kod: 'CIM-50', urunAdi: 'ÇİMENTO 50 KG', birim: 'PALET', sth_birim_pntr: 2, sth_miktar: 80, sth_tutar: 16000, sth_vergi: 3200, sth_vergi_pntr: 4 },
+      { sth_stok_kod: 'KALEKIM.3131', urunAdi: 'Kalekim 3131 Elastikor 20 kg', birim: 'ADET', girisBirimi: 'KILOGRAM', sth_birim_pntr: 2, sth_miktar: 50, sth_tutar: 57916.66, sth_vergi: 11583.33, sth_vergi_pntr: 4 },
     ]));
-    render(<MikroFaturaDetay fatura={{ ...fatura, tutar: 19200 }} currentLanguage="tr" onClose={() => {}} />);
-    const h = hucreler(await satirOf('ÇİMENTO 50 KG'));
-    expect(h[6]).toBe('₺200,00 *');                                  // sayı gizlenmez, İŞARETLENİR
-    expect(screen.getByText(/ana birim dışında girilmiş/)).toBeTruthy();   // dipnot nedeni söyler
+    render(<MikroFaturaDetay fatura={{ ...fatura, yon: 'gelen', tutar: 69499.99 }} currentLanguage="tr" onClose={() => {}} />);
+    const h = hucreler(await satirOf('Kalekim 3131 Elastikor 20 kg'));
+    expect(h[2]).toBe('ADETKILOGRAM ile girilmiş');     // Birim hücresi: ana birim + alt satırda giriş notu
+    expect(h[6]).toBe('₺1.158,3332');                   // KOVA başına net — işaretsiz
+    expect(screen.queryByText(/ana birim dışında/)).toBeNull();
   });
 });

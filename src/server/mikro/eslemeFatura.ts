@@ -322,15 +322,28 @@ export function siparisTuretmeNotu(s: SiparisTuretmeSayaci): string | null {
 
 /**
  * Birim ADI çözümü (2026-08-31 kullanıcı isteği: "BİRİM'i de ekle").
- * `sth_birim_pntr` 1-3 arası bir İŞARETÇİdir, adı STOKLAR'daki `sto_birimN_ad`
- * kolonundadır. İşaretçi okunamaz/aralık dışıysa ya da ad boşsa birim UYDURULMAZ —
- * alan `undefined` kalır (JSON'da hiç görünmez). Davranış rotadan aynen taşındı.
+ *
+ * `birim` = **MİKTARIN** birimi. `sth_birim_pntr` (1-3) satırın hangi birimle GİRİLDİĞİNİ söyler, `sth_miktar`'ın
+ * hangi birimde SAKLANDIĞINI değil: Mikro miktarı ANA birime çevirip saklar. CANLI ÖLÇÜM (2026-09-19, kullanıcı
+ * sunucuda koştu): alış faturası 234, Kalekim 3131 Elastikor 20 kg — ana birim ADET, 2. birim KILOGRAM, işaretçi 2,
+ * `sth_miktar = 50`, tutar ₺57.916,66 → ₺1.158,33/birim = KOVA fiyatı (kg fiyatı olamaz). Eski eşleme işaretçinin
+ * adını basıyordu → ekranda "50 · KILOGRAM · ₺1.158,33" (Net Birim sütunu eklenince yanlış FİYAT okumasına döndü).
+ * Ölçüm tek satır (canlıda işaretçisi ≠ 1 olan başka fatura satırı yok: tip 3'te 1/557, tip 4'te 0/738); Mikro'nun
+ * bilinen saklama kuralıyla tutarlı. Aksi bir örnek çıkarsa bu yorum + test güncellenir.
+ *
+ * `girisBirimi` = satır ana birim DIŞINDA girildiyse o birimin adı (bilgi notu: "KILOGRAM ile girilmiş"); ana
+ * birimle aynıysa ya da adı boşsa YAZILMAZ. İşaretçi okunamaz/aralık dışıysa ya da ana birim adı boşsa birim
+ * UYDURULMAZ — alan `undefined` kalır (JSON'da hiç görünmez).
  */
 export function kalemleriBirimle(rows: readonly Record<string, unknown>[]): Record<string, unknown>[] {
+  const ad = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
   return rows.map(rec => {
     const p = bilinenSayi(rec.sth_birim_pntr) ? Number(rec.sth_birim_pntr) : NaN;
-    const ad = p >= 1 && p <= 3 ? rec[`sto_birim${p}_ad`] : undefined;
-    return { ...rec, birim: typeof ad === 'string' && ad.trim() ? ad.trim() : undefined };
+    if (!(p >= 1 && p <= 3)) return { ...rec, birim: undefined };
+    const anaBirim = ad(rec.sto_birim1_ad);
+    const giris = p === 1 ? undefined : ad(rec[`sto_birim${p}_ad`]);
+    const farkli = giris !== undefined && giris.toLocaleLowerCase('tr-TR') !== anaBirim?.toLocaleLowerCase('tr-TR');
+    return { ...rec, birim: anaBirim, ...(farkli ? { girisBirimi: giris } : {}) };
   });
 }
 

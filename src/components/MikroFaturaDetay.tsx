@@ -259,11 +259,10 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                       const miktar = bilinenSayi(k.sth_miktar) ? Number(k.sth_miktar) : null;
                       const kdv = bilinenSayi(k.sth_vergi) ? Number(k.sth_vergi) : null;
                       const fa = n?.kaynak === 'faturaAltiKdvden' || n?.kaynak === 'faturaAltiBasliktan';
-                      // ANA BİRİM DIŞI satır (sth_birim_pntr 2/3): Birim sütunu o işaretçinin ADINI (ör. PALET) basar, ama
-                      // `sth_miktar`ın o birimde mi yoksa ana birimde mi tutulduğu bu kod tabanında TEYİTSİZ (Mikro alanının
-                      // anlamı tahmin edilmez). Ana birimdeyse "80 · PALET · ₺200" satırı palet değil TORBA fiyatıdır. Sayı
-                      // gizlenmez (net ÷ Miktar sütunu olarak DOĞRUDUR), hangi birime ait olduğu belirsiz diye İŞARETLENİR.
-                      const anaBirimDisi = bilinenSayi(k.sth_birim_pntr) && Number(k.sth_birim_pntr) !== 1;
+                      // Birim = MİKTARIN birimi (ana birim) — Mikro miktarı ana birime çevirip saklar (canlı ölçüm 2026-09-19,
+                      // bkz. server/mikro/eslemeFatura.kalemleriBirimle). Satır başka birimle GİRİLDİYSE sunucu `girisBirimi`
+                      // yollar; o yalnız bilgi notudur — Miktar ve Net Birim ana birim üzerindendir.
+                      const girisBirimi = typeof k.girisBirimi === 'string' && k.girisBirimi ? k.girisBirimi : null;
                       return (
                         <tr key={`${sku}-${i}`} className="border-b border-gray-50 last:border-0">
                           <td className="py-1.5 px-1 text-[#1D1D1F]">
@@ -275,7 +274,15 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                           </td>
                           {/* Birim sunucuda sto_birimX_ad'dan çözülür (2026-08-31);
                               şemada yoksa '—' — uydurma 'ADET' yazılmaz. */}
-                          <td className="py-1.5 px-1 text-left text-gray-500">{String(k.birim ?? '') || '—'}</td>
+                          <td className="py-1.5 px-1 text-left text-gray-500">
+                            {String(k.birim ?? '') || '—'}
+                            {girisBirimi && (
+                              <span className="block text-[10px] text-gray-400 whitespace-nowrap"
+                                title={tr ? `Faturada ${girisBirimi} ile girilmiş; Mikro miktarı ana birime çevirip saklar — Miktar ve Net Birim ana birim üzerindendir.` : `Entered in ${girisBirimi}; Mikro stores quantity in the base unit — Quantity and Net Unit are per base unit.`}>
+                                {tr ? `${girisBirimi} ile girilmiş` : `entered in ${girisBirimi}`}
+                              </span>
+                            )}
+                          </td>
                           <td className="py-1.5 px-1 text-right tabular-nums text-gray-400">{n?.brut != null ? tl(n.brut) : '—'}</td>
                           <td className={`py-1.5 px-1 text-right tabular-nums ${n?.iskonto ? 'text-amber-700' : 'text-gray-300'}`}
                             title={fa ? (tr ? 'Fatura altı iskonto — satırda yazılı değil; fatura toplamından / satırın KDV\'sinden türetildi' : 'Invoice-level discount — not on the line; derived from the invoice total / line VAT') : undefined}>
@@ -285,11 +292,8 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                           {/* Net birim fiyat = iskonto düşülmüş net ÷ miktar (lib/stokFiyat.kalemleriCoz — KDV HARİÇ). Miktarı 0/bilinmeyen
                               satırda (fiyat farkı) '—'. 2 ondalık net tutarı geri üretmiyorsa 4 ondalık basılır (birimFiyatOndaligi). */}
                           <td className="py-1.5 px-1 text-right tabular-nums text-[#1D1D1F] whitespace-nowrap"
-                            title={anaBirimDisi
-                              ? (tr ? 'Net ÷ Miktar sütunu (KDV hariç). DİKKAT: bu satır ana birim dışında girilmiş — Mikro miktarı ana birimde tutuyorsa bu fiyat Birim sütunundaki birime DEĞİL, ana birime aittir.' : 'Net ÷ Quantity column (excl. VAT). NOTE: this line uses a non-base unit — if Mikro stores quantity in the base unit, this price is per BASE unit, not the unit shown.')
-                              : (tr ? 'İskonto düşülmüş net tutar ÷ miktar (KDV hariç)' : 'Net amount after discount ÷ quantity (excl. VAT)')}>
+                            title={tr ? 'İskonto düşülmüş net tutar ÷ miktar (KDV hariç) — Birim sütunundaki birim başına' : 'Net amount after discount ÷ quantity (excl. VAT) — per the unit shown'}>
                             {n?.birimFiyat != null ? paraYaz(n.birimFiyat, { ondalik: birimFiyatOndaligi(n.birimFiyat, n.miktar, n.net) }) : '—'}
-                            {n?.birimFiyat != null && anaBirimDisi && <span className="text-amber-600" aria-hidden="true"> *</span>}
                           </td>
                           <td className="py-1.5 px-1 text-right tabular-nums text-gray-500">{kdv === null ? '—' : tl(kdv)}</td>
                         </tr>
@@ -297,13 +301,6 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                     })}
                   </tbody>
                 </table>
-                {kalemler.some((k, i) => cozumler[i]?.birimFiyat != null && bilinenSayi(k.sth_birim_pntr) && Number(k.sth_birim_pntr) !== 1) && (
-                  <p className="mt-2 text-[10px] text-amber-700">
-                    {tr
-                      ? '* Bu satır ana birim dışında girilmiş. Net birim fiyat, Miktar sütunundaki sayıya bölünerek hesaplandı; Mikro miktarı ana birimde tutuyorsa fiyat ana birime aittir.'
-                      : '* This line uses a non-base unit. Net unit price = net ÷ the Quantity shown; if Mikro stores quantity in the base unit, the price is per base unit.'}
-                  </p>
-                )}
                 {saglama && (
                   <p className={`mt-2 text-[11px] rounded-lg px-2.5 py-1.5 ${saglama.tutuyor ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50 border border-amber-200'}`}>
                     {saglama.tutuyor

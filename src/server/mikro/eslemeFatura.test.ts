@@ -305,13 +305,32 @@ describe('siparisTuretmeNotu', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe('kalemleriBirimle — sth_birim_pntr → sto_birimN_ad', () => {
+describe('kalemleriBirimle — `birim` MİKTARIN birimidir (ana birim); `girisBirimi` satırın girildiği birim', () => {
   const kalem = { sth_stok_kod: 'CIM50', sth_miktar: 100, sto_birim1_ad: 'ADET', sto_birim2_ad: 'KOLİ', sto_birim3_ad: '' };
 
-  it('işaretçi 1-3 arasındaysa o birimin adı çözülür, diğer alanlar korunur', () => {
-    const [r] = kalemleriBirimle([{ ...kalem, sth_birim_pntr: 2 }]);
-    expect(r.birim).toBe('KOLİ');
-    expect(r.sth_stok_kod).toBe('CIM50');
+  it('[CANLI ÖLÇÜM 2026-09-19] ikinci birimle girilen satırda sth_miktar ANA birimdedir → birim = ana birim', () => {
+    // Alış faturası 234: Kalekim 3131 Elastikor 20 kg — ana birim ADET, 2. birim KILOGRAM, sth_birim_pntr = 2,
+    // sth_miktar = 50, sth_tutar = 57.916,66 → ₺1.158,33 / birim. Bu bir KOVA fiyatıdır (kg fiyatı olamaz): Mikro
+    // 1.000 kg'lık girişi 50 ADET olarak saklamış. Eski eşleme ekrana "50 · KILOGRAM · ₺1.158,33" yazdırıyordu.
+    const [r] = kalemleriBirimle([{ sth_stok_kod: 'KALEKIM.3131', sth_miktar: 50, sth_tutar: 57916.66, sth_birim_pntr: 2,
+                                    sto_birim1_ad: 'ADET', sto_birim2_ad: 'KILOGRAM', sto_birim3_ad: '' }]);
+    expect(r.birim).toBe('ADET');
+    expect(r.girisBirimi).toBe('KILOGRAM');
+    expect(r.sth_stok_kod).toBe('KALEKIM.3131');       // diğer alanlar korunur
+  });
+
+  it('ana birimle girilen satırda girisBirimi YAZILMAZ (söylenecek fark yok)', () => {
+    const [r] = kalemleriBirimle([{ ...kalem, sth_birim_pntr: 1 }]);
+    expect(r.birim).toBe('ADET');
+    expect('girisBirimi' in r).toBe(false);
+  });
+
+  it('giriş biriminin adı boşsa ya da ana birimle AYNIYSA girisBirimi yazılmaz; ana birim adı boşsa birim yazılmaz', () => {
+    expect('girisBirimi' in kalemleriBirimle([{ ...kalem, sth_birim_pntr: 3 }])[0]).toBe(false);                       // 3. birim adı ''
+    expect('girisBirimi' in kalemleriBirimle([{ ...kalem, sth_birim_pntr: 2, sto_birim2_ad: ' adet ' }])[0]).toBe(false);
+    const [r] = kalemleriBirimle([{ ...kalem, sth_birim_pntr: 2, sto_birim1_ad: '' }]);
+    expect(r.birim).toBeUndefined();
+    expect(r.girisBirimi).toBe('KOLİ');
   });
 
   it('sayısal metin işaretçi de çözülür', () => {
@@ -325,8 +344,8 @@ describe('kalemleriBirimle — sth_birim_pntr → sto_birimN_ad', () => {
     expect(kalemleriBirimle([{ ...kalem, sth_birim_pntr: 'abc' }])[0].birim).toBeUndefined();
   });
 
-  it('birim adı boş/boşluksa alan yazılmaz; dolu ad kırpılır', () => {
-    expect(kalemleriBirimle([{ ...kalem, sth_birim_pntr: 3 }])[0].birim).toBeUndefined();
+  it('ana birim adı boş/boşluksa alan yazılmaz; dolu ad kırpılır', () => {
+    expect(kalemleriBirimle([{ ...kalem, sth_birim_pntr: 1, sto_birim1_ad: '   ' }])[0].birim).toBeUndefined();
     expect(kalemleriBirimle([{ ...kalem, sth_birim_pntr: 1, sto_birim1_ad: '  TON  ' }])[0].birim).toBe('TON');
   });
 });
