@@ -30,7 +30,7 @@
  *   ... --bakiye <bakiye-beklenen.json>  : yazmadan ÖNCE cari bakiye mutabakatı (LUCA ↔ Mikro)
  *   ... --yalniz-tutan : yalnız bakiyesi tutan carilerin satırlarını yaz
  *   ... --devam        : hata alınca durma, kalanları dene (varsayılan: İLK hatada dur)
- *   ... --zorla        : Mikro'da aynı gün+tutar+yön kaydı olsa bile yaz (mükerrer riski!)
+ *   ... --cakisanlari-atla : Mikro'da BAŞKA seriyle aynı gün+tutar+yön kaydı olan satırları yazma
  *
  * Varsayılan KURU'dur: `--yaz` verilmeden Mikro'ya tek bir istek bile gitmez (okuma hariç).
  */
@@ -67,12 +67,12 @@ const ADET = adetArg >= 0 ? Number(argv[adetArg + 1]) : Infinity;
 const bakiyeArg = argv.indexOf('--bakiye');
 const BAKIYE_YOLU = bakiyeArg >= 0 ? argv[bakiyeArg + 1] : null;
 const YALNIZ_TUTAN = argv.includes('--yalniz-tutan');
-const ZORLA = argv.includes('--zorla');
+const CAKISANLARI_ATLA = argv.includes('--cakisanlari-atla');
 /** İki bakiyenin "aynı" sayılacağı eşik — kuruş yuvarlamaları için. */
 const KURUS = 0.01;
 
 if (!manifestYolu) {
-  console.error('Kullanım: npx tsx scripts/luca-dekont-aktar.ts <manifest.json> [--bakiye <b.json>] [--yaz] [--adet N] [--devam] [--yalniz-tutan] [--zorla]');
+  console.error('Kullanım: npx tsx scripts/luca-dekont-aktar.ts <manifest.json> [--bakiye <b.json>] [--yaz] [--adet N] [--devam] [--yalniz-tutan] [--cakisanlari-atla]');
   process.exit(1);
 }
 if (adetArg >= 0 && (!Number.isFinite(ADET) || ADET < 1)) {
@@ -158,37 +158,81 @@ async function main(): Promise<void> {
     process.exit(5);
   }
 
-  // 3) Mikro'da bu seriyle ZATEN yazılmış belge no'lar — mükerrer kayıt koruması.
+  // ── Mükerrer koruması: İKİ bağımsız ağ ─────────────────────────────────────
+  //
+  // DOĞAL ANAHTAR TEK BAŞINA YETMEZ — veride MEŞRU tekrarlar var: Doğan Limoncu
+  // 2026-04-01'de ÜÇ ayrı ₺25.000 göndermiş (ölçüldü: 7 grup, ₺474.900). Bu grupları
+  // "zaten var" diye elemek iki gerçek ödemeyi kaybettirir. Bu yüzden anahtar bir küme
+  // değil, SAYAÇ olarak kullanılır: Mikro'da o anahtardan M kayıt varsa gruptan M satır
+  // atlanır, kalanı yazılır.
+  const anahtarla = (kod: string, gun: string, tutar: number, tip: number) => `${kod}|${gun}|${tutar.toFixed(2)}|${tip}`;
+  const satirAnahtari = (s: ManifestSatiri) => anahtarla(s.cariKod, s.tarih.replace(/-/g, ''), s.tutar, s.chaTip);
+
+  /** Mikro'da BİZİM serimizle yazılmış kayıtların doğal anahtar sayımı. */
+  const sayimOku = async (nerede: string): Promise<{ sayim: Map<string, number>; hata: string | null }> => {
+    const { rows, hata } = await mikroSql(
+      `SELECT cha_kod, CONVERT(varchar(8), cha_tarihi, 112) AS gun, cha_meblag, cha_tip, COUNT(*) AS adet ` +
+      `FROM CARI_HESAP_HAREKETLERI WHERE cha_kod IN (${kodListesi}) AND ${nerede} ` +
+      `GROUP BY cha_kod, CONVERT(varchar(8), cha_tarihi, 112), cha_meblag, cha_tip`);
+    const sayim = new Map<string, number>();
+    for (const r of rows) {
+      const adet = Number(r.adet);
+      if (!Number.isFinite(adet)) continue;   // sayı gelmediyse "0 kayıt" varsayma — atla, uyarı aşağıda
+      sayim.set(anahtarla(String(r.cha_kod ?? '').trim(), String(r.gun ?? ''), Number(r.cha_meblag), Number(r.cha_tip)), adet);
+    }
+    return { sayim, hata };
+  };
+
+  // 3a) Belge no ağı (EN KESİN — ama cha_belge_no'nun Mikro'da saklandığı TEYİTSİZ).
   const { rows: varOlan, hata: belgeHata } = await mikroSql(
     `SELECT cha_belge_no FROM CARI_HESAP_HAREKETLERI WHERE cha_evrakno_seri = '${SERI}'`);
   if (belgeHata) { console.error(`Mükerrer kontrolü başarısız: ${belgeHata}`); process.exit(6); }
-  const yazilmis = new Set(varOlan.map(r => String(r.cha_belge_no ?? '').trim()).filter(Boolean));
-  const kalan = gecerli.filter(g => !yazilmis.has(g.s.belgeNo));
-  console.log(`Mikro'da mevcut: ${yazilmis.size} LUCA kaydı → ${gecerli.length - kalan.length} satır atlanacak`);
+  const yazilmisBelge = new Set(varOlan.map(r => String(r.cha_belge_no ?? '').trim()).filter(Boolean));
+  console.log(`Mikro'da '${SERI}' serisi: ${varOlan.length} kayıt, ${yazilmisBelge.size} tanesinin belge no'su dolu`);
+  if (varOlan.length && !yazilmisBelge.size) {
+    console.log(`   NOT: Mikro cha_belge_no'yu SAKLAMIYOR — koruma doğal anahtar sayacına düşüyor.`);
+  }
+
+  // 3b) Doğal anahtar SAYACI, yalnız BİZİM serimiz üstünde — kaldığı yerden devam için.
+  const { sayim: kendiSayim, hata: kendiHata } = await sayimOku(`cha_evrakno_seri = '${SERI}'`);
+  if (kendiHata) { console.error(`Doğal anahtar sayımı başarısız: ${kendiHata}`); process.exit(8); }
+
+  const belgeAtilanSet = new Set(gecerli.filter(g => yazilmisBelge.has(g.s.belgeNo)).map(g => g.s.belgeNo));
+  // Grup grup: Mikro'daki sayı, belge no ile zaten atılandan FAZLAYSA aradaki kadarını daha at.
+  const grup = new Map<string, { s: ManifestSatiri; payload: Record<string, unknown> }[]>();
+  for (const g of gecerli) {
+    const a = satirAnahtari(g.s);
+    const liste = grup.get(a);
+    if (liste) liste.push(g); else grup.set(a, [g]);
+  }
+  const sayacIleAtilan = new Set<string>();
+  for (const [a, liste] of grup) {
+    const mikroda = kendiSayim.get(a);
+    if (mikroda === undefined) continue;                       // bu anahtardan hiç yazılmamış
+    const zaten = liste.filter(g => belgeAtilanSet.has(g.s.belgeNo)).length;
+    const ekstra = Math.max(0, mikroda - zaten);
+    for (const g of liste.filter(x => !belgeAtilanSet.has(x.s.belgeNo)).slice(0, ekstra)) {
+      sayacIleAtilan.add(g.s.belgeNo);
+    }
+  }
+  const kalan = gecerli.filter(g => !belgeAtilanSet.has(g.s.belgeNo) && !sayacIleAtilan.has(g.s.belgeNo));
+  console.log(`Zaten yazılmış : ${belgeAtilanSet.size} (belge no) + ${sayacIleAtilan.size} (doğal anahtar sayacı)`);
   console.log(`Yazılacak      : ${kalan.length} satır`);
 
-  // 3b) DOĞAL ANAHTAR kontrolü — cha_belge_no'nun Mikro'da saklandığı TEYİTSİZ olduğu için
-  //     ikinci bir ağ: aynı cari + aynı gün + aynı tutar + aynı yön zaten var mı?
-  //     Bu, hem betiğin ikinci koşusunu hem de ödemenin Mikro'ya BAŞKA yoldan girmiş olmasını yakalar.
-  const { rows: dogalRows, hata: dogalHata } = await mikroSql(
-    `SELECT cha_kod, CONVERT(varchar(8), cha_tarihi, 112) AS gun, cha_meblag, cha_tip, COUNT(*) AS adet ` +
-    `FROM CARI_HESAP_HAREKETLERI WHERE cha_kod IN (${kodListesi}) ` +
-    `GROUP BY cha_kod, CONVERT(varchar(8), cha_tarihi, 112), cha_meblag, cha_tip`);
-  if (dogalHata) { console.error(`Doğal anahtar kontrolü başarısız: ${dogalHata}`); process.exit(8); }
-  const dogalAnahtar = (kod: string, gun: string, tutar: number, tip: number) => `${kod}|${gun}|${tutar.toFixed(2)}|${tip}`;
-  const mikrodaVar = new Set(dogalRows.map(r =>
-    dogalAnahtar(String(r.cha_kod ?? '').trim(), String(r.gun ?? ''), Number(r.cha_meblag), Number(r.cha_tip))));
-  const cakisan = kalan.filter(g =>
-    mikrodaVar.has(dogalAnahtar(g.s.cariKod, g.s.tarih.replace(/-/g, ''), g.s.tutar, g.s.chaTip)));
+  // 3c) UYARI AĞI — ödemenin Mikro'ya BAŞKA yoldan (elle, başka seri) girmiş olması.
+  //     Bu ağ ASLA eleme yapmaz; yalnız uyarır. Fatura ile çakışma ihtimali yüksek
+  //     olduğu için otomatik elemeye güvenilmez, karar kullanıcınındır.
+  const { sayim: digerSayim, hata: digerHata } = await sayimOku(`ISNULL(cha_evrakno_seri, '') <> '${SERI}'`);
+  if (digerHata) { console.error(`Ön uyarı sorgusu başarısız: ${digerHata}`); process.exit(9); }
+  const cakisan = kalan.filter(g => digerSayim.has(satirAnahtari(g.s)));
   if (cakisan.length) {
-    console.log(`\nUYARI — Mikro'da AYNI gün+tutar+yön kaydı zaten olan ${cakisan.length} satır:`);
+    console.log(`\nUYARI — Mikro'da BAŞKA bir seriyle aynı gün+tutar+yön kaydı olan ${cakisan.length} satır:`);
     for (const g of cakisan.slice(0, 15)) {
       console.log(`   ${g.s.belgeNo} ${g.s.tarih} ${g.s.tutar.toLocaleString('tr-TR')} TL ${g.s.cariKod} ${g.s.cariAd.slice(0, 28)}`);
     }
-    console.log('   Bunlar ya bu betiğin önceki koşusundan, ya da ödemenin Mikro\'ya başka yoldan girmiş olmasından.');
-    console.log('   Yine de yazmak için: --zorla');
+    console.log(`   Aynı tarihli bir FATURA da bu kalıba uyabilir — otomatik elenmez, gözle bakın.`);
+    console.log(`   Bu satırları dışarıda bırakmak için: --cakisanlari-atla`);
   }
-  const cakisanSet = new Set(cakisan.map(g => g.s.belgeNo));
 
   // 3c) BAKİYE MUTABAKATI — yazmadan önce "bu aktarım LUCA ile Mikro'yu buluşturacak mı?"
   //     Beklenen = LUCA kapanış bakiyesi − dekontların etkisi. Mikro'nun ŞU ANKİ bakiyesi
@@ -234,12 +278,13 @@ async function main(): Promise<void> {
     }
   }
 
+  const cakisanSet = new Set(cakisan.map(g => g.s.belgeNo));
   let aday = kalan;
-  if (!ZORLA) aday = aday.filter(g => !cakisanSet.has(g.s.belgeNo));
+  if (CAKISANLARI_ATLA) aday = aday.filter(g => !cakisanSet.has(g.s.belgeNo));
   if (YALNIZ_TUTAN) aday = aday.filter(g => !tutmayanCari.has(g.s.cariKod));
   if (aday.length !== kalan.length) {
     console.log(`\nSüzme sonrası: ${kalan.length} → ${aday.length} satır` +
-      (ZORLA ? ' (--zorla: çakışanlar dahil)' : '') + (YALNIZ_TUTAN ? ' (--yalniz-tutan)' : ''));
+      (CAKISANLARI_ATLA ? ' (--cakisanlari-atla)' : '') + (YALNIZ_TUTAN ? ' (--yalniz-tutan)' : ''));
   }
   const hedef = aday.slice(0, Number.isFinite(ADET) ? ADET : aday.length);
   const toplam = hedef.reduce((a, g) => a + g.s.tutar, 0);
