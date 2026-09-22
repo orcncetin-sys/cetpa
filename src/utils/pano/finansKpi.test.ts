@@ -112,6 +112,35 @@ describe('stokDurumu — stok seviyesi BİLİNMİYORSA "stokta kalmadı" denmez'
     expect(d.esigiBilinmeyen).toBe(0);
   });
 
+  /**
+   * `esigiBilinmeyenStoklu` — Faz 3 6a düzeltme turu (2026-09-22).
+   * ARIZA: Stok Yenileme paneli aynı kartı hem 'Out of Stock: N' diye SAYIP hem
+   * "N ürünün kritik stok eşiği tanımlı değil — kovalara ayrılamadı" diyordu. Seviyesi ≤ 0
+   * olan kart `tukenen` kovasındadır; eşiği bilinmese de KOVALANMIŞTIR, "ayrılamadı" notu
+   * onun için YALANDIR. Yeni sayaç `esigiBilinmeyen`in ALT KÜMESİDİR (eskisi olduğu gibi durur:
+   * `esikAltinda` listesini basan PDF sitesi için o sayaç DOĞRU).
+   */
+  it('MUTASYON AYIRT EDİCİ: tükenen kart eşiksiz olsa da "kovalara ayrılamadı" sayılmaz', () => {
+    const envanter = [
+      urun({ name: 'ÇİMENTO 50KG', stockLevel: 0, lowStockThreshold: undefined, minStock: undefined }),  // tükenen + eşiksiz
+      urun({ name: 'DEMİR Ø12', stockLevel: -12, lowStockThreshold: undefined, minStock: undefined }),   // negatif (veri hatası) + eşiksiz
+      urun({ name: 'TUĞLA', stockLevel: 800, lowStockThreshold: undefined, minStock: undefined }),       // stoklu + eşiksiz → KOVASIZ
+    ];
+    const d = stokDurumu(envanter);
+    expect(d.tukenen.length).toBe(2);
+    expect(d.esigiBilinmeyen).toBe(3);          // eski sayaç DEĞİŞMEZ (PDF sitesi buna bakar)
+    expect(d.esigiBilinmeyenStoklu).toBe(1);    // `esigiBilinmeyen` yazan mutasyon BURADA ölür
+  });
+
+  it('seviyesi okunamayan kart `esigiBilinmeyenStoklu`ya GİRMEZ (çift sayım yok)', () => {
+    // Seviyesi bilinmeyen kart zaten `seviyesiBilinmeyen`de sayılıyor; iki sayaç aynı notta
+    // yan yana basıldığı için kesişmemeleri ŞART.
+    const d = stokDurumu([urun({ stockLevel: null, lowStockThreshold: undefined, minStock: undefined })]);
+    expect(d.seviyesiBilinmeyen).toBe(1);
+    expect(d.esigiBilinmeyen).toBe(0);          // eşik kapısına hiç varılmaz
+    expect(d.esigiBilinmeyenStoklu).toBe(0);
+  });
+
   it('en düşük kritik ürün seçilirken girdi dizisi MUTASYONA uğramaz', () => {
     const envanter = [
       urun({ name: 'TUĞLA', stockLevel: 9, lowStockThreshold: 10 }),

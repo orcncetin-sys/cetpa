@@ -14,8 +14,10 @@
  * bile bilinmiyorsa HESAPLANMAZ (null → çubuk çizilmez).
  */
 import { describe, it, expect } from 'vitest';
-import { olcekReferansi, cubukOrani, tutarSatiri, type CubukSatiri } from './cubuk';
-import { toplaBilinen } from '../para';
+import { olcekReferansi, cubukOrani, tutarSatiri, sayacOlcegi, seriCubukOrani, type CubukSatiri } from './cubuk';
+import { toplaBilinen, type Tutar } from '../para';
+import { enBuyukHafta, type Hafta } from './hedefButce';
+import { oranYuzde } from '../siparisler/lojistikKpi';
 
 /** Şirin İnşaat / ÇİMENTO 50KG evreninden satırlar (₺). */
 const tam = (ciro: number): CubukSatiri => ({ ciro, tutarsizSiparis: 0 });
@@ -114,5 +116,120 @@ describe('tutarSatiri — `Tutar` → çubuk satırı köprüsü (kopya ekran ku
     // Eski köprü (`tutarsizSiparis: 0 + 1`) tepe satırı kısmi sayıp hepsini söndürüyordu:
     const eskiKopru = satirlar.map((s, i) => ({ ...s, tutarsizSiparis: s.tutarsizSiparis + (i === 0 ? 1 : 0) }));
     expect(Number.isNaN(olcekReferansi(eskiKopru))).toBe(true);
+  });
+});
+
+/**
+ * sayacOlcegi — ADET / sayı serilerinin ölçeği (Faz 3 6a, 2026-09-19).
+ *
+ * NEDEN BURADA: aynı sözleşme `hedefButce.enBuyukHafta`da ZATEN vardı ("bilinen en büyük
+ * değer; hiç bilinen pozitif yoksa null") ama imzası `Hafta`ya (`{indeks, ciro, deger}`)
+ * kilitliydi — adet kovası, saat dilimi ya da ay serisi geçirilemiyordu. Beşinci bir ölçek
+ * fonksiyonu yazmak yerine ölçek kurallarının tek evi olan `cubuk.ts`'e alındı; `enBuyukHafta`
+ * gövdesi buraya indi (imzası ve testleri AYNEN durur — aşağıda çapraz parite vakası).
+ *
+ * Ayırt edici mutasyon: eski sayfa kodu `Math.max(...sayilar, 1)` yazıyordu —
+ *   (a) tek bir NaN bütün ölçeği NaN yapıyor, o listede hiçbir çubuk çizilmiyordu;
+ *   (b) `, 1` uydurma tabanı BOŞ seride bile her çubuğu "biraz dolu" gösteriyordu.
+ */
+describe('sayacOlcegi — adet/sayı serilerinin ölçeği (ADDITIVE, 6a)', () => {
+  it('parite (`enBuyukHafta` vektörleri): en büyük bilinen; hiç bilinen yoksa null', () => {
+    expect(sayacOlcegi([50_000, 12_000])).toBe(50_000);
+    expect(sayacOlcegi([null])).toBeNull();
+    expect(sayacOlcegi([0, 0, 0])).toBeNull(); // hepsi ₺0 → ölçek yok
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: tek NaN ölçeği BOZMAZ (süzgeçsiz `Math.max` NaN döndürürdü)', () => {
+    expect(sayacOlcegi([3, NaN, 7, undefined, null])).toBe(7);
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: uydurma taban YOK — boş seri ve yalnız sıfır null (`Math.max(..., 1)` → 1)', () => {
+    expect(sayacOlcegi([])).toBeNull();
+    expect(sayacOlcegi([0])).toBeNull();
+  });
+
+  it('negatif / sıfır ölçek OLAMAZ; aralarındaki pozitif ölçeği kurar', () => {
+    expect(sayacOlcegi([-5, 0])).toBeNull();
+    expect(sayacOlcegi([-5, 2])).toBe(2);
+  });
+
+  it('±Infinity elenir (bölmeden gelen taşma ölçeği ele geçirmez)', () => {
+    expect(sayacOlcegi([Infinity, 4])).toBe(4);
+    expect(sayacOlcegi([-Infinity, 4])).toBe(4);
+  });
+
+  /**
+   * ÇAPRAZ PARİTE — `enBuyukHafta` gövdesinin bu fonksiyona indiğinin kanıtı.
+   * Fikstür: Şirin İnşaat'ın 8 haftalık ÇİMENTO 50KG cirosu (₺); 2 numaralı haftada
+   * tutarı okunamayan tek sipariş var → o haftanın `deger`i null (₺0 DEĞİL).
+   */
+  it('çapraz parite: enBuyukHafta(h) === sayacOlcegi(h.map(x => x.deger))', () => {
+    const tutar = (bilinenler: readonly number[], bilinmeyen = 0): Tutar =>
+      toplaBilinen([...bilinenler, ...Array.from({ length: bilinmeyen }, () => null)], x => x);
+    const haftalar: Hafta[] = [
+      { indeks: 0, ciro: tutar([]), deger: 0 },                 // sipariş yok → gerçek ₺0
+      { indeks: 1, ciro: tutar([12_000]), deger: 12_000 },
+      { indeks: 2, ciro: tutar([], 1), deger: null },           // yalnız tutarsız kayıt
+      { indeks: 3, ciro: tutar([50_000]), deger: 50_000 },      // tepe
+    ];
+    expect(sayacOlcegi(haftalar.map(h => h.deger))).toBe(50_000);
+    expect(enBuyukHafta(haftalar)).toBe(sayacOlcegi(haftalar.map(h => h.deger)));
+
+    const bosSeri: Hafta[] = [{ indeks: 0, ciro: tutar([], 2), deger: null }];
+    expect(enBuyukHafta(bosSeri)).toBe(sayacOlcegi(bosSeri.map(h => h.deger)));
+    expect(enBuyukHafta(bosSeri)).toBeNull();
+  });
+
+  /**
+   * Oran AYRI fonksiyon değil: mevcut testli `lojistikKpi.oranYuzde` kullanılır
+   * (ölçek null → oran null → çubuk ÇİZİLMEZ; KOPYA oran kuralı yazılmaz).
+   */
+  it('oranYuzde ile birlikte: ölçek yoksa çubuk çizilmez', () => {
+    expect(oranYuzde(3, sayacOlcegi([3, 6]))).toBe(50);
+    expect(oranYuzde(3, sayacOlcegi([0]))).toBeNull();
+    expect(oranYuzde(0, sayacOlcegi([0, 4]))).toBe(0); // bilinen 0 adet: çubuk genişliği 0
+  });
+
+  it('girdi mutasyona uğramaz (donmuş dizi hata vermez)', () => {
+    const seri = Object.freeze([3, 9, 1]);
+    expect(sayacOlcegi(seri)).toBe(9);
+    expect(seri).toEqual([3, 9, 1]);
+  });
+});
+
+/**
+ * seriCubukOrani — ÖLÇEĞİN `null`unu okuyan tek kural (Faz 3 6a düzeltme turu, 2026-09-22).
+ *
+ * NEDEN VAR: kural `RaporlarPage.tsx:67`de sayfa-içi `const` olarak duruyordu, yani export
+ * edilmediği için HİÇBİR test onu göremiyordu. Hakem `if (olcek === null) return 0;` satırını
+ * `return null;` yaptı ve tek bir test bile kırılmadı — düzeltme turunun kapattığı arıza
+ * korumasızdı. Aşağıdaki iki vaka tam o mutasyonu ayırt eder.
+ */
+describe('seriCubukOrani — "değer bilinmiyor" ile "seride hiç pozitif yok" AYNI ŞEY DEĞİL', () => {
+  it('MUTASYON AYIRT EDİCİ: bilinen 0 + ölçeksiz seri → 0 (çubuk çizilmez), null DEĞİL', () => {
+    // P603 'leads' metriği: son üç ayda hiç aday açılmamış (üçü de GERÇEK 0).
+    const olcek = sayacOlcegi([0, 0, 0]);
+    expect(olcek).toBeNull();                     // uydurma `, 1` tabanı yok
+    expect(seriCubukOrani(0, olcek)).toBe(0);     // `return null` mutasyonu BURADA ölür
+  });
+
+  it('MUTASYON AYIRT EDİCİ: değer okunamıyorsa null (taralı çubuk) — 0 DEĞİL', () => {
+    expect(seriCubukOrani(NaN, 50_000)).toBeNull();
+    expect(seriCubukOrani(NaN, null)).toBeNull();     // değer kapısı ölçek kapısından ÖNCE
+    expect(seriCubukOrani(Infinity, 50_000)).toBeNull();
+  });
+
+  it('ölçek varsa oran `oranYuzde` ile BİREBİR (kopya oran kuralı yazılmaz)', () => {
+    // Şirin İnşaat'ın ÇİMENTO 50KG ayları (₺): tepe 50.000.
+    const olcek = sayacOlcegi([12_000, 50_000, 25_000]);
+    expect(olcek).toBe(50_000);
+    expect(seriCubukOrani(25_000, olcek)).toBe(oranYuzde(25_000, 50_000));
+    expect(seriCubukOrani(50_000, olcek)).toBe(100);
+    expect(seriCubukOrani(0, olcek)).toBe(0);
+  });
+
+  it('negatif ölçek/değer: `oranYuzde` sözleşmesi aynen (payda ≤ 0 → null)', () => {
+    expect(seriCubukOrani(5, 0)).toBeNull();
+    expect(seriCubukOrani(5, -10)).toBeNull();
   });
 });

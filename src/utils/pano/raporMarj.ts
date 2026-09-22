@@ -74,12 +74,35 @@ function anahtar(x: unknown): string | null {
 }
 
 /**
- * Kalem → stok kartı çözücüsü.
+ * Kalem → stok KARTI eşleşmesi (maliyetten bağımsız; 6a, 2026-09-19'da `stokMaliyetCozucu`
+ * gövdesinden buraya çıkarıldı — `rapor/stokTalep.talepKartCozucu` ad-yedeği için AYNI kuralı
+ * kullanmalıydı, kopyalamak eşleme kuralını ikinci kez çatallandırırdı). `stokMaliyetCozucu`
+ * artık bunu çağırır; imzası ve `raporMarj.test.ts` vakaları AYNEN korundu.
  *
  * BOŞ ANAHTAR EŞLEŞMEZ: eski `inventory.find(ii => ii.id === li.inventoryId || ii.name === li.name)`
  * kuralı `'' === ''` (ve `undefined === undefined`) olduğu için serbest satırı ("Nakliye bedeli",
  * kanal siparişi kalemi) katalogdaki adsız İLK karta bağlıyor, o ilgisiz kartın maliyetini
- * "bilinen maliyet" sayıyordu. OR sırası (önce kimlik, sonra ad) parite için korundu.
+ * "bilinen maliyet" sayıyordu. OR sırası (önce kimlik, sonra ad) parite için korundu: eşleşme,
+ * liste sırasında kimliği YA DA adı tutan İLK karttır — kimliğe öncelik vermek davranış
+ * değişikliği olurdu.
+ */
+export function stokKartiCozucu<K extends { id?: unknown; name?: unknown }>(
+  kartlar: readonly K[],
+): (satir: MarjSatiri) => K | null {
+  return (satir) => {
+    const kimlik = anahtar(satir.inventoryId);
+    const ad = anahtar(satir.name);
+    if (kimlik === null && ad === null) return null;
+    return kartlar.find(k =>
+      (kimlik !== null && anahtar(k.id) === kimlik) ||
+      (ad !== null && anahtar(k.name) === ad),
+    ) ?? null;
+  };
+}
+
+/**
+ * Kalem → BİRİM MALİYET çözücüsü: kalemin kendi `costPrice`'ı öncelikli, yoksa `stokKartiCozucu`
+ * ile bulunan kartın maliyeti. Eşleşme kuralı için yukarıya bak (boş anahtar eşleşmez).
  *
  * `birimMaliyet` kur çevrimini yapan çağırandan gelir (`kartMaliyetiTL(kart, rates)`);
  * `itemCostTRY` DOĞRUDAN geçilmemeli — çevrilemeyen kaleme 0 döndürür.
@@ -88,15 +111,10 @@ export function stokMaliyetCozucu<K extends { id?: unknown; name?: unknown }>(
   kartlar: readonly K[],
   birimMaliyet: (k: K) => number | null,
 ): KalemMaliyetCozucu {
+  const kartCozucu = stokKartiCozucu(kartlar);
   return (satir) => {
     if (bilinenSayi(satir.costPrice)) return Number(satir.costPrice);
-    const kimlik = anahtar(satir.inventoryId);
-    const ad = anahtar(satir.name);
-    if (kimlik === null && ad === null) return null;
-    const kart = kartlar.find(k =>
-      (kimlik !== null && anahtar(k.id) === kimlik) ||
-      (ad !== null && anahtar(k.name) === ad),
-    );
+    const kart = kartCozucu(satir);
     return kart ? birimMaliyet(kart) : null;
   };
 }

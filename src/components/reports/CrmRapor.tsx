@@ -41,7 +41,7 @@ import CrmBloklar9 from './crm/CrmBloklar9';
 import CrmBloklar10 from './crm/CrmBloklar10';
 
 export default function CrmRapor(ctx: ReportsCtx) {
-  const { orders, inventory, exchangeRates, currentT, currentLanguage, onMusteriAc, quotations, inventoryMovements, revenueCurrency, setRevenueCurrency, reportsTab, fmtAna, statusChartData, topCustomers, trendData, COLORS } = ctx;
+  const { orders, inventory, exchangeRates, currentT, currentLanguage, onMusteriAc, quotations, inventoryMovements, revenueCurrency, setRevenueCurrency, reportsTab, fmtAna, statusChartData, topCustomers, musteriKimliksiz, trendData, COLORS } = ctx;
   // `exchangeRates` kur YOKKEN null gelir; formatInCurrency imzası `?: ExchangeRates`.
   // `?? undefined` yalnız TİP köprüsü — iki değerde de fonksiyon kuru bulamayıp '—'
   // döndürür, uydurma bir kur/tutar üretmez.
@@ -53,6 +53,7 @@ export default function CrmRapor(ctx: ReportsCtx) {
           orders={orders} currentLanguage={currentLanguage} currentT={currentT}
           revenueCurrency={revenueCurrency} setRevenueCurrency={setRevenueCurrency} onMusteriAc={onMusteriAc}
           statusChartData={statusChartData} COLORS={COLORS} topCustomers={topCustomers}
+          musteriKimliksiz={musteriKimliksiz}
           trendData={trendData} fxKurlari={fxKurlari}
         />
       )}

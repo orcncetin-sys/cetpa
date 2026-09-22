@@ -16,6 +16,8 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { ChevronRight } from 'lucide-react';
+import { kapsamNotu, type KapsamSayaclari, type KapsamBirimi } from '../../utils/rapor/kapsamNotu';
+import { oc } from '../../i18n/ortak';
 
 // ── Bölüm kartı ───────────────────────────────────────────────────────────────
 
@@ -217,4 +219,149 @@ export function KpiCurrencyToggle({ value, onChange }: {
       ))}
     </div>
   );
+}
+
+// ── Kapsam notu ───────────────────────────────────────────────────────────────
+
+export interface KapsamNotuProps {
+  /** Yardımcı çıktılarından AYNEN gelen sayaçlar — bileşende toplanmaz/çıkarılmaz. */
+  sayaclar: KapsamSayaclari;
+  /**
+   * YALNIZ serbest sayaçlar (tutarsiz / tarihsiz / maliyetsiz / kapsamDisi / dovizli) için;
+   * SABİT birimli sayaçlar (miktarsiz, esiksiz, kimliksiz, eslesmeyen, kalemsiz) bunu yok sayar.
+   * Bu yüzden KARIŞIK birimli bir sayaç kümesi TEK `<KapsamNotu>` ile geçer — bileşen sayaçları
+   * bölmez, `birim`'e göre dallanmaz, metin birleştirmez.
+   */
+  birim?: KapsamBirimi;
+  /** `currentLanguage` AYNEN geçer; daraltma `kapsamNotu` içinde (`oc()` kuralı: 'tr' değilse İngilizce). */
+  dil: string;
+  /** Çağıranın panel cümlesi, ÇAĞIRANIN DİLİNDE (tr/en çifti çağıranda kurulur). */
+  sonuc?: string;
+  className?: string;
+}
+
+/**
+ * Kısmi toplamın altındaki tek satırlık "neyin dışarıda kaldığı" notu.
+ *
+ * NEDEN BİLEŞEN: EKRAN sözleşmesi (`para.ts` `ekranTutari`) kısmi toplamın yanında notu ZORUNLU
+ * kılıyor; 6/n boyunca ~110 panel bu notu basacak. Satır içi yazılsaydı ~110 kopya metin + ~110
+ * ayrı "0 iken basma" koşulu olurdu (Faz 0 kök nedeni: kopya kod).
+ *
+ * METNİ BU BİLEŞEN ÜRETMEZ — `rapor/kapsamNotu` üretir; burada yalnız `<p>` sarmalaması ve
+ * "basılacak bir şey yoksa HİÇ düğüm çizme" kuralı var (boş `<p>` mt-2 boşluğu bırakırdı).
+ * Varsayılan sınıf, yerini aldığı mevcut satır içi notlarla aynı (`GenelOzet:103`,
+ * `RaporlarPage:399,510` → `text-[11px] text-amber-600 mt-2/3`) — tek tip görünüm.
+ *
+ * KPI kartında KULLANILMAZ: orada `KpiCard.hint={kapsamNotu(…) ?? undefined}` yeter (kartın kendi
+ * ipucu tipografisi var).
+ */
+export function KapsamNotu({
+  sayaclar, birim, dil, sonuc, className = 'text-[11px] text-amber-600 mt-2',
+}: KapsamNotuProps): React.ReactElement | null {
+  const metin = kapsamNotu(sayaclar, { birim, dil, sonuc });
+  if (metin === null) return null;
+  return <p className={className}>{metin}</p>;
+}
+
+// ── Ölçek çubuğu ──────────────────────────────────────────────────────────────
+
+/**
+ * BİLİNMEYEN oranın deseni — gri çapraz tarama. Dolu bir renk kullanılamaz: o zaman "bilinmiyor"
+ * ile "gerçek değer" görsel olarak ayırt edilemezdi (eski kod bilinmeyeni düz `#d1d5db` çiziyordu,
+ * gerçek bir gri çubuktan farksızdı).
+ */
+const BILINMEYEN_DESENI = 'repeating-linear-gradient(45deg, #e5e7eb 0 4px, #f3f4f6 4px 8px)';
+
+export interface OlcekCubuguProps {
+  /**
+   * Yüzde (0–100+). `null` / `undefined` / `NaN` / `±Infinity` = BİLİNMİYOR.
+   * Bileşen ORAN HESAPLAMAZ; kaynak testli yardımcılardır: `lojistikKpi.oranYuzde(deger, olcek)` ·
+   * `cubuk.cubukOrani` · `gelirGider.cubukYuzdesi` · `kpiTrend.hedefOrani` — hepsi bilinmeyende
+   * `null` döner, buraya doğrudan geçirilir.
+   */
+  oran: number | null | undefined;
+  /** 'yatay' = ilerleme çubuğu (ray İÇERİDE), 'dikey' = sparkline sütunu (yükseklik kabı ÇAĞIRANDA). */
+  yon?: 'yatay' | 'dikey';
+  /** CSS rengi (`style.background`) — dikey sparkline'lar bunu kullanıyor. */
+  renk?: string;
+  /** Tailwind renk sınıfı (`bg-blue-500` …) — yatay ilerleme çubukları bunu kullanıyor. */
+  renkSinifi?: string;
+  /** Yatay: rayın kalınlığı ('h-1.5' | 'h-3' …). Dikey: sütunun genişliği ('w-full'). */
+  kalinlik?: string;
+  /** Varsayılan: yatay 'rounded-full', dikey 'rounded-t-md'. */
+  koseSinifi?: string;
+  title?: string;
+  /**
+   * ADDITIVE (şartname imzasında yoktu): "bilinmiyor" `aria-label`'ının dili. Verilmezse Türkçe —
+   * `oc()` ile AYNI daraltma. Metin ORTAK sözlükten (`oc(dil).bilinmiyor`) gelir, satır içi
+   * yazılmaz.
+   */
+  dil?: string;
+}
+
+/**
+ * Tek çubuk — ÜÇ DURUMU ayıran tek yer.
+ *
+ * KAYNAK, DÜRÜSTÇE: bu davranış PLAN'ın K26 VARSAYILANIDIR, kullanıcı kararı DEĞİL —
+ * `PLAN-v2.md:188` K26'yı açıkça "karar metni olmayan satırlar" arasında sayıyor
+ * (`PLAN.md:358` "min 2–4 px kalksın; bilinmeyen = gri taralı, gerçek 0 = boş" cümlesi PLAN'ın
+ * ÖNERİSİDİR). Kullanıcı bunu onaylarsa/değiştirirse tek dokunulacak yer burasıdır; o zaman
+ * kullanıcının kendi cümlesi bu yoruma yazılır (KARARLAR.md kuralı).
+ *
+ *   BİLİNMİYOR → tam boy gri çapraz taralı + `aria-label`, çağıranın rengi UYGULANMAZ.
+ *   ≤ 0        → dolgu hiç çizilmez (yatayda yalnız boş ray kalır).
+ *   > 0        → `Math.min(oran, 100)%` dolgu, verilen renk/sınıf.
+ *
+ * NEDEN: bugün ~80 çağrı yeri `style={{ height: `${Math.max(h, 2)}%` }}` ya da
+ * `Math.max(4, Math.round(...))` yazıyor (`RaporlarPage:503,584`, `GenelOzet:193,337,385`). O taban
+ * üç ayrı yalanı aynı anda söylüyordu: (1) veri yokken "az da olsa hareket var", (2) gerçek 0 ile
+ * bilinmeyen aynı görünüyor, (3) tepe değer bilinmiyorsa bütün seri tabana yapışıyor. Ölçek
+ * tarafındaki karşılığı `pano/cubuk.sayacOlcegi` (`, 1` uydurma tabanı yok) — ikisi birlikte
+ * çalışır: ölçek `null` → oran `null` → taralı çubuk.
+ *
+ * DİKEY'DE RAY YOKTUR: dış öğe saydam bir `h-full` kolondur, yükseklik kabı (`h-20` /
+ * `style={{ height: '80px' }}`) ÇAĞIRANDA kalır — mevcut yerleşim bozulmaz. Dolgu yine de dış
+ * öğenin ÇOCUĞUDUR, böylece "≤ 0 → dolgu öğesi yok" kuralı iki yönde de aynıdır.
+ */
+export function OlcekCubugu({
+  oran, yon = 'yatay', renk, renkSinifi, kalinlik, koseSinifi, title, dil,
+}: OlcekCubuguProps): React.ReactElement {
+  const dikey = yon === 'dikey';
+  const kose = koseSinifi ?? (dikey ? 'rounded-t-md' : 'rounded-full');
+  const kalin = kalinlik ?? (dikey ? 'w-full' : 'h-1.5');
+
+  // `Number.isFinite` (global `isFinite` DEĞİL: `isFinite(null) === true`). `typeof` daraltması
+  // `sayi`yi `number | null` yapar — `as` / `!` gerekmez.
+  const sayi = typeof oran === 'number' && Number.isFinite(oran) ? oran : null;
+  const bilinmiyor = sayi === null;
+  const cizilir = bilinmiyor || sayi > 0;
+  const yuzde = bilinmiyor ? 100 : Math.min(sayi, 100);
+
+  const dolguSinifi = [
+    dikey ? kalin : 'h-full',
+    kose,
+    'transition-all duration-500',
+    bilinmiyor ? '' : renkSinifi ?? '',
+  ].filter(Boolean).join(' ');
+
+  const dolguStili: React.CSSProperties = dikey ? { height: `${yuzde}%` } : { width: `${yuzde}%` };
+  if (bilinmiyor) dolguStili.background = BILINMEYEN_DESENI;
+  else if (renk !== undefined) dolguStili.background = renk;
+
+  const dolgu = cizilir
+    ? (
+      <div
+        className={dolguSinifi}
+        style={dolguStili}
+        // Ekran okuyucu "bilinmiyor"u duysun diye GERÇEK bir rol gerekiyor: etiketli ama rolsüz
+        // <div> çoğu okuyucuda hiç duyurulmaz. Bilinen çubukta rol/etiket YOK — sayı zaten
+        // çubuğun yanında metin olarak basılı, ikinci kez okutmak gürültü olur.
+        {...(bilinmiyor ? { role: 'img' as const, 'aria-label': oc(dil).bilinmiyor } : {})}
+      />
+    )
+    : null;
+
+  return dikey
+    ? <div className="w-full h-full flex flex-col justify-end" title={title}>{dolgu}</div>
+    : <div className={`w-full ${kalin} bg-gray-100 ${kose} overflow-hidden`} title={title}>{dolgu}</div>;
 }

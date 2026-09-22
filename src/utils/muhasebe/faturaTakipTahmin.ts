@@ -109,6 +109,12 @@ export function faturaYaslandirma(
 
 export interface TahminSiparisi {
   totalPrice?: unknown;
+  /**
+   * Faz 3 6a: YALNIZ tip — varsayılan seçici bu alana BAKMAZ (Muhasebe çağrısı değişmez). Raporlar
+   * sayfası `tutarSec: siparisTutari` geçtiğinde (`totalPrice ?? totalAmount`) yapısal uyum için var;
+   * `siparisTutari` girdisi `SiparisTutarAlanlari` olduğundan alan burada da tanımlı olmalı.
+   */
+  totalAmount?: unknown;
   status?: string;
   source?: string;
   createdAt?: unknown;
@@ -158,13 +164,27 @@ export const TAHMIN_GECMIS_AY = 6;
  * `ufuk` ay ileri tahmin ve ±`bant` aralığı. Sayfadaki formüller birebir; tek fark bilinmeyen tutarın
  * sıfır değil sayaç olması ve tarihi çözülemeyen siparişin sessizce düşmeyip `tarihsiz` sayılması.
  * Ay anahtarı `ayAnahtari` (yerel) — `getMonth()` aritmetiği ve UTC kayması yok.
+ *
+ * Faz 3 6a (2026-09-19) — `tutarSec` İSTEĞE BAĞLI seçici, ADDITIVE:
+ * Raporlar → Satış Tahmini (RaporlarPage.tsx:526-609, P620) aynı regresyonu satır içinde yazıyordu ve
+ * tahmin ayını `ȳ + eğim·(geçmişAy + i)` ile basıyordu — ilk tahmin ayı için `6·eğim`, doğrusu
+ * `wma + eğim·1`; trend bileşeni ~1,7× abartılı, düşen trendde de aynı oranda erken ₺0'a kırpılıyordu.
+ * Kopya hesap YAZILMAZ (kullanıcı kararı K14 · Aynı işi yapan çift paneller → "kaldır": «Her çiftten TEK
+ * panel kalır (kalan: testli yardımcıya bağlı olan / daha doğru tanım)»), o yüzden o panel de buraya
+ * bağlanır. Tek engel ciro alanıydı: Raporlar'ın tutarı `siparisTutari` (`totalPrice ?? totalAmount`),
+ * buranınki `totalPrice`. Seçici bu yüzden parametre oldu; VARSAYILAN `o => o.totalPrice` = bugünkü
+ * davranış → MuhasebePage.tsx:2768 çağrısı ve mevcut testler AYNEN geçerli (parite testi: «1 · varsayılan
+ * parite»). Ağırlıklar, eğim, `Math.max(0, …)` kırpması, iptal süzgeci ve `alacakTarihi` tarih kuralı
+ * DEĞİŞMEDİ — seçici yalnız "bu siparişin tutarı hangi alandan okunur" sorusunu yanıtlar; kural seçiciye
+ * taşınmaz. Seçicinin bilinmeyen (NaN/undefined/'') çıktısı burada da toplama GİRMEZ, SAYILIR.
+ * K2 (iptaller ciroya girmez) bu panelde rakam değiştirmez: hem burası hem P620 zaten iptal hariçti.
  */
 export function satisTahmini(
   siparisler: readonly TahminSiparisi[],
   simdi: Date = new Date(),
-  s: { ufuk?: number; bant?: number } = {},
+  s: { ufuk?: number; bant?: number; tutarSec?: (o: TahminSiparisi) => unknown } = {},
 ): SatisTahmini {
-  const { ufuk = 3, bant = 0.15 } = s;
+  const { ufuk = 3, bant = 0.15, tutarSec = (o: TahminSiparisi) => o.totalPrice } = s;
   const aylar = new Map<string, TahminAyi>();
   const gecmis: TahminAyi[] = [];
   for (let i = TAHMIN_GECMIS_AY - 1; i >= 0; i--) {
@@ -181,7 +201,8 @@ export function satisTahmini(
     const a = aylar.get(anahtar);
     if (!a) continue; // pencere dışı (6 aydan eski ya da gelecek ay)
     a.adet++;
-    if (bilinenSayi(o.totalPrice)) { a.toplam += Number(o.totalPrice); a.bilinen++; } else a.bilinmeyen++;
+    const tutar = tutarSec(o);
+    if (bilinenSayi(tutar)) { a.toplam += Number(tutar); a.bilinen++; } else a.bilinmeyen++;
   }
   const bilinen = gecmis.reduce((t, a) => t + a.bilinen, 0);
   const bilinmeyen = gecmis.reduce((t, a) => t + a.bilinmeyen, 0);

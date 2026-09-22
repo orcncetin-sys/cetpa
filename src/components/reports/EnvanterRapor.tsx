@@ -41,12 +41,26 @@ import {
   type InventoryMovement,
 } from '../../types';
 import { itemCostTRY, itemPriceTRY, type ReportsCtx } from './useReportsData';
-import { KpiCard, KpiGrid, KpiCurrencyToggle } from './ReportKit';
+import { KpiCard, KpiGrid, KpiCurrencyToggle, KapsamNotu } from './ReportKit';
 import { oc } from '../../i18n/ortak';
+// TEK düşük-stok tanımı (delta 2026-09-22): KPI `lowStockItems` artık `pano/finansKpi.stokDurumu`
+// zincirinden geliyor (eşik `lowStockThreshold → minStock`, seviye `stockLevel → stock`), bu
+// dosyanın panelleri ise ham `i.stockLevel <= i.lowStockThreshold` karşılaştırmasında kalmıştı.
+// Sonuç: aynı sekmede "1 düşük stok" KPI'sı ile "Tüm ürünler yeterli stokta" paneli YAN YANA.
+// Ham karşılaştırma ayrıca seviyesi/eşiği OKUNAMAYAN kartta sessizce `false` verip kartı
+// "sorunsuz" sayıyordu. Beş site de aynı kaynağa bağlandı.
+import { stokSeviyesi, stokEsigi } from '../../utils/pano/finansKpi';
+import { adetYaz } from '../../utils/muhasebe/depoDeger';
+import { ekranTutari, sayiSirala, satirTutari, toplaBilinen } from '../../utils/para';
+import { kartPerakendeDegeri } from '../../utils/rapor/stokDeger';
+// `itemCostTRY`nin DÜRÜST ikizi: çevrilemeyen / girilmemiş maliyete 0 değil `null` döner.
+import { kartMaliyetiTL } from '../../utils/cost';
 
 export default function EnvanterRapor(ctx: ReportsCtx) {
-  const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
+  const { orders, inventory, exchangeRates, currentT, currentLanguage, userRole, onNavigate, employees, quotations, inventoryMovements, recurringOrders, externalTab, setExternalTab, timeRange, setTimeRange, revenueCurrency, setRevenueCurrency, _localReportsTab, _setLocalReportsTab, reportsTab, setReportsTab, invSummarySort, setInvSummarySort, logisticsSummarySort, setLogisticsSummarySort, fmtAna, hrStats, setHrStats, totalRevenueTRY, revenueSymbol, revenueFormatted, totalOrders, avgOrderValueTRY, avgOrderFormatted, lowStockItems, stokDurum, salesByDate, trendData, categoryData, categoryChartData, ordersByStatus, statusChartData, topCustomers, totalInventoryValueTRY, categoryValueData, categoryValueChartData, COLORS, exportPDF } = ctx;
   void itemCostTRY; void itemPriceTRY; // sekmeye göre kullanılıyor olabilir
+  /** `adetYaz` / `kapsamNotu` daraltması — ctx'te `currentLanguage: string` taşınır. */
+  const dilEnv: 'tr' | 'en' = currentLanguage === 'tr' ? 'tr' : 'en';
   return (
     <>
       {reportsTab === 'envanter' && (
@@ -85,24 +99,35 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
             <div className="apple-card p-6">
               <h3 className="font-bold text-gray-800 mb-4">{currentLanguage==='tr'?'Kritik Stok Ürünleri':'Critical Stock Items'}</h3>
               <div className="space-y-2 max-h-[280px] overflow-y-auto">
-                {inventory.filter(i => i.stockLevel <= i.lowStockThreshold).length === 0 ? (
+                {/* Liste KPI ile AYNI kaynaktan (`stokDurum.esikAltinda`): yan yana duran
+                    "Düşük Stok: 1" kartı ile "Tüm ürünler yeterli stokta" yeşili artık
+                    çelişemez. Sıralama `sayiSirala` (bilinmeyen HER yönde sonda). */}
+                {stokDurum.esikAltinda.length === 0 ? (
                   <div className="flex items-center justify-center gap-2 py-8 text-green-600">
                     <CheckCircle2 className="w-5 h-5" />
                     <span className="text-sm font-medium">{currentLanguage==='tr'?'Tüm ürünler yeterli stokta':'All products in stock'}</span>
                   </div>
-                ) : inventory.filter(i => i.stockLevel <= i.lowStockThreshold).sort((a,b) => a.stockLevel-b.stockLevel).map((item, i) => (
+                ) : [...stokDurum.esikAltinda].sort((a,b) => sayiSirala(stokSeviyesi(a), stokSeviyesi(b))).map((item, i) => (
                   <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-800 truncate">{item.name}</p>
                       <p className="text-xs text-gray-400">{item.sku}</p>
                     </div>
                     <div className="text-right ml-3">
-                      <p className="text-sm font-bold text-red-500">{item.stockLevel} {oc(currentLanguage).adet}</p>
-                      <p className="text-[10px] text-gray-400">Min: {item.lowStockThreshold}</p>
+                      {/* Ham `{item.stockLevel}` okunamayan kartta ekrana 'undefined' basıyordu. */}
+                      <p className="text-sm font-bold text-red-500">{adetYaz(stokSeviyesi(item), dilEnv)} {oc(currentLanguage).adet}</p>
+                      <p className="text-[10px] text-gray-400">Min: {adetYaz(stokEsigi(item), dilEnv)}</p>
                     </div>
                   </div>
                 ))}
               </div>
+              {/* Listeye GİREMEYEN kartlar: seviyesi ya da eşiği okunamadığı için kritik/normal
+                  kararı verilemeyenler. Eskiden sessizce "sorunsuz" sayılıyorlardı. */}
+              <KapsamNotu
+                sayaclar={{ miktarsiz: stokDurum.seviyesiBilinmeyen, esiksiz: stokDurum.esigiBilinmeyen }}
+                dil={currentLanguage}
+                sonuc={currentLanguage === 'tr' ? 'listeye alınamadı' : 'could not be listed'}
+              />
             </div>
           </div>
 
@@ -131,31 +156,50 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                 </thead>
                 <tbody>
                   {[...inventory].sort((a,b) => {
-                    const av = invSummarySort.key === 'value'
-                      ? (a.stockLevel * (a.prices?.['Retail'] || 0))
-                      : (a as Record<string,unknown>)[invSummarySort.key] as string|number ?? '';
-                    const bv = invSummarySort.key === 'value'
-                      ? (b.stockLevel * (b.prices?.['Retail'] || 0))
-                      : (b as Record<string,unknown>)[invSummarySort.key] as string|number ?? '';
+                    // 'value' SAYISAL sıralamadır: ham `<` / `>` karşılaştırması bilinmeyeni
+                    // (NaN) her iki yönde de `false` verip satırı bulunduğu yerde bırakıyordu.
+                    // `sayiSirala` sözleşmesi: bilinmeyen HER yönde SONDA (yön `-cmp` ile
+                    // çevrilmez). Değer zinciri hücrenin KENDİSİYLE aynı (`kartPerakendeDegeri`)
+                    // — ayrışırsa tablo bir sayıyı gösterip başkasına göre sıralar.
+                    if (invSummarySort.key === 'value') {
+                      return sayiSirala(kartPerakendeDegeri(a), kartPerakendeDegeri(b), invSummarySort.dir === 'desc');
+                    }
+                    const av = (a as Record<string,unknown>)[invSummarySort.key] as string|number ?? '';
+                    const bv = (b as Record<string,unknown>)[invSummarySort.key] as string|number ?? '';
                     if (av < bv) return invSummarySort.dir === 'asc' ? -1 : 1;
                     if (av > bv) return invSummarySort.dir === 'asc' ? 1 : -1;
                     return 0;
-                  }).slice(0,10).map((item, i) => (
+                  }).slice(0,10).map((item, i) => {
+                    // Rozet de KPI/panel ile AYNI zincirden (delta 2026-09-22). Seviyesi ya da
+                    // eşiği okunamayan kart artık 'Normal' YEŞİLİ almaz: karar verilemiyorsa
+                    // bilinmiyordur ('—', gri) — ham karşılaştırma `undefined`'da sessizce
+                    // `false` verip kartı sağlıklı gösteriyordu.
+                    const seviyeB = stokSeviyesi(item);
+                    const esikB = stokEsigi(item);
+                    const kararB = Number.isFinite(seviyeB) && Number.isFinite(esikB);
+                    const kritikB = kararB && seviyeB <= esikB;
+                    const dusukB = kararB && !kritikB && seviyeB <= esikB * 2;
+                    return (
                     <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2.5 px-3">
                         <p className="font-medium text-gray-800">{item.name}</p>
                         <p className="text-xs text-gray-400">{item.sku}</p>
                       </td>
                       <td className="py-2.5 px-3 text-gray-500 text-xs hidden sm:table-cell">{item.category||'—'}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-gray-800">{item.stockLevel}</td>
-                      <td className="py-2.5 px-3 text-right text-gray-500 text-xs hidden md:table-cell">{fmtAna(item.stockLevel*(item.prices?.['Retail']||0))}</td>
+                      <td className="py-2.5 px-3 text-right font-semibold text-gray-800">{adetYaz(seviyeB, dilEnv)}</td>
+                      {/* Değer hücresi de aynı satırın Stok/Durum hücreleriyle AYNI sözleşmede
+                          (delta 2026-09-22): eski `|| 0`, fiyatı hiç girilmemiş kartı "₺0" diye
+                          gösteriyordu (120 adetlik ÇİMENTO 50KG "değeri sıfır" okunuyordu) —
+                          "null × miktar === 0" tuzağı. Türetilen sayı: biri bile bilinmiyorsa '—'. */}
+                      <td className="py-2.5 px-3 text-right text-gray-500 text-xs hidden md:table-cell">{fmtAna(kartPerakendeDegeri(item))}</td>
                       <td className="py-2.5 px-3 text-center">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.stockLevel <= item.lowStockThreshold ? 'bg-red-100 text-red-600' : item.stockLevel <= item.lowStockThreshold*2 ? 'bg-yellow-100 text-yellow-600' : 'bg-green-100 text-green-600'}`}>
-                          {item.stockLevel <= item.lowStockThreshold ? (oc(currentLanguage).kritik) : item.stockLevel <= item.lowStockThreshold*2 ? (oc(currentLanguage).dusuk) : (currentLanguage==='tr'?'Normal':'Normal')}
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${!kararB ? 'bg-gray-100 text-gray-500' : kritikB ? 'bg-red-100 text-red-600' : dusukB ? 'bg-yellow-100 text-yellow-600' : 'bg-green-100 text-green-600'}`}>
+                          {!kararB ? '—' : kritikB ? (oc(currentLanguage).kritik) : dusukB ? (oc(currentLanguage).dusuk) : (currentLanguage==='tr'?'Normal':'Normal')}
                         </span>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
               {inventory.length > 10 && <p className="text-xs text-center text-gray-400 mt-3 py-2">{currentLanguage==='tr'?`+${inventory.length-10} ürün daha — Envanter sekmesine gidin`:`+${inventory.length-10} more items — Go to Inventory tab`}</p>}
@@ -1829,8 +1873,16 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
           const key = m.productName || 'Unknown';
           stockoutMap[key] = (stockoutMap[key] || 0) + 1;
         });
-        const lowStockItems = inventory.filter(item => item.stockLevel <= item.lowStockThreshold && item.stockLevel >= 0)
-          .map(item => ({ name: item.name, stock: item.stockLevel, threshold: item.lowStockThreshold, outFreq: stockoutMap[item.name] || 0 }))
+        // Aynı sekmedeki TEK düşük-stok tanımı (delta 2026-09-22): eski ham karşılaştırma
+        // eşiği/seviyesi okunamayan kartı listeden düşürüp "No items currently at or below
+        // reorder threshold" yeşilini bastırıyordu — KPI ise o kartı sayıyordu.
+        // DÜZELTME TURU (2026-09-22): eski `.filter(stokSeviyesi(item) >= 0)` KALDIRILDI.
+        // Negatif stoklu kart (Mikro senkron hatası; `stokDurum` onu HEM `tukenen` HEM
+        // `esikAltinda` kovasına koyar) bu süzgeçle listeden düşüyor, panel yeşil
+        // "sorun yok" basarken 300 px aşağıdaki panel AYNI kartı 'Out of Stock' sayıyordu —
+        // tek sekmede iki zıt cevap. Negatif stok bir VERİ HATASIDIR: gizlenmez, gösterilir.
+        const lowStockItems = stokDurum.esikAltinda
+          .map(item => ({ name: item.name, stock: stokSeviyesi(item), threshold: stokEsigi(item), outFreq: stockoutMap[item.name] || 0 }))
           .sort((a,b) => b.outFreq - a.outFreq).slice(0,8);
         if (lowStockItems.length === 0) {
           return (
@@ -1848,9 +1900,10 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
               {lowStockItems.map((item,i) => (
                 <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg bg-amber-50">
                   <span className="font-medium text-gray-800 truncate w-36">{item.name}</span>
-                  <span className="text-amber-700">Stock: {item.stock} / Min: {item.threshold}</span>
+                  <span className="text-amber-700">Stock: {adetYaz(item.stock, dilEnv)} / Min: {adetYaz(item.threshold, dilEnv)}</span>
                   <span className="text-gray-500">{item.outFreq} outflows</span>
-                  <span className={`font-bold ${item.stock === 0 ? 'text-red-600' : 'text-amber-600'}`}>{item.stock === 0 ? '🔴 OUT' : '🟡 LOW'}</span>
+                  {/* `=== 0` DEĞİL `<= 0`: negatif stok da "stokta yok"tur (üstteki süzgeç notu). */}
+                  <span className={`font-bold ${item.stock <= 0 ? 'text-red-600' : 'text-amber-600'}`}>{item.stock <= 0 ? '🔴 OUT' : '🟡 LOW'}</span>
                 </div>
               ))}
             </div>
@@ -2167,11 +2220,40 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
       })()}
 
       {reportsTab === 'envanter' && inventory.length >= 3 && (() => {
-        const critical = inventory.filter(i => i.stockLevel === 0);
-        const low = inventory.filter(i => i.stockLevel > 0 && i.stockLevel <= i.lowStockThreshold);
-        const healthy = inventory.filter(i => i.stockLevel > i.lowStockThreshold);
+        // Üç kova da KPI ile AYNI zincirden (delta 2026-09-22). BİLİNÇLİ FARK: `tukenen`
+        // seviye <= 0'dır, eski `=== 0` ise NEGATİF stoklu (veri hatası) kartı hiçbir kovaya
+        // koymadan sessizce düşürüyordu. Seviyesi/eşiği okunamayan kartlar da hiçbir kovaya
+        // girmez — sayıları aşağıdaki kapsam notunda.
+        const critical = stokDurum.tukenen;
+        const low = stokDurum.kritik;
+        const healthy = inventory.filter(i => {
+          const sH = stokSeviyesi(i); const eH = stokEsigi(i);
+          return Number.isFinite(sH) && Number.isFinite(eH) && sH > eH;
+        });
         const totalValue = inventory.reduce((s, i) => s + i.stockLevel * itemCostTRY(i, exchangeRates), 0);
-        const criticalValue = critical.reduce((s, i) => s + i.lowStockThreshold * itemCostTRY(i, exchangeRates), 0);
+        // "Yenileme tutarı" EKRAN toplamıdır (delta 2026-09-22): eski `reduce` eşiği okunamayan
+        // TEK kart yüzünden NaN dönüyor ve diğer kartların tutarı da '—'ye düşüyordu — üstelik
+        // panel bunun nedenini SÖYLEMİYORDU. Artık bilinenlerin kısmi toplamı basılır,
+        // dışarıda kalanlar aşağıdaki kapsam notlarında SAYILIR.
+        // BİLİNÇLİ FARK — maliyet tarafında `itemCostTRY` DEĞİL `kartMaliyetiTL`: `itemCostTRY`
+        // çevrilemeyen/girilmemiş maliyete 0 döner, yani o kart tutara SESSİZCE ₺0 ile girerdi
+        // ve "girmedi" diyen not YALAN olurdu. `null` dönen sürüm kartı dışarıda bırakır ve
+        // sayacına düşürür (notun doğru olmasının ön koşulu). `totalValue` PARİTE gereği
+        // eski `itemCostTRY` zincirinde kaldı — o toplamın sessiz sıfırı ayrı bir iştir.
+        const criticalTutar = toplaBilinen(critical, i => satirTutari(stokEsigi(i), kartMaliyetiTL(i, exchangeRates)));
+        const criticalValue = ekranTutari(criticalTutar);
+        // İki sayaç AYRIK olsun diye eşik kapısı ÖNCE: eşiği okunamayan kart maliyet sayacında
+        // TEKRAR sayılmaz (aynı kümeden çıkan iki sayaç kesişirse not çift sayar).
+        let restockEsiksiz = 0, restockMaliyetsiz = 0;
+        for (const i of critical) {
+          if (!Number.isFinite(stokEsigi(i))) { restockEsiksiz++; continue; }
+          if (kartMaliyetiTL(i, exchangeRates) === null) restockMaliyetsiz++;
+        }
+        // Hiçbir kovaya giremeyen kart: seviyesi okunamayan + STOKLU olup eşiği okunamayan.
+        // `stokDurum.esigiBilinmeyen` BURADA KULLANILAMAZ: seviyesi ≤ 0 olan kart eşiği
+        // bilinmese de `tukenen` kovasındadır, yani "kovalara ayrılamadı" notunda sayılırsa
+        // panel aynı kartı hem 'Out of Stock' diye sayıp hem "ayrılamadı" der (çift sayım).
+        const kovasizEsiksiz = stokDurum.esigiBilinmeyenStoklu;
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? 'Stok Yenileme Uyarı Paneli' : 'Inventory Reorder Alert Dashboard'}</h3>
@@ -2199,12 +2281,31 @@ export default function EnvanterRapor(ctx: ReportsCtx) {
                   <div key={i} className="flex justify-between text-xs p-1.5 bg-red-50 rounded-lg">
                     <span className="text-gray-800 font-medium truncate w-44">{item.name}</span>
                     <span className="text-gray-400">{item.sku}</span>
-                    <span className="text-red-600 font-bold">0 in stock</span>
+                    {/* Sabit "0 in stock" DEĞİL (delta 2026-09-22): kova tanımı `=== 0`'dan
+                        `<= 0`'a genişletildiği için liste artık NEGATİF stoklu (veri hatası)
+                        kartı da içeriyor; sabit metin o kart için uydurma bir sayı basıyor ve
+                        operatör yenileme miktarını eksik hesaplıyordu. */}
+                    <span className="text-red-600 font-bold">{adetYaz(stokSeviyesi(item), dilEnv)} in stock</span>
                   </div>
                 ))}
               </div>
             )}
             <p className="text-xs text-gray-400 mt-3 text-center">Total inventory value: {fmtAna(totalValue,'full',0)}</p>
+            {/* Üç kovanın toplamı envanterden azsa nedeni burada yazar. İki sayaç KESİŞMEZ:
+                seviyesi okunamayan kart eşik kapısına hiç varmaz (çift sayım yok). */}
+            <KapsamNotu
+              sayaclar={{ miktarsiz: stokDurum.seviyesiBilinmeyen, esiksiz: kovasizEsiksiz }}
+              dil={currentLanguage}
+              sonuc={currentLanguage === 'tr' ? 'kovalara ayrılamadı' : 'could not be bucketed'}
+            />
+            {/* Yenileme tutarı AYRI bir kapsam notu ister: nedeni "kovalara ayrılamadı" değil,
+                eşiği ya da maliyeti okunamadığı için TUTARA girememesidir. İki sayaç ayrık. */}
+            <KapsamNotu
+              sayaclar={{ maliyetsiz: restockMaliyetsiz, esiksiz: restockEsiksiz }}
+              birim="urun"
+              dil={currentLanguage}
+              sonuc={currentLanguage === 'tr' ? 'yenileme tutarına girmedi' : 'not included in the restock amount'}
+            />
           </div>
         );
       })()}

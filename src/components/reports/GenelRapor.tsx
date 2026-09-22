@@ -44,6 +44,8 @@ export default function GenelRapor(ctx: ReportsCtx) {
         avgOrderFormatted={ctx.avgOrderFormatted}
         ciroTutar={ctx.ciroTutar}
         lowStockItems={ctx.lowStockItems}
+        stokDurum={ctx.stokDurum}
+        stokOzet={ctx.stokOzet}
         trendData={ctx.trendData}
         categoryChartData={ctx.categoryChartData}
         COLORS={ctx.COLORS}

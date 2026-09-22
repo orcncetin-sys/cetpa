@@ -70,6 +70,7 @@ import { siparisTutari } from '../siparis';
 import { zamanDate } from '../zaman';
 import { ayAnahtariYerel } from '../muhasebe/karZarar';
 import { formSayisi, pozitifSayi } from '../muhasebe/irsaliyeCalisan';
+import { sayacOlcegi } from './cubuk';
 
 /** Panelin gerçekten okuduğu alanlar; hepsi `unknown` (DB'den null gelebilir, tip "number" demek dolu demek değil). */
 export interface PanoSiparis {
@@ -279,12 +280,11 @@ export function haftalikCiro(siparisler: readonly PanoSiparis[], simdi: Date, ha
  * (veri yokken "az da olsa satış var" izlenimi). null'da bağlama çubuk çizmez, "veri yok" der.
  */
 export function enBuyukHafta(haftalar: readonly Hafta[]): number | null {
-  let en: number | null = null;
-  for (const h of haftalar) {
-    if (h.deger === null || h.deger <= 0) continue;
-    if (en === null || h.deger > en) en = h.deger;
-  }
-  return en;
+  // 6a (2026-09-19): gövde `cubuk.sayacOlcegi`ye indi — ADET/sayı serilerinin ölçek kuralı
+  // artık tek evde (bu imza `Hafta`ya kilitli olduğu için saat dilimi/adet kovası geçemiyordu).
+  // Davranış farkı: `sayacOlcegi` ek olarak NaN/±Infinity eler; `Hafta.deger: number | null`
+  // sözleşmesinde gözlenebilir fark YOK (kabul ölçüsü: bu dosyanın testleri düzenlenmeden yeşil).
+  return sayacOlcegi(haftalar.map(h => h.deger));
 }
 
 // ── Hedef düzenleme formu (Phase 99 inline input) ──────────────────────────────────────────

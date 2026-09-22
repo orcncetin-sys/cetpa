@@ -9,19 +9,84 @@
  * Props yalnız bu dosyanın gerçekten kullandığı ctx alanlarıdır
  * (tsc "Cannot find name" listesinden çıkarıldı).
  */
-import React from 'react';
+/*
+ * Faz 3 · 6a BAĞLAMA (2026-09-19) — dokuz panelin satır içi hesapları testli saf
+ * modüllere bağlandı; bu dosyada artık SAYI ÜRETEN kural yok, yalnız yerleşim + metin.
+ *
+ * Bağlanan siteler (eski satır → yeni kaynak):
+ *   P1  KPI düşük stok ipucu  :60          → rapor/kapsamNotu + ctx.stokDurum
+ *   P3  kategori pastası notu :122         → ctx.stokOzet.toplamAdet
+ *   P4  MRR/ARR               :127-158     → rapor/abonelik (tekrarlayanGelir, sablonAylikTutari)
+ *   P5  sipariş değeri kovası :169-194     → rapor/dagilim (kovayaYerlestir) + pano/cubuk
+ *   P6  CCC / DSO / DIO       :213-259     → rapor/nakitDongusu + pano/stokSevkiyat
+ *   P7  saate göre            :309-337     → rapor/zamanDagilimi + pano/cubuk
+ *   P8  güne göre (ciro)      :359-386     → rapor/zamanDagilimi + pano/cubuk
+ *   P9  stok tükenme          :402-443     → rapor/stokTalep (urunTalebi, tukenmeSatirlari, tukenmeListesi)
+ *
+ * İKİ SÖZLEŞME (src/utils/para.ts — KARIŞTIRMA): ekranda basılan toplam `ekranTutari`
+ * (kısmi olabilir, yanında `<KapsamNotu>` durur); BAŞKA bir sayıya girecek toplam
+ * `tamTutar` (tek girdi bile bilinmiyorsa NaN → '—', çubuk/rozet ÇİZİLMEZ). İkinci sözleşme
+ * bu dosyada ARTIK ÇAĞRILMAZ: türetme kapıları yardımcıların içindedir (`stokDevirGunuTutar`).
+ *
+ * ÖLÇEK AİLESİ (pano/cubuk — karıştırma): ADET serileri `sayacOlcegi` + `oranYuzde`
+ * (P5, P7, P9), PARA serileri `olcekReferansi` + `cubukOrani` (P8).
+ *
+ * 2026-09-20 HAKEM TURU — iki düzeltme:
+ *   (a) P9'un aday kapısı/ufku/sayaçları satır içiydi ve TESTSİZDİ → `rapor/stokTalep.tukenmeListesi`.
+ *       P6'nın stok `Tutar` → sayı seçimi de öyleydi → `rapor/nakitDongusu.stokDevirGunuTutar`.
+ *   (b) P5 ve P8'de HER kova boşken ölçek yoktu ve `OlcekCubugu` tam boy "bilinmiyor" taralı
+ *       çubuk çiziyordu. Adet 0 BİLİNEN bir sayıdır → boş kovanın çubuğu ÇİZİLMEZ (aşağıda).
+ */
+import React, { useMemo } from 'react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, PieChart as RePieChart, Pie, Cell, AreaChart, Area,
 } from 'recharts';
 import { Package, AlertCircle } from 'lucide-react';
-import { itemCostTRY, type ReportsCtx, brutMarj } from '../useReportsData';
-import { odemeTakipli, siparisTarih } from '../../../utils/siparis';
-import { KpiCard, KpiGrid, KpiCurrencyToggle } from '../ReportKit';
+import { type ReportsCtx, brutMarj } from '../useReportsData';
+import { odemeTakipli, siparisTarih, siparisTutari } from '../../../utils/siparis';
+import { KpiCard, KpiGrid, KpiCurrencyToggle, KapsamNotu, OlcekCubugu } from '../ReportKit';
 import { paraYaz } from '../../../utils/currency';
-import { stokDevirGunu } from '../../../utils/pano/raporMarj';
-import { zamanDate } from '../../../utils/zaman';
 import { oc } from '../../../i18n/ortak';
+import { toplaBilinen, ekranTutari } from '../../../utils/para';
+import { kapsamNotu } from '../../../utils/rapor/kapsamNotu';
+import { tekrarlayanGelir, sablonAylikTutari } from '../../../utils/rapor/abonelik';
+import { kovayaYerlestir, type KovaSiniri } from '../../../utils/rapor/dagilim';
+import { zamanKovalari } from '../../../utils/rapor/zamanDagilimi';
+import { alacakDevirGunu, nakitDongusu, stokDevirGunuTutar } from '../../../utils/rapor/nakitDongusu';
+import { talepKartCozucu, urunTalebi, tukenmeSatirlari, tukenmeListesi } from '../../../utils/rapor/stokTalep';
+import { sayacOlcegi, olcekReferansi, cubukOrani, tutarSatiri } from '../../../utils/pano/cubuk';
+import { oranYuzde } from '../../../utils/siparisler/lojistikKpi';
+import { degerToplami } from '../../../utils/pano/stokSevkiyat';
+import { kartMaliyetiTL, cevrilemeyenler, cevrilemeyenMesaji } from '../../../utils/cost';
+import { adetYaz } from '../../../utils/muhasebe/depoDeger';
+
+/*
+ * K20 — kullanıcı 2026-09-19: "ok kalsın." Koda gömülü eşik/kova DEĞERLERİ DEĞİŞMEZ;
+ * yalnız adlandırılır (ve ekranda dipnotu olan yerlerde dipnotu kalır).
+ */
+/** P189 sipariş değeri kovaları — üst sınır HARİÇ, son kova `Infinity` (üst taşma olmaz). */
+const SIPARIS_DEGERI_KOVALARI: readonly KovaSiniri[] = [
+  { etiket: '<₺1K', ust: 1000 },
+  { etiket: '₺1-5K', ust: 5000 },
+  { etiket: '₺5-20K', ust: 20000 },
+  { etiket: '₺20-100K', ust: 100000 },
+  { etiket: '₺100K+', ust: Infinity },
+];
+/** P185 CCC penceresi (gün) — DSO paydası ve DIO günlük COGS'u AYNI pencereden. */
+const CCC_PENCERE_GUN = 90;
+/** P148 talep penceresi (gün) — "son 30 gün satış hızı". */
+const TUKENME_PENCERE_GUN = 30;
+/** P148 aday kapısı: stok ≤ kritik eşik × bu çarpan. */
+const TUKENME_ESIK_CARPANI = 3;
+/** P148 ufku (gün): bu sürenin ötesinde tükenecek ürün listelenmez; çubuk tavanı da budur. */
+const TUKENME_UFUK_GUN = 45;
+/** P148 kırmızı eşiği (gün). */
+const TUKENME_ACIL_GUN = 7;
+/** P148 sarı eşiği (gün). */
+const TUKENME_UYARI_GUN = 20;
+/** P148 listede gösterilen en çok satır. */
+const TUKENME_SATIR = 8;
 
 /**
  * `ciroTutar`: ciro kartının KISMİ olup olmadığını söyleyen sayaç (`useReportsData`).
@@ -29,9 +94,9 @@ import { oc } from '../../../i18n/ortak';
  * DIŞINDADIR — ama 2026-09-19'a kadar bu sayaç hiçbir ekrana geçmiyordu: kullanıcı
  * kısmi ciroyu kesin rakam sanıyordu (EKRAN sözleşmesi: '—' VEYA açık not).
  */
-type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentT' | 'currentLanguage' | 'onNavigate' | 'recurringOrders' | 'fmtAna' | 'totalOrders' | 'revenueSymbol' | 'revenueFormatted' | 'avgOrderFormatted' | 'ciroTutar' | 'lowStockItems' | 'trendData' | 'categoryChartData' | 'COLORS' | 'revenueCurrency' | 'setRevenueCurrency'>;
+type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'inventory' | 'exchangeRates' | 'currentT' | 'currentLanguage' | 'onNavigate' | 'recurringOrders' | 'fmtAna' | 'totalOrders' | 'revenueSymbol' | 'revenueFormatted' | 'avgOrderFormatted' | 'ciroTutar' | 'lowStockItems' | 'stokDurum' | 'stokOzet' | 'trendData' | 'categoryChartData' | 'COLORS' | 'revenueCurrency' | 'setRevenueCurrency'>;
 
-export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates, currentT, currentLanguage, onNavigate, recurringOrders, fmtAna, totalOrders, revenueSymbol, revenueFormatted, avgOrderFormatted, ciroTutar, lowStockItems, trendData, categoryChartData, COLORS, revenueCurrency, setRevenueCurrency }: Props) {
+export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates, currentT, currentLanguage, onNavigate, recurringOrders, fmtAna, totalOrders, revenueSymbol, revenueFormatted, avgOrderFormatted, ciroTutar, lowStockItems, stokDurum, stokOzet, trendData, categoryChartData, COLORS, revenueCurrency, setRevenueCurrency }: Props) {
   // Tutarı okunamayan sipariş sayısı — ciro toplamına GİRMEZ, ortalamayı da hesaplatmaz.
   const tutarsizSiparis = ciroTutar.bilinmeyen;
   const ciroNotu = tutarsizSiparis > 0
@@ -47,6 +112,47 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
   // Trend grafiğinin GÖSTERİLEN 30 gününde tutarı okunamayan sipariş sayısı (ciro kartının
   // sayacından AYRI: grafik son 30 kovayla sınırlı, kart tüm dönemi kapsıyor).
   const trendGunlukTutarsiz = trendData.reduce((s, g) => s + g.bilinmeyen, 0);
+  // Düşük Stok KPI ipucu: seviyesi okunamayan ve eşiği tanımsız ürünler SAYIYA GİRMEZ
+  // (`stokDurumu` kuralı) — 2026-09-19'a kadar kart bunu söylemiyordu, kullanıcı
+  // "N ürün kritik" rakamını tam sanıyordu. İki sayaç da ÜRÜN birimindedir (tek çağrı).
+  const dusukStokNotu = kapsamNotu(
+    { miktarsiz: stokDurum.seviyesiBilinmeyen, esiksiz: stokDurum.esigiBilinmeyen },
+    {
+      birim: 'urun',
+      dil: currentLanguage,
+      sonuc: currentLanguage === 'tr' ? 'sayıya dâhil değil' : 'not included in the count',
+    },
+  ) ?? undefined;
+
+  // ── P148 stok tükenme: TEK geçişli talep ──────────────────────────────────
+  // Eski kod kalem BAŞINA tüm sipariş listesini yeniden tarıyordu (O(kart × sipariş)) ve
+  // sipariş içinde yalnız İLK eşleşen kalemi sayıyordu (`find`) — aynı üründen iki satır
+  // içeren sipariş günlük tüketimi DÜŞÜK gösterip uyarıyı geciktiriyordu.
+  // Hook olduğu için bileşenin ÜST DÜZEYİNDE durur (panel IIFE'sinin içinde olamaz).
+  const talep148 = useMemo(
+    () => urunTalebi(orders, {
+      pencereGun: TUKENME_PENCERE_GUN,
+      simdi: new Date(),
+      kartSec: talepKartCozucu(inventory),
+    }),
+    [orders, inventory],
+  );
+  const satirlar148 = useMemo(
+    () => (talep148 === null ? [] : tukenmeSatirlari(talep148, TUKENME_PENCERE_GUN)),
+    [talep148],
+  );
+  // Aday kapısı + ufuk süzgeci + sıralama/kesme + üç sayaç: `rapor/stokTalep.tukenmeListesi`
+  // (2026-09-20 hakem turu). Blok buraya kadar satır içiydi ve testsizdi; eşiği tanımsız karta
+  // uydurma 5 varsayılanını geri koyan bir mutasyon yakalanmadan geçti — kural artık testli
+  // modülde, burada yalnız sabitler geçiliyor.
+  const p148 = useMemo(
+    () => tukenmeListesi(satirlar148, inventory, {
+      carpan: TUKENME_ESIK_CARPANI,
+      ufukGun: TUKENME_UFUK_GUN,
+      satir: TUKENME_SATIR,
+    }),
+    [satirlar148, inventory],
+  );
   return (
     <>
       {reportsTab === 'genel' && (
@@ -57,7 +163,7 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
               { label: currentT.kpi_revenue, value: revenueFormatted, hint: ciroNotu, icon: undefined, symbol: revenueSymbol, accent: 'text-brand', accentBg: 'bg-brand/10', tab: 'crm', money: true },
               { label: currentT.kpi_orders, value: String(totalOrders), hint: undefined, icon: Package, symbol: undefined, accent: 'text-blue-500', accentBg: 'bg-blue-50', tab: 'crm', money: false },
               { label: currentT.kpi_avg_order, value: avgOrderFormatted, hint: ortalamaNotu, icon: undefined, symbol: revenueSymbol, accent: 'text-green-500', accentBg: 'bg-green-50', tab: 'crm', money: false },
-              { label: currentT.kpi_low_stock, value: String(lowStockItems), hint: undefined, icon: AlertCircle, symbol: undefined, accent: 'text-orange-500', accentBg: 'bg-orange-50', tab: 'inventory', money: false },
+              { label: currentT.kpi_low_stock, value: String(lowStockItems), hint: dusukStokNotu, icon: AlertCircle, symbol: undefined, accent: 'text-orange-500', accentBg: 'bg-orange-50', tab: 'inventory', money: false },
             ] as { label: string; value: string; hint?: string; icon?: React.ElementType; symbol?: string; accent: string; accentBg: string; tab: string; money: boolean }[]).map((kpi, i) => (
               <KpiCard
                 key={kpi.tab + i}
@@ -120,45 +226,64 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                   </RePieChart>
                 </ResponsiveContainer>
               </div>
+              {/* Stok seviyesi okunamayan kalem dilime GİRMEZ (`grupStokDegeri` kuralı); kategorisi
+                  yalnız o kalemlerden oluşan grup pastada 0 çizer — kaybolmasın diye sayısı yazılır. */}
+              <KapsamNotu
+                sayaclar={{ miktarsiz: stokOzet.toplamAdet.bilinmeyen }}
+                birim="urun"
+                dil={currentLanguage}
+                sonuc={currentLanguage === 'tr' ? 'dilimlere dâhil değil' : 'not included in the slices'}
+              />
             </div>
           </div>
 
           {/* ── Phase 181: Monthly Recurring Revenue (MRR) ── */}
-      {reportsTab === 'genel' && recurringOrders.filter(r => r.active).length > 0 && (() => {
+      {reportsTab === 'genel' && (() => {
+        // K19 — kullanıcı 2026-09-19: "Daha satışa başlamadık ama önerin ok."
+        // Haftalık katsayı 52 ÷ 12 (eski satır içi ×4 değil); sıklığı bilinmeyen şablon
+        // TOPLANMAZ, SAYILIR. Katsayının TEK evi `utils/rapor/abonelik.ts` — burada yok.
+        const tg = tekrarlayanGelir(recurringOrders);
+        if (tg.aktif === 0) return null;
         const activeRO = recurringOrders.filter(r => r.active);
-        const mrr = activeRO.reduce((s, r) => {
-          const monthly = r.frequency === 'weekly' ? r.totalPrice * 4 : r.frequency === 'quarterly' ? r.totalPrice / 3 : r.totalPrice;
-          return s + monthly;
-        }, 0);
-        const arr = mrr * 12;
         return (
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🔁 Aylık Tekrarlayan Gelir (MRR)' : '🔁 Monthly Recurring Revenue (MRR)'}</h3>
-              <span className="text-xs text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full">{activeRO.length} {currentLanguage==='tr'?'aktif şablon':'active templates'}</span>
+              <span className="text-xs text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full">{tg.aktif} {currentLanguage==='tr'?'aktif şablon':'active templates'}</span>
             </div>
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="bg-emerald-50 rounded-2xl p-4">
                 <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wide">MRR</p>
-                <p className="text-3xl font-black text-emerald-700 mt-1">{fmtAna(mrr,'K',1)}</p>
+                {/* EKRAN toplamı: kısmi olabilir, altındaki not kaç şablonun dışarıda kaldığını söyler. */}
+                <p className="text-3xl font-black text-emerald-700 mt-1">{fmtAna(ekranTutari(tg.mrr),'K',1)}</p>
                 <p className="text-[10px] text-emerald-600 mt-0.5">{currentLanguage==='tr'?'Aylık tekrarlayan':'Monthly recurring'}</p>
               </div>
               <div className="bg-blue-50 rounded-2xl p-4">
                 <p className="text-[10px] text-blue-700 font-bold uppercase tracking-wide">ARR</p>
-                <p className="text-3xl font-black text-blue-700 mt-1">{fmtAna(arr,'K',0)}</p>
+                {/* TÜRETME: tek şablon bile bilinmiyorsa `tg.arr` NaN → '—' (kısmi MRR × 12 YOK). */}
+                <p className="text-3xl font-black text-blue-700 mt-1">{fmtAna(tg.arr,'K',0)}</p>
                 <p className="text-[10px] text-blue-600 mt-0.5">{currentLanguage==='tr'?'Yıllık projeksiyon':'Annual projection'}</p>
               </div>
             </div>
+            {/* NEDEN KIRILIMI (delta 2026-09-22): `tg.mrr.bilinmeyen` TEK sayaç olarak geçilince
+                sıklığı tanınmayan şablon da "tutarı okunamadı" diye raporlanıyordu — `abonelik.ts`
+                `sablonAylikTutari` frekans tanınmazsa TUTAR BİLİNSE BİLE NaN döndürür. Kullanıcı
+                ₺12.000'i yerinde bulup sorunu 'yok' sanıyor, ARR kalıcı '—' kalıyordu. `abonelik`
+                kırılımı zaten üretiyordu (değişmez: `tutarsiz + bilinmeyenFrekans === mrr.bilinmeyen`),
+                hiçbir yüzey okumuyordu. Toplam DEĞİŞMEZ; çift sayım YOK (iki sayaç ayrık). */}
+            <KapsamNotu
+              sayaclar={{ tutarsiz: tg.tutarsiz, sikligisiz: tg.bilinmeyenFrekans }}
+              birim="sablon"
+              dil={currentLanguage}
+              sonuc={currentLanguage === 'tr' ? 'MRR kısmi toplam; ARR hesaplanmadı' : 'MRR is a partial total; ARR not calculated'}
+            />
             <div className="space-y-1.5">
-              {activeRO.slice(0, 4).map(r => {
-                const monthly = r.frequency === 'weekly' ? r.totalPrice * 4 : r.frequency === 'quarterly' ? r.totalPrice / 3 : r.totalPrice;
-                return (
-                  <div key={r.id} className="flex items-center justify-between text-xs py-1 border-b border-gray-50 last:border-0">
-                    <span className="text-gray-700 truncate">{r.templateName} · {r.customerName}</span>
-                    <span className="font-bold text-emerald-600 shrink-0 ml-2">{fmtAna(Math.round(monthly))}/m</span>
-                  </div>
-                );
-              })}
+              {activeRO.slice(0, 4).map(r => (
+                <div key={r.id} className="flex items-center justify-between text-xs py-1 border-b border-gray-50 last:border-0">
+                  <span className="text-gray-700 truncate">{r.templateName} · {r.customerName}</span>
+                  <span className="font-bold text-emerald-600 shrink-0 ml-2">{fmtAna(Math.round(sablonAylikTutari(r)))}/m</span>
+                </div>
+              ))}
             </div>
           </div>
         );
@@ -166,40 +291,52 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
 
       {/* ── Phase 189: Order Value Distribution ── */}
       {reportsTab === 'genel' && orders.length >= 5 && (() => {
-        const buckets189 = [
-          { label: '<₺1K', min: 0, max: 1000, count: 0, total: 0 },
-          { label: '₺1-5K', min: 1000, max: 5000, count: 0, total: 0 },
-          { label: '₺5-20K', min: 5000, max: 20000, count: 0, total: 0 },
-          { label: '₺20-100K', min: 20000, max: 100000, count: 0, total: 0 },
-          { label: '₺100K+', min: 100000, max: Infinity, count: 0, total: 0 },
-        ];
-        for (const o of orders) {
-          if (o.status === 'Cancelled') continue;
-          const v = o.totalPrice || 0;
-          const b = buckets189.find(b => v >= b.min && v < b.max);
-          if (b) { b.count++; b.total += v; }
-        }
-        const maxCount = Math.max(...buckets189.map(b => b.count), 1);
+        // Tutar seçici `siparisTutari` (`totalPrice ?? totalAmount`) — sayfanın TEK tanımı.
+        // Eski `o.totalPrice || 0` tutarsız siparişi '<₺1K' kovasına yazıyor, negatif tutarlı
+        // iadeyi ise hiçbir kovaya koymadan SESSİZCE düşürüyordu; ikisi de artık sayılıyor.
+        const d189 = kovayaYerlestir(
+          orders.filter(o => o.status !== 'Cancelled'),
+          siparisTutari,
+          SIPARIS_DEGERI_KOVALARI,
+        );
+        // ADET ölçeği (`, 1` uydurma tabanı YOK): boş kovanın %3'lük hayalet çubuğu kalkar.
+        // `null` = HİÇBİR kovada pozitif adet yok (tüm siparişler iptal, ya da hepsinin tutarı
+        // okunamadı → hepsi `bilinmeyen`e gitti). Adet BİLİNEN bir sayıdır: o durumda her kova
+        // gerçek 0'dır, "bilinmiyor" DEĞİL — bkz. aşağıdaki `k.adet === 0 ? 0 : …`.
+        const olcek189 = sayacOlcegi(d189.kovalar.map(k => k.adet));
+        const colors = ['bg-blue-300', 'bg-blue-400', 'bg-brand/70', 'bg-brand', 'bg-purple-500'];
         return (
           <div className="apple-card p-6">
             <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '📊 Sipariş Değeri Dağılımı' : '📊 Order Value Distribution'}</h3>
             <div className="flex items-end gap-3 h-28 mb-3">
-              {buckets189.map((b, i) => {
-                const h = Math.round((b.count / maxCount) * 100);
-                const colors = ['bg-blue-300', 'bg-blue-400', 'bg-brand/70', 'bg-brand', 'bg-purple-500'];
-                return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1 group">
-                    <div className="w-full flex flex-col justify-end" style={{ height: '80px' }}>
-                      <div className={`w-full rounded-t-lg ${colors[i]}`} style={{ height: `${Math.max(h, 3)}%` }}
-                        title={`${b.count} ${oc(currentLanguage).siparis} · ${paraYaz(b.total, { ondalik: 0 })}`} />
-                    </div>
-                    <span className="text-[8px] text-gray-400 text-center leading-tight">{b.label}</span>
-                    <span className="text-[9px] font-bold text-gray-600">{b.count}</span>
+              {d189.kovalar.map((k, i) => (
+                <div key={k.etiket} className="flex-1 flex flex-col items-center gap-1 group">
+                  <div className="w-full flex flex-col justify-end" style={{ height: '80px' }}>
+                    {/* 2026-09-20 hakem turu: `oranYuzde(0, null)` → `null` → `OlcekCubugu` TAM BOY
+                        taralı "bilinmiyor" çubuğu çiziyordu; altındaki rakam ise "0" diyordu. Ölçek
+                        yalnız HER kova 0 iken yoktur ve o zaman kovanın adedi bilinen 0'dır —
+                        çubuk çizilmez. Ölçek varken `oranYuzde(0, olcek)` zaten 0 verir (parite). */}
+                    <OlcekCubugu
+                      yon="dikey"
+                      oran={k.adet === 0 ? 0 : oranYuzde(k.adet, olcek189)}
+                      renkSinifi={colors[i]}
+                      koseSinifi="rounded-t-lg"
+                      dil={currentLanguage}
+                      title={`${k.adet} ${oc(currentLanguage).siparis} · ${paraYaz(ekranTutari(k.tutar), { ondalik: 0 })}`}
+                    />
                   </div>
-                );
-              })}
+                  <span className="text-[8px] text-gray-400 text-center leading-tight">{k.etiket}</span>
+                  <span className="text-[9px] font-bold text-gray-600">{k.adet}</span>
+                </div>
+              ))}
             </div>
             <p className="text-[10px] text-gray-400">{currentLanguage==='tr'?'Sayı, sipariş başına sipariş değerine göre':'Order count by order value range'}</p>
+            <KapsamNotu
+              sayaclar={{ tutarsiz: d189.bilinmeyen, kapsamDisi: d189.kapsamDisi }}
+              birim="siparis"
+              dil={currentLanguage}
+              sonuc={currentLanguage === 'tr' ? 'dağılıma dâhil değil' : 'not included in the distribution'}
+            />
           </div>
         );
       })()}
@@ -207,36 +344,46 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
       {/* ── Phase 185: Cash Conversion Cycle (CCC) ── */}
       {reportsTab === 'genel' && orders.length >= 5 && inventory.length > 0 && (() => {
         const now185 = new Date();
-        const days90 = 90;
-        const cutoff185 = new Date(now185); cutoff185.setDate(cutoff185.getDate() - days90);
-        // DSO: avg days from order creation to paid status
-        const paidOrders = orders.filter(o => o.status === 'Delivered' || (o as unknown as Record<string,unknown>).paidAt);
-        void paidOrders;
+        const cutoff185 = new Date(now185); cutoff185.setDate(cutoff185.getDate() - CCC_PENCERE_GUN);
         // PAY ve PAYDA AYNI KUMEDEN (2026-09-04 denetimi): AR yalniz Cetpa'da
         // odemesi izlenen siparislerden gelir (Mikro turevlerinde `paid` yok,
         // tahsilat Mikro cari hesapta). Payda tum ciroyu alirsa — Mikro dahil —
         // DSO yapay olarak DUSUK cikiyordu.
         const izlenen185 = orders.filter(o => odemeTakipli(o));
+        // K15 — KARAR VERİLDİ, 6c'de uygulanacak (6a ARA DURUM). Kullanıcı bu kümeyi REDDETTİ (2026-09-19):
+        //   "Teslim edilmiş ama parası alınmamış sipariş alacağa girmiyor." → "girmeli."
+        //   "Teslim edilmemiş ama peşin ödenmiş sipariş alacak görünüyor." → "girmemeli. Sadece teslimat bekliyor olmalı."
+        // Aşağıdaki süzgeç (iptal olmayan + teslim edilmemiş; ödenip ödenmediğine HİÇ bakmıyor) iki cümlenin de TERSİDİR.
+        // Defter tanımı (B: Mikro cari bakiyeleri + faturalanmamış ödenmemiş Cetpa siparişleri) ve "teslimat bekleyenler"
+        // kovası 6c'de gelir; o güne kadar DSO/CCC bu kümeden üretilir.
         const unPaidOrders = izlenen185.filter(o => o.status !== 'Cancelled' && o.status !== 'Delivered');
-        const arBalance = unPaidOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+        const alacak185 = toplaBilinen(unPaidOrders, siparisTutari);
         const son90 = (list: typeof orders) => list.filter(o => {
           const od = siparisTarih(o);
           return !!od && od >= cutoff185 && o.status !== 'Cancelled';
         });
-        const monthly90Rev = son90(izlenen185).reduce((s, o) => s + (o.totalPrice || 0), 0);
-        const dailyRev185 = monthly90Rev / days90;
-        const dso = dailyRev185 > 0 ? Math.round(arBalance / dailyRev185) : null;
+        const ciro90 = toplaBilinen(son90(izlenen185), siparisTutari);
+        // DSO TÜRETİLEN sayıdır: alacak ya da ciro KISMİ ise üretilmez ('—' + neden).
+        // Eski `dailyRev185 > 0 ? Math.round(ar / daily) : null` kısmi alacaktan küçük bir
+        // DSO çıkarıp panelde "sağlıklı" yazdırabiliyordu.
+        const { dso, neden: dsoNedeni } = alacakDevirGunu(alacak185, ciro90, CCC_PENCERE_GUN);
         // DIO: stok degeri / gunluk GERCEK maliyet.
         // Eskiden `monthly90Rev * 0.6` ile "%60 COGS varsayimi" kullaniliyordu —
         // gercek kalem maliyeti elde varken uydurma orandi (sahte kesinlik).
         // DIO'nun PAYI tum stok, PAYDASI yalniz KALEMLI siparislerin COGS'u: kalem verisi olmayan
         // (Mikro faturasindan turetilen) TEK siparis bile COGS'u eksik birakir → DIO ve dolayisiyla
         // CCC BILINMIYOR ('—'), 0 DEGIL. Kural + nedenler: `raporMarj.stokDevirGunu` (testli).
-        // ACIK (rapor ekranlari turu): PAY hala kismi — `itemCostTRY` cevrilemeyen/girilmemis maliyete 0
-        // doner, `stockLevel ?? 0` bilinmeyen stogu 0 sayar; `kartMaliyetiTL` + bilinmeyen sayaciyla kapatilacak.
-        const inventoryVal185 = inventory.reduce((s, i) => s + itemCostTRY(i, exchangeRates) * (i.stockLevel ?? 0), 0);
+        // PAY da artık kısmi DEĞİL (2026-09-19, 6a): `kartMaliyetiTL` maliyeti çözülemeyen kaleme
+        // `null` döner (`itemCostTRY`in 0'ı gibi sessizce toplamı düşürmez) ve `degerToplami`
+        // onu `bilinmeyen` sayar → `stokDevirGunuTutar`ın `tamTutar` kapısı → 'stok-bilinmiyor'.
+        // K8 (alış günü kuru / bugünün kuru çifti + son alış sütunu) 6h'de; burada taban MALİYET
+        // olarak KALIR (rakam parite), yalnız alt etiket tabanı açıkça yazar.
+        const stok185 = degerToplami(inventory, i => kartMaliyetiTL(i, exchangeRates));
         const marj90 = brutMarj(son90(orders), inventory, exchangeRates);
-        // DIO ve CCC TÜRETİLEN sayılardır → `stokDevirGunu` (içinde `tamTutar`; 2026-09-19 delta bulgusu).
+        // DIO ve CCC TÜRETİLEN sayılardır → `stokDevirGunuTutar` (2026-09-19 delta bulgusu).
+        // `Tutar` GEÇİLİR, sayı değil (2026-09-20 hakem turu): stok değerinin TÜRETME sözleşmesiyle
+        // (`tamTutar`) çevrildiğini kilitleyen test o köprünün yanında duruyor; burada satır içi
+        // yapılan seçim `ekranTutari`ye çevrildiğinde hiçbir test kırılmıyordu.
         // `marj90.maliyet` bir EKRAN toplamıdır: maliyeti çözülemeyen sipariş toplama GİRMEZ,
         // SAYILIR. O kısmi COGS'tan DIO üretmek günlük maliyeti olduğundan küçük gösterir ve
         // DIO'yu şişirir — 100 siparişin 40'ında katalogda olmayan bir kalem varsa ~45 günlük
@@ -244,9 +391,21 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
         // var" HÜKMÜ kısmi veriden üretiliyordu. Tek kayıt bile eksikse hesaplanmaz ('—').
         // Kapı artık `kapsamDisi`yi de görür (son inceleme: 300 kalemsiz fatura + 10 kalemli sipariş
         // "1350 gün — nakit sıkışıklığı riski var" basıyordu).
-        const { dio, neden: dioNedeni } = stokDevirGunu(inventoryVal185, marj90, days90);
-        const ccc = (dso !== null && dio !== null) ? dso + dio : null;
+        const { dio, neden: dioNedeni } = stokDevirGunuTutar(stok185, marj90, CCC_PENCERE_GUN);
+        const { ccc } = nakitDongusu({ dso, dio });
         const cccColor = ccc === null ? 'text-gray-400' : ccc <= 30 ? 'text-emerald-600' : ccc <= 60 ? 'text-amber-500' : 'text-red-500';
+        // Stok değeri neden bilinmiyor: önce kur/birim ayrıntısını veren mevcut mesaj
+        // (`cost.cevrilemeyenMesaji`), o da yoksa düz sayaç cümlesi. Yalnız ilgili dalda çağrılır.
+        const stokBilinmeyenMetni = (): string => {
+          const mesaj = cevrilemeyenMesaji(
+            cevrilemeyenler(inventory, exchangeRates),
+            currentLanguage === 'tr' ? 'tr' : 'en',
+          );
+          if (mesaj !== null) return mesaj;
+          return currentLanguage === 'tr'
+            ? `${stok185.bilinmeyen} kalemin maliyeti bilinmiyor`
+            : `${stok185.bilinmeyen} item(s) have an unknown cost`;
+        };
         return (
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
@@ -255,8 +414,8 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
             </div>
             <div className="grid grid-cols-2 gap-3 mb-4">
               {[
-                { label: 'DSO', desc: currentLanguage === 'tr' ? 'Alacak Tahsilat Süresi' : 'Days Sales Outstanding', value: dso, color: dso === null ? 'text-gray-400' : dso > 45 ? 'text-red-500' : dso > 30 ? 'text-amber-500' : 'text-emerald-600', sub: currentLanguage === 'tr' ? `₺${(arBalance/1000).toFixed(0)}K ödenmemiş` : `₺${(arBalance/1000).toFixed(0)}K outstanding` },
-                { label: 'DIO', desc: currentLanguage === 'tr' ? 'Stok Elde Tutma Süresi' : 'Days Inventory Outstanding', value: dio, color: dio === null ? 'text-gray-400' : dio > 60 ? 'text-red-500' : dio > 30 ? 'text-amber-500' : 'text-emerald-600', sub: currentLanguage === 'tr' ? `₺${(inventoryVal185/1000).toFixed(0)}K stok` : `₺${(inventoryVal185/1000).toFixed(0)}K inventory` },
+                { label: 'DSO', desc: currentLanguage === 'tr' ? 'Alacak Tahsilat Süresi' : 'Days Sales Outstanding', value: dso, color: dso === null ? 'text-gray-400' : dso > 45 ? 'text-red-500' : dso > 30 ? 'text-amber-500' : 'text-emerald-600', sub: currentLanguage === 'tr' ? `${fmtAna(ekranTutari(alacak185), 'K', 0)} ödenmemiş` : `${fmtAna(ekranTutari(alacak185), 'K', 0)} outstanding` },
+                { label: 'DIO', desc: currentLanguage === 'tr' ? 'Stok Elde Tutma Süresi' : 'Days Inventory Outstanding', value: dio, color: dio === null ? 'text-gray-400' : dio > 60 ? 'text-red-500' : dio > 30 ? 'text-amber-500' : 'text-emerald-600', sub: currentLanguage === 'tr' ? `${fmtAna(ekranTutari(stok185), 'K', 0)} stok (maliyetle)` : `${fmtAna(ekranTutari(stok185), 'K', 0)} stock (at cost)` },
               ].map(k => (
                 <div key={k.label} className="bg-gray-50 rounded-xl p-4">
                   <p className={`text-3xl font-black ${k.color}`}>{k.value === null ? '—' : <>{k.value}<span className="text-sm font-medium text-gray-400 ml-1">{oc(currentLanguage).gun}</span></>}</p>
@@ -268,9 +427,22 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
             <div className="flex items-center gap-1.5 bg-blue-50 rounded-xl p-3">
               <span className="text-blue-500 text-sm">💡</span>
               {/* '—' nedenini AYIRT EDEREK yaz (2026-09-19): "kalem maliyeti olan sipariş yok"
-                  cümlesi, maliyeti çözülemeyen sipariş VARKEN yanlıştı. */}
+                  cümlesi, maliyeti çözülemeyen sipariş VARKEN yanlıştı. Sıra: önce DSO nedenleri
+                  (yeni, 6a), sonra DIO nedenleri — ekranda TEK neden görünür. */}
               <p className="text-[11px] text-blue-700">{ccc === null
-                ? (dioNedeni === 'maliyet-bilinmiyor'
+                ? (dsoNedeni === 'alacak-bilinmiyor'
+                    ? (currentLanguage === 'tr'
+                        ? `CCC = DSO + DIO. Şu an hesaplanamıyor: ${alacak185.bilinmeyen} alacağın tutarı okunamadı — DSO kısmi alacaktan üretilmez.`
+                        : `CCC = DSO + DIO. Not computable: ${alacak185.bilinmeyen} receivable(s) with an unreadable amount — DSO is not derived from a partial receivable balance.`)
+                    : dsoNedeni === 'ciro-bilinmiyor'
+                    ? (currentLanguage === 'tr'
+                        ? `CCC = DSO + DIO. Şu an hesaplanamıyor: ${ciro90.bilinmeyen} siparişin tutarı okunamadı — DSO kısmi bir cirodan üretilmez.`
+                        : `CCC = DSO + DIO. Not computable: ${ciro90.bilinmeyen} order(s) with an unreadable amount — DSO is not derived from a partial revenue figure.`)
+                    : dsoNedeni === 'ciro-yok'
+                    ? (currentLanguage === 'tr'
+                        ? 'CCC = DSO + DIO. Şu an hesaplanamıyor: son 90 günde ödemesi izlenen ciro yok.'
+                        : 'CCC = DSO + DIO. Not computable: no payment-tracked revenue in the last 90 days.')
+                    : dioNedeni === 'maliyet-bilinmiyor'
                     ? (currentLanguage === 'tr'
                         ? `CCC = DSO + DIO. Şu an hesaplanamıyor: ${marj90.maliyetTutar.bilinmeyen} siparişin maliyeti çözülemedi — DIO kısmi bir maliyetten üretilmez.`
                         : `CCC = DSO + DIO. Not computable: ${marj90.maliyetTutar.bilinmeyen} order(s) with unresolved cost — DIO is not derived from a partial COGS.`)
@@ -282,6 +454,10 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                     ? (currentLanguage === 'tr'
                         ? 'CCC = DSO + DIO. Şu an hesaplanamıyor: son 90 günde kalem maliyeti olan sipariş yok.'
                         : 'CCC = DSO + DIO. Not computable: no orders with line-item cost data in the last 90 days.')
+                    : dioNedeni === 'stok-bilinmiyor'
+                    ? (currentLanguage === 'tr'
+                        ? `CCC = DSO + DIO. Şu an hesaplanamıyor: ${stokBilinmeyenMetni()} — DIO kısmi bir stok değerinden üretilmez.`
+                        : `CCC = DSO + DIO. Not computable: ${stokBilinmeyenMetni()} — DIO is not derived from a partial inventory value.`)
                     : (currentLanguage === 'tr'
                         ? 'CCC = DSO + DIO. Şu an hesaplanamıyor: DSO ya da DIO için yeterli veri yok.'
                         : 'CCC = DSO + DIO. Not computable: not enough data for DSO or DIO.'))
@@ -300,44 +476,52 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
                   : `${marj90.maliyetTutar.bilinmeyen} order(s) with unresolved cost, ${marj90.kapsamDisi} without line items — DIO and CCC NOT computed.`}
               </p>
             )}
+            {/* Alacak / ciro sayaçları BURADA toplanmaz: aynı sipariş iki kümede de olabilir
+                (çift sayım). Sayılarını yukarıdaki `dsoNedeni` cümlesi tek tek yazar. */}
+            <KapsamNotu
+              sayaclar={{ maliyetsiz: stok185.bilinmeyen }}
+              birim="urun"
+              dil={currentLanguage}
+              sonuc={currentLanguage === 'tr' ? 'stok değerine dâhil değil' : 'not included in the stock value'}
+            />
           </div>
         );
       })()}
 
       {/* ── Phase 186: Sales by Hour of Day ── */}
       {reportsTab === 'genel' && orders.length >= 10 && (() => {
-        const hourBuckets186 = Array.from({ length: 8 }, (_, i) => ({ label: `${i*3}:00-${i*3+2}:59`, start: i*3, count: 0, rev: 0 }));
-        let hasHours = false;
-        for (const o of orders) {
-          if (o.status === 'Cancelled') continue;
-          try {
-            const od = zamanDate(o.createdAt);
-            if (!od) continue;
-            const h = od.getHours();
-            hasHours = true;
-            const bucket = hourBuckets186.find(b => h >= b.start && h < b.start + 3);
-            if (bucket) { bucket.count++; bucket.rev += o.totalPrice || 0; }
-          } catch { /* skip */ }
-        }
-        if (!hasHours) return null;
-        const maxCount186 = Math.max(...hourBuckets186.map(b => b.count), 1);
-        const peakBucket = hourBuckets186.reduce((best, b) => b.count > best.count ? b : best, hourBuckets186[0]);
+        // 8 × 3 saatlik kova. `rev` alanı eskiden toplanıyor ama HİÇ render edilmiyordu
+        // (ölü toplam) — canlandırılmadı: `tutarSec` VERİLMEZ.
+        const z186 = zamanKovalari(
+          orders.filter(o => o.status !== 'Cancelled'),
+          8,
+          d => Math.floor(d.getHours() / 3),
+          { tarihSec: o => o.createdAt },
+        );
+        // `enYogun === null` ⇔ hiçbir siparişin tarihi çözülemedi (eski `hasHours` kapısı).
+        if (z186.enYogun === null) return null;
+        const olcek186 = sayacOlcegi(z186.kovalar.map(k => k.adet));
+        const zirveEtiketi = `${z186.enYogun * 3}:00-${z186.enYogun * 3 + 2}:59`;
         return (
           <div className="apple-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '🕐 Saate Göre Satış Dağılımı' : '🕐 Sales by Hour of Day'}</h3>
-              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">{currentLanguage === 'tr' ? `Zirve: ${peakBucket.label}` : `Peak: ${peakBucket.label}`}</span>
+              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">{currentLanguage === 'tr' ? `Zirve: ${zirveEtiketi}` : `Peak: ${zirveEtiketi}`}</span>
             </div>
             <div className="flex items-end gap-1.5 h-24">
-              {hourBuckets186.map(b => (
-                <div key={b.label} className="flex-1 flex flex-col items-center gap-1">
+              {z186.kovalar.map((k, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
                   <div className="w-full flex items-end justify-center" style={{ height: '72px' }}>
-                    <div
-                      className={`w-full rounded-t-md ${b.count === peakBucket.count ? 'bg-brand' : 'bg-blue-200'}`}
-                      style={{ height: `${Math.max(4, Math.round((b.count / maxCount186) * 72))}px` }}
+                    {/* Beraberlikte İLK kova boyanır (eski kod tepeyle AYNI adetli HER kovayı
+                        marka rengine boyuyordu — "zirve" rozeti tekken birden çok zirve çiziliyordu). */}
+                    <OlcekCubugu
+                      yon="dikey"
+                      oran={oranYuzde(k.adet, olcek186)}
+                      renkSinifi={i === z186.enYogun ? 'bg-brand' : 'bg-blue-200'}
+                      dil={currentLanguage}
                     />
                   </div>
-                  <span className="text-[9px] text-gray-400 leading-none text-center">{b.start}h</span>
+                  <span className="text-[9px] text-gray-400 leading-none text-center">{i * 3}h</span>
                 </div>
               ))}
             </div>
@@ -347,6 +531,12 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
               <span className="text-[10px] text-gray-400">21:00</span>
             </div>
             <p className="text-[10px] text-gray-400 mt-2">{currentLanguage === 'tr' ? 'Her çubuk 3 saatlik dilimi temsil eder' : 'Each bar represents a 3-hour window'}</p>
+            <KapsamNotu
+              sayaclar={{ tarihsiz: z186.tarihsiz }}
+              birim="siparis"
+              dil={currentLanguage}
+              sonuc={currentLanguage === 'tr' ? 'dağılıma dâhil değil' : 'not included in the distribution'}
+            />
           </div>
         );
       })()}
@@ -356,96 +546,121 @@ export default function GenelOzet({ reportsTab, orders, inventory, exchangeRates
             const dayNames = currentLanguage === 'tr'
               ? ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt']
               : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-            const dayCounts = Array(7).fill(null).map((_, d) => ({ day: dayNames[d], revenue: 0, orders: 0 }));
-            for (const o of orders) {
-              if (o.status === 'Cancelled') continue;
-              try {
-                const d = zamanDate(o.createdAt);
-                if (!d) continue;
-                dayCounts[d.getDay()].revenue += o.totalPrice || 0;
-                dayCounts[d.getDay()].orders++;
-              } catch { /* skip */ }
-            }
-            const maxRev147 = Math.max(...dayCounts.map(d => d.revenue), 1);
-            const bestDay = dayCounts.reduce((best, d) => d.revenue > best.revenue ? d : best, dayCounts[0]);
+            const z147 = zamanKovalari(
+              orders.filter(o => o.status !== 'Cancelled'),
+              7,
+              d => d.getDay(),
+              { tarihSec: o => o.createdAt, tutarSec: siparisTutari },
+            );
+            // PARA ölçeği (`olcekReferansi`, ADET ölçeği DEĞİL): tepe günün cirosu KISMİYSE
+            // ölçek yoktur ve o listede hiçbir çubuk çizilmez — kısmi bir tepeye göre çizilen
+            // çubuklar alt günleri olduğundan uzun gösteriyordu.
+            const olcek147 = olcekReferansi(z147.kovalar.map(k => tutarSatiri(k.ciro)));
+            const tutarsiz147 = z147.kovalar.reduce((s, k) => s + k.ciro.bilinmeyen, 0);
             return (
               <div className="apple-card p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-bold text-gray-800">{currentLanguage === 'tr' ? '📅 Güne Göre Satış Dağılımı' : '📅 Revenue by Day of Week'}</h3>
-                  <span className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'En iyi gün:' : 'Best day:'} <span className="font-bold text-brand">{bestDay.day}</span></span>
+                  {/* Hiçbir günün cirosu BİLİNMİYORSA rozet ÇİZİLMEZ — eski `reduce(..., dayCounts[0])`
+                      boş veride "En iyi gün: Paz" uyduruyordu. */}
+                  {z147.enCokCiro !== null && (
+                    <span className="text-xs text-gray-500">{currentLanguage === 'tr' ? 'En iyi gün:' : 'Best day:'} <span className="font-bold text-brand">{dayNames[z147.enCokCiro]}</span></span>
+                  )}
                 </div>
                 <div className="flex items-end gap-2 h-32">
-                  {dayCounts.map((d, i) => {
-                    const h = Math.round((d.revenue / maxRev147) * 100);
-                    return (
-                      <div key={i} className="flex-1 flex flex-col items-center gap-1 cursor-default">
-                        <div className="w-full flex flex-col justify-end" style={{ height: '96px' }}>
-                          <div
-                            className={`w-full rounded-t-lg transition-all duration-500 ${d.revenue === maxRev147 ? 'bg-brand' : 'bg-brand/30 hover:bg-brand/60'}`}
-                            style={{ height: `${Math.max(h, 2)}%` }}
-                            title={`${paraYaz(d.revenue, { ondalik: 0 })} · ${d.orders} ${oc(currentLanguage).siparis}`}
-                          />
-                        </div>
-                        <span className={`text-[10px] font-semibold ${d.revenue === maxRev147 ? 'text-brand' : 'text-gray-400'}`}>{d.day}</span>
+                  {z147.kovalar.map((k, i) => (
+                    <div key={i} className="flex-1 flex flex-col items-center gap-1 cursor-default">
+                      <div className="w-full flex flex-col justify-end" style={{ height: '96px' }}>
+                        {/* `k.adet === 0` = o güne HİÇ sipariş düşmedi → cirosu gerçek ₺0'dır.
+                            2026-09-20 hakem turu: hiçbir günde sipariş yokken `olcekReferansi` NaN
+                            döner ve `cubukOrani` yedi kovada da `null` verir — ekranda yedi tam boy
+                            taralı "bilinmiyor" çubuğu, hem de notsuz. Ölçek varken bu ternary
+                            no-op'tur (`cubukOrani({ciro: 0}, ref)` zaten 0). Tutarı okunamayan
+                            SİPARİŞİ olan gün bu daldan geçmez: orada 'bilinmiyor' DOĞRU cevaptır. */}
+                        <OlcekCubugu
+                          yon="dikey"
+                          oran={k.adet === 0 ? 0 : cubukOrani(tutarSatiri(k.ciro), olcek147)}
+                          renkSinifi={i === z147.enCokCiro ? 'bg-brand' : 'bg-brand/30 hover:bg-brand/60'}
+                          koseSinifi="rounded-t-lg"
+                          dil={currentLanguage}
+                          title={`${paraYaz(ekranTutari(k.ciro), { ondalik: 0 })} · ${k.adet} ${oc(currentLanguage).siparis}`}
+                        />
                       </div>
-                    );
-                  })}
+                      <span className={`text-[10px] font-semibold ${i === z147.enCokCiro ? 'text-brand' : 'text-gray-400'}`}>{dayNames[i]}</span>
+                    </div>
+                  ))}
                 </div>
+                {/* İki sayaç da SİPARİŞ birimi (tek çağrı) ve kümeler AYRIK: tarihi çözülemeyen
+                    sipariş hiçbir kovaya girmediği için `ciro.bilinmeyen`de SAYILMAZ. */}
+                <KapsamNotu
+                  sayaclar={{ tutarsiz: tutarsiz147, tarihsiz: z147.tarihsiz }}
+                  birim="siparis"
+                  dil={currentLanguage}
+                  sonuc={currentLanguage === 'tr' ? 'günlük ciroya dâhil değil' : 'not included in daily revenue'}
+                />
               </div>
             );
           })()}
 
           {/* ── Phase 148: Days-to-Stockout Forecast ── */}
           {inventory.length > 0 && (() => {
-            const now148 = new Date();
-            const cutoff148 = new Date(now148); cutoff148.setDate(cutoff148.getDate() - 30);
-            const atRisk = inventory
-              .filter(i => i.stockLevel > 0 && i.stockLevel <= (i.lowStockThreshold ?? 5) * 3)
-              .map(i => {
-                const sold30 = orders
-                  .filter(o => {
-                    try {
-                      const d = zamanDate(o.createdAt);
-                      return !!d && d >= cutoff148 && o.status !== 'Cancelled';
-                    } catch { return false; }
-                  })
-                  .reduce((s, o) => {
-                    const li = (o.lineItems || []).find(l => l.inventoryId === i.id || l.name === i.name);
-                    return s + (li?.quantity || 0);
-                  }, 0);
-                const dailyUsage = sold30 / 30;
-                const daysLeft = dailyUsage > 0 ? Math.round(i.stockLevel / dailyUsage) : null;
-                return { ...i, dailyUsage, daysLeft };
-              })
-              .filter(i => i.daysLeft !== null && i.daysLeft <= 45)
-              .sort((a, b) => (a.daysLeft ?? 999) - (b.daysLeft ?? 999))
-              .slice(0, 8);
-            if (atRisk.length === 0) return null;
+            // `urunTalebi` yalnız pencere ya da `simdi` geçersizse null döner; ikisi de burada
+            // SABİT (TUKENME_PENCERE_GUN = 30, `new Date()`) → bu dal pratikte ULAŞILMAZ.
+            // Yine de sıfır sayaç UYDURMAK yerine panel çizilmez.
+            if (talep148 === null) return null;
+            // Liste boş AMA dışarıda kalan ürün varsa panel NOT ile görünür (eskiden tümüyle
+            // kayboluyordu); üçü de 0 ise (`bos`) bugünkü gibi hiç çizilmez.
+            if (p148.bos) return null;
             return (
               <div className="apple-card p-6">
                 <h3 className="font-bold text-gray-800 mb-2">{currentLanguage === 'tr' ? '⏱️ Stok Tükenme Tahmini' : '⏱️ Days-to-Stockout Forecast'}</h3>
                 <p className="text-xs text-gray-400 mb-4">{currentLanguage === 'tr' ? 'Son 30 gün satış hızına göre tahmin' : 'Based on last 30-day sales velocity'}</p>
                 <div className="space-y-3">
-                  {atRisk.map(item => {
-                    const d = item.daysLeft!;
-                    const cls = d <= 7 ? 'bg-red-500' : d <= 20 ? 'bg-amber-400' : 'bg-emerald-400';
-                    const textCls = d <= 7 ? 'text-red-600' : d <= 20 ? 'text-amber-600' : 'text-emerald-600';
+                  {p148.liste.map(s => {
+                    const d = Math.round(s.kalan);
+                    const cls = d <= TUKENME_ACIL_GUN ? 'bg-red-500' : d <= TUKENME_UYARI_GUN ? 'bg-amber-400' : 'bg-emerald-400';
+                    const textCls = d <= TUKENME_ACIL_GUN ? 'text-red-600' : d <= TUKENME_UYARI_GUN ? 'text-amber-600' : 'text-emerald-600';
                     return (
-                      <div key={item.id} className="flex items-center gap-3">
+                      <div key={s.kart.id} className="flex items-center gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-semibold text-gray-800 truncate">{item.name}</span>
+                            <span className="text-xs font-semibold text-gray-800 truncate">{s.kart.name}</span>
                             <span className={`text-xs font-bold ${textCls} shrink-0 ml-2`}>{d} {currentLanguage==='tr'?'gün':'days'}</span>
                           </div>
-                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full ${cls}`} style={{ width: `${Math.min((d / 45) * 100, 100)}%` }} />
-                          </div>
-                          <p className="text-[10px] text-gray-400 mt-0.5">{oc(currentLanguage).stok}: {item.stockLevel} · {currentLanguage==='tr'?'Günlük':'Daily'}: {item.dailyUsage.toFixed(1)}</p>
+                          <OlcekCubugu
+                            oran={oranYuzde(d, TUKENME_UFUK_GUN)}
+                            renkSinifi={cls}
+                            kalinlik="h-1.5"
+                            dil={currentLanguage}
+                          />
+                          <p className="text-[10px] text-gray-400 mt-0.5">{oc(currentLanguage).stok}: {adetYaz(s.stok, currentLanguage === 'tr' ? 'tr' : 'en')} · {currentLanguage==='tr'?'Günlük':'Daily'}: {s.gunluk === null ? '—' : s.gunluk.toFixed(1)}</p>
                         </div>
                       </div>
                     );
                   })}
                 </div>
+                {/* BİRİM BAŞINA AYRI not — karışık birim tek çağrıya VERİLMEZ (yoksa
+                    "3 kalemin tarihi çözülemedi" gibi yanlış cümle çıkar). */}
+                {/* (a) ÜRÜN: tahmin üretilemeyen kartlar. */}
+                <KapsamNotu
+                  sayaclar={{ esiksiz: p148.esiksiz, miktarsiz: p148.miktarsizUrun }}
+                  birim="urun"
+                  dil={currentLanguage}
+                  sonuc={currentLanguage === 'tr' ? 'tahmin üretilmedi' : 'no forecast produced'}
+                />
+                {/* (b) KALEM: stok kartıyla eşleşmeyen sipariş satırları (`eslesmeyen` birimi SABİT). */}
+                <KapsamNotu
+                  sayaclar={{ eslesmeyen: talep148.eslesmeyenKalem }}
+                  dil={currentLanguage}
+                  sonuc={currentLanguage === 'tr' ? 'talebe dâhil değil' : 'not included in demand'}
+                />
+                {/* (c) SİPARİŞ: kalem verisi olmayan (Mikro türevi) ve tarihi çözülemeyen siparişler. */}
+                <KapsamNotu
+                  sayaclar={{ kalemsiz: talep148.kalemsizSiparis, tarihsiz: talep148.tarihsiz }}
+                  birim="siparis"
+                  dil={currentLanguage}
+                  sonuc={currentLanguage === 'tr' ? 'talebe dâhil değil' : 'not included in demand'}
+                />
               </div>
             );
           })()}

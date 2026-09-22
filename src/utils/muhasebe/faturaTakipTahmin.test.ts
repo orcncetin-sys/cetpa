@@ -14,6 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import { paraYaz } from '../currency';
 import { satirTutari, ekranTutari } from '../para';
+import { siparisTutari } from '../siparis';
 import { kovaTutari } from './arYaslandirma';
 import {
   faturaYaslandirma, satisTahmini, karMerkezleri, karMerkeziToplami, tahminTutari,
@@ -335,5 +336,112 @@ describe('Phase 564 kalem satırı — satirTutari (para.ts) ile', () => {
     expect(paraYaz(satirTutari(undefined, 4))).toBe('—');
     expect(paraYaz(satirTutari(250, undefined))).toBe('—');
     expect(paraYaz(satirTutari(250, 0))).toBe('₺0,00');
+  });
+});
+
+// ── Faz 3 6a: `tutarSec` — Raporlar → Satış Tahmini (P620) aynı yardımcıya bağlanır ──────────────
+// RaporlarPage.tsx:526-609 aynı regresyonu satır içinde yazıyor ve tahmin ayını `ȳ + eğim·(geçmişAy + i)`
+// ile basıyor (ilk tahmin ayı için 6·eğim; doğrusu wma/ȳ + eğim·1). Kopya hesap YAZILMAZ (KARARLAR K14
+// "Her çiftten TEK panel kalır: testli yardımcıya bağlı olan"), fakat Raporlar sayfasının ciro tutarı
+// `siparisTutari` (`totalPrice ?? totalAmount`) — bu yüzden seçici İSTEĞE BAĞLI parametre oldu.
+describe('satisTahmini · tutarSec — Faz 3 6a (Raporlar P620 bağlaması)', () => {
+  // Şahin İnşaat'ın ÇİMENTO 50KG siparişleri (TL) — altı ay düzgün artan seri.
+  const altiAy = [5, 4, 3, 2, 1, 0].map((n, i) => sip({ totalPrice: (i + 1) * 100, createdAt: ayOnce(n) }));
+
+  it('1 · varsayılan parite: `tutarSec` verilmeden sonuç, `o => o.totalPrice` ile BİREBİR aynı', () => {
+    expect(satisTahmini(altiAy, SIMDI)).toEqual(satisTahmini(altiAy, SIMDI, { tutarSec: o => o.totalPrice }));
+    // Bilinmeyen/tarihsiz/iptal karışık vektörde de aynı (yalnız "mutlu yol" paritesi yetmez).
+    const karisik = [
+      sip({ totalPrice: 300, createdAt: ayOnce(1) }),
+      sip({ totalPrice: undefined, createdAt: ayOnce(1) }),
+      sip({ totalPrice: '250', createdAt: ayOnce(0) }),
+      sip({ totalPrice: 999, createdAt: ayOnce(0), status: 'Cancelled' }),
+      sip({ totalPrice: 100, createdAt: 'dün' }),
+    ];
+    expect(satisTahmini(karisik, SIMDI)).toEqual(satisTahmini(karisik, SIMDI, { tutarSec: o => o.totalPrice }));
+  });
+
+  it('2 · `siparisTutari` yedeği: totalPrice yok + totalAmount 500 → varsayılanla bilinmeyen, seçiciyle bilinen 500', () => {
+    const liste = [sip({ totalPrice: undefined, totalAmount: 500, createdAt: ayOnce(0) })];
+    const varsayilan = satisTahmini(liste, SIMDI);
+    expect(varsayilan.bilinen).toBe(0);
+    expect(varsayilan.bilinmeyen).toBe(1);
+    expect(varsayilan.gecmis[5]?.toplam).toBe(0);
+
+    const secici = satisTahmini(liste, SIMDI, { tutarSec: siparisTutari });
+    expect(secici.bilinen).toBe(1);
+    expect(secici.bilinmeyen).toBe(0);
+    expect(secici.gecmis[5]?.toplam).toBe(500);
+    expect(secici.gecmis[5]?.bilinen).toBe(1);
+    expect(secici.gecmis[5]?.adet).toBe(1); // adet her iki yolda da 1 — sayaç tutarı bilmese de sipariş gerçek
+  });
+
+  it('3 · meşru 0 yedeğe DÜŞMEZ: { totalPrice: 0, totalAmount: 500 } + siparisTutari → 0 (bilinen)', () => {
+    const r = satisTahmini([sip({ totalPrice: 0, totalAmount: 500, createdAt: ayOnce(0) })], SIMDI, { tutarSec: siparisTutari });
+    expect(r.gecmis[5]?.toplam).toBe(0);
+    expect(r.gecmis[5]?.bilinen).toBe(1);
+    expect(r.bilinmeyen).toBe(0);
+  });
+
+  it('4 · seçicinin bilinmeyen çıktısı SAYILIR, toplama girmez (NaN / undefined / boş metin)', () => {
+    const liste = [
+      sip({ totalPrice: 400, createdAt: ayOnce(0) }),
+      sip({ totalPrice: 'x', createdAt: ayOnce(0) }),
+      sip({ totalPrice: undefined, createdAt: ayOnce(0) }),
+      sip({ totalPrice: '', createdAt: ayOnce(0) }),
+    ];
+    const r = satisTahmini(liste, SIMDI, { tutarSec: siparisTutari });
+    expect(r.gecmis[5]?.toplam).toBe(400);
+    expect(r.gecmis[5]?.bilinen).toBe(1);
+    expect(r.gecmis[5]?.bilinmeyen).toBe(3);
+    expect(r.bilinmeyen).toBe(3);
+    // Seçici NaN döndürdüğünde toplam NaN'a bulaşmaz (`0 * bilinmeyen` tuzağı da yok).
+    expect(Number.isFinite(r.gecmis[5]?.toplam ?? NaN)).toBe(true);
+  });
+
+  it('5 · model kilidi: [100..600] → eğim 100, wma 5600/13.5, ilk tahmin wma+eğim·1 (P620 950 / ders kitabı 700 DEĞİL)', () => {
+    const r = satisTahmini(altiAy, SIMDI, { tutarSec: siparisTutari });
+    const wma = 5600 / 13.5; // ≈ 414,81
+    expect(r.egim).toBeCloseTo(100, 6);
+    expect(r.wma).toBeCloseTo(wma, 6);
+    expect(r.tahmin[0]?.deger).toBeCloseTo(wma + 100, 6); // ≈ 514,81
+    // Ayırt edici: aynı vektörde P620'nin satır içi formülü 350 + 6·100 = 950,
+    // ders kitabı regresyonu (ȳ + eğim·3,5) 350 + 350 = 700 verirdi.
+    expect(r.tahmin[0]?.deger).toBeLessThan(600);
+    expect(Math.abs((r.tahmin[0]?.deger ?? 0) - 950)).toBeGreaterThan(1);
+    expect(Math.abs((r.tahmin[0]?.deger ?? 0) - 700)).toBeGreaterThan(1);
+  });
+
+  it('6 · iptal hariç + tarihsiz: seçici verilince de aynı (kural seçiciye taşınmaz)', () => {
+    const r = satisTahmini([
+      sip({ totalPrice: undefined, totalAmount: 100, createdAt: ayOnce(0) }),
+      sip({ totalPrice: undefined, totalAmount: 999, createdAt: ayOnce(0), status: 'Cancelled' }),
+      sip({ totalPrice: undefined, totalAmount: 999, createdAt: 'dün', syncedAt: 'belirsiz' }),
+    ], SIMDI, { tutarSec: siparisTutari });
+    expect(r.gecmis[5]?.toplam).toBe(100);
+    expect(r.gecmis[5]?.adet).toBe(1);
+    expect(r.tarihsiz).toBe(1);
+    expect(r.bilinen).toBe(1);
+  });
+
+  it('7 · kırpma korunur: düşen seride tahmin negatife inmez, eğim negatif kalır', () => {
+    const dusen = [5, 4, 3, 2, 1, 0].map((n, i) => sip({ totalPrice: undefined, totalAmount: (6 - i) * 100, createdAt: ayOnce(n) }));
+    const r = satisTahmini(dusen, SIMDI, { tutarSec: siparisTutari, ufuk: 6 });
+    expect(r.egim).toBeCloseTo(-100, 6);
+    expect(r.tahmin.every(t => t.deger >= 0 && t.alt >= 0 && t.ust >= 0)).toBe(true);
+    expect(r.tahmin[5]?.deger).toBe(0);
+  });
+
+  it('8 · `ufuk` seçiciyle de geçerli: uzunluk eşit, anahtarlar ardışık YYYY-MM', () => {
+    for (const ufuk of [1, 3, 6]) {
+      const r = satisTahmini(altiAy, SIMDI, { tutarSec: siparisTutari, ufuk });
+      expect(r.tahmin).toHaveLength(ufuk);
+      expect(r.tahmin.map(t => t.anahtar)).toEqual(
+        Array.from({ length: ufuk }, (_, k) => {
+          const d = new Date(2026, 8 + k + 1, 1);
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        }),
+      );
+    }
   });
 });

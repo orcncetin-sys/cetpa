@@ -56,7 +56,15 @@ export function depoToplamlari(kalemler: readonly DepoKalemi[]): DepoToplamlari 
   };
 }
 
-/** Adet metni (para değil, sembol yok): '3.000' / '1.250,5' — bilinmeyen '—' (eski `|| 0` "0" basıyordu). */
-export function adetYaz(x: unknown): string {
-  return bilinenSayi(x) ? Number(x).toLocaleString('tr-TR') : '—';
+/**
+ * Adet metni (para değil, sembol yok): '3.000' / '1.250,5' — bilinmeyen '—' (eski `|| 0` "0" basıyordu).
+ *
+ * `dil` ADDITIVE (2026-09-22 delta bulgusu): yerel SABİT 'tr-TR'ydi, yani EN arayüzde de Türkçe
+ * ayraç basıyordu. 'Target: 1.500' okuyan İngiliz kullanıcı için nokta ONDALIK ayracıdır → hedef
+ * bin kat küçük okunur (RaporlarPage:493 P570 'Sipariş Adedi' hem gerçekleşeni hem hedefi basar).
+ * Daraltma `rapor/bicim.yuzdeYaz` ile BİREBİR aynı desendir. Varsayılan 'tr': `dil` geçirmeyen
+ * mevcut çağrılar (WarehousesTab, pano/stokSevkiyat, DashboardPage) DEĞİŞMEZ.
+ */
+export function adetYaz(x: unknown, dil: 'tr' | 'en' = 'tr'): string {
+  return bilinenSayi(x) ? Number(x).toLocaleString(dil === 'tr' ? 'tr-TR' : 'en-US') : '—';
 }

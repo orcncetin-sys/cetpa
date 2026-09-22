@@ -125,25 +125,42 @@ export interface StokDurumu<T> {
   seviyesiBilinmeyen: number;
   /** Seviyesi bilinen ama eşiği bilinmeyen ürün sayısı — kritik/normal kararı verilemez. */
   esigiBilinmeyen: number;
+  /**
+   * `esigiBilinmeyen`in ALT KÜMESİ: seviyesi bilinen ve 0'ın ÜSTÜNDE olup eşiği bilinmeyen,
+   * yani HİÇBİR kovaya giremeyen ürün sayısı. (Faz 3 6a düzeltme turu, 2026-09-22.)
+   *
+   * NEDEN AYRI SAYAÇ: seviyesi ≤ 0 olan kart eşiği bilinmese de `tukenen` kovasındadır.
+   * Üç kovayı sayan panel (`EnvanterRapor` Stok Yenileme) `esigiBilinmeyen`i "kovalara
+   * ayrılamadı" notunda basınca AYNI kartı hem 'Out of Stock: N' diye sayıyor hem de
+   * "kovalara ayrılamadı" diyordu — not yalan oluyordu. `esikAltinda` LİSTESİNİ basan siteler
+   * (PDF kritik stok tablosu) için `esigiBilinmeyen` DOĞRU kalır: orada seviye ≤ 0 kart da
+   * listeye girmez. Bu yüzden eski sayacın sözleşmesi DEĞİŞTİRİLMEDİ, yenisi ADDITIVE eklendi.
+   */
+  esigiBilinmeyenStoklu: number;
 }
 
 /** Stok uyarılarının tek hesabı. Girdi dizisi MUTASYONA uğramaz (sıralama kopya üzerinde). */
 export function stokDurumu<T extends KpiStokKalemi>(envanter: readonly T[]): StokDurumu<T> {
   const tukenen: T[] = [], kritik: T[] = [], esikAltinda: T[] = [];
-  let seviyesiBilinmeyen = 0, esigiBilinmeyen = 0;
+  let seviyesiBilinmeyen = 0, esigiBilinmeyen = 0, esigiBilinmeyenStoklu = 0;
   for (const i of envanter) {
     const seviye = stokSeviyesi(i);
     if (!Number.isFinite(seviye)) { seviyesiBilinmeyen++; continue; }
     if (seviye <= 0) { tukenen.push(i); }
     const esik = stokEsigi(i);
-    if (!Number.isFinite(esik)) { esigiBilinmeyen++; continue; }
+    if (!Number.isFinite(esik)) {
+      esigiBilinmeyen++;
+      // Kart YALNIZ stoklu (> 0) ise hiçbir kovaya giremedi; ≤ 0 ise `tukenen`dedir.
+      if (seviye > 0) esigiBilinmeyenStoklu++;
+      continue;
+    }
     if (seviye <= esik) {
       esikAltinda.push(i);
       if (seviye > 0) kritik.push(i);
     }
   }
   const enDusukKritik = [...kritik].sort((a, b) => sayiSirala(stokSeviyesi(a), stokSeviyesi(b)))[0] ?? null;
-  return { tukenen, kritik, esikAltinda, enDusukKritik, seviyesiBilinmeyen, esigiBilinmeyen };
+  return { tukenen, kritik, esikAltinda, enDusukKritik, seviyesiBilinmeyen, esigiBilinmeyen, esigiBilinmeyenStoklu };
 }
 
 // ── Ödenmemiş / gecikmiş siparişler (Phase 528 · 291, Phase 90 · 673, Phase 124 · 1029) ──

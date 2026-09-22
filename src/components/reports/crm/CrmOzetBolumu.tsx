@@ -12,15 +12,15 @@ import { Users, UserCheck, CheckCircle2, CreditCard } from 'lucide-react';
 import { formatInCurrency, type ExchangeRates } from '../../../utils/currency';
 import { zamanMs } from '../../../utils/zaman';
 import type { ReportsCtx } from '../useReportsData';
-import { KpiCard, KpiGrid, KpiCurrencyToggle } from '../ReportKit';
+import { KpiCard, KpiGrid, KpiCurrencyToggle, KapsamNotu } from '../ReportKit';
 import { oc } from '../../../i18n/ortak';
 
-type Props = Pick<ReportsCtx, 'orders' | 'currentLanguage' | 'currentT' | 'revenueCurrency' | 'setRevenueCurrency' | 'onMusteriAc' | 'statusChartData' | 'COLORS' | 'topCustomers' | 'trendData'> & {
+type Props = Pick<ReportsCtx, 'orders' | 'currentLanguage' | 'currentT' | 'revenueCurrency' | 'setRevenueCurrency' | 'onMusteriAc' | 'statusChartData' | 'COLORS' | 'topCustomers' | 'musteriKimliksiz' | 'trendData'> & {
   /** `exchangeRates ?? undefined` — yalnız TİP köprüsü, ebeveynde türetilir (bkz. CrmRapor.tsx). */
   fxKurlari: ExchangeRates | undefined;
 };
 
-export default function CrmOzetBolumu({ orders, currentLanguage, currentT, revenueCurrency, setRevenueCurrency, onMusteriAc, statusChartData, COLORS, topCustomers, trendData, fxKurlari }: Props) {
+export default function CrmOzetBolumu({ orders, currentLanguage, currentT, revenueCurrency, setRevenueCurrency, onMusteriAc, statusChartData, COLORS, topCustomers, musteriKimliksiz, trendData, fxKurlari }: Props) {
   return (
     <div className="space-y-6">
       {/* KPIs — KONUYA UYGUN METRİKLER (2026-08-21).
@@ -144,6 +144,13 @@ export default function CrmOzetBolumu({ orders, currentLanguage, currentT, reven
               </button>
             ))}
           </div>
+          {/* K4 — kullanıcı: "Müşteriyi adla mı kimlikle mi gruplayacağız → kimlikle."
+              Kimliği de adı da olmayan sipariş artık '—' adlı SAHTE bir müşteri satırı olmuyor;
+              NOT oluyor. Sayaç TEK KAYNAKTAN (`rapor/musteri.musteriOzeti().kimliksiz`), cümle
+              `rapor/kapsamNotu`tan. Not, liste BOŞKEN de basılır (koşulun DIŞINDA) — tüm
+              siparişler kimliksizse "Henüz sipariş yok." cümlesi tek başına YALAN olurdu. */}
+          <KapsamNotu sayaclar={{ kimliksiz: musteriKimliksiz }} dil={currentLanguage}
+            sonuc={currentLanguage === 'tr' ? 'listeye girmedi' : 'not listed'} className="text-[11px] text-amber-600 mt-3" />
         </div>
       </div>
 

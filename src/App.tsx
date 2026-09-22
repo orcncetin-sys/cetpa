@@ -7,6 +7,7 @@ import MuhasebeGroupNav from './components/MuhasebeGroupNav';
 const InventoryViewComponent = React.lazy(() => import('./components/InventoryView'));
 const PriceIntelPanel        = React.lazy(() => import('./components/PriceIntelPanel'));
 const RaporlarPage            = React.lazy(() => import('./pages/RaporlarPage'));
+import type { P570Targets } from './pages/RaporlarPage';  // `import type` derlemede SİLİNİR — lazy paket bölünmesi etkilenmez
 const SettingsPage            = React.lazy(() => import('./pages/SettingsPage'));
 const AdminPage               = React.lazy(() => import('./pages/AdminPage'));
 const CRMPage                 = React.lazy(() => import('./pages/CRMPage'));
@@ -1691,8 +1692,28 @@ function AppContent() {
   // girdiği hedefler sayfa yenilenince varsayılana dönüyordu. reportTargets/kpiHedefleri
   // dokümanından yüklenir — 'settings' koleksiyonu ADMIN_ONLY olduğundan (rbac.ts)
   // KULLANILMADI, ayrı bir koleksiyon (Manager/Accounting de yazabilsin diye).
-  const [p570Targets, setP570Targets] = useState({ revenue: 500000, orders: 100, avgOrderVal: 5000, leadConv: 30 });
+  // Başlangıç TÜMÜ `null` (delta 2026-09-22): eski tohum `{revenue: 500000, orders: 100, …}`
+  // UYDURMA hedefti. Hiç hedef girmemiş kiracı Raporlar'ı açınca RaporlarPage dolu bir ölçek
+  // çubuğu + renkli yüzde rozeti çiziyor ("Hedef: 500.000 · %24"), hedef kutusu da 500000 ile
+  // ÖN-DOLDURULUYOR (kullanıcı girmiş gibi) ve 800 ms sonra bu uydurma DB'ye yazılıyordu.
+  // RaporlarPage'in kendi sözleşmesi (`P570Targets`: "null = hedef girilmemiş → rozet/çubuk '—'")
+  // yalnız kullanıcı kutuyu ELLE boşaltırsa devreye giriyordu. Sahte kesinlik yasağı: hedef
+  // bilinmiyorsa 0 da 500.000 de değil, BİLİNMİYOR.
+  //
+  // AÇIK MADDE (2026-09-22 düzeltme turu, KULLANICI KARARI BEKLİYOR): bu tohum YALNIZ İSTEMCİ
+  // tarafında null'landı. Eski kod `{...p570Targets}` TAMAMINI `merge: true` ile yazdığı ve
+  // snapshot işleyicisi her yüklemede yeni bir nesne ürettiği için, hedef kaydetmiş HER
+  // kiracının `reportTargets/kpiHedefleri_<cid>` dokümanında dört alanın dördü de doludur —
+  // üçü kullanıcının hiç girmediği tohum değeri (revenue 500000 / orders 100 /
+  // avgOrderVal 5000 / leadConv 30). O kiracılarda P570 hâlâ "Hedef: ₺500K" gösterir.
+  // Temizlik bir VERİ GÖÇÜDÜR ve kullanıcı onayı ister: 500.000'i gerçekten kendisi girmiş
+  // olabilir, tohumla ayırt edilemez. Yeni tohum yalnız HİÇ dokümanı olmayan kiracıya yarar.
+  const [p570Targets, setP570Targets] = useState<P570Targets>({ revenue: null, orders: null, avgOrderVal: null, leadConv: null });
   const p570LoadedRef = useRef(false);
+  /** Kiracının KAYITLI hedef dokümanı var mı — "hepsini sil" yazmasını mümkün kılar (aşağıya bak). */
+  const p570DocVarRef = useRef(false);
+  /** Hedeflerin YÜKLENDİĞİ kiracı — değişimi ancak buna bakarak anlaşılır (aşağıdaki sıfırlama). */
+  const p570CidRef = useRef<string | null>(null);
   useEffect(() => {
     // Sabit 'kpiHedefleri' doc ID'si TÜM kiracılar arasında paylaşılıyordu —
     // ilk kaydeden firma companyId'yi damgalıyor, sonraki firmaların yazması
@@ -1701,9 +1722,25 @@ function AppContent() {
     // companyId ile namespace'liyoruz — TENANT_COLLECTIONS deseni (companyId
     // alanı) zaten var, eksik olan kiracı-başına-benzersiz doc ID'ydi.
     const cid = storeCompanyId ?? user?.uid ?? null;
+    // KİRACI DEĞİŞİMİNDE SIFIRLA (delta 2026-09-22). Eskiden ne state ne de refler başa
+    // alınıyordu: süper-admin hedefi KAYITLI bir firmadan hedefi OLMAYAN firmaya geçince
+    // (a) yeni kiracının KPI kartlarında öncekinin hedefi + yüzde rozeti görünüyor,
+    // (b) `p570DocVarRef` hâlâ `true` olduğu için aşağıdaki "boş dokümanı yazma" kapısı
+    // DEVREYE GİRMİYOR ve 800 ms sonra önceki kiracının hedefleri yeni kiracının
+    // dokümanına YAZILIYORDU. Snapshot `exists() === false` iken hiçbir state yazmadığı
+    // için kapının dayandığı bilgi de bayat kalıyordu.
+    // Sıfırlama `cid` GERÇEKTEN değiştiğinde yapılır: `user` nesnesinin kimliği token
+    // yenilemesinde de değişebilir ve her seferinde kullanıcının yazdığı hedef silinirdi.
+    if (p570CidRef.current !== cid) {
+      p570CidRef.current = cid;
+      p570LoadedRef.current = false;
+      p570DocVarRef.current = false;
+      setP570Targets({ revenue: null, orders: null, avgOrderVal: null, leadConv: null });
+    }
     if (!cid) return;
     const unsub = onSnapshot(doc(db, 'reportTargets', `kpiHedefleri_${cid}`), snap => {
       p570LoadedRef.current = true;
+      p570DocVarRef.current = snap.exists();
       if (snap.exists()) setP570Targets(prev => ({ ...prev, ...(snap.data() as Partial<typeof prev>) }));
     }, () => {});
     return unsub;
@@ -1713,6 +1750,11 @@ function AppContent() {
     if (!p570LoadedRef.current) return; // ilk yükleme tamamlanmadan geri-yazma yapma
     const cid = storeCompanyId ?? user?.uid ?? null;
     if (!cid) return;
+    // Hiç hedef girilmemiş VE kayıtlı doküman da yoksa yazma: tohum artık tümü `null` olduğu
+    // için bu çağrı yeni kiracıya BOŞ bir doküman üretirdi. Doküman zaten varsa yazılır —
+    // yoksa "kayıtlı hedeflerin hepsini sil" işlemi sessizce kaydedilmez ve sayfa yenilenince
+    // silinen hedefler geri gelirdi.
+    if (!p570DocVarRef.current && Object.values(p570Targets).every(v => v === null)) return;
     if (p570SaveTimer.current) clearTimeout(p570SaveTimer.current);
     p570SaveTimer.current = setTimeout(() => {
       setDoc(doc(db, 'reportTargets', `kpiHedefleri_${cid}`), { ...p570Targets, companyId: cid, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});

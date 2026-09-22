@@ -32,7 +32,7 @@
  * reduce'larla BİREBİR aynıdır.
  */
 import { describe, it, expect } from 'vitest';
-import { brutMarjHesabi, stokMaliyetCozucu, stokDevirGunu, type MarjSiparisi } from './raporMarj';
+import { brutMarjHesabi, stokMaliyetCozucu, stokKartiCozucu, stokDevirGunu, type MarjSiparisi } from './raporMarj';
 import { ekranTutari } from '../para';
 
 // ── Şirin İnşaat (inşaat malzemesi toptancısı) ───────────────────────────────────
@@ -277,5 +277,35 @@ describe('stokDevirGunu (DIO) — TÜRETME: payda eksikse HESAPLANMAZ', () => {
   it('stok değeri ya da gün sayısı bilinmiyorsa null (NaN gün basılmaz)', () => {
     expect(stokDevirGunu(NaN, { maliyetTutar: T(900_000, 10, 0), kapsamDisi: 0 }, 90)).toEqual({ dio: null, neden: 'stok-bilinmiyor' });
     expect(stokDevirGunu(390_000, { maliyetTutar: T(900_000, 10, 0), kapsamDisi: 0 }, 0).dio).toBeNull();
+  });
+});
+
+// ── stokKartiCozucu (6a ADDITIVE, 2026-09-19) ────────────────────────────────────
+// `stokMaliyetCozucu` gövdesinden çıkarılan KART eşleşmesi. Yukarıdaki mevcut vakalar
+// DÜZENLENMEDEN yeşil kalmalı (maliyet çözücüsünün imzası/davranışı değişmedi).
+describe('stokKartiCozucu — kart eşleşmesi tek evde', () => {
+  const kartCoz = stokKartiCozucu(KATALOG);
+
+  it('kimlik ya da ad tutuyorsa eşleşir; eşleşme liste sırasındaki İLK karttır (OR semantiği AYNEN)', () => {
+    expect(kartCoz({ inventoryId: 'p1', price: 1, quantity: 1 })).toBe(KATALOG[0]);
+    expect(kartCoz({ name: 'İNŞAAT DEMİRİ 12MM', price: 1, quantity: 1 })).toBe(KATALOG[1]);
+    // adı 1. kartı, kimliği 2. kartı tutuyor → kimliğe öncelik VERİLMEZ, liste sırası kazanır
+    expect(kartCoz({ inventoryId: 'p2', name: 'ÇİMENTO 50KG', price: 1, quantity: 1 })).toBe(KATALOG[0]);
+  });
+
+  it('MUTASYON-AYIRT EDİCİ — boş kimlik/ad katalogdaki boş anahtarlı karta BAĞLANMAZ', () => {
+    const bozukKatalog = [{ id: '', name: '', birim: 999 }, ...KATALOG];
+    const c = stokKartiCozucu(bozukKatalog);
+    expect(c({ price: 5_000, quantity: 1 })).toBeNull();
+    expect(c({ inventoryId: '', name: '', price: 5_000, quantity: 1 })).toBeNull();
+    expect(c({ inventoryId: '  ', name: '  ', price: 5_000, quantity: 1 })).toBeNull();
+  });
+
+  it('eşleşme yoksa null (maliyet çözücüsünün "bilinmiyor" kapısı)', () => {
+    expect(kartCoz({ inventoryId: 'yok', name: 'Nakliye bedeli', price: 5_000, quantity: 1 })).toBeNull();
+  });
+
+  it('`costPrice` kapısı BURADA YOK — o yalnız stokMaliyetCozucu\'nun işi', () => {
+    expect(kartCoz({ inventoryId: 'p1', costPrice: 0, price: 1, quantity: 1 })).toBe(KATALOG[0]);
   });
 });

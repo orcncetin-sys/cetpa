@@ -101,6 +101,21 @@ describe('adetYaz — satır/kart adet metni', () => {
     expect(adetYaz('abc')).toBe('—');
     expect(adetYaz(NaN)).toBe('—');
   });
+
+  // DELTA 2026-09-22 (hakem bulgusu, RaporlarPage:493 P570 "Sipariş Adedi"): yerel SABİT 'tr-TR'ydi.
+  // EN arayüzde 'Target: 1.500' okuyan kullanıcı için nokta ONDALIK ayracıdır → hedef bin kat
+  // küçük okunur. Yerel artık `yuzdeYaz` (rapor/bicim.ts) ile AYNI daraltmadan gelir.
+  it('yerel DİLE göre: EN arayüzde binlik ayracı virgül, ondalık nokta', () => {
+    expect(adetYaz(1500, 'en')).toBe('1,500');
+    expect(adetYaz('1250.5', 'en')).toBe('1,250.5');
+    expect(adetYaz(0, 'en')).toBe('0');
+    expect(adetYaz(null, 'en')).toBe('—');
+  });
+
+  it('PARİTE: `dil` verilmeyen çağrılar (WarehousesTab, stokSevkiyat) aynen Türkçe kalır', () => {
+    expect(adetYaz(3000)).toBe(adetYaz(3000, 'tr'));
+    expect(adetYaz(3000)).toBe('3.000');
+  });
 });
 
 describe('sıralama — bilinmeyen adet 0 sayılmaz, listenin sonuna gider (para.ts sayiSirala, azalan)', () => {
