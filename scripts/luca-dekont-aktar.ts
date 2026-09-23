@@ -309,13 +309,35 @@ async function main(): Promise<void> {
     return { sayim, okunamayan, hata };
   };
 
-  // 3a) Belge no ağı (EN KESİN — ama cha_belge_no'nun Mikro'da saklandığı TEYİTSİZ).
+  // 3a) Belge no ağı — ama belge no TEK BAŞINA yetmez.
+  //
+  // BELGE NO KARARLI DEĞİLDİR (2026-09-23'te CANLIDA ÖLÇÜLDÜ). Numara `fiş + sıra`
+  // ile üretiliyor ve sıra, manifestteki satır kümesine bağlı. Eşleştirmeye yeni bir
+  // hesap eklenince aynı fişi paylaşan satırların sırası KAYIYOR: `LUCA25-00154-01`
+  // önce Murat Uysal'ın 110.000 TL'sine verilmişti, Handeko eşleşince o numara
+  // Handeko'nun 22.500 TL'sine geçti. Ağ "bu numara Mikro'da var" deyip Handeko'nun
+  // ÖDEMESİNİ SESSİZCE ATLADI — mükerrerin aynadaki karşıtı, aynı derecede zararlı.
+  //
+  // Bu yüzden belge no eşleşmesi ancak kaydın KİMLİĞİ de tutuyorsa "yazılmış" sayılır:
+  // cari + gün + tutar + yön. Tutmuyorsa numara bayattır, satır yazılmamış demektir.
   const { rows: varOlan, hata: belgeHata } = await mikroSql(
-    `SELECT cha_belge_no FROM CARI_HESAP_HAREKETLERI WHERE cha_evrakno_seri = '${SERI}'`);
+    `SELECT cha_belge_no, cha_kod, CONVERT(varchar(8), cha_tarihi, 112) AS gun, cha_meblag, cha_tip ` +
+    `FROM CARI_HESAP_HAREKETLERI WHERE cha_evrakno_seri = '${SERI}'`);
   if (belgeHata) { console.error(`Mükerrer kontrolü başarısız: ${belgeHata}`); process.exit(6); }
-  const yazilmisBelge = new Set(varOlan.map(r => String(r.cha_belge_no ?? '').trim()).filter(Boolean));
-  console.log(`'${SERI}' serisi : Mikro'da ${varOlan.length} kayıt, ${yazilmisBelge.size} tanesinin belge no'su dolu`);
-  if (varOlan.length && !yazilmisBelge.size) {
+  /** belge no → o kaydın doğal anahtarı. Aynı numara birden fazla kayıtta ise hepsi tutulur. */
+  const belgeAnahtari = new Map<string, Set<string>>();
+  for (const r of varOlan) {
+    const bn = String(r.cha_belge_no ?? '').trim();
+    if (!bn) continue;
+    const kod = String(r.cha_kod ?? '').trim(), gun = String(r.gun ?? '');
+    const meblag = Number(r.cha_meblag), tip = Number(r.cha_tip);
+    if (!kod || gun.length !== 8 || !Number.isFinite(meblag) || !Number.isFinite(tip)) continue;
+    const k = `${kod}|${gun}|${meblag.toFixed(2)}|${tip}`;
+    const mevcut = belgeAnahtari.get(bn);
+    if (mevcut) mevcut.add(k); else belgeAnahtari.set(bn, new Set([k]));
+  }
+  console.log(`'${SERI}' serisi : Mikro'da ${varOlan.length} kayıt, ${belgeAnahtari.size} tanesinin belge no'su dolu`);
+  if (varOlan.length && !belgeAnahtari.size) {
     console.log(`   NOT: Mikro cha_belge_no'yu SAKLAMIYOR — koruma doğal anahtar sayacına düşüyor.`);
   }
 
@@ -327,7 +349,22 @@ async function main(): Promise<void> {
     if (YAZ) { console.error('Yazma iptal edildi.'); process.exit(8); }
   }
 
-  const belgeAtilan = new Set(gecerli.filter(g => yazilmisBelge.has(g.s.belgeNo)).map(g => g.s.belgeNo));
+  // Belge no VE kimlik birlikte tutmalı. Sadece numara tutuyorsa numara bayattır.
+  const bayatNumara: Hazir[] = [];
+  const belgeAtilan = new Set<string>();
+  for (const g of gecerli) {
+    const anahtarlar = belgeAnahtari.get(g.s.belgeNo);
+    if (!anahtarlar) continue;
+    if (anahtarlar.has(g.anahtar)) belgeAtilan.add(g.s.belgeNo);
+    else bayatNumara.push(g);
+  }
+  if (bayatNumara.length) {
+    console.log(`\nBAYAT BELGE NO — numara Mikro'da var ama BAŞKA bir kayda ait (${bayatNumara.length}):`);
+    for (const g of bayatNumara.slice(0, 10)) {
+      console.log(`   ${g.s.belgeNo} ${g.s.tarih} ${para(g.s.tutar)} TL ${g.s.cariKod} ${g.s.cariAd.slice(0, 26)}`);
+    }
+    console.log(`   Bu satırlar YAZILMAMIŞ sayılır; koruma doğal anahtar sayacına düşer.`);
+  }
   const grup = new Map<string, Hazir[]>();
   for (const g of gecerli) {
     const liste = grup.get(g.anahtar);
