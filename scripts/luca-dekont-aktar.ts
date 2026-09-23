@@ -381,10 +381,16 @@ async function main(): Promise<void> {
     const sorulan = new Set(bakKodlari.map(k => k.toUpperCase()));
     const mikroBakiye = new Map(bakRows.map(r => [String(r.cha_kod ?? '').trim().toUpperCase(), Number(r.bakiye)]));
 
-    // Önceki koşularda YAZILMIŞ satırların etkisi beklentiye eklenmeli; yoksa yarım kalmış
-    // cariler "tutmuyor" görünür ve --yalniz-tutan tam da onları kalıcı olarak dışarıda bırakır.
+    // Beklentiye "Mikro'da ZATEN VAR" sayılan her şeyin etkisi eklenmeli:
+    //  (a) önceki koşularda YAZILMIŞ satırlar — yoksa yarım kalmış cariler "tutmuyor"
+    //      görünür ve --yalniz-tutan tam da onları kalıcı olarak dışarıda bırakır;
+    //  (b) --cakisanlari-atla ile ATLANAN satırlar — bunları atlamamızın SEBEBİ zaten
+    //      Mikro'nun eşdeğer kaydı taşıması. 2026-09-23 ölçümü: 10 çakışan satırın 10'u
+    //      da Mikro'daki bir FATURAYLA birebir aynı belge no'yu taşıyordu (karşılıklı
+    //      fatura mahsubu; ₺582.867,60). Etkilerini saymazsak o cariler hiç tutmaz.
+    const sayilanlar = CAKISANLARI_ATLA ? [...yazilmisSatirlar, ...cakisan] : yazilmisSatirlar;
     const yazilmisEtki = new Map<string, number>();
-    for (const g of yazilmisSatirlar) {
+    for (const g of sayilanlar) {
       const k = g.s.cariKod.toUpperCase();
       yazilmisEtki.set(k, (yazilmisEtki.get(k) ?? 0) + bakiyeEtkisi(g.s));
     }
