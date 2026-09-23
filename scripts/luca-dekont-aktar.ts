@@ -416,6 +416,7 @@ async function main(): Promise<void> {
 
     console.log(`\nBAKİYE MUTABAKATI (${beklenenler.length} cari)`);
     console.log(`   TUTAN      : ${tutan.length} cari — dekontlar yazılınca Mikro = LUCA olacak`);
+    if (tutan.length) console.log(`   ${tutan.join(' ')}`);
     console.log(`   TUTMAYAN   : ${tutmayan.length} cari`);
     if (olculemeyen.length) console.log(`   ÖLÇÜLEMEYEN: ${olculemeyen.length} cari — ${olculemeyen.slice(0, 8).join(', ')}`);
     if (kapsamDisi.length) console.log(`   BAKİYE DOSYASINDA YOK: ${kapsamDisi.length} manifest carisi — ${kapsamDisi.slice(0, 8).join(', ')}`);
@@ -430,11 +431,18 @@ async function main(): Promise<void> {
       // muavini gelmeden kapanmaz. İkisini ayırmadan "aktarım işe yaramadı" sanılır.
       const yil = hedefDonemYili(satirlar);
       const sinir = `${yil}0101`;
+      // KENDI SERIMIZ HARIC: bu tablo Mikro'nun hareketlerini LUCA'nin FATURA tarafiyla
+      // karsilastirir. Yazdigimiz dekontlar da bu donemde oldugu icin, sayilmalari
+      // karsilastirmayi elma-armut yapar ve aktarim ilerledikce tablo kayar
+      // (2026-09-23 olculdu: Gokay'in 2026 farki 41.486 -> 545.086; arasindaki 503.600
+      // o cariye yazilan yedi dekontun toplamiydi). Haric tutulunca tablo, ne kadar
+      // yazilmis olursa olsun AYNI kalir.
       const { rows: donemRows, hata: donemHata } = await mikroSql(
         `SELECT cha_kod, ` +
         `SUM(CASE WHEN cha_tarihi <  '${sinir}' THEN (CASE WHEN cha_tip = 0 THEN cha_meblag ELSE -cha_meblag END) ELSE 0 END) AS onceki, ` +
         `SUM(CASE WHEN cha_tarihi >= '${sinir}' THEN (CASE WHEN cha_tip = 0 THEN cha_meblag ELSE -cha_meblag END) ELSE 0 END) AS budonem ` +
-        `FROM CARI_HESAP_HAREKETLERI WHERE cha_kod IN (${inListesi(bakKodlari)}) GROUP BY cha_kod`);
+        `FROM CARI_HESAP_HAREKETLERI WHERE cha_kod IN (${inListesi(bakKodlari)}) ` +
+        `AND ISNULL(cha_evrakno_seri, '') <> '${SERI}' GROUP BY cha_kod`);
       if (donemHata) {
         console.log(`\n   Dönem ayrımı okunamadı (yalnız bilgi amaçlı): ${donemHata}`);
       } else {
