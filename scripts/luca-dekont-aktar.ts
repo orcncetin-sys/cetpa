@@ -57,7 +57,13 @@ interface ManifestSatiri {
   yon: Yon; tutar: number; chaTip: 0 | 1;
   aciklama: string; lucaKod: string; lucaFis: string; defter: string;
 }
-interface BakiyeBeklenen { cariKod: string; lucaBakiye: number; dekontEtkisi: number; mikroBeklenen: number }
+interface BakiyeBeklenen {
+  cariKod: string; lucaBakiye: number; dekontEtkisi: number; mikroBeklenen: number;
+  /** LUCA'nin acilis fisi = aktarilan donemden ONCEKI kapanis. Bilinmiyorsa NaN. */
+  lucaOncekiDonem: number;
+  /** LUCA'nin aktarilan donemdeki FATURA tarafi (odemeler haric). Bilinmiyorsa NaN. */
+  lucaBuDonemFatura: number;
+}
 interface Hazir { s: ManifestSatiri; payload: Record<string, unknown>; anahtar: string }
 
 const guvenliKod = (v: unknown): v is string => typeof v === 'string' && KOD_RE.test(v);
@@ -192,7 +198,11 @@ function bakiyeOku(yol: string): BakiyeBeklenen[] {
       hatalar.push(`bakiye satır ${i + 1} (${r.cariKod}): mikroBeklenen sonlu sayı olmalı`); return;
     }
     const say = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : NaN);
-    cikti.push({ cariKod: r.cariKod, mikroBeklenen: r.mikroBeklenen, lucaBakiye: say(r.lucaBakiye), dekontEtkisi: say(r.dekontEtkisi) });
+    cikti.push({
+      cariKod: r.cariKod, mikroBeklenen: r.mikroBeklenen,
+      lucaBakiye: say(r.lucaBakiye), dekontEtkisi: say(r.dekontEtkisi),
+      lucaOncekiDonem: say(r.lucaOncekiDonem), lucaBuDonemFatura: say(r.lucaBuDonemFatura),
+    });
   });
   if (hatalar.length) {
     console.error(`\nBakiye dosyası doğrulaması DÜŞTÜ (${hatalar.length}):`);
@@ -203,6 +213,13 @@ function bakiyeOku(yol: string): BakiyeBeklenen[] {
 }
 
 const para = (n: number): string => n.toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+
+/** Aktarilan donemin yili = manifestteki EN ERKEN tarihin yili. Sabit yil gomulmez. */
+function hedefDonemYili(satirlar: readonly ManifestSatiri[]): string {
+  let enErken = satirlar[0]?.tarih ?? '';
+  for (const s of satirlar) if (s.tarih < enErken) enErken = s.tarih;
+  return enErken.slice(0, 4);
+}
 
 // ── Ana akış ─────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
@@ -402,8 +419,50 @@ async function main(): Promise<void> {
         const ad = gecerli.find(g => g.s.cariKod.toUpperCase() === t.kod.toUpperCase())?.s.cariAd ?? '';
         console.log(`   ${t.kod.padEnd(10)} | ${para(t.simdi).padStart(14)} | ${para(t.bek).padStart(15)} | ${para(t.fark).padStart(15)} | ${ad.slice(0, 28)}`);
       }
-      console.log('\n   Bu farklar Mikro\'da EKSİK/FAZLA fatura ya da yanlış eşleşme anlamına gelir.');
-      console.log('   Yalnız tutan carileri yazmak için: --yalniz-tutan');
+      // DÖNEM AYRIMI — farkın ÖNCEKİ dönemden mi bu dönemden mi geldiğini gösterir.
+      // Aktarım yalnız bu dönemi düzeltir; önceki dönemden gelen fark o dönemin
+      // muavini gelmeden kapanmaz. İkisini ayırmadan "aktarım işe yaramadı" sanılır.
+      const yil = hedefDonemYili(satirlar);
+      const sinir = `${yil}0101`;
+      const { rows: donemRows, hata: donemHata } = await mikroSql(
+        `SELECT cha_kod, ` +
+        `SUM(CASE WHEN cha_tarihi <  '${sinir}' THEN (CASE WHEN cha_tip = 0 THEN cha_meblag ELSE -cha_meblag END) ELSE 0 END) AS onceki, ` +
+        `SUM(CASE WHEN cha_tarihi >= '${sinir}' THEN (CASE WHEN cha_tip = 0 THEN cha_meblag ELSE -cha_meblag END) ELSE 0 END) AS budonem ` +
+        `FROM CARI_HESAP_HAREKETLERI WHERE cha_kod IN (${inListesi(bakKodlari)}) GROUP BY cha_kod`);
+      if (donemHata) {
+        console.log(`\n   Dönem ayrımı okunamadı (yalnız bilgi amaçlı): ${donemHata}`);
+      } else {
+        const onceki = new Map<string, number>(), budonem = new Map<string, number>();
+        for (const r of donemRows) {
+          const k = String(r.cha_kod ?? '').trim().toUpperCase();
+          const o = Number(r.onceki), b = Number(r.budonem);
+          if (Number.isFinite(o)) onceki.set(k, o);
+          if (Number.isFinite(b)) budonem.set(k, b);
+        }
+        const bakiyeIndeks = new Map(beklenenler.map(b => [b.cariKod.toUpperCase(), b]));
+        let farkOnceki = 0, farkBuDonem = 0, olculen = 0;
+        console.log(`\n   FARK NEREDEN GELİYOR? (${yil} öncesi / ${yil})`);
+        console.log(`   cari kod   |  ${yil} önc. fark |     ${yil} fark | ad`);
+        for (const t of tutmayan.sort((a, b) => Math.abs(b.fark) - Math.abs(a.fark)).slice(0, 25)) {
+          const k = t.kod.toUpperCase();
+          const b = bakiyeIndeks.get(k);
+          const mo = onceki.get(k), mb = budonem.get(k);
+          if (!b || mo === undefined || mb === undefined || !Number.isFinite(b.lucaOncekiDonem) || !Number.isFinite(b.lucaBuDonemFatura)) {
+            console.log(`   ${t.kod.padEnd(10)} |              — |              — | (dönem verisi yok)`);
+            continue;
+          }
+          const fo = mo - b.lucaOncekiDonem, fb = mb - b.lucaBuDonemFatura;
+          farkOnceki += fo; farkBuDonem += fb; olculen++;
+          const ad = gecerli.find(g => g.s.cariKod.toUpperCase() === k)?.s.cariAd ?? '';
+          console.log(`   ${t.kod.padEnd(10)} | ${para(fo).padStart(14)} | ${para(fb).padStart(14)} | ${ad.slice(0, 30)}`);
+        }
+        if (olculen) {
+          console.log(`   ${'TOPLAM'.padEnd(10)} | ${para(farkOnceki).padStart(14)} | ${para(farkBuDonem).padStart(14)} | (${olculen} cari)`);
+          console.log(`\n   ${yil} ÖNCESİ farkı bu aktarım KAPATMAZ — o dönemin muavini gerekir.`);
+          console.log(`   ${yil} farkı ise Mikro ile LUCA'nın ${yil} FATURALARININ ayrıldığını gösterir.`);
+        }
+      }
+      console.log('\n   Yalnız tutan carileri yazmak için: --yalniz-tutan');
     }
   }
 
