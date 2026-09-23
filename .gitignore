@@ -20,6 +20,7 @@ dist.old/
 
 # Kod incelemesi baglam paketi (scripts/inceleme-paketi.sh uretir, gecicidir)
 .cetpa-inceleme/
+.paket/
 .paket-test/
 
 # lead-birlestir vb. veri scriptlerinin JSON yedekleri (PII) — asla commit edilmez
