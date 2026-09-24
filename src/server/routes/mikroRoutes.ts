@@ -29,7 +29,7 @@
 import type { AdminDbLike, AdminDocRef, DocDaralt } from '../adminDbTypes.js';
 import type { Express, Request, Response } from 'express';
 import { FaturaKaydetSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema, type Sema } from '../schemas.js';
-import cron from 'node-cron';
+import { zamanla } from '../zamanla.js';
 import { timingSafeEqual } from 'crypto';
 import { findKey, kolonSec } from '../../lib/mikroKolon.js';
 import {
@@ -2516,8 +2516,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       return '';
     };
 
-    // 03:20 — gece yedeğinden (03:30) ÖNCE bitsin diye erken.
-    cron.schedule('20 3 * * *', async () => {
+    // 03:20 İstanbul (zamanla.ts). Yedek görevi 03:30 SUNUCU-yerel saattedir;
+    // sunucu dilimi düzeltilene kadar ikisi arasında sıra ilişkisi yoktur.
+    zamanla('20 3 * * *', async () => {
       const companyId = await sqlSenkronHedefTenant();
       if (!companyId) return;
       if (!(await getMikroCreds())) { console.warn('Mikro SQL senkron: kimlik yok, atlandı.'); return; }
@@ -2544,9 +2545,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // yani eski bir faturanın iptal edilmesi 90 günü geçtiyse bize hiç
     // yansımıyordu. Tam senkron bunu kapatır.
     //
-    // 02:00: gecelik SQL senkronundan (03:20) ve yedekten (03:30) ÖNCE biter.
+    // 02:00 İstanbul: gecelik SQL senkronundan (03:20 İstanbul) ÖNCE biter. Yedek
+    // görevi sunucu-yerel 03:30'dadır (yukarıdaki not), onunla sıra ilişkisi kurulmaz.
     // Ayda bir olduğu için yükü kabul edilebilir.
-    cron.schedule('0 2 1 * *', async () => {
+    zamanla('0 2 1 * *', async () => {
       const companyId = await sqlSenkronHedefTenant();
       if (!companyId) return;
       if (!(await getMikroCreds())) { console.warn('Mikro TAM senkron: kimlik yok, atlandı.'); return; }

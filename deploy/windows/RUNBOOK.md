@@ -156,6 +156,20 @@ Cutover doğrulandıktan sonra:
 
 ---
 
+## [11] Sunucu saat dilimi — Pasifik → İstanbul (2026-09-24 bulgusu)
+
+Sunucu Pasifik dilimindeydi (PG damgaları `-07`; gece Mikro senkronu `03:20-07` = 13:20 İstanbul).
+Kod artık dilimden bağımsız (`src/server/zamanla.ts`, cron'lar Europe/Istanbul), ama Mikro/SQL Server,
+Görev Zamanlayıcı, Windows Update ve PG gösterimi OS dilimine bağlı kalır. Sırayla:
+
+1. **Yalnız DİLİMİ değiştir, saati elle ADIMLAMA** (yönetici PowerShell): `tzutil /s "Turkey Standard Time"` — anında etkili, restart gerekmez. Epoch değişmez; node-cron kaçırılan koşuyu telafi etmediği için saat adımı (elle ayar / `w32tm` step) o günkü işi atlatır — adım olduysa 2. adımı mutlaka yap.
+2. `Restart-Service cetpa` — Node dilimi süreç başında önbellekler; restart'sız yerel tarih çağrıları eski dilimde kalır. (Bir deploy da aynı işi görür.)
+   **Tetik kayması (tek seferlik):** `zamanla()` sürümünün İLK deploy'u ya da bu restart, tetikleri eski Pasifik saatinden İstanbul'a kaydırır; node-cron geçmiş eşleşmeyi telafi etmez. Restart 08:30–18:30 İstanbul arasına düşerse o gün bekçi (08:30) ve saklama (08:15) bir kez atlanır; 03:20–13:20 arasına düşerse gece SQL senkronu (03:20) ve stok senkronu (04:00) da o gün koşmaz. Restart'ı **18:30 İstanbul'dan sonra** (ya da 03:20'den önce) yap; olmadıysa süper-admin panelindeki Operasyon Bekçisi kartından "Elle çalıştır" (`POST /api/ops/watchdog/run`) ile o günün `opsChecks` kaydını üret, gerekirse ERP Hub'dan SQL senkronunu tetikle.
+3. PostgreSQL kendi dilimini kurulumda OS'tan kopyalar, OS'la DEĞİŞMEZ: `C:\Program Files\PostgreSQL\15\data\postgresql.conf` içinde `timezone` ve `log_timezone` → `'Europe/Istanbul'`, sonra psql `SELECT pg_reload_conf();` (restart gerekmez), teyit `SHOW timezone;`. Yapılmazsa `pg-sorgu.ps1` damgaları `-07` görünmeye devam eder ("düzeltme tutmadı" yanılgısı).
+4. Görev Zamanlayıcı'daki yedek görevi (`CetpaDbBackupOffsite`, `register-backup-task.ps1`, 03:30 yerel) artık 03:30 İstanbul'da koşar. **Değişikliği o günün yedeği KOŞTUKTAN sonra — 13:30 İstanbul'dan sonra — yap** (o zaman boşluk ~14 saat). Sabah yapıldıysa adım 1'den hemen sonra `Start-ScheduledTask -TaskName CetpaDbBackupOffsite` ile yedeği elle koştur; aksi hâlde ~38 saatlik yedeksiz pencere oluşur ve bekçi (08:30 örneklemesi, 26 sa eşiği) bunu GÖRMEZ. Teyit: `Get-ScheduledTaskInfo -TaskName CetpaDbBackupOffsite | Select LastRunTime,NextRunTime` → NextRunTime ertesi gün 03:30. Plesk zamanlanmış görevleri ve Windows Update etkin saatlerine (08–17 yerel) bir kez bak.
+5. Mikro'yu bir kez aç (lisans/tarih); `GETDATE()` damgaları bir kez 10 saat ileri atlar, geri gitme yok.
+6. Teyit (ertesi gün): `pg-sorgu.ps1 -Sql "SELECT data->>'operation', updated_at FROM docs WHERE coll='syncLog' AND data->>'userId'='system' ORDER BY updated_at DESC LIMIT 3"` → `03:20:xx+03`.
+
 ### İş bölümü özeti
 | Claude (repo/kod) | Sen (sunucu) |
 |---|---|

@@ -20,7 +20,7 @@
  */
 import { resendGonderici } from './eposta.js';
 import type { AdminDbLike, AdminDocRef, DocDaralt } from './adminDbTypes.js';
-import cron from 'node-cron';
+import { zamanla, IS_SAAT_DILIMI } from './zamanla.js';
 import { getMikroCreds, mikroPost, mikroData, mikroBugun, mikroStokMiktari,
          mikroSatisFiyatlari, mikroVergiOranlari, vergiOraniCoz,
          MIKRO_JUMP_SURUM } from './mikroClient.js';
@@ -120,7 +120,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
     return out;
   };
 
-  cron.schedule('0 * * * *', async () => {
+  zamanla('0 * * * *', async () => {
     // Yazıcı kaydı (2026-09-11): bakım scripti kilidi koyduktan sonra bu koşunun BİTMESİNİ bekler —
     // yalnız başlangıçta kilide bakmak yetmiyordu (T0 ref'leriyle silinen kopya diriliyordu).
     const yaziciSonucu = await yaziciOlarakCalistir(deps().getPgPool?.() ?? null, 'mikro-cron', async () => {
@@ -329,7 +329,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
   });
 
   // ── Gece 04:00: stok miktar + maliyet senkronu (yalnız V17+) ──────────────
-  cron.schedule('0 4 * * *', async () => {
+  zamanla('0 4 * * *', async () => {
     if (MIKRO_JUMP_SURUM < 17) return; // GenelAmacliMaliyetListesiV2 V16'da yok
     const cronCreds = await getMikroCreds();
     const db = deps().getAdminDb();
@@ -389,7 +389,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
 // ── Weekly email report cron ────────────────────────────────────────────────
 // Every Monday at 08:00 — send summary report to REPORT_RECIPIENT_EMAIL
 if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
-  cron.schedule('0 8 * * 1', async () => {
+  zamanla('0 8 * * 1', async () => {
     if (!deps().getAdminDb()) return;
     const recipient = process.env.REPORT_RECIPIENT_EMAIL;
     const resendKey = process.env.RESEND_API_KEY;
@@ -448,7 +448,10 @@ if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
       const arrow    = karsilastirma.yon === 'artis' ? '▲' : '▼';
       const color    = karsilastirma.yon === 'artis' ? '#10b981' : '#ef4444';
 
-      const weekStr = `${d7.toLocaleDateString('tr-TR')} – ${now.toLocaleDateString('tr-TR')}`;
+      // Etiket İş takviminde (tetik de öyle); süreç dilimine bırakılırsa Pasifik
+      // sunucuda Pazartesi 08:00 İstanbul = Pazar 22:00 yazar (inceleme 2026-09-24).
+      const gunStr = (t: Date) => t.toLocaleDateString('tr-TR', { timeZone: IS_SAAT_DILIMI });
+      const weekStr = `${gunStr(d7)} – ${gunStr(now)}`;
 
       const html = `
 <!DOCTYPE html><html><head><meta charset="utf-8"></head>

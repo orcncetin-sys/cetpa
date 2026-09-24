@@ -49,7 +49,7 @@ import fs from "fs";
 import multer from "multer";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import cron from "node-cron";
+import { zamanla } from "./src/server/zamanla.js";
 // firebase-admin 14 NAMESPACE API'sini KALDIRDI (admin.auth(), admin.firestore(),
 // admin.storage(), admin.credential artik yok) — moduler alt-yol importlari sart.
 import { initializeApp, cert, type Credential, type App } from "firebase-admin/app";
@@ -1128,7 +1128,7 @@ async function fetchAndCacheExchangeRates() {
 }
 
 // Schedule cron job
-cron.schedule('*/30 * * * *', fetchAndCacheExchangeRates);
+zamanla('*/30 * * * *', fetchAndCacheExchangeRates);
 fetchAndCacheExchangeRates(); // Initial fetch
 
 // ── Mikro Jump API — Config & Helpers ───────────────────────────────────────
@@ -1173,7 +1173,7 @@ async function saklamaSuresiUygula(): Promise<Array<{ coll: string; silinen: num
 }
 
 // Gunde bir, bekciden once (bekci sonucu raporlayabilsin).
-cron.schedule('15 8 * * *', () => { void saklamaSuresiUygula(); });
+zamanla('15 8 * * *', () => { void saklamaSuresiUygula(); });
 // Açılışta bir kez: sunucu dolu diskle ayağa kalkmışsa hemen haber ver.
 
 /** Bekçiyi koştur, BOZUK kontrol varsa e-posta at (2026-07-28).

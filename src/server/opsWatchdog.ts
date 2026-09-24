@@ -16,7 +16,7 @@
  */
 import { resendGonderici, resendSagligi } from './eposta.js';
 import type { AdminDbLike } from './adminDbTypes.js';
-import cron from 'node-cron';
+import { zamanla, isGunu } from './zamanla.js';
 import fs from 'fs';
 import path from 'path';
 import tls from 'tls';
@@ -181,8 +181,7 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
       else {
         const withStock = snap.docs.filter(d => Number((d.data() as Record<string, unknown>).stockLevel) > 0).length;
         stockRatio = withStock / total;
-        const yd = new Date(Date.now() - 86_400_000);
-        const ydStr = `${yd.getFullYear()}-${String(yd.getMonth() + 1).padStart(2, '0')}-${String(yd.getDate()).padStart(2, '0')}`;
+        const ydStr = isGunu(new Date(Date.now() - 86_400_000));   // dünün İstanbul günü (zamanla.ts)
         const prev = await db.collection('opsChecks').doc(ydStr).get();
         const prevRatio = prev.exists ? Number((prev.data() as Record<string, unknown>).stockRatio) : NaN;
         const drop = Number.isFinite(prevRatio) ? prevRatio - stockRatio : 0;
@@ -401,8 +400,7 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
       const { rows } = await havuz.query("SELECT count(*)::int AS n, pg_total_relation_size('docs') AS b FROM docs");
       docsCount = rows[0]?.n ?? 0;
       const mb = Number(rows[0]?.b ?? 0) / 1024 ** 2;
-      const yd2 = new Date(Date.now() - 86_400_000);
-      const yd2Str = `${yd2.getFullYear()}-${String(yd2.getMonth() + 1).padStart(2, '0')}-${String(yd2.getDate()).padStart(2, '0')}`;
+      const yd2Str = isGunu(new Date(Date.now() - 86_400_000));   // dünün İstanbul günü (zamanla.ts)
       const db = deps().getAdminDb();
       const prev = db ? await db.collection('opsChecks').doc(yd2Str).get() : null;
       const prevCount = prev?.exists ? Number((prev.data() as Record<string, unknown>).docsCount) : NaN;
@@ -434,7 +432,7 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   }
 
   const d = new Date();
-  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const date = isGunu(d);   // opsChecks/<İstanbul günü> — tetik de İstanbul (zamanla.ts)
   const ok = checks.every(c => c.ok);
   try {
     const db = deps().getAdminDb();
@@ -443,8 +441,6 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
   console.log(`Ops watchdog: ${ok ? 'PASS' : 'FAIL'} — ${checks.map(c => `${c.ok ? '+' : '!'}${c.key}`).join(' ')}`);
   return { date, ok, checks, stockRatio };
 }
-// Her sabah 08:30 (sunucu saati) — gece yedeği ve gece cron'ları bittikten sonra.
-
 /** ── Disk nöbetçisi: SAATLİK, PostgreSQL'e BAĞIMSIZ ──────────────────────────
  *
  *  Neden ayrı: 2026-07-31'de disk %100 doldu (sistem-yönetimli sayfa dosyası
@@ -685,7 +681,11 @@ export async function runOpsWatchdogAndAlert(): Promise<void> {
  */
 export function initOpsWatchdog(d: OpsDeps): void {
   D = d;
-  cron.schedule('30 8 * * *', () => { void runOpsWatchdogAndAlert(); });
-  cron.schedule('7 * * * *', () => { void diskNobetcisi(); });
+  // Her sabah 08:30 İstanbul (zamanla.ts) — gece Mikro cron'ları (02:00/03:20/04:00
+  // İstanbul) ve 08:15 saklama süresi bittikten sonra. Off-site yedek görevi
+  // 03:30 SUNUCU-yerel saattedir; bekçi bir önceki yedeği en fazla ~19 saat
+  // yaşında görür, 26 saatlik eşik tutar.
+  zamanla('30 8 * * *', () => { void runOpsWatchdogAndAlert(); });
+  zamanla('7 * * * *', () => { void diskNobetcisi(); });
   setTimeout(() => { void diskNobetcisi(); }, 30_000);
 }
