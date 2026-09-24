@@ -1569,7 +1569,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
                      // Yoksa istemci fatura tarihine düşer (uydurma vade YAZILMAZ).
                      'cha_vade_tarihi'],
     siralama: 'cha_tarihi DESC, cha_Guid',
-    ekKosul: 'cha_iptal = 0',
+    // ISNULL: cha_iptal NULL olan satir (or. API ile yazilan LUCA dekontlari) SESSIZCE
+    // elenmesin — kardes sorgular (1530, 1791, 4337) ve denetim C16 ile ayni kural. 2026-09-24.
+    ekKosul: 'ISNULL(cha_iptal, 0) = 0',
     iptalKolonu: 'cha_iptal',
     tarihKolonu: 'cha_tarihi',
     collection: 'mikroCariHareketler', label: 'Mikro Cari Hareketleri',
@@ -3082,7 +3084,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const sql =
         "SELECT TOP 2000 cha_Guid, cha_evrakno_seri, cha_evrakno_sira, cha_tarihi, cha_tip, cha_cinsi, " +
         "cha_kod, cha_aciklama, cha_meblag, cha_aratoplam, cha_ebelge_turu, cha_belge_no, cha_kasa_hizkod, cha_kasa_hizmet " +
-        "FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 AND cha_iptal = 0 ORDER BY cha_tarihi DESC";
+        "FROM CARI_HESAP_HAREKETLERI WHERE cha_evrak_tip = 63 AND ISNULL(cha_iptal, 0) = 0 ORDER BY cha_tarihi DESC";
       const { ok, data, status } = await mikroPost('SqlVeriOkuV2', { SQLSorgu: sql });
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       if (!ok || !r0 || r0.IsError) {
@@ -3167,7 +3169,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       }
 
       const kosul = [`${tarihCol} BETWEEN '${ilkTarih}' AND '${sonTarih}'`];
-      if (iptalCol) kosul.push(`${iptalCol} = 0`);
+      if (iptalCol) kosul.push(`ISNULL(${iptalCol}, 0) = 0`)   /* ISNULL: sabit kardesler (1530/1574/1593) ile ayni kural; hakem 2026-09-24 */;
       const secim = [`${tipCol} AS tip`, `SUM(${vergiCol}) AS kdv`];
       if (tutarCol) secim.push(`SUM(${tutarCol}) AS matrah`);
       const grup = [tipCol];
@@ -4567,7 +4569,7 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
 
       const kosul: string[] = [];
       if (tarihCol) kosul.push(`${tarihCol} BETWEEN '${ilkTarih}' AND '${sonTarih}'`);
-      if (iptalCol) kosul.push(`${iptalCol} = 0`);   // iptal edilmiş fişler mizana girmez
+      if (iptalCol) kosul.push(`ISNULL(${iptalCol}, 0) = 0`)   /* ISNULL: sabit kardesler (1530/1574/1593) ile ayni kural; hakem 2026-09-24 */;   // iptal edilmiş fişler mizana girmez
       const where = kosul.length ? ` WHERE ${kosul.join(' AND ')}` : '';
       const { rows, hata } = await mikroSql(
         `SELECT ${hesapCol} AS hesapKodu, ` +

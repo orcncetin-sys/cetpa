@@ -90,7 +90,11 @@ async function apiPost<T>(path: string, body?: unknown): Promise<T> {
     const res = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeader },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      // Govdesiz POST yazilmaz — authFetch.ts ile AYNI sozlesme. DURUST NOT (hakem 2026-09-24):
+      // tarayici govdesiz fetch'e KENDISI Content-Length: 0 ekler; 2026-08-18'deki IIS 411 olcumu
+      // curl ileydi (Content-Length hic yok). Yani bu satir tarayicidan 502'yi ACIKLAMAZ; yine de
+      // tek sozlesme + istemci disi cagiranlar (test/betik) icin tutuluyor.
+      body: JSON.stringify(body ?? {}),
     });
     const data = await res.json().catch(() => ({ success: false, error: `HTTP ${res.status}` }));
     return data as T;

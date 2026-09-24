@@ -3,7 +3,7 @@ import {
   RefreshCw, CheckCircle2, XCircle, AlertCircle, Download,
   Package, Users, Activity, Clock, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { collection, doc, query, limit, onSnapshot } from '../lib/dbClient';
+import { collection, doc, query, where, limit, orderBy, onSnapshot } from '../lib/dbClient';
 import { db, auth } from '../firebase';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -172,12 +172,12 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   const [retAciklama, setRetAciklama] = useState('');
 
   useEffect(() => {
-    const q = query(collection(db, 'mikroFaturalar'), limit(50));
+    // Eski: `limit(50)` alip SONRA `.filter(yon === 'alis')` — hem sirasiz hem limit-sonrasi-suzme:
+    // 50 rastgele faturanin icinden alislar seciliyordu, yeni gelen fatura listeye girmeyebiliyordu.
+    // dbClient sirasi where -> orderBy -> limit (applyConstraints). 2026-09-24 hasimsal tur, E4 kardesi.
+    const q = query(collection(db, 'mikroFaturalar'), where('yon', '==', 'alis'), orderBy('cha_tarihi', 'desc'), limit(50));
     const unsub = onSnapshot(q, snap => {
-      const alis = snap.docs
-        .filter(d => (d.data() as GelenFatura & { yon?: string }).yon === 'alis')
-        .map(d => ({ id: d.id, ...(d.data() as Omit<GelenFatura, 'id'>) }));
-      setGelenFaturalar(alis);
+      setGelenFaturalar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<GelenFatura, 'id'>) })));
     }, () => {});
     return () => unsub();
   }, []);
@@ -228,6 +228,9 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   useEffect(() => {
     const q = query(
       collection(db, 'syncLog'),
+      // orderBy YOKTU: kayit olsa bile EN YENI 30 degil RASTGELE 30 geliyordu (2026-09-24 teshis, CONFIRMED).
+      // ErpSyncPanel:119 ile ayni desen.
+      orderBy('timestamp', 'desc'),
       limit(30)
     );
     const unsub = onSnapshot(
