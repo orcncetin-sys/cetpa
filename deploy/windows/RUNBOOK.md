@@ -1,6 +1,8 @@
 # Cetpa — AlmaLinux → Windows Server 2022 Geçiş Runbook'u
 
-**Hedef sunucu:** `213.238.190.124` (Windows Server 2022, Plesk kurulu)
+**Hedef sunucu:** `78.111.111.185` (Windows Server 2022, Plesk kurulu)
+> IP geçmişi: `213.238.190.124` → `78.111.111.185` (ODEAWEB donanım taşıması, 2026-09-24 gecesi;
+> aynı VM/disk, yalnız genel IP değişti). Aşağıdaki adreslerin hepsi güncel IP'yi gösterir.
 **Mimari:** Native Node (Windows Service, NSSM) + **Plesk+IIS+ARR reverse proxy** (Caddy DEĞİL — bkz. not) + PostgreSQL 15
 **Sebep:** Mikro V17 (Windows-native ERP) aynı box'ta çalışacak.
 
@@ -20,7 +22,7 @@ Sıra: **yeni box'ı tam kur → test et → EN SON DNS'i çevir.** DNS çevrilm
 [4] Yerel test (port 5173 üzerinden, DNS/proxy'siz)
 [5] Plesk'te app.cetpa.com.tr subdomain'i oluştur
 [6] setup-iis-proxy.ps1 → ARR/URL Rewrite kur, web.config yerleştir
-[7] DNS'i 213.238.190.124'e çevir  ← kesme anı
+[7] DNS'i 78.111.111.185'e çevir  ← kesme anı
 [8] Plesk'te app.cetpa.com.tr için Let's Encrypt aç → HTTPS canlı
 [9] CI/CD'yi Windows'a çevir (ci.yml swap)
 [10] Doğrula → eski box'ı emekliye ayır
@@ -55,7 +57,7 @@ npm ci --legacy-peer-deps
 Gerçek prod dosyası eski box'ta `/opt/cetpa/.env` DEĞİL, **`/opt/cetpa/.env.production`** (docker-compose `env_file` ile kullanılıyor). Doğrudan eski sunucudan yeni sunucuya (aradan geçmeden) taşı:
 ```bash
 # eski sunucuda (root):
-scp /opt/cetpa/.env.production "administrator@213.238.190.124:C:/cetpa/.env"
+scp /opt/cetpa/.env.production "administrator@78.111.111.185:C:/cetpa/.env"
 ```
 Sonra yeni box'ta `DATABASE_URL` satırını TCP'ye çevir — eski box'ta **Unix domain socket** (`?host=/var/run/postgresql`) kullanılıyordu, Windows'ta bu yol yok:
 ```powershell
@@ -75,7 +77,7 @@ npm run build   # vite build -> dist/
 **Eski box'ta (AlmaLinux, hâlâ canlı)** — gerçek db adını ve kullanıcıyı `.env.production`'daki `DATABASE_URL`'den al, sonra dök:
 ```bash
 PGPASSWORD='<PAROLA>' pg_dump -Fc -h /var/run/postgresql -U <KULLANICI> <DBADI> > /root/cetpa_db_$(date +%F).dump
-scp /root/cetpa_db_*.dump "administrator@213.238.190.124:C:/cetpa/cetpa_db.dump"
+scp /root/cetpa_db_*.dump "administrator@78.111.111.185:C:/cetpa/cetpa_db.dump"
 ```
 
 **Yeni box'ta** — db/kullanıcı oluştur (eski box'takiyle AYNI kullanıcı/parola/db adı — `.env`'i hiç değiştirmemize gerek kalmaz) + geri yükle:
@@ -128,7 +130,7 @@ Yapılanlar: `iis-arr` (ARR+URL Rewrite) kurulur, ARR proxy özelliği sunucu ge
 
 ## [7] DNS cutover  ← kesme anı
 
-DNS panelinde `app.cetpa.com.tr` **A kaydını** `213.238.190.124`'e çevir. `nslookup app.cetpa.com.tr` yeni IP'yi gösterene kadar bekle.
+DNS panelinde `app.cetpa.com.tr` **A kaydını** `78.111.111.185`'e çevir. `nslookup app.cetpa.com.tr` yeni IP'yi gösterene kadar bekle.
 
 ## [8] Let's Encrypt (Plesk)
 
@@ -140,7 +142,7 @@ curl.exe -s -o NUL -w "%{http_code}`n" https://app.cetpa.com.tr/api/health   # 2
 ## [9] CI/CD → Windows
 
 Cutover doğrulandıktan sonra:
-1. GitHub repo **Secrets**: `VDS_HOST=213.238.190.124`, `VDS_USER=administrator`, `VDS_SSH_KEY`= yeni box'ta oluşturduğun deploy anahtarının **private** kısmı. Public kısmı yeni box'ta `C:\ProgramData\ssh\administrators_authorized_keys`'e ekle.
+1. GitHub repo **Secrets**: `VDS_HOST=78.111.111.185`, `VDS_USER=administrator`, `VDS_SSH_KEY`= yeni box'ta oluşturduğun deploy anahtarının **private** kısmı. Public kısmı yeni box'ta `C:\ProgramData\ssh\administrators_authorized_keys`'e ekle.
 2. `deploy/windows/ci-windows.yml` içeriğini `.github/workflows/ci.yml` üzerine al, commit + push.
 3. Push artık Windows'a SSH ile `deploy.ps1` çalıştırır (git reset --hard → build → `Restart-Service cetpa` → health).
 
