@@ -3,6 +3,7 @@ const CanliSevkiyatPanel = React.lazy(() => import('../components/CanliSevkiyatP
 import { eslesir } from '../utils/arama';
 import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli } from '../utils/siparis';
 import { irsaliyeIstegi, irsaliyeNedenMetni } from '../utils/siparisler/irsaliyeGonder';
+import { faturaKesilebilir, mikroyaFaturaGonderilebilir } from '../utils/siparisler/faturaDurumu';
 import { mikroDepoSecenekleri } from '../utils/muhasebe/depoNo';
 import { onayAcikMi } from '../lib/confirm';
 import { siparisBelgeTipi, type BelgeTipi } from '../utils/siparisler/belgeTipi';
@@ -1446,7 +1447,10 @@ export default function OrdersPage({
                                     <CheckCircle2 className="w-4 h-4" />
                                   </button>
                                 )}
-                                {!order.hasInvoice && order.faturali !== false && (
+                                {/* Faturası OLAN satırda (Mikro faturası / mikroFaturaNo / hasInvoice) düğme KAPALI —
+                                    kullanıcı kuralı 2026-09-24: "faturası olan bir şeye tekrar fatura kestiremeyiz".
+                                    `faturali` bayrağı fatura KANITI değildir (faturalı satış tipi) — utils/siparisler/faturaDurumu. */}
+                                {faturaKesilebilir(order) && (
                                   <button
                                     onClick={() => setActiveTab('muhasebe')}
                                     className="text-xs font-bold px-2 py-1 bg-brand/10 text-brand hover:bg-brand hover:text-white rounded-lg transition-all flex items-center gap-1"
@@ -1462,7 +1466,7 @@ export default function OrdersPage({
                                   </span>
                                 )}
                                 {/* Mikro e-Fatura push */}
-                                {!order.mikroFaturaNo && order.faturali !== false && (
+                                {mikroyaFaturaGonderilebilir(order) && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); void handleMikroFatura(order); }}
                                     disabled={!!faturaLoading[order.id]}
@@ -1928,7 +1932,8 @@ export default function OrdersPage({
                         </button>
                       )}
                       {/* Mikro e-Fatura button in order detail */}
-                      {!selectedOrder.mikroFaturaNo && selectedOrder.faturali !== false && (
+                      {/* Satirdaki dugmeyle AYNI kaynak (faturaDurumu) — detay penceresi yarim duzeltme kalmasin (code-review 2026-09-24). */}
+                      {mikroyaFaturaGonderilebilir(selectedOrder) && (
                         <button
                           onClick={() => void handleMikroFatura(selectedOrder)}
                           disabled={!!faturaLoading[selectedOrder.id]}
