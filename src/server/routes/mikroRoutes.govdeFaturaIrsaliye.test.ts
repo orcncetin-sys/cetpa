@@ -199,6 +199,15 @@ describe('POST /api/mikro/fatura/kaydet — bilinen sipariş: eski gövdeyle Bİ
     expect(res.govde).toMatchObject({ success: true, mikroFaturaNo: 'FTR-000123', ettn: 'E-1111' });
   });
 
+  it('İkiz ölçümü (I2): syncLog yanıtın yalnız ANAHTAR yollarını taşır — numara/ETTN DEĞERİ yazılmaz', async () => {
+    basariliYanit({ faturaNo: 'FTR-000123', ettn: 'E-1111', sira: 777 });
+    await faturaGonder(SIPARIS);
+
+    const cagri = vi.mocked(d.syncLog).mock.calls.find(c => c[0] === 'FaturaKaydetV2');
+    expect(cagri?.[8]).toEqual({ yanitAnahtarlari: ['result[0].IsError', 'result[0].Data.ettn', 'result[0].Data.faturaNo', 'result[0].Data.sira'] });
+    expect(JSON.stringify(cagri?.[8])).not.toMatch(/E-1111|777/);
+  });
+
   it('başarılı push siparişi damgalar (mikroFaturaDate gövdedeki tarihin AYNISI)', async () => {
     basariliYanit({ faturaNo: 'FTR-000123', ettn: 'E-1111' });
     await faturaGonder(SIPARIS);

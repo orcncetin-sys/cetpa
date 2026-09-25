@@ -97,7 +97,7 @@ import {
   kalemleriBirimle, okumaArizasiUyarisi, OKUMA_ARIZASI_ESIK, type SiparisSatiri,
 } from '../mikro/eslemeFatura.js';
 import { eBelgeNormalize, eBelgeleriNormalize, cariHareketYonOzeti } from '../mikro/eBelge.js';
-import { belgeNoMetni } from '../mikro/belgeNo.js';
+import { belgeNoMetni, yanitAnahtarYollari } from '../mikro/belgeNo.js';
 // KDV özeti / mizan eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/raporKdvMizan.ts
 import { kdvKirilimi, mizanSatirlari, mizanToplami } from '../mikro/raporKdvMizan.js';
 
@@ -4557,7 +4557,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const ettn          = belgeNoMetni(md?.ettn, md?.Ettn, md?.uuid);
       const errorMsg   = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
 
-      await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', success, mikroFaturaNo, errorMsg, duration, C.reqActor(req));
+      // İkiz ölçümü (I2): yanıtın yalnız ANAHTAR yolları — evrak sırası hangi anahtarda, önce ölçülür (tahmin yok).
+      // Tanı yardımcısı YASAL BELGE yolunu asla düşürmez: fatura Mikro'da ARTIK VAR — burada fırlayan hata 500 → kullanıcı
+      // tekrar dener → ikinci e-Fatura (P5-3 ile aynı sınıf). Çıkarılamazsa işaret yazılır.
+      let yanitAnahtarlari: string[];
+      try { yanitAnahtarlari = yanitAnahtarYollari(data); } catch { yanitAnahtarlari = ['…(yol çıkarılamadı)']; }
+      await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', success, mikroFaturaNo, errorMsg, duration, C.reqActor(req),
+        { yanitAnahtarlari });
       if (success) {
         if (C.getPgPool()) {
           const client = await C.getPgPool().connect();

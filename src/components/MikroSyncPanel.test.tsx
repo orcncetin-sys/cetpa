@@ -314,6 +314,17 @@ describe('MikroSyncPanel — Senkron Geçmişi: yetkisizlik ≠ boşluk', () => 
     expect(screen.queryByText(/göremez/)).toBeNull();
   });
 
+  it('İkiz ölçümü (I2): kayıttaki Mikro yanıt ANAHTARLARI satırda görünür (kullanıcı bunu iletir)', async () => {
+    koleksiyonAyarla('syncLog', [{ id: 'k2', veri: {
+      operation: 'FaturaKaydetV2', entityType: 'order', entityId: 'ord12345678',
+      success: true, mikroRef: null, error: null, duration: 900,
+      ayrinti: { yanitAnahtarlari: ['result[0].Data.sira', 'result[0].IsError'] },
+    } }]);
+    await cizVeBekle();
+    fireEvent.click(screen.getByRole('button', { name: /Senkronizasyon Geçmişi/ }));
+    expect(screen.getByText(/Yanıt alanları: result\[0\]\.Data\.sira, result\[0\]\.IsError/)).toBeInTheDocument();
+  });
+
   it("userRole 'Admin' + boş liste → 'Henüz senkronizasyon kaydı yok'", async () => {
     await cizVeBekle();
     fireEvent.click(screen.getByRole('button', { name: /Senkronizasyon Geçmişi/ }));

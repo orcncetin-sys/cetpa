@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { belgeNoMetni } from './belgeNo';
+import { belgeNoMetni, yanitAnahtarYollari } from './belgeNo';
 
 describe('belgeNoMetni — Mikro yanıtındaki evrak numarasının METİN karşılığı', () => {
   it('PARİTE: dolu metin olduğu gibi döner (kırpılmış)', () => {
@@ -46,5 +46,71 @@ describe('belgeNoMetni — Mikro yanıtındaki evrak numarasının METİN karş�
   it('ilkBelgeNo: yedek zincirinin İLK geçerli değerini verir', () => {
     expect(belgeNoMetni(undefined, null, 1042, 'ARD')).toBe('1042');
     expect(belgeNoMetni(undefined, null, 0, '')).toBeNull();
+  });
+});
+
+describe('yanitAnahtarYollari — İkiz ölçümü (I2): Mikro yanıtının ANAHTAR yolları, DEĞER ASLA', () => {
+  const ZARF = { result: [{ IsError: false, Data: { faturaNo: 'FTR-0000731', ettn: 'aa11-bb22-cc33', sira: 90417 } }] };
+
+  it('zarfın yollarını verir: her seviyede yapraklar önce, sonra dallar (sıralı); dizide ilk öğe [0]', () => {
+    expect(yanitAnahtarYollari(ZARF)).toEqual([
+      'result[0].IsError', 'result[0].Data.ettn', 'result[0].Data.faturaNo', 'result[0].Data.sira',
+    ]);
+  });
+
+  it('DEĞER sızmaz: numara, ETTN ve sayı çıktıda YOK', () => {
+    const metin = JSON.stringify(yanitAnahtarYollari(ZARF));
+    for (const deger of ['FTR-0000731', 'aa11-bb22-cc33', '90417', 'false']) expect(metin).not.toContain(deger);
+  });
+
+  it('satır düzeyi (Data[0].evraklar[0].detay[0].sth_evrakno_sira) varsayılan derinlikte görünür — dizi dalı erken kesmez', () => {
+    expect(yanitAnahtarYollari({ result: [{ Data: [{ evraklar: [{ seri: 'F', detay: [{ sth_evrakno_sira: 1 }] }] }] }] }))
+      .toContain('result[0].Data[0].evraklar[0].detay[0].sth_evrakno_sira');
+  });
+
+  it('toplu gövde yanıtı (Data.evraklar[0] / Data[0].evraklar[0]) varsayılan derinlikte SIRAYA kadar görünür', () => {
+    expect(yanitAnahtarYollari({ result: [{ IsError: false, Data: { evraklar: [{ seri: 'F', sira: 1 }] } }] }))
+      .toContain('result[0].Data.evraklar[0].sira');
+    expect(yanitAnahtarYollari({ result: [{ Data: [{ evraklar: [{ belge: { sira: 1 } }] }] }] }))
+      .toContain('result[0].Data[0].evraklar[0].belge.sira');
+  });
+
+  it('boş dizi/nesne işaretlenir; ilkel kök ve null boş liste', () => {
+    expect(yanitAnahtarYollari({ result: [] })).toEqual(['result[]']);
+    expect(yanitAnahtarYollari({ result: [{ Data: {} }] })).toEqual(['result[0].Data{}']);
+    expect(yanitAnahtarYollari(null)).toEqual([]);
+    expect(yanitAnahtarYollari('Api Server Error')).toEqual([]);
+    expect(yanitAnahtarYollari({ a: null })).toEqual(['a']);
+  });
+
+  it('derinlik sınırına gelen dal İŞARETLİ ({…} / […]) — yaprak sanılmaz', () => {
+    expect(yanitAnahtarYollari({ a: { b: { c: { d: { e: 1 } } } } }, 60, 3)).toEqual(['a.b.c{…}']);
+    expect(yanitAnahtarYollari({ a: { b: [{ c: 1 }] } }, 60, 2)).toEqual(['a.b[…]']);
+  });
+
+  it('iç içe DİZİDE de derinlik uygulanır (kök dahil) — çok derin dizi yığını taşırmaz', () => {
+    expect(yanitAnahtarYollari([[[[{ a: 1 }]]]], 60, 2)).toEqual(['[0][0][…]']);
+    expect(yanitAnahtarYollari({ r: [[[{ a: 1 }]]] }, 60, 3)).toEqual(['r[0][0][…]']);
+    let derin: unknown = { a: 1 };
+    for (let i = 0; i < 20000; i++) derin = [derin];
+    expect(() => yanitAnahtarYollari({ result: derin })).not.toThrow();
+    expect(yanitAnahtarYollari({ result: derin }).at(-1)).toMatch(/\[…\]$/);
+  });
+
+  it('kaçak büyüklük koruması: sayım 5000\'de durur, işaret alt sınır olduğunu söyler (+)', () => {
+    const g = Object.fromEntries(Array.from({ length: 6000 }, (_, i) => [`k${String(i).padStart(4, '0')}`, 1]));
+    const y = yanitAnahtarYollari(g);
+    expect(y).toHaveLength(61);
+    expect(y.at(-1)).toBe('…(+4941+ yol kırpıldı)');
+  });
+
+  it('yol sınırı SESSİZ değil: son öğe kırpma işareti; zarf alanı (IsError) büyük Data dalının arkasında düşmez', () => {
+    const data = Object.fromEntries(Array.from({ length: 70 }, (_, i) => [`sth_a${String(i).padStart(2, '0')}`, 1]));
+    const y = yanitAnahtarYollari({ result: [{ IsError: false, ErrorMessage: null, Data: { ...data, sth_evrakno_sira: 5 } }] });
+    expect(y).toHaveLength(61);
+    expect(y[0]).toBe('result[0].ErrorMessage');
+    expect(y).toContain('result[0].IsError');
+    expect(y[60]).toBe('…(+13 yol kırpıldı)');
+    expect(yanitAnahtarYollari({ [`${'x'.repeat(50)}`]: 1 })[0]).toBe('x'.repeat(40) + '…');
   });
 });

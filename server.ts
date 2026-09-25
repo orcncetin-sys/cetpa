@@ -1194,7 +1194,9 @@ async function writeSyncLog(
   error:      string | null,
   // null = BİLİNMİYOR (açılış taraması: yarıda kalan işin süresi ölçülemedi — 0 uydurulmaz; panel '—' basar).
   duration:   number | null,
-  actor?:     { uid: string; email: string }
+  actor?:     { uid: string; email: string },
+  // Tanı ayrıntısı (ör. Mikro yanıtının ANAHTAR yolları — değer değil; mikro/belgeNo.yanitAnahtarYollari).
+  ayrinti?:   Record<string, unknown>
 ): Promise<void> {
   if (!adminDb) return;
   try {
@@ -1208,6 +1210,7 @@ async function writeSyncLog(
       error,
       duration,
       ...(actor ? { userId: actor.uid, userEmail: actor.email } : {}),
+      ...(ayrinti ? { ayrinti } : {}),
     });
   } catch (e) {
     console.warn('syncLog write failed:', e);

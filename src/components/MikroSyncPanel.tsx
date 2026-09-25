@@ -38,6 +38,8 @@ interface SyncLogEntry {
   error: string | null;
   duration: number;
   timestamp?: { toDate: () => Date };
+  /** Tanı ayrıntısı — `yanitAnahtarlari`: Mikro yanıtının yalnız ANAHTAR yolları (İkiz ölçümü I2; değer yok). */
+  ayrinti?: { yanitAnahtarlari?: unknown };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1035,6 +1037,12 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
                       </td>
                       <td className="px-4 py-2.5 text-gray-500 font-mono text-[10px]">
                         {entry.mikroRef || '—'}
+                        {/* İkiz ölçümü (I2): numara hangi anahtarda dönüyor — kullanıcı bu satırı iletir. */}
+                        {Array.isArray(entry.ayrinti?.yanitAnahtarlari) && entry.ayrinti.yanitAnahtarlari.length > 0 && (
+                          <span className="block mt-0.5 text-gray-400 break-all">
+                            Yanıt alanları: {(entry.ayrinti.yanitAnahtarlari as unknown[]).map(String).join(', ')}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         {entry.success
