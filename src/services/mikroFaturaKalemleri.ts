@@ -4,7 +4,8 @@
  * fişi PDF'i bunu kullanır. (MikroFaturaDetay kendi effect'inde aynı ucu çağırır — o bileşen ayrı turda buna bağlanır.)
  */
 import { authFetch } from './authFetch';
-import type { KalemSaglamasi } from '../lib/stokFiyat';
+import { kalemleriCoz, kalemSaglamasi, type KalemSaglamasi } from '../lib/stokFiyat';
+import { toplaBilinen, type Tutar } from '../utils/para';
 
 export interface FaturaEvragi { seri: string; sira: string; yon: 'gelen' | 'giden' }
 export type KalemSonucu = { ok: true; kalemler: Record<string, unknown>[] } | { ok: false; hata: string };
@@ -45,7 +46,7 @@ export function kalemleriMikrodanOkunacak(o: {
 export function mikroKalemNotlari(araBilinmeyen: number, kdvBilinmeyen: number, saglama: KalemSaglamasi | null, dil: string): string[] {
   const tr = dil === 'tr';
   const notlar: string[] = [];
-  if (araBilinmeyen > 0) notlar.push(tr ? `${araBilinmeyen} kalemin neti hesaplanamadı — ara toplama girmedi.` : `${araBilinmeyen} line(s) could not be netted — excluded from subtotal.`);
+  if (araBilinmeyen > 0) notlar.push(tr ? `${araBilinmeyen} kalemin tutarı çözülemedi — brüt, iskonto ve ara toplama girmedi.` : `${araBilinmeyen} line(s) could not be resolved — excluded from gross, discount and subtotal.`);
   if (kdvBilinmeyen > 0) notlar.push(tr ? `${kdvBilinmeyen} kalemin KDV'si okunamadı — KDV toplamına girmedi.` : `${kdvBilinmeyen} line(s) with unreadable VAT — excluded from VAT total.`);
   if (saglama && !saglama.tutuyor && saglama.eksik === 0) {
     const f = (n: number) => n.toLocaleString(tr ? 'tr-TR' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -56,3 +57,78 @@ export function mikroKalemNotlari(araBilinmeyen: number, kdvBilinmeyen: number, 
   return notlar;
 }
 
+/** Kalem tablosunun bir satırı — ekran ve fiş AYNI modeli basar. */
+export interface MikroKalemSatiri {
+  ad: string;
+  sku: string | null;
+  /** "100 ADET" / "100" / "—". */
+  miktarMetni: string;
+  /** Liste birim fiyatı: brüt ÷ miktar (KDV hariç, iskonto ÖNCESİ). Miktar 0/bilinmiyor → null ('—'). */
+  birimFiyat: number | null;
+  /** Satır iskontosu + satıra dağıtılmış fatura altı iskonto (brüt − net). Bilinmiyorsa null. */
+  iskonto: number | null;
+  /** İskonto satırda yazılı DEĞİL, fatura altı: 'baslik' = fatura toplamından satırlara dağıtıldı (doğrulanmış);
+   *  'kdv' = başlıkla doğrulanamadı, satırın KDV'sinden TAHMİN (eski oranlı iskontosuz satırla aynı aritmetik —
+   *  lib/stokFiyat BİLİNEN SINIR). Satır/iskontosuz kaynakta null. */
+  faturaAltiKaynagi: 'baslik' | 'kdv' | null;
+  /** KDV hariç net tutar (iskonto düşülmüş). */
+  net: number | null;
+}
+export interface MikroKalemTablosu {
+  satirlar: MikroKalemSatiri[];
+  /** İskonto ÖNCESİ toplam (KDV hariç). */
+  brut: Tutar;
+  iskonto: Tutar;
+  /** Net ara toplam (KDV hariç). */
+  ara: Tutar;
+  kdv: Tutar;
+  /** Satır masrafları; sağlama kurulamadıysa (genel toplam bilinmiyor) null — gösterilmez, 0 UYDURULMAZ. */
+  masraf: number | null;
+  notlar: string[];
+}
+
+/**
+ * K-İSKONTO (2026-09-25, kullanıcı: "iskontoları atlama"): Mikro kalemleri brüt birim fiyat + iskonto + net ile gösterilir;
+ * eskiden yalnız iskonto düşülmüş net basılıyordu, iskonto görünmüyordu. TEK model: ekran (MikroSiparisKalemleri) ve sipariş
+ * fişi PDF'i bunu kullanır — ikisi ayrı ayrı tablo kuruyordu (kopya kod), bir sütun birinde eklenip ötekinde unutulurdu.
+ * Hesap lib/stokFiyat.kalemleriCoz (fatura detayı ve Fiyat Karşılaştırma ile AYNI; fatura altı iskonto başlıkla hakemlenir).
+ */
+export function mikroKalemTablosu(kalemler: readonly Record<string, unknown>[], genelToplam: unknown, dil: string): MikroKalemTablosu {
+  const tr = dil === 'tr';
+  const cozumler = kalemleriCoz(kalemler, genelToplam);
+  const satirlar = kalemler.map((k, i): MikroKalemSatiri => {
+    const c = cozumler[i];
+    const birim = typeof k.birim === 'string' && k.birim ? ` ${k.birim}` : '';
+    const miktar = c?.miktar ?? null;
+    const sku = k.sth_stok_kod != null && String(k.sth_stok_kod).trim() ? String(k.sth_stok_kod).trim() : null;
+    return {
+      ad: String(k.urunAdi ?? '').trim() || sku || '—',
+      sku,
+      miktarMetni: miktar === null ? '—' : `${miktar}${birim}`,
+      birimFiyat: c && c.brut !== null && miktar !== null && miktar > 0 ? c.brut / miktar : null,
+      iskonto: c?.iskonto ?? null,
+      faturaAltiKaynagi: c?.kaynak === 'faturaAltiBasliktan' ? 'baslik' : c?.kaynak === 'faturaAltiKdvden' ? 'kdv' : null,
+      net: c?.net ?? null,
+    };
+  });
+  const brut = toplaBilinen(cozumler, c => c.brut);
+  const iskonto = toplaBilinen(cozumler, c => c.iskonto);
+  const ara = toplaBilinen(cozumler, c => c.net);
+  const kdv = toplaBilinen(kalemler, k => k.sth_vergi);
+  const saglama = kalemSaglamasi(kalemler, cozumler, genelToplam);
+  const notlar = mikroKalemNotlari(ara.bilinmeyen, kdv.bilinmeyen, saglama, dil);
+  // İnceleme 2026-09-25: iki fatura altı kaynağı AYNI cümleyle ("faturanın toplamından") basılıyordu; KDV'den türetilen
+  // tahmin doğrulanmış iskonto gibi görünüyordu. Metinler Fiyat Karşılaştırma ile aynı dilde, kaynağa göre ayrı.
+  const iskontolu = satirlar.filter(s => (s.iskonto ?? 0) > 0);
+  if (iskontolu.some(s => s.faturaAltiKaynagi === 'baslik')) {
+    notlar.push(tr
+      ? 'İskontonun bir kısmı fatura altı iskontodur — satırda yazılı değil, fatura toplamından satırlara dağıtıldı.'
+      : 'Part of the discount is an invoice-level discount — not on the line; allocated to lines from the invoice total.');
+  }
+  if (iskontolu.some(s => s.faturaAltiKaynagi === 'kdv')) {
+    notlar.push(tr
+      ? "Bazı satırların iskontosu satırda yazılı değil ve fatura toplamıyla doğrulanamadı — satırın KDV'sinden TAHMİN edildi (eski oranlı iskontosuz satır da olabilir); faturayı Mikro'da kontrol edin."
+      : 'Some line discounts are not on the line and could not be verified against the invoice total — ESTIMATED from the line VAT (could also be an old-rate line without discount); check the invoice in Mikro.');
+  }
+  return { satirlar, brut, iskonto, ara, kdv, masraf: saglama ? saglama.masraf : null, notlar };
+}

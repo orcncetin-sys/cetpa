@@ -2005,6 +2005,36 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
              "UNION ALL SELECT 'CARI_HESAPLAR', COUNT(*) FROM CARI_HESAPLAR " +
              "UNION ALL SELECT 'STOKLAR', COUNT(*) FROM STOKLAR " +
              "UNION ALL SELECT 'EBELGE_EVRAK_HAREKETLERI', COUNT(*) FROM EBELGE_EVRAK_HAREKETLERI" },
+      // GİB / İPTAL KEŞFİ (2026-09-25 kullanıcı isteği: "GİB'den kabul edilmeyen faturaları da çekelim, iptal
+      // faturaları iptal olarak görünsün ama başka bir hesaplamaya dahil olmasın"). Bir faturanın GİB ya da alıcı
+      // tarafından reddedildiği bilgisi kodun HİÇBİR yerinde okunmuyor; kolon adı TAHMİN EDİLMEZ (cha_vergi /
+      // cha_ettn dersi) — önce şema. Yalnız INFORMATION_SCHEMA + kodda zaten kullanılan cha_* kolonları.
+      { ad: 'ebelgeTabloAdaylari',
+        sql: "SELECT TABLE_NAME, (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS c WHERE c.TABLE_NAME = t.TABLE_NAME) AS kolonSayisi " +
+             "FROM INFORMATION_SCHEMA.TABLES t WHERE t.TABLE_NAME LIKE '%EBELGE%' OR t.TABLE_NAME LIKE '%EFATURA%' " +
+             "OR t.TABLE_NAME LIKE '%EARSIV%' OR t.TABLE_NAME LIKE '%GIB%' OR t.TABLE_NAME LIKE '%ZARF%' ORDER BY TABLE_NAME" },
+      { ad: 'ebelgeEvrakKolonlari',
+        sql: "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'EBELGE_EVRAK_HAREKETLERI' ORDER BY ORDINAL_POSITION" },
+      { ad: 'ebelgeEvrakOrnek',
+        sql: 'SELECT TOP 3 * FROM EBELGE_EVRAK_HAREKETLERI' },
+      // TÜM kolonlar (süzgeçsiz): ad deseni Türkçe harmanlamada 'I'/'ı' farkıyla kolon kaçırıp sahte "kolon yok"
+      // sonucu verebilirdi (inceleme 2026-09-25). Teşhis ucu — ebelgeEvrakKolonlari ile aynı biçim.
+      { ad: 'chaKolonlari',
+        sql: "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'CARI_HESAP_HAREKETLERI' ORDER BY ORDINAL_POSITION" },
+      // Fatura-listesi importuyla AYNI evrak koşulu; iptal kırılımı (bugün iptaller importta elenir, süpürgeyle silinir).
+      { ad: 'iptalFaturaDagilimi',
+        sql: "SELECT ISNULL(cha_iptal, 0) AS iptal, cha_tip, cha_ebelge_turu, COUNT(*) AS adet, SUM(cha_meblag) AS toplam " +
+             "FROM CARI_HESAP_HAREKETLERI WHERE (cha_evrak_tip = 63 OR (cha_evrak_tip = 0 AND cha_cinsi = 6)) " +
+             "GROUP BY ISNULL(cha_iptal, 0), cha_tip, cha_ebelge_turu ORDER BY 1, 2, 3" },
+      { ad: 'iptalFaturaOrnek',
+        sql: "SELECT TOP 10 cha_evrakno_seri, cha_evrakno_sira, cha_evrak_tip, cha_tip, cha_tarihi, cha_meblag, cha_ebelge_turu, cha_kod, cha_aciklama " +
+             "FROM CARI_HESAP_HAREKETLERI WHERE ISNULL(cha_iptal, 0) <> 0 AND (cha_evrak_tip = 63 OR (cha_evrak_tip = 0 AND cha_cinsi = 6)) " +
+             "ORDER BY cha_tarihi DESC" },
+      // Fatura satırlarının iptal kırılımı (sth_iptal ve sth_evraktip kodda zaten kullanılıyor): iptal edilen faturanın
+      // satırları da iptal mi işaretleniyor — kalem kaynağı (inventoryMovements) iptalleri importta eliyor.
+      { ad: 'faturaSatirIptalDagilimi',
+        sql: "SELECT sth_evraktip, ISNULL(sth_iptal, 0) AS iptal, COUNT(*) AS adet FROM STOK_HAREKETLERI " +
+             "WHERE sth_evraktip IN (3, 4) GROUP BY sth_evraktip, ISNULL(sth_iptal, 0) ORDER BY 1, 2" },
     ];
 
     const sonuc: Record<string, unknown> = {};

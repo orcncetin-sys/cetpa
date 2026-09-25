@@ -42,9 +42,13 @@ describe('Siparişler — işlem düğmeleri', () => {
     expect(kod).not.toMatch(/disabled=\{(selectedOrder|order)\.source === 'mikro-siparis'\}/);
     expect(kod).toMatch(/if \(!x \|\| !yerelDegistirilebilir\(x\)\) continue;/);
   });
-  it('iç not Mikro kaynaklı siparişe de yazılır (ayrı kapı); fiş masrafı ekranla aynı koşulla basar', () => {
+  it('iç not Mikro kaynaklı siparişe de yazılır (ayrı kapı); fiş Mikro kalemlerini EKRANLA ORTAK modelden basar (K-İSKONTO)', () => {
     expect(kod).toMatch(/if \(!ordersKaydi\(selectedOrder\.id\)\) return;/);
-    expect(kod).toMatch(/saglama505 !== null && saglama505\.masraf > 0/);
+    // Fiş ve ekran aynı modeli kullanır: sütunlar (birim fiyat → iskonto → net), masraf koşulu ve notlar tek yerde.
+    // Fişte ayrı hesap (kalemleriCoz / kalemSaglamasi doğrudan) geri gelirse iskonto sütunu bir yüzeyde unutulur.
+    expect(kod).toMatch(/mikroKalemTablosu\(mikroKalem505\.kalemler, o\.totalPrice, currentLanguage\)/);
+    expect(kod).toMatch(/tablo505\.masraf !== null && tablo505\.masraf > 0/);
+    expect(kod).not.toMatch(/\bkalemleriCoz\(|\bkalemSaglamasi\(/);
   });
   it('CRM sayfası da AYNI kural: iki Sil düğmesi + durum seçicisi + işleyiciler', () => {
     expect((crm.match(/disabled=\{!yerelDegistirilebilir\(order\)\}/g) ?? []).length).toBeGreaterThanOrEqual(3);

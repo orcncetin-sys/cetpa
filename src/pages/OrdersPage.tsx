@@ -7,9 +7,8 @@ import { faturaKesilebilir, mikroyaFaturaGonderilebilir } from '../utils/siparis
 import { yerelDegistirilebilir, sevkiyatEngeli, sevkiyatEngeliMetni, yerelDegistirilemezMetni } from '../utils/siparisler/siparisIslemleri';
 import { useMikroSiparisKalemleri } from '../hooks/useMikroSiparisKalemleri';
 import MikroSiparisKalemleri from '../components/siparis/MikroSiparisKalemleri';
-import { kalemleriMikrodanOkunacak, mikroFaturaKalemleriGetir, mikroKalemNotlari } from '../services/mikroFaturaKalemleri';
+import { kalemleriMikrodanOkunacak, mikroFaturaKalemleriGetir, mikroKalemTablosu } from '../services/mikroFaturaKalemleri';
 import { kalemTutari, kalemBirimFiyati, kdvDahilKalemVar } from '../utils/pano/stokSevkiyat';
-import { kalemleriCoz, kalemSaglamasi } from '../lib/stokFiyat';
 import { authFetch } from '../services/authFetch';
 import { mikroDepoSecenekleri } from '../utils/muhasebe/depoNo';
 import { onayAcikMi } from '../lib/confirm';
@@ -2131,7 +2130,7 @@ export default function OrdersPage({
                           if (o.customerEmail) doc505.text(o.customerEmail, 14, govdeY505 + 11);
                           const lineItems505 = (o.lineItems || []);
                           // Kalemleri Cetpa'ya aktarılmamış Mikro faturası siparişi: kalemler Mikro'dan canlı (MF-383, 2026-09-25:
-                          // "fiş pdf diyince detayı olmadığı için çekemiyor"). Tutarlar NET, KDV hariç (lib/stokFiyat.kalemleriCoz).
+                          // "fiş pdf diyince detayı olmadığı için çekemiyor"). Tutarlar KDV hariç; iskonto ayrı sütun (services/mikroFaturaKalemleri.mikroKalemTablosu).
                           const mikroEvrak505 = lineItems505.length === 0 ? kalemleriMikrodanOkunacak(o) : null;
                           const mikroKalem505 = mikroEvrak505 ? await mikroFaturaKalemleriGetir(mikroEvrak505, currentLanguage === 'tr') : null;
                           if (lineItems505.length > 0) {
@@ -2153,33 +2152,36 @@ export default function OrdersPage({
                               footStyles: { fillColor: PDF_RENK.light, fontStyle: 'bold', fontSize: 10 },
                             });
                           } else if (mikroKalem505 && mikroKalem505.ok && mikroKalem505.kalemler.length > 0) {
-                            const kalemler505 = mikroKalem505.kalemler;
-                            const coz505 = kalemleriCoz(kalemler505, o.totalPrice);
+                            // Tablo modeli ekranla ORTAK (services/mikroFaturaKalemleri.mikroKalemTablosu): aynı sütunlar (birim fiyat →
+                            // iskonto → net, K-İSKONTO), aynı alt satırlar (masraf dahil) ve aynı notlar — ikisi ayrı kuruluyordu.
+                            const tablo505 = mikroKalemTablosu(mikroKalem505.kalemler, o.totalPrice, currentLanguage);
                             const tr505 = currentLanguage === 'tr';
-                            const ara505 = toplaBilinen(coz505, c => c.net);
-                            const kdv505 = toplaBilinen(kalemler505, k => k.sth_vergi);
-                            // Ekrandaki tabloyla AYNI notlar (MikroSiparisKalemleri): okunamayan kalem ve tutmayan sağlama SESSİZ geçmez.
-                            const saglama505 = kalemSaglamasi(kalemler505, coz505, o.totalPrice);
-                            const notlar505 = mikroKalemNotlari(ara505.bilinmeyen, kdv505.bilinmeyen, saglama505, currentLanguage);
+                            const iskontoVar505 = tablo505.iskonto.toplam > 0;   // ekranla AYNI kural (MikroSiparisKalemleri)
+                            const alt505 = (etiket: string, tutar: string, kalin = false) =>
+                              [{ content: etiket, colSpan: 5, styles: { halign: 'right' as const, ...(kalin ? { fontStyle: 'bold' as const } : {}) } }, tutar];
                             autoTable(doc505, {
                               ...pdfTabloStili(marka505),
                               startY: govdeY505 + 20,
                               margin: { bottom: PDF_ALT_BANT_YUKSEKLIK + 20 },
-                              head: [[ oc(currentLanguage).urun, 'SKU', oc(currentLanguage).adet_2, tr505 ? 'Birim (KDV hariç)' : 'Unit (excl. VAT)', tr505 ? 'Tutar (KDV hariç)' : 'Amount (excl. VAT)' ]],
-                              body: kalemler505.map((k, i) => [
-                                String(k.urunAdi ?? '').trim() || String(k.sth_stok_kod ?? ''),
-                                String(k.sth_stok_kod ?? ''),
-                                `${coz505[i]?.miktar ?? '—'}${typeof k.birim === 'string' && k.birim ? ` ${k.birim}` : ''}`,
-                                paraYaz(coz505[i]?.birimFiyat ?? null),
-                                paraYaz(coz505[i]?.net ?? null),
+                              head: [[ oc(currentLanguage).urun, 'SKU', oc(currentLanguage).adet_2, tr505 ? 'Birim fiyat (KDV hariç)' : 'Unit price (excl. VAT)', tr505 ? 'İskonto' : 'Discount', tr505 ? 'Tutar (net, KDV hariç)' : 'Amount (net, excl. VAT)' ]],
+                              body: tablo505.satirlar.map(r => [
+                                r.ad,
+                                r.sku ?? '',
+                                r.miktarMetni,
+                                paraYaz(r.birimFiyat),
+                                r.iskonto === null ? '—' : r.iskonto > 0 ? `−${paraYaz(r.iskonto)}` : paraYaz(0),
+                                paraYaz(r.net),
                               ]),
                               foot: [
-                                [{ content: tr505 ? 'Ara toplam (KDV hariç)' : 'Subtotal (excl. VAT)', colSpan: 4, styles: { halign: 'right' } }, paraYaz(ekranTutari(ara505))],
-                                // Masraf ekranla AYNI koşulla (MikroSiparisKalemleri) — yoksa fişte ara + KDV toplamı tutmaz, fark açıklamasız kalırdı.
-                                ...(saglama505 !== null && saglama505.masraf > 0 ? [[{ content: tr505 ? 'Masraf' : 'Charges', colSpan: 4, styles: { halign: 'right' as const } }, paraYaz(saglama505.masraf)]] : []),
-                                [{ content: oc(currentLanguage).kdv, colSpan: 4, styles: { halign: 'right' } }, paraYaz(ekranTutari(kdv505))],
-                                [{ content: oc(currentLanguage).toplam_2, colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, paraYaz(o.totalPrice)],
-                                ...notlar505.map(n => [{ content: n, colSpan: 5, styles: { halign: 'right' as const, fontStyle: 'normal' as const, fontSize: 7, textColor: [180, 90, 0] as [number, number, number] } }]),
+                                ...(iskontoVar505 ? [
+                                  alt505(tr505 ? 'Brüt toplam (KDV hariç)' : 'Gross total (excl. VAT)', paraYaz(ekranTutari(tablo505.brut))),
+                                  alt505(tr505 ? 'İskonto' : 'Discount', `−${paraYaz(ekranTutari(tablo505.iskonto))}`),
+                                ] : []),
+                                alt505(tr505 ? 'Ara toplam (net, KDV hariç)' : 'Subtotal (net, excl. VAT)', paraYaz(ekranTutari(tablo505.ara))),
+                                ...(tablo505.masraf !== null && tablo505.masraf > 0 ? [alt505(tr505 ? 'Masraf' : 'Charges', paraYaz(tablo505.masraf))] : []),
+                                alt505(oc(currentLanguage).kdv, paraYaz(ekranTutari(tablo505.kdv))),
+                                alt505(oc(currentLanguage).toplam_2, paraYaz(o.totalPrice), true),
+                                ...tablo505.notlar.map(n => [{ content: n, colSpan: 6, styles: { halign: 'right' as const, fontStyle: 'normal' as const, fontSize: 7, textColor: [180, 90, 0] as [number, number, number] } }]),
                               ],
                               footStyles: { fillColor: PDF_RENK.light, fontStyle: 'bold', fontSize: 10 },
                             });

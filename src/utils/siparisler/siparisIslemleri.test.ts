@@ -30,6 +30,15 @@ describe('sevkiyatEngeli — "teslim edilen bir şeye tekrar sevkiyat oluşturul
   it('bekleyen / hazırlanan / kargodaki siparişe açılır', () => {
     for (const status of ['Pending', 'Processing', 'Shipped']) expect(sevkiyatEngeli({ ...native, status }, [])).toBeNull();
   });
+  // K-MİKRO-SİPARİŞ (2026-09-25): Mikro Siparişleri sekmesindeki satır `orders` dokümanı değil, durumu yer tutucu
+  // 'Pending' — durum kuralları onu "açılır" sayıyordu, sevkiyat öksüz kalıyordu. Faturadan türeyen MF siparişi AÇIK kalır.
+  it("Mikro Siparişleri satırı (source 'mikro-siparis', durum yer tutucu 'Pending') sevkiyat AÇMAZ; faturadan türeyen MF açar", () => {
+    expect(sevkiyatEngeli({ id: 'm1', source: 'mikro-siparis', status: 'Pending' }, [])).toBe('mikroSiparisi');
+    expect(sevkiyatEngeli({ id: 'm1', source: 'mikro-siparis', status: 'Delivered' }, [])).toBe('mikroSiparisi');
+    expect(sevkiyatEngeli({ ...mf383, status: 'Pending' }, [])).toBeNull();
+    expect(sevkiyatEngeliMetni('mikroSiparisi', 'tr')).toMatch(/faturadan türeyen Cetpa siparişinden/);
+    expect(sevkiyatEngeliMetni('mikroSiparisi', 'en')).toMatch(/derived from the invoice/);
+  });
   it('neden metni iki dilde', () => {
     expect(sevkiyatEngeliMetni('teslimEdildi', 'tr')).toMatch(/teslim edilmiş/);
     expect(sevkiyatEngeliMetni('sevkiyatAcik', 'en')).toMatch(/already has/);
