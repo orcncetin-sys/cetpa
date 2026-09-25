@@ -42,6 +42,26 @@
  * onu kovalar. ÖLÇÜLDÜ: iki panel de bugün zaten `if (o.status === 'Cancelled') continue;` ile
  * atlıyor (:312, :361) → K2 bu iki panelde rakam DEĞİŞTİRMEZ; bağlama süzgeci sadece KORUR.
  * P186 bir ADET panelidir ama AYNI kümeyi kullanır (tek kartta iki farklı sipariş kümesi olmasın).
+ * `mevsimsellikEndeksi` (6b eki) de aynı karardadır: sipariş okumaz, kovaları alır; GB3 mevsimsellik paneli
+ * (`:554-561`) bugün iptalleri DIŞLAMIYOR → K2 bağlama süzgeciyle uygulanır, rakam DEĞİŞİR (beklenen).
+ *
+ * ## 6b EKİ (2026-09-24, Faz 3 6/n Genel I) — `mevsimsellikEndeksi` (ADDITIVE; `zamanKovalari` DOKUNULMADI)
+ * Neden var — src/components/reports/genel/GenelBloklar3.tsx:553-598 "Ciro Mevsimsellik Endeksi" (HEAD 912d750):
+ *   :560 `monthRevenue[m].push(o.totalPrice);`                         — bilinmeyen tutar `undefined` giriyor → :565 reduce
+ *        NaN → o ay TÜMDEN kayboluyor, ekranda iz yok
+ *   :565 `vals.length > 0 ? Σ/len : 0`                                   — ay ortalaması TÜRETME; boş ay 0 → "veri yok" ile
+ *        "ciro sıfır" ayırt edilemiyor
+ *   :567 `… / Math.max(1, monthAvg.filter(v=>v>0).length)`               — sahte payda; süzgeç iki kez (kopya)
+ *   :572 `peakMonth = seasonality.reduce(…, -1)`                         — -1 kalabilir → :576 `monthNames[-1]` = "peak: undefined"
+ * Aynı hesabın ikinci kopyası GenelBloklar6.tsx:140-156 (×100 biçim, "100 = average month") — aynı taban, GB6 bağlaması AYRI alt faz.
+ * TABAN (K28 kullanıcı: "Dönem tanımları: parite + adlandırma"): AY ORTALAMASI (`tamTutar(ciro) / adet`), genel ortalama =
+ *   ölçülen ayların AĞIRLIKSIZ aritmetik ortalaması — GB3:565/GB6:152 ile AYNI tanım. AY TOPLAMI tabanı YAZILMADI (tüketicisi yok).
+ * PARİTE: hepsi bilinen girdide endeksler eski formülle BİREBİR (test 1); `avg > 0` süzgeci korunur (meşru ₺0 ay da
+ *   `verisizAy` — gerçek sıfır ile "veri yok" ayrımı ayrı karar ister, orkestratöre açık soru).
+ * BİLİNÇLİ FARKLAR (mevsimsellikEndeksi): ay ortalaması TÜRETMEdir (`tamTutar` kapısı) — ayda tutarı okunamayan TEK kayıt
+ *   varsa o ay ölçülemez (`tutarsizAy`, endeks `null`) ve tabana GİRMEZ; `olculenAy === 0` → hepsi `null`, `zirve null`
+ *   (sahte payda `Math.max(1, …)` YOK); zirve aday yoksa `null` (-1 DEĞİL); endeks KIRPILMAZ (bugünkü `Math.min(80, s*40)`
+ *   ÇAĞIRANIN ölçek işi, `cubuk.ts`). Sayaçlar AYRIKTIR: `olculenAy + tutarsizAy + verisizAy === aylar.length`.
  *
  * ## `segmentCirosu`'na neden BAĞLANMADI (`src/utils/pano/musteriAnaliz.ts:248`)
  * O yardımcı her siparişi bir METİN segmentine koymak zorundadır (tarihi çözülemeyen / aralık dışı
@@ -55,7 +75,7 @@
  * `stokSevkiyat.haftaIciIsiHaritasi` / `IsiHaritasi` / `TarihliSiparis` — imza, gövde ve testleri
  * AYNEN durur (kapalı modül). Onu buna indirmek 6m sonrası ayrı iştir; sapma test 1 ile kilitli.
  */
-import type { Tutar } from '../para';
+import { tamTutar, type Tutar } from '../para';
 import { zamanDate } from '../zaman';
 import { BOS_TUTAR, kovayaEkle } from '../pano/raporVeriKatmani';
 import type { TarihliSiparis } from '../pano/stokSevkiyat';
@@ -159,4 +179,68 @@ function enBuyukIndeks(kovalar: readonly ZamanKovasi[], sec: (k: ZamanKovasi) =>
  */
 function enCokCiroIndeksi(kovalar: readonly ZamanKovasi[]): number | null {
   return enBuyukIndeks(kovalar, k => (k.ciro.bilinen > 0 ? k.ciro.toplam : 0));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mevsimsellik endeksi (6b eki, 2026-09-24 — GenelBloklar3 :553-598, GenelBloklar6 :140-156)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface MevsimsellikSonucu {
+  /**
+   * Ay başına endeks: `ay ortalaması / genel ortalama` (1 = ortalama ay).
+   * ÖLÇÜLEMEYEN ay `null` — 0 DEĞİL (grafikte sıfıra çakılmasın, `cubukOrani` çubuğu çizmesin).
+   * Uzunluk = girdi uzunluğu.
+   */
+  endeksler: (number | null)[];
+  /** Tabanı kuran ay sayısı (endeksi `null` olmayanlar). */
+  olculenAy: number;
+  /** İçinde tutarı okunamayan sipariş olan ay — ortalaması TÜRETİLEMEZ, endeks `null`. */
+  tutarsizAy: number;
+  /** Hiç kaydı olmayan YA DA bilinen ortalaması `<= 0` olan ay — endeks `null` (bugünkü davranışın paritesi). */
+  verisizAy: number;
+  /** En yüksek endeksli ay (beraberlikte İLK); aday yoksa `null` — 'peak: undefined' biter. */
+  zirve: number | null;
+}
+
+/**
+ * Sabit uzunluklu ay kovalarından (tipik olarak `zamanKovalari(liste, 12, d => d.getMonth(), { tutarSec })`)
+ * mevsimsellik endeksi. Taban = AY ORTALAMASI (ciro / adet) — GB3:565 ve GB6:152 ile AYNI tanım
+ * (K28: dönem tanımı parite + adlandırma). AY TOPLAMI tabanı YAZILMAZ: bugün tüketicisi YOK.
+ *
+ * - Ay ortalaması TÜRETMEdir: `tamTutar(k.ciro) / k.adet`. Ayda tutarı okunamayan TEK kayıt varsa `tamTutar` NaN →
+ *   o ay ölçülemez (`tutarsizAy++`, `endeksler[i] = null`) ve tabana GİRMEZ (kısmi ortalamadan endeks üretilmez).
+ * - `k.adet === 0` ya da ortalama `<= 0` → `verisizAy++`, `endeksler[i] = null` (parite: bugün `avg > 0` süzgeci).
+ * - Sayaçlar AYRIK — her ay tam olarak bir sayaca girer. DEĞİŞMEZ: `olculenAy + tutarsizAy + verisizAy === aylar.length`.
+ * - Genel ortalama = ölçülen ayların ortalamalarının AĞIRLIKSIZ aritmetik ortalaması (bugünkü tanım).
+ *   `olculenAy === 0` → `endeksler` hepsi `null`, `zirve === null` (sahte payda `Math.max(1, …)` YOK).
+ * - `zirve`: en büyük endeks, beraberlikte İLK indeks (`>` ile, `>=` DEĞİL — `enBuyukIndeks` kuralıyla aynı; o yardımcı
+ *   `ZamanKovasi` okuduğu için burada endeks dizisi üzerinde aynı kural yerinde uygulanır). Aday yoksa `null`.
+ * - Endeks KIRPILMAZ; saf: tarih çözmez, sipariş okumaz, dil/metin yok. İptal süzgeci ÇAĞIRANDA (K2). Girdi mutasyona uğramaz.
+ */
+export function mevsimsellikEndeksi(aylar: readonly ZamanKovasi[]): MevsimsellikSonucu {
+  let tutarsizAy = 0;
+  let verisizAy = 0;
+  const ortalamalar: (number | null)[] = aylar.map(k => {
+    if (k.adet === 0) { verisizAy += 1; return null; }                 // hiç kayıt yok
+    const tam = tamTutar(k.ciro);                                      // TÜRETME kapısı: tek tutarsız kayıt → NaN
+    if (!Number.isFinite(tam)) { tutarsizAy += 1; return null; }
+    const ortalama = tam / k.adet;
+    if (!(ortalama > 0)) { verisizAy += 1; return null; }              // parite: `avg > 0` süzgeci (meşru ₺0 ay dâhil)
+    return ortalama;
+  });
+
+  const olculen = ortalamalar.filter((v): v is number => v !== null);
+  const olculenAy = olculen.length;
+  if (olculenAy === 0) {
+    return { endeksler: aylar.map(() => null), olculenAy: 0, tutarsizAy, verisizAy, zirve: null };
+  }
+  const genelOrtalama = olculen.reduce((toplam, v) => toplam + v, 0) / olculenAy;
+  const endeksler = ortalamalar.map(v => (v === null ? null : v / genelOrtalama));
+
+  // Beraberlikte İLK indeks (`>`); aday yoksa null — eski `reduce(…, -1)` "peak: undefined" basıyordu.
+  let zirve: number | null = null;
+  let enBuyuk = 0;
+  endeksler.forEach((e, i) => { if (e !== null && e > enBuyuk) { enBuyuk = e; zirve = i; } });
+
+  return { endeksler, olculenAy, tutarsizAy, verisizAy, zirve };
 }

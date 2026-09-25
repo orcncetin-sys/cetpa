@@ -56,6 +56,16 @@ describe('olcekReferansi — ölçek yalnız TAM bir tepe satırdan kurulur', ()
 });
 
 describe('cubukOrani — kısmi satır çubuk çizdirmez', () => {
+  it('BİLİNEN ₺0 satır ölçek yokken de 0 (taralı "bilinmiyor" DEĞİL) — tüm pencere ₺0 (inceleme 2026-09-25)', () => {
+    expect(cubukOrani(tam(0), NaN)).toBe(0);
+    const satirlar = [tam(0), tam(0), tam(0)];
+    const olcek = olcekReferansi(satirlar);
+    expect(Number.isNaN(olcek)).toBe(true);
+    expect(satirlar.map(s => cubukOrani(s, olcek))).toEqual([0, 0, 0]);
+    // kısmi ₺0 (bilinen 0 + okunamayan kayıt) hâlâ bilinmiyor
+    expect(cubukOrani(kismi(0), NaN)).toBeNull();
+    expect(cubukOrani(kismi(0), 1000)).toBeNull();
+  });
   it('parite: tam satırda oran `(ciro / referans) * 100`', () => {
     expect(cubukOrani(tam(750), 1500)).toBeCloseTo(50, 9);
     expect(cubukOrani(tam(1500), 1500)).toBe(100);

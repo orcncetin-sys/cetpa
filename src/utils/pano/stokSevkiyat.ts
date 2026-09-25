@@ -53,6 +53,40 @@
  *  4. Ürün kovası `sku`, yoksa `name`, o da yoksa TEK "tanımsız" kovası (`anahtar: null`) — eski
  *     kod bunları `'Unknown'` adıyla ekrana basıyordu (İngilizce sızıntısı + sahte ürün adı).
  *  5. Tarihi bilinmeyen sevkiyat sıralamada epoch (0) değil, `sayiSirala` ile HER İKİ yönde SONDA.
+ *
+ * ## 6b EKİ (2026-09-24, Faz 3 6/n Genel I) — `urunSatislari` (ADDITIVE; `enCokSatanlar` sözleşmesi DEĞİŞMEZ)
+ * `enCokSatanlar`ın İÇ gruplaması `urunSatislari` adıyla dışa açıldı; `enCokSatanlar(s, n)` gövdesi artık
+ * `urunSatislari(s).slice(0, n)` + `barOrani` (PLAN-v2 §3.1 Y16). İki 6b tüketicisi aynı işi ayrı ayrı, ayrı
+ * arızalarla yapıyordu (HEAD 912d750'de teyit):
+ *   A · src/components/reports/UrunlerRapor.tsx:57-75
+ *     :63  `const qty = Number(liR.quantity ?? 1) || 1;`                        — miktarı bilinmeyen kalem 1 ADET (kg/ton işinde uydurma)
+ *     :64  `Number(liR.unitPrice ?? liR.price ?? liR.variant_price ?? 0) || 0`  — fiyatı bilinmeyen ₺0; `unitPrice`/`variant_price`
+ *          HAYALET ALAN (sipariş satırına bu adları YAZAN kod yok: types.ts:91-102 OrderLineItem, server.ts:431-435 Shopify)
+ *     :61  `… ?? 'Unknown'`                                                      — adsız kalem sahte ürün satırı (İngilizce sızıntısı)
+ *     :70  `prodMap[key].orderCount++;`                                          — KALEM sayıyor, sipariş değil
+ *     :74  `avgOrderValue: p.orderCount > 0 ? … : 0`                             — türetme, `: 0` sahte kesinliği
+ *   B · src/components/reports/genel/GenelBloklar1.tsx:586-637 (Phase 217 Ürün Karma, Top 6)
+ *     :595 `prodRev217[key].rev += li.price * li.quantity;`                      — KORUMASIZ ÇARPIM: `undefined * 4` → NaN,
+ *          `null * 4` → 0; tek NaN `total217`i (:601) komple NaN yapıyor → TÜM yüzdeler '%0'
+ *     :599 `.sort((a, b) => b.rev - a.rev).slice(0, 6)`                          — NaN karşılaştırıcı "Top 6"yı yanlış seçiyor
+ *     :601 `total217 = sorted217.reduce(…)`                                       — payda YALNIZ ilk 6 ürün → K21
+ * PARİTE (Pano): `enCokSatanlar` çıktısı — anahtar, ad, adet, ciro, sıra, `barOrani` — DEĞİŞMEZ; tek ek `siparisSayisi`.
+ * BİLİNÇLİ FARKLAR (urunSatislari tüketicileri için):
+ *   1. `unitPrice` / `variant_price` yedekleri DÜŞER (yazan kod yok — ölçüldü).
+ *   2. `'Unknown'` ürün adı kalkar → `ad: null` → ekranda '—' (yukarıdaki "BİLİNÇLİ FARKLAR 4" ile aynı karar).
+ *   3. `siparisSayisi` kalem değil BENZERSİZ sipariş sayar → UrunlerRapor "Sipariş" sütunu DÜŞEBİLİR, ürün başına
+ *      ortalama sipariş değeri YÜKSELİR (görünür; orkestratöre açık soru).
+ *   4. GB1 P217 anahtarı `inventoryId` yerine `sku → name` ile başlar (açık soru).
+ * K2 ("İptaller ciroya girsin mi → hayır"): iptal süzgeci BURADA YOK — `SatisSiparisi` `status` OKUMAZ; iç süzgeç
+ *   Pano'nun (DashboardPage:2108 HAM `orders`) sözleşmesini değiştirirdi. İki 6b tüketicisi bugün zaten iptalleri
+ *   atıyor (UrunlerRapor:58, GenelBloklar1:590) → K2 orada rakam DEĞİŞTİRMEZ, süzgeç yalnız KORUNUR.
+ * K21 kullanıcı 2026-09-24: "Tüm ciro" (KARARLAR.md) — `urunSatislari` TÜM ürünleri döndürür; "Top N" yalnız GÖSTERİM
+ *   için çağıranda kesilir, pay paydası TÜM liste.
+ * K-KALEM=A (6b hakem turu 2026-09-24, bulgu 1; ADDITIVE): `UrunSatisSecenek.tutarSec` + `SatisSatiri.total`. Mikro
+ *   faturasından türeyen kalem `price` TAŞIMAZ, tutarı `total`da (KDV dâhil — src/server/mikro/eslemeFatura.ts:166-171);
+ *   varsayılan `satirTutari(price, quantity)` onu "tutarı okunamadı" sayıyor, `tamTutar` kapısı da TÜM ürünlerin payını
+ *   '—' yapıyordu (tutarı yazılı faturaya "okunamadı" = yanlış neden). Kullanıcı K3 (KARARLAR.md): "evet / ana program
+ *   zaten bu." → Mikro verisi KATILIR. Seçici VERİLMEZSE eski yol (Pano paritesi: `enCokSatanlar` geçmez, 5/n testleri sabit).
  */
 import { bilinenSayi, satirTutari, toplaBilinen, sayiSirala, tamTutar, ekranTutari, type Tutar } from '../para';
 import { olcekReferansi, cubukOrani, tutarSatiri } from './cubuk';
@@ -163,11 +197,16 @@ export function stokEsikYaz(k: StokKalemi, esikSec: (k: StokKalemi) => unknown =
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Sipariş satırının okunan alanları (OrderLineItem'e yapısal olarak uyar). */
-export interface SatisSatiri { sku?: unknown; name?: unknown; title?: unknown; quantity?: unknown; price?: unknown }
+export interface SatisSatiri {
+  sku?: unknown; name?: unknown; title?: unknown; quantity?: unknown; price?: unknown;
+  /** Satır tutarı (Mikro türevi kalem: KDV DÂHİL, `price` yok — eslemeFatura.ts:166-171). YALNIZ `tutarSec` okur. */
+  total?: unknown;
+}
 export interface SatisSiparisi { lineItems?: readonly SatisSatiri[] | null }
 
-export interface UrunSatis {
-  /** Kova anahtarı: `sku`, yoksa `name`; ikisi de yoksa null (tek "tanımsız" kovası). */
+/** `enCokSatanlar`ın satırı, çubuk oranı OLMADAN — tüm ürünlerin listesi (6b eki). */
+export interface UrunSatisSatiri {
+  /** Kova anahtarı: `sku`, yoksa `name` (seçenekle `title`); hiçbiri yoksa null (tek "tanımsız" kovası). */
   anahtar: string | null;
   /** Ekranda gösterilecek ad: `name` → `title` → anahtar; hiçbiri yoksa null → sayfa '—' basar. */
   ad: string | null;
@@ -175,11 +214,32 @@ export interface UrunSatis {
   adet: Tutar;
   /** Σ fiyat × adet — fiyatı ya da adedi bilinmeyen satır SAYILIR (eski `|| 0` ile ₺0 sayılıyordu). */
   ciro: Tutar;
+  /** Bu ürünü içeren BENZERSİZ sipariş sayısı (aynı siparişteki iki satır 1 sayılır; UrunlerRapor:70 kalem sayıyordu). */
+  siparisSayisi: number;
+}
+
+export interface UrunSatis extends UrunSatisSatiri {
   /**
    * Ölçek çubuğunun genişliği (%); ölçek ya da satırın KENDİ cirosu kısmiyse `null` →
    * çubuk ÇİZİLMEZ (kural: `utils/pano/cubuk`; `musteriAnaliz` panelleriyle aynı).
    */
   barOrani: number | null;
+}
+
+export interface UrunSatisSecenek {
+  /**
+   * Anahtar zincirine `title` yedeğini EKLER: `sku → name → title`.
+   * Varsayılan KAPALI = Pano paritesi (`enCokSatanlar` bu seçeneği GEÇMEZ).
+   * Shopify webhook'u sipariş satırına `name` YAZMIYOR, `title` yazıyor (server.ts:431-435) —
+   * UrunlerRapor bugün o kalemleri başlıkla ayrı satırlarda gösteriyor; bağlama `true` geçer.
+   */
+  baslikYedegi?: boolean;
+  /**
+   * Satır cirosu seçicisi (K-KALEM=A, 6b hakem 2026-09-24). Dönüş `toplaBilinen`e girer: sonlu sayı/sayısal metin
+   * BİLİNİR, aksi (NaN/null/undefined) SAYILIR — 0 sayılmaz. Verilmezse `satirTutari(price, quantity)` = Pano paritesi
+   * (`enCokSatanlar` bu seçeneği GEÇMEZ). UrunlerRapor `total` biliniyorsa onu, yoksa fiyat × adet geçer.
+   */
+  tutarSec?: (s: SatisSatiri) => unknown;
 }
 
 /** Boş olmayan metin/sonlu sayı → string; aksi hâlde null (boş sku ada düşsün diye). */
@@ -190,6 +250,79 @@ function metin(x: unknown): string | null {
 }
 
 /**
+ * Ciroya göre AZALAN sıralı TÜM ürünler — KESİLMEZ (6b eki, 2026-09-24). "Top N" gösterim kararı ÇAĞIRANDA.
+ * // K21 kullanıcı 2026-09-24: "Tüm ciro" (KARARLAR.md) — pay paydası bu listenin TAMAMIDIR, ilk N değil.
+ *
+ * Anahtar/ad/tutar kuralları `enCokSatanlar`ınkiyle BİREBİR AYNI (tek gövde — `enCokSatanlar` buna delege eder):
+ * anahtar `metin(sku) ?? metin(name)` (+ `baslikYedegi` ile `?? metin(title)`), ad `metin(name) ?? metin(title) ??
+ * anahtar` (İLK satırdan — eski `productCount[k] = productCount[k] || {...}` davranışı), adet `toplaBilinen(quantity)`,
+ * ciro `toplaBilinen(tutarSec ?? satirTutari(price, quantity))` (K-KALEM=A: seçici çağıranın). Adsız kalem TEK `null` kovası (5/n kararı).
+ * `siparisSayisi`: ürünün geçtiği BENZERSİZ sipariş (nesne kimliği) — aynı siparişte iki satır 1 sayılır.
+ * Sıralama `sayiSirala(ekranTutari(a.ciro), ekranTutari(b.ciro), true)`: cirosu hiç bilinmeyen ürün listenin
+ * ORTASINA ₺0 gibi dizilmez, SONA gider. İptal süzgeci YOK (K2 — çağıranda; `SatisSiparisi` `status` okumaz).
+ * Girdi mutasyona uğramaz; `lineItems` `null`/`undefined` ise sipariş ürün eklemez.
+ */
+export function urunSatislari(
+  siparisler: readonly SatisSiparisi[],
+  secenek: UrunSatisSecenek = {},
+): UrunSatisSatiri[] {
+  const kovalar = new Map<string | null, { ad: string | null; satirlar: SatisSatiri[]; siparisler: Set<SatisSiparisi> }>();
+  // Seçici yoksa eski yol (Pano paritesi); `??` burada sayı yedeği DEĞİL, fonksiyon yedeğidir.
+  const tutar = secenek.tutarSec ?? ((s: SatisSatiri) => satirTutari(s.price, s.quantity));
+  for (const o of siparisler) {
+    for (const l of o.lineItems ?? []) {
+      const anahtar = metin(l.sku) ?? metin(l.name) ?? (secenek.baslikYedegi === true ? metin(l.title) : null);
+      let kova = kovalar.get(anahtar);
+      if (!kova) {
+        // Ad İLK satırdan alınır (eski `productCount[k] = productCount[k] || {...}` davranışı). ANAHTARSIZ kova
+        // (sku/ad/başlık yok) BİRDEN ÇOK ürünü toplar → ilk satırın başlığı o toplamın adı OLAMAZ: ad null → ekran '—'
+        // (inceleme 2026-09-25; Pano `enCokSatanlar` da aynı yanlış etiketi basıyordu).
+        kova = { ad: anahtar === null ? null : (metin(l.name) ?? metin(l.title) ?? anahtar), satirlar: [], siparisler: new Set() };
+        kovalar.set(anahtar, kova);
+      }
+      kova.satirlar.push(l);
+      kova.siparisler.add(o);                                   // benzersiz sipariş: aynı siparişin 2. satırı eklemez
+    }
+  }
+  return [...kovalar.entries()]
+    .map(([anahtar, k]): UrunSatisSatiri => ({
+      anahtar,
+      ad: k.ad,
+      adet: toplaBilinen(k.satirlar, s => s.quantity),
+      ciro: toplaBilinen(k.satirlar, tutar),
+      siparisSayisi: k.siparisler.size,
+    }))
+    // Sıralama anahtarı EKRAN toplamı: hiç bilinen satırı olmayan ürün NaN verir →
+    // `sayiSirala` onu her iki yönde SONA koyar (yerel `ekranCiro` kopyası silindi).
+    .sort((a, b) => sayiSirala(ekranTutari(a.ciro), ekranTutari(b.ciro), true));
+}
+
+/**
+ * K-KALEM=A satır cirosu seçicisi — TEK tanım (6b kapanış turu 2026-09-24, bulgu 4 + 6; ADDITIVE).
+ * GenelBloklar1 P217 ve UrunlerRapor bunu `tutarSec` olarak geçer. Eskiden iki dosyada SATIR İÇİ KOPYAydı
+ * (GB1:155 ≡ UrunlerRapor:113): karar B'ye dönse biri unutulur, Genel sekmesi ile Ürün Performansı AYNI ürünün
+ * cirosunu FARKLI basardı (yarım düzeltme sınıfı). Şimdi YALNIZ bu gövde değişir.
+ * Kural: `total` biliniyorsa o (Mikro faturası türevi kalem `price` TAŞIMAZ, tutarı `total`da — KDV DÂHİL,
+ * src/server/mikro/eslemeFatura.ts:166-171); yoksa `satirTutari(price, quantity)` (native: KDV HARİÇ; biri
+ * bilinmiyorsa NaN → `toplaBilinen` SAYAR; `Number(null) * 4 === 0` tuzağına GİRMEZ). Bilinen `total: 0` GERÇEK 0.
+ * Dayanak kullanıcı K3 (KARARLAR.md): "evet / ana program zaten bu." — K-KALEM'in KENDİ kullanıcı cümlesi
+ * KARARLAR.md'de HENÜZ YOK (açık soru; orkestratör soracak).
+ */
+export function kalemTutari(s: SatisSatiri): number {
+  return bilinenSayi(s.total) ? Number(s.total) : satirTutari(s.price, s.quantity);
+}
+
+/**
+ * `kalemTutari`nin `total` yolu en az BİR kalemde kullanıldı mı — "Mikro faturasından türeyen kalemlerde satır
+ * tutarı KDV dâhildir" dipnotunun kapısı (seçicinin ilk dalıyla AYNI kural: `total` alanının VARLIĞI değil,
+ * BİLİNİRLİĞİ). Mikro'suz kiracıda dipnot basılmaz — açıkladığı satır yoksa not gürültüdür. `lineItems`
+ * null/undefined ise sipariş kalem katmaz; iptal süzgeci ÇAĞIRANDA (K2).
+ */
+export function kdvDahilKalemVar(siparisler: readonly SatisSiparisi[]): boolean {
+  return siparisler.some(o => (o.lineItems ?? []).some(l => bilinenSayi(l.total)));
+}
+
+/**
  * Ciroya göre en çok satan ilk `n` ürün. Cirosu hiç bilinmeyen ürün listenin ORTASINA ₺0 gibi
  * dizilmez — `sayiSirala` ile SONA gider (her iki yönde).
  *
@@ -197,34 +330,13 @@ function metin(x: unknown): string | null {
  * ölçeği kısmi tepeden alıp (`maxRevTop`) her satıra `oranYuzde(ekranTutari(...))` çiziyordu,
  * yani fiyatsız satırı olan ürün kısa bir çubukla yanlış bir sıralama izlenimi veriyordu.
  * Kural `./cubuk`ta tek kaynak — `musteriAnaliz` panelleri de aynı kuralı okur.
+ *
+ * 6b (2026-09-24): gruplama/sıralama `urunSatislari`a DELEGE — iki kopya gruplama sessizce ayrışmasın
+ * (5/n dersi). Sözleşme (imza, anahtar/ad/tutar, sıra, `barOrani`, tek `null` kovası) DEĞİŞMEDİ.
  */
 export function enCokSatanlar(siparisler: readonly SatisSiparisi[], n: number): UrunSatis[] {
-  const kovalar = new Map<string | null, { ad: string | null; satirlar: SatisSatiri[] }>();
-  for (const o of siparisler) {
-    for (const l of o.lineItems ?? []) {
-      const anahtar = metin(l.sku) ?? metin(l.name);
-      let kova = kovalar.get(anahtar);
-      if (!kova) {
-        // Ad İLK satırdan alınır (eski `productCount[k] = productCount[k] || {...}` davranışı).
-        kova = { ad: metin(l.name) ?? metin(l.title) ?? anahtar, satirlar: [] };
-        kovalar.set(anahtar, kova);
-      }
-      kova.satirlar.push(l);
-    }
-  }
-  const satirlar = [...kovalar.entries()]
-    .map(([anahtar, k]): Omit<UrunSatis, 'barOrani'> => ({
-      anahtar,
-      ad: k.ad,
-      adet: toplaBilinen(k.satirlar, s => s.quantity),
-      ciro: toplaBilinen(k.satirlar, s => satirTutari(s.price, s.quantity)),
-    }))
-    // Sıralama anahtarı EKRAN toplamı: hiç bilinen satırı olmayan ürün NaN verir →
-    // `sayiSirala` onu her iki yönde SONA koyar (yerel `ekranCiro` kopyası silindi).
-    .sort((a, b) => sayiSirala(ekranTutari(a.ciro), ekranTutari(b.ciro), true));
-
   // Ölçek GÖSTERİLEN listeye göre kurulur (sayfa da `top5` üzerinden ölçekliyordu).
-  const ilkN = satirlar.slice(0, n);
+  const ilkN = urunSatislari(siparisler).slice(0, n);
   const referans = olcekReferansi(ilkN.map(u => tutarSatiri(u.ciro)));
   return ilkN.map(u => ({ ...u, barOrani: cubukOrani(tutarSatiri(u.ciro), referans) }));
 }

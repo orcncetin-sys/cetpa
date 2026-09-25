@@ -59,8 +59,14 @@ export function olcekReferansi(satirlar: readonly CubukSatiri[]): number {
   return Number.isFinite(en.ciro) && en.ciro > 0 ? en.ciro : NaN;
 }
 
-/** Satırın çubuk oranı (%). Ölçek yoksa ya da satırın kendi cirosu kısmi/bilinmiyorsa `null`. */
+/**
+ * Satırın çubuk oranı (%). Ölçek yoksa ya da satırın kendi cirosu kısmi/bilinmiyorsa `null`.
+ * BİLİNEN ₺0 satır ölçekten bağımsız olarak 0'dır (çubuk çizilmez): tüm pencere ₺0 iken ölçek NaN olur ve eski
+ * sıra her satırı `null` → tam boy taralı "bilinmiyor" çizdiriyordu; etiket '₺0', çubuk 'bilinmiyor' (6b inceleme
+ * 2026-09-25; K26 "gerçek 0 = boş"). Kısmi/bilinmeyen satır yine `null`.
+ */
 export function cubukOrani(satir: CubukSatiri, referans: number): number | null {
+  if (satir.tutarsizSiparis === 0 && satir.ciro === 0) return 0;
   if (!Number.isFinite(referans)) return null;
   if (satir.tutarsizSiparis > 0 || !Number.isFinite(satir.ciro)) return null;
   return (satir.ciro / referans) * 100;

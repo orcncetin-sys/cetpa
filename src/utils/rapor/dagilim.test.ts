@@ -169,3 +169,143 @@ describe('kovayaYerlestir', () => {
     expect(bilinmeyen).toBe(1);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6b EKİ (2026-09-24): `siraliDilimler` — sıralı EŞİT dilimler (desil / çeyreklik), POZİSYONA göre
+// A · GenelBloklar3.tsx:21-57 (P256 desil):
+//   :22  `orders.filter(o => o.status !== 'Cancelled' && (o.totalPrice || 0) > 0)` → bilinmeyen '0' sayılıp eleniyor (sayılmıyor)
+//   :24  `sort((a, b) => (a.totalPrice || 0) - (b.totalPrice || 0))`             → bilinmeyen D1'e
+//   :25  `decileSize = Math.ceil(n / 10)`; `slice(i*size, (i+1)*size)`            → 'tavan' bölmesi
+// B · GenelBloklar3.tsx:120-157 (çeyreklik):
+//   :121 `sort((a,b) => a.totalPrice - b.totalPrice)`                              → KORUMASIZ: NaN karşılaştırıcı
+//   :123 `q = Math.floor(n / 4)`; `slice(3q)` son dilim kalanı alır                → 'taban' bölmesi
+//   :133 `reduce((s, o) => s + o.totalPrice, 0)`                                    → tek bilinmeyen TÜM çeyreği NaN yapar
+// İki bölme kuralı da KORUNUR (K28 parite) — seçenekle. Pay hesabı BURADA DEĞİL (utils-yogunlasma).
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { siraliDilimler } from './dagilim';
+import { ekranTutari, tamTutar, tutarBirlestir } from '../para';
+
+/** 1..n arası TL tutarlı Şirin İnşaat siparişleri: 100, 200, …, n×100. */
+const seri = (n: number): Siparis[] => Array.from({ length: n }, (_, i) => sip((i + 1) * 100));
+
+describe('siraliDilimler — 6b eki', () => {
+  it("PARİTE 'tavan' (desil, GB3:25 ceil): 10 sipariş → 10×1; 11 sipariş → [2,2,2,2,2,1,0,0,0,0]; boş dilim TÜRETMEYE KAPI DEĞİL", () => {
+    const on = siraliDilimler(seri(10), tutarSec, 10, { bolme: 'tavan' });
+    expect(on.dilimler.map(d => d.adet)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+    expect(on.dilimler[0].ogeler[0].tutar).toBe(100);      // D1 = en KÜÇÜK
+    expect(on.dilimler[9].ogeler[0].tutar).toBe(1000);     // D10 = en BÜYÜK
+    expect(on.dilimler.map(d => d.sira)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+    // 11 sipariş: boyut = ceil(11/10) = 2 → D7-D10 BOŞ (bugünkü ceil davranışı; mutasyon: floor ya da
+    // "eşit dağıt" düzeltmesi dağılımı değiştirir → parite bekçisi).
+    const onbir = siraliDilimler(seri(11), tutarSec, 10, { bolme: 'tavan' });
+    expect(onbir.dilimler.map(d => d.adet)).toEqual([2, 2, 2, 2, 2, 1, 0, 0, 0, 0]);
+    expect(onbir.dilimler[5].tutar).toEqual({ toplam: 1100, bilinen: 1, bilinmeyen: 0 });
+    // GB3 P1 kapısının KANITI: üst 3 dilim boş → yardımcı bunu "tutarsız" diye ETİKETLEMEZ
+    expect(onbir.dilimler.slice(-3).every(d => d.adet === 0)).toBe(true);
+    const ust = tutarBirlestir(...onbir.dilimler.slice(-3).map(d => d.tutar));
+    expect(ust).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 0 });
+    expect(tamTutar(ust)).toBe(0);                          // NaN DEĞİL — "boş liste gerçek 0" (para.ts)
+    expect(onbir.toplam.bilinmeyen).toBe(0);
+    // Kapısız `yuzdeOrani(0, toplam)` → %0 = bugünkü "Üst %30 → %0 ciro" yanlışı;
+    // PAY KAPISI ÇAĞIRANDADIR: `dilimler.slice(-3).every(d => d.adet > 0)`.
+    expect(onbir.dilimler.slice(-3).every(d => d.adet > 0)).toBe(false);
+    expect(tamTutar(onbir.toplam)).toBe(6600);              // 100+…+1100
+
+    // 25 sipariş: boyut = 3 → [3×8, 1, 0]
+    const yirmibes = siraliDilimler(seri(25), tutarSec, 10, { bolme: 'tavan' });
+    expect(yirmibes.dilimler.map(d => d.adet)).toEqual([3, 3, 3, 3, 3, 3, 3, 3, 1, 0]);
+    expect(yirmibes.dilimler.slice(-3).every(d => d.adet > 0)).toBe(false);
+  });
+
+  it("PARİTE 'taban' (çeyreklik, GB3:123-129 floor): 10 sipariş → [2,2,2,4] (artık SON dilimde; mutasyon: ceil → [3,3,3,1])", () => {
+    const r = siraliDilimler(seri(10), tutarSec, 4, { bolme: 'taban' });
+    expect(r.dilimler.map(d => d.adet)).toEqual([2, 2, 2, 4]);
+    expect(r.dilimler[3].ogeler.map(o => o.tutar)).toEqual([700, 800, 900, 1000]);
+    expect(r.dilimler[3].tutar).toEqual({ toplam: 3400, bilinen: 4, bilinmeyen: 0 });
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: bilinmeyen değer dilime (sıralamaya bile) GİRMEZ, `bilinmeyen` sayılır (mutasyon: `|| 0` → D1 şişer)', () => {
+    const liste = [sip(400), sip(undefined), sip(100), sip(null), sip(300), sip('abc'), sip(200)];
+    const r = siraliDilimler(liste, tutarSec, 4, { bolme: 'tavan' });
+    expect(r.bilinmeyen).toBe(3);
+    expect(r.dilimler.reduce((t, d) => t + d.adet, 0)).toBe(4);
+    expect(r.dilimler.map(d => d.adet)).toEqual([1, 1, 1, 1]);
+    expect(r.dilimler[0].ogeler[0].tutar).toBe(100);        // D1 gerçek en küçük, '0'lar değil
+    expect(r.dilimler.every(d => d.tutar.bilinmeyen === 0)).toBe(true);
+  });
+
+  it('`sadecePozitif`: bilinen `<= 0` değer dilime girmez, `kapsamDisi` sayılır (mutasyon: sessiz filter → sayaç 0)', () => {
+    const liste = [sip(-500), sip(0), sip(100)];
+    const pozitif = siraliDilimler(liste, tutarSec, 2, { bolme: 'tavan', sadecePozitif: true });
+    expect(pozitif.kapsamDisi).toBe(2);                     // negatif + MEŞRU 0
+    expect(pozitif.bilinmeyen).toBe(0);
+    expect(pozitif.dilimler.reduce((t, d) => t + d.adet, 0)).toBe(1);
+    expect(pozitif.dilimler[0].ogeler[0].tutar).toBe(100);
+
+    const hepsi = siraliDilimler(liste, tutarSec, 2, { bolme: 'tavan' });
+    expect(hepsi.kapsamDisi).toBe(0);
+    expect(hepsi.dilimler.reduce((t, d) => t + d.adet, 0)).toBe(3);
+    expect(hepsi.dilimler[0].ogeler.map(o => o.tutar)).toEqual([-500, 0]);   // varsayılan: her değer girer (çeyreklik paritesi)
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: `toplam` TÜRETMEYE KAPALI — bilinmeyen sayacı TAŞINIR; `kapsamDisi` tamTutar\'ı BOZMAZ', () => {
+    const r = siraliDilimler([sip(200), sip(300), sip(500), sip(undefined)], tutarSec, 2, { bolme: 'tavan' });
+    expect(ekranTutari(r.toplam)).toBe(1000);
+    expect(Number.isNaN(tamTutar(r.toplam))).toBe(true);    // sayaç taşınmazsa 1000 döner → "Üst %30 → %42" eksik veriyle basılır
+    expect(r.toplam).toEqual({ toplam: 1000, bilinen: 3, bilinmeyen: 1 });
+    expect(r.toplam.bilinmeyen).toBe(r.bilinmeyen);
+
+    const k = siraliDilimler([sip(200), sip(300), sip(-50)], tutarSec, 2, { bolme: 'tavan', sadecePozitif: true });
+    expect(k.kapsamDisi).toBe(1);
+    expect(tamTutar(k.toplam)).toBe(500);                   // okunmuş ama kapsam dışı → bilinmez YAPMAZ
+  });
+
+  it('eşit değerler: sıralama girdi sırasını korur (kararlı), dilimler POZİSYONA göre bölünür (aynı tutar iki dilimde)', () => {
+    const liste = Array.from({ length: 5 }, (_, i) => ({ ...sip(500), musteri: `Şirin İnşaat ${i + 1}` }));
+    const r = siraliDilimler(liste, tutarSec, 2, { bolme: 'tavan' });
+    expect(r.dilimler.map(d => d.adet)).toEqual([3, 2]);
+    expect(r.dilimler[0].ogeler.map(o => o.musteri)).toEqual(['Şirin İnşaat 1', 'Şirin İnşaat 2', 'Şirin İnşaat 3']);
+    expect(r.dilimler[1].ogeler.map(o => o.musteri)).toEqual(['Şirin İnşaat 4', 'Şirin İnşaat 5']);
+    expect(r.dilimler[0].ogeler[0]).toBe(liste[0]);         // nesne kimliği korunur
+  });
+
+  it("az kayıt: n=2, 4 dilim → 'taban' [0,0,0,2] (q=0, bugünkü davranış), 'tavan' [1,1,0,0]", () => {
+    const liste = seri(2);
+    expect(siraliDilimler(liste, tutarSec, 4, { bolme: 'taban' }).dilimler.map(d => d.adet)).toEqual([0, 0, 0, 2]);
+    expect(siraliDilimler(liste, tutarSec, 4, { bolme: 'tavan' }).dilimler.map(d => d.adet)).toEqual([1, 1, 0, 0]);
+  });
+
+  it('boş liste: tüm dilimler adet 0 / tutar {0,0,0}; toplam {0,0,0}; sayaçlar 0 (dilim sayısı SABİT)', () => {
+    for (const bolme of ['tavan', 'taban'] as const) {
+      const r = siraliDilimler([], tutarSec, 4, { bolme });
+      expect(r.dilimler).toHaveLength(4);
+      expect(r.dilimler.map(d => d.adet)).toEqual([0, 0, 0, 0]);
+      expect(r.dilimler.every(d => d.tutar.toplam === 0 && d.tutar.bilinen === 0 && d.tutar.bilinmeyen === 0)).toBe(true);
+      expect(r.toplam).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 0 });
+      expect(r.bilinmeyen).toBe(0);
+      expect(r.kapsamDisi).toBe(0);
+    }
+  });
+
+  it('geçersiz dilimSayisi → throw (sessizce yanlış bölme YOK)', () => {
+    for (const n of [0, -2, 2.5, NaN]) {
+      expect(() => siraliDilimler(seri(3), tutarSec, n, { bolme: 'tavan' }), String(n)).toThrow();
+    }
+  });
+
+  it('DEĞİŞMEZ + mutasyon yok: Σ adet + bilinmeyen + kapsamDisi === liste.length; donuk girdi hata atmaz; girdi sırası değişmez', () => {
+    const liste = Object.freeze([sip(900), sip(undefined), sip(-10), sip(300), sip(0), sip('abc'), sip(150)]
+      .map(o => Object.freeze(o)));
+    const oncesi = liste.map(o => o.tutar);
+    const r = siraliDilimler(liste, tutarSec, 3, { bolme: 'taban', sadecePozitif: true });
+    const adet = r.dilimler.reduce((t, d) => t + d.adet, 0);
+    expect(adet + r.bilinmeyen + r.kapsamDisi).toBe(liste.length);
+    expect(r.bilinmeyen).toBe(2);
+    expect(r.kapsamDisi).toBe(2);
+    expect(liste.map(o => o.tutar)).toEqual(oncesi);        // `[...liste]` kopyası üzerinde sıralandı
+    // Bilinen pozitifler [150, 300, 900] → n=3, 3 dilim 'taban' → boyut 1: D1 [150], D2 [300], D3 [900]
+    expect(r.dilimler.map(d => d.adet)).toEqual([1, 1, 1]);
+    expect(r.dilimler.map(d => d.ogeler.map(o => o.tutar))).toEqual([[150], [300], [900]]);
+  });
+});

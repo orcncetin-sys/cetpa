@@ -457,3 +457,270 @@ describe('sonSevkiyatlar — tarihi bilinmeyen sevkiyat sona gider (her iki yön
     expect(liste.map(s => s.id)).toEqual(['a', 'c', 'b']);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6b EKİ (2026-09-24): `urunSatislari` — `enCokSatanlar`ın iç gruplaması DIŞA AÇILIR (kesilmez).
+// A · UrunlerRapor.tsx:57-75
+//   :63  `const qty = Number(liR.quantity ?? 1) || 1;`                        → miktarı bilinmeyen kalem 1 ADET
+//   :64  `Number(liR.unitPrice ?? liR.price ?? liR.variant_price ?? 0) || 0`  → fiyatı bilinmeyen ₺0; unitPrice/variant_price HAYALET
+//   :61  `… ?? 'Unknown'`                                                      → adsız kalem sahte ürün satırı
+//   :70  `prodMap[key].orderCount++;`                                          → KALEM sayıyor, sipariş değil
+// B · GenelBloklar1.tsx:586-637 (P217 Top 6)
+//   :595 `prodRev217[key].rev += li.price * li.quantity;`                      → korumasız çarpım (null × 4 === 0; undefined → NaN)
+//   :601 `total217 = sorted217.reduce(…)` payda YALNIZ ilk 6                   → K21 kullanıcı 2026-09-24: "Tüm ciro" (KARARLAR.md)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { urunSatislari } from './stokSevkiyat';
+
+describe('urunSatislari — 6b eki: gruplama tek gövde, kesme ÇAĞIRANDA', () => {
+  it('YENİDEN YAPILANDIRMA PARİTESİ: enCokSatanlar(s, 5) satırları urunSatislari(s).slice(0, 5) ile BİREBİR; barOrani yalnız enCokSatanlar\'da', () => {
+    const s = [sip1, sip2, sipBozuk];
+    const eski = enCokSatanlar(s, 5);
+    const yeni = urunSatislari(s).slice(0, 5);
+    expect(eski.length).toBe(yeni.length);
+    eski.forEach((e, i) => {
+      expect(e.anahtar).toBe(yeni[i].anahtar);
+      expect(e.ad).toBe(yeni[i].ad);
+      expect(e.adet).toEqual(yeni[i].adet);
+      expect(e.ciro).toEqual(yeni[i].ciro);
+      expect(e.siparisSayisi).toBe(yeni[i].siparisSayisi);
+      expect('barOrani' in e).toBe(true);
+    });
+    expect(yeni.some(u => 'barOrani' in u)).toBe(false);
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: siparisSayisi BENZERSİZ sipariş sayar — aynı siparişte iki ÇİMENTO satırı 1 (UrunlerRapor bugün 2 sayıyor)', () => {
+    const tek: SatisSiparisi = {
+      lineItems: [
+        { sku: 'CIM-50', name: 'ÇİMENTO 50KG', quantity: 10, price: 130 },
+        { sku: 'CIM-50', name: 'ÇİMENTO 50KG', quantity: 10, price: 130 },
+      ],
+    };
+    const r1 = urunSatislari([tek]);
+    expect(r1).toHaveLength(1);
+    expect(r1[0].siparisSayisi).toBe(1);
+    expect(ekranTutari(r1[0].adet)).toBe(20);
+    expect(ekranTutari(r1[0].ciro)).toBe(2600);
+
+    const r2 = urunSatislari([sip1, sip2]);            // CIM-50 iki ayrı siparişte, DMR-12 birinde
+    expect(r2.find(u => u.anahtar === 'CIM-50')!.siparisSayisi).toBe(2);
+    expect(r2.find(u => u.anahtar === 'DMR-12')!.siparisSayisi).toBe(1);
+    // Aynı alan enCokSatanlar çıktısında da var ve doğru
+    expect(enCokSatanlar([sip1, sip2], 5).find(u => u.anahtar === 'CIM-50')!.siparisSayisi).toBe(2);
+  });
+
+  it('`baslikYedegi`: sku/name YOK, title VAR → varsayılan tanımsız kovası; true ile başlık anahtar olur (Shopify satırı `title` yazar)', () => {
+    const shopify: SatisSiparisi = {
+      lineItems: [
+        { title: 'BORDÜR 8cm', quantity: 2, price: 100 },
+        { title: 'BORDÜR 8cm', quantity: 3, price: 100 },
+        { title: 'KİLİT TAŞI', quantity: 1, price: 40 },
+      ],
+    };
+    const varsayilan = urunSatislari([shopify]);
+    expect(varsayilan).toHaveLength(1);                // tek tanımsız kova (Pano paritesi)
+    expect(varsayilan[0].anahtar).toBeNull();
+    expect(ekranTutari(varsayilan[0].adet)).toBe(6);
+    // İki ayrı ürünü toplayan anahtarsız kovaya İLK satırın başlığı ad olarak VERİLMEZ (inceleme 2026-09-25:
+    // "BORDÜR 8cm ₺540" = bordür + kilit taşı toplamı yanlış etiketle basılıyordu) → ekran '—'.
+    expect(varsayilan[0].ad).toBeNull();
+    expect(enCokSatanlar([shopify], 5)[0].ad).toBeNull();
+
+    const basliklı = urunSatislari([shopify], { baslikYedegi: true });
+    expect(basliklı.map(u => u.anahtar)).toEqual(['BORDÜR 8cm', 'KİLİT TAŞI']);
+    expect(basliklı[0].ad).toBe('BORDÜR 8cm');
+    expect(ekranTutari(basliklı[0].adet)).toBe(5);
+    // sku varken başlık yedeği devreye GİRMEZ (zincir sku → name → title)
+    expect(urunSatislari([sip1], { baslikYedegi: true }).map(u => u.anahtar)).toEqual(['CIM-50', 'DMR-12']);
+  });
+
+  it('kesme YOK: 8 ürün → 8 satır, ciroya göre azalan; cirosu hiç bilinmeyen ürün SONDA', () => {
+    const sekiz: SatisSiparisi = {
+      lineItems: [
+        { sku: 'U1', quantity: 1, price: 800 }, { sku: 'U2', quantity: 1, price: 100 },
+        { sku: 'U3', quantity: 1, price: 500 }, { sku: 'U4', quantity: 1, price: null },   // cirosu bilinmiyor
+        { sku: 'U5', quantity: 1, price: 300 }, { sku: 'U6', quantity: 1, price: 700 },
+        { sku: 'U7', quantity: 1, price: 200 }, { sku: 'U8', quantity: 1, price: 600 },
+      ],
+    };
+    const r = urunSatislari([sekiz]);
+    expect(r).toHaveLength(8);
+    expect(r.map(u => u.anahtar)).toEqual(['U1', 'U6', 'U8', 'U3', 'U5', 'U7', 'U2', 'U4']);
+    expect(enCokSatanlar([sekiz], 6)).toHaveLength(6);
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: bilinmeyen 1 adet / ₺0 SAYILMAZ (mutasyon: `?? 1` / `|| 0`)', () => {
+    const r = urunSatislari([sipBozuk]);
+    const tugla = r.find(u => u.anahtar === 'TGL-19')!;    // quantity null
+    expect(tugla.adet).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 1 });
+    expect(Number.isNaN(ekranTutari(tugla.adet))).toBe(true);
+    expect(tugla.ciro.bilinmeyen).toBe(1);
+    const kum = r.find(u => u.anahtar === 'KUM-01')!;      // price null
+    expect(kum.adet).toEqual({ toplam: 5, bilinen: 1, bilinmeyen: 0 });
+    expect(kum.ciro).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 1 });
+    expect(Number.isNaN(ekranTutari(kum.ciro))).toBe(true);
+    expect(urunSatislari([{ lineItems: [{ sku: 'X', quantity: undefined, price: 10 }] }])[0].adet.bilinmeyen).toBe(1);
+  });
+
+  it('boş girdi: [], [{lineItems: []}], [{lineItems: null}] → []', () => {
+    expect(urunSatislari([])).toEqual([]);
+    expect(urunSatislari([{ lineItems: [] }])).toEqual([]);
+    expect(urunSatislari([{ lineItems: null }])).toEqual([]);
+  });
+
+  it('enCokSatanlar sözleşmesi korunuyor: barOrani kuralı aynen (tepe kısmiyse null, tam tepe 100) + siparisSayisi alanı', () => {
+    const r = enCokSatanlar([sip1, sip2], 5);
+    expect(r[0].barOrani).toBe(100);
+    expect(r[0].siparisSayisi).toBe(2);
+    expect(r[1].siparisSayisi).toBe(1);
+    const tepeKismi: SatisSiparisi = {
+      lineItems: [
+        { sku: 'CIM-50', quantity: 100, price: 130 },
+        { sku: 'CIM-50', quantity: 20, price: null },
+        { sku: 'DMR-12', quantity: 2, price: 1800 },
+      ],
+    };
+    expect(enCokSatanlar([tepeKismi], 5).map(p => p.barOrani)).toEqual([null, null]);
+  });
+
+  it('girdi mutasyona uğramaz: Object.freeze\'li sipariş/satırlarla hata atmaz', () => {
+    const donuk = Object.freeze([sip1, sip2].map(o => Object.freeze({
+      lineItems: Object.freeze((o.lineItems ?? []).map(l => Object.freeze({ ...l }))),
+    })));
+    expect(() => urunSatislari(donuk, { baslikYedegi: true })).not.toThrow();
+    expect(() => enCokSatanlar(donuk, 5)).not.toThrow();
+    expect(urunSatislari(donuk)[0].anahtar).toBe('CIM-50');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6b HAKEM TURU (2026-09-24, bulgu 1 — K-KALEM=A): `UrunSatisSecenek.tutarSec` + `SatisSatiri.total` (ADDITIVE).
+// Neden: Mikro faturasından türeyen sipariş kalemi `price` TAŞIMAZ, tutarı `total`da (KDV dâhil) —
+// src/server/mikro/eslemeFatura.ts:166-171 `SiparisSatiri { sku; name; quantity; total }`. Varsayılan seçici
+// `satirTutari(price, quantity)` bu kalemleri "tutarı okunamadı" sayıyor, `tamTutar` kapısı da TÜM ürünlerin
+// payını/sınıfını '—' yapıyordu (tutarı apaçık yazılı fatura "okunamadı" oluyordu → yanlış neden).
+// Kullanıcı kararı K3 (KARARLAR.md): "evet / ana program zaten bu." — Mikro verisi KATILIR.
+// Sözleşme: seçici VERİLMEZSE bugünkü `satirTutari` (Pano paritesi — `enCokSatanlar` GEÇMEZ, 5/n testleri sabit).
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { bilinenSayi, satirTutari } from '../para';
+
+describe('urunSatislari — `tutarSec` (6b hakem, K-KALEM=A): satır cirosu seçicisi, varsayılan satirTutari', () => {
+  /**
+   * UrunlerRapor'un geçtiği seçici (şartname §Açık sorular 1/A): `total` biliniyorsa o, yoksa fiyat × adet.
+   * Yedek `satirTutari` OLMAK ZORUNDA: `Number(100) * Number(null)` = 0 → "null × miktar === 0" tuzağı
+   * (bu testin ilk taslağı o tuzağa düştü ve C vakası kırmızı yandı — vaka bilerek kalıyor).
+   */
+  const mikroSecici = (s: { total?: unknown; price?: unknown; quantity?: unknown }): number =>
+    bilinenSayi(s.total) ? Number(s.total) : satirTutari(s.price, s.quantity);
+
+  const mikroFaturasi: SatisSiparisi = {
+    // eslemeFatura çıktısı: `price` YOK, `total` KDV DÂHİL (130 × 100 × 1,20)
+    lineItems: [{ sku: 'CIM-50', name: 'ÇİMENTO 50KG', quantity: 100, total: 15600 }],
+  };
+
+  it('şartname vakaları: `{ total: 1180 }` → 1180; `{ total: null, price: 100, quantity: 2 }` → 200; `{ total: null, price: 100, quantity: null }` → NaN', () => {
+    const s: SatisSiparisi = {
+      lineItems: [
+        { sku: 'A', total: 1180 },                                  // yalnız total (adet bilinmiyor, ciro biliniyor)
+        { sku: 'B', total: null, price: 100, quantity: 2 },         // total yok → fiyat × adet
+        { sku: 'C', total: null, price: 100, quantity: null },      // ikisi de yok → bilinmiyor
+      ],
+    };
+    const r = urunSatislari([s], { tutarSec: mikroSecici });
+    const a = r.find(u => u.anahtar === 'A')!;
+    const b = r.find(u => u.anahtar === 'B')!;
+    const c = r.find(u => u.anahtar === 'C')!;
+    expect(a.ciro).toEqual({ toplam: 1180, bilinen: 1, bilinmeyen: 0 });
+    expect(a.adet).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 1 });      // adet AYRI kova — total adedi bilinir yapmaz
+    expect(b.ciro).toEqual({ toplam: 200, bilinen: 1, bilinmeyen: 0 });
+    expect(c.ciro).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 1 });
+    expect(Number.isNaN(ekranTutari(c.ciro))).toBe(true);
+    // sıralama seçicinin cirosuyla: A (1180) > B (200) > C (bilinmiyor, SONDA)
+    expect(r.map(u => u.anahtar)).toEqual(['A', 'B', 'C']);
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: Mikro türevi kalem (price YOK, total VAR) seçiciyle BİLİNİR; seçicisiz "tutarı okunamadı" kalır', () => {
+    const seciciyle = urunSatislari([mikroFaturasi], { tutarSec: mikroSecici });
+    expect(seciciyle).toHaveLength(1);
+    expect(seciciyle[0].ciro).toEqual({ toplam: 15600, bilinen: 1, bilinmeyen: 0 });
+    expect(ekranTutari(seciciyle[0].adet)).toBe(100);
+    expect(seciciyle[0].siparisSayisi).toBe(1);
+
+    // Varsayılan (Pano paritesi): `total` OKUNMAZ — enCokSatanlar/5-n sözleşmesi değişmez
+    const varsayilan = urunSatislari([mikroFaturasi]);
+    expect(varsayilan[0].ciro).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 1 });
+    expect(enCokSatanlar([mikroFaturasi], 5)[0].ciro).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 1 });
+  });
+
+  it('karışık veri: Cetpa-native (price × quantity) + Mikro türevi (total) TEK kovada toplanır; bilinmeyen sayaç 0', () => {
+    const r = urunSatislari([sip1, sip2, mikroFaturasi], { tutarSec: mikroSecici });
+    const cimentoKova = r.find(u => u.anahtar === 'CIM-50')!;
+    expect(cimentoKova.ciro).toEqual({ toplam: 13000 + 5200 + 15600, bilinen: 3, bilinmeyen: 0 });
+    expect(ekranTutari(cimentoKova.adet)).toBe(240);
+    expect(cimentoKova.siparisSayisi).toBe(3);
+    // native ürün seçiciden ETKİLENMEZ (total yok → fiyat × adet)
+    expect(r.find(u => u.anahtar === 'DMR-12')!.ciro).toEqual({ toplam: 3600, bilinen: 1, bilinmeyen: 0 });
+  });
+
+  it('seçici HAM satırı alır (title/sku dâhil) ve bilinmeyen döndürürse satır SAYILIR (0 değil)', () => {
+    const gorulen: unknown[] = [];
+    const r = urunSatislari([sip2], { tutarSec: s => { gorulen.push(s.sku); return undefined; } });
+    expect(gorulen).toEqual(['CIM-50']);
+    expect(r[0].ciro).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 1 });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6b KAPANIŞ TURU (2026-09-24, bulgu 4 + 6 — K-KALEM=A seçicisi TEK tanım; ADDITIVE):
+// `kalemTutari` + `kdvDahilKalemVar`. Yukarıdaki `mikroSecici` GenelBloklar1 P217 (:155) ve UrunlerRapor (:113)
+// dosyalarında SATIR İÇİ KOPYA olarak yaşıyordu; biri değişince öteki unutulur, Genel sekmesi ile Ürün Performansı
+// aynı ürünün cirosunu FARKLI basar (yarım düzeltme sınıfı). Dipnot kapısı da (yalnız UrunlerRapor'da vardı)
+// aynı kuralı ikinci kez yazıyordu. Karar B'ye dönerse YALNIZ bu iki gövde değişir.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { kalemTutari, kdvDahilKalemVar, type SatisSatiri } from './stokSevkiyat';
+
+describe('kalemTutari — K-KALEM=A seçicisi (6b kapanış, TEK tanım)', () => {
+  it('şartname vakaları: `{ total: 1180 }` → 1180; `{ total: null, price: 100, quantity: 2 }` → 200; ikisi de yok → NaN', () => {
+    expect(kalemTutari({ total: 1180 })).toBe(1180);
+    expect(kalemTutari({ total: null, price: 100, quantity: 2 })).toBe(200);
+    expect(Number.isNaN(kalemTutari({ total: null, price: 100, quantity: null }))).toBe(true);
+  });
+
+  it('sayısal metin `total` bilinir ("15600" → 15600); bilinen 0 `total` GERÇEK 0 (bedelsiz satır), bilinmeyen değil', () => {
+    expect(kalemTutari({ total: '15600' })).toBe(15600);
+    expect(kalemTutari({ total: 0, price: 130, quantity: 100 })).toBe(0);   // total ÖNCE — fiyat × adet'e düşmez
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: `total` yokken `Number(null) * 4 === 0` tuzağına GİRMEZ (yedek satirTutari, çarpım değil)', () => {
+    expect(Number.isNaN(kalemTutari({ price: null, quantity: 4 }))).toBe(true);
+    expect(Number.isNaN(kalemTutari({ total: 'abc', price: undefined, quantity: 4 }))).toBe(true);
+  });
+
+  it('PARİTE: `urunSatislari(…, { tutarSec: kalemTutari })` iki dosyanın eski satır içi seçicisiyle BİREBİR aynı kovaları verir', () => {
+    const eskiSatirIci = (s: SatisSatiri): number =>
+      bilinenSayi(s.total) ? Number(s.total) : satirTutari(s.price, s.quantity);
+    const mikro: SatisSiparisi = { lineItems: [{ sku: 'CIM-50', name: 'ÇİMENTO 50KG', quantity: 100, total: 15600 }] };
+    const karisik = [sip1, sip2, mikro, sipBozuk];
+    expect(urunSatislari(karisik, { tutarSec: kalemTutari })).toEqual(urunSatislari(karisik, { tutarSec: eskiSatirIci }));
+    expect(urunSatislari(karisik, { tutarSec: kalemTutari, baslikYedegi: true }))
+      .toEqual(urunSatislari(karisik, { tutarSec: eskiSatirIci, baslikYedegi: true }));
+  });
+});
+
+describe('kdvDahilKalemVar — "Mikro kalemlerinde KDV dâhildir" dipnot kapısı (seçicinin ilk dalıyla AYNI kural)', () => {
+  it('yalnız native satırlar (price × quantity) → false: Mikro\'suz kiracıda dipnot basılmaz (gürültü)', () => {
+    expect(kdvDahilKalemVar([sip1, sip2])).toBe(false);
+    expect(kdvDahilKalemVar([])).toBe(false);
+    expect(kdvDahilKalemVar([{ lineItems: null }, { lineItems: [] }])).toBe(false);
+  });
+
+  it('en az BİR kalemde `total` biliniyorsa true (Mikro faturası türevi) — sayısal metin de sayılır', () => {
+    expect(kdvDahilKalemVar([sip1, { lineItems: [{ sku: 'KUM-01', quantity: 1, total: 12000 }] }])).toBe(true);
+    expect(kdvDahilKalemVar([{ lineItems: [{ sku: 'KUM-01', total: '12000' }] }])).toBe(true);
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: okunamayan `total` (null / "abc" / NaN) kapıyı AÇMAZ — `total` alanının varlığı değil, bilinirliği', () => {
+    expect(kdvDahilKalemVar([{ lineItems: [{ sku: 'X', total: null, price: 10, quantity: 1 }] }])).toBe(false);
+    expect(kdvDahilKalemVar([{ lineItems: [{ sku: 'X', total: 'abc' }] }])).toBe(false);
+    expect(kdvDahilKalemVar([{ lineItems: [{ sku: 'X', total: Number.NaN }] }])).toBe(false);
+  });
+});

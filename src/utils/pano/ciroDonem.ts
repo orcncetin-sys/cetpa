@@ -39,6 +39,27 @@
  *      ÇİZİLMEZ ('—'). Eskiden kısmi toplamdan "▲ %25" üretiliyordu.
  *   3. Ölçek tavanı (`olcekTavani`) bilinmeyeni ölçeğe sokmaz — `Math.max(...rev, 1)` tek bir NaN'la
  *      bütün çubuk yüksekliklerini NaN yapıyordu.
+ *
+ * ## 6b EKİ (2026-09-24, Faz 3 6/n Genel I) — `ceyreklikCiro` (ADDITIVE; yukarıdaki gövdeler DOKUNULMADI)
+ * Neden var: src/components/reports/genel/GenelBloklar1.tsx:171-224 (Phase 156 "Çeyrek Bazlı Karşılaştırma / QoQ")
+ * çeyrek kovalarını ELLE kuruyor (HEAD 912d750'de teyit):
+ *   • :181  `quarters.push({ …, revenue: 0, orders: 0 })`           — `revenue` `Tutar` kovası olmalı (BOS_TUTAR deseni)
+ *   • :189  `entry.revenue += o.totalPrice || 0; entry.orders++;`    — tutarı okunamayan sipariş ₺0 giriyor ama adet
+ *           artıyor → "adet var, ciro yok" = kullanıcı çeyreği "düşük satış" sanıyor; `find` eşleşmezse SESSİZCE düşüyor
+ *   • :185  `if (!d) continue;`                                      — tarihi çözülemeyen kayıt sessizce düşüyor
+ *   • :191  `Math.max(...quarters.map(q => q.revenue), 1)`           — kopya ölçek (para ölçeği `./cubuk`ta)
+ *   • :194  `prevQ.revenue > 0 ? Math.round(…) : null`               — girdiler KISMİ toplam, `tamTutar` kapısı yok
+ * PARİTE: çeyrek pencereleri (`new Date(y, m - i*3, 1)` geri sarma), etiket metni `Q${n} ${yıl}` (`getQLabel`),
+ *   `adet` tanımı (tutarsızlar DÂHİL) ve iptal süzgeci (`{ iptalHaric }`) bugünküyle AYNI; bilinen girdide rakam BİREBİR.
+ * BİLİNÇLİ FARKLAR (ceyreklikCiro):
+ *   1. Tarih zinciri modülün TEK kuralı `ciroTarihi` (= `createdAt ?? syncedAt`); GB1 bugün YALNIZ `createdAt` okuyor.
+ *      Gerekçe yukarıdaki "BİLİNÇLİ FARKLAR 1" ile aynı: yalnız `syncedAt`i olan sipariş sessizce düşüyor ve aynı
+ *      sayfadaki `aylikCiro` tüketicileri (GB1:235 P190, :488 P215) onu SAYIYOR → tek sayfada iki ciro tanımı.
+ *   2. `tarihsiz` / `pencereDisi` sayaçları BİLDİRİLİR (emsal: `hedefButce.CiroPenceresi`, `zamanKovalari`).
+ *      `aylikCiro` bildirmez (eski imza, KAPALI) — ona aynı sayaçları eklemek AYRI iş, DEVREDEN.
+ *   3. Tutar seçici `siparisTutari` (`totalPrice ?? totalAmount`) — sayfanın tek tanımı.
+ * K28 (kullanıcı: "Dönem tanımları: parite + adlandırma") — çeyrek penceresi bugünkü tanımı KORUR, yalnız adlandırır.
+ * K2 ("İptaller ciroya girsin mi → hayır") — süzgeç `DonemSecenek.iptalHaric` ile ÇAĞIRANDA; varsayılan `aylikCiro` ile aynı.
  */
 import {
   toplaBilinen,
@@ -49,7 +70,7 @@ import {
   type Tutar,
 } from '../para';
 import { siparisTarih, siparisTutari } from '../siparis';
-import { zamanDate, zamanMs, gunAnahtari, ayAnahtari, tarihYaz, type ArayuzDili } from '../zaman';
+import { zamanDate, zamanMs, gunAnahtari, ayAnahtari, ceyrekAnahtari, tarihYaz, type ArayuzDili } from '../zaman';
 // Günlük tarafın birleşim kuralı (çift sayım kapısı + yalnız 'giden' fatura + "tutarı okunamayan
 // kayıt 0 SAYILMAZ, SAYILIR") TEK YERDE durur. Burada ikinci bir kopyası olsaydı iki modül sessizce
 // ayrışabilirdi — 2026-09-04'te sparkline korumayı kaçırdığı için çubuklar gerçeğin iki katına çıkmıştı.
@@ -223,6 +244,94 @@ export function aylikCiro(
       adet: ayinlar.length,
     };
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ÇEYREKLİK pencere (6b eki, 2026-09-24 — GenelBloklar1 P156 QoQ)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Çeyrek satırı — `GunSatiri` emsali: `DonemSatiri`ye çeyreğin kimliğini ekler. */
+export interface CeyrekSatiri extends DonemSatiri {
+  /** Takvim yılı (etiketin ikinci parçası). */
+  yil: number;
+  /** 1-4 (getMonth()/3 SIFIR tabanlıdır; burada İNSAN numarası tutulur — off-by-one tuzağı kapanır). */
+  ceyrek: number;
+}
+
+export interface CeyreklikCiro {
+  /** En eskiden bu çeyreğe; uzunluk = `ceyrekSayisi`; BOŞ çeyrekler dâhil (grafik şekli sabit). */
+  satirlar: CeyrekSatiri[];
+  /** İptal süzgecinden GEÇEN ama tarihi çözülemeyen kayıt — hiçbir çeyreğe girmez, SAYILIR. */
+  tarihsiz: number;
+  /** Tarihi çözülen ama pencerenin (son N çeyrek) dışında kalan kayıt — bugün SESSİZCE düşüyor. */
+  pencereDisi: number;
+}
+
+/**
+ * Son `ceyrekSayisi` çeyreğin cirosu, en eskiden bu çeyreğe (GenelBloklar1 P156 "Çeyrek Bazlı Karşılaştırma").
+ *
+ * - Tarih: modülün TEK kuralı `ciroTarihi` (`createdAt ?? syncedAt`; `orderDate`e DÜŞMEZ). Çözülemezse `tarihsiz++`.
+ * - Pencere: `bugun`un çeyreğinden geriye `ceyrekSayisi` çeyrek (GB1:178 `new Date(y, m - i*3, 1)` ile aynı geri
+ *   sarma — yıl sınırını JS `Date` normalleştirir). Çeyrek başı `new Date(yil, (ceyrek-1)*3, 1)` → `satir.tarih`.
+ *   Pencere dışı → `pencereDisi++` (eskiden `find` eşleşmeyince sessizce düşüyordu).
+ * - Anahtar `ceyrekAnahtari` → `'2026-Q3'` (kronolojik metin sırası); etiket `Q${ceyrek} ${yil}` → `'Q3 2026'`
+ *   (`getQLabel` ile BİREBİR; iki dilde AYNI → `dil` parametresi YOK).
+ * - Tutar `toplaBilinen(çeyreğin siparişleri, siparisTutari)`; `ekran` kısmi toplam (hiç bilinen yoksa NaN → '—'),
+ *   `grafik` bilinen yoksa `null` (0 DEĞİL), `adet` çeyreğe düşen kayıt sayısı — tutarı bilinmeyenler DÂHİL
+ *   (`entry.orders++` paritesi). QoQ yüzdesi ÇAĞIRANDA `para.donemKarsilastir` ile (`tamTutar` kapısı içinde).
+ * - Tek geçiş: siparişler bir kez gezilip anahtar → indeks haritasıyla kovalanır (`aylikCiro`nun O(n·m) `filter`
+ *   kalıbı KOPYALANMADI; `aylikCiro` DOKUNULMADI).
+ * - `ceyrekSayisi` pozitif TAM SAYI olmalı; değilse `throw` (emsal `zamanDagilimi.zamanKovalari`: sessiz boş
+ *   sonuç panelin bozuk yapılandırmayı fark etmeden "veri yok" basmasına yol açardı).
+ *
+ * DEĞİŞMEZ: `Σ satirlar.adet + tarihsiz + pencereDisi === iptalSuz(siparisler, sec).length`. Girdi mutasyona uğramaz.
+ */
+export function ceyreklikCiro(
+  siparisler: readonly CiroSiparisi[],
+  ceyrekSayisi: number,
+  bugun: Date = new Date(),
+  sec: DonemSecenek = { iptalHaric: false },
+): CeyreklikCiro {
+  if (!Number.isInteger(ceyrekSayisi) || ceyrekSayisi <= 0) {
+    throw new Error(`ceyreklikCiro: ceyrekSayisi pozitif tam sayı olmalı (geldi: ${String(ceyrekSayisi)})`);
+  }
+  const liste = iptalSuz(siparisler, sec);
+
+  // Bugünün çeyrek başı; oradan geriye 3'er ay (GB1:178 ile aynı geri sarma).
+  const buCeyrekBasi = new Date(bugun.getFullYear(), Math.floor(bugun.getMonth() / 3) * 3, 1);
+  const kovalar = Array.from({ length: ceyrekSayisi }, (_, i) => {
+    const tarih = new Date(buCeyrekBasi.getFullYear(), buCeyrekBasi.getMonth() - (ceyrekSayisi - 1 - i) * 3, 1);
+    // Kurulan Date her zaman geçerli → anahtar hiç null olmaz; `aylikCiro:212` ile aynı `?? ''` kalıbı (sayı değil).
+    const anahtar = ceyrekAnahtari(tarih) ?? '';
+    return { tarih, yil: tarih.getFullYear(), ceyrek: Math.floor(tarih.getMonth() / 3) + 1, anahtar, siparisler: [] as CiroSiparisi[] };
+  });
+  const indeks = new Map(kovalar.map((k, i) => [k.anahtar, i] as const));
+
+  let tarihsiz = 0;
+  let pencereDisi = 0;
+  for (const o of liste) {
+    const anahtar = ceyrekAnahtari(ciroTarihi(o));
+    if (anahtar === null) { tarihsiz += 1; continue; }          // ASLA "bugün"e düşmez
+    const i = indeks.get(anahtar);
+    if (i === undefined) { pencereDisi += 1; continue; }         // eskiden `find` ile sessizce düşüyordu
+    kovalar[i].siparisler.push(o);
+  }
+
+  const satirlar = kovalar.map((k): CeyrekSatiri => {
+    const tutar = toplaBilinen(k.siparisler, siparisTutari);
+    return {
+      anahtar: k.anahtar,
+      etiket: `Q${k.ceyrek} ${k.yil}`,
+      tarih: k.tarih,
+      yil: k.yil,
+      ceyrek: k.ceyrek,
+      tutar,
+      ekran: ekranTutari(tutar),
+      grafik: grafikDegeri(tutar),
+      adet: k.siparisler.length,
+    };
+  });
+  return { satirlar, tarihsiz, pencereDisi };
 }
 
 /** Dönem satırlarının toplamı — "6 ay toplam ciro" gibi özet rakamlar için (sayaçlar da toplanır). */

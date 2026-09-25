@@ -144,3 +144,86 @@ describe('İKİ yüzde biçimi bilinçli olarak YAŞAR', () => {
     expect(yuzdeYaz(null)).toBe('—');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6b EKİ (2026-09-24): `katYaz` + `gunYaz` — kat ve gün metni
+//   GenelBloklar3.tsx:580 `{s.toFixed(1)}x`                            → TR'de nokta ('1.2x')
+//   GenelBloklar3.tsx:342 `${inventoryTurnover.toFixed(1)}x` (:338 `: 0`) → veri yokken '0.0x'
+//   GenelBloklar1.tsx:326/:330/:334 `{avgCycle} {oc(currentLanguage).gun}` → sayı kapısı yok: "NaN gün" / "Infinity gün"
+// Parametre sırası (değer, ondalik, dil) = `yuzdeYaz` (PLAN.md:164 `gunYaz(g, dil)` taslağından bilinçli sapma).
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { katYaz, gunYaz } from './bicim';
+import { oc } from '../../i18n/ortak';
+
+describe('katYaz — 6b eki: kat (çarpan) metni', () => {
+  it("parite: katYaz(1.2, 1, 'en') → '1.2x'; katYaz(4, 1, 'en') → '4.0x' (GB3:580 `toFixed(1)` + 'x')", () => {
+    expect(katYaz(1.2, 1, 'en')).toBe('1.2x');
+    expect(katYaz(4, 1, 'en')).toBe('4.0x');
+    expect(katYaz(1.2, 1, 'en')).toBe(`${(1.2).toFixed(1)}x`);
+  });
+
+  it("TR ondalık VİRGÜL: katYaz(1.25, 1) → '1,3x' (yuvarlama), katYaz(1.2, 1) → '1,2x' (mutasyon: toFixed → '1.2x')", () => {
+    expect(katYaz(1.25, 1)).toBe('1,3x');
+    expect(katYaz(1.2, 1)).toBe('1,2x');
+    expect(katYaz(1.2)).toBe('1,2x');                       // varsayılan ondalik 1, dil tr
+  });
+
+  it("bilinmeyen → '—' (mutasyon: global isFinite → katYaz(null) '0,0x')", () => {
+    for (const v of [null, undefined, NaN, Infinity, -Infinity]) {
+      expect(katYaz(v, 1), String(v)).toBe('—');
+      expect(katYaz(v, 1, 'en'), String(v)).toBe('—');
+    }
+    expect(katYaz(null)).not.toBe('0,0x');
+  });
+
+  it("meşru sıfır gerçek sıfırdır: katYaz(0) → '0,0x'; katYaz(0, 0) → '0x'", () => {
+    expect(katYaz(0)).toBe('0,0x');
+    expect(katYaz(0, 0)).toBe('0x');
+  });
+
+  it("negatif işaret korunur, binlik ayracı YOK: '-0,5x', '1250x'", () => {
+    expect(katYaz(-0.5, 1)).toBe('-0,5x');
+    expect(katYaz(1250, 0)).toBe('1250x');
+    expect(katYaz(1250, 0, 'en')).toBe('1250x');
+  });
+});
+
+describe('gunYaz — 6b eki: gün metni (birim ORTAK sözlükten)', () => {
+  it("parite: gunYaz(12) → '12 gün'; gunYaz(12, 0, 'en') → '12 d' (GB1 `{12} {oc(dil).gun}` ile BİREBİR; mutasyon: satır içi birim → EN'de 'gün'/'days')", () => {
+    expect(gunYaz(12)).toBe('12 gün');
+    expect(gunYaz(12, 0, 'en')).toBe('12 d');
+    expect(gunYaz(12)).toBe(`${12} ${oc('tr').gun}`);
+    expect(gunYaz(12, 0, 'en')).toBe(`${12} ${oc('en').gun}`);
+    expect(gunYaz(12, 0, 'en')).not.toBe('12 gün');
+    expect(gunYaz(12, 0, 'en')).not.toBe('12 days');
+  });
+
+  it("bilinmeyen → '—'; Infinity ZORUNLU vaka (GB1:307 `Math.min(...[])` → Infinity; mutasyon: `|| 0` → '0 gün')", () => {
+    for (const v of [null, undefined, NaN, Infinity, -Infinity]) {
+      expect(gunYaz(v), String(v)).toBe('—');
+      expect(gunYaz(v, 0, 'en'), String(v)).toBe('—');
+    }
+    expect(gunYaz(Math.min(...([] as number[])))).toBe('—');
+    expect(gunYaz(null)).not.toBe('0 gün');
+  });
+
+  it("meşru sıfır ve yuvarlama: '0 gün', 12.6 → '13 gün', 12.5 → '13 gün' (yarım YUKARI = Math.round), 12.55/1 → '12,6 gün' / '12.6 d'", () => {
+    expect(gunYaz(0)).toBe('0 gün');
+    expect(gunYaz(12.6)).toBe('13 gün');
+    expect(gunYaz(12.5)).toBe('13 gün');
+    expect(gunYaz(12.5)).toBe(`${Math.round(12.5)} gün`);   // GB1:306 eski Math.round paritesi
+    expect(gunYaz(12.55, 1)).toBe('12,6 gün');
+    expect(gunYaz(12.55, 1, 'en')).toBe('12.6 d');
+  });
+
+  it("negatif korunur: gunYaz(-3) → '-3 gün' (çağıran eler; yardımcı sayıyı SAKLAMAZ)", () => {
+    expect(gunYaz(-3)).toBe('-3 gün');
+    expect(gunYaz(-3, 0, 'en')).toBe('-3 d');
+  });
+
+  it('sözlük bağı: birim metni oc(dil).gun ile biter (sözlük değişirse test uyarır)', () => {
+    expect(gunYaz(1, 0, 'en').endsWith(oc('en').gun)).toBe(true);
+    expect(gunYaz(1, 0, 'tr').endsWith(oc('tr').gun)).toBe(true);
+    expect(gunYaz(1).endsWith(` ${oc('tr').gun}`)).toBe(true);   // tek boşluk
+  });
+});

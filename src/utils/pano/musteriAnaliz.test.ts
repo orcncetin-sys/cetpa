@@ -325,6 +325,17 @@ describe('enIyiMusteriler — MUTASYON-AYIRT-EDİCİ', () => {
     expect(musteriler[0].tutarsizSiparis).toBe(1);
   });
 
+  it('ölçek yokken BİLİNEN ₺0 müşteri boş ray (0) alır, pozitifler null kalır (6b inceleme 2026-09-25)', () => {
+    const { musteriler, olcekGecerli } = enIyiMusteriler([
+      sip({ id: 'a', customerName: 'Yapı Market A.Ş.', totalPrice: 20000 }),
+      sip({ id: 'a2', customerName: 'Yapı Market A.Ş.', totalPrice: undefined }),
+      sip({ id: 'b', customerName: 'Deniz Nakliyat', totalPrice: 3000 }),
+      sip({ id: 'c', customerName: 'Numune Cari', totalPrice: 0 }),
+    ], 5);
+    expect(olcekGecerli).toBe(false);
+    expect(musteriler.map(m => m.barOrani)).toEqual([null, null, 0]);
+  });
+
   it('kısmi cirolu ALT satırın çubuğu çizilmez, ölçek geçerli olsa bile', () => {
     const { musteriler, olcekGecerli } = enIyiMusteriler([
       sip({ id: 'a', customerName: 'Yapı Market A.Ş.', totalPrice: 20000 }),

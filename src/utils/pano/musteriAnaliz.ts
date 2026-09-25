@@ -59,8 +59,10 @@
  *  4. **Adı olmayan müşteriler TEK kovada** toplanır (`ad === null` → ekranda '—'). Phase 77
  *     `custMap[o.customerName]` yazıyordu: adı olmayan siparişler "undefined" adlı SAHTE bir
  *     müşteri üretiyordu. Phase 160 zaten `o.customerName || '—'` ile aynı şeyi yapıyordu.
- *  5. **Ölçek çubuğu, tepe değer kısmiyse hiç çizilmez** (`barOrani === null`, `olcekGecerli`).
- *     Kısmi bir tepeye göre çizilen çubuk, alt satırları olduğundan uzun gösterir.
+ *  5. **Ölçek çubuğu, tepe değer kısmiyse çizilmez** (`barOrani === null`, `olcekGecerli`).
+ *     Kısmi bir tepeye göre çizilen çubuk, alt satırları olduğundan uzun gösterir. İstisna: BİLİNEN
+ *     ₺0 satır ölçekten bağımsız `barOrani: 0` alır (boş ray — `cubuk.cubukOrani`, 6b inceleme
+ *     2026-09-25; "gerçek 0 = boş", taralı "bilinmiyor" değil).
  *  6. `tipSegmenti` boşluktan ibaret `customerType`'ı da 'Retail' sayar (eski `|| 'Retail'`
  *     yalnız boş dizgiyi yakalıyordu); tanınmayan DOLU değer aynen korunur, kendi satırını alır.
  *  7. **Marjın paydası KALEM cirosudur, başlık tutarı değil** — ekranda GÖRÜNÜR değişiklik
@@ -304,7 +306,8 @@ export interface MusteriCiro extends CubukSatiri {
 export interface EnIyiMusterilerSonucu {
   /** Azalan ciro; tutarı bilinmeyen müşteri SONDA. En fazla `n` satır. */
   musteriler: MusteriCiro[];
-  /** Çubuk ölçeği güvenilir mi? false ise hiçbir çubuk çizilmez (tepe değer kısmi/bilinmiyor). */
+  /** Çubuk ölçeği güvenilir mi? false ise pozitif/kısmi satırların çubuğu çizilmez (tepe değer kısmi/bilinmiyor);
+   *  bilinen ₺0 satır yine `barOrani: 0` (boş ray) alır. */
   olcekGecerli: boolean;
   /** Tutarı bilinmeyen sipariş sayısı (liste geneli). */
   tutarsiz: number;

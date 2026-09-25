@@ -213,3 +213,125 @@ describe('zamanKovalari', () => {
     expect(liste).toHaveLength(1);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6b EKİ (2026-09-24): `mevsimsellikEndeksi` — GenelBloklar3.tsx:553-598 (Ciro Mevsimsellik Endeksi)
+//   :560 `monthRevenue[m].push(o.totalPrice);`                        → bilinmeyen tutar `undefined` → :565 reduce NaN → ay kayboluyor
+//   :565 `vals.length > 0 ? Σ/len : 0`                                  → boş ay 0 (veri yok ≠ ciro sıfır)
+//   :567 `… / Math.max(1, monthAvg.filter(v=>v>0).length)`              → sahte payda; süzgeç iki kez
+//   :572 `peakMonth = seasonality.reduce(…, -1)`                        → -1 kalırsa "peak: undefined"
+// Aynı taban GenelBloklar6.tsx:140-156 (×100 biçim). Ay ortalaması TÜRETMEdir (tamTutar): kısmi toplamdan üretilmez.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { mevsimsellikEndeksi, type ZamanKovasi } from './zamanDagilimi';
+
+/** Bilinen tutarlı ay kovası: `adet` sipariş, toplam `ciro` TL (Şirin İnşaat ÇİMENTO 50KG). */
+const ay = (adet: number, ciro: number): ZamanKovasi => ({ adet, ciro: { toplam: ciro, bilinen: adet, bilinmeyen: 0 } });
+const bosAy = (): ZamanKovasi => ({ adet: 0, ciro: SIFIR_CIRO });
+/** İçinde tutarı okunamayan sipariş olan ay. */
+const tutarsizAy = (bilinen: number, ciro: number, tutarsiz: number): ZamanKovasi =>
+  ({ adet: bilinen + tutarsiz, ciro: { toplam: ciro, bilinen, bilinmeyen: tutarsiz } });
+
+describe('mevsimsellikEndeksi — 6b eki', () => {
+  // GB3:563-569 eski formül: monthAvg = Σ/len; overallAvg = Σ(avg>0)/n(avg>0); seasonality = avg/overallAvg.
+  const oniki = [ay(1, 100), ay(2, 400), ay(3, 900), ay(4, 1600), ...Array.from({ length: 8 }, bosAy)];
+
+  it('PARİTE: 4 ölçülen ay (ort. 100/200/300/400) → genel 250; endeksler [0.4, 0.8, 1.2, 1.6, null×8]; zirve 3', () => {
+    const m = mevsimsellikEndeksi(oniki);
+    expect(m.endeksler.slice(0, 4).map(e => (e === null ? null : Number(e.toFixed(6))))).toEqual([0.4, 0.8, 1.2, 1.6]);
+    expect(m.endeksler.slice(4)).toEqual(Array.from({ length: 8 }, () => null));
+    expect(m.endeksler).toHaveLength(12);
+    expect(m.olculenAy).toBe(4);
+    expect(m.verisizAy).toBe(8);
+    expect(m.tutarsizAy).toBe(0);
+    expect(m.zirve).toBe(3);
+    // Eski formülle BİREBİR (kendi hesabımızla değil, eski kodun aritmetiğiyle)
+    const monthAvg = [100, 200, 300, 400, 0, 0, 0, 0, 0, 0, 0, 0];
+    const overallAvg = monthAvg.filter(v => v > 0).reduce((s, v) => s + v, 0) / monthAvg.filter(v => v > 0).length;
+    expect(m.endeksler[2]).toBeCloseTo(300 / overallAvg, 12);
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: tutarsız ay ÖLÇÜLMEZ (null, tutarsizAy) ve tabana GİRMEZ — diğer endeksler değişmez', () => {
+    const temiz = mevsimsellikEndeksi([ay(1, 100), ay(1, 300), ...Array.from({ length: 10 }, bosAy)]);
+    // Aynı iki ay + üçüncü ayda 2 bilinen (₺1.000) + 1 tutarsız → kısmi ortalama 500 tabana girseydi genel 300 olurdu.
+    const kirli = mevsimsellikEndeksi([ay(1, 100), ay(1, 300), tutarsizAy(2, 1000, 1), ...Array.from({ length: 9 }, bosAy)]);
+    expect(kirli.endeksler[2]).toBeNull();
+    expect(kirli.tutarsizAy).toBe(1);
+    expect(kirli.olculenAy).toBe(2);
+    expect(kirli.endeksler[0]).toBe(temiz.endeksler[0]);   // 100/200 = 0.5 (mutasyon: ekranTutari → 100/300)
+    expect(kirli.endeksler[1]).toBe(temiz.endeksler[1]);
+    expect(kirli.endeksler[0]).toBeCloseTo(0.5, 12);
+  });
+
+  it('AYRIK sayaçlar — çift sayım YOK: tutarsız ay verisizAy\'a DA sayılmaz; olculenAy + tutarsizAy + verisizAy === 12', () => {
+    const karisik = [ay(2, 500), tutarsizAy(1, 200, 2), bosAy(), ay(3, 0), tutarsizAy(0, 0, 1), ...Array.from({ length: 7 }, bosAy)];
+    const m = mevsimsellikEndeksi(karisik);
+    expect(m.olculenAy).toBe(1);
+    expect(m.tutarsizAy).toBe(2);
+    expect(m.verisizAy).toBe(9);           // 8 boş + 1 meşru ₺0 ortalama
+    expect(m.olculenAy + m.tutarsizAy + m.verisizAy).toBe(12);
+  });
+
+  it('zirve YOK: hiç ölçülen ay yoksa endeksler hepsi null, zirve null, olculenAy 0 (mutasyon: -1 → monthNames[-1] "peak: undefined")', () => {
+    const bos = mevsimsellikEndeksi(Array.from({ length: 12 }, bosAy));
+    expect(bos.endeksler).toEqual(Array.from({ length: 12 }, () => null));
+    expect(bos.zirve).toBeNull();
+    expect(bos.olculenAy).toBe(0);
+    expect(bos.verisizAy).toBe(12);
+    const hepsiTutarsiz = mevsimsellikEndeksi([tutarsizAy(1, 100, 1), tutarsizAy(0, 0, 2), ...Array.from({ length: 10 }, bosAy)]);
+    expect(hepsiTutarsiz.endeksler.every(e => e === null)).toBe(true);
+    expect(hepsiTutarsiz.zirve).toBeNull();
+    expect(hepsiTutarsiz.olculenAy).toBe(0);
+    expect(hepsiTutarsiz.tutarsizAy).toBe(2);
+    expect(hepsiTutarsiz.verisizAy).toBe(10);
+  });
+
+  it('beraberlik: iki ay aynı endekste → zirve KÜÇÜK indeks (`>`, `>=` değil)', () => {
+    const m = mevsimsellikEndeksi([ay(1, 100), ay(2, 800), ay(1, 400), ay(4, 1600), ...Array.from({ length: 8 }, bosAy)]);
+    expect(m.endeksler[1]).toBe(m.endeksler[3]);
+    expect(m.zirve).toBe(1);
+  });
+
+  it('meşru ₺0 ay (parite): 3 bilinen ₺0 sipariş → endeks null, verisizAy artar (bugünkü `avg > 0` süzgeci)', () => {
+    const m = mevsimsellikEndeksi([ay(3, 0), ay(1, 100), ...Array.from({ length: 10 }, bosAy)]);
+    expect(m.endeksler[0]).toBeNull();
+    expect(m.verisizAy).toBe(11);
+    expect(m.tutarsizAy).toBe(0);
+    expect(m.olculenAy).toBe(1);
+  });
+
+  it('tek ölçülen ay: endeksi tam 1, diğerleri null, zirve o ay', () => {
+    const m = mevsimsellikEndeksi([bosAy(), bosAy(), ay(5, 2500), ...Array.from({ length: 9 }, bosAy)]);
+    expect(m.endeksler[2]).toBe(1);
+    expect(m.endeksler.filter(e => e !== null)).toHaveLength(1);
+    expect(m.zirve).toBe(2);
+  });
+
+  it('zamanKovalari çıktısıyla uçtan uca: tutarı okunamayan sipariş o ayı ölçülemez yapar', () => {
+    const liste = [
+      sip({ createdAt: new Date(2026, 0, 5), totalPrice: 100 }),
+      sip({ createdAt: new Date(2026, 1, 5), totalPrice: 300 }),
+      sip({ createdAt: new Date(2026, 2, 5), totalPrice: 500 }),
+      sip({ createdAt: new Date(2026, 2, 9) }),                     // Mart — tutarı OKUNAMADI
+    ];
+    const z = zamanKovalari(liste, 12, d => d.getMonth(), { tarihSec: o => o.createdAt, tutarSec });
+    const m = mevsimsellikEndeksi(z.kovalar);
+    expect(m.endeksler[2]).toBeNull();
+    expect(m.tutarsizAy).toBe(1);
+    expect(m.olculenAy).toBe(2);
+    expect(m.endeksler[0]).toBeCloseTo(0.5, 12);
+    expect(m.endeksler[1]).toBeCloseTo(1.5, 12);
+    expect(m.zirve).toBe(1);
+  });
+
+  it('girdi mutasyona uğramaz (Object.freeze); uzunluk girdiden gelir (4 çeyrek kovası da çalışır)', () => {
+    const donuk = Object.freeze([ay(1, 100), ay(1, 300), bosAy(), tutarsizAy(1, 50, 1)].map(k =>
+      Object.freeze({ ...k, ciro: Object.freeze({ ...k.ciro }) })));
+    expect(() => mevsimsellikEndeksi(donuk)).not.toThrow();
+    const m = mevsimsellikEndeksi(donuk);
+    expect(m.endeksler).toHaveLength(4);
+    expect(m.endeksler[0]).toBeCloseTo(0.5, 12);
+    expect(m.endeksler[2]).toBeNull();
+    expect(m.endeksler[3]).toBeNull();
+    expect(m.olculenAy + m.tutarsizAy + m.verisizAy).toBe(4);
+  });
+});

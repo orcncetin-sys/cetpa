@@ -326,3 +326,156 @@ describe('mtdKarsilastir — Phase 56 "Bu Ay Ciro (MTD)"', () => {
     expect(k.ekran).toBe(20000);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6b EKİ (2026-09-24): `ceyreklikCiro` — çeyreklik ciro penceresi (GenelBloklar1.tsx:171-224, P156 QoQ)
+//   :181  `quarters.push({ …, revenue: 0, orders: 0 })`         → `revenue` Tutar kovası olmalı
+//   :189  `entry.revenue += o.totalPrice || 0; entry.orders++;`  → tutarsız sipariş ₺0 giriyor, adet artıyor
+//   :185  `if (!d) continue;`                                    → tarihsiz kayıt sessizce düşüyor
+//   :189  `find` eşleşmezse (pencere dışı)                       → sessizce düşüyor
+//   :194  `prevQ.revenue > 0 ? Math.round(…) : null`             → KISMİ toplamdan QoQ; tamTutar kapısı yok
+// Kural: tutarı okunamayan sipariş ₺0 değildir; toplama girmez, SAYILIR. Tarihsiz / pencere dışı izsiz kaybolmaz.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { ceyreklikCiro } from './ciroDonem';
+import { tamTutar } from '../para';
+
+// BUGUN = 19 Eylül 2026 → pencere (4 çeyrek): 2025-Q4, 2026-Q1, 2026-Q2, 2026-Q3
+const ceyrekSiparisler: CiroSiparisi[] = [
+  s({ createdAt: new Date(2025, 10, 10), totalPrice: 5000 }),                      // 2025-Q4 — Şirin İnşaat
+  s({ createdAt: new Date(2026, 1, 3), totalPrice: 7000 }),                        // 2026-Q1 — Çelik Yapı
+  s({ createdAt: new Date(2026, 2, 31, 23, 59), totalPrice: 1000 }),               // 2026-Q1 — çeyrek SINIRI (son dakika)
+  s({ createdAt: new Date(2026, 3, 1, 0, 0), totalPrice: 2000 }),                  // 2026-Q2 — çeyrek SINIRI (ilk an)
+  s({ createdAt: new Date(2026, 7, 18), totalPrice: 8000 }),                       // 2026-Q3
+  s({ createdAt: new Date(2026, 8, 5), totalPrice: 12000 }),                       // 2026-Q3 — ÇİMENTO 50KG
+];
+
+describe('ceyreklikCiro — 6b eki, GB1 P156 paritesi', () => {
+  const c = ceyreklikCiro(ceyrekSiparisler, 4, BUGUN, { iptalHaric: true });
+
+  it('PARİTE: 4 çeyrek en eskiden yeniye; anahtar "YYYY-Qn", etiket "Qn YYYY" (getQLabel ile BİREBİR)', () => {
+    expect(c.satirlar.map(q => q.anahtar)).toEqual(['2025-Q4', '2026-Q1', '2026-Q2', '2026-Q3']);
+    expect(c.satirlar.map(q => q.etiket)).toEqual(['Q4 2025', 'Q1 2026', 'Q2 2026', 'Q3 2026']);
+    expect(c.satirlar[3]).toMatchObject({ etiket: 'Q3 2026', anahtar: '2026-Q3', ceyrek: 3, yil: 2026 });
+    expect(c.satirlar[0]).toMatchObject({ ceyrek: 4, yil: 2025, tarih: new Date(2025, 9, 1) });
+    expect(c.satirlar[3].tarih).toEqual(new Date(2026, 6, 1));
+  });
+
+  it('PARİTE: bilinen girdide çeyrek cirosu eski `revenue` toplamıyla BİREBİR', () => {
+    expect(c.satirlar.map(q => q.ekran)).toEqual([5000, 8000, 2000, 20000]);
+    expect(c.satirlar.map(q => q.adet)).toEqual([1, 2, 1, 2]);
+    expect(c.satirlar.map(q => q.grafik)).toEqual([5000, 8000, 2000, 20000]);
+    expect(c.tarihsiz).toBe(0);
+    expect(c.pencereDisi).toBe(0);
+  });
+
+  it('çeyrek sınırı: 31.03 23:59 → Q1, 01.04 00:00 → Q2', () => {
+    expect(c.satirlar[1].adet).toBe(2);   // 7000 + 1000 (son dakika)
+    expect(c.satirlar[2].adet).toBe(1);   // 2000 (ilk an)
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: tutarı bilinmeyen sipariş ₺0 SAYILMAZ, SAYILIR; QoQ türetmesi kapanır', () => {
+    const r = ceyreklikCiro([
+      s({ createdAt: new Date(2026, 8, 5), totalPrice: 13000 }),
+      s({ createdAt: new Date(2026, 8, 6) }),                                      // tutarı OKUNAMADI
+    ], 4, BUGUN);
+    const q3 = r.satirlar[3];
+    expect(q3.tutar).toEqual({ toplam: 13000, bilinen: 1, bilinmeyen: 1 });
+    expect(q3.ekran).toBe(13000);
+    expect(q3.adet).toBe(2);                                                        // `entry.orders++` paritesi
+    expect(Number.isNaN(tamTutar(q3.tutar))).toBe(true);                            // rozet ÇİZİLMEZ
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: çeyreğin TÜM siparişleri tutarsızsa ekran NaN, grafik null (0 DEĞİL)', () => {
+    const r = ceyreklikCiro([
+      s({ createdAt: new Date(2026, 4, 5) }),
+      s({ createdAt: new Date(2026, 5, 6), totalPrice: 'abc' }),
+    ], 4, BUGUN);
+    const q2 = r.satirlar[2];
+    expect(Number.isNaN(q2.ekran)).toBe(true);
+    expect(q2.grafik).toBeNull();
+    expect(q2.adet).toBe(2);
+    expect(q2.tutar).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 2 });
+  });
+
+  it('kaydı olmayan çeyrek GERÇEK 0 (boş liste), grafik 0 çizilir', () => {
+    const r = ceyreklikCiro([s({ createdAt: new Date(2026, 8, 5), totalPrice: 1 })], 4, BUGUN);
+    expect(r.satirlar[0]).toMatchObject({ ekran: 0, grafik: 0, adet: 0, tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 } });
+  });
+
+  it('MUTASYON-AYIRT EDİCİ: tarihi çözülemeyen sipariş `tarihsiz` sayılır, hiçbir çeyreğe (bugüne de) girmez', () => {
+    const r = ceyreklikCiro([s({ totalPrice: 300 }), s({ createdAt: 'çözülemez', totalPrice: 400 })], 4, BUGUN);
+    expect(r.tarihsiz).toBe(2);
+    expect(r.satirlar.map(q => q.adet)).toEqual([0, 0, 0, 0]);
+    expect(r.satirlar[3].ekran).toBe(0);                                            // "bugün"e düşmedi
+  });
+
+  it('BİLİNÇLİ FARK 1: yalnız `syncedAt`i olan sipariş çeyreğe GİRER (GB1 yalnız createdAt okuyor, aylikCiro sayıyor)', () => {
+    const r = ceyreklikCiro([s({ syncedAt: new Date(2026, 8, 9), totalPrice: 700 })], 4, BUGUN);
+    expect(r.satirlar[3].ekran).toBe(700);
+    expect(r.satirlar[3].adet).toBe(1);
+    expect(r.tarihsiz).toBe(0);
+  });
+
+  it('pencere dışı (5 çeyrek önce) sipariş `pencereDisi` sayılır — bugün `find` ile sessizce düşüyor', () => {
+    const r = ceyreklikCiro([s({ createdAt: new Date(2025, 6, 1), totalPrice: 900 })], 4, BUGUN); // 2025-Q3
+    expect(r.pencereDisi).toBe(1);
+    expect(r.satirlar.map(q => q.adet)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('yıl sınırı: bugün 15.01.2026 → 2025-Q2 … 2026-Q1; Aralık 2025 → 2025-Q4, Ocak 2026 → 2026-Q1', () => {
+    const r = ceyreklikCiro([
+      s({ createdAt: new Date(2025, 11, 20), totalPrice: 100 }),
+      s({ createdAt: new Date(2026, 0, 10), totalPrice: 200 }),
+    ], 4, new Date(2026, 0, 15));
+    expect(r.satirlar.map(q => q.anahtar)).toEqual(['2025-Q2', '2025-Q3', '2025-Q4', '2026-Q1']);
+    expect(r.satirlar.map(q => q.etiket)).toEqual(['Q2 2025', 'Q3 2025', 'Q4 2025', 'Q1 2026']);
+    expect(r.satirlar[2].ekran).toBe(100);
+    expect(r.satirlar[3].ekran).toBe(200);
+  });
+
+  it('iptalHaric:true iptali hem tutardan hem adetten düşürür; false ikisini de sayar', () => {
+    const liste = [
+      s({ createdAt: new Date(2026, 8, 5), totalPrice: 12000 }),
+      s({ createdAt: new Date(2026, 8, 12), totalPrice: 4000, status: 'Cancelled' }),
+    ];
+    const haric = ceyreklikCiro(liste, 4, BUGUN, { iptalHaric: true });
+    expect(haric.satirlar[3].ekran).toBe(12000);
+    expect(haric.satirlar[3].adet).toBe(1);
+    const dahil = ceyreklikCiro(liste, 4, BUGUN, { iptalHaric: false });
+    expect(dahil.satirlar[3].ekran).toBe(16000);
+    expect(dahil.satirlar[3].adet).toBe(2);
+    // Varsayılan seçenek aylikCiro ile AYNI: { iptalHaric: false }
+    expect(ceyreklikCiro(liste, 4, BUGUN).satirlar[3].ekran).toBe(16000);
+  });
+
+  it('BİLİNÇLİ FARK 3: `totalAmount` yedeği siparisTutari üzerinden sayılır (mutasyon: `o.totalPrice` doğrudan okunursa bilinmeyen)', () => {
+    const r = ceyreklikCiro([s({ createdAt: new Date(2026, 8, 5), totalAmount: 2500 })], 4, BUGUN);
+    expect(r.satirlar[3].tutar).toEqual({ toplam: 2500, bilinen: 1, bilinmeyen: 0 });
+  });
+
+  it('ceyrekSayisi pozitif tam sayı değilse throw (sessiz boş sonuç YOK)', () => {
+    for (const n of [0, -1, 2.5, NaN]) {
+      expect(() => ceyreklikCiro(ceyrekSiparisler, n, BUGUN), String(n)).toThrow();
+    }
+  });
+
+  it('DEĞİŞMEZ: Σ adet + tarihsiz + pencereDisi === iptalsiz liste uzunluğu', () => {
+    const karisik = [
+      ...ceyrekSiparisler,
+      s({ totalPrice: 300 }),                                                        // tarihsiz
+      s({ createdAt: new Date(2025, 6, 1), totalPrice: 900 }),                       // pencere dışı
+      s({ createdAt: new Date(2026, 8, 6) }),                                        // tutarsız (çeyreğe girer)
+      s({ createdAt: new Date(2026, 8, 12), totalPrice: 4000, status: 'Cancelled' }), // iptal → hiçbir sayaçta
+    ];
+    const r = ceyreklikCiro(karisik, 4, BUGUN, { iptalHaric: true });
+    const adet = r.satirlar.reduce((t, q) => t + q.adet, 0);
+    expect(adet + r.tarihsiz + r.pencereDisi).toBe(karisik.length - 1);
+    expect(adet + r.tarihsiz + r.pencereDisi).toBe(karisik.filter(o => o.status !== 'Cancelled').length);
+  });
+
+  it('girdi mutasyona uğramaz: Object.freeze\'li dizi ve öğelerle hata atmaz', () => {
+    const donuk = Object.freeze(ceyrekSiparisler.map(o => Object.freeze({ ...o })));
+    expect(() => ceyreklikCiro(donuk, 4, BUGUN, { iptalHaric: true })).not.toThrow();
+    expect(ceyreklikCiro(donuk, 4, BUGUN, { iptalHaric: true }).satirlar[3].ekran).toBe(20000);
+  });
+});

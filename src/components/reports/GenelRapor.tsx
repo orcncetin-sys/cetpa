@@ -79,6 +79,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         exchangeRates={ctx.exchangeRates}
         currentLanguage={ctx.currentLanguage}
         fmtAna={ctx.fmtAna}
+        leadCariKodu={ctx.leadCariKodu}
       />
       <GenelBloklar4
         reportsTab={ctx.reportsTab}

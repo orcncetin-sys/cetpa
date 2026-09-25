@@ -31,6 +31,13 @@
  * (UTC+3) bu 3 saatlik fark gün farkına dönüşüyordu: bir fatura KPI'da
  * "gecikmiş", aynı satırın durum sütununda "Bekliyor" görünüyordu.
  * `gunBasi()` bu ikisini tek kurala bağlar.
+ *
+ * 6b EKİ (2026-09-24, Faz 3 6/n Genel I): `ceyrekAnahtari` — `ayAnahtari`/`gunAnahtari` ile aynı
+ * kalıpta, sıralanabilir 'YYYY-Qn' çeyrek anahtarı. Neden: `pano/ciroDonem.ceyreklikCiro`nun kova
+ * anahtarı (GenelBloklar1.tsx:171-224 P156 çeyrek kovalarını elle kuruyordu) ve CrmBloklar4.tsx:152'nin
+ * `'Q<çeyrek> <yıl>'` anahtarını `localeCompare` ile sıralayıp `.slice(-6)` alması ('Q1 2026' < 'Q2 2025'
+ * → yanlış kohortlar). Ölçüldü: `git grep -in "ceyrek\|quarter" -- src/utils src/lib` yalnız `rapor/abonelik`in
+ * frekans katsayısına düşüyordu — takvim çeyreği için tek kaynak YOKTU.
  */
 
 /**
@@ -160,6 +167,22 @@ export function gunAnahtari(v: unknown): string | null {
   const d = gunBasi(v);
   if (!d) return null;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Bir kaydın çeyrek anahtarı: `'YYYY-Qn'` (n = 1-4). Çözemezse `null` — `new Date(x)` ile
+ * Invalid Date üretilip `'NaN-QNaN'` YAZILMAZ.
+ * Metin sırası KRONOLOJİKTİR — `'Q3 2026'` biçimi değil (o biçim `'Q1 2026' < 'Q2 2025'` verir;
+ * CrmBloklar4.tsx:152 bu yüzden yanlış kohortları seçiyor). Etiket AYRI: ekranda `Q${n} ${yıl}`
+ * yazılır, ANAHTAR olarak bu kullanılır.
+ * YEREL saat (`ayAnahtari`/`gunAnahtari` ile aynı karar: UTC kayması TR'de 00:00-03:00 arası dönemi
+ * kaydırır). Saf: dil/biçim/Intl yok. 6b eki (2026-09-24).
+ */
+export function ceyrekAnahtari(v: unknown): string | null {
+  const d = zamanDate(v);
+  if (!d) return null;
+  // getMonth() SIFIR tabanlı: 0-2 → Q1 … 9-11 → Q4. `+ 1` insan numarası.
+  return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3) + 1}`;
 }
 
 // ── GÖSTERİM — tek kaynak (Faz 2 2/n, 2026-09-12) ───────────────────────────────────────
