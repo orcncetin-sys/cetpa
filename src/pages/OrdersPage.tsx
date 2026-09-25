@@ -4,7 +4,8 @@ import { eslesir } from '../utils/arama';
 import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli } from '../utils/siparis';
 import { irsaliyeIstegi, irsaliyeNedenMetni } from '../utils/siparisler/irsaliyeGonder';
 import { faturaKesilebilir, mikroyaFaturaGonderilebilir } from '../utils/siparisler/faturaDurumu';
-import { yerelDegistirilebilir, sevkiyatEngeli, sevkiyatEngeliMetni, yerelDegistirilemezMetni } from '../utils/siparisler/siparisIslemleri';
+import { yerelDegistirilebilir, sevkiyatEngeli, sevkiyatEngeliMetni, yerelDegistirilemezMetni, silmeYolu, mikroSilOnayMetni, mikroSilindiMetni, silmeEngelMetni, silmeHataMetni, siparisNotMetni } from '../utils/siparisler/siparisIslemleri';
+import { mikroSiparisiSil } from '../services/mikroSiparisSil';
 import { useMikroSiparisKalemleri } from '../hooks/useMikroSiparisKalemleri';
 import MikroSiparisKalemleri from '../components/siparis/MikroSiparisKalemleri';
 import { kalemleriMikrodanOkunacak, mikroFaturaKalemleriGetir, mikroKalemTablosu, kayitliKalemTablosu, kayitliMikroKalemleri } from '../services/mikroFaturaKalemleri';
@@ -449,12 +450,28 @@ export default function OrdersPage({
     try { await addDoc(collection(db, 'notifications'), { title, message, type, read: false, createdAt: serverTimestamp() }); } catch { /* ignore */ }
   };
 
-  const handleDeleteOrder = async (orderId: string) => {
+  /** Dönüş: silindi mi — çağıran (detay paneli) yalnız başarıda kapanır. */
+  const handleDeleteOrder = async (orderId: string): Promise<boolean> => {
+    // Silme yolu TEK kuraldan (siparisIslemleri.silmeYolu, K-MF-SİL): Mikro faturası siparişi sunucu ucundan (mezar +
+    // notla geri gelir), Mikro sipariş satırı silinmez, native yerelde.
+    const ord = orders.find(o => o.id === orderId);
+    const engel = ord ? silmeEngelMetni(ord, userRole, currentLanguage) : null;
+    if (engel) { toast(engel, 'warning'); return false; }
+    const yol = ord ? silmeYolu(ord) : 'yerel';
     try {
+      if (yol === 'mikroSunucu') {
+        const hata = await mikroSiparisiSil(orderId, currentLanguage === 'tr');
+        if (hata) { toast(hata, 'error'); return false; }
+        toast(mikroSilindiMetni(currentLanguage), 'success');  // denetim kaydını sunucu yazar
+        return true;
+      }
       await deleteDoc(doc(db, 'orders', orderId));
       logAuditAction(currentT.order_deletion || 'Order Deleted', orderId);
+      return true;
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `orders/${orderId}`);
+      toast(silmeHataMetni(error, currentLanguage), 'error');   // eskiden yalnız konsol: kullanıcı silindi sanıyordu
+      return false;
     }
   };
 
@@ -1362,10 +1379,10 @@ export default function OrdersPage({
                                   </span>
                                 )}
                                 {/* Phase 78: Notes indicator dot */}
-                                {order.notes && (
+                                {siparisNotMetni(order) && (
                                   <span
                                     className="w-4 h-4 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0 cursor-help"
-                                    title={order.notes}
+                                    title={siparisNotMetni(order)}
                                   >
                                     <FileText className="w-2.5 h-2.5 text-amber-600" />
                                   </span>
@@ -1555,16 +1572,16 @@ export default function OrdersPage({
                                 >
                                   ★
                                 </button>
-                                <button onClick={() => { if (!yerelDegistirilebilir(order)) return; openConfirm({
+                                <button onClick={() => { if (silmeEngelMetni(order, userRole, currentLanguage)) return; openConfirm({
                                   title: currentT.confirm_delete_title,
-                                  message: currentT.confirm_delete,
+                                  message: silmeYolu(order) === 'mikroSunucu' ? mikroSilOnayMetni(currentLanguage) : currentT.confirm_delete,
                                   confirmLabel: currentT.delete,
                                   variant: 'danger',
-                                  onConfirm: () => handleDeleteOrder(order.id)
+                                  onConfirm: () => { void handleDeleteOrder(order.id); }
                                 }); }}
-                                  disabled={!yerelDegistirilebilir(order)}
+                                  disabled={silmeEngelMetni(order, userRole, currentLanguage) !== null}
                                   className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-400"
-                                  title={yerelDegistirilebilir(order) ? currentT.delete_order : yerelDegistirilemezMetni(currentLanguage)}>
+                                  title={silmeEngelMetni(order, userRole, currentLanguage) ?? currentT.delete_order}>
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
@@ -2473,15 +2490,16 @@ export default function OrdersPage({
                         <Edit2 className="w-4 h-4" /> {oc(currentLanguage).duzenle}
                       </button>
                       <button
-                        onClick={() => { if (!yerelDegistirilebilir(selectedOrder)) return; openConfirm({
+                        onClick={() => { if (silmeEngelMetni(selectedOrder, userRole, currentLanguage)) return; openConfirm({
                           title: currentT.confirm_delete_title,
-                          message: currentT.confirm_delete,
+                          message: silmeYolu(selectedOrder) === 'mikroSunucu' ? mikroSilOnayMetni(currentLanguage) : currentT.confirm_delete,
                           confirmLabel: currentT.delete,
                           variant: 'danger',
-                          onConfirm: () => { handleDeleteOrder(selectedOrder.id); setSelectedOrder(null); }
+                          // Panel YALNIZ başarıda kapanır — başarısız silmede kapanması "silindi" izlenimi veriyordu.
+                          onConfirm: () => { void handleDeleteOrder(selectedOrder.id).then(ok => { if (ok) setSelectedOrder(null); }); }
                         }); }}
-                        disabled={!yerelDegistirilebilir(selectedOrder)}
-                        title={yerelDegistirilebilir(selectedOrder) ? undefined : yerelDegistirilemezMetni(currentLanguage)}
+                        disabled={silmeEngelMetni(selectedOrder, userRole, currentLanguage) !== null}
+                        title={silmeEngelMetni(selectedOrder, userRole, currentLanguage) ?? undefined}
                         className="bg-white hover:bg-red-50 text-red-600 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
                         <Trash2 className="w-4 h-4" /> {oc(currentLanguage).sil}
                       </button>
@@ -2585,6 +2603,13 @@ export default function OrdersPage({
                       <h3 className="font-bold">{currentT.notes}</h3>
                       {orderNoteSaved && <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />{oc(currentLanguage).kaydedildi_2}</span>}
                     </div>
+                    {/* Sistem notu (K-MF-SİL) düzenlenmez — iç notun ÜSTÜNDE ayrı durur, textarea'ya karışmaz. */}
+                    {selectedOrder.sistemNotu && (
+                      <p role="note" className="mb-3 flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                        <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                        <span>{selectedOrder.sistemNotu}</span>
+                      </p>
+                    )}
                     <textarea
                       value={orderNoteText}
                       onChange={e => { setOrderNoteText(e.target.value); setOrderNoteSaved(false); }}

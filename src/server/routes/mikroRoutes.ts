@@ -31,7 +31,7 @@
 import type { AdminDbLike, AdminDocRef, DocDaralt } from '../adminDbTypes.js';
 import type { Express, Request, Response } from 'express';
 import { FaturaKaydetSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema, type Sema } from '../schemas.js';
-import { zamanla } from '../zamanla.js';
+import { zamanla, isGunu } from '../zamanla.js';
 import { timingSafeEqual } from 'crypto';
 import { findKey, kolonSec } from '../../lib/mikroKolon.js';
 import {
@@ -55,6 +55,7 @@ import {
 } from '../mikro/govdeMuhasebe.js';
 import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
 import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
+import { EXTERNAL_ROLES, type AppRole } from '../../lib/rbac.js';
 import { mikroIsAdi } from '../../lib/mikroIsAdi.js';
 import { arkaPlanIsiBaslat, arkaPlanOnKontrol, arkaPlanYaziciAdi, bakimKilidiMesaji, type ArkaPlanBagimlilik, type BaslatSonucu } from '../mikro/arkaPlanIsi.js';
 import { araligiTopla, ALT_STOK, ALT_CARI, type SayfaSayaclari } from '../mikro/adaptifSayfalama.js';
@@ -126,6 +127,8 @@ export interface MikroRouteCtx {
   validate: <T>(sema: Sema<T>, veri: unknown, res: Response) => T | null;
   /** pg-boss kuyrugu (server.ts'te sonradan atanir) - GETTER. */
   getBoss: () => any;
+  /** Kullanıcının rolü (server.ts getUserRole) — rota düzeyinde ek yetki kararı için (ör. iç rol şartı). */
+  getUserRole: (uid: string) => Promise<AppRole | null>;
 }
 
 export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
@@ -3777,6 +3780,60 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  YALNIZ push'ta doluyordu → Mikro'da kesilen faturanın siparişi kalemsizdi. MEVCUT MF siparişinin kalemi yalnız
    *  açık istekle yenilenir: body `kalemYenile: 'onizle'` HİÇBİR ŞEY YAZMAZ (sayaç + örnek döner), `'uygula'` yazar
    *  (yalnız `lineItems` — durum, not, sevkiyat dokunulmaz; kaynak boşsa dokunulmaz). */
+  /** POST /api/mikro/siparis/sil — K-MF-SİL (kullanıcı 2026-09-25: "sildiğim tekrar gelsin ama yanına not düşsün
+   *  silinmişti diye"). Yalnız faturadan türeyen MF siparişi (`source:'mikro-fatura'`, id `mikrofat__<kiracı>__…`),
+   *  yalnız çağıranın kiracısı, yalnız İÇ roller: `orders` yazma yetkisi B2B/Dealer'ı da kapsıyor (şartname kapısı C1).
+   *  Sıra: MEZAR yaz → siparişi sil (mezar yazılamazsa silme YAPILMAZ). Mezar SERVER_ONLY (`siparisMezarlari`):
+   *  istemci okuyamaz/yazamaz. faturadan-sipariş importu mezarlı faturayı yeniden yaratır, ayrı `sistemNotu` düşer. */
+  // Kapı 'delete' (Admin/Manager — /api/db'nin sipariş silme kuralıyla AYNI): 'write' Satış/Lojistik'e /api/db'nin
+  // vermediği silme yetkisini veriyordu (inceleme 2026-09-25, CONFIRMED).
+  app.post('/api/mikro/siparis/sil', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('orders', 'delete'), async (req: Request, res: Response) => {
+    try {
+      const actor = C.reqActor(req);
+      const rol = await C.getUserRole(actor.uid);
+      if (!rol || EXTERNAL_ROLES.includes(rol)) return res.status(403).json({ success: false, error: 'Bu işlem için yetkiniz yok.' });
+      const cid = await C.reqCompanyId(req);
+      const id = String((req.body as { id?: unknown } | undefined)?.id ?? '');
+      if (!id.startsWith(`mikrofat__${cid}__`)) {
+        return res.status(400).json({ success: false, error: 'Yalnız Mikro faturasından türeyen sipariş bu yolla silinir.' });
+      }
+      const ref = C.getAdminDb().collection('orders').doc(id);
+      const snap = await ref.get();
+      const o = (snap.exists ? snap.data() : undefined) as Record<string, unknown> | undefined;
+      // Başka kiracının kaydı "yok" gibi görünür (varlığı sızmaz).
+      if (!o || o.companyId !== cid) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+      if (o.source !== 'mikro-fatura') return res.status(400).json({ success: false, error: 'Yalnız Mikro faturasından türeyen sipariş bu yolla silinir.' });
+      // Notta e-posta DEĞİL görünen ad (kişisel veri sipariş okuyan herkese açılmasın); yoksa "bir kullanıcı".
+      let silenAd: string | null = null;
+      try {
+        const u = await C.getAdminDb().collection('users').doc(actor.uid).get();
+        const ud = (u.exists ? u.data() : undefined) as Record<string, unknown> | undefined;
+        const aday = [ud?.displayName, ud?.name].find(x => typeof x === 'string' && x.trim());
+        silenAd = typeof aday === 'string' ? aday.trim() : null;
+      } catch { /* ad okunamazsa "bir kullanıcı" */ }
+      const mezarRef = C.getAdminDb().collection('siparisMezarlari').doc(id);
+      await mezarRef.set({
+        orderId: id, companyId: cid,
+        orderNumber: typeof o.orderNumber === 'string' ? o.orderNumber : null,
+        mikroEvrak: o.mikroEvrak ?? null,
+        silenUid: actor.uid, silenAd,
+        // İstanbul günü (zamanla.isGunu): UTC günü TR 00:00-03:00 silmesini bir gün geri yazıyordu (inceleme 2026-09-25).
+        silinmeZamani: pgServerTimestamp(), silinmeGunu: isGunu(),
+        silinenNot: typeof o.notes === 'string' && o.notes.trim() ? o.notes : null,
+        geriGeldi: false,
+      });
+      // Silme başarısızsa mezar GERİ ALINIR: sipariş yerinde kalıp `geriGeldi:false` hayalet mezar, ileride başka bir yoldan
+      // silinen siparişe yanlış kişi/gün notu düşürürdü (inceleme 2026-09-25).
+      try { await ref.delete(); } catch (e) { await mezarRef.delete().catch(() => {}); throw e; }
+      await C.writeAuditLog(actor, 'Mikro siparişi silindi',
+        `orders/${id} (${typeof o.orderNumber === 'string' ? o.orderNumber : id}) — faturadan-sipariş importu notla geri getirir`);
+      res.json({ success: true });
+    } catch (err) {
+      console.error('[mikro/siparis/sil]', err);
+      res.status(500).json({ success: false, error: 'Sipariş silinemedi — tekrar deneyin.' });
+    }
+  });
+
   app.post('/api/mikro/import/faturadan-siparis', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     const t0 = Date.now();
@@ -3893,6 +3950,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // Kalem sayaçları YAZILAN kalemler için (yeni sipariş + otomatik doldurulan); yenileme adayları AYRI sayılır.
       let miktarsizKalem = 0, tutarsizKalem = 0, kalemKaynagiYok = 0, bosDoldurulan = 0;
       let kalemYenilenecek = 0, kalemYenilenen = 0, yenileMiktarsiz = 0, yenileTutarsiz = 0, kalemAzalan = 0, kaynaksizBekleyen = 0;
+      // K-MF-SİL: Cetpa'da silinmiş MF siparişlerinin mezarları — yeniden yaratılırken not düşülür (kalem modunda okunmaz).
+      const mezarlar = yalnizKalem ? new Map<string, Record<string, unknown>>()
+        : new Map((await C.loadCompanyDocs('siparisMezarlari', cid)).map(m => [String(m.id ?? ''), m as Record<string, unknown>]));
+      let geriGelen = 0;
       const kalemOrnek: Array<{ orderNumber: string; eski: number; yeni: number }> = [];
 
       let batch = C.getAdminDb().batch();
@@ -3957,11 +4018,24 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         miktarsizKalem += k.miktarsiz; tutarsizKalem += k.tutarsiz;
         if (t.tutarBilinmiyor) tutarsizSiparis++;
         created++;
+        // Cetpa'da silinmişti → notla geri gelir (sistem notu AYRI alan; kullanıcının iç notu `notes`a geri konur).
+        const mezar = mezarlar.get(t.id);
+        const geriGelis = mezar && mezar.geriGeldi !== true ? {
+          sistemNotu: `Cetpa'da ${typeof mezar.silinmeGunu === 'string' ? mezar.silinmeGunu : 'bilinmeyen bir tarihte'} `
+            + `${typeof mezar.silenAd === 'string' && mezar.silenAd ? mezar.silenAd : 'bir kullanıcı'} tarafından silinmişti — Mikro'dan yeniden geldi.`,
+          ...(typeof mezar.silinenNot === 'string' && mezar.silinenNot ? { notes: mezar.silinenNot } : {}),
+        } : {};
         batch.set(C.getAdminDb().collection('orders').doc(t.id), {
           ...t.doc,
+          ...geriGelis,
           // Fatura tarihi sipariş tarihi olarak işlenir (kullanıcının isteği).
           createdAt: t.olusturmaTarihi ?? pgServerTimestamp(),
         });
+        if (mezar && mezar.geriGeldi !== true) {
+          batch.update(C.getAdminDb().collection('siparisMezarlari').doc(t.id), { geriGeldi: true, geriGelmeZamani: pgServerTimestamp() });
+          geriGelen++;
+          if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+        }
         if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
       }
       if (ops > 0) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
@@ -3985,6 +4059,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             siparisTuretmeNotu({ turetilen: created, tutarsiz: tutarsizSiparis, yonsuz,
               miktarsizKalem, tutarsizKalem, kalemKaynagiYok, pgYok: !pool }),
             bosDoldurulan > 0 ? `${bosDoldurulan} kalemsiz MF siparişinin kalemi dolduruldu` : null,
+            geriGelen > 0 ? `${geriGelen} silinmiş MF siparişi Mikro'dan notla yeniden geldi` : null,
             ...iptalNotlari(iptal),
             iptalAtlandi ? `${yonsuz} faturanın yönü okunamadığı için iptal eşlemesi ATLANDI — faturaları yeniden çekin` : null,
             kalemYenilenecek > 0 ? `${kalemYenilenecek} MF siparişinin kalemi eski biçimde ya da Mikro'daki satırlarla TUTMUYOR (eksik/değişmiş) — Entegrasyon → "MF Sipariş Kalemlerini Yenile"` : null,

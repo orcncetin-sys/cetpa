@@ -89,12 +89,15 @@ export function genDocId(): string {
 
 export function broadcastDocChange(coll: string, type: 'set' | 'delete', id: string, data?: unknown): void {
   // Kiracı/kullanıcı filtreleme için companyId + userId'yi olaya iliştir.
+  // SİLMEDE `data` = silinen dokümanın SON hali: yalnız etiket için okunur, olaya İLİŞTİRİLMEZ (içerik akışa gitmez).
+  // Etiketsiz silme olayı SSE'de BÜTÜN kiracılara gidiyordu (`ev.cid && …` filtresi) — MF kimliği kiracı kimliği +
+  // fatura seri-sırası taşır (inceleme 2026-09-25).
   const d = (data ?? {}) as Record<string, unknown>;
   dbEvents.emit('change', {
     coll, type, id,
     cid: d.companyId as string | undefined,
     uid: d.userId as string | undefined,
-    ...(data !== undefined ? { data } : {}),
+    ...(data !== undefined && type !== 'delete' ? { data } : {}),
   });
 }
 
@@ -249,8 +252,8 @@ export class PgDocRef {
     broadcastDocChange(this.coll, 'set', this.id, final);
   }
   async delete(): Promise<void> {
-    await this.pool.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [this.coll, this.id]);
-    broadcastDocChange(this.coll, 'delete', this.id);
+    const { rows } = await this.pool.query('DELETE FROM docs WHERE coll = $1 AND id = $2 RETURNING data', [this.coll, this.id]);
+    broadcastDocChange(this.coll, 'delete', this.id, rows[0]?.data);   // etiket (cid/uid) için; içerik iliştirilmez
   }
 }
 

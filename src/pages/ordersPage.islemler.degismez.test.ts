@@ -21,8 +21,42 @@ describe('Siparişler — işlem düğmeleri', () => {
   it('Düzenle SİLME onayıyla açılmaz ("Kaydı Sil" başlığı + "Düzenle" onayı kopyası kalktı)', () => {
     expect(kod).not.toMatch(/confirmLabel:\s*currentT\.edit/);
   });
-  it('Mikro kaynaklı kayıt Cetpa\'da düzenlenmez/silinmez — detay ve liste satırı aynı kurala bağlı', () => {
+  it('Mikro kaynaklı kayıt Cetpa\'da düzenlenmez — detay ve liste satırı aynı kurala bağlı', () => {
     expect((kod.match(/disabled=\{!yerelDegistirilebilir\((selectedOrder|order)\)\}/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+  it('Sil düğmeleri SİLME kuralına bağlı (K-MF-SİL): MF sunucu ucundan, onay metni geri geleceğini söyler', () => {
+    // İki düğme (liste satırı + detay) aynı kural; düzenleme kilidiyle (yerelDegistirilebilir) KARIŞMAZ.
+    // Engel TEK kuraldan (kaynak + ROL): Satış/Lojistik silemez — düğme kapalı, gerekçe title'da (delta inceleme 2026-09-25).
+    expect((kod.match(/disabled=\{silmeEngelMetni\((selectedOrder|order), userRole, currentLanguage\) !== null\}/g) ?? []).length).toBe(2);
+    expect((kod.match(/onClick=\{\(\) => \{ if \(silmeEngelMetni\((selectedOrder|order), userRole, currentLanguage\)\) return; openConfirm/g) ?? []).length).toBe(2);
+    // Detay paneli YALNIZ başarıda kapanır (başarısız silmede kapanması "silindi" izlenimi veriyordu).
+    expect(kod).toMatch(/handleDeleteOrder\(selectedOrder\.id\)\.then\(ok => \{ if \(ok\) setSelectedOrder\(null\); \}\)/);
+    expect(kod).not.toMatch(/handleDeleteOrder\(selectedOrder\.id\); setSelectedOrder\(null\)/);
+    expect((kod.match(/message: silmeYolu\((selectedOrder|order)\) === 'mikroSunucu' \? mikroSilOnayMetni\(currentLanguage\)/g) ?? []).length).toBe(2);
+    const isleyici = kod.slice(kod.indexOf('const handleDeleteOrder'), kod.indexOf('const applyOrderStock'));
+    expect(isleyici).toMatch(/const yol = ord \? silmeYolu\(ord\) : 'yerel';/);
+    // MF kaydı istemciden `orders`tan DOĞRUDAN silinmez — mezar kaydını sunucu yazar.
+    expect(isleyici.indexOf("if (yol === 'mikroSunucu')")).toBeGreaterThan(-1);
+    expect(isleyici.indexOf("if (yol === 'mikroSunucu')")).toBeLessThan(isleyici.indexOf("deleteDoc(doc(db, 'orders'"));
+    expect(isleyici).toMatch(/await mikroSiparisiSil\(orderId/);
+    silmeIsleyicisiCitleri(isleyici);
+    // Dönüş değeri paneli kapatır/açık tutar: hata → false, yerel başarı → true (mutant: ikisi ters — delta 2 inceleme).
+    expect(isleyici).toMatch(/toast\(silmeHataMetni\(error, currentLanguage\), 'error'\);[^\n]*\n\s*return false;\s*\}/);
+    expect(isleyici).toMatch(/await deleteDoc\(doc\(db, 'orders', orderId\)\);\s*logAuditAction\([^;]*;\s*return true;\s*\} catch/);
+    expect(isleyici).toMatch(/if \(engel\) \{ toast\(engel, 'warning'\); return false; \}/);
+    expect(isleyici).toMatch(/if \(hata\) \{ toast\(hata, 'error'\); return false; \}/);
+  });
+  it('sistem notu (silinmişti — geri geldi) detayda ayrı, iç not kutusuna karışmadan gösterilir', () => {
+    expect(kod).toMatch(/\{selectedOrder\.sistemNotu && \(/);
+    expect(kod).not.toMatch(/setOrderNoteText\([^)]*sistemNotu/);
+  });
+  it('liste not göstergesi Siparişler + CRM\'de TEK kural (siparisNotMetni) — yalnız `notes`a bakan gösterge kalmadı', () => {
+    for (const k of [kod, crm]) {
+      expect(k).toMatch(/\{siparisNotMetni\(order\) && \(/);
+      expect(k).toMatch(/title=\{siparisNotMetni\(order\)\}/);
+      expect(k).not.toMatch(/\{order\.notes && \(/);
+      expect(k).not.toMatch(/title=\{order\.notes\}/);
+    }
   });
   it('sevkiyat: düğme ve pencere aynı kuralla (teslim edilmiş / iptal / açık sevkiyat) — ikinci çit dahil', () => {
     expect(kod).toMatch(/disabled=\{sevkiyatEngeli\(guncelSiparis\(selectedOrder\), shipments\) !== null\}/);
@@ -55,8 +89,31 @@ describe('Siparişler — işlem düğmeleri', () => {
     expect(kod).toMatch(/tablo505\.masraf !== null && tablo505\.masraf > 0/);
     expect(kod).not.toMatch(/\bkalemleriCoz\(|\bkalemSaglamasi\(/);
   });
-  it('CRM sayfası da AYNI kural: iki Sil düğmesi + durum seçicisi + işleyiciler', () => {
-    expect((crm.match(/disabled=\{!yerelDegistirilebilir\(order\)\}/g) ?? []).length).toBeGreaterThanOrEqual(3);
-    expect((crm.match(/if \(ord && !yerelDegistirilebilir\(ord\)\)/g) ?? []).length).toBe(2);
+  it('CRM sayfası da AYNI kural: iki Sil düğmesi silmeYolu, durum seçicisi düzenleme kilidi; işleyiciler', () => {
+    expect((crm.match(/disabled=\{silmeEngelMetni\(order, userRole, currentLanguage\) !== null\}/g) ?? []).length).toBe(2);
+    expect((crm.match(/disabled=\{!yerelDegistirilebilir\(order\)\}/g) ?? []).length).toBe(1);
+    expect((crm.match(/if \(ord && !yerelDegistirilebilir\(ord\)\)/g) ?? []).length).toBe(1);
+    const isleyici = crm.slice(crm.indexOf('const handleDeleteOrder'), crm.indexOf('const handleUpdateOrderStatus'));
+    expect(isleyici).toMatch(/const yol = ord \? silmeYolu\(ord\) : 'yerel';/);
+    expect(isleyici).toMatch(/mikroSilOnayMetni\(currentLanguage\)/);
+    expect(isleyici.indexOf("if (yol === 'mikroSunucu')")).toBeGreaterThan(-1);
+    expect(isleyici.indexOf("if (yol === 'mikroSunucu')")).toBeLessThan(isleyici.indexOf("deleteDoc(doc(db, 'orders'"));
+    silmeIsleyicisiCitleri(isleyici);
+    // Onay: MF → silinip geri geleceğini söyleyen metin; öteki yol olağan silme onayı (koşul ters çevrilemez).
+    // Vazgeç → HİÇBİR silme yok: onay kapısı onay ifadesinin hemen ardında ve try'dan ÖNCE (satır silinirse eşleşmez).
+    expect(isleyici).toMatch(/const onay = yol === 'mikroSunucu'\s*\? await confirmAction\(\{[^}]*message: mikroSilOnayMetni\(currentLanguage\)[^}]*\}\)\s*: await confirmDelete\([^)]*\);\s*if \(!onay\) return;\s*try \{/);
   });
 });
+
+/** İki sayfanın silme işleyicisi için ortak çitler (inceleme 2026-09-25: üç mutant ayırt edilmiyordu). */
+function silmeIsleyicisiCitleri(isleyici: string): void {
+  // (a) 'yok' yolu işleyicide de reddedilir (düğme disabled tek başına yetmez — başka çağıran olabilir), en başta.
+  const red = /const engel = ord \? silmeEngelMetni\(ord, userRole, currentLanguage\) : null;\s*if \(engel\) \{ toast\(engel, 'warning'\); return( false)?; \}/;
+  const m = isleyici.match(red);
+  expect(m, 'engel (kaynak + rol) işleyicide de reddedilir').not.toBeNull();
+  expect(isleyici.indexOf(m![0])).toBeLessThan(isleyici.indexOf("if (yol === 'mikroSunucu')"));
+  // (c) başarısız silme SESSİZ değil: catch kullanıcıya söyler (eskiden yalnız konsol).
+  expect(isleyici).toMatch(/catch \(error\) \{\s*handleFirestoreError\([^;]*;\s*toast\(silmeHataMetni\(error, currentLanguage\), 'error'\);/);
+  // (b) sunucu silmesi başarılıysa ERKEN döner — akış yerel deleteDoc'a düşmez; hata toast'la döner.
+  expect(isleyici).toMatch(/if \(hata\) \{ toast\(hata, 'error'\); return( false)?; \}\s*toast\(mikroSilindiMetni\(currentLanguage\), 'success'\);[^\n]*\n\s*return( true)?;\s*\}/);
+}

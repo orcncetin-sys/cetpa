@@ -6,7 +6,7 @@ import { huniAsamasi } from '../lib/huni';
 // Eskiden bu dosyada ÜÇ kopya `l.email.toLowerCase()` vardı; Mikro import'u bilinmeyen
 // alanı hiç yazmadığı için ada uymayan her aramada CRM sekmesi çöküyordu (2026-09-19).
 import { leadAramaEslesir } from '../lib/leadArama';
-import { confirmDelete } from '../lib/confirm';
+import { confirmDelete, confirmAction } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plus, Search, X, ChevronDown, ChevronRight,
@@ -28,7 +28,8 @@ import { twMerge } from 'tailwind-merge';
 import Papa from 'papaparse';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { odemeTakipli } from '../utils/siparis';
-import { yerelDegistirilebilir, yerelDegistirilemezMetni } from '../utils/siparisler/siparisIslemleri';
+import { yerelDegistirilebilir, yerelDegistirilemezMetni, silmeYolu, mikroSilOnayMetni, mikroSilindiMetni, silmeEngelMetni, silmeHataMetni, siparisNotMetni } from '../utils/siparisler/siparisIslemleri';
+import { mikroSiparisiSil } from '../services/mikroSiparisSil';
 import { hedefGirdisi, hedefOnDoldur } from '../utils/pano/hedefButce';
 import { zamanDate, zamanMs, gunFarki, ayAnahtari, gunAnahtari, tarihYaz } from '../utils/zaman';
 import { authFetch } from '../services/authFetch';
@@ -487,16 +488,29 @@ export default function CRMPage({
   };
 
   const handleDeleteOrder = async (orderId: string) => {
-    // Mikro kaynaklı kayıt Cetpa'da silinmez — Siparişler sayfasıyla AYNI kural (utils/siparisler/siparisIslemleri;
-    // inceleme 2026-09-25: yalnız Siparişler kapatılmıştı, buradaki iki Sil düğmesi açık kalmıştı).
+    // Silme yolu TEK kuraldan (siparisIslemleri.silmeYolu, K-MF-SİL) — Siparişler sayfasıyla AYNI (inceleme
+    // 2026-09-25: kural önce yalnız Siparişler'e konmuştu, buradaki iki Sil düğmesi açık kalmıştı).
     const ord = orders.find(o => o.id === orderId);
-    if (ord && !yerelDegistirilebilir(ord)) { toast(yerelDegistirilemezMetni(currentLanguage), 'warning'); return; }
-    if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return;
+    const engel = ord ? silmeEngelMetni(ord, userRole, currentLanguage) : null;
+    if (engel) { toast(engel, 'warning'); return; }
+    const yol = ord ? silmeYolu(ord) : 'yerel';
+    const tr = currentLanguage === 'tr';
+    const onay = yol === 'mikroSunucu'
+      ? await confirmAction({ title: tr ? 'Silme Onayı' : 'Confirm Delete', message: mikroSilOnayMetni(currentLanguage), confirmLabel: oc(currentLanguage).sil, variant: 'danger' })
+      : await confirmDelete(undefined, tr ? 'tr' : 'en');
+    if (!onay) return;
     try {
+      if (yol === 'mikroSunucu') {
+        const hata = await mikroSiparisiSil(orderId, tr);
+        if (hata) { toast(hata, 'error'); return; }
+        toast(mikroSilindiMetni(currentLanguage), 'success');  // denetim kaydını sunucu yazar
+        return;
+      }
       await deleteDoc(doc(db, 'orders', orderId));
       logAuditAction(currentT.order_deletion || 'Order Deleted', orderId);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `orders/${orderId}`);
+      toast(silmeHataMetni(error, currentLanguage), 'error');   // eskiden yalnız konsol: kullanıcı silindi sanıyordu
     }
   };
 
@@ -666,8 +680,8 @@ export default function CRMPage({
                                 <td className="px-6 py-4 text-right font-bold text-[#1D2226]">
                                   <div className="flex items-center justify-end gap-1.5">
                                     {/* Phase 50: Notes indicator */}
-                                    {order.notes && (
-                                      <span title={order.notes} className="w-4 h-4 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                                    {siparisNotMetni(order) && (
+                                      <span title={siparisNotMetni(order)} className="w-4 h-4 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
                                         <FileText className="w-2.5 h-2.5 text-amber-600" />
                                       </span>
                                     )}
@@ -675,7 +689,7 @@ export default function CRMPage({
                                   </div>
                                 </td>
                                 <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                  <button onClick={() => handleDeleteOrder(order.id)} disabled={!yerelDegistirilebilir(order)} title={yerelDegistirilebilir(order) ? undefined : yerelDegistirilemezMetni(currentLanguage)} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors p-1 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-400">
+                                  <button onClick={() => handleDeleteOrder(order.id)} disabled={silmeEngelMetni(order, userRole, currentLanguage) !== null} title={silmeEngelMetni(order, userRole, currentLanguage) ?? undefined} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors p-1 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-400">
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 </td>
@@ -3431,7 +3445,7 @@ export default function CRMPage({
                               <p className="text-[10px] text-gray-400 mt-1 truncate max-w-[200px]">{order.shippingAddress}</p>
                             </div>
                             <div className="text-right flex flex-col items-end gap-2">
-                              <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} disabled={!yerelDegistirilebilir(order)} title={yerelDegistirilebilir(order) ? undefined : yerelDegistirilemezMetni(currentLanguage)} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-400">
+                              <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} disabled={silmeEngelMetni(order, userRole, currentLanguage) !== null} title={silmeEngelMetni(order, userRole, currentLanguage) ?? undefined} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-400">
                                 <Trash2 className="w-4 h-4" />
                               </button>
                               <div>

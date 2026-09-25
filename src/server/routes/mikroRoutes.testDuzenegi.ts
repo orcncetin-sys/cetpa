@@ -271,6 +271,7 @@ export function duzenekKur(secenek: DuzenekSecenek = {}): Duzenek {
       return sonuc.data;
     },
     getBoss: () => null,
+    getUserRole: vi.fn(async () => 'Admin' as const),
   };
 
   (secenek.kayit ?? mikroRoutes)(app as unknown as Express, C);

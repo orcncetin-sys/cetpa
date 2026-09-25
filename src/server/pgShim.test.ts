@@ -6,7 +6,7 @@
  * incelemesi, KRİTİK). Firestore semantiği: update var olmayan dokümanda yazmaz. `set` ise oluşturur.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { PgDocRef } from './pgShim';
+import { PgDocRef, dbEvents, broadcastDocChange } from './pgShim';
 
 function sahtePool(mevcut: Record<string, Record<string, unknown>>) {
   const sorgular: Array<{ sql: string; params: unknown[] }> = [];
@@ -41,5 +41,38 @@ describe('PgDocRef.update', () => {
     const { pool, sorgular } = sahtePool({});
     await new PgDocRef(pool as never, 'leads', 'yeni').set({ name: 'X' });
     expect(sorgular.some(q => q.sql.includes('INSERT INTO docs'))).toBe(true);
+  });
+});
+
+// İnceleme 2026-09-25: etiketsiz silme olayı SSE'de (`ev.cid && ev.cid !== streamCid`) BÜTÜN kiracılara gidiyordu.
+describe('silme olayı kiracı/kullanıcı ETİKETİ taşır, içerik taşımaz', () => {
+  const dinle = async (is: () => Promise<void> | void) => {
+    const olaylar: unknown[] = [];
+    const f = (e: unknown) => { olaylar.push(e); };
+    dbEvents.on('change', f);
+    try { await is(); } finally { dbEvents.off('change', f); }
+    return olaylar;
+  };
+
+  it('PgDocRef.delete silinen satırı RETURNING ile okur; olay cid/uid taşır, data TAŞIMAZ', async () => {
+    const pool = { query: vi.fn(async (sql: string) => ({ rows: sql.startsWith('DELETE') ? [{ data: { companyId: 'A', userId: 'u1', notes: 'iç not' } }] : [], rowCount: 1 })) };
+    const olaylar = await dinle(() => new PgDocRef(pool as never, 'orders', 'mikrofat__A__-321').delete());
+    expect(pool.query.mock.calls[0][0]).toMatch(/^DELETE FROM docs WHERE coll = \$1 AND id = \$2 RETURNING data$/);
+    expect(olaylar).toEqual([{ coll: 'orders', type: 'delete', id: 'mikrofat__A__-321', cid: 'A', uid: 'u1' }]);
+  });
+
+  it('olmayan dokümanın silinmesi etiketsiz olay (önceki davranış) — hata yok', async () => {
+    const pool = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) };
+    const olaylar = await dinle(() => new PgDocRef(pool as never, 'orders', 'yok').delete());
+    expect(olaylar).toEqual([{ coll: 'orders', type: 'delete', id: 'yok', cid: undefined, uid: undefined }]);
+  });
+
+  it('broadcastDocChange: silmede data yalnız etiket için okunur; set\'te olaya iliştirilir', async () => {
+    const olaylar = await dinle(() => {
+      broadcastDocChange('leads', 'delete', 'l1', { companyId: 'B', name: 'Gizli Firma' });
+      broadcastDocChange('leads', 'set', 'l1', { companyId: 'B', name: 'Açık' });
+    });
+    expect(olaylar[0]).toEqual({ coll: 'leads', type: 'delete', id: 'l1', cid: 'B', uid: undefined });
+    expect(olaylar[1]).toMatchObject({ type: 'set', cid: 'B', data: { name: 'Açık' } });
   });
 });

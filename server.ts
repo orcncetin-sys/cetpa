@@ -2026,7 +2026,7 @@ async function startServer() {
           if (existing.length && !(await ownsDoc(req, coll, prevData, realId))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
         }
         await docsDb.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
-        broadcastDocChange(coll, 'delete', id);
+        broadcastDocChange(coll, 'delete', id, prevData);   // kiracı/kullanıcı ETİKETİ için; içerik olaya iliştirilmez
         // Silme işlemini her zaman logla (efemeral koleksiyonlar hariç).
         if (shouldAudit(coll)) {
           const label = (prevData.name || prevData.title || prevData.adi || prevData.musteriAdi || id) as string;
@@ -2677,7 +2677,7 @@ async function startServer() {
     requireAuth, requireMfaVerified,
     // Sonradan atanan baglantilar GETTER ile (bkz. diger modullerdeki gerekce).
     getAdminDb: adminDbZorunlu, getPgPool: () => pgPool,
-    getUserCompanyId, mikroIdCozucuIds, validate, getBoss: () => boss,
+    getUserCompanyId, mikroIdCozucuIds, validate, getBoss: () => boss, getUserRole,
   });
 
 

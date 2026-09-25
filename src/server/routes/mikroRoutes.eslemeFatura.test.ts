@@ -441,3 +441,121 @@ describe('POST /api/mikro/fatura/kalemler', () => {
     expect(govde.kalemler[2].birim, 'okunamayan işaretçi → birim uydurulmaz').toBeUndefined();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// K-MF-SİL (kullanıcı 2026-09-25: "sildiğim tekrar gelsin ama yanına not düşsün silinmişti diye")
+describe('POST /api/mikro/siparis/sil + faturadan-siparis geri geliş notu', () => {
+  const BASLIK = { cha_evrakno_seri: '', cha_evrakno_sira: 321, cha_tarihi: '2026-08-01T00:00:00', cha_tip: 0, cha_kod: '120 01', cha_meblag: 21600 };
+  const MF = { source: 'mikro-fatura', companyId: 'A', orderNumber: 'MF-321', mikroEvrak: { seri: '', sira: '321' }, notes: 'teslimatta sorun vardı', status: 'Delivered' };
+
+  it("sıra: MEZAR yazılır (silen AD, gün, iç not) → sipariş silinir → denetim kaydı; e-posta mezara/nota GİRMEZ", async () => {
+    d.snapAyarla('orders', { 'mikrofat__A__-321': MF });
+    d.snapAyarla('users', { u1: { displayName: 'Ayşe Yılmaz', email: 'a@cetpa.com.tr' } });
+    const res = await d.cagir('POST', '/api/mikro/siparis/sil', { id: 'mikrofat__A__-321' });
+    expect(res.govde).toEqual({ success: true });
+    const yazim = d.yazilan.filter(y => ['orders', 'siparisMezarlari'].includes(y.ref.coll));
+    expect(yazim.map(y => [y.op, y.ref.coll, y.ref.id])).toEqual([
+      ['set', 'siparisMezarlari', 'mikrofat__A__-321'],
+      ['delete', 'orders', 'mikrofat__A__-321'],
+    ]);
+    expect(yazim[0].data).toMatchObject({ orderId: 'mikrofat__A__-321', companyId: 'A', orderNumber: 'MF-321', silenUid: 'u1', silenAd: 'Ayşe Yılmaz',
+      silinenNot: 'teslimatta sorun vardı', geriGeldi: false, silinmeGunu: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
+    expect(JSON.stringify(yazim[0].data)).not.toContain('a@cetpa.com.tr');
+    expect(d.C.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ uid: 'u1' }), 'Mikro siparişi silindi', expect.stringContaining('MF-321'));
+  });
+
+  it('dış rol (B2B/Dealer) 403; başka kiracının siparişi 404 (varlığı sızmaz); MF olmayan / yanlış kimlik 400 — hiçbir yazım yok', async () => {
+    d.snapAyarla('orders', { 'mikrofat__A__-321': MF, 'mikrofat__A__-9': { ...MF, source: 'shopify' }, 'mikrofat__A__-8': { ...MF, companyId: 'B' } });
+    vi.mocked(d.C.getUserRole).mockResolvedValueOnce('B2B');
+    expect((await d.cagir('POST', '/api/mikro/siparis/sil', { id: 'mikrofat__A__-321' })).kod).toBe(403);
+    expect((await d.cagir('POST', '/api/mikro/siparis/sil', { id: 'mikrofat__A__-8' })).kod).toBe(404);
+    expect((await d.cagir('POST', '/api/mikro/siparis/sil', { id: 'mikrofat__A__-9' })).kod).toBe(400);
+    expect((await d.cagir('POST', '/api/mikro/siparis/sil', { id: 'mikrofat__B__-321' })).kod).toBe(400);
+    expect((await d.cagir('POST', '/api/mikro/siparis/sil', { id: 'native-1' })).kod).toBe(400);
+    expect(d.yazilan.filter(y => ['orders', 'siparisMezarlari'].includes(y.ref.coll))).toEqual([]);
+  });
+
+  it('import mezarlı faturayı yeniden yaratır: sistemNotu (gün + ad), eski iç not geri, mezar geriGeldi; ikinci koşuda tekrar not YOK', async () => {
+    vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) =>
+      coll === 'mikroFaturalar' ? [BASLIK]
+        : coll === 'siparisMezarlari' ? [{ id: 'mikrofat__A__-321', geriGeldi: false, silinmeGunu: '2026-09-25', silenAd: 'Ayşe Yılmaz', silinenNot: 'teslimatta sorun vardı' }]
+          : []) as typeof d.C.loadCompanyDocs);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    const siparis = d.koleksiyon('orders').find(y => y.ref.id === 'mikrofat__A__-321');
+    expect(siparis?.data).toMatchObject({ sistemNotu: "Cetpa'da 2026-09-25 Ayşe Yılmaz tarafından silinmişti — Mikro'dan yeniden geldi.", notes: 'teslimatta sorun vardı' });
+    expect(d.koleksiyon('siparisMezarlari')).toEqual([expect.objectContaining({ op: 'update', data: expect.objectContaining({ geriGeldi: true }) })]);
+    expect(String((res.govde as { note?: string }).note)).toMatch(/1 silinmiş MF siparişi Mikro'dan notla yeniden geldi/);
+    // Mezar zaten geriGeldi → yeniden silinmeden tekrar gelmişse not DÜŞÜLMEZ.
+    d.sifirla();
+    vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) =>
+      coll === 'mikroFaturalar' ? [BASLIK] : coll === 'siparisMezarlari' ? [{ id: 'mikrofat__A__-321', geriGeldi: true, silenAd: 'X' }] : []) as typeof d.C.loadCompanyDocs);
+    await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect('sistemNotu' in (d.koleksiyon('orders')[0]?.data ?? {})).toBe(false);
+    expect(d.koleksiyon('siparisMezarlari')).toEqual([]);
+  });
+
+  // İnceleme 2026-09-25 (CONFIRMED): kapı 'write' Satış/Lojistik'e /api/db'nin vermediği silme yetkisini veriyordu.
+  it("kapı 'orders:delete' (Admin/Manager — /api/db sipariş silme kuralıyla aynı), 'write' DEĞİL", () => {
+    const zincir = d.app.zincirler['POST /api/mikro/siparis/sil'] as Array<{ erisimKapisi?: string }>;
+    expect(zincir.some(m => m?.erisimKapisi === 'orders:delete')).toBe(true);
+    expect(zincir.some(m => m?.erisimKapisi === 'orders:write')).toBe(false);
+  });
+
+  it('silinme günü İSTANBUL günüdür: TR 26.09 01:30 (UTC 25.09 22:30) → 2026-09-26', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-09-25T22:30:00Z'));
+      d.snapAyarla('orders', { 'mikrofat__A__-321': MF });
+      await d.cagir('POST', '/api/mikro/siparis/sil', { id: 'mikrofat__A__-321' });
+      expect(d.yazilan.find(y => y.ref.coll === 'siparisMezarlari')?.data?.silinmeGunu).toBe('2026-09-26');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('sipariş silinemezse mezar GERİ ALINIR (hayalet mezar kalmaz), yanıt 500 ve iç hata metni sızmaz', async () => {
+    d.snapAyarla('orders', { 'mikrofat__A__-321': MF });
+    const adb = d.C.getAdminDb() as unknown as { collection: (c: string) => { doc: (id?: string) => { delete: () => Promise<void> } } };
+    const asil = adb.collection.bind(adb);
+    vi.spyOn(adb, 'collection').mockImplementation((c: string) => {
+      const kol = asil(c);
+      if (c !== 'orders') return kol;
+      return { ...kol, doc: (id?: string) => Object.assign(kol.doc(id), { delete: async () => { throw new Error('PG bağlantısı koptu'); } }) };
+    });
+    const res = await d.cagir('POST', '/api/mikro/siparis/sil', { id: 'mikrofat__A__-321' });
+    expect(res.kod).toBe(500);
+    expect(JSON.stringify(res.govde)).not.toContain('PG bağlantısı');
+    expect(d.yazilan.filter(y => y.ref.coll === 'siparisMezarlari').map(y => y.op)).toEqual(['set', 'delete']);
+    expect(d.C.writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it('mezar yalnız YENİ yaratılan siparişte tüketilir: sipariş hâlâ duruyorsa mezar açık kalır, siparişe not düşmez', async () => {
+    vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) =>
+      coll === 'mikroFaturalar' ? [BASLIK]
+        : coll === 'orders' ? [{ id: 'mikrofat__A__-321', ...MF }]
+          : coll === 'siparisMezarlari' ? [{ id: 'mikrofat__A__-321', geriGeldi: false, silinmeGunu: '2026-09-25', silenAd: 'Ayşe Yılmaz' }]
+            : []) as typeof d.C.loadCompanyDocs);
+    await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(d.koleksiyon('siparisMezarlari')).toEqual([]);
+    expect(d.koleksiyon('orders').some(y => 'sistemNotu' in (y.data ?? {}))).toBe(false);
+  });
+
+  it("kalem modunda ('onizle' / 'uygula') mezar OKUNMAZ ve İŞARETLENMEZ", async () => {
+    for (const kalemYenile of ['onizle', 'uygula'] as const) {
+      d.sifirla();
+      vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) =>
+        coll === 'mikroFaturalar' ? [BASLIK]
+          : coll === 'siparisMezarlari' ? [{ id: 'mikrofat__A__-321', geriGeldi: false, silenAd: 'X' }]
+            : []) as typeof d.C.loadCompanyDocs);
+      await d.cagir('POST', '/api/mikro/import/faturadan-siparis', { kalemYenile });
+      expect(vi.mocked(d.C.loadCompanyDocs).mock.calls.some(c => c[0] === 'siparisMezarlari'), kalemYenile).toBe(false);
+      expect(d.koleksiyon('siparisMezarlari'), kalemYenile).toEqual([]);
+      expect(d.koleksiyon('orders').some(y => 'sistemNotu' in (y.data ?? {})), kalemYenile).toBe(false);
+    }
+  });
+
+  it('ad bulunamazsa "bir kullanıcı" (e-posta yazılmaz)', async () => {
+    d.snapAyarla('orders', { 'mikrofat__A__-321': MF });
+    await d.cagir('POST', '/api/mikro/siparis/sil', { id: 'mikrofat__A__-321' });
+    const mezar = d.yazilan.find(y => y.ref.coll === 'siparisMezarlari');
+    expect(mezar?.data?.silenAd).toBeNull();
+  });
+});

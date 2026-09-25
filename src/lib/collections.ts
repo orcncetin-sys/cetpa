@@ -132,6 +132,9 @@ export const USER_SCOPED_COLLECTIONS: readonly string[] = [
  */
 export const SERVER_ONLY_COLLECTIONS: readonly string[] = [
   'opsLocks',          // bakım kilidi (bakimKilidi.ts) — script koyar, cron/import uyar; API'ye kapalı
+  // 2026-09-25 K-MF-SİL: silinen Mikro faturası siparişinin mezarı (silen kişi, zaman, iç not). Yalnız sunucu yazar
+  // (/api/mikro/siparis/sil) ve okur (faturadan-sipariş importu) — istemci sahte mezar yazamaz, e-posta dışarı çıkmaz.
+  'siparisMezarlari',
   'opsChecks', 'emailLog', 'whatsappMessages', 'waMessageLog',
   // Cerezsiz trafik sayaci (2026-08-28) - gunluk toplamlar, kisisel veri yok.
   // Istemci /api/db'den okuyamaz; super-admin GET /api/trafik/ozet ile okur.

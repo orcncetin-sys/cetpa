@@ -136,6 +136,9 @@ export interface Order {
   syncedAt?: unknown;
   leadId?: string;
   notes?: string;
+  /** Sistemin yazdığı, kullanıcının düzenlemediği not (K-MF-SİL): Cetpa'da silinip Mikro'dan yeniden gelen MF
+   *  siparişine "… tarafından silinmişti — Mikro'dan yeniden geldi" (POST /api/mikro/import/faturadan-siparis). */
+  sistemNotu?: string;
   lineItems?: OrderLineItem[];
   customerType: CustomerType;
   cargoCompany?: string;

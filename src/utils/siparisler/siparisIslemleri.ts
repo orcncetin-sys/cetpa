@@ -6,15 +6,16 @@
  * Neden var (2026-09-25 kullanıcı bildirimleri, MF-383 ekranı):
  *  - "teslim edilen bir şeye tekrar sevkiyat oluşturulamaz" → teslim edilmiş / iptal edilmiş siparişe, ya da zaten
  *    açık sevkiyatı olan siparişe Hızlı Sevkiyat açılmaz.
- *  - Mikro'dan türeyen sipariş (`source` 'mikro…', ör. faturadan türeyen MF-383) Cetpa'da düzenlenmez/silinmez:
- *    gerçeği Mikro'dadır. Yerel düzenleme Mikro'yla çelişir; silinen kayıt bir sonraki "faturadan sipariş"
- *    importunda geri gelir (import mevcut olmayan kimliği yeniden yazar). Düzeltme Mikro'da yapılır.
+ *  - Mikro'dan türeyen sipariş (`source` 'mikro…', ör. faturadan türeyen MF-383) Cetpa'da DÜZENLENMEZ: gerçeği
+ *    Mikro'dadır, yerel düzenleme Mikro'yla çelişir; düzeltme Mikro'da yapılır. SİLME ayrı kural (`silmeYolu`,
+ *    K-MF-SİL): MF sunucu ucundan silinir ve bir sonraki "faturadan sipariş" importunda "silinmişti" notuyla döner.
  *  - "Mikro Siparişleri" sekmesinin satırları (`source:'mikro-siparis'`) sevkiyat AÇMAZ (K-MİKRO-SİPARİŞ, kullanıcı:
  *    "mikroda sipariş oluşturmadan devam ediyoruz, ondan CETPA da oluşuyor"): iş akışında Mikro siparişi yok, fatura
  *    kesilir ve Cetpa siparişi faturadan türer (MF-…). O satırlar `orders`ta DOKÜMAN DEĞİL (Mikro aynasından ekranda
  *    üretilir, durumları yer tutucu 'Pending'); açılan sevkiyat var olmayan bir siparişe bağlanan öksüz kayıt olurdu.
  */
 import { mikroTurevi } from '../pano/mikroBirlesim';
+import { isAllowed, type AppRole } from '../../lib/rbac';
 
 export interface IslemSiparisi {
   id: string;
@@ -26,7 +27,7 @@ export interface IslemSevkiyati {
   status?: string;
 }
 
-/** Sipariş Cetpa'da düzenlenebilir / silinebilir mi? Mikro kaynaklı kayıtta HAYIR. */
+/** Sipariş Cetpa'da DÜZENLENEBİLİR mi? Mikro kaynaklı kayıtta HAYIR. Silme için `silmeYolu`. */
 export function yerelDegistirilebilir(o: IslemSiparisi): boolean {
   return !mikroTurevi(o);
 }
@@ -62,6 +63,79 @@ export function sevkiyatEngeliMetni(e: SevkiyatEngeli, dil: string): string {
 
 export function yerelDegistirilemezMetni(dil: string): string {
   return dil === 'tr'
-    ? "Mikro'dan gelen kayıt — düzeltme ve silme Mikro'da yapılır (Cetpa'da silinen kayıt bir sonraki importta geri gelir)."
-    : 'Record comes from Mikro — edit or delete it in Mikro (a record deleted here returns on the next import).';
+    ? "Mikro'dan gelen kayıt Cetpa'da düzenlenmez — düzeltme Mikro'da yapılır."
+    : 'Record comes from Mikro and cannot be edited here — correct it in Mikro.';
+}
+
+export type SilmeYolu = 'yerel' | 'mikroSunucu' | 'yok';
+
+/**
+ * Siparişin SİLME yolu — düzenleme kilidinden AYRI (K-MF-SİL, kullanıcı 2026-09-25: "sildiğim tekrar gelsin ama yanına
+ * not düşsün silinmişti diye"; şartname kapısı C3). native → yerel silme; faturadan türeyen MF (`source:'mikro-fatura'`)
+ * → sunucu ucu (mezar kaydı; bir sonraki "Faturadan Sipariş Türet"te notla geri gelir); "Mikro Siparişleri" sözde
+ * satırı (`'mikro-siparis'`, orders'ta doküman DEĞİL) ve diğer Mikro kaynakları → silinemez.
+ */
+export function silmeYolu(o: IslemSiparisi): SilmeYolu {
+  if (o.source === 'mikro-fatura') return 'mikroSunucu';
+  return yerelDegistirilebilir(o) ? 'yerel' : 'yok';
+}
+
+export function mikroSilOnayMetni(dil: string): string {
+  return dil === 'tr'
+    ? "Bu sipariş Mikro faturasından geliyor. Silerseniz bir sonraki \"Faturadan Sipariş Türet\" çalışmasında \"silinmişti\" notuyla GERİ GELİR (Mikro'daki fatura değişmez). Silinsin mi?"
+    : 'This order comes from a Mikro invoice. If deleted, it RETURNS with a "was deleted" note on the next "Derive Orders from Invoices" run (the Mikro invoice is unchanged). Delete?';
+}
+
+export function mikroSilindiMetni(dil: string): string {
+  return dil === 'tr' ? "Sipariş silindi — Mikro'dan yeniden gelirse \"silinmişti\" notuyla gelir." : 'Order deleted — if it returns from Mikro it will carry a "was deleted" note.';
+}
+
+/**
+ * Liste satırındaki NOT göstergesinin metni — sistem notu (K-MF-SİL: "silinmişti — geri geldi") + iç not; ikisi de
+ * yoksa '' (gösterge çizilmez). TEK kaynak: Siparişler ve CRM listesi aynı kuralı okur (inceleme 2026-09-25: CRM
+ * göstergesi yalnız `notes`a bakıyordu — geri gelen siparişin izi CRM'de görünmüyordu).
+ */
+export function siparisNotMetni(o: { notes?: unknown; sistemNotu?: unknown }): string {
+  return [o.sistemNotu, o.notes].filter((x): x is string => typeof x === 'string' && x.trim() !== '').join('\n');
+}
+
+export function silinemezMetni(dil: string): string {
+  return dil === 'tr' ? "Mikro sipariş satırı Cetpa'da silinmez — Mikro'dan okunur." : 'Mikro order row cannot be deleted here — it is read from Mikro.';
+}
+
+export function silmeYetkisiYokMetni(dil: string): string {
+  return dil === 'tr' ? 'Sipariş silme yetkiniz yok — Yönetici/Müdür gerekir.' : 'You are not allowed to delete orders — Admin/Manager required.';
+}
+
+/**
+ * Sil düğmesi/işleyicisi için TEK engel kuralı: silinemiyorsa GEREKÇE metni, silinebiliyorsa null. Kayıt kaynağı
+ * (`silmeYolu` 'yok') + ROL: sunucu sipariş silmeyi yalnız Admin/Manager'a açar (rbac `op === 'delete'`; hem /api/db
+ * hem /api/mikro/siparis/sil). Eskiden Satış/Lojistik düğmeyi basabiliyor, yerel silmenin 403'ü yalnız konsola
+ * düşüyor ve detay paneli kapanıyordu — kullanıcı silindi sanıyordu (delta inceleme 2026-09-25).
+ */
+export function silmeEngelMetni(o: IslemSiparisi, rol: string | null | undefined, dil: string): string | null {
+  if (silmeYolu(o) === 'yok') return silinemezMetni(dil);
+  if (!isAllowed((rol ?? null) as AppRole | null, 'orders', 'delete')) return silmeYetkisiYokMetni(dil);
+  return null;
+}
+
+/** MFA 403'ünün (`mfaRequired`) talimatlı metni — yerel silme (dbClient) ve MF silme (mikroSiparisSil) AYNI metni basar. */
+export function mfaGerekliMetni(dil: string): string {
+  return dil === 'tr' ? 'İki faktörlü doğrulama gerekli — sayfayı yenileyip kodu girin.' : 'Two-factor verification required — reload the page and enter your code.';
+}
+
+/**
+ * Silme isteği başarısız olunca kullanıcıya gösterilen metin. dbClient hatası sunucu gövdesini taşır
+ * (`… → 403 {"error":…,"mfaRequired":true}`). 403'ün NEDENİ ayrılır (delta inceleme 2026-09-25): rol ön denetimden
+ * zaten geçtiği için buraya düşen 403 çoğu kez MFA'dır (5 günlük çerez düşmüş / MFA başka cihazda açılmış) — Admin'e
+ * "Yönetici/Müdür gerekir" demek asıl yapılacak işi gizler. Kiracı uyuşmazlığı vb. rol belirtmeyen yetki metni alır.
+ */
+export function silmeHataMetni(hata: unknown, dil: string): string {
+  const m = hata instanceof Error ? hata.message : String(hata ?? '');
+  const tr = dil === 'tr';
+  if (/\b403\b/.test(m)) {
+    if (/mfaRequired/.test(m)) return mfaGerekliMetni(dil);
+    return tr ? 'Bu işlem için yetkiniz yok.' : 'You are not allowed to do this.';
+  }
+  return tr ? 'Sipariş silinemedi — tekrar deneyin.' : 'Could not delete the order — try again.';
 }
