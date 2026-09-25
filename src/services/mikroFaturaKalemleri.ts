@@ -4,8 +4,8 @@
  * fişi PDF'i bunu kullanır. (MikroFaturaDetay kendi effect'inde aynı ucu çağırır — o bileşen ayrı turda buna bağlanır.)
  */
 import { authFetch } from './authFetch';
-import { kalemleriCoz, kalemSaglamasi, type KalemSaglamasi } from '../lib/stokFiyat';
-import { toplaBilinen, type Tutar } from '../utils/para';
+import { kalemleriCoz, kalemSaglamasi, saglamaKur, type KalemSaglamasi, type NetKaynagi } from '../lib/stokFiyat';
+import { toplaBilinen, bilinenSayi, type Tutar } from '../utils/para';
 
 export interface FaturaEvragi { seri: string; sira: string; yon: 'gelen' | 'giden' }
 export type KalemSonucu = { ok: true; kalemler: Record<string, unknown>[] } | { ok: false; hata: string };
@@ -23,6 +23,18 @@ export async function mikroFaturaKalemleriGetir(e: FaturaEvragi, tr: boolean): P
   } catch {
     return { ok: false, hata: tr ? 'Sunucuya ulaşılamadı.' : 'Server unreachable.' };
   }
+}
+
+/**
+ * Faturadan-sipariş importunun yazdığı SÜRÜM-2 kalemler (2026-09-25) — yalnız MF siparişinde ve TÜM kalemler sürüm 2
+ * iken; aksi hâlde null (eski/karışık kalem kendi tablosunda, kalemsiz sipariş canlı okumada kalır). Detay ekranı ve
+ * fiş bu TEK kuralla seçer.
+ */
+export function kayitliMikroKalemleri(o: { source?: string; lineItems?: readonly unknown[] | null } | null | undefined): KayitliMikroKalem[] | null {
+  if (!o || o.source !== 'mikro-fatura') return null;
+  const k = o.lineItems ?? [];
+  if (k.length === 0) return null;
+  return k.every(l => !!l && typeof l === 'object' && (l as { kalemSurumu?: unknown }).kalemSurumu === 2) ? (k as KayitliMikroKalem[]) : null;
 }
 
 /**
@@ -107,7 +119,7 @@ export function mikroKalemTablosu(kalemler: readonly Record<string, unknown>[], 
       miktarMetni: miktar === null ? '—' : `${miktar}${birim}`,
       birimFiyat: c && c.brut !== null && miktar !== null && miktar > 0 ? c.brut / miktar : null,
       iskonto: c?.iskonto ?? null,
-      faturaAltiKaynagi: c?.kaynak === 'faturaAltiBasliktan' ? 'baslik' : c?.kaynak === 'faturaAltiKdvden' ? 'kdv' : null,
+      faturaAltiKaynagi: faturaAltiKaynagi(c?.kaynak),
       net: c?.net ?? null,
     };
   });
@@ -117,6 +129,13 @@ export function mikroKalemTablosu(kalemler: readonly Record<string, unknown>[], 
   const kdv = toplaBilinen(kalemler, k => k.sth_vergi);
   const saglama = kalemSaglamasi(kalemler, cozumler, genelToplam);
   const notlar = mikroKalemNotlari(ara.bilinmeyen, kdv.bilinmeyen, saglama, dil);
+  notlar.push(...faturaAltiNotlari(satirlar, tr));
+  return { satirlar, brut, iskonto, ara, kdv, masraf: saglama ? saglama.masraf : null, notlar };
+}
+
+/** İki fatura altı kaynağının notu — ham ve kalıcı tablo AYNI metni basar. */
+function faturaAltiNotlari(satirlar: readonly MikroKalemSatiri[], tr: boolean): string[] {
+  const notlar: string[] = [];
   // İnceleme 2026-09-25: iki fatura altı kaynağı AYNI cümleyle ("faturanın toplamından") basılıyordu; KDV'den türetilen
   // tahmin doğrulanmış iskonto gibi görünüyordu. Metinler Fiyat Karşılaştırma ile aynı dilde, kaynağa göre ayrı.
   const iskontolu = satirlar.filter(s => (s.iskonto ?? 0) > 0);
@@ -130,5 +149,50 @@ export function mikroKalemTablosu(kalemler: readonly Record<string, unknown>[], 
       ? "Bazı satırların iskontosu satırda yazılı değil ve fatura toplamıyla doğrulanamadı — satırın KDV'sinden TAHMİN edildi (eski oranlı iskontosuz satır da olabilir); faturayı Mikro'da kontrol edin."
       : 'Some line discounts are not on the line and could not be verified against the invoice total — ESTIMATED from the line VAT (could also be an old-rate line without discount); check the invoice in Mikro.');
   }
-  return { satirlar, brut, iskonto, ara, kdv, masraf: saglama ? saglama.masraf : null, notlar };
+  return notlar;
+}
+
+const faturaAltiKaynagi = (k: unknown): MikroKalemSatiri['faturaAltiKaynagi'] =>
+  (k === 'faturaAltiBasliktan' ? 'baslik' : k === 'faturaAltiKdvden' ? 'kdv' : null);
+
+/** Kalıcı (sürüm-2) MF sipariş kalemi — server/mikro/eslemeFatura SiparisSatiri'nin istemci okuması. */
+export interface KayitliMikroKalem {
+  sku?: unknown; name?: unknown; quantity?: unknown; birim?: unknown;
+  brutTutar?: unknown; iskonto?: unknown; netTutar?: unknown; kdv?: unknown; masraf?: unknown; netKaynagi?: unknown;
+}
+const sayiYaDaNull = (x: unknown): number | null => (bilinenSayi(x) ? Number(x) : null);
+
+/**
+ * Faturadan-sipariş importunun YAZDIĞI (sürüm-2) kalemden aynı tablo modeli (2026-09-25): kalem Cetpa'ya aktarıldıktan
+ * sonra detay ekranı ve fiş canlı Mikro okumasıyla AYNI sütunları (birim fiyat → iskonto → net) ve alt satırları basar.
+ * Hesap importta yapıldı (lib/stokFiyat); burada yalnız okunur. Sağlama `saglamaKur` ile AYNI formül.
+ */
+export function kayitliKalemTablosu(kalemler: readonly KayitliMikroKalem[], genelToplam: unknown, dil: string): MikroKalemTablosu {
+  const tr = dil === 'tr';
+  const satirlar = kalemler.map((k): MikroKalemSatiri => {
+    const miktar = sayiYaDaNull(k.quantity), brutT = sayiYaDaNull(k.brutTutar);
+    const sku = String(k.sku ?? '').trim() || null;
+    const birim = typeof k.birim === 'string' && k.birim ? ` ${k.birim}` : '';
+    return {
+      ad: String(k.name ?? '').trim() || sku || '—',
+      sku,
+      miktarMetni: miktar === null ? '—' : `${miktar}${birim}`,
+      birimFiyat: brutT !== null && miktar !== null && miktar > 0 ? brutT / miktar : null,
+      iskonto: sayiYaDaNull(k.iskonto),
+      faturaAltiKaynagi: faturaAltiKaynagi(k.netKaynagi as NetKaynagi | null),
+      net: sayiYaDaNull(k.netTutar),
+    };
+  });
+  const brut = toplaBilinen(kalemler, k => k.brutTutar);
+  const iskonto = toplaBilinen(kalemler, k => k.iskonto);
+  const ara = toplaBilinen(kalemler, k => k.netTutar);
+  const kdv = toplaBilinen(kalemler, k => k.kdv);
+  // Sağlama ham yolla AYNI: KDV mutlak değerle (kalemSaglamasi `Math.abs(sth_vergi)`), masraf her satırdan.
+  const kdvMutlak = toplaBilinen(kalemler, k => (bilinenSayi(k.kdv) ? Math.abs(Number(k.kdv)) : k.kdv));
+  const masrafT = toplaBilinen(kalemler, k => k.masraf);
+  const saglama = kalemler.length && bilinenSayi(genelToplam)
+    ? saglamaKur({ net: ara.toplam, kdv: kdvMutlak.toplam, masraf: masrafT.toplam, brut: brut.toplam, eksik: ara.bilinmeyen + kdv.bilinmeyen }, genelToplam)
+    : null;
+  const notlar = [...mikroKalemNotlari(ara.bilinmeyen, kdv.bilinmeyen, saglama, dil), ...faturaAltiNotlari(satirlar, tr)];
+  return { satirlar, brut, iskonto, ara, kdv, masraf: saglama ? masrafT.toplam : null, notlar };
 }

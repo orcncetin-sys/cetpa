@@ -735,3 +735,35 @@ describe('kalemBirimFiyati — ekrandaki birim fiyat kalemTutari ile aynı kayna
   });
 });
 
+
+// 2026-09-25 (K-KALEM "KDV hariç" uygulandı): faturadan-sipariş importu sürüm-2 kalem yazar — `netTutar` KDV hariç,
+// iskonto düşülmüş. Okuyucular onu tercih eder; KDV dâhil dipnotu yalnız eski (netTutar'sız) kalem için.
+describe('sürüm-2 Mikro kalemi (netTutar) — ciro KDV hariç', () => {
+  const yeni: SatisSatiri = { sku: 'CMT-50', quantity: 100, netTutar: 18000, total: 21600 };
+  const eski: SatisSatiri = { sku: 'CMT-50', quantity: 100, total: 21600 };
+  it('kalemTutari netTutar\'ı (KDV hariç) okur; eski kalem total\'e (KDV dâhil) düşer; bilinen netTutar 0 GERÇEK 0', () => {
+    expect(kalemTutari(yeni)).toBe(18000);
+    expect(kalemTutari(eski)).toBe(21600);
+    expect(kalemTutari({ netTutar: 0, total: 50 })).toBe(0);
+    expect(kalemTutari({ netTutar: null, total: 50 })).toBe(50);
+  });
+  it('kalemBirimFiyati: price yoksa netTutar ÷ miktar; miktar 0 ise total yoluna da düşmez (NaN)', () => {
+    expect(kalemBirimFiyati(yeni)).toBe(180);
+    expect(kalemBirimFiyati(eski)).toBe(216);
+    expect(Number.isNaN(kalemBirimFiyati({ netTutar: 50, quantity: 0 }))).toBe(true);
+  });
+  it('kdvDahilKalemVar: yalnız netTutar\'sız (eski) kalem varken true', () => {
+    expect(kdvDahilKalemVar([{ lineItems: [yeni] }])).toBe(false);
+    expect(kdvDahilKalemVar([{ lineItems: [yeni, eski] }])).toBe(true);
+  });
+});
+
+// İnceleme 2026-09-25 (PLAUSIBLE, K3 "Mikro dâhil"): pano en çok satanlar price × quantity ile Mikro kalemini göremiyordu.
+describe('enCokSatanlar — tutarSec (pano satirCirosu)', () => {
+  it('seçici verilirse satır cirosu ondan (sürüm-2 netTutar); verilmezse eski yol', () => {
+    const sip = [{ lineItems: [{ sku: 'CMT', name: 'ÇİMENTO', quantity: 10, netTutar: 1800 }, { sku: 'KUM', name: 'KUM', quantity: 2, price: 50 }] }];
+    const secici = (s: SatisSatiri) => (typeof s.netTutar === 'number' ? s.netTutar : Number(s.price) * Number(s.quantity));
+    expect(enCokSatanlar(sip, 5, secici).map(u => u.anahtar)).toEqual(['CMT', 'KUM']);
+    expect(enCokSatanlar(sip, 5).map(u => u.anahtar)).toEqual(['KUM', 'CMT']);   // eski yol: CMT cirosu bilinmiyor → SONA
+  });
+});

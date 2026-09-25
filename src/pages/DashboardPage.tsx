@@ -6,7 +6,7 @@ import {
   odemeDavranisi, segmentCirosu, enIyiMusteriler, segmentKarliligi,
   tipSegmenti, donutSegmenti, b2bSegmenti,
 } from '../utils/pano/musteriAnaliz';
-import { siparisKarliligi } from '../utils/siparisler/siparisKarlilik';
+import { siparisKarliligi, satirCirosu } from '../utils/siparisler/siparisKarlilik';
 import {
   donemCirosu, ayCirosu, hedefGerceklesme, butceKarsilastir,
   satisHizi, hizDegisimi, haftalikCiro, enBuyukHafta, hedefGirdisi, hedefOnDoldur,
@@ -2105,7 +2105,9 @@ export default function DashboardPage(props: Props) {
                 // çubuk çiziyordu. Fiyatsız satırı olan ÇİMENTO, gerçekte listenin tepesindeyken
                 // %67'lik kısa bir çubukla ikinci sırada görünüyordu — üstelik aynı sayfadaki
                 // müşteri/segment panelleri (musteriAnaliz) tam tersi kuralı uyguluyordu.
-                const top5 = enCokSatanlar(orders, 5);
+                // Sürüm-2 Mikro kalemi (2026-09-25) `price` taşımaz — satır cirosu KDV hariç net (K-KALEM, K3 Mikro dâhil);
+                // eski Mikro kalemi (yalnız KDV dâhil total) BİLİNMEZ sayılır, KDV dâhil tutar listeye karışmaz.
+                const top5 = enCokSatanlar(orders, 5, satirCirosu);
 
                 const toplamT = donemToplami(aylar);
                 const totalRevAll = ekranTutari(toplamT);

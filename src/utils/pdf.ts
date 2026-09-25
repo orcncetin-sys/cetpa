@@ -17,6 +17,7 @@ import { registerTurkishFont } from './pdfFont';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz, VARSAYILAN_BASLIK, type BelgeTipi } from './belgeSablonu';
 import { tutarYaz, kdvAyristir, satirTutari, bilinenSayi, teklifToplamlari, toplaBilinen, ekranTutari } from './para';
 import { siparisTutari } from './siparis';
+import { kalemBirimFiyati, kalemTutari } from './pano/stokSevkiyat';
 // Başlık bandı / alt bant / bilgi kutusu / palet TEK KAYNAK (Faz 2 3/n, 2026-09-12): bu dosyadaki
 // 4 üretici eskiden her biri kendi bandını ve palet kopyasını yazıyordu (pdfTheme.degismez.test.ts kilitler).
 import { pdfBaslik, pdfAltBilgi, pdfBilgiKutusu, PDF_RENK, type RGB } from './pdfTheme';
@@ -108,8 +109,10 @@ export const exportOrderPDF = async (
     normTR(String(item.title || item.name || '-')),
     item.sku || '-',
     bilinenSayi(item.quantity) ? String(item.quantity) : '—',
-    tutarYaz(item.price, paraBirimi),                                  // bilinmeyen '—' (eskiden `|| 0` → 0,00)
-    tutarYaz(satirTutari(item.price, item.quantity), paraBirimi),
+    // Ortak okuyucular (utils/pano/stokSevkiyat): Mikro türevi kalem `price` taşımaz — sürüm-2 kalemde KDV hariç net
+    // (netTutar), eski kalemde total. Bilinmeyen NaN → '—' (eskiden `|| 0` → 0,00).
+    tutarYaz(kalemBirimFiyati(item), paraBirimi),
+    tutarYaz(kalemTutari(item), paraBirimi),
   ]);
 
   // FONKSİYONEL biçim, plugin-yöntemi DEĞİL (Faz 1 2/n, inceleme CONFIRMED): eskiden

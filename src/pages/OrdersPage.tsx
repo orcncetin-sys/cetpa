@@ -7,7 +7,7 @@ import { faturaKesilebilir, mikroyaFaturaGonderilebilir } from '../utils/siparis
 import { yerelDegistirilebilir, sevkiyatEngeli, sevkiyatEngeliMetni, yerelDegistirilemezMetni } from '../utils/siparisler/siparisIslemleri';
 import { useMikroSiparisKalemleri } from '../hooks/useMikroSiparisKalemleri';
 import MikroSiparisKalemleri from '../components/siparis/MikroSiparisKalemleri';
-import { kalemleriMikrodanOkunacak, mikroFaturaKalemleriGetir, mikroKalemTablosu } from '../services/mikroFaturaKalemleri';
+import { kalemleriMikrodanOkunacak, mikroFaturaKalemleriGetir, mikroKalemTablosu, kayitliKalemTablosu, kayitliMikroKalemleri } from '../services/mikroFaturaKalemleri';
 import { kalemTutari, kalemBirimFiyati, kdvDahilKalemVar } from '../utils/pano/stokSevkiyat';
 import { authFetch } from '../services/authFetch';
 import { mikroDepoSecenekleri } from '../utils/muhasebe/depoNo';
@@ -1574,6 +1574,19 @@ export default function OrdersPage({
                           {expandedOrderId === order.id && order.lineItems && order.lineItems.length > 0 && (
                             <tr className="bg-gray-50/80">
                               <td colSpan={7} className="px-8 py-3">
+                                {/* Sürüm-2 MF kalemi (2026-09-25): detay ve fişle AYNI tablo (kayitliMikroKalemleri) — satırlar KDV hariç
+                                    net, alt satırlar KDV/masraf/genel toplam; eski tabloda net satırlar KDV dâhil toplamla yan yana kalıyordu. */}
+                                {kayitliMikroKalemleri(order) ? (
+                                  <MikroSiparisKalemleri
+                                    durum="hazir"
+                                    kalemler={[]}
+                                    kayitli={kayitliMikroKalemleri(order) ?? undefined}
+                                    hata={null}
+                                    genelToplam={order.totalPrice}
+                                    evrakNo={[order.mikroEvrak?.seri, order.mikroEvrak?.sira].filter(Boolean).join('') || gorunenSiparisNo(order)}
+                                    dil={currentLanguage}
+                                  />
+                                ) : (
                                 <div className="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
                                   <table className="w-full text-xs">
                                     <thead>
@@ -1605,6 +1618,7 @@ export default function OrdersPage({
                                     </tfoot>
                                   </table>
                                 </div>
+                                )}
                               </td>
                             </tr>
                           )}
@@ -2133,7 +2147,9 @@ export default function OrdersPage({
                           // "fiş pdf diyince detayı olmadığı için çekemiyor"). Tutarlar KDV hariç; iskonto ayrı sütun (services/mikroFaturaKalemleri.mikroKalemTablosu).
                           const mikroEvrak505 = lineItems505.length === 0 ? kalemleriMikrodanOkunacak(o) : null;
                           const mikroKalem505 = mikroEvrak505 ? await mikroFaturaKalemleriGetir(mikroEvrak505, currentLanguage === 'tr') : null;
-                          if (lineItems505.length > 0) {
+                          // Sürüm-2 MF kalemi (importun yazdığı, 2026-09-25): canlı okumayla AYNI tablo (kayitliKalemTablosu).
+                          const kayitli505 = kayitliMikroKalemleri(o);
+                          if (lineItems505.length > 0 && !kayitli505) {
                             autoTable(doc505, {
                               ...pdfTabloStili(marka505),
                               startY: govdeY505 + 20,
@@ -2151,10 +2167,12 @@ export default function OrdersPage({
                               ],
                               footStyles: { fillColor: PDF_RENK.light, fontStyle: 'bold', fontSize: 10 },
                             });
-                          } else if (mikroKalem505 && mikroKalem505.ok && mikroKalem505.kalemler.length > 0) {
+                          } else if (kayitli505 || (mikroKalem505 && mikroKalem505.ok && mikroKalem505.kalemler.length > 0)) {
                             // Tablo modeli ekranla ORTAK (services/mikroFaturaKalemleri.mikroKalemTablosu): aynı sütunlar (birim fiyat →
                             // iskonto → net, K-İSKONTO), aynı alt satırlar (masraf dahil) ve aynı notlar — ikisi ayrı kuruluyordu.
-                            const tablo505 = mikroKalemTablosu(mikroKalem505.kalemler, o.totalPrice, currentLanguage);
+                            const tablo505 = kayitli505
+                              ? kayitliKalemTablosu(kayitli505, o.totalPrice, currentLanguage)
+                              : mikroKalemTablosu(mikroKalem505 && mikroKalem505.ok ? mikroKalem505.kalemler : [], o.totalPrice, currentLanguage);
                             const tr505 = currentLanguage === 'tr';
                             const iskontoVar505 = tablo505.iskonto.toplam > 0;   // ekranla AYNI kural (MikroSiparisKalemleri)
                             const alt505 = (etiket: string, tutar: string, kalin = false) =>
@@ -2629,7 +2647,17 @@ export default function OrdersPage({
                     <h3 className="font-bold mb-4 flex items-center gap-2">
                       <Package className="w-5 h-5 text-brand" /> {currentT.order_items}
                     </h3>
-                    {selectedOrder.lineItems && selectedOrder.lineItems.length > 0 ? (
+                    {kayitliMikroKalemleri(selectedOrder) ? (
+                      <MikroSiparisKalemleri
+                        durum="hazir"
+                        kalemler={[]}
+                        kayitli={kayitliMikroKalemleri(selectedOrder) ?? undefined}
+                        hata={null}
+                        genelToplam={selectedOrder.totalPrice}
+                        evrakNo={[selectedOrder.mikroEvrak?.seri, selectedOrder.mikroEvrak?.sira].filter(Boolean).join('') || gorunenSiparisNo(selectedOrder)}
+                        dil={currentLanguage}
+                      />
+                    ) : selectedOrder.lineItems && selectedOrder.lineItems.length > 0 ? (
                       <div className="border border-gray-100 rounded-xl overflow-hidden">
                         <table className="w-full text-sm">
                           <thead className="bg-gray-50 border-b border-gray-100">

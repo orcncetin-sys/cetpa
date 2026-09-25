@@ -101,6 +101,16 @@ export interface OrderLineItem {
   price: number;
   /** Mikro faturasından türeyen kalemin satır tutarı (KDV DÂHİL — server/mikro/eslemeFatura SiparisSatiri). */
   total?: number | null;
+  /** Sürüm-2 Mikro kalemi (eslemeFatura MF_KALEM_SURUMU, 2026-09-25): KDV hariç; bilinmeyen null. */
+  brutTutar?: number | null;
+  iskonto?: number | null;
+  netTutar?: number | null;
+  kdv?: number | null;
+  masraf?: number | null;
+  /** lib/stokFiyat NetKaynagi — net tutarın nasıl belirlendiği. */
+  netKaynagi?: string | null;
+  birim?: string | null;
+  kalemSurumu?: number;
   costPrice?: number;
   vatRate?: number;
   inventoryId?: string;

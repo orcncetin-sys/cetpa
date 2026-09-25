@@ -199,8 +199,10 @@ export function stokEsikYaz(k: StokKalemi, esikSec: (k: StokKalemi) => unknown =
 /** Sipariş satırının okunan alanları (OrderLineItem'e yapısal olarak uyar). */
 export interface SatisSatiri {
   sku?: unknown; name?: unknown; title?: unknown; quantity?: unknown; price?: unknown;
-  /** Satır tutarı (Mikro türevi kalem: KDV DÂHİL, `price` yok — eslemeFatura.ts:166-171). YALNIZ `tutarSec` okur. */
+  /** Satır tutarı (Mikro türevi kalem: KDV DÂHİL, `price` yok). Sürüm-2 kalemde = netTutar + kdv. */
   total?: unknown;
+  /** Sürüm-2 Mikro türevi kalem (2026-09-25, eslemeFatura MF_KALEM_SURUMU): KDV HARİÇ, iskonto düşülmüş — ciro (K-KALEM). */
+  netTutar?: unknown;
 }
 export interface SatisSiparisi { lineItems?: readonly SatisSatiri[] | null }
 
@@ -309,6 +311,9 @@ export function urunSatislari(
  * KARARLAR.md'de HENÜZ YOK (açık soru; orkestratör soracak).
  */
 export function kalemTutari(s: SatisSatiri): number {
+  // Sürüm-2 Mikro kalemi (2026-09-25): KDV hariç NET varsa O — K-KALEM "KDV hariç" kararının uygulandığı yer.
+  // Eski kalem (yalnız KDV dâhil `total`) aynen okunur; dipnot kapısı `kdvDahilKalemVar` onu bildirir.
+  if (bilinenSayi(s.netTutar)) return Number(s.netTutar);
   return bilinenSayi(s.total) ? Number(s.total) : satirTutari(s.price, s.quantity);
 }
 
@@ -319,6 +324,7 @@ export function kalemTutari(s: SatisSatiri): number {
  */
 export function kalemBirimFiyati(s: SatisSatiri): number {
   if (bilinenSayi(s.price)) return Number(s.price);
+  if (bilinenSayi(s.netTutar) && bilinenSayi(s.quantity) && Number(s.quantity) !== 0) return Number(s.netTutar) / Number(s.quantity);
   if (bilinenSayi(s.total) && bilinenSayi(s.quantity) && Number(s.quantity) !== 0) return Number(s.total) / Number(s.quantity);
   return NaN;
 }
@@ -330,7 +336,8 @@ export function kalemBirimFiyati(s: SatisSatiri): number {
  * null/undefined ise sipariş kalem katmaz; iptal süzgeci ÇAĞIRANDA (K2).
  */
 export function kdvDahilKalemVar(siparisler: readonly SatisSiparisi[]): boolean {
-  return siparisler.some(o => (o.lineItems ?? []).some(l => bilinenSayi(l.total)));
+  // Sürüm-2 kalem KDV hariç net taşır → `total` yolu kullanılmaz, dipnot gereksiz (2026-09-25).
+  return siparisler.some(o => (o.lineItems ?? []).some(l => bilinenSayi(l.total) && !bilinenSayi(l.netTutar)));
 }
 
 /**
@@ -345,9 +352,10 @@ export function kdvDahilKalemVar(siparisler: readonly SatisSiparisi[]): boolean 
  * 6b (2026-09-24): gruplama/sıralama `urunSatislari`a DELEGE — iki kopya gruplama sessizce ayrışmasın
  * (5/n dersi). Sözleşme (imza, anahtar/ad/tutar, sıra, `barOrani`, tek `null` kovası) DEĞİŞMEDİ.
  */
-export function enCokSatanlar(siparisler: readonly SatisSiparisi[], n: number): UrunSatis[] {
+export function enCokSatanlar(siparisler: readonly SatisSiparisi[], n: number, tutarSec?: (s: SatisSatiri) => number): UrunSatis[] {
   // Ölçek GÖSTERİLEN listeye göre kurulur (sayfa da `top5` üzerinden ölçekliyordu).
-  const ilkN = urunSatislari(siparisler).slice(0, n);
+  // `tutarSec` verilmezse eski yol (price × quantity) — sayfa paritesi testleri.
+  const ilkN = urunSatislari(siparisler, tutarSec ? { tutarSec } : {}).slice(0, n);
   const referans = olcekReferansi(ilkN.map(u => tutarSatiri(u.ciro)));
   return ilkN.map(u => ({ ...u, barOrani: cubukOrani(tutarSatiri(u.ciro), referans) }));
 }

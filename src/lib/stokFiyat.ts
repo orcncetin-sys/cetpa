@@ -529,8 +529,15 @@ export function kalemSaglamasi(kalemler: readonly StokHareketi[], cozumler: read
     if (bilinenSayi(k.sth_vergi)) kdv += Math.abs(Number(k.sth_vergi)); else eksik++;
     masraf += satirMasrafi(k);
   }
+  return saglamaKur({ net, kdv, masraf, brut, eksik }, meblag);
+}
+
+/** Toplamlardan sağlama — TEK formül (pay dahil): ham satırdan (`kalemSaglamasi`) ve kalıcı sipariş kaleminden
+ *  (services/mikroFaturaKalemleri.kayitliKalemTablosu) AYNI kural. `meblag` bilinmeyen çağıranda kullanılmaz. */
+export function saglamaKur(t: { net: number; kdv: number; masraf: number; brut: number; eksik: number }, meblag: unknown): KalemSaglamasi {
   const toplam = Math.abs(Number(meblag));
-  const kalemToplami = net + masraf + kdv, fark = kalemToplami - toplam;
-  return { net, kdv, masraf, iskonto: brut - net, kalemToplami, fark, tutuyor: eksik === 0 && Math.abs(fark) <= Math.max(1, toplam * 0.0005), eksik };
+  const kalemToplami = t.net + t.masraf + t.kdv, fark = kalemToplami - toplam;
+  return { net: t.net, kdv: t.kdv, masraf: t.masraf, iskonto: t.brut - t.net, kalemToplami, fark,
+    tutuyor: t.eksik === 0 && Math.abs(fark) <= Math.max(1, toplam * 0.0005), eksik: t.eksik };
 }
 

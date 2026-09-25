@@ -46,7 +46,12 @@ describe('Siparişler — işlem düğmeleri', () => {
     expect(kod).toMatch(/if \(!ordersKaydi\(selectedOrder\.id\)\) return;/);
     // Fiş ve ekran aynı modeli kullanır: sütunlar (birim fiyat → iskonto → net), masraf koşulu ve notlar tek yerde.
     // Fişte ayrı hesap (kalemleriCoz / kalemSaglamasi doğrudan) geri gelirse iskonto sütunu bir yüzeyde unutulur.
-    expect(kod).toMatch(/mikroKalemTablosu\(mikroKalem505\.kalemler, o\.totalPrice, currentLanguage\)/);
+    expect(kod).toMatch(/mikroKalemTablosu\(mikroKalem505 && mikroKalem505\.ok \? mikroKalem505\.kalemler : \[\], o\.totalPrice, currentLanguage\)/);
+    // Sürüm-2 kalem (import 2026-09-25) fişte de AYNI modelden (kayitliKalemTablosu) — ekranla tek kural (kayitliMikroKalemleri).
+    expect(kod).toMatch(/kayitliKalemTablosu\(kayitli505, o\.totalPrice, currentLanguage\)/);
+    expect(kod).toMatch(/const kayitli505 = kayitliMikroKalemleri\(o\)/);
+    expect(kod).toMatch(/\{kayitliMikroKalemleri\(selectedOrder\) \?/);
+    expect(kod).toMatch(/\{kayitliMikroKalemleri\(order\) \?/);   // liste açılır satırı da AYNI kural (inceleme 2026-09-25)
     expect(kod).toMatch(/tablo505\.masraf !== null && tablo505\.masraf > 0/);
     expect(kod).not.toMatch(/\bkalemleriCoz\(|\bkalemSaglamasi\(/);
   });

@@ -16,6 +16,7 @@
  * vi.mock blokları burada KALMAK ZORUNDA (vitest hoisting) — tarif tek kaynakta:
  * `mikroRoutes.testDuzenegi.ts` → `mikroMockTarifi`.
  */
+import { mfKalemleri } from '../mikro/eslemeFatura';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
 import { mikroPost, mikroSql, mikroKolonlar, v17MetoduKullanilabilir } from '../mikroClient.js';
@@ -175,36 +176,118 @@ describe('POST /api/mikro/import/faturadan-siparis', () => {
     expect(String((res.govde as { note?: string }).note)).toMatch(/1 faturanın yönü \(cha_tip\) okunamadı — satış sayılmadı/);
   });
 
-  it("KDV'si okunamayan kalemin total'i null iner (eski SQL COALESCE'i KDV'siz tutarı toplam sanıyordu); miktar/tutar sayaçları note'a girer", async () => {
-    faturalariKur([BASLIK]);
-    d.pgAyarla(async (sql: string) => {
-      if (/mikro_cari_hesaplar/.test(sql)) return { rows: [{ cari_kod: '120 01', unvan: 'ŞİRİN İNŞAAT' }] };
-      if (/mikro_stok_hareketleri/.test(sql)) {
-        return { rows: [
-          { seri: '', sira: '321', sku: 'CMT-50', ad: 'ÇİMENTO 50KG', miktar: 100, tutar: 18000, vergi: 3600 },
-          { seri: '', sira: '321', sku: 'KUM-01', ad: 'Kum', miktar: null, tutar: 500, vergi: null },
-        ] };
-      }
-      return { rows: [] };
-    });
+  /** Kalem kaynağı (2026-09-25): kiracının inventoryMovements'ı + stok adları; PG yalnız cari ünvanı. */
+  const kaynakKur = (faturalar: Record<string, unknown>[], hareketler: Record<string, unknown>[], mevcut: Record<string, unknown>[] = []) => {
+    vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) =>
+      coll === 'mikroFaturalar' ? faturalar
+        : coll === 'inventoryMovements' ? hareketler
+          : coll === 'inventory' ? [{ sku: 'CMT-50', name: 'ÇİMENTO 50KG' }]
+            : coll === 'orders' ? mevcut : []) as typeof d.C.loadCompanyDocs);
+  };
+  const HAREKET = (p: Record<string, unknown>) => ({ source: 'mikro_sql', sth_evraktip: 4, sth_evrakno_seri: '', sth_evrakno_sira: 321,
+    sth_tarih: '2026-08-01', ...p });
+
+  it('KALEMLER inventoryMovements\'tan (PG aynası DEĞİL): KDV hariç net + iskonto ayrı, total = net + KDV; okunamayan kalem null + sayılır', async () => {
+    kaynakKur([BASLIK], [
+      HAREKET({ sth_stok_kod: 'CMT-50', sth_miktar: 100, sth_tutar: 20000, sth_iskonto1: 2000, sth_vergi: 3600 }),
+      HAREKET({ sth_stok_kod: 'KUM-01', sth_miktar: null, sth_tutar: null, sth_vergi: null }),
+      HAREKET({ sth_stok_kod: 'ALIS', sth_evraktip: 3, sth_miktar: 1, sth_tutar: 1, sth_vergi: 0.2 }),   // alış satırı karışmaz
+    ]);
+    d.pgAyarla(async (sql: string) => (/mikro_cari_hesaplar/.test(sql) ? { rows: [{ cari_kod: '120 01', unvan: 'ŞİRİN İNŞAAT' }] } : { rows: [] }));
     const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
     const doc = d.koleksiyon('orders')[0]?.data ?? {};
     expect(doc.customerName, 'PG varken cari ünvanı kullanılır').toBe('ŞİRİN İNŞAAT');
-    expect(doc.lineItems).toEqual([
-      { sku: 'CMT-50', name: 'ÇİMENTO 50KG', quantity: 100, total: 21600 },
-      { sku: 'KUM-01', name: 'Kum', quantity: null, total: null },
-    ]);
+    const kalemler = doc.lineItems as Record<string, unknown>[];
+    expect(kalemler.map(k => k.sku)).toEqual(['CMT-50', 'KUM-01']);
+    expect(kalemler[0]).toMatchObject({ name: 'ÇİMENTO 50KG', quantity: 100, brutTutar: 20000, iskonto: 2000, netTutar: 18000, kdv: 3600, total: 21600, kalemSurumu: 2 });
+    expect(kalemler[1]).toMatchObject({ name: 'KUM-01', quantity: null, netTutar: null, total: null });
     const not = String((res.govde as { note?: string }).note);
     expect(not).toMatch(/1 kalemin miktarı bilinmiyor/);
     expect(not).toMatch(/1 kalemin tutarı bilinmiyor/);
-    expect(not).not.toMatch(/PG yok/);
+    expect(not).not.toMatch(/stok hareketi yok/);
+  });
+
+  it('stok hareketi olmayan fatura kalemsiz yazılır ve note bunu SÖYLER (sessiz boş kalem yok)', async () => {
+    kaynakKur([BASLIK], []);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(d.koleksiyon('orders')[0]?.data?.lineItems).toEqual([]);
+    expect(String((res.govde as { note?: string }).note)).toMatch(/1 faturanın stok hareketi yok — kalemsiz yazıldı/);
+  });
+
+  describe('mevcut MF siparişinin kalemini yenileme (kalemYenile)', () => {
+    const MEVCUT = { id: 'mikrofat__A__-321', source: 'mikro-fatura', orderNumber: 'MF-321', status: 'Shipped', notes: 'kullanıcı notu',
+      faturali: true, mikroFaturaNo: '321', lineItems: [] as unknown[] };
+    const KAYNAK = [HAREKET({ sth_stok_kod: 'CMT-50', sth_miktar: 100, sth_tutar: 18000, sth_vergi: 3600 })];
+
+    // İnceleme 2026-09-25 (CONFIRMED): sipariş stok hareketinden ÖNCE türediyse Tümünü Çek onu bir daha hiç doldurmuyordu.
+    it('istek yoksa (Tümünü Çek): BOŞ kalemli mevcut sipariş otomatik DOLDURULUR (yalnız lineItems); eski biçimli kalem YAZILMAZ, not yönlendirir', async () => {
+      kaynakKur([BASLIK, { ...BASLIK, cha_evrakno_sira: 325 }],
+        [...KAYNAK, HAREKET({ sth_evrakno_sira: 325, sth_stok_kod: 'CMT-50', sth_miktar: 1, sth_tutar: 1, sth_vergi: 0.2 })],
+        [MEVCUT, { ...MEVCUT, id: 'mikrofat__A__-325', orderNumber: 'MF-325', lineItems: [{ sku: 'eski', total: 5 }] }]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      const yazim = d.koleksiyon('orders');
+      expect(yazim.map(y => [y.op, y.ref.id])).toEqual([['update', 'mikrofat__A__-321']]);
+      expect(Object.keys(yazim[0].data ?? {})).toEqual(['lineItems']);
+      expect(res.govde).toMatchObject({ bosDoldurulan: 1, kalemYenilenecek: 1, kalemYenilenen: 0, created: 0 });
+      const not = String((res.govde as { note?: string }).note);
+      expect(not).toMatch(/1 kalemsiz MF siparişinin kalemi dolduruldu/);
+      expect(not).toMatch(/1 MF siparişinin kalemi eski biçimde ya da Mikro'daki satırlarla TUTMUYOR \(eksik\/değişmiş\) — Entegrasyon → "MF Sipariş Kalemlerini Yenile"/);
+    });
+
+    it('kaynağı olmayan kalemsiz sipariş SESSİZ kalmaz: "önce Stok Hareketleri" notu + sayaç', async () => {
+      kaynakKur([BASLIK], [], [MEVCUT]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      expect(d.koleksiyon('orders')).toEqual([]);
+      expect(res.govde).toMatchObject({ kaynaksizBekleyen: 1, bosDoldurulan: 0 });
+      expect(String((res.govde as { note?: string }).note)).toMatch(/1 MF siparişinin kalemi boş\/eski ama stok hareketi yok/);
+    });
+
+    it("'onizle' HİÇBİR ŞEY yazmaz (yeni sipariş, onarım, doldurma, denetim/syncLog yok) — yalnız kalem sayaçları + örnek + not", async () => {
+      kaynakKur([BASLIK, { ...BASLIK, cha_evrakno_sira: 322 }], KAYNAK, [{ ...MEVCUT, faturali: false }]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis', { kalemYenile: 'onizle' });
+      expect(d.koleksiyon('orders')).toEqual([]);
+      expect(res.govde).toMatchObject({ success: true, onizleme: true, kalemYenilenecek: 1, kalemAzalan: 0, kaynaksizBekleyen: 0 });
+      expect('olusturulacak' in (res.govde as object)).toBe(false);
+      expect(d.C.writeAuditLog).not.toHaveBeenCalled();
+      expect(d.C.writeSyncLog).not.toHaveBeenCalled();
+    });
+
+    it("'uygula' YALNIZ kalem yeniler: yeni sipariş OLUŞTURMAZ, eski alan onarımı YAPMAZ; kalem sayısı azalan sayılır", async () => {
+      kaynakKur([BASLIK, { ...BASLIK, cha_evrakno_sira: 322 }], KAYNAK,
+        [{ ...MEVCUT, faturali: false, lineItems: [{ sku: 'a', total: 1 }, { sku: 'b', total: 2 }] }]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis', { kalemYenile: 'uygula' });
+      const yazim = d.koleksiyon('orders');
+      expect(yazim.map(y => [y.op, y.ref.id])).toEqual([['update', 'mikrofat__A__-321']]);
+      expect(Object.keys(yazim[0].data ?? {})).toEqual(['lineItems']);
+      expect(res.govde).toMatchObject({ created: 0, onarilan: 0, kalemYenilenen: 1, kalemAzalan: 1 });
+      expect(String((res.govde as { note?: string }).note)).toMatch(/1 siparişte kalem sayısı AZALIYOR/);
+    });
+
+    it("'uygula' YALNIZ lineItems'ı günceller (durum, not dokunulmaz); kaynak boşsa ya da kalem zaten sürüm 2 ise dokunmaz", async () => {
+      kaynakKur(
+        [BASLIK, { ...BASLIK, cha_evrakno_sira: 323 }, { ...BASLIK, cha_evrakno_sira: 324 }],
+        [...KAYNAK, HAREKET({ sth_evrakno_sira: 324, sth_stok_kod: 'CMT-50', sth_miktar: 1, sth_tutar: 1, sth_vergi: 0.2 })],
+        [MEVCUT,
+          { ...MEVCUT, id: 'mikrofat__A__-323', orderNumber: 'MF-323' },                                  // kaynak YOK
+          // Zaten güncel: kayıtlı kalem kaynaktan kurulanla AYNI (sayı + Σ net/KDV).
+          { ...MEVCUT, id: 'mikrofat__A__-324', orderNumber: 'MF-324',
+            lineItems: mfKalemleri([HAREKET({ sth_evrakno_sira: 324, sth_stok_kod: 'CMT-50', sth_miktar: 1, sth_tutar: 1, sth_vergi: 0.2 })], BASLIK.cha_meblag, () => 'ÇİMENTO 50KG').kalemler }],
+      );
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis', { kalemYenile: 'uygula' });
+      const yazim = d.koleksiyon('orders');
+      expect(yazim.map(y => [y.op, y.ref.id])).toEqual([['update', 'mikrofat__A__-321']]);
+      expect(Object.keys(yazim[0].data ?? {})).toEqual(['lineItems']);
+      expect((yazim[0].data?.lineItems as Record<string, unknown>[])[0]).toMatchObject({ sku: 'CMT-50', netTutar: 18000, kalemSurumu: 2 });
+      expect(res.govde).toMatchObject({ kalemYenilenecek: 1, kalemYenilenen: 1 });
+      expect(String((res.govde as { note?: string }).note ?? '')).not.toMatch(/Kalemleri yenile/);
+    });
   });
 
   it("'kalemsiz' alanı yerine `note` döner — PG yoksa uyarı artık ekranda görünen alanda", async () => {
     faturalariKur([BASLIK]);
     const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
     expect('kalemsiz' in (res.govde as object), 'ölü yüzey kaldırıldı').toBe(false);
-    expect(String((res.govde as { note?: string }).note)).toMatch(/PG yok — kalemler ve cari adları eklenemedi/);
+    expect(String((res.govde as { note?: string }).note)).toMatch(/PG yok — cari adları eklenemedi/);
   });
 
   it('evrak sıra no yoksa sipariş UYDURULMAZ (skipped)', async () => {

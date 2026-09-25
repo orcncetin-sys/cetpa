@@ -18,7 +18,7 @@
  * Kural (CLAUDE.md "sahte kesinlik gösterme"): bilinmeyen sayı 0 DEĞİL bilinmiyordur.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { siparisKarliligi, mesajTutari, kalemlerTutari, stokKartiBul } from './siparisKarlilik';
+import { siparisKarliligi, mesajTutari, kalemlerTutari, stokKartiBul, satirCirosu } from './siparisKarlilik';
 import { siparisMaliyeti, ekranTutari } from '../para';
 import { kartMaliyetiTL } from '../cost';
 import type { Order, InventoryItem } from '../../types';
@@ -441,5 +441,22 @@ describe('SAYFA KABLOLAMASI — stok kartı maliyet çözücüsü (OrdersPage 28
     expect(k.maliyet).toBe(0);
     expect(k.marjYuzde).toBe(100);
     expect(k.maliyetsizKalem).toBe(0);
+  });
+});
+
+// İnceleme 2026-09-25 (CONFIRMED): sürüm-2 Mikro kaleminde `price` yok → ciro NaN idi. Artık KDV hariç `netTutar`;
+// eski kalem (yalnız KDV dâhil total) bilinmez kalır — KDV dâhil tutar kârı şişirmesin.
+describe('satirCirosu — sürüm-2 Mikro kalemi KDV hariç net', () => {
+  it('netTutar varsa o; native price × quantity; yalnız total (eski Mikro) NaN', () => {
+    expect(satirCirosu({ netTutar: 18000, quantity: 100 })).toBe(18000);
+    expect(satirCirosu({ price: 5, quantity: 3 })).toBe(15);
+    expect(Number.isNaN(satirCirosu({ quantity: 100, total: 21600 } as never))).toBe(true);
+  });
+  it('siparisKarliligi v2 kalemde ciro = Σ netTutar (KDV hariç), maliyet bilinirse kâr üretir', () => {
+    const k = siparisKarliligi({ lineItems: [{ netTutar: 900, quantity: 10, costPrice: 60 }, { netTutar: 100, quantity: 1, costPrice: 50 }] } as never);
+    expect(k.ciro).toBe(1000);
+    expect(k.maliyet).toBe(650);
+    expect(k.kar).toBe(350);
+    expect(kalemlerTutari({ lineItems: [{ netTutar: 900, quantity: 10 }] } as never).toplam).toBe(900);
   });
 });

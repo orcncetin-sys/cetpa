@@ -138,6 +138,16 @@ export interface SiparisKarlilik {
 }
 
 /**
+ * Satırın CİROSU (KDV hariç): sürüm-2 Mikro kalemi (2026-09-25, faturadan-sipariş importu) `netTutar` taşır — iskonto
+ * düşülmüş, KDV hariç (K-KALEM); native kalem `price × quantity`. Eski Mikro kalemi (yalnız KDV dâhil `total`) BİLİNMEZ
+ * (NaN) — KDV dâhil tutarı ciroya katmak kârı KDV kadar şişirirdi (bu yüzden `stokSevkiyat.kalemTutari` KULLANILMAZ).
+ * TEK kaynak: satır cirosu, sipariş cirosu ve kalem alt toplamı bunu okur (inceleme 2026-09-25: v2 kalemde NaN).
+ */
+export function satirCirosu(s: { price?: unknown; quantity?: unknown; netTutar?: unknown }): number {
+  return bilinenSayi(s.netTutar) ? Number(s.netTutar) : satirTutari(s.price, s.quantity);
+}
+
+/**
  * Siparişin kârlılığı — Phase 513 popup'ı ile Phase 74 kutusunun TEK ortak hesabı.
  * Bir kalemin maliyeti bilinmiyorsa kâr ve marj üretilmez (kısmi maliyetten kâr çıkarmak,
  * eksik maliyet kadar uydurma kârdır); ekran `maliyetsizKalem` sayısını yazar.
@@ -152,11 +162,12 @@ export function siparisKarliligi<S extends KarlilikSatiri>(
   const cozulmus = ham.map(s => ({
     price: s.price,
     quantity: s.quantity,
+    netTutar: (s as { netTutar?: unknown }).netTutar,
     costPrice: bilinenSayi(s.costPrice) ? s.costPrice : (kalemMaliyeti ? kalemMaliyeti(s) : undefined),
   }));
 
   const satirlar: SatirKarlilik[] = cozulmus.map(s => {
-    const ciro = satirTutari(s.price, s.quantity);
+    const ciro = satirCirosu(s);
     const maliyet = satirTutari(s.costPrice, s.quantity);
     return { ciro, maliyet, kar: Number.isFinite(ciro) && Number.isFinite(maliyet) ? ciro - maliyet : NaN };
   });
@@ -168,7 +179,7 @@ export function siparisKarliligi<S extends KarlilikSatiri>(
 
   // Ciro TÜRETİLEN sayıdır (kâra girer): tek kalem bile bilinmiyorsa kısmi toplam kullanılmaz.
   const ciro = ham.length > 0
-    ? tamTutar(toplaBilinen(ham, s => satirTutari(s.price, s.quantity)))
+    ? tamTutar(toplaBilinen(ham, s => satirCirosu(s as { price?: unknown; quantity?: unknown; netTutar?: unknown })))
     : siparisTutari(o);
 
   const kar = Number.isFinite(ciro) && Number.isFinite(maliyet) ? ciro - maliyet : NaN;
@@ -200,5 +211,5 @@ export function mesajTutari(o: SiparisTutarAlanlari, birim: string, kurlar?: Exc
  * Kârın ciro tabanından (TÜRETME, `tamTutar`) bilerek AYRI: burada eksik kalem gizlenmez, YAZILIR.
  */
 export function kalemlerTutari(o: KarlilikSiparisi): Tutar {
-  return toplaBilinen(o.lineItems ?? [], s => satirTutari(s.price, s.quantity));
+  return toplaBilinen(o.lineItems ?? [], s => satirCirosu(s as { price?: unknown; quantity?: unknown; netTutar?: unknown }));
 }

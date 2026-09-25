@@ -6,7 +6,7 @@
  * services/mikroFaturaKalemleri.mikroKalemTablosu. Alt satırda KDV ve siparişin (faturanın) genel toplamı ayrı yazılır.
  */
 import { useMemo } from 'react';
-import { mikroKalemTablosu } from '../../services/mikroFaturaKalemleri';
+import { mikroKalemTablosu, kayitliKalemTablosu, type KayitliMikroKalem } from '../../services/mikroFaturaKalemleri';
 import { ekranTutari } from '../../utils/para';
 import { paraYaz } from '../../utils/currency';
 import { oc } from '../../i18n/ortak';
@@ -19,23 +19,31 @@ interface Props {
   genelToplam: unknown;
   evrakNo: string;
   dil: string;
+  /** Faturadan-sipariş importunun YAZDIĞI sürüm-2 kalemler (2026-09-25). Verilirse canlı okuma YOK; tablo bunlardan. */
+  kayitli?: readonly KayitliMikroKalem[];
 }
 
-export default function MikroSiparisKalemleri({ durum, kalemler, hata, genelToplam, evrakNo, dil }: Props) {
+export default function MikroSiparisKalemleri({ durum, kalemler, hata, genelToplam, evrakNo, dil, kayitli }: Props) {
   const tr = dil === 'tr';
-  const tablo = useMemo(() => mikroKalemTablosu(kalemler, genelToplam, dil), [kalemler, genelToplam, dil]);
-  if (durum === 'yukleniyor') return <p className="text-sm text-gray-400 py-6 text-center">{tr ? 'Kalemler Mikro faturasından yükleniyor…' : 'Loading lines from the Mikro invoice…'}</p>;
-  if (durum === 'hata') return <p className="text-sm text-red-600 py-6 text-center">{hata}</p>;
-  if (kalemler.length === 0) return <p className="text-sm text-gray-400 py-6 text-center">{tr ? 'Mikro faturasında kalem bulunamadı.' : 'No lines on the Mikro invoice.'}</p>;
+  const tablo = useMemo(
+    () => (kayitli ? kayitliKalemTablosu(kayitli, genelToplam, dil) : mikroKalemTablosu(kalemler, genelToplam, dil)),
+    [kayitli, kalemler, genelToplam, dil]);
+  if (!kayitli && durum === 'yukleniyor') return <p className="text-sm text-gray-400 py-6 text-center">{tr ? 'Kalemler Mikro faturasından yükleniyor…' : 'Loading lines from the Mikro invoice…'}</p>;
+  if (!kayitli && durum === 'hata') return <p className="text-sm text-red-600 py-6 text-center">{hata}</p>;
+  if (tablo.satirlar.length === 0) return <p className="text-sm text-gray-400 py-6 text-center">{tr ? 'Mikro faturasında kalem bulunamadı.' : 'No lines on the Mikro invoice.'}</p>;
   // Brüt/iskonto alt satırları yalnız BİLİNEN iskonto varken (inceleme 2026-09-25: bilinmeyen kalem varken "−₺0,00"
   // sahte kesinlik basıyordu). Çözülemeyen kalem notta: "brüt, iskonto ve ara toplama girmedi".
   const iskontoVar = tablo.iskonto.toplam > 0;
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
-        {tr
-          ? `Kalemler Cetpa'ya aktarılmamış — Mikro faturasından (evrak ${evrakNo}) canlı okunuyor. Tutarlar KDV hariç; iskonto ayrı sütunda, net tutardan düşülmüş.`
-          : `Lines were not imported into Cetpa — read live from the Mikro invoice (doc ${evrakNo}). Amounts excl. VAT; discount shown separately and deducted from the net amount.`}
+        {kayitli
+          ? (tr
+            ? `Kalemler Mikro faturasından (evrak ${evrakNo}) aktarıldı. Tutarlar KDV hariç; iskonto ayrı sütunda, net tutardan düşülmüş.`
+            : `Lines imported from the Mikro invoice (doc ${evrakNo}). Amounts excl. VAT; discount shown separately and deducted from the net amount.`)
+          : (tr
+            ? `Kalemler Cetpa'ya aktarılmamış — Mikro faturasından (evrak ${evrakNo}) canlı okunuyor. Tutarlar KDV hariç; iskonto ayrı sütunda, net tutardan düşülmüş.`
+            : `Lines were not imported into Cetpa — read live from the Mikro invoice (doc ${evrakNo}). Amounts excl. VAT; discount shown separately and deducted from the net amount.`)}
       </p>
       <div className="border border-gray-100 rounded-xl overflow-x-auto">
         <table className="w-full text-sm">

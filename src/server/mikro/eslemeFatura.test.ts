@@ -21,7 +21,10 @@ import {
   faturaYonu,
   faturaEsle,
   faturalariEsle,
-  kalemHaritasi,
+  satisFaturasiHareketleri,
+  mfKalemleri,
+  kalemYenilenmeli,
+  MF_KALEM_SURUMU,
   faturadanSiparis,
   siparisTuretmeNotu,
   kalemleriBirimle,
@@ -157,53 +160,84 @@ describe('faturalariEsle — sayaçlar + okuma arızası', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe('kalemHaritasi — PG aynasından sipariş kalemleri', () => {
-  const pgSatirlari = [
-    { seri: 'A', sira: '321', sku: 'CIM50',  ad: 'ÇİMENTO 50KG', miktar: 100, tutar: 18000, vergi: 3600 },
-    { seri: 'A', sira: '321', sku: 'DEMIR12', ad: '',             miktar: null, tutar: 5000,  vergi: 1000 },
-    { seri: '',  sira: '322', sku: 'KUM1',   ad: 'KUM 1 TON',    miktar: 2,    tutar: null,  vergi: 200 },
-  ];
-
-  it('PARİTE: bilinen satırda kalem {sku,name,quantity,total} ve total = tutar + KDV', () => {
-    const { harita } = kalemHaritasi(pgSatirlari);
-    expect(harita.get('A|321')?.[0]).toEqual({ sku: 'CIM50', name: 'ÇİMENTO 50KG', quantity: 100, total: 21600 });
-  });
-
-  it('ürün adı boşsa SKU\'ya düşer (eski davranış)', () => {
-    const { harita } = kalemHaritasi(pgSatirlari);
-    expect(harita.get('A|321')?.[1].name).toBe('DEMIR12');
-  });
-
-  it('miktar bilinmiyorsa quantity NULL — `Number(x) || 0` 0 ADET yazıyordu', () => {
-    const { harita, miktarsiz } = kalemHaritasi(pgSatirlari);
-    expect(harita.get('A|321')?.[1].quantity).toBeNull();
-    expect(miktarsiz).toBe(1);
-  });
-
-  it('tutar ya da KDV bilinmiyorsa total NULL — COALESCE(...,0) toplamı EKSİK gösteriyordu', () => {
-    const { harita, tutarsiz } = kalemHaritasi(pgSatirlari);
-    expect(harita.get('|322')?.[0].total).toBeNull();
-    expect(tutarsiz).toBe(1);
-  });
-
-  it('meşru 0 (bedelsiz/numune satır) 0 KALIR, bilinmeyen sayılmaz', () => {
-    const { harita, miktarsiz, tutarsiz } = kalemHaritasi([
-      { seri: 'A', sira: '400', sku: 'NUMUNE', ad: 'NUMUNE', miktar: 0, tutar: 0, vergi: 0 },
+describe('satisFaturasiHareketleri — kiracının stok hareketlerinden SATIŞ faturası kalemleri (MF-383 kök nedeni)', () => {
+  const h = (p: Record<string, unknown>) => ({ source: 'mikro_sql', sth_evraktip: 4, sth_evrakno_seri: '', sth_evrakno_sira: 321, ...p });
+  it("yalnız source 'mikro_sql' + satış (sth_evraktip 4); anahtar seri|sıra (başlıkla AYNI, kırpılmış)", () => {
+    const m = satisFaturasiHareketleri([
+      h({ sth_stok_kod: 'A' }),
+      h({ sth_stok_kod: 'B', sth_evrakno_seri: ' X ', sth_evrakno_sira: ' 7 ' }),
+      h({ sth_stok_kod: 'ALIS', sth_evraktip: 3 }),                 // alış faturası
+      h({ sth_stok_kod: 'IRS', sth_evraktip: 1 }),                  // fatura değil
+      { ...h({ sth_stok_kod: 'ELLE' }), source: 'elle' },           // başka kaynak
+      h({ sth_stok_kod: 'SIRASIZ', sth_evrakno_sira: '' }),
     ]);
-    expect(harita.get('A|400')?.[0]).toEqual({ sku: 'NUMUNE', name: 'NUMUNE', quantity: 0, total: 0 });
-    expect(miktarsiz).toBe(0);
-    expect(tutarsiz).toBe(0);
+    expect([...m.keys()].sort()).toEqual(['X|7', '|321']);
+    expect(m.get('|321')!.map(x => x.sth_stok_kod)).toEqual(['A']);
   });
+});
 
-  it('anahtar seri|sıra — seri boşken de kırılmaz, boşluklar kırpılır', () => {
-    const { harita } = kalemHaritasi([{ seri: ' A ', sira: ' 321 ', sku: 'X', ad: 'X', miktar: 1, tutar: 1, vergi: 0 }]);
-    expect(harita.has('A|321')).toBe(true);
+describe('mfKalemleri — KDV hariç net + iskonto ayrı (K-KALEM / K-İSKONTO), lib/stokFiyat ile AYNI hesap', () => {
+  const T = { sth_tarih: '2025-09-06' };
+  const ad = (sku: string) => (sku === 'CIM50' ? 'ÇİMENTO 50KG' : undefined);
+  it('satır iskontosu: brüt / iskonto / net / KDV / total = net + KDV; ad stok kaydından, yoksa SKU; birim UYDURULMAZ', () => {
+    const { kalemler, miktarsiz, tutarsiz } = mfKalemleri([
+      { ...T, sth_stok_kod: 'CIM50', sth_miktar: 10, sth_tutar: 1000, sth_iskonto1: 100, sth_vergi: 180 },
+      { ...T, sth_stok_kod: 'KUM', sth_miktar: 2, sth_tutar: 500, sth_vergi: 100 },
+    ], 1780, ad);
+    expect(kalemler[0]).toEqual({ sku: 'CIM50', name: 'ÇİMENTO 50KG', quantity: 10, price: 90, birim: null,
+      brutTutar: 1000, iskonto: 100, netTutar: 900, kdv: 180, masraf: 0, netKaynagi: 'satirIskontosu',
+      total: 1080, kalemSurumu: MF_KALEM_SURUMU });
+    expect(kalemler[1]).toMatchObject({ name: 'KUM', netTutar: 500, iskonto: 0, total: 600 });
+    expect([miktarsiz, tutarsiz]).toEqual([0, 0]);
+  });
+  it("FATURA ALTI iskonto başlıkla hakemlenir (satırda yok): net 2.016, iskonto 224 — kuruşa yuvarlı", () => {
+    const { kalemler } = mfKalemleri([{ ...T, sth_stok_kod: 'CIM50', sth_miktar: 100, sth_tutar: 2240, sth_vergi: 403.2 }], 2419.2, ad);
+    expect(kalemler[0]).toMatchObject({ brutTutar: 2240, iskonto: 224, netTutar: 2016, total: 2419.2, netKaynagi: 'faturaAltiBasliktan' });
+  });
+  it('tutarı okunamayan satır: net/brüt/iskonto/masraf/total NULL (0 değil) ve sayılır; KDV bilinmiyorsa total null', () => {
+    const { kalemler, miktarsiz, tutarsiz } = mfKalemleri([
+      { ...T, sth_stok_kod: 'X', sth_miktar: null, sth_tutar: null, sth_vergi: 10 },
+      { ...T, sth_stok_kod: 'Y', sth_miktar: 1, sth_tutar: 100, sth_vergi: null },
+    ], undefined, ad);
+    // Masraf satırın kendi kolonlarından (kolon yok → 0) — netin çözülmesine bağlı değil; ham tabloyla AYNI kural.
+    expect(kalemler[0]).toMatchObject({ quantity: null, brutTutar: null, iskonto: null, netTutar: null, masraf: 0, total: null, netKaynagi: null });
+    expect(kalemler[1]).toMatchObject({ kdv: null, total: null });
+    expect([miktarsiz, tutarsiz]).toEqual([1, 1]);
+  });
+  it('sıra: sth_satir_no biliniyorsa ona göre; bilinmiyorsa geliş sırası korunur', () => {
+    const { kalemler } = mfKalemleri([
+      { ...T, sth_stok_kod: 'B', sth_satir_no: 2, sth_miktar: 1, sth_tutar: 1, sth_vergi: 0.2 },
+      { ...T, sth_stok_kod: 'A', sth_satir_no: 1, sth_miktar: 1, sth_tutar: 1, sth_vergi: 0.2 },
+    ], undefined, ad);
+    expect(kalemler.map(k => k.sku)).toEqual(['A', 'B']);
+  });
+});
+
+describe('kalemYenilenmeli — mevcut MF siparişinin kalemi yenilensin mi', () => {
+  it('kalem yok ya da sürüm-2 olmayan (eski PG aynası) kalem varsa EVET; tümü sürüm 2 ise HAYIR', () => {
+    expect(kalemYenilenmeli([])).toBe(true);
+    expect(kalemYenilenmeli(undefined)).toBe(true);
+    expect(kalemYenilenmeli([{ sku: 'A', total: 21600 }])).toBe(true);
+    expect(kalemYenilenmeli([{ kalemSurumu: MF_KALEM_SURUMU }, { sku: 'eski' }])).toBe(true);
+    expect(kalemYenilenmeli([{ kalemSurumu: MF_KALEM_SURUMU }])).toBe(false);
+  });
+  // Delta hakem 2026-09-25: stok hareketi importu yarıda kalınca KISMİ kalem sürüm 2 damgasıyla kalıcı oluyordu.
+  it('kaynak verilirse sürüm 2 kalem de kaynaktan FARKLIYSA (sayı ya da Σ net/KDV) yenilenir; aynıysa yenilenmez', () => {
+    const T = { sth_tarih: '2025-09-06' };
+    const h = (sku: string, tutar: number) => ({ ...T, sth_stok_kod: sku, sth_miktar: 1, sth_tutar: tutar, sth_vergi: tutar * 0.2 });
+    const tam = mfKalemleri([h('A', 100), h('B', 50), h('C', 25)], undefined, () => undefined).kalemler;
+    const kismi = mfKalemleri([h('A', 100), h('B', 50)], undefined, () => undefined).kalemler;
+    expect(kalemYenilenmeli(kismi, tam)).toBe(true);                      // 2 kayıtlı, kaynakta 3
+    expect(kalemYenilenmeli(tam, tam)).toBe(false);
+    const fiyatDegisti = mfKalemleri([h('A', 100), h('B', 50), h('C', 30)], undefined, () => undefined).kalemler;
+    expect(kalemYenilenmeli(tam, fiyatDegisti)).toBe(true);               // aynı sayı, Σ net farklı
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe('faturadanSiparis — satış faturasından Cetpa siparişi', () => {
-  const kalemler = [{ sku: 'CIM50', name: 'ÇİMENTO 50KG', quantity: 100, total: 21600 }];
+  const kalemler = mfKalemleri([{ sth_tarih: '2025-09-06', sth_stok_kod: 'CIM50', sth_miktar: 100, sth_tutar: 18000, sth_vergi: 3600 }],
+    21600, () => 'ÇİMENTO 50KG').kalemler;
 
   it('PARİTE: bilinen faturada doküman + id eskisiyle BİREBİR', () => {
     const t = faturadanSiparis({ ...satisBasligi, cha_evrakno_seri: 'A' }, kalemler,
@@ -274,7 +308,7 @@ describe('faturadanSiparis — satış faturasından Cetpa siparişi', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe('siparisTuretmeNotu', () => {
-  const bos = { turetilen: 0, tutarsiz: 0, yonsuz: 0, miktarsizKalem: 0, tutarsizKalem: 0, pgYok: false };
+  const bos = { turetilen: 0, tutarsiz: 0, yonsuz: 0, miktarsizKalem: 0, tutarsizKalem: 0, kalemKaynagiYok: 0, pgYok: false };
 
   it('söylenecek bir şey yoksa null', () => {
     expect(siparisTuretmeNotu({ ...bos, turetilen: 12 })).toBeNull();
@@ -296,8 +330,9 @@ describe('siparisTuretmeNotu', () => {
   });
 
   it('yönsüz fatura, kalem eksikleri ve PG yokluğu ayrı ayrı bildirilir', () => {
-    const n = siparisTuretmeNotu({ turetilen: 4, tutarsiz: 0, yonsuz: 2, miktarsizKalem: 5, tutarsizKalem: 1, pgYok: true });
+    const n = siparisTuretmeNotu({ turetilen: 4, tutarsiz: 0, yonsuz: 2, miktarsizKalem: 5, tutarsizKalem: 1, kalemKaynagiYok: 3, pgYok: true });
     expect(n).toMatch(/2 faturanın yönü \(cha_tip\) okunamadı — satış sayılmadı/);
+    expect(n).toMatch(/3 faturanın stok hareketi yok — kalemsiz yazıldı/);
     expect(n).toMatch(/5 kalemin miktarı bilinmiyor/);
     expect(n).toMatch(/1 kalemin tutarı bilinmiyor/);
     expect(n).toMatch(/PG yok/);

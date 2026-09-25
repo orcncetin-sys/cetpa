@@ -371,7 +371,9 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     const adimlar: TumunuCekAdimi[] = [
       { ad: t ? 'Stok kartları' : 'Stock cards',   calistir: () => arkaPlanAdimi('/api/mikro/import/stok') },
       { ad: t ? 'Cariler' : 'Customers',           calistir: () => arkaPlanAdimi('/api/mikro/import/cari') },
-      ...extraPullDefs.map(d => ({
+      // Faturadan sipariş, stok hareketlerinden SONRA (inceleme 2026-09-25, CONFIRMED): kalemleri artık o hareketlerden
+      // yazılıyor; önce koşarsa bugünün faturasının siparişi kalemsiz türerdi.
+      ...[...extraPullDefs.filter(d => d.key !== 'faturadan-siparis'), ...extraPullDefs.filter(d => d.key === 'faturadan-siparis')].map(d => ({
         ad: d.title,
         calistir: d.arkaPlan ? () => arkaPlanAdimi(d.route) : senkronAdim(() => handleExtraPull(d.key, d.route)),
       })),
@@ -427,6 +429,40 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     // yapabilmesi için şart (bkz. TerritoryModule cityInTerritory).
     { key: 'cari-adres',   route: '/api/mikro/pull/cari-adres',       title: t ? 'Cari Adresleri' : 'Account Addresses', desc: t ? 'Mikro cari adreslerini çek, yalnız boş şehir/adres alanlarını doldurur (Satış Bölgesi otomatik atama için).' : 'Pull Mikro account addresses, filling only empty city/address fields (feeds Territory auto-assignment).' },
   ];
+
+  // ── MF sipariş kalemlerini yenile (2026-09-25) ───────────────────────────────
+  // Faturadan-sipariş importu artık kalemleri kiracının stok hareketlerinden KDV hariç net + iskonto ile yazıyor (sürüm 2).
+  // MEVCUT MF siparişlerinin (kalemsiz ya da eski biçimli) kalemi yalnız bu açık iki adımla yenilenir: önce önizle (sunucu
+  // HİÇBİR ŞEY yazmaz), sonra uygula (yalnız lineItems; durum/not/sevkiyat dokunulmaz). Tümünü Çek bunu YAPMAZ.
+  const [kalemYenile, setKalemYenile] = useState<{
+    running: boolean; bekleyen: number | null; ornek: Array<{ orderNumber: string; eski: number; yeni: number }>;
+    /** Önizlemenin sunucu notu (çözülemeyen kalem, azalan kalem, kaynaksız sipariş) — atılmaz, onaydan önce görünür. */
+    not: string | null;
+    sonuc: string | null; hata: string | null;
+  }>({ running: false, bekleyen: null, ornek: [], not: null, sonuc: null, hata: null });
+
+  async function handleKalemYenile(uygula: boolean) {
+    setKalemYenile(s => ({ ...s, running: true, hata: null, sonuc: null }));
+    try {
+      const r = await fetch('/api/mikro/import/faturadan-siparis', {
+        method: 'POST', headers: await authHeaders(), body: JSON.stringify({ kalemYenile: uygula ? 'uygula' : 'onizle' }),
+      });
+      const d = await r.json() as { success: boolean; error?: string; notConfigured?: boolean; note?: string | null;
+        kalemYenilenecek?: number; kalemYenilenen?: number; kalemOrnek?: Array<{ orderNumber: string; eski: number; yeni: number }> };
+      if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
+      if (!d.success) throw new Error(d.error || (t ? 'Hata' : 'Error'));
+      if (!uygula) {
+        const bekleyen = typeof d.kalemYenilenecek === 'number' && Number.isFinite(d.kalemYenilenecek) ? d.kalemYenilenecek : null;
+        if (bekleyen === null) throw new Error(t ? 'Sunucu yenilenecek sipariş sayısını döndürmedi.' : 'Server did not return a count.');
+        setKalemYenile({ running: false, bekleyen, ornek: d.kalemOrnek ?? [], not: d.note ?? null, sonuc: null, hata: null });
+      } else {
+        setKalemYenile({ running: false, bekleyen: null, ornek: [], not: null,
+          sonuc: `${sayiMetni(d.kalemYenilenen)} ${t ? 'siparişin kalemi yenilendi' : 'orders updated'}${d.note ? ` · ${d.note}` : ''}`, hata: null });
+      }
+    } catch (e) {
+      setKalemYenile(s => ({ ...s, running: false, hata: e instanceof Error ? e.message : String(e) }));
+    }
+  }
 
   // ── Dummy ürün temizliği (kaynaksız seed kayıtları) ─────────────────────────
   const [cleanupState, setCleanupState] = useState<{
@@ -693,6 +729,49 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             : 'ℹ️ The Mikro JumpBulut API supports: stock list/save, customer list/save, order, e-invoice/dispatch note save, incoming invoice GİB accept/reject. Bank, cash register, barcode, payment plan, stock movement, order/invoice list and balance services do not exist in the API (gateway verified).'}
         </p>
       </div>
+
+      {/* ── MF sipariş kalemlerini yenile ── */}
+      <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3" aria-label={t ? 'MF sipariş kalemlerini yenile' : 'Refresh MF order lines'}>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h4 className="font-bold text-sm text-gray-900">{t ? 'MF Sipariş Kalemlerini Yenile' : 'Refresh MF Order Lines'}</h4>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              {t
+                ? 'Faturadan türeyen siparişlerin boş ya da eski biçimli kalemlerini Mikro stok hareketlerinden (KDV hariç net, iskonto ayrı) yeniden yazar. Durum, not ve sevkiyat değişmez. Önce "Stok Hareketleri"ni çekin.'
+                : 'Rewrites empty or old-format lines of invoice-derived orders from Mikro stock movements (net excl. VAT, discount separate). Status, notes and shipments are unchanged. Pull stock movements first.'}
+            </p>
+          </div>
+          {kalemYenile.bekleyen === null ? (
+            <button onClick={() => handleKalemYenile(false)} disabled={kalemYenile.running} className="apple-button-secondary text-xs px-4 py-2 disabled:opacity-50">
+              {kalemYenile.running ? (t ? 'Sayılıyor…' : 'Counting…') : (t ? 'Önizle' : 'Preview')}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button onClick={() => setKalemYenile(s => ({ ...s, bekleyen: null, ornek: [], not: null }))} className="apple-button-secondary text-xs px-4 py-2">
+                {t ? 'Vazgeç' : 'Cancel'}
+              </button>
+              <button onClick={() => handleKalemYenile(true)} disabled={kalemYenile.running || kalemYenile.bekleyen === 0}
+                className="apple-button-primary text-xs px-4 py-2 disabled:opacity-50">
+                {kalemYenile.running
+                  ? (t ? 'Yazılıyor…' : 'Writing…')
+                  : (t ? `${kalemYenile.bekleyen} Siparişi Yenile` : `Refresh ${kalemYenile.bekleyen} Orders`)}
+              </button>
+            </div>
+          )}
+        </div>
+        {kalemYenile.bekleyen !== null && (
+          <p role="status" className="text-[11px] text-gray-600 bg-gray-50 rounded-xl px-3 py-2">
+            {kalemYenile.bekleyen === 0
+              ? (t ? 'Yenilenecek sipariş yok.' : 'Nothing to refresh.')
+              : `${t ? 'Örnek' : 'Sample'}: ${kalemYenile.ornek.map(o => `${o.orderNumber} (${o.eski} → ${o.yeni} ${t ? 'kalem' : 'lines'})`).join(', ')}${kalemYenile.bekleyen > kalemYenile.ornek.length ? '…' : ''}`}
+          </p>
+        )}
+        {kalemYenile.bekleyen !== null && kalemYenile.not && (
+          <p role="status" className="text-[11px] text-amber-800 bg-amber-50 rounded-xl px-3 py-2">{kalemYenile.not}</p>
+        )}
+        {kalemYenile.sonuc && <p role="status" className="text-[11px] text-green-700 bg-green-50 rounded-xl px-3 py-2">{kalemYenile.sonuc}</p>}
+        {kalemYenile.hata && <p role="alert" className="text-[11px] text-red-700 bg-red-50 rounded-xl px-3 py-2">{kalemYenile.hata}</p>}
+      </section>
 
       {/* ── Dummy Ürün Temizliği ── */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">

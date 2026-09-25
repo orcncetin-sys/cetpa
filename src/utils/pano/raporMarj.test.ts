@@ -32,7 +32,7 @@
  * reduce'larla BİREBİR aynıdır.
  */
 import { describe, it, expect } from 'vitest';
-import { brutMarjHesabi, stokMaliyetCozucu, stokKartiCozucu, stokDevirGunu, type MarjSiparisi } from './raporMarj';
+import { brutMarjHesabi, stokMaliyetCozucu, stokKartiCozucu, stokDevirGunu, marjCirosu, type MarjSiparisi } from './raporMarj';
 import { ekranTutari } from '../para';
 
 // ── Şirin İnşaat (inşaat malzemesi toptancısı) ───────────────────────────────────
@@ -307,5 +307,25 @@ describe('stokKartiCozucu — kart eşleşmesi tek evde', () => {
 
   it('`costPrice` kapısı BURADA YOK — o yalnız stokMaliyetCozucu\'nun işi', () => {
     expect(kartCoz({ inventoryId: 'p1', costPrice: 0, price: 1, quantity: 1 })).toBe(KATALOG[0]);
+  });
+});
+
+// İnceleme 2026-09-25: faturadan-sipariş importu MF siparişine sürüm-2 kalem yazınca sipariş marj kapsamına girdi; ciro
+// `totalPrice` (KDV + masraf DÂHİL) iken maliyet KDV hariç → marj şişerdi. Ciro artık Σ netTutar (K-KALEM).
+describe('marjCirosu + sku eşleşmesi — sürüm-2 MF siparişi', () => {
+  const mf = (kalemler: Record<string, unknown>[]) => ({ source: 'mikro-fatura', totalPrice: 2160, lineItems: kalemler });
+  it('tüm kalemler sürüm 2 → ciro Σ netTutar (KDV hariç); tek net bilinmiyorsa NaN; eski kalem/native → raporSiparisi', () => {
+    expect(marjCirosu(mf([{ netTutar: 1500, kalemSurumu: 2 }, { netTutar: 300, kalemSurumu: 2 }]) as never)).toBe(1800);
+    expect(Number.isNaN(marjCirosu(mf([{ netTutar: null, kalemSurumu: 2 }]) as never))).toBe(true);
+    expect(Number.isNaN(marjCirosu(mf([{ total: 2160 }]) as never))).toBe(true);   // eski MF kalemi: net yok → bilinmez
+    expect(marjCirosu({ totalPrice: 500, lineItems: [{ price: 5, quantity: 100 }] } as never)).toBe(500);
+  });
+  it('brutMarjHesabi v2 MF siparişinde KDV hariç ciroyla marj üretir; kart SKU ile bulunur', () => {
+    const kartlar = [{ id: 'k1', sku: 'CMT-50', name: 'ÇİMENTO (kart adı farklı)', maliyet: 120 }];
+    const cozucu = stokMaliyetCozucu(kartlar, k => k.maliyet);
+    const r = brutMarjHesabi([mf([{ sku: 'CMT-50', name: 'ÇİMENTO 50KG', quantity: 10, netTutar: 1800, kalemSurumu: 2 }]) as never], cozucu);
+    expect(r.ciro).toBe(1800);
+    expect(r.maliyet).toBe(1200);
+    expect(r.marj).toBe(33);
   });
 });

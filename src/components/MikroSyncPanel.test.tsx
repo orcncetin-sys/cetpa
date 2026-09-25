@@ -326,3 +326,46 @@ describe('MikroSyncPanel — Senkron Geçmişi: yetkisizlik ≠ boşluk', () => 
     expect(within(document.body).queryByText(/arka planda sürüyor olabilir/)).toBeNull();
   });
 });
+
+// 2026-09-25: MEVCUT MF siparişlerinin kalemi yalnız açık iki adımla yenilenir (şartname kapısı: kuru koşu şart).
+describe('MikroSyncPanel — MF sipariş kalemlerini yenile (önizle → uygula)', () => {
+  it("önizle 'onizle' gönderir ve sayı + örnek basar; uygula 'uygula' gönderir ve sonucu basar", async () => {
+    const fetchSahte = vi.fn((_u: string, init?: { body?: string }) => {
+      const govde = JSON.parse(String(init?.body ?? '{}')) as { kalemYenile?: string };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(govde.kalemYenile === 'onizle'
+        ? { success: true, onizleme: true, kalemYenilenecek: 2, kalemOrnek: [{ orderNumber: 'MF-383', eski: 0, yeni: 3 }],
+            note: "1 kalemin tutarı çözülemiyor — yenilenirse '—' görünür" }
+        : { success: true, kalemYenilenen: 2, note: null }) });
+    });
+    vi.stubGlobal('fetch', fetchSahte);
+    await cizVeBekle();
+    const bolum = screen.getByRole('region', { name: 'MF sipariş kalemlerini yenile' });
+    fireEvent.click(within(bolum).getByRole('button', { name: 'Önizle' }));
+    await within(bolum).findByText(/MF-383 \(0 → 3 kalem\)/);
+    expect(within(bolum).getByText(/1 kalemin tutarı çözülemiyor/)).toBeTruthy();   // önizleme notu ATILMAZ
+    const onizleCagri = fetchSahte.mock.calls.find(c => String(c[0]) === '/api/mikro/import/faturadan-siparis');
+    expect(JSON.parse(String(onizleCagri?.[1]?.body))).toEqual({ kalemYenile: 'onizle' });
+    fireEvent.click(within(bolum).getByRole('button', { name: '2 Siparişi Yenile' }));
+    await within(bolum).findByText(/2 siparişin kalemi yenilendi/);
+    const uygulaCagri = fetchSahte.mock.calls.filter(c => String(c[0]) === '/api/mikro/import/faturadan-siparis').pop();
+    expect(JSON.parse(String(uygulaCagri?.[1]?.body))).toEqual({ kalemYenile: 'uygula' });
+  });
+});
+
+// İnceleme 2026-09-25 (CONFIRMED): kalemler artık stok hareketlerinden yazılıyor — Tümünü Çek sipariş türetmeyi stok
+// hareketlerinden ÖNCE koşarsa bugünün faturasının siparişi kalemsiz türer.
+describe('MikroSyncPanel — Tümünü Çek: faturadan sipariş stok hareketlerinden SONRA', () => {
+  it('sıra: /import/stok-hareket başlatılır, faturadan-siparis ondan sonra çağrılır', async () => {
+    const olaylar: string[] = [];
+    baslat.mockImplementation(route => { olaylar.push(route); return Promise.resolve({ success: false, error: 'x' }); });
+    vi.stubGlobal('fetch', vi.fn((u: string) => { olaylar.push(String(u)); return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) }); }));
+    await cizVeBekle();
+    olaylar.length = 0;
+    fireEvent.click(screen.getByRole('button', { name: /Tümünü Çek/ }));
+    await screen.findByRole('status', { name: 'Tümünü Çek özeti' });
+    const stokHareket = olaylar.indexOf('/api/mikro/import/stok-hareket');
+    const faturadanSiparis = olaylar.indexOf('/api/mikro/import/faturadan-siparis');
+    expect(stokHareket).toBeGreaterThanOrEqual(0);
+    expect(faturadanSiparis).toBeGreaterThan(stokHareket);
+  });
+});

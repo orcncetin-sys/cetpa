@@ -59,6 +59,7 @@
  *   dokümanına EŞLER. İkisini karıştırma.
  */
 import { bilinenSayi } from '../../utils/para.js';
+import { kalemleriCoz, faturaAnahtari, satirMasrafi, type StokHareketi, type NetKaynagi } from '../../lib/stokFiyat.js';
 
 /** Bir alanın "hiçbir satırda okunamadı" sayılması için gereken en az satır sayısı. */
 export const OKUMA_ARIZASI_ESIK = 5;
@@ -162,61 +163,133 @@ export function faturalariEsle(rows: readonly Record<string, unknown>[]): Fatura
 // Faturadan sipariş türetme
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Türetilen siparişin kalemi. Bilinmeyen miktar/tutar `null` — 0 DEĞİL. */
+/**
+ * MF sipariş kaleminin SÜRÜMÜ. 2 = kaynak kiracının `inventoryMovements`'ı + `lib/stokFiyat` (KDV hariç net, iskonto
+ * ayrı — K-KALEM / K-İSKONTO, 2026-09-25). 1 / alan yok = eski PG aynası kalemi: `total` = sth_tutar + sth_vergi
+ * (iskonto ÖNCESİ tutar + iskonto SONRASI KDV karışımı). Eski aynası YALNIZ Cetpa→Mikro push'unda doluyordu ve push
+ * satırında evrak sırası yoktu → Mikro'da kesilen faturanın siparişi KALEMSİZ kalıyordu (MF-383 kök nedeni).
+ */
+export const MF_KALEM_SURUMU = 2;
+
+/** Türetilen siparişin kalemi (sürüm 2). Bilinmeyen sayı `null` — 0 DEĞİL. */
 export interface SiparisSatiri {
   sku: string;
   name: string;
   quantity: number | null;
-  total: number | null;
-}
-
-/** PG aynasından (mikro_stok_hareketleri ⋈ mikro_stoklar) gelen ham kalem satırı. */
-export interface PgKalemSatiri {
-  seri?: unknown;
-  sira?: unknown;
-  sku?: unknown;
-  ad?: unknown;
-  /** sth_miktar — COALESCE(...,0) YOK, null inebilir. */
-  miktar?: unknown;
-  /** sth_tutar (BRÜT — iskonto açık sorusu için başlık yorumuna bak). */
-  tutar?: unknown;
+  /** NET birim fiyat (KDV hariç, iskonto düşülmüş) = netTutar ÷ miktar — native kalemin `price`ı ile AYNI anlam; eski
+   *  `price × quantity` okuyucuları (Envanter raporu, Muhasebe detayı, takip) böylece KDV hariç neti okur (inceleme
+   *  2026-09-25: alan yokken NaN/boş görüyorlardı). Miktar 0/bilinmiyor ya da net bilinmiyorsa null. Yuvarlanmaz. */
+  price: number | null;
+  /** Bu kaynakta birim güvenilir çözülemez (ana birim adı yerel kayıtta yok) → null; 'ADET' UYDURULMAZ. */
+  birim: string | null;
+  /** KDV hariç, iskonto ÖNCESİ. */
+  brutTutar: number | null;
+  /** Satır iskontosu + satıra dağıtılmış fatura altı iskonto (brüt − net). */
+  iskonto: number | null;
+  /** KDV hariç, iskonto düşülmüş — ürün cirosu (K-KALEM). */
+  netTutar: number | null;
   /** sth_vergi. */
-  vergi?: unknown;
-}
-
-export interface KalemHaritasi {
-  /** `${seri}|${sıra}` → kalemler (2026-08-01 canlı doğrulanan birleştirme anahtarı). */
-  harita: Map<string, SiparisSatiri[]>;
-  miktarsiz: number;
-  tutarsiz: number;
+  kdv: number | null;
+  /** Satır masrafları (nakliye vb.): KDV matrahına girer, ürün cirosuna GİRMEZ. Kolon yoksa 0 (lib/stokFiyat satirMasrafi). */
+  masraf: number | null;
+  /** Net tutarın nasıl belirlendiği (lib/stokFiyat) — 'dogrulanamadi' / 'faturaAltiKdvden' kesin rakam gibi okunmasın. */
+  netKaynagi: NetKaynagi | null;
+  /** netTutar + kdv (ikisi de biliniyorsa), yoksa null. Eski sürümün karışık rakamı DEĞİL. */
+  total: number | null;
+  kalemSurumu: number;
 }
 
 /**
- * Kalem satırlarını evrak anahtarına göre gruplar.
- * total = sth_tutar + sth_vergi (KDV dahil satır toplamı) — İKİSİ DE biliniyorsa.
- * Biri bilinmiyorsa `null`: eski SQL `COALESCE(...,0)` ile KDV'siz tutarı toplam
- * sanıyordu ve fark hiçbir yerde görünmüyordu.
+ * Kiracının `inventoryMovements` dokümanlarından (stok-hareket SQL importu, `source:'mikro_sql'`, iptaller importta
+ * elenir) SATIŞ faturası anahtarı → satırlar. Anahtar `seri|sıra` (fatura başlığıyla AYNI); satış = `faturaAnahtari`
+ * yön 'giden' (sth_evraktip 4). Başka kaynak (elle girilen hareket, push) karışmaz.
  */
-export function kalemHaritasi(rows: readonly PgKalemSatiri[]): KalemHaritasi {
-  const harita = new Map<string, SiparisSatiri[]>();
-  let miktarsiz = 0, tutarsiz = 0;
-  for (const row of rows) {
-    const anahtar = `${metin(row.seri).trim()}|${metin(row.sira).trim()}`;
-    const sku = metin(row.sku);
-    const miktarVar = bilinenSayi(row.miktar);
-    const toplamVar = bilinenSayi(row.tutar) && bilinenSayi(row.vergi);
-    if (!miktarVar) miktarsiz++;
-    if (!toplamVar) tutarsiz++;
-    const liste = harita.get(anahtar) ?? [];
-    liste.push({
-      sku,
-      name: metin(row.ad) || sku,
-      quantity: miktarVar ? Number(row.miktar) : null,
-      total: toplamVar ? Number(row.tutar) + Number(row.vergi) : null,
-    });
-    harita.set(anahtar, liste);
+export function satisFaturasiHareketleri(hareketler: readonly Record<string, unknown>[]): Map<string, StokHareketi[]> {
+  const harita = new Map<string, StokHareketi[]>();
+  for (const h of hareketler) {
+    if (h.source !== 'mikro_sql') continue;
+    const f = faturaAnahtari(h);
+    if (!f || f.yon !== 'giden') continue;
+    const k = `${f.seri}|${f.sira}`;
+    const liste = harita.get(k) ?? [];
+    liste.push(h);
+    harita.set(k, liste);
   }
-  return { harita, miktarsiz, tutarsiz };
+  return harita;
+}
+
+export interface MfKalemSonucu {
+  kalemler: SiparisSatiri[];
+  /** Miktarı okunamayan kalem. */
+  miktarsiz: number;
+  /** Net tutarı çözülemeyen kalem (tutar yok / iskonto tutarsız). */
+  tutarsiz: number;
+}
+
+const kurus = (x: number | null): number | null => (x === null ? null : Math.round(x * 100) / 100);
+/** `sth_satir_no` (fatura/kalemler rotasının şemadan doğruladığı sıra kolonu) — yoksa ya da okunamazsa sıra korunur. */
+const satirNo = (h: StokHareketi): number | null => (bilinenSayi(h.sth_satir_no) ? Number(h.sth_satir_no) : null);
+
+/**
+ * Bir satış faturasının satırlarından sipariş kalemleri. Hesap `lib/stokFiyat.kalemleriCoz` (fatura başlığıyla
+ * hakemli) — ekrandaki fatura detayı ve Fiyat Karşılaştırma ile AYNI; tutarlar kuruşa yuvarlanır.
+ */
+export function mfKalemleri(hareketler: readonly StokHareketi[], meblag: unknown, stokAdi: (sku: string) => string | undefined): MfKalemSonucu {
+  const sirali = [...hareketler].sort((a, b) => {
+    const x = satirNo(a), y = satirNo(b);
+    return x !== null && y !== null ? x - y : 0;
+  });
+  const cozumler = kalemleriCoz(sirali, meblag);
+  let miktarsiz = 0, tutarsiz = 0;
+  const kalemler = sirali.map((h, i): SiparisSatiri => {
+    const c = cozumler[i];
+    const sku = metin(h.sth_stok_kod).trim();
+    const kdv = bilinenSayi(h.sth_vergi) ? Number(h.sth_vergi) : null;
+    const net = kurus(c.net);
+    if (c.miktar === null) miktarsiz++;
+    if (net === null) tutarsiz++;
+    return {
+      sku,
+      name: stokAdi(sku) || sku,
+      quantity: c.miktar,
+      price: c.net !== null && c.miktar !== null && c.miktar > 0 ? c.net / c.miktar : null,
+      birim: null,
+      brutTutar: kurus(c.brut),
+      iskonto: kurus(c.iskonto),
+      netTutar: net,
+      kdv,
+      // Masraf satırın KENDİ kolonlarından — netin çözülmesine bağlı değil (ham tablo `kalemSaglamasi` ile AYNI kural).
+      masraf: kurus(satirMasrafi(h)),
+      netKaynagi: c.kaynak,
+      total: net !== null && kdv !== null ? kurus(net + kdv) : null,
+      kalemSurumu: MF_KALEM_SURUMU,
+    };
+  });
+  return { kalemler, miktarsiz, tutarsiz };
+}
+
+const topla = (k: readonly unknown[], alan: 'netTutar' | 'kdv'): number | null => {
+  let t = 0;
+  for (const l of k) {
+    const v = (l as Record<string, unknown> | null)?.[alan];
+    if (!bilinenSayi(v)) return null;
+    t += Number(v);
+  }
+  return Math.round(t * 100) / 100;
+};
+
+/**
+ * Mevcut MF siparişinin kalemleri yenilenmeli mi: hiç kalem yok, sürüm-2 olmayan kalem var, ya da (verilirse) kaynaktan
+ * kurulan kalemler kayıtlıdan FARKLI — kalem sayısı ya da Σ net / Σ KDV kuruş düzeyinde (inceleme 2026-09-25: stok
+ * hareketi importu yarıda kalınca kısmi kalem sürüm 2 damgasıyla kalıcı oluyor, bir daha hiç yenilenmiyordu).
+ * Sağlamaya BAKILMAZ: tevkifat/ÖTV'li fatura meşru olarak tutmaz.
+ */
+export function kalemYenilenmeli(lineItems: unknown, kaynak?: readonly SiparisSatiri[]): boolean {
+  if (!Array.isArray(lineItems) || lineItems.length === 0) return true;
+  if (lineItems.some(l => !l || typeof l !== 'object' || (l as { kalemSurumu?: unknown }).kalemSurumu !== MF_KALEM_SURUMU)) return true;
+  if (!kaynak) return false;
+  if (kaynak.length !== lineItems.length) return true;
+  return topla(kaynak, 'netTutar') !== topla(lineItems, 'netTutar') || topla(kaynak, 'kdv') !== topla(lineItems, 'kdv');
 }
 
 export interface SiparisTuretmesi {
@@ -299,7 +372,9 @@ export interface SiparisTuretmeSayaci {
   yonsuz: number;
   miktarsizKalem: number;
   tutarsizKalem: number;
-  /** PG havuzu yok (lokal dev) — kalemler ve cari adları hiç yüklenmedi. */
+  /** Stok hareketi (inventoryMovements) bulunamayan fatura — sipariş kalemsiz yazıldı. */
+  kalemKaynagiYok: number;
+  /** PG havuzu yok (lokal dev) — cari adları yüklenmedi. */
   pgYok: boolean;
 }
 
@@ -312,7 +387,8 @@ export function siparisTuretmeNotu(s: SiparisTuretmeSayaci): string | null {
   if (s.yonsuz > 0) parcalar.push(`${s.yonsuz} faturanın yönü (cha_tip) okunamadı — satış sayılmadı`);
   if (s.miktarsizKalem > 0) parcalar.push(`${s.miktarsizKalem} kalemin miktarı bilinmiyor`);
   if (s.tutarsizKalem > 0) parcalar.push(`${s.tutarsizKalem} kalemin tutarı bilinmiyor`);
-  if (s.pgYok) parcalar.push('PG yok — kalemler ve cari adları eklenemedi (lokal dev)');
+  if (s.kalemKaynagiYok > 0) parcalar.push(`${s.kalemKaynagiYok} faturanın stok hareketi yok — kalemsiz yazıldı (önce "Stok Hareketleri"ni çekin)`);
+  if (s.pgYok) parcalar.push('PG yok — cari adları eklenemedi (lokal dev)');
   return parcalar.join(' · ') || null;
 }
 

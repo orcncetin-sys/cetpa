@@ -91,7 +91,8 @@ import {
 } from '../mikro/eslemeStok.js';
 // Fatura eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeFatura.ts
 import {
-  faturaYonu, faturalariEsle, kalemHaritasi, faturadanSiparis, siparisTuretmeNotu,
+  faturaYonu, faturalariEsle, faturadanSiparis, siparisTuretmeNotu,
+  satisFaturasiHareketleri, mfKalemleri, kalemYenilenmeli,
   kalemleriBirimle, okumaArizasiUyarisi, OKUMA_ARIZASI_ESIK, type SiparisSatiri,
 } from '../mikro/eslemeFatura.js';
 import { eBelgeNormalize, eBelgeleriNormalize, cariHareketYonOzeti } from '../mikro/eBelge.js';
@@ -3701,7 +3702,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  İDEMPOTENT: doc id `mikrofat__<cid>__<seri>-<sira>` (kiracı önekli —
    *  eBelgeYaz dersi: evrak no küresel benzersiz DEĞİL); mevcut id atlanır,
    *  tekrar çalıştırmak kopya üretmez. Mevcut NATIVE siparişlere dokunulmaz
-   *  (Mikro'ya bağlarken EKLE, YERİNE KOYMA). */
+   *  (Mikro'ya bağlarken EKLE, YERİNE KOYMA).
+   *
+   *  KALEMLER (2026-09-25, K-KALEM/K-İSKONTO + MF-383 kök nedeni): kaynak kiracının `inventoryMovements`'ı
+   *  (stok-hareket importu), hesap lib/stokFiyat — KDV hariç net + iskonto ayrı (sürüm 2). Eski kaynak PG aynası
+   *  YALNIZ push'ta doluyordu → Mikro'da kesilen faturanın siparişi kalemsizdi. MEVCUT MF siparişinin kalemi yalnız
+   *  açık istekle yenilenir: body `kalemYenile: 'onizle'` HİÇBİR ŞEY YAZMAZ (sayaç + örnek döner), `'uygula'` yazar
+   *  (yalnız `lineItems` — durum, not, sevkiyat dokunulmaz; kaynak boşsa dokunulmaz). */
   app.post('/api/mikro/import/faturadan-siparis', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     const t0 = Date.now();
@@ -3727,7 +3734,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           if (uyari) { console.warn('[faturadan-siparis]', uyari); erkenNot.push(uyari); }
         }
         const sayac = siparisTuretmeNotu({ turetilen: 0, tutarsiz: 0, yonsuz,
-          miktarsizKalem: 0, tutarsizKalem: 0, pgYok: !pool });
+          miktarsizKalem: 0, tutarsizKalem: 0, kalemKaynagiYok: 0, pgYok: !pool });
         if (sayac) erkenNot.push(sayac);
         return res.json({ success: true, created: 0, skipped: 0, total: 0,
           note: erkenNot.join(' · ') || null,
@@ -3748,34 +3755,35 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         return x.source === 'mikro-fatura' && (x.faturali !== true || !x.mikroFaturaNo);
       });
 
-      // Cari adları + kalemler: ikişer toplu sorgu (fatura başına sorgu YOK).
+      // Cari adları: PG aynası (tek sorgu). Kalemler: kiracının stok hareketleri + stok adları (fatura başına sorgu YOK).
       const cariAd = new Map<string, string>();
-      // Kalem tipi tek kaynakta: quantity/total BİLİNMİYORSA null (0 DEĞİL).
-      let kalemMap = new Map<string, SiparisSatiri[]>();
-      let miktarsizKalem = 0, tutarsizKalem = 0;
       if (pool) {
         const cr = await pool.query(`SELECT cari_kod, COALESCE(cari_unvan1, '') AS unvan FROM mikro_cari_hesaplar`);
         for (const row of cr.rows) cariAd.set(String(row.cari_kod), String(row.unvan));
-        const kr = await pool.query(
-          `SELECT COALESCE(h.sth_evrakno_seri, '') AS seri, CAST(h.sth_evrakno_sira AS text) AS sira,
-                  COALESCE(h.sth_stok_kod, '') AS sku, COALESCE(s.sto_isim, '') AS ad,
-                  h.sth_miktar AS miktar, h.sth_tutar AS tutar, h.sth_vergi AS vergi
-             FROM mikro_stok_hareketleri h
-             LEFT JOIN mikro_stoklar s ON s.sto_kod = h.sth_stok_kod
-            WHERE h.sth_evraktip = 4`);
-        // SAYISAL COALESCE(...,0) KALDIRILDI: KDV'si okunamayan satırın toplamı SESSİZCE
-        // EKSİK iniyordu (tutar + 0). Artık NULL iner ve kalem `total: null` olur + sayılır.
-        // Metin kolonlarındaki COALESCE(...,'') KALIR (anahtar/ad, sayı değil).
-        // Gövde tek kaynakta (server/mikro/eslemeFatura.kalemHaritasi).
-        const kh = kalemHaritasi(kr.rows);
-        kalemMap = kh.harita;
-        miktarsizKalem = kh.miktarsiz;
-        tutarsizKalem = kh.tutarsiz;
       }
+      const hareketler = satisFaturasiHareketleri(await C.loadCompanyDocs('inventoryMovements', cid));
+      const stokAdlari = new Map<string, string>();
+      for (const u of await C.loadCompanyDocs('inventory', cid)) {
+        const sku = String((u as Record<string, unknown>).sku ?? '').trim();
+        const ad = String((u as Record<string, unknown>).name ?? '').trim();
+        if (sku && ad && !stokAdlari.has(sku)) stokAdlari.set(sku, ad);
+      }
+      const kalemYenile = (req.body as { kalemYenile?: unknown } | undefined)?.kalemYenile;
+      const onizleme = kalemYenile === 'onizle';
+      // KALEM MODU (önizle/uygula): YALNIZ mevcut MF siparişinin kalemi — yeni sipariş oluşturulmaz, eski alan onarımı
+      // yapılmaz (inceleme 2026-09-25: 'uygula' tüm importu koşturuyor, önizleme ise yalnız kalem sayısını gösteriyordu).
+      const yalnizKalem = kalemYenile === 'onizle' || kalemYenile === 'uygula';
+      const mevcutMf = new Map(mevcutSiparisler
+        .filter(o => (o as Record<string, unknown>).source === 'mikro-fatura')
+        .map(o => [String(o.id ?? ''), o as Record<string, unknown>]));
+      // Kalem sayaçları YAZILAN kalemler için (yeni sipariş + otomatik doldurulan); yenileme adayları AYRI sayılır.
+      let miktarsizKalem = 0, tutarsizKalem = 0, kalemKaynagiYok = 0, bosDoldurulan = 0;
+      let kalemYenilenecek = 0, kalemYenilenen = 0, yenileMiktarsiz = 0, yenileTutarsiz = 0, kalemAzalan = 0, kaynaksizBekleyen = 0;
+      const kalemOrnek: Array<{ orderNumber: string; eski: number; yeni: number }> = [];
 
       let batch = C.getAdminDb().batch();
       let ops = 0, created = 0, skipped = 0, onarilan = 0, tutarsizSiparis = 0;
-      for (const o of backfillGerekli) {
+      for (const o of yalnizKalem ? [] : backfillGerekli) {
         const x = o as Record<string, unknown>;
         const ev = (x.mikroEvrak ?? {}) as { seri?: unknown; sira?: unknown };
         // Evrak no yalnız mikroEvrak'tan türetilir; yoksa alan yazılmaz (uydurma yok).
@@ -3794,28 +3802,82 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         // biçimi ve tüm alanlar BİREBİR aynı; tek fark tutar bilinmiyorsa totalPrice
         // alanının HİÇ YAZILMAMASI. Okuyan tarafın durumu (hangi yüzey `siparisTutari`
         // kullanıyor, hangisi hâlâ ham topluyor) eslemeFatura.ts'teki uyarıda.
-        const t = faturadanSiparis(x, kalemMap.get(anahtar) ?? [],
+        const hareket = hareketler.get(anahtar) ?? [];
+        const k = mfKalemleri(hareket, x.cha_meblag, sku => stokAdlari.get(sku));
+        const t = faturadanSiparis(x, k.kalemler,
           { companyId: cid, cariUnvan: cariAd.get(String(x.cha_kod ?? '').trim()) });
         if (!t) { skipped++; continue; }                  // evrak sıra no yok
-        if (mevcutIdler.has(t.id)) { skipped++; continue; }
+        if (mevcutIdler.has(t.id)) {
+          skipped++;
+          const mevcut = mevcutMf.get(t.id);
+          if (!mevcut) continue;
+          // Kaynak BOŞSA kıyas yapılamaz: yalnız sürüme bakılır (kaynaksız bekleyen sayılır).
+          if (!kalemYenilenmeli(mevcut.lineItems, k.kalemler.length > 0 ? k.kalemler : undefined)) continue;
+          const eskiSayi = Array.isArray(mevcut.lineItems) ? mevcut.lineItems.length : 0;
+          // Kaynak yok: yazılacak kalem yok — sessiz kalmaz, sayılır ("önce Stok Hareketleri").
+          if (k.kalemler.length === 0) { kaynaksizBekleyen++; continue; }
+          if (!yalnizKalem && eskiSayi === 0) {
+            // VARSAYILAN MOD: BOŞ kalemi doldurmak ekleme — kullanıcı verisini değiştirmez; Tümünü Çek'in ana yolu
+            // (inceleme 2026-09-25, CONFIRMED: sipariş stok hareketinden önce türediyse bir daha hiç dolmuyordu).
+            batch.update(C.getAdminDb().collection('orders').doc(t.id), { lineItems: k.kalemler });
+            bosDoldurulan++;
+            miktarsizKalem += k.miktarsiz; tutarsizKalem += k.tutarsiz;
+            if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+            continue;
+          }
+          // Mevcut kalemi DEĞİŞTİRMEK (eski biçim → sürüm 2) ya da kalem modunda boşu doldurmak: yalnız açık
+          // önizle → uygula ile; satır eşleme yok, kalemler kaynaktan BÜTÜNÜYLE yazılır.
+          kalemYenilenecek++;
+          yenileMiktarsiz += k.miktarsiz; yenileTutarsiz += k.tutarsiz;
+          if (k.kalemler.length < eskiSayi) kalemAzalan++;
+          if (kalemOrnek.length < 10) kalemOrnek.push({ orderNumber: String(mevcut.orderNumber ?? t.id), eski: eskiSayi, yeni: k.kalemler.length });
+          if (kalemYenile === 'uygula') {
+            batch.update(C.getAdminDb().collection('orders').doc(t.id), { lineItems: k.kalemler });
+            kalemYenilenen++;
+            if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+          }
+          continue;
+        }
+        if (yalnizKalem) continue;                        // kalem modunda yeni sipariş OLUŞTURULMAZ
+        if (hareket.length === 0) kalemKaynagiYok++;
+        miktarsizKalem += k.miktarsiz; tutarsizKalem += k.tutarsiz;
         if (t.tutarBilinmiyor) tutarsizSiparis++;
+        created++;
         batch.set(C.getAdminDb().collection('orders').doc(t.id), {
           ...t.doc,
           // Fatura tarihi sipariş tarihi olarak işlenir (kullanıcının isteği).
           createdAt: t.olusturmaTarihi ?? pgServerTimestamp(),
         });
-        created++;
         if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
       }
       if (ops > 0) await batch.commit();
 
-      const not = siparisTuretmeNotu({ turetilen: created, tutarsiz: tutarsizSiparis, yonsuz,
-        miktarsizKalem, tutarsizKalem, pgYok: !pool });
+      const kaynaksizNotu = kaynaksizBekleyen > 0
+        ? `${kaynaksizBekleyen} MF siparişinin kalemi boş/eski ama stok hareketi yok — önce "Stok Hareketleri"ni çekin` : null;
+      const not = (yalnizKalem
+        ? [
+            yenileTutarsiz > 0 ? `${yenileTutarsiz} kalemin tutarı çözülemiyor — yenilenirse '—' görünür` : null,
+            yenileMiktarsiz > 0 ? `${yenileMiktarsiz} kalemin miktarı bilinmiyor` : null,
+            kalemAzalan > 0 ? `${kalemAzalan} siparişte kalem sayısı AZALIYOR — örnekleri kontrol edin` : null,
+            kaynaksizNotu,
+          ]
+        : [
+            siparisTuretmeNotu({ turetilen: created, tutarsiz: tutarsizSiparis, yonsuz,
+              miktarsizKalem, tutarsizKalem, kalemKaynagiYok, pgYok: !pool }),
+            bosDoldurulan > 0 ? `${bosDoldurulan} kalemsiz MF siparişinin kalemi dolduruldu` : null,
+            kalemYenilenecek > 0 ? `${kalemYenilenecek} MF siparişinin kalemi eski biçimde ya da Mikro'daki satırlarla TUTMUYOR (eksik/değişmiş) — Entegrasyon → "MF Sipariş Kalemlerini Yenile"` : null,
+            kaynaksizNotu,
+          ]).filter(Boolean).join(' · ') || null;
       if (not?.startsWith('UYARI:')) console.warn('[faturadan-siparis]', not);
+      if (onizleme) {
+        return res.json({ success: true, onizleme: true, kalemYenilenecek, kalemOrnek, yenileTutarsiz, yenileMiktarsiz,
+          kalemAzalan, kaynaksizBekleyen, total: satisFaturalari.length, note: not, duration: Date.now() - t0 });
+      }
       await C.writeAuditLog(C.reqActor(req), 'Faturadan Sipariş',
-        `${created} sipariş türetildi, ${skipped} atlandı, ${onarilan} eski kayıt onarıldı (${satisFaturalari.length} satış faturası)${not ? ` — ${not}` : ''}`);
+        `${created} sipariş türetildi, ${skipped} atlandı, ${onarilan} eski kayıt onarıldı, ${bosDoldurulan} kalemsiz sipariş dolduruldu, ${kalemYenilenen} siparişin kalemi yenilendi (${satisFaturalari.length} satış faturası)${not ? ` — ${not}` : ''}`);
       await C.writeSyncLog('faturadan-siparis', 'orders', String(created), true, null, null, Date.now() - t0, C.reqActor(req));
-      res.json({ success: true, created, skipped, onarilan, total: satisFaturalari.length,
+      res.json({ success: true, created, skipped, onarilan, bosDoldurulan, kalemYenilenecek, kalemYenilenen, kalemOrnek,
+        yenileTutarsiz, yenileMiktarsiz, kalemAzalan, kaynaksizBekleyen, total: satisFaturalari.length,
         // `kalemsiz` alanı KALDIRILDI: MikroSyncPanel jenerik kartı yalnız `note`u basıyor
         // (handleExtraPull, MikroSyncPanel.tsx 328-333) — bu uyarı ekranda HİÇ GÖRÜNMÜYORDU.
         // Artık aynı cümle `note` içinde, diğer sayaçlarla birlikte.

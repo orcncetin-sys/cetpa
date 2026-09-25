@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, renderHook, waitFor } from '@testing-library/react';
 import MikroSiparisKalemleri from './MikroSiparisKalemleri';
 import { useMikroSiparisKalemleri } from '../../hooks/useMikroSiparisKalemleri';
-import { kalemleriMikrodanOkunacak, mikroKalemNotlari, mikroKalemTablosu } from '../../services/mikroFaturaKalemleri';
+import { kalemleriMikrodanOkunacak, mikroKalemNotlari, mikroKalemTablosu, kayitliKalemTablosu, kayitliMikroKalemleri } from '../../services/mikroFaturaKalemleri';
 
 const authFetch = vi.fn();
 vi.mock('../../services/authFetch', () => ({ authFetch: (...a: unknown[]) => authFetch(...a) }));
@@ -141,5 +141,52 @@ describe('MikroSiparisKalemleri — iskonto sütunu ve alt satırları', () => {
     render(<MikroSiparisKalemleri durum="hazir" kalemler={[kalem({ sth_tarih: '2025-03-10' })]} hata={null} genelToplam={15000} evrakNo="383" dil="tr" />);
     expect(screen.queryByText('Brüt toplam (KDV hariç)')).toBeNull();
     expect(screen.getByText(/^₺0,00$/)).toBeTruthy();
+  });
+});
+
+// 2026-09-25: faturadan-sipariş importu artık sürüm-2 kalem YAZIYOR (inventoryMovements + lib/stokFiyat). Detay ve fiş
+// o kalemi canlı okumayla AYNI tabloyla basar; seçim TEK kural (kayitliMikroKalemleri).
+describe('kalıcı (sürüm-2) MF kalemi — canlı okumayla aynı tablo', () => {
+  const k2 = (p: Record<string, unknown>) => ({ sku: 'CIM-50', name: 'ÇİMENTO 50KG', quantity: 10, brutTutar: 1000, iskonto: 100,
+    netTutar: 900, kdv: 180, masraf: 0, netKaynagi: 'satirIskontosu', total: 1080, kalemSurumu: 2, ...p });
+  it('kayitliMikroKalemleri: yalnız MF + TÜM kalemler sürüm 2; eski/karışık/native/kalemsiz → null', () => {
+    expect(kayitliMikroKalemleri({ source: 'mikro-fatura', lineItems: [k2({})] })).toHaveLength(1);
+    expect(kayitliMikroKalemleri({ source: 'mikro-fatura', lineItems: [k2({}), { sku: 'eski', total: 5 }] })).toBeNull();
+    expect(kayitliMikroKalemleri({ source: 'mikro-fatura', lineItems: [] })).toBeNull();
+    expect(kayitliMikroKalemleri({ source: undefined, lineItems: [k2({})] })).toBeNull();
+  });
+  it('kayitliKalemTablosu: ham tabloyla AYNI alanlar; sağlama tutuyorsa not yok; tutmuyorsa "Sağlama tutmuyor"', () => {
+    const t = kayitliKalemTablosu([k2({})], 1080, 'tr');
+    expect(t.satirlar[0]).toMatchObject({ ad: 'ÇİMENTO 50KG', miktarMetni: '10', birimFiyat: 100, iskonto: 100, net: 900, faturaAltiKaynagi: null });
+    expect([t.brut.toplam, t.iskonto.toplam, t.ara.toplam, t.kdv.toplam, t.masraf]).toEqual([1000, 100, 900, 180, 0]);
+    expect(t.notlar).toEqual([]);
+    expect(kayitliKalemTablosu([k2({})], 1500, 'tr').notlar.some(n => /Sağlama tutmuyor/.test(n))).toBe(true);
+    expect(kayitliKalemTablosu([k2({ netKaynagi: 'faturaAltiKdvden' })], 1080, 'tr').notlar.some(n => /TAHMİN edildi/.test(n))).toBe(true);
+  });
+  // Delta hakem 2026-09-25: kayıtlı sağlama ham yolla (kalemSaglamasi) AYNI olmalı — KDV mutlak değer, masraf her satırdan.
+  it('kayıtlı ve ham tablo aynı veride AYNI sağlamayı verir: negatif KDV (iade satırı) ve masraflı satır', () => {
+    const ham = [
+      { sth_tarih: '2025-03-10', sth_stok_kod: 'A', sth_miktar: 1, sth_tutar: 100, sth_vergi: -20 },
+      { sth_tarih: '2025-03-10', sth_stok_kod: 'B', sth_miktar: 1, sth_tutar: 1000, sth_masraf1: 50, sth_vergi: 210 },
+    ];
+    // Kalıcı kalem, importun yazacağı biçimde (mfKalemleri ile aynı alanlar).
+    const kayitli = [
+      k2({ sku: 'A', quantity: 1, brutTutar: 100, iskonto: 0, netTutar: 100, kdv: -20, masraf: 0 }),
+      k2({ sku: 'B', quantity: 1, brutTutar: 1000, iskonto: 0, netTutar: 1000, kdv: 210, masraf: 50 }),
+    ];
+    for (const meblag of [1380, 1500]) {
+      const a = mikroKalemTablosu(ham, meblag, 'tr'), b = kayitliKalemTablosu(kayitli, meblag, 'tr');
+      expect(b.notlar).toEqual(a.notlar);
+      expect(b.masraf).toBe(a.masraf);
+    }
+    expect(kayitliKalemTablosu(kayitli, 1380, 'tr').notlar).toEqual([]);   // 100 + 1000 + 50 + |−20| + 210 = 1.380
+  });
+
+  it('bileşen kayitli ile canlı okuma YAPMAZ, "aktarıldı" der ve iskonto sütununu basar', () => {
+    render(<MikroSiparisKalemleri durum="yukleniyor" kalemler={[]} kayitli={[k2({})]} hata={null} genelToplam={1080} evrakNo="383" dil="tr" />);
+    expect(screen.getByText(/Mikro faturasından \(evrak 383\) aktarıldı/)).toBeTruthy();
+    expect(screen.queryByText(/yükleniyor/)).toBeNull();
+    expect(screen.getAllByText(/^−₺100,00$/).length).toBe(2);
+    expect(authFetch).not.toHaveBeenCalled();
   });
 });

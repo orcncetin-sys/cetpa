@@ -55,11 +55,33 @@ export interface MarjSatiri {
   quantity?: unknown;
   /** Kalemin KENDİ birim maliyeti; varsa katalog aranmaz (meşru ₺0 dahil). */
   costPrice?: unknown;
+  /** Stok kodu — kimlik yoksa kart bununla da bulunur (Mikro türevi kalem `inventoryId` taşımaz). */
+  sku?: unknown;
+  /** Sürüm-2 Mikro kalemi (2026-09-25): KDV hariç, iskonto düşülmüş satır neti. */
+  netTutar?: unknown;
+  kalemSurumu?: unknown;
 }
 
 /** Marj hesabına giren sipariş — tutar alanları `raporSiparisi` ile okunur (`totalPrice ?? totalAmount`). */
 export interface MarjSiparisi extends RaporSiparisi {
   lineItems?: readonly MarjSatiri[] | null;
+  source?: unknown;
+}
+
+/**
+ * Marjın CİRO tabanı (inceleme 2026-09-25): faturadan-sipariş importu MF siparişine kalem yazınca sipariş kapsam
+ * DIŞINDAN kapsama geçti; ciro `totalPrice` (Mikro `cha_meblag`: KDV + masraf DÂHİL) iken maliyet KDV hariç kart
+ * maliyeti — marj KDV kadar şişerdi. Tüm kalemleri sürüm 2 olan MF siparişinde ciro = Σ netTutar (KDV hariç, K-KALEM);
+ * tek kalemin neti bilinmiyorsa NaN (kısmi ciro türetmeye girmez). Diğer siparişler eski kuralla (`raporSiparisi`).
+ */
+export function marjCirosu(o: MarjSiparisi): number {
+  const kalemler = o.lineItems ?? [];
+  if (o.source === 'mikro-fatura' && kalemler.length > 0) {
+    // Eski (sürüm-1) MF kalemi: KDV hariç net YOK → ciro BİLİNMEZ (NaN, `tutarsizSiparis`). KDV dâhil totalPrice'a
+    // düşmek, sku ile artık bulunan kart maliyetine karşı marjı KDV kadar şişirirdi (delta hakem 2026-09-25).
+    return kalemler.every(k => k.kalemSurumu === 2) ? tamTutar(toplaBilinen(kalemler, k => k.netTutar)) : NaN;
+  }
+  return raporSiparisi(o);
 }
 
 /**
@@ -86,15 +108,19 @@ function anahtar(x: unknown): string | null {
  * liste sırasında kimliği YA DA adı tutan İLK karttır — kimliğe öncelik vermek davranış
  * değişikliği olurdu.
  */
-export function stokKartiCozucu<K extends { id?: unknown; name?: unknown }>(
+export function stokKartiCozucu<K extends { id?: unknown; name?: unknown; sku?: unknown }>(
   kartlar: readonly K[],
 ): (satir: MarjSatiri) => K | null {
   return (satir) => {
     const kimlik = anahtar(satir.inventoryId);
+    const sku = anahtar(satir.sku);
     const ad = anahtar(satir.name);
-    if (kimlik === null && ad === null) return null;
+    if (kimlik === null && sku === null && ad === null) return null;
+    // Stok kodu da eşleşir (inceleme 2026-09-25: Mikro türevi kalem yalnız sku + ad taşır; ad kartla birebir tutmazsa
+    // maliyet bulunamıyordu). OR semantiği ve "liste sırasındaki İLK kart" kuralı AYNEN (6a parite testi).
     return kartlar.find(k =>
       (kimlik !== null && anahtar(k.id) === kimlik) ||
+      (sku !== null && anahtar(k.sku) === sku) ||
       (ad !== null && anahtar(k.name) === ad),
     ) ?? null;
   };
@@ -107,7 +133,7 @@ export function stokKartiCozucu<K extends { id?: unknown; name?: unknown }>(
  * `birimMaliyet` kur çevrimini yapan çağırandan gelir (`kartMaliyetiTL(kart, rates)`);
  * `itemCostTRY` DOĞRUDAN geçilmemeli — çevrilemeyen kaleme 0 döndürür.
  */
-export function stokMaliyetCozucu<K extends { id?: unknown; name?: unknown }>(
+export function stokMaliyetCozucu<K extends { id?: unknown; name?: unknown; sku?: unknown }>(
   kartlar: readonly K[],
   birimMaliyet: (k: K) => number | null,
 ): KalemMaliyetCozucu {
@@ -160,7 +186,7 @@ export function brutMarjHesabi(
   const kapsamli = list.filter(o => (o.lineItems ?? []).length > 0);
   const kapsamDisi = list.length - kapsamli.length;
 
-  const ciroTutar = toplaBilinen(kapsamli, raporSiparisi);
+  const ciroTutar = toplaBilinen(kapsamli, marjCirosu);
   // Siparişin maliyeti BİR KEZ hesaplanır: hem `maliyetTutar` hem benzersiz sayaç aynı sayıyı
   // okur (iki ayrı geçiş, kalem çözücüsünü sipariş başına iki kez çağırırdı).
   const maliyetler = kapsamli.map(o =>
@@ -170,7 +196,7 @@ export function brutMarjHesabi(
   // Benzersiz sayaç: kesişen iki kümeyi TOPLAMAK tek kaydı iki kez raporlardı (bkz. `tutarsizSiparis`).
   let tutarsizSiparis = 0;
   for (let i = 0; i < kapsamli.length; i++) {
-    if (!Number.isFinite(raporSiparisi(kapsamli[i])) || !Number.isFinite(maliyetler[i])) tutarsizSiparis++;
+    if (!Number.isFinite(marjCirosu(kapsamli[i])) || !Number.isFinite(maliyetler[i])) tutarsizSiparis++;
   }
 
   // TÜRETME kapısı: iki taraf da TAM bilinmeli (kısmi cirodan tam maliyeti çıkarmak,
