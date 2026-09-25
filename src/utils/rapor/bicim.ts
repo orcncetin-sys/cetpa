@@ -69,12 +69,15 @@ export function yuzdeYaz(
   dil: 'tr' | 'en' = 'tr',
 ): string {
   if (!bilinenSayi(oran)) return '—';
-  const metin = oran.toLocaleString(dil === 'tr' ? 'tr-TR' : 'en-US', {
+  // İşaretin yeri DİLİN kalıbından (Intl `style: 'percent'`, CLDR): TR '%42' / '-%17' / '%33,3', EN '42%'.
+  // Kullanıcı kararı 2026-09-25: "%42 şeklinde olsun." (eski: iki dilde de sonda '42%'). `percent` 0–1 aralığı
+  // bekler → /100; yuvarlama Intl'de (yarım-çift değil, yarım-yukarı — eski `toLocaleString` ile aynı).
+  return (oran / 100).toLocaleString(dil === 'tr' ? 'tr-TR' : 'en-US', {
+    style: 'percent',
     minimumFractionDigits: ondalik,
     maximumFractionDigits: ondalik,
     useGrouping: false,
   });
-  return `${metin}%`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

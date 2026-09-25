@@ -11,7 +11,7 @@
  */
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike, DocDaralt } from '../adminDbTypes.js';
-import { stokFiyatOzeti, stokFiyatDetay, faturaToplamlari } from '../../lib/stokFiyat.js';
+import { stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, birimSapmalari, netCozumleri } from '../../lib/stokFiyat.js';
 import { bilinenSayi } from '../../utils/para.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
@@ -103,10 +103,25 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
         stokMap.set(sku, bilinenSayi(rec.stockLevel) ? Number(rec.stockLevel) : null);
       }
 
-      const ozet = stokFiyatOzeti(movements, { faturaToplamlari: faturaToplamlari(basliklar) });
-      const rows = ozet.satirlar.map(r => ({ ...r, ad: adMap.get(r.sku) ?? r.sku, kalanStok: stokMap.get(r.sku) ?? null }));
+      const secenek = { faturaToplamlari: faturaToplamlari(basliklar) };
+      const cozum = netCozumleri(movements, secenek);          // tek tarama — özet ve sapma aynı çözümü paylaşır
+      const ozet = stokFiyatOzeti(movements, secenek, cozum);
+      // Birim sapması (koli/adet karışıklığı — lib/stokFiyat.birimSapmalari, 2026-09-25 kullanıcı isteği: "bu tip fark
+      // olanları listelemem gerekli"): liste + ürün başına sayı. Ortalama bu satırları İÇERİR (sessizce ayıklanmaz);
+      // ekran rozetle uyarır, düzeltme Mikro'da.
+      const sapma = birimSapmalari(movements, secenek, cozum);
+      const sapmalar = sapma.satirlar.map(s => ({ ...s, ad: adMap.get(s.sku) ?? s.sku }));
+      // Sayaç: DEĞERLENDİRİLEN üründe listede yoksa şüpheli satırı gerçekten yoktur → 0; değerlendirilemeyen
+      // üründe (< 3 fiyatı bilinen satır) BİLİNMİYOR → null (ekran '0 şüpheli' demez — inceleme 2026-09-25).
+      const sapmaSayisi = new Map<string, number>();
+      for (const s of sapmalar) { const n = sapmaSayisi.get(s.sku); sapmaSayisi.set(s.sku, n === undefined ? 1 : n + 1); }
+      const rows = ozet.satirlar.map(r => {
+        const n = sapmaSayisi.get(r.sku);
+        const sayi = !sapma.degerlendirilen.has(r.sku) ? null : n === undefined ? 0 : n;
+        return { ...r, ad: adMap.get(r.sku) ?? r.sku, kalanStok: stokMap.get(r.sku) ?? null, sapmaSayisi: sayi };
+      });
       // iskontoKolonlari: aynada GERÇEKTEN bulunan sth_iskonto<N> kolonları — boşsa ekran "iskonto kolonu yok" der.
-      res.json({ success: true, rows, toplamSku: rows.length, iskontoKolonlari: ozet.iskontoKolonlari, netKaynaklari: ozet.netKaynaklari });
+      res.json({ success: true, rows, toplamSku: rows.length, iskontoKolonlari: ozet.iskontoKolonlari, netKaynaklari: ozet.netKaynaklari, sapmalar });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
     }

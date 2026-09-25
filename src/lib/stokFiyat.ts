@@ -166,9 +166,26 @@ const anahtar = (seri: unknown, sira: unknown, yon: 'gelen' | 'giden'): string |
   const s = String(sira ?? '').trim();
   return s ? `${yon}|${String(seri ?? '').trim()}|${s}` : null;
 };
-const satirAnahtari = (h: StokHareketi): string | null => {
+/** Bir stok hareketinin FATURA anahtarı. */
+export interface FaturaAnahtari { seri: string; sira: string; yon: 'gelen' | 'giden' }
+
+/**
+ * Stok hareketinin ait olduğu FATURA (seri + sıra + yön). Yalnız `sth_evraktip` 3 (alış faturası) / 4 (satış
+ * faturası) — yukarıdaki doğrulanmış kural; irsaliye/sayım/virman fatura DEĞİLDİR → `null`. Tek tanım: başlık
+ * hakemliği (`satirAnahtari`) ve ekranlardaki "evraka bas → faturayı aç" düğmeleri (`utils/faturaEsle.hareketFaturasi`)
+ * bunu kullanır. `/api/mikro/fatura/kalemler` aynı üçlüyle (seri, sıra, yön→3/4) okur.
+ */
+export function faturaAnahtari(h: StokHareketi): FaturaAnahtari | null {
   const tip = Number(h.sth_evraktip);
-  return tip === 3 ? anahtar(h.sth_evrakno_seri, h.sth_evrakno_sira, 'gelen') : tip === 4 ? anahtar(h.sth_evrakno_seri, h.sth_evrakno_sira, 'giden') : null;
+  const yon = tip === 3 ? 'gelen' : tip === 4 ? 'giden' : null;
+  const sira = String(h.sth_evrakno_sira ?? '').trim();
+  if (yon === null || sira === '') return null;
+  return { seri: String(h.sth_evrakno_seri ?? '').trim(), sira, yon };
+}
+
+const satirAnahtari = (h: StokHareketi): string | null => {
+  const f = faturaAnahtari(h);
+  return f ? anahtar(f.seri, f.sira, f.yon) : null;
 };
 
 /**
@@ -292,8 +309,15 @@ interface Yon { net: number; brut: number; iskonto: number; miktar: number; adet
 const bosYon = (): Yon => ({ net: 0, brut: 0, iskonto: 0, miktar: 0, adet: 0, bilinmeyen: 0 });
 
 /** SKU + yön bazında NET ağırlıklı ortalama fiyat. İptal ve SKU'suz (native Cetpa) hareketler dışarıda. */
-export function stokFiyatOzeti(hareketler: readonly StokHareketi[], secenek?: NetSecenegi): StokFiyatOzeti {
-  const cozumler = netleriCoz(hareketler, secenek);
+/** Hareketlerin net çözümü (başlık hakemliği dâhil) — `stokFiyatOzeti` ile `birimSapmalari` AYNI çözümü paylaşsın diye
+ *  dışa açık: özet ucu tüm hareketleri iki kez çözmesin (inceleme 2026-09-25). */
+export type NetCozumleri = ReadonlyMap<StokHareketi, TutarCozumu>;
+export function netCozumleri(hareketler: readonly StokHareketi[], secenek?: NetSecenegi): NetCozumleri {
+  return netleriCoz(hareketler, secenek);
+}
+
+export function stokFiyatOzeti(hareketler: readonly StokHareketi[], secenek?: NetSecenegi, hazirCozum?: NetCozumleri): StokFiyatOzeti {
+  const cozumler = hazirCozum ?? netleriCoz(hareketler, secenek);
   const gruplar = new Map<string, { alis: Yon; satis: Yon; miktarsiz: number }>();
   const kolonSet = new Set<string>();
   const netKaynaklari: Partial<Record<NetKaynagi, number>> = {};
@@ -338,6 +362,8 @@ export interface StokFiyatDetaySatiri {
   /** Netin hangi yolla belirlendiği; hesaplanamayan satırda null. */
   kaynak: NetKaynagi | null;
   cariKod: unknown; evrakNo: string | null;
+  /** Hareketin faturası (`faturaAnahtari`); fatura olmayan evrakta (irsaliye, sayım) `null`. */
+  fatura: FaturaAnahtari | null;
 }
 
 /** Bir SKU'nun tüm alım/satım satırları (iptal hariç), yeniden eskiye. */
@@ -357,7 +383,118 @@ export function stokFiyatDetay(hareketler: readonly StokHareketi[], sku: string,
         kaynak: tamam ? s.kaynak : null,
         cariKod: h.sth_cari_kodu ?? h.sth_cari_kod ?? null,
         evrakNo: [h.sth_evrakno_seri, h.sth_evrakno_sira].filter(v => v !== '' && v != null).join('-') || null,
+        fatura: faturaAnahtari(h),
       };
     })
     .sort((a, b) => String(b.tarih ?? '').localeCompare(String(a.tarih ?? '')));
 }
+
+// ── Birim sapması: koli/adet karışıklığı ─────────────────────────────────────────────────────────────
+
+/**
+ * Şüpheli satır eşiği: satırın NET birim fiyatı, aynı ürünün medyan net birim fiyatının bu kadar KATI ya da 1/KATI.
+ * Kullanıcı vakası 2026-09-25: DAYSON-DYS.029'un iki alış faturası (evrak 410, 394) koli olarak kesilmiş — adet
+ * fiyatı ~₺129 iken ₺3.125 / ₺3.229 (≈24–25×) girmiş, ortalama alış ve marj (-%27) bozulmuş. Olağan alış–satış
+ * farkı (marj) bu eşiğe yaklaşmaz; koli/adet karışıklığı tipik olarak 6–50 kat. Eşik tahmin DEĞİL, ölçüt: aşan
+ * satır "hata" diye düzeltilmez, LİSTELENİR — kararı kullanıcı Mikro'da verir.
+ */
+export const BIRIM_SAPMA_KATI = 4;
+/** Medyan ancak ürünün en az bu kadar fiyatı bilinen satırı varsa anlamlı (2 satırda hangisinin yanlış olduğu belirsiz). */
+export const BIRIM_SAPMA_ASGARI_SATIR = 3;
+
+export interface BirimSapmasi {
+  sku: string; tarih: unknown; yon: 'alis' | 'satis';
+  miktar: number;
+  /** Satırın NET birim fiyatı (KDV hariç, iskontolar düşülmüş) — ekrandaki "Net birim fiyat" ile aynı hesap. */
+  birimFiyat: number;
+  /** Referans: ürünün ANA fiyat grubunun (en kalabalık) medyan net birim fiyatı. */
+  medyan: number;
+  /** birimFiyat / medyan — 24 = ana kümenin 24 katı (koli girilmiş olabilir); 0,04 = 1/25'i. */
+  kat: number;
+  /** true: ürünün fiyatları dengeli gruplara bölünüyor (ör. 2 adet + 2 koli satırı) — HANGİ grubun yanlış olduğu
+   *  fiyattan anlaşılamaz; yalnız ana gruptan sapan satırlar listelenir, ekran "belirsiz" der. */
+  belirsiz: boolean;
+  cariKod: unknown; evrakNo: string | null; fatura: FaturaAnahtari | null;
+}
+
+export interface BirimSapmaSonucu {
+  satirlar: BirimSapmasi[];
+  /** Kontrol EDİLEBİLEN ürünler (≥ BIRIM_SAPMA_ASGARI_SATIR fiyatı bilinen satır). Listede olmayan ama burada olan
+   *  ürünün şüpheli satırı GERÇEKTEN yoktur; burada olmayan ürün DEĞERLENDİRİLEMEDİ (0 değil, bilinmiyor). */
+  degerlendirilen: ReadonlySet<string>;
+}
+
+const medyanOf = (sirali: readonly number[]): number => {
+  const n = sirali.length, o = Math.floor(n / 2);
+  return n % 2 === 1 ? sirali[o] : (sirali[o - 1] + sirali[o]) / 2;
+};
+
+/**
+ * Ürünün fiyat düzeyinden `BIRIM_SAPMA_KATI` kat ve üzeri sapan satırlar (her iki yönde), sapması büyükten küçüğe.
+ *
+ * Referans = ANA GRUBUN medyanı. Tek medyan YETMEZ (inceleme 2026-09-25): koli satırları ürünün satırlarının yarısına
+ * yaklaşınca medyan koli fiyatına kayar ve DOĞRU adet satırları şüpheli çıkar. Ana grup: her fiyat için yarısı ile iki
+ * katı arasındaki (±√KAT) satırlar sayılır, en kalabalık pencere ana gruptur (eşitlikte en ucuz). Zincir kümelemesi
+ * DEĞİL — aradaki bir köprü fiyat adet ve koli gruplarını birleştirip koli satırlarını gizliyordu (delta hakemleri).
+ * Hiçbir iki fiyat birbirine yakın değilse (ana grup < 2 satır) fiyat düzeyi belirlenemez → ürün için hüküm yok.
+ * Şüpheli = ana grup medyanından ≥ `BIRIM_SAPMA_KATI` kat uzak HER satır.
+ * Kesinlik: şüpheli OLMAYAN satırlar tüm satırların en az ¾'ü ise `belirsiz: false`; değilse fiyatlar dengeli
+ * gruplara ayrılıyor, hangisinin yanlış olduğu fiyattan anlaşılamaz → `belirsiz: true` (yalnız sapan satırlar
+ * listelenir, ekran "belirsiz" der). ¾, az satırda yanlış hüküm vermemek için (1 adet + 2 koli: ⅔).
+ * Sınır: yıllara yayılan enflasyon fiyat düzeyini kaydırır — liste bir KONTROL listesidir, hüküm değil.
+ *
+ * Yalnız net birim fiyatı hesaplanabilen, iptal olmayan satırlar; fiyatı bilinmeyen satır gruba GİRMEZ ve şüpheli
+ * sayılmaz (bilinmeyen ≠ sapma). Alış + satış birlikte: koli hatası iki yönde de aynı düzeyden sapar, marj ise
+ * eşiğin çok altında kalır.
+ */
+export function birimSapmalari(hareketler: readonly StokHareketi[], secenek?: NetSecenegi, hazirCozum?: NetCozumleri): BirimSapmaSonucu {
+  const cozumler = hazirCozum ?? netleriCoz(hareketler, secenek);
+  const gruplar = new Map<string, { h: StokHareketi; miktar: number; birimFiyat: number }[]>();
+  for (const h of hareketler) {
+    if (iptalMi(h)) continue;
+    const sku = skuOku(h);
+    if (!sku) continue;
+    const s = satirdan(h, cozumler.get(h) ?? tutarCoz(h));
+    if (s.durum !== 'tamam' || !(s.birimFiyat > 0)) continue;
+    const g = gruplar.get(sku) ?? [];
+    g.push({ h, miktar: s.miktar, birimFiyat: s.birimFiyat });
+    gruplar.set(sku, g);
+  }
+  const satirlar: BirimSapmasi[] = [];
+  const degerlendirilen = new Set<string>();
+  for (const [sku, g] of gruplar) {
+    if (g.length < BIRIM_SAPMA_ASGARI_SATIR) continue;
+    // ANA GRUP = en kalabalık "±√KAT" fiyat penceresi (KAT 4 → her fiyatın yarısı ile iki katı arası). Zincir DEĞİL:
+    // ardışık-oran kümelemesinde aradaki köprü fiyat adet ve koli gruplarını birleştirip koli satırlarını gizliyordu
+    // (delta hakemi 2026-09-25). İki işaretçi, O(n). Eşitlikte EN UCUZ pencere (ilk bulunan).
+    const sirali = [...g].sort((a, b) => a.birimFiyat - b.birimFiyat);
+    const pencere = Math.sqrt(BIRIM_SAPMA_KATI);
+    let bas = 0, son = 0, enBas = 0, enSon = 0;
+    for (let i = 0; i < sirali.length; i++) {
+      const fiyat = sirali[i].birimFiyat;
+      while (sirali[bas].birimFiyat < fiyat / pencere) bas++;
+      if (son < i + 1) son = i + 1;
+      while (son < sirali.length && sirali[son].birimFiyat <= fiyat * pencere) son++;
+      if (son - bas > enSon - enBas) { enBas = bas; enSon = son; }
+    }
+    const ana = sirali.slice(enBas, enSon);
+    if (ana.length < 2) continue;                                        // hiçbir iki fiyat yakın değil → düzey belirsiz, hüküm yok
+    degerlendirilen.add(sku);                                            // yalnız HÜKÜM verilebilen ürün (0 = gerçekten temiz)
+    const medyan = medyanOf(ana.map(x => x.birimFiyat));
+    const sapan = g.filter(x => { const k = x.birimFiyat / medyan; return k >= BIRIM_SAPMA_KATI || k <= 1 / BIRIM_SAPMA_KATI; });
+    if (sapan.length === 0) continue;
+    const belirsiz = (g.length - sapan.length) * 4 < g.length * 3;     // olağan satırlar ¾'ün altında
+    for (const x of sapan) {
+      satirlar.push({
+        sku, tarih: x.h.sth_tarih ?? null, yon: yonOku(x.h), miktar: x.miktar, birimFiyat: x.birimFiyat, medyan,
+        kat: x.birimFiyat / medyan, belirsiz,
+        cariKod: x.h.sth_cari_kodu ?? x.h.sth_cari_kod ?? null,
+        evrakNo: [x.h.sth_evrakno_seri, x.h.sth_evrakno_sira].filter(v => v !== '' && v != null).join('-') || null,
+        fatura: faturaAnahtari(x.h),
+      });
+    }
+  }
+  const sapma = (k: number) => Math.max(k, 1 / k);
+  return { satirlar: satirlar.sort((a, b) => sapma(b.kat) - sapma(a.kat)), degerlendirilen };
+}
+

@@ -38,6 +38,9 @@ export interface MikroFaturaDetayVerisi {
   oranKarma?: boolean;
   yon: 'gelen' | 'giden';
   uuid?: string;
+  /** Fatura BAŞLIĞI Cetpa'da yok (stok hareketinin evrak anahtarından açıldı — `utils/faturaEsle.hareketFaturasi`):
+   *  toplam/KDV/matrah bilinmiyor, kalemler seri+sıra+yön ile doğrudan Mikro'dan gelir. */
+  baslikYok?: boolean;
 }
 
 interface Props {
@@ -147,7 +150,9 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
     setHata(await eBelgeIndir({
       tur,
       uuid: fatura.uuid,
-      faturaGuid: fatura.id,
+      // Başlıksız kayıt (hareketFaturasi) `id`si Mikro GUID'i DEĞİL ('hareket|gelen||410') — sunucuya gönderilmez
+      // (inceleme 2026-09-25: her denemede 400). Düğme zaten kapalı; bu ikinci çit.
+      faturaGuid: fatura.baslikYok ? undefined : fatura.id,
       belgeTuru: 'e-fatura',
       yon: fatura.yon,
       dosyaAdi: fatura.faturaNo || fatura.id,
@@ -204,6 +209,13 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
             </div>
           )}
           {satir(oc(tr).toplam, bilinenSayi(fatura.tutar) ? tl(fatura.tutar) : '—')}
+          {fatura.baslikYok && (
+            <p className="text-[11px] text-amber-600 mt-1">
+              {tr
+                ? 'Fatura başlığı Cetpa\'da yok ("Faturaları Çek" bu tarihi kapsamamış olabilir) — toplam/KDV bilinmiyor; kalemler doğrudan Mikro\'dan.'
+                : 'Invoice header not in Cetpa (the invoice pull may not cover this date) — totals/VAT unknown; lines are read directly from Mikro.'}
+            </p>
+          )}
 
           {/* ── Fatura kalemleri ── */}
           <div className="mt-4">
@@ -318,7 +330,7 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
             </div>
           )}
 
-          {!fatura.uuid && (
+          {!fatura.uuid && !fatura.baslikYok && (
             <div className="mt-3 text-xs text-amber-800 bg-amber-50 rounded-xl px-3 py-2">
               {tr
                 ? 'Bu faturanın GİB belge kimliği (UUID) yok — e-belge olarak gönderilmemiş olabilir. XML çekilemez; PDF Mikro belge numarasıyla denenir.'
@@ -331,7 +343,8 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
           <button onClick={onClose} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr).kapat}</button>
           <button
             onClick={() => void indir('pdf')}
-            disabled={!!indiriliyor}
+            disabled={!!indiriliyor || (fatura.baslikYok === true && !fatura.uuid)}
+            title={fatura.baslikYok && !fatura.uuid ? (tr ? "Fatura başlığı Cetpa'da yok — belge kimliği bilinmiyor, PDF çekilemez (önce \"Faturaları Çek\")" : 'Invoice header not in Cetpa — document id unknown, PDF unavailable') : undefined}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             {indiriliyor === 'pdf' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}

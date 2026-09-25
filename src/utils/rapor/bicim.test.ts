@@ -14,12 +14,13 @@ import { yuzdeYaz } from './bicim';
 import { kdvOranYaz } from '../muhasebe/mizan';
 
 describe('yuzdeYaz — parite (mevcut rapor yüzeyleriyle birebir)', () => {
-  it("tam sayı oran → '42%' (işaret SONDA; RaporlarPage :177/:656/:700 `${Math.round(...)}%` ile parite)", () => {
+  it("tam sayı oran → TR '%42' (işaret ÖNDE, kullanıcı kararı 2026-09-25: \"%42 şeklinde olsun\"), EN '42%'", () => {
     // Şirin İnşaat'ın siparişlerinin %42'si "Teslim Edildi" durumunda.
-    expect(yuzdeYaz(42)).toBe('42%');
-    // Mutasyon kapısı: `%${...}` ön-ek biçimine dönerse burada kırılır.
-    expect(yuzdeYaz(42).endsWith('%')).toBe(true);
-    expect(yuzdeYaz(42).startsWith('%')).toBe(false);
+    expect(yuzdeYaz(42)).toBe('%42');
+    expect(yuzdeYaz(42, 0, 'en')).toBe('42%');
+    // Mutasyon kapısı: iki dilde de sonek biçimine (eski `${…}%`) dönerse burada kırılır.
+    expect(yuzdeYaz(42).startsWith('%')).toBe(true);
+    expect(yuzdeYaz(42, 0, 'en').endsWith('%')).toBe(true);
   });
 
   it("EN tek ondalık → '12.3%' (RaporlarPage :364 `v.toFixed(1) + '%'` ile parite)", () => {
@@ -27,16 +28,16 @@ describe('yuzdeYaz — parite (mevcut rapor yüzeyleriyle birebir)', () => {
   });
 
   it('ondalık istenmezse yuvarlar, ondalık basmaz', () => {
-    expect(yuzdeYaz(12.34)).toBe('12%');
-    expect(yuzdeYaz(12.6)).toBe('13%');
+    expect(yuzdeYaz(12.34)).toBe('%12');
+    expect(yuzdeYaz(12.6)).toBe('%13');
   });
 });
 
 describe('yuzdeYaz — yerel ondalık ayracı', () => {
   it("TR ondalık VİRGÜL: '12,3%' (mutasyon: toFixed → '12.3%')", () => {
-    expect(yuzdeYaz(12.34, 1)).toBe('12,3%');
+    expect(yuzdeYaz(12.34, 1)).toBe('%12,3');
     // Varsayılan dil tr: açıkça geçilmese de virgül.
-    expect(yuzdeYaz(12.34, 1, 'tr')).toBe('12,3%');
+    expect(yuzdeYaz(12.34, 1, 'tr')).toBe('%12,3');
   });
 
   it("EN ondalık NOKTA: '12.3%' (mutasyon: dil yok sayılıp 'tr-TR' sabitlenirse kırılır)", () => {
@@ -81,20 +82,20 @@ describe('yuzdeYaz — bilinmeyen 0 SAYILMAZ', () => {
 describe('yuzdeYaz — meşru sıfır bilinmeyen DEĞİLDİR', () => {
   it("0 → '0%' (mutasyon: `if (!oran) return '—'` burada kırılır)", () => {
     // Şirin İnşaat'ın HİÇ iptal siparişi yok: gerçek %0.
-    expect(yuzdeYaz(0)).toBe('0%');
-    expect(yuzdeYaz(0, 1)).toBe('0,0%');
+    expect(yuzdeYaz(0)).toBe('%0');
+    expect(yuzdeYaz(0, 1)).toBe('%0,0');
     expect(yuzdeYaz(0, 1, 'en')).toBe('0.0%');
   });
 });
 
 describe('yuzdeYaz — işaret', () => {
   it("negatif oran işaretini korur: '-5,5%'", () => {
-    expect(yuzdeYaz(-5.5, 1)).toBe('-5,5%');
+    expect(yuzdeYaz(-5.5, 1)).toBe('-%5,5');
     expect(yuzdeYaz(-5.5, 1, 'en')).toBe('-5.5%');
   });
 
   it("pozitife '+' öneki EKLEMEZ (değişim rozetleri kendi önekini koyar)", () => {
-    expect(yuzdeYaz(5)).toBe('5%');
+    expect(yuzdeYaz(5)).toBe('%5');
     expect(yuzdeYaz(5).startsWith('+')).toBe(false);
   });
 });
@@ -102,9 +103,9 @@ describe('yuzdeYaz — işaret', () => {
 describe('yuzdeYaz — binlik ayracı YOK', () => {
   it("'1250%' — gruplanmaz (mutasyon: useGrouping varsayılanı → TR'de '1.250%')", () => {
     // Geçen aya göre 12,5 kat artış oranı olarak gelebilir.
-    expect(yuzdeYaz(1250)).toBe('1250%');
+    expect(yuzdeYaz(1250)).toBe('%1250');
     expect(yuzdeYaz(1250, 0, 'en')).toBe('1250%');
-    expect(yuzdeYaz(1250.5, 1)).toBe('1250,5%');
+    expect(yuzdeYaz(1250.5, 1)).toBe('%1250,5');
   });
 });
 
@@ -115,28 +116,29 @@ describe('yuzdeYaz — yuvarlama sınırları', () => {
 
   it("0.04 → '0.0%' — sıfıra yuvarlanan gerçek bir değer '—' OLMAZ", () => {
     expect(yuzdeYaz(0.04, 1, 'en')).toBe('0.0%');
-    expect(yuzdeYaz(0.04, 1)).toBe('0,0%');
+    expect(yuzdeYaz(0.04, 1)).toBe('%0,0');
   });
 
   it("ondalık sayısı SABİTLENİR: minimumFractionDigits eksikse '0.0%' yerine '0%' basardı", () => {
     expect(yuzdeYaz(100, 1, 'en')).toBe('100.0%');
-    expect(yuzdeYaz(100, 2)).toBe('100,00%');
+    expect(yuzdeYaz(100, 2)).toBe('%100,00');
   });
 });
 
 describe('yuzdeYaz — oranı HESAPLAMAZ', () => {
   it('girdi hazır orandır (0-100 aralığı zorunlu değil, kırpılmaz)', () => {
     // lojistikKpi.oranYuzde ham, finansKpi.yuzdeOrani yuvarlanmış gelir; modül ikisini de aynen basar.
-    expect(yuzdeYaz(137.5, 1)).toBe('137,5%');
-    expect(yuzdeYaz(-12)).toBe('-12%');
+    expect(yuzdeYaz(137.5, 1)).toBe('%137,5');
+    expect(yuzdeYaz(-12)).toBe('-%12');
   });
 });
 
-describe('İKİ yüzde biçimi bilinçli olarak YAŞAR', () => {
-  it("Muhasebe KDV oranı ÖNEK ('%20'), rapor oranı SONEK ('20%') — biri öbürüne indirgenmez", () => {
+describe('İKİ yüzde biçimi — TR\'de birleşti (2026-09-25)', () => {
+  it("TR'de iki biçim artık AYNI yazılır ('%20') — rapor oranı da önek (2026-09-25); EN rapor oranı sonek", () => {
     expect(kdvOranYaz(20)).toBe('%20');
-    expect(yuzdeYaz(20)).toBe('20%');
-    expect(yuzdeYaz(20)).not.toBe(kdvOranYaz(20));
+    expect(yuzdeYaz(20)).toBe('%20');
+    expect(yuzdeYaz(20)).toBe(kdvOranYaz(20));
+    expect(yuzdeYaz(20, 0, 'en')).toBe('20%');
   });
 
   it("iki biçim de bilinmeyende aynı şeyi der: '—'", () => {

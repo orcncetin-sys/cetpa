@@ -8,7 +8,8 @@ import ProductForm from './ProductForm';
 
 import { InventoryItem, Warehouse } from '../types';
 import { useMikroFaturalar } from '../hooks/useMikroFaturalar';
-import { faturaEsle } from '../utils/faturaEsle';
+import { hareketFaturasi } from '../utils/faturaEsle';
+import { faturaAnahtari } from '../lib/stokFiyat';
 import { paraYaz } from '../utils/currency';
 import { zamanMs, gunAnahtari, tarihYaz } from '../utils/zaman';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
@@ -247,12 +248,15 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
         {/* Hareket Detayı — satıra tıklanınca (2026-08-28) */}
         {seciliHareket && (() => {
           const m = seciliHareket;
-          // Eşleşme MUHAFAZAKÂR (utils/faturaEsle.ts): cari + gün ikisi de
-          // tutmalı ve TEK fatura çıkmalı; yoksa düğme hiç görünmez.
-          const f = faturaEsle(mikroFaturalar, {
-            cariKod: m.cariKod ?? null,
+          // Başlık TEKİL eşleşirse başlıklı; yoksa hareketin FATURA ANAHTARINDAN başlıksız (kalemler Mikro'dan) —
+          // utils/faturaEsle.hareketFaturasi, Fiyat Karşılaştırma ile AYNI kural (2026-09-25; eskiden başlık
+          // bulunamayınca düğme hiç çıkmıyordu). Mikro satırı normalize edilirken ham `sth_*` alanları korunur.
+          const anahtar = faturaAnahtari(m as unknown as Readonly<Record<string, unknown>>);
+          const f = hareketFaturasi(mikroFaturalar, {
+            evrakSira: anahtar?.sira ?? null,
+            cariKod: typeof m.cariKod === 'string' ? m.cariKod : null,
             tarih: gunAnahtari(m.timestamp),
-          });
+          }, anahtar);
           return (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setSeciliHareket(null)}>
               <div className="bg-white rounded-2xl w-full max-w-md shadow-xl p-5 space-y-3 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -275,15 +279,14 @@ export default function ProductDetail({ product, onClose, movements = [], wareho
                 </div>
                 {f ? (
                   <button
-                    onClick={() => { setSeciliFatura({ ...f, musteri: f.cariKod }); setSeciliHareket(null); }}
+                    onClick={() => { setSeciliFatura(f); setSeciliHareket(null); }}
                     className="apple-button-primary w-full text-sm"
                   >
                     Faturayı Aç ({f.faturaNo})
                   </button>
                 ) : m.cariKod ? (
                   <p className="text-[10px] text-gray-400 text-center">
-                    Bu hareket için tek bir fatura kaydı eşleştirilemedi
-                    (aynı gün birden çok fatura olabilir ya da Faturaları Çek çalıştırılmamış olabilir).
+                    Bu hareket bir faturaya bağlı değil (irsaliye/sayım) ya da tek bir fatura kaydı eşleştirilemedi.
                   </p>
                 ) : null}
               </div>

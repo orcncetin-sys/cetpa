@@ -1,4 +1,6 @@
 import type { MikroFatura } from '../hooks/useMikroFaturalar';
+import type { MikroFaturaDetayVerisi } from '../components/MikroFaturaDetay';
+import type { FaturaAnahtari } from '../lib/stokFiyat';
 
 /**
  * faturaEsle — bir stok hareketini/evrak numarasını mikroFaturalar'daki
@@ -52,4 +54,38 @@ export function faturaEsle(faturalar: readonly MikroFatura[], olcut: EslesmeOlcu
     return true;
   });
   return adaylar.length === 1 ? adaylar[0] : null;
+}
+
+/**
+ * Stok hareketindeki evrak numarasına basınca AÇILACAK fatura (2026-09-25 kullanıcı bildirimi: Fiyat Karşılaştırma →
+ * İşlem Detayı'nda "evraka basınca evrak detayları gelmiyor").
+ *
+ * Eskiden düğme yalnız başlık listesinde (`mikroFaturalar`) TEKİL eşleşme bulunursa çıkıyordu; bulunamazsa numara düz
+ * metin kalıyordu — gece importu 90 günle sınırlı olduğu için eski faturaların HİÇBİRİ açılmıyordu. Oysa fatura
+ * kalemleri başlığa ihtiyaç duymaz: `/api/mikro/fatura/kalemler` seri + sıra + yön ile doğrudan Mikro'dan okur.
+ *
+ * Sıra: (1) başlık TEKİL eşleşir ve yönü hareketin faturasıyla çelişmezse → başlıklı (tutar/KDV dolu); (2) yoksa
+ * hareketin FATURA ANAHTARINDAN başlıksız kayıt (`baslikYok`, tutar/KDV/matrah NaN → '—', kalemler Mikro'dan);
+ * (3) hareket fatura değilse (irsaliye, sayım — anahtar `null`) ve başlık da yoksa `null` → düğme yok.
+ * Yanlış faturayı açma riski yok: anahtar Mikro'nun kendi evrak kimliğidir, tahmin değil.
+ */
+export function hareketFaturasi(
+  faturalar: readonly MikroFatura[],
+  olcut: EslesmeOlcutu,
+  anahtar: FaturaAnahtari | null,
+): MikroFaturaDetayVerisi | null {
+  const baslik = faturaEsle(faturalar, olcut);
+  if (baslik && (anahtar === null || baslik.yon === anahtar.yon)) return { ...baslik, musteri: baslik.cariKod };
+  if (anahtar === null) return null;
+  const cari = olcut.cariKod?.trim() || '';
+  return {
+    id: `hareket|${anahtar.yon}|${anahtar.seri}|${anahtar.sira}`,
+    faturaNo: anahtar.seri ? `${anahtar.seri}-${anahtar.sira}` : anahtar.sira,
+    musteri: cari || '—',
+    cariKod: cari,
+    tarih: olcut.tarih?.slice(0, 10) ?? '',
+    tutar: NaN, kdv: NaN, matrah: NaN, oran: null,
+    yon: anahtar.yon,
+    baslikYok: true,
+  };
 }

@@ -8,7 +8,7 @@
  * miktarla ortalamaya sokup fiyatı aşağı çekiyordu (CLAUDE.md: sayısal alanda `|| 0` yasak).
  */
 import { describe, it, expect } from 'vitest';
-import { satirNet, stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, kalemleriCoz, birimFiyatOndaligi } from './stokFiyat';
+import { satirNet, stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, kalemleriCoz, birimFiyatOndaligi, faturaAnahtari, birimSapmalari, BIRIM_SAPMA_KATI } from './stokFiyat';
 
 const alis = (p: Record<string, unknown>) => ({ sth_stok_kod: 'CIM-50', sth_tip: 0, sth_miktar: 10, sth_tutar: 1000, ...p });
 const satis = (p: Record<string, unknown>) => ({ sth_stok_kod: 'CIM-50', sth_tip: 1, sth_miktar: 4, sth_tutar: 600, ...p });
@@ -159,7 +159,26 @@ describe('stokFiyatDetay — SKU satırları: brüt, iskonto, net, net birim fiy
     ], 'CIM-50');
     expect(d).toHaveLength(2);
     expect(d[0]).toMatchObject({ tarih: '2026-09-01', yon: 'alis', miktar: 10, brutTutar: null, iskonto: null, tutar: null, birimFiyat: null, kaynak: null });
-    expect(d[1]).toEqual({ tarih: '2026-08-01', yon: 'alis', miktar: 10, brutTutar: 1000, iskonto: 100, tutar: 900, birimFiyat: 90, kaynak: 'dogrulanamadi', cariKod: '320.01', evrakNo: 'A-377' });
+    // `sth_evraktip` yok → faturaya bağlanamaz (fatura: null); evrak numarası yine görünür.
+    expect(d[1]).toEqual({ tarih: '2026-08-01', yon: 'alis', miktar: 10, brutTutar: 1000, iskonto: 100, tutar: 900, birimFiyat: 90, kaynak: 'dogrulanamadi', cariKod: '320.01', evrakNo: 'A-377', fatura: null });
+  });
+});
+
+describe('faturaAnahtari — "evraka bas → faturayı aç" anahtarı (2026-09-25 kullanıcı bildirimi)', () => {
+  it('evrak tipi 3 = alış faturası (gelen), 4 = satış faturası (giden); seri boş olabilir', () => {
+    expect(faturaAnahtari(alis({ sth_evraktip: 3, sth_evrakno_seri: 'A', sth_evrakno_sira: 128 }))).toEqual({ seri: 'A', sira: '128', yon: 'gelen' });
+    expect(faturaAnahtari(satis({ sth_evraktip: 4, sth_evrakno_seri: '', sth_evrakno_sira: '116' }))).toEqual({ seri: '', sira: '116', yon: 'giden' });
+  });
+  it('fatura olmayan evrak (irsaliye 1, sayım…) ya da sırasız satır → null (yanlış faturayı açmaz)', () => {
+    expect(faturaAnahtari(alis({ sth_evraktip: 1, sth_evrakno_sira: 5 }))).toBeNull();
+    expect(faturaAnahtari(alis({ sth_evraktip: 3, sth_evrakno_sira: '' }))).toBeNull();
+    expect(faturaAnahtari(alis({ sth_evraktip: 3 }))).toBeNull();
+    expect(faturaAnahtari(alis({ sth_evrakno_sira: 5 }))).toBeNull();          // tip yok
+  });
+  it('stokFiyatDetay satırı anahtarı taşır', () => {
+    const d = stokFiyatDetay([satis({ sth_tarih: '2025-12-30', sth_evraktip: 4, sth_evrakno_seri: '', sth_evrakno_sira: 116 })], 'CIM-50');
+    expect(d[0].fatura).toEqual({ seri: '', sira: '116', yon: 'giden' });
+    expect(d[0].evrakNo).toBe('116');
   });
 });
 
@@ -264,5 +283,75 @@ describe('birimFiyatOndaligi — net birim fiyat kaç ondalıkla basılır (fatu
     expect(birimFiyatOndaligi(null, 20, 183.34)).toBe(2);
     expect(birimFiyatOndaligi(9.167, null, 183.34)).toBe(2);
     expect(birimFiyatOndaligi(NaN, 20, NaN)).toBe(2);
+  });
+});
+
+describe('birimSapmalari — koli/adet karışıklığı (kullanıcı vakası DAYSON-DYS.029, 2026-09-25)', () => {
+  const D = { sth_stok_kod: 'DAYSON-DYS.029' };
+  const al = (p: Record<string, unknown>) => ({ ...D, sth_tip: 0, sth_evraktip: 3, sth_evrakno_seri: '', ...p });
+  const sat = (p: Record<string, unknown>) => ({ ...D, sth_tip: 1, sth_evraktip: 4, sth_evrakno_seri: '', ...p });
+  // Canlı ekrandaki satırlar (brüt = net, iskonto yok): adet fiyatı ~₺129–200, iki alış koli fiyatıyla.
+  const hareketler = [
+    al({ sth_tarih: '2026-08-19', sth_miktar: 10, sth_tutar: 31250, sth_evrakno_sira: 410 }),
+    sat({ sth_tarih: '2026-08-13', sth_miktar: 100, sth_tutar: 15833.33, sth_evrakno_sira: 329 }),
+    al({ sth_tarih: '2026-08-11', sth_miktar: 8, sth_tutar: 25833.33, sth_evrakno_sira: 394 }),
+    sat({ sth_tarih: '2026-03-07', sth_miktar: 25, sth_tutar: 3854.17, sth_evrakno_sira: 192 }),
+    sat({ sth_tarih: '2026-03-06', sth_miktar: 50, sth_tutar: 7291.67, sth_evrakno_sira: 188 }),
+    al({ sth_tarih: '2026-02-21', sth_miktar: 500, sth_tutar: 64583.33, sth_evrakno_sira: 213 }),
+    sat({ sth_tarih: '2026-02-15', sth_miktar: 40, sth_tutar: 8000, sth_evrakno_sira: 165 }),
+    al({ sth_tarih: '2025-12-01', sth_miktar: 125, sth_tutar: 16145.83, sth_evrakno_sira: 135 }),
+  ];
+  const tek = (sku: string, fiyatlar: number[]) => fiyatlar.map((f, i) => al({ sth_stok_kod: sku, sth_miktar: 1, sth_tutar: f, sth_evrakno_sira: i + 1 }));
+
+  it('koli girilmiş iki alış faturası listelenir (kesin), olağan alış/satış (marj) listelenmez', () => {
+    const { satirlar, degerlendirilen } = birimSapmalari(hareketler);
+    expect(satirlar.map(x => x.evrakNo)).toEqual(['394', '410']);        // sapması büyükten küçüğe
+    expect(satirlar.every(x => !x.belirsiz)).toBe(true);
+    expect(satirlar[0].kat).toBeGreaterThan(20);
+    expect(satirlar[0].medyan).toBeCloseTo(150, 1);                       // ANA kümenin (6 adet satırı) medyanı
+    expect(satirlar[0].fatura).toEqual({ seri: '', sira: '394', yon: 'gelen' });
+    expect(degerlendirilen.has('DAYSON-DYS.029')).toBe(true);
+  });
+  it('tersi yönde (koli fiyatlı üründe tek adet fiyatı) de yakalar', () => {
+    const { satirlar } = birimSapmalari(tek('KOLI-1', [2400, 2400, 2400, 100]));
+    expect(satirlar).toHaveLength(1);
+    expect(satirlar[0].kat).toBeLessThanOrEqual(1 / BIRIM_SAPMA_KATI);
+    expect(satirlar[0].belirsiz).toBe(false);
+  });
+  it('DENGELİ gruplar (2 adet + 2 koli; 1 adet + 2 koli): yalnız ana gruptan sapanlar, "belirsiz" işaretli; ana grubun kendi satırları (kat ≈ 1) listelenmez', () => {
+    const ikiIki = birimSapmalari(tek('A', [129, 150, 3125, 3229])).satirlar;
+    expect(ikiIki).toHaveLength(2);
+    expect(ikiIki.every(x => x.belirsiz && x.kat > BIRIM_SAPMA_KATI)).toBe(true);
+    const birIki = birimSapmalari(tek('B', [129, 3125, 3229])).satirlar;
+    expect(birIki).toHaveLength(1);
+    expect(birIki[0].belirsiz).toBe(true);
+    expect(birIki[0].kat).toBeLessThan(1 / BIRIM_SAPMA_KATI);
+  });
+  it('ZİNCİR: aradaki bir fiyat adet ve koli gruplarını birleştirse de koli satırları kaçmaz (delta incelemesi)', () => {
+    const { satirlar } = birimSapmalari(tek('Z', [150, 150, 150, 150, 150, 150, 500, 1800, 1800]));
+    expect(satirlar.map(x => Math.round(x.birimFiyat))).toEqual([1800, 1800]);
+    expect(satirlar.every(x => !x.belirsiz)).toBe(true);
+    // DENGELİ gruplar + köprü (3 adet + 1 ara + 3 koli; 3 + 2 ara + 3): koli satırları yine listelenir, "belirsiz"
+    const denge = birimSapmalari(tek('Z2', [150, 150, 150, 500, 1800, 1800, 1800])).satirlar;
+    expect(denge.map(x => Math.round(x.birimFiyat))).toEqual([1800, 1800, 1800]);
+    expect(denge.every(x => x.belirsiz)).toBe(true);
+    expect(birimSapmalari(tek('Z3', [150, 150, 150, 500, 550, 1800, 1800, 1800])).satirlar).toHaveLength(3);
+  });
+  it('fiyat düzeyi belirlenemiyorsa (hiçbir iki fiyat birbirinin ±2 katı içinde değil) hüküm verilmez', () => {
+    expect(birimSapmalari(tek('K', [100, 300, 900])).satirlar).toEqual([]);   // uçlar 9× ama kademeli, yoğunluk yok
+    expect(birimSapmalari(tek('K', [100, 300, 900])).degerlendirilen.has('K')).toBe(false);   // hüküm yok → 0 değil, bilinmiyor
+    expect(birimSapmalari(tek('K2', [100, 100, 100, 100, 100])).satirlar).toEqual([]);
+  });
+  it('fiyatı bilinmeyen satır kümeye girmez, şüpheli de sayılmaz; 3\'ten az bilinen satırda ürün DEĞERLENDİRİLMEZ', () => {
+    expect(birimSapmalari([...hareketler, al({ sth_tarih: '2026-09-01', sth_miktar: 5, sth_tutar: null, sth_evrakno_sira: 500 })]).satirlar.map(x => x.evrakNo)).toEqual(['394', '410']);
+    const az = birimSapmalari(hareketler.slice(0, 2));
+    expect(az.satirlar).toEqual([]);
+    expect(az.degerlendirilen.has('DAYSON-DYS.029')).toBe(false);              // 0 şüpheli DEĞİL — bilinmiyor
+  });
+  it('iptal satır ne kümeye girer ne listelenir; eşik sınırı (tam 4 kat) şüphelidir', () => {
+    const iptal = al({ sth_tarih: '2026-09-02', sth_miktar: 1, sth_tutar: 99999, sth_iptal: 1, sth_evrakno_sira: 777 });
+    expect(birimSapmalari([...hareketler, iptal]).satirlar.some(x => x.evrakNo === '777')).toBe(false);
+    expect(birimSapmalari(tek('E', [100, 100, 100, 400])).satirlar).toHaveLength(1);
+    expect(birimSapmalari(tek('E', [100, 100, 100, 399])).satirlar).toHaveLength(0);
   });
 });

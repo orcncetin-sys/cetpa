@@ -70,3 +70,14 @@ describe('MikroFaturaDetay — Net Birim sütunu', () => {
     expect(screen.queryByText(/ana birim dışında/)).toBeNull();
   });
 });
+
+describe('MikroFaturaDetay — başlıksız açılan fatura (hareketFaturasi, 2026-09-25)', () => {
+  it('PDF düğmesi KAPALI (uydurma id sunucuya gitmez), "UUID yok" notu yerine başlık notu; kalemler yine çekilir', async () => {
+    authFetch.mockReturnValue(yanit([]));
+    render(<MikroFaturaDetay fatura={{ ...fatura, id: 'hareket|gelen||410', faturaNo: '410', yon: 'gelen', tutar: NaN, kdv: NaN, matrah: NaN, baslikYok: true }} currentLanguage="tr" onClose={() => {}} />);
+    expect((screen.getByRole('button', { name: /PDF/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Fatura başlığı Cetpa'da yok/)).toBeTruthy();
+    expect(screen.queryByText(/PDF Mikro belge numarasıyla denenir/)).toBeNull();
+    expect(authFetch).toHaveBeenCalledWith('/api/mikro/fatura/kalemler', expect.objectContaining({ body: JSON.stringify({ seri: '', sira: '410', yon: 'gelen' }) }));
+  });
+});
