@@ -58,7 +58,7 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
     }
 
     // Clean up domain if it has https://
-    storeDomain = storeDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    storeDomain = storeDomain.replace(/^https?:\/{2}/, '').replace(/\/$/, '');
 
     // If the user accidentally pasted an email or service account into the domain secret
     if (storeDomain.includes('@')) {

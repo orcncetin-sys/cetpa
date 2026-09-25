@@ -52,6 +52,10 @@ const kolonlarDonsun = (cols: string[]) => vi.mocked(mikroKolonlar).mockResolved
 /** Yazılan dokümanın alanları (docId ile). */
 const yazilanDoc = (coll: string, id: string) =>
   d.koleksiyon(coll).find(y => y.ref.id === id)?.data ?? {};
+/** 2026-09-24 (mikro-import-arkaplan): SQL fabrika uçları ARKA PLAN işi — `note` `jobs/<job>` dokümanında; iş beklenir. */
+const sqlImportu = async (yol: string, job: string) => { await d.cagir('POST', yol); return (await d.isBitisi(job)) ?? {}; };
+const isNotu = (is: Record<string, unknown>) => String(is.note ?? '');
+/** Senkron uçlar (pull/personel, pull/uretim-receteleri) `note`u hâlâ yanıtta döner. */
 const notu = (res: { govde: unknown }) => String((res.govde as { note?: string })?.note ?? '');
 
 // ── /api/mikro/import/demirbas → sabitKiymetler ──────────────────────────────
@@ -68,7 +72,7 @@ describe('POST /api/mikro/import/demirbas', () => {
       { ...satir(), dem_Guid: 'g2', dem_kod: 'DM-2', dem_isim: 'Vinç', dem_alis_tarihi: '2023-01-02', dem_alis_bedeli: 250000, dem_faydali_omur: 10, dem_grup_kodu: 'Makine' },
       { ...satir(), dem_Guid: 'g3', dem_kod: 'DM-3', dem_isim: 'Hurda Kalıp', dem_alis_tarihi: '2022-05-05', dem_alis_bedeli: 0, dem_faydali_omur: 5, dem_grup_kodu: 'Makine' },
     ]);
-    const res = await d.cagir('POST', '/api/mikro/import/demirbas');
+    const is = await sqlImportu('/api/mikro/import/demirbas', 'mikroImport-demirbas');
 
     const dm1 = yazilanDoc('sabitKiymetler', 'DM-1');
     expect('alisBedeli' in dm1, 'bilinmeyen bedel 0 olarak YAZILMAMALI').toBe(false);
@@ -78,9 +82,9 @@ describe('POST /api/mikro/import/demirbas', () => {
     expect(yazilanDoc('sabitKiymetler', 'DM-2')).toMatchObject({ alisBedeli: 250000, faydaliOmur: 10 });
     expect(yazilanDoc('sabitKiymetler', 'DM-3').alisBedeli, 'Mikro gerçekten 0 yazdıysa 0 yazılır').toBe(0);
 
-    expect(notu(res)).toContain('1 satırın alisBedeli alanı bilinmiyor');
-    expect(notu(res)).toContain('1 satırın faydaliOmur alanı bilinmiyor');
-    expect(notu(res)).not.toMatch(/^UYARI/);
+    expect(isNotu(is)).toContain('1 satırın alisBedeli alanı bilinmiyor');
+    expect(isNotu(is)).toContain('1 satırın faydaliOmur alanı bilinmiyor');
+    expect(isNotu(is)).not.toMatch(/^UYARI/);
   });
 
   it('var olan kayıtta kullanıcının kategori/durum/birikmişAmortisman değeri EZİLMEZ; yeni kayıtta UI sözlük varsayılanları yazılır', async () => {
@@ -91,7 +95,7 @@ describe('POST /api/mikro/import/demirbas', () => {
       { ...satir(), dem_Guid: 'g1', dem_kod: 'DM-1', dem_isim: 'Kamyon', dem_grup_kodu: 'MK-01', dem_alis_bedeli: 100, dem_faydali_omur: 5, dem_alis_tarihi: '2024-01-01' },
       { ...satir(), dem_Guid: 'g2', dem_kod: 'DM-9', dem_isim: 'Yeni Kepçe', dem_grup_kodu: 'MK-01', dem_alis_bedeli: 200, dem_faydali_omur: 8, dem_alis_tarihi: '2024-02-02' },
     ]);
-    await d.cagir('POST', '/api/mikro/import/demirbas');
+    await sqlImportu('/api/mikro/import/demirbas', 'mikroImport-demirbas');
 
     const eski = yazilanDoc('sabitKiymetler', 'DM-1');
     expect(eski).toMatchObject({ kategori: 'Taşıt', durum: 'Pasif', amortYontemi: 'Azalan Bakiyeler', departman: 'Şantiye', mikroGrupKodu: 'MK-01' });
@@ -107,8 +111,8 @@ describe('POST /api/mikro/import/demirbas', () => {
       ...satir(), dem_Guid: `g${i}`, dem_kod: `DM-${i}`, dem_isim: `Demirbaş ${i}`,
       dem_alis_tarihi: '2024-03-15', dem_alis_bedeli: '', dem_faydali_omur: 4, dem_grup_kodu: 'Makine',
     })));
-    const res = await d.cagir('POST', '/api/mikro/import/demirbas');
-    expect(notu(res)).toMatch(/^UYARI: alisBedeli alanı hiçbir satırda okunamadı/);
+    const is = await sqlImportu('/api/mikro/import/demirbas', 'mikroImport-demirbas');
+    expect(isNotu(is)).toMatch(/^UYARI: alisBedeli alanı hiçbir satırda okunamadı/);
     expect(uyari).toHaveBeenCalledWith(expect.stringContaining('[import/demirbas] UYARI: alisBedeli'));
     uyari.mockRestore();
   });
@@ -123,7 +127,7 @@ describe('POST /api/mikro/import/maliyet-merkezi', () => {
       { som_Guid: 'g1', som_kodu: 'MM-1', som_adi: 'Şirin İnşaat Şantiyesi' },
       { som_Guid: 'g2', som_kodu: 'MM-2', som_adi: 'Merkez Depo' },
     ]);
-    await d.cagir('POST', '/api/mikro/import/maliyet-merkezi');
+    await sqlImportu('/api/mikro/import/maliyet-merkezi', 'mikroImport-maliyet-merkezi');
 
     const eski = yazilanDoc('maliyetMerkezleri', 'MM-1');
     expect('aktif' in eski, 'var olan merkezin aktif alanı her senkronda true yapılmamalı').toBe(false);
@@ -133,9 +137,9 @@ describe('POST /api/mikro/import/maliyet-merkezi', () => {
 
   it('ad boşsa Mikro koduna düşer ve sayaç note\'a girer', async () => {
     sqlDonsun([{ som_Guid: 'g1', som_kodu: 'MM-7', som_adi: '' }]);
-    const res = await d.cagir('POST', '/api/mikro/import/maliyet-merkezi');
+    const is = await sqlImportu('/api/mikro/import/maliyet-merkezi', 'mikroImport-maliyet-merkezi');
     expect(yazilanDoc('maliyetMerkezleri', 'MM-7')).toMatchObject({ kod: 'MM-7', ad: 'MM-7' });
-    expect(notu(res)).toContain('1 satırın ad alanı bilinmiyor');
+    expect(isNotu(is)).toContain('1 satırın ad alanı bilinmiyor');
   });
 });
 

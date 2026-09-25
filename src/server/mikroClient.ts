@@ -411,9 +411,40 @@ export function sqlTanimlayici(v: unknown): string | null {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(s) ? s : null;
 }
 
-/** SqlVeriOkuV2 çalıştır, satırları döndür. Hata varsa `hata` dolu gelir. */
-export async function mikroSql(sorgu: string): Promise<{ rows: Record<string, unknown>[]; hata: string | null }> {
-  const { ok, data } = await mikroPost('SqlVeriOkuV2', { SQLSorgu: sorgu });
+/** mikroPost/mikroSql seçeneği. `zamanAsimiMs`: bu çağrıya ÖZEL `AbortSignal.timeout` (ms). */
+export interface MikroPostSecenek { zamanAsimiMs?: number }
+
+// ── Liste/sayfa çağrısı zaman aşımı (mikro-import-arkaplan, 2026-09-24; K-A) ──────────────
+// server.ts global `fetch` yaması signal'sız her çağrıya 30 sn koyar. Import sayfaları (500 satır
+// SqlVeriOkuV2 / 100 satır StokListesiV2) bunu aşabiliyor; iş artık arka planda koştuğu için uzun
+// bir zaman aşımının tek maliyeti asılı bir sayfanın işi geciktirmesi. BİRİM ms; env
+// `MIKRO_LISTE_ZAMAN_ASIMI_MS=120000`. Aralık 30-600 sn (alt sınır = bugünkü global). DEĞER
+// ÖLÇÜLMEDİ: 120 sn geçici — ilk canlı koşuda `jobs/<isAdi>.sonSayfaMs` okunup env'e yazılmalı.
+// GECE/AYLIK CRON DA bu değeri kullanır (mikroSqlImportCalistir ortak gövde; devre kesicisi yok):
+// asılı Mikro'da cron süresi ≈ 12 tanım × bu değer — env'i büyütmeden önce bunu hesaba kat.
+//
+// ÇAĞRI ANINDA OKUNUR (delta hakem 2026-09-25, bulgu 7): eskiden modül YÜKLENİRKEN okunan bir sabitti.
+// server.ts `dotenv.config()`'i tüm statik import'lar (bu modül dâhil) değerlendirildikten SONRA çağırıyor
+// (ESM); prod'da NSSM yalnız NODE_ENV/PORT geçiriyor, gerisi C:/cetpa/.env'den → .env'e yazılan değer
+// HİÇ okunmuyor, 120000 kalıyordu ("yazıldı ama bağlanmadı"). Aynı sınıf bu dosyadaki diğer modül düzeyi
+// okumaları da (MIKRO_JUMP_SURUM, MIKRO_API_URL/MIKRO_LOCAL) etkiliyor olabilir — ayrı iş (açık soru):
+// onları düzeltmek canlıda davranışı DEĞİŞTİRİR (bugün görmezden gelinen .env değerleri devreye girer).
+/** Uyarının tekrarını önler: geçersiz değer her sayfa çağrısında log basmasın (değer başına bir kez). */
+let listeZamanAsimiUyarilanDeger: string | null = null;
+export function listeZamanAsimiMs(): number {
+  const env = process.env.MIKRO_LISTE_ZAMAN_ASIMI_MS;
+  const ms = sqlTamsayi(env, 120_000, 30_000, 600_000);
+  if (env != null && ms !== Number(env) && listeZamanAsimiUyarilanDeger !== env) {
+    listeZamanAsimiUyarilanDeger = env;
+    console.warn(`MIKRO_LISTE_ZAMAN_ASIMI_MS='${env}' 30000-600000 ms aralığı dışında (sn değil MS) → ${ms} ms kullanılıyor`);
+  }
+  return ms;
+}
+
+/** SqlVeriOkuV2 çalıştır, satırları döndür. Hata varsa `hata` dolu gelir.
+ *  `secenek.zamanAsimiMs` mikroPost'a geçer (import sayfası için `listeZamanAsimiMs()`). */
+export async function mikroSql(sorgu: string, secenek?: MikroPostSecenek): Promise<{ rows: Record<string, unknown>[]; hata: string | null }> {
+  const { ok, data } = await mikroPost('SqlVeriOkuV2', { SQLSorgu: sorgu }, false, secenek);
   const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
   if (!ok || !r0 || r0.IsError) return { rows: [], hata: mikroHata(data, 'SqlVeriOkuV2 yanıt vermedi.') };
   return { rows: mikroSatirlar(data), hata: null };
@@ -517,7 +548,8 @@ export function detectMikroGatewayBlock(data: unknown, status?: number): string 
 export async function mikroPost(
   endpoint: string,
   extraBody: Record<string, unknown>,
-  inMikro = false // true → ekstra alanlar Mikro objesi İÇİNE konur (V17 evrak kalıbı)
+  inMikro = false, // true → ekstra alanlar Mikro objesi İÇİNE konur (V17 evrak kalıbı)
+  secenek?: MikroPostSecenek, // zamanAsimiMs → bu çağrıya özel signal; yoksa server.ts global 30 sn AYNEN
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
   // V17'de OLMAYAN metotları ağa hiç çıkarmadan, anlaşılır hatayla kes.
   // Çağıran kodun "yanıt geldi ama alan yok" durumuna düşüp `?? 0` ile sıfır
@@ -551,6 +583,11 @@ export async function mikroPost(
         'Accept':         'application/json',
       },
       body: JSON.stringify(body),
+      // Açık `signal` server.ts:76-79 global 30 sn yamasını BU çağrı için devre dışı bırakır
+      // (yama yalnız signal'sız init'e dokunur). Zaman aşımı: DOMException name='TimeoutError'
+      // → adaptifSayfalama.zamanAsimiMi ayırt eder. Geçersiz/sıfır değer → signal YOK (global kalır).
+      ...(secenek?.zamanAsimiMs !== undefined && Number.isFinite(secenek.zamanAsimiMs) && secenek.zamanAsimiMs > 0
+        ? { signal: AbortSignal.timeout(secenek.zamanAsimiMs) } : {}),
     });
     const text = await res.text();
     let data: unknown;

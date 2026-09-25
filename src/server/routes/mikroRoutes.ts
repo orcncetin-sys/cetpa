@@ -16,8 +16,10 @@
  *
  * ICERIDE KALAN (olculdu - yalniz bu rotalar kullaniyor): SQL import motoru
  * (mikroSqlImportCalistir, makeMikroSqlImport, makeMikroListImport,
- * SQL_IMPORT_TANIMLARI), MIKRO_PUSH_WHITELIST, stokMiktarJobRunning,
- * firstArrayIn.
+ * SQL_IMPORT_TANIMLARI), MIKRO_PUSH_WHITELIST, firstArrayIn. (stok-miktar'in
+ * eski surec-ici kilit bayragi 2026-09-24'te src/server/mikro/arkaPlanIsi.ts
+ * surec-geneli kilidine tasindi — 15 import ucu (stok, cari, stok-miktar, 12 SQL
+ * fabrika; 4 cagri yeri) o yardimciya baglanir.)
  *
  * SINIR SECIMI: blok, bolum basligindan son rotanin kapanisina kadar alindi.
  * `/api/integrations/health` (mikro DEGIL) bu araligin hemen ardinda kaldi;
@@ -35,7 +37,7 @@ import { findKey, kolonSec } from '../../lib/mikroKolon.js';
 import {
   MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, detectMikroGatewayBlock, v17MetoduKullanilabilir,
   getMikroCreds, mikroBugun, mikroData, mikroHata, mikroKolonlar, mikroPost,
-  mikroSatirlar, mikroSql, mikroStokMiktari,
+  mikroSatirlar, mikroSql, mikroStokMiktari, listeZamanAsimiMs,
   mikroVergiOranlari, sqlTarih, kolonBul, sqlTanimlayici,
 } from '../mikroClient.js';
 import {
@@ -53,6 +55,9 @@ import {
 } from '../mikro/govdeMuhasebe.js';
 import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
 import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
+import { mikroIsAdi } from '../../lib/mikroIsAdi.js';
+import { arkaPlanIsiBaslat, arkaPlanOnKontrol, arkaPlanYaziciAdi, bakimKilidiMesaji, type ArkaPlanBagimlilik, type BaslatSonucu } from '../mikro/arkaPlanIsi.js';
+import { araligiTopla, ALT_STOK, ALT_CARI, type SayfaSayaclari } from '../mikro/adaptifSayfalama.js';
 import { bilinenSayi } from '../../utils/para.js';
 // Varlık eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeVarlik.ts
 // (demirbaş / maliyet merkezi / personel / üretim reçetesi import gövdeleri)
@@ -600,44 +605,84 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   // These UPSERT — create new Firebase docs for items that don't exist yet,
   // update existing ones. Paginates automatically until all records are fetched.
 
-  /** POST /api/mikro/import/stok — import ALL Mikro stock → Firebase inventory */
+  // ── Arka plan import işi (mikro-import-arkaplan, 2026-09-24) ─────────────────
+  // Teşhis (CONFIRMED): iş HTTP isteğinin İÇİNDE bitiyordu, IIS/ARR ~120 sn'de kesip 502 dönüyordu.
+  // 15 import ucu (stok, cari, stok-miktar, 12 SQL fabrika; 4 çağrı yeri) `src/server/mikro/arkaPlanIsi.ts` TEK
+  // yardımcısına bağlanır: yanıt anında `{ success, started:true, job }` (job = ÖNEKSİZ isAdi, sözlük
+  // `src/lib/mikroIsAdi.ts`), ilerleme/sonuç `jobs/<job>` dokümanında (istemci `useArkaPlanIsi` dinler).
+  // Bağımlılık her istekte kurulur: `C.getAdminDb()`/`getPgPool()` server.ts'te SONRADAN atanan
+  // getter'lardır, rota kayıt anında değer yok.
+  const arkaPlanDep = (): ArkaPlanBagimlilik => ({
+    db: C.getAdminDb(), writeSyncLog: C.writeSyncLog, writeAuditLog: C.writeAuditLog, pgPool: C.getPgPool?.(),
+  });
+  /** BaslatSonucu → HTTP. 423 metni `bakimKilidiMesaji` (rotalardaki kopyayla birebir; SQL uçları kilide
+   *  bağlı olmadığı için o dal orada hiç düşmez); alreadyRunning'de `job` = ÇALIŞAN iş (K-C). */
+  const arkaPlanYaniti = (res: Response, sonuc: BaslatSonucu) => {
+    if ('kilit' in sonuc) return res.status(423).json({ success: false, error: bakimKilidiMesaji(sonuc.kilit) });
+    if (!sonuc.started) return res.json({ success: true, started: false, alreadyRunning: true, job: sonuc.job });
+    return res.json({ success: true, started: true, job: sonuc.job });
+  };
+  /** Sayfalama sayaçlarının özet eki: zaman aşımı ile bozuk kayıt AYRI söylenir (özet yalan söylemesin). */
+  const zamanAsimiEki = (sayac: SayfaSayaclari): string =>
+    (sayac.zamanAsimiSayfa ? ` / ${sayac.zamanAsimiSayfa} Mikro çağrısı zaman aşımı (daraltıldı)` : '') +
+    (sayac.zamanAsimiKayit ? ` / ${sayac.zamanAsimiKayit} kayıt zaman aşımıyla ATLANDI — import EKSİK, yeniden çalıştırın` : '');
+  /** KARAR: bozuk kayıt (Mikro tarafında kalıcı) bugün gibi success:true; zaman aşımı kaybı (geçici,
+   *  tekrar denenebilir) success:false — özet "tamamlandı" deyip eksik bırakmasın. */
+  const zamanAsimiHatasi = (sayac: SayfaSayaclari): string | null =>
+    sayac.zamanAsimiKayit ? `${sayac.zamanAsimiKayit} kayıt zaman aşımıyla atlandı` : null;
+
+  /** POST /api/mikro/import/stok — import ALL Mikro stock → Firebase inventory.
+   *  ARKA PLAN İŞİ (2026-09-24): yanıt anında `{ started:true, job:'mikroImport-stok' }`; ilerleme/sonuç
+   *  `jobs/mikroImport-stok` (created/updated/errors/bozukKayit/zamanAsimiSayfa/zamanAsimiKayit/fiyatliUrun/
+   *  note/offset/sonSayfaMs/durationMs/error). Eski `{created,…}` yanıtı istemci şartnamesine devredildi. */
   app.post('/api/mikro/import/stok', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
-    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
     // Data is scoped by companyId (= uid of the account owner) — the app's
     // inventory listener filters on it, so imports MUST set it or items are invisible.
     // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
+    // req YALNIZ burada okunur (yanıt ÖNCESİ); `calistir` gövdesi req/res bilmez.
     const companyId = await C.reqCompanyId(req);
-    // Snapshot'lar aşağıda zaten çekiliyor; çözücüler ONLARIN id'lerinden
-    // kurulur — aynı koleksiyonu istek başına iki kez tam gövdeyle taramamak
-    // için (2026-08-22 verimlilik bulgusu).
-    const invSnapOnce  = await C.tenantSnap('inventory', companyId);
-    const depoSnapOnce = await C.tenantSnap('warehouses', companyId);
-    const invId  = C.mikroIdCozucuIds(invSnapOnce.docs.map(d => d.id), companyId);
-    const depoId = C.mikroIdCozucuIds(depoSnapOnce.docs.map(d => d.id), companyId);
-    // ÇÖZÜCÜ, YAZILAN KOLEKSİYONUN KENDİSİNDEN kurulmalı: "eski biçimli id var mı"
-    // kararı o koleksiyonun id'lerine bakar. Aşağıda warehouseItems ve
-    // wmsLocations'a da yazılıyor; onlar için inventory/warehouses çözücüsünü
-    // kullanmak kararı YANLIŞ koleksiyona sordurur ve C11'in kapatmaya
-    // çalıştığı kiracılar-arası id çakışmasını geri getirir (code-review).
-    const whItemId = await C.mikroIdCozucu('warehouseItems', companyId);
+    const actor = C.reqActor(req);
+    const isAdi = mikroIsAdi('/api/mikro/import/stok');   // 'mikroImport-stok' — src/lib/mikroIsAdi.ts TEK sözlük
+    const sonuc = await arkaPlanIsiBaslat(arkaPlanDep(), {
+      isAdi, companyId, actor,
+      senkronKaydi: { operation: 'ImportStok', entityType: 'inventory' },
+      // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts). Kayıt artık İŞ ömrünce
+      // durur (eski `yaziciyiIstegeBagla` yanıt bitince siliyordu — anında yanıtla bu, işi ilk saniyede
+      // "yazıcı değil" sayardı).
+      yaziciAdi: arkaPlanYaziciAdi(isAdi, Date.now()),
+      calistir: async (ilerle) => {
+      // Snapshot'lar aşağıda zaten çekiliyor; çözücüler ONLARIN id'lerinden
+      // kurulur — aynı koleksiyonu istek başına iki kez tam gövdeyle taramamak
+      // için (2026-08-22 verimlilik bulgusu). (Yanıt <1 sn kalsın diye ~2.367 doküman artık
+      // `calistir` içinde, yanıttan SONRA okunur.)
+      const invSnapOnce  = await C.tenantSnap('inventory', companyId);
+      const depoSnapOnce = await C.tenantSnap('warehouses', companyId);
+      const invId  = C.mikroIdCozucuIds(invSnapOnce.docs.map(d => d.id), companyId);
+      const depoId = C.mikroIdCozucuIds(depoSnapOnce.docs.map(d => d.id), companyId);
+      // ÇÖZÜCÜ, YAZILAN KOLEKSİYONUN KENDİSİNDEN kurulmalı: "eski biçimli id var mı"
+      // kararı o koleksiyonun id'lerine bakar. Aşağıda warehouseItems ve
+      // wmsLocations'a da yazılıyor; onlar için inventory/warehouses çözücüsünü
+      // kullanmak kararı YANLIŞ koleksiyona sordurur ve C11'in kapatmaya
+      // çalıştığı kiracılar-arası id çakışmasını geri getirir (code-review).
+      const whItemId = await C.mikroIdCozucu('warehouseItems', companyId);
 
-    const t0 = Date.now();
-    let created = 0, updated = 0, errors = 0;
-    let skippedRecords = 0;
-    /** Mikro'dan en az bir satış fiyatı gelen ürün sayısı (özet raporlanır). */
-    let fiyatliUrun = 0;
-    /** Mikro'nun vermediği alanların satır sayacı — import notuna ve okuma arızası uyarısına girer. */
-    const stokSayac = sayacOlustur();
-    /** Görünen ad/kategori: stokEsle yazmıyorsa MEVCUT dokümandaki değeri kullan (warehouseItems
-     *  + kategori senkronu için lazım); o da yoksa undefined → alan hiç yazılmaz (merge:true
-     *  bayat değeri korur; '' ya da 'Genel' UYDURULMAZ). */
-    const coz = (yeni: string | undefined, eski: unknown): string | undefined =>
-      yeni ?? (typeof eski === 'string' && eski.trim() ? eski : undefined);
+      const t0 = Date.now();   // yalnız log için; durationMs helper'da
+      let created = 0, updated = 0, errors = 0;
+      /** Sayfalama sayaçları (adaptifSayfalama.ts): bozuk kayıt ≠ zaman aşımı. */
+      const sayac: SayfaSayaclari = { bozukKayit: 0, zamanAsimiSayfa: 0, zamanAsimiKayit: 0 };
+      /** Mikro'dan en az bir satış fiyatı gelen ürün sayısı (özet raporlanır). */
+      let fiyatliUrun = 0;
+      /** Mikro'nun vermediği alanların satır sayacı — import notuna ve okuma arızası uyarısına girer. */
+      const stokSayac = sayacOlustur();
+      /** Görünen ad/kategori: stokEsle yazmıyorsa MEVCUT dokümandaki değeri kullan (warehouseItems
+       *  + kategori senkronu için lazım); o da yoksa undefined → alan hiç yazılmaz (merge:true
+       *  bayat değeri korur; '' ya da 'Genel' UYDURULMAZ). */
+      const coz = (yeni: string | undefined, eski: unknown): string | undefined =>
+        yeni ?? (typeof eski === 'string' && eski.trim() ? eski : undefined);
 
-    try {
       // Prefetch ALL inventory docs → Map<sku, ref>. ETİKETSİZ (companyId boş)
       // eski kayıtlar bilerek dahil — SKU ile eşleşip iyileştirilir (companyId
       // yazılır), çoğaltılmaz. Ama BAŞKA kiracıya ait (companyId DOLU ve farklı)
@@ -688,17 +733,19 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const categorySet = new Set<string>();
 
       // ── Adaptif sayfalama ───────────────────────────────────────────────────
-      // Mikro bazı sayfa aralıklarında düz metin "Api Server Error" döner
-      // (kayıt bazlı serileştirme hatası, sunucu tarafında). Bozuk aralık
-      // 100 → 20 → 5 → 1 şeklinde daraltılır; yalnızca gerçekten bozuk tekil
-      // kayıtlar atlanır. Index = offset / size (Mikro Index sayfa numarasıdır).
+      // Gövde TEK KAYNAKTA: server/mikro/adaptifSayfalama.ts (araligiTopla). Bozuk aralık
+      // 100 → 20 → 5 → 1 daraltılır; zaman aşımı (listeZamanAsimiMs()) AYRI sayılır.
+      // try/catch YOK: throw'u `araligiTopla` sınıflar (TimeoutError → daralt, diğer → işi düşür;
+      // Mikro hiç yanıt vermiyorsa devre kesici `MikroYanitVermiyorHatasi`, sürekli null/IsError dönüyorsa
+      // `MikroVeriVermiyorHatasi` → iş error ile biter, kilit açılır).
+      // Index = offset / size (Mikro Index sayfa numarasıdır).
       const fetchRange = async (offset: number, size: number): Promise<Record<string, unknown>[] | null> => {
         const { ok, data } = await mikroPost('StokListesiV2', {
           StokKod: '', TarihTipi: 2,
           IlkTarih: '2000-01-01',
           SonTarih: `${new Date().getFullYear() + 1}-12-31`,
           Sort: 'sto_kod', Size: String(size), Index: offset / size,
-        });
+        }, false, { zamanAsimiMs: listeZamanAsimiMs() });
         if (!ok || typeof data === 'string') return null; // "Api Server Error" vb.
         const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
         if (!r0 || r0.IsError) return null;
@@ -706,31 +753,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : null;
       };
 
-      const SUB: Record<number, number> = { 100: 20, 20: 5, 5: 1 };
-      const collectRange = async (offset: number, size: number): Promise<{ rows: Record<string, unknown>[]; end: boolean }> => {
-        const direct = await fetchRange(offset, size);
-        if (direct !== null) return { rows: direct, end: direct.length < size };
-        if (size === 1) {
-          skippedRecords++;
-          console.warn(`Stok import: kayıt #${offset} atlandı (Mikro Api Server Error)`);
-          return { rows: [], end: false };
-        }
-        const sub = SUB[size];
-        const out: Record<string, unknown>[] = [];
-        let end = false;
-        for (let o = offset; o < offset + size; o += sub) {
-          const r = await collectRange(o, sub);
-          out.push(...r.rows);
-          end = r.end; // son alt-aralığın end durumu belirleyicidir
-        }
-        return { rows: out, end };
-      };
-
       const CHUNK = 100;
       let offset = 0;
       let reachedEnd = false;
       while (!reachedEnd && offset < 50000) {
-        const { rows: stoklar, end } = await collectRange(offset, CHUNK);
+        // K-A: sonSayfaMs = bu CHUNK'ın TÜM Mikro süresi (daraltma alt çağrıları DÂHİL);
+        // MIKRO_LISTE_ZAMAN_ASIMI_MS ayarı için ilk canlı koşuda jobs dokümanından okunur.
+        const t = Date.now();
+        const { rows: stoklar, end } = await araligiTopla(fetchRange, offset, CHUNK, ALT_STOK, sayac);
+        const sonSayfaMs = Date.now() - t;
         void mirrorMikroStoklar(stoklar);
         reachedEnd = end;
         offset += CHUNK;
@@ -808,7 +839,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           }
         }
 
-        console.log(`Stok import: offset ${offset} — toplam ${created + updated} işlendi${skippedRecords ? `, ${skippedRecords} bozuk kayıt atlandı` : ''}`);
+        console.log(`Stok import: offset ${offset} — toplam ${created + updated} işlendi${sayac.bozukKayit ? `, ${sayac.bozukKayit} bozuk kayıt atlandı` : ''}`);
+        await ilerle({ processed: created + updated, created, updated, errors,
+                       bozukKayit: sayac.bozukKayit, zamanAsimiSayfa: sayac.zamanAsimiSayfa, zamanAsimiKayit: sayac.zamanAsimiKayit,
+                       offset, sonSayfaMs });
       }
 
       await commitBatch();
@@ -880,36 +914,44 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       if (uyari) console.warn('[import/stok]', uyari);
       const sayacMetni = sayacNotu(stokSayac, stokArizalari);
       const note = [uyari, fiyatNot, sayacMetni].filter(Boolean).join(' — ');
-      await C.writeSyncLog('ImportStok', 'inventory', `${created} yeni / ${updated} güncel — ${note}${skippedRecords ? ` / ${skippedRecords} bozuk atlandı` : ''}`, true, null, null, duration, C.reqActor(req));
-      console.log(`Stok import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, ${note}, hata: ${errors}, bozuk atlanan: ${skippedRecords}, süre: ${duration}ms`);
-      res.json({ success: true, created, updated, errors, skippedRecords, fiyatliUrun, note, duration });
-
-    } catch (err) {
-      const duration = Date.now() - t0;
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      await C.writeSyncLog('ImportStok', 'inventory', 'bulk', false, null, errorMsg, duration, C.reqActor(req));
-      console.error('Stok import genel hatası:', err);
-      res.status(500).json({ success: false, error: errorMsg, created, updated, errors });
-    }
+      const ozet = `${created} yeni / ${updated} güncel — ${note}${sayac.bozukKayit ? ` / ${sayac.bozukKayit} bozuk atlandı` : ''}${zamanAsimiEki(sayac)}`;
+      console.log(`Stok import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, ${note}, hata: ${errors}, bozuk atlanan: ${sayac.bozukKayit}, zaman aşımı: ${sayac.zamanAsimiKayit}, süre: ${duration}ms`);
+      // syncLog'u helper yazar (aynı argümanlar: ImportStok / inventory / ozet / success / duration / actor).
+      return {
+        jobAlanlari: { created, updated, errors, bozukKayit: sayac.bozukKayit, zamanAsimiSayfa: sayac.zamanAsimiSayfa,
+                       zamanAsimiKayit: sayac.zamanAsimiKayit, fiyatliUrun, note },
+        ozet, basarili: sayac.zamanAsimiKayit === 0, hata: zamanAsimiHatasi(sayac),
+      };
+      },
+    });
+    return arkaPlanYaniti(res, sonuc);
   });
 
-  /** POST /api/mikro/import/cari — import ALL Mikro cari → Firebase leads */
+  /** POST /api/mikro/import/cari — import ALL Mikro cari → Firebase leads.
+   *  ARKA PLAN İŞİ (2026-09-24): yanıt anında `{ started:true, job:'mikroImport-cari' }`; ilerleme/sonuç
+   *  `jobs/mikroImport-cari` (created/updated/errors/bozukKayit/zamanAsimiSayfa/zamanAsimiKayit/sayfa/sonSayfaMs/note/error). */
   app.post('/api/mikro/import/cari', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
-    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
     // Data is scoped by companyId — the app's leads listener filters on it.
     // Kiracı = reqCompanyId, ham uid DEĞİL (gerekçe: reqCompanyId tanımı).
+    // req YALNIZ burada okunur (yanıt ÖNCESİ); `calistir` gövdesi req/res bilmez.
     const companyId = await C.reqCompanyId(req);
+    const actor = C.reqActor(req);
+    const isAdi = mikroIsAdi('/api/mikro/import/cari');   // 'mikroImport-cari' — src/lib/mikroIsAdi.ts TEK sözlük
+    const sonuc = await arkaPlanIsiBaslat(arkaPlanDep(), {
+      isAdi, companyId, actor,
+      senkronKaydi: { operation: 'ImportCari', entityType: 'lead' },
+      // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts); kayıt İŞ ömrünce durur.
+      yaziciAdi: arkaPlanYaziciAdi(isAdi, Date.now()),
+      calistir: async (ilerle) => {
+      const t0 = Date.now();   // yalnız log için; durationMs helper'da
+      let created = 0, updated = 0, errors = 0;
+      const PAGE_SIZE = 500;
+      /** Sayfalama sayaçları (adaptifSayfalama.ts): bozuk kayıt ≠ zaman aşımı. */
+      const sayac: SayfaSayaclari = { bozukKayit: 0, zamanAsimiSayfa: 0, zamanAsimiKayit: 0 };
 
-    const t0 = Date.now();
-    let created = 0, updated = 0, errors = 0;
-    const PAGE_SIZE = 500;
-    let index = 0;
-    let hasMore = true;
-
-    try {
       // Prefetch ALL leads → Map<mikroCariKod, ref> + Map<VKN, ref> + Map<isim, ref>.
       // ETİKETSİZ (companyId boş) eski kayıtlar bilerek dahil — cari koduyla
       // eşleşip iyileştirilir. VKN/isim fallback'i şart: manuel oluşturulmuş
@@ -946,18 +988,40 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // sayfa sayacı sıfırlar ve "hiçbir satırda okunamadı" kararı yanlış çıkar.
       const eslemeler: CariEsleme[] = [];
 
-      while (hasMore) {
+      // ── Sayfalama: TEK KAYNAK server/mikro/adaptifSayfalama.ts (stok import'uyla aynı) ──
+      // GÖRÜNÜR fark (kabul edilen sapma 3): eski `if (!ok) break;` sayfalamayı SESSİZCE bitiriyordu,
+      // kısmi import "tamamlandı" görünüyordu. Artık bozuk aralık 500 → 100 → 20 → 5 → 1 daraltılır,
+      // gerçekten bozuk kayıt sayılır, devam edilir (Mikro hiç yanıt vermiyorsa devre kesici işi
+      // `MikroYanitVermiyorHatasi`, SÜREKLİ null/IsError dönüyorsa `MikroVeriVermiyorHatasi` ile bitirir —
+      // adaptifSayfalama.ts; eskiden 63.100 çağrı + "50000 bozuk atlandı" success:true). Gövde (FieldName/WhereStr/Sort) BİREBİR;
+      // Index = offset / size (500'lük ilk seviyede eski `index`e eşit).
+      const getir = async (offset: number, size: number): Promise<Record<string, unknown>[] | null> => {
         const { ok, data } = await mikroPost('CariListesiV2', {
           FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi,cari_muh_kod',
           WhereStr: "cari_baglanti_tipi=0 and cari_lastup_date > '2000/01/01'",
-          Sort: 'cari_kod', Size: String(PAGE_SIZE), Index: index,
-        });
+          Sort: 'cari_kod', Size: String(size), Index: offset / size,
+        }, false, { zamanAsimiMs: listeZamanAsimiMs() });
+        if (!ok || typeof data === 'string') return null;   // "Api Server Error" vb. → daralt
+        const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+        if (!r0 || r0.IsError) return null;
+        // Eski kodun `CariListesi ?? []` paritesi: OK yanıtta liste alanı yoksa "sayfa boş" (liste bitti)
+        // sayılır, daraltmaya DÜŞÜRÜLMEZ (bilinçli fark: stok `fetchRange` orada null döner — 709 paritesi).
+        const rows = mikroData(data).CariListesi ?? [];
+        return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : null;
+      };
 
-        if (!ok) break;
-
-        const cariler = (mikroData(data).CariListesi ?? []) as Record<string, unknown>[];
+      let offset = 0;
+      let end = false;
+      while (!end && offset < 50000) {
+        // K-A: sonSayfaMs = bu sayfanın TÜM Mikro süresi (daraltma alt çağrıları DÂHİL).
+        const t = Date.now();
+        const sayfaSonucu = await araligiTopla(getir, offset, PAGE_SIZE, ALT_CARI, sayac);
+        const sonSayfaMs = Date.now() - t;
+        const cariler = sayfaSonucu.rows;
+        end = sayfaSonucu.end;
+        offset += PAGE_SIZE;
         void mirrorMikroCariler(cariler);
-        if (!Array.isArray(cariler) || cariler.length === 0) break;
+        if (cariler.length === 0) { if (end) break; else continue; }
 
         for (const c of cariler) {
           // Gövde/eşleme TEK KAYNAKTA (server/mikro/eslemeCari.ts).
@@ -1000,9 +1064,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           }
         }
 
-        hasMore = cariler.length === PAGE_SIZE;
-        index += 1; // Mikro Index = sayfa numarası
-        console.log(`Cari import: sayfa ${index} tamamlandı — toplam ${created + updated} işlendi`);
+        console.log(`Cari import: sayfa ${offset / PAGE_SIZE} tamamlandı — toplam ${created + updated} işlendi`);
+        await ilerle({ processed: created + updated, created, updated, errors, sayfa: offset / PAGE_SIZE,
+                       bozukKayit: sayac.bozukKayit, zamanAsimiSayfa: sayac.zamanAsimiSayfa, zamanAsimiKayit: sayac.zamanAsimiKayit,
+                       sonSayfaMs });
       }
 
       await commitBatch();
@@ -1010,17 +1075,18 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const duration = Date.now() - t0;
       const eslemeOzeti = cariEslemeOzeti(eslemeler);
       if (eslemeOzeti.okumaArizasi.length) console.warn('[import/cari] okuma arızası:', eslemeOzeti.not);
-      await C.writeSyncLog('ImportCari', 'lead', `${created} yeni / ${updated} güncel${eslemeOzeti.not ? ` — ${eslemeOzeti.not}` : ''}`, true, null, null, duration, C.reqActor(req));
-      console.log(`Cari import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, hata: ${errors}, süre: ${duration}ms`);
-      res.json({ success: true, created, updated, errors, duration, ...(eslemeOzeti.not ? { note: eslemeOzeti.not } : {}) });
-
-    } catch (err) {
-      const duration = Date.now() - t0;
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      await C.writeSyncLog('ImportCari', 'lead', 'bulk', false, null, errorMsg, duration, C.reqActor(req));
-      console.error('Cari import genel hatası:', err);
-      res.status(500).json({ success: false, error: errorMsg, created, updated, errors });
-    }
+      const ozet = `${created} yeni / ${updated} güncel${eslemeOzeti.not ? ` — ${eslemeOzeti.not}` : ''}` +
+        `${sayac.bozukKayit ? ` / ${sayac.bozukKayit} bozuk atlandı` : ''}${zamanAsimiEki(sayac)}`;
+      console.log(`Cari import tamamlandı — oluşturuldu: ${created}, güncellendi: ${updated}, hata: ${errors}, bozuk: ${sayac.bozukKayit}, zaman aşımı: ${sayac.zamanAsimiKayit}, süre: ${duration}ms`);
+      // syncLog'u helper yazar (ImportCari / lead / ozet / success / duration / actor).
+      return {
+        jobAlanlari: { created, updated, errors, bozukKayit: sayac.bozukKayit, zamanAsimiSayfa: sayac.zamanAsimiSayfa,
+                       zamanAsimiKayit: sayac.zamanAsimiKayit, note: eslemeOzeti.not ?? null },
+        ozet, basarili: sayac.zamanAsimiKayit === 0, hata: zamanAsimiHatasi(sayac),
+      };
+      },
+    });
+    return arkaPlanYaniti(res, sonuc);
   });
 
   // ── Mikro Genel Liste Import'ları ────────────────────────────────────────────
@@ -1102,26 +1168,51 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
      * Filtre tek başına bu sınıfı çözmez; süpürge çözer.
      */
     iptalKolonu?: string;
+    /** Gece cron penceresi (K-B, 2026-09-24): 'tam' = tüm geçmiş her gece; { gun } = son N gün; yoksa cron
+     *  politikası (90 gün). Tarih kolonu OLMAYAN 8 tanımda etkisiz (koşul hiç eklenmez → zaten tam).
+     *  cari-hareket + fatura-listesi 'tam' (ÖLÇÜLDÜ: 1.594 satır); SIPARISLER/STOK_HAREKETLERI ÖLÇÜLMEDİ →
+     *  90 gün KALIR, `SELECT COUNT(*)` ölçülünce 'tam'a alınır. */
+    gecePenceresi?: 'tam' | { gun: number };
     postProcess?: (rows: Record<string, unknown>[], companyId: string) => Promise<string | null>;
   };
+
+  /** Tarih penceresi koşulu — sayfa sorgusu VE iptal süpürgesi AYNI üreticiyi kullanır (iki yerde yazılmaz).
+   *  `son === null` → ÜST SINIR YOK: eski `mikroBugun()` sınırı 30.09.2026 tarihli LUCA satırını düşürüyordu
+   *  (teşhis ölçümü: aralık 23.04.2025..30.09.2026); cron da null geçer. */
+  const tarihKosulu = (kolon: string, ilk: string, son: string | null): string =>
+    son === null ? `${kolon} >= '${ilk}'` : `${kolon} BETWEEN '${ilk}' AND '${son}'`;
+  /** Gövdedeki `sonTarih`: geçerli YYYY-MM-DD ise o, yoksa (boş/geçersiz) null = üst sınır YOK. */
+  const ustSinir = (v: unknown): string | null => { const t = sqlTarih(v, ''); return t === '' ? null : t; };
+
+  /** Ayrık birleşim (hakem 2026-09-25): sayımlar YALNIZ `ok:true` dalında var. Eski tek şekil hata
+   *  dönüşlerinde `total: 0, truncated: false` yazıyordu — sahte kesinlik: sayfa 1'in 500 satırı PG'ye
+   *  yazılmışken sayfa 2 düşünce "toplam 0" derdi ve arka plan işi bunu jobs dokümanına taşıyordu
+   *  (kart '500/0 işlendi'). Tüketiciler (S4 fabrika, 2 cron) `ok` ile daraltmadan sayıya ERİŞEMEZ. */
+  type SqlImportSonucu =
+    | { ok: true; total: number; note: string | null; truncated: boolean; duration: number; guidsizSatir: number }
+    | { ok: false; error: string; duration: number };
 
   async function mikroSqlImportCalistir(
     opts: SqlImportOpts,
     companyId: string,
     ilkTarih: string,
-    sonTarih: string,
+    sonTarih: string | null,   // null = üst sınır yok (tarihKosulu)
     actor: { uid: string; email: string },
-  ): Promise<{ ok: boolean; total: number; note: string | null; truncated: boolean; error?: string; duration: number; guidsizSatir?: number }> {
+    /** Sayfa başına ilerleme — HTTP arka plan yolu (S4) verir, cron GEÇMEZ. Yük jobs alan adı bilmez
+     *  (cron ile ortak gövde); `sonSayfaMs` ZORUNLU alan (K-A): opsiyonel yapılırsa S4 `...a` ile
+     *  sessizce düşer ve listeZamanAsimiMs() hiç ölçülemez. */
+    ilerle?: (a: { sayfa: number; satir: number; sonSayfaMs: number }) => Promise<void>,
+  ): Promise<SqlImportSonucu> {
     const t0 = Date.now();
     // Kararli kimligi (GUID) olmayan satir sayisi — mukerrer kayit riski.
     let guidsizSatir = 0;
     const SAYFA = 500;
-    const MAKS_SAYFA = 40; // 20.000 satır tavanı — sessiz değil, yanıtta bildirilir
-    if (!C.getAdminDb()) return { ok: false, total: 0, note: null, truncated: false, error: 'Firebase Admin başlatılamadı.', duration: 0 };
+    const MAKS_SAYFA = 40; // 20.000 satır tavanı — sessiz değil: syncLog özetinde 'SAYFA TAVANINA ÇARPTI' (cron dâhil) + HTTP yolunda jobs/<isAdi> truncated/limit
+    if (!C.getAdminDb()) return { ok: false, error: 'Firebase Admin başlatılamadı.', duration: 0 };
 
     const kosullar: string[] = [];
     if (opts.ekKosul) kosullar.push(opts.ekKosul);
-    if (opts.tarihKolonu) kosullar.push(`${opts.tarihKolonu} BETWEEN '${ilkTarih}' AND '${sonTarih}'`);
+    if (opts.tarihKolonu) kosullar.push(tarihKosulu(opts.tarihKolonu, ilkTarih, sonTarih));
     const where = kosullar.length ? ` WHERE ${kosullar.join(' AND ')}` : '';
 
     // SELECT listesi. secimKolonlari verilmişse GERÇEK şemaya karşı süzülür:
@@ -1165,14 +1256,20 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     try {
       while (sayfa < MAKS_SAYFA) {
         const offset = sayfa * SAYFA;
+        // K-A: sonSayfaMs = YALNIZ Mikro sayfa süresi — aşağıdaki PG batch DAHİL DEĞİL
+        // (MIKRO_LISTE_ZAMAN_ASIMI_MS ayarı bunu okur). Zaman aşımı `hata` olarak değil throw olarak
+        // gelir (DOMException TimeoutError) → catch → syncLog(false), ok:false.
+        const sayfaT0 = Date.now();
         const { rows, hata } = await mikroSql(
           `SELECT ${secim} FROM ${opts.tablo}${opts.fromEk ?? ''}${where} ` +
           `ORDER BY ${siralama} OFFSET ${offset} ROWS FETCH NEXT ${SAYFA} ROWS ONLY`,
+          { zamanAsimiMs: listeZamanAsimiMs() },
         );
+        const sonSayfaMs = Date.now() - sayfaT0;
         if (hata) {
           // Başarısızsa hiçbir şey yazma — yarım/boş veri gerçek veriyi ezmesin.
           await C.writeSyncLog(`SQL:${opts.tablo}`, opts.collection, opts.label, false, null, hata, Date.now() - t0, actor);
-          return { ok: false, total: 0, note: null, truncated: false, error: `${opts.label}: ${hata}`, duration: Date.now() - t0 };
+          return { ok: false, error: `${opts.label}: ${hata}`, duration: Date.now() - t0 };
         }
         if (!rows.length) break;
 
@@ -1199,6 +1296,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
         allRows.push(...rows);
         total += rows.length;
+        // İlerleme (HTTP yolu): alanlar olduğu gibi jobs'a geçer (S4 `...a`), `processed: satir` eşlemesi orada.
+        if (ilerle) await ilerle({ sayfa: sayfa + 1, satir: total, sonSayfaMs }).catch(() => {});
         if (rows.length < SAYFA) break;
         sayfa++;
         if (sayfa >= MAKS_SAYFA) tavanaCarpti = true;
@@ -1238,10 +1337,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             // başarısız ol, "hiç iptal yok" gibi sessiz bir sonuç üretme.
             supurgeHata = `${anaTablo}.${iptalKol} şemada yok — iptal süpürgesi atlandı`;
           } else {
+            // Aynı pencere (tarihKosulu) — sayfa sorgusuyla İKİ AYRI koşul üreticisi olmasın (hakem 7).
             const { ok: sOk, data: sData } = await mikroPost('SqlVeriOkuV2', {
               SQLSorgu: `SELECT ${guidKolon} FROM ${anaTablo} WHERE ISNULL(${iptalKol}, 0) <> 0 `
-                + `AND ${tarihKol} BETWEEN '${ilkTarih}' AND '${sonTarih}'`,
-            });
+                + `AND ${tarihKosulu(tarihKol, ilkTarih, sonTarih)}`,
+            }, false, { zamanAsimiMs: listeZamanAsimiMs() });
             const sr0 = ((sData as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
             if (!sOk || !sr0 || sr0.IsError) {
               supurgeHata = String(sr0?.ErrorMessage || 'Mikro iptal sorgusu başarısız');
@@ -1312,7 +1412,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[sqlImport ${opts.tablo}]`, msg);
       await C.writeSyncLog(`SQL:${opts.tablo}`, opts.collection, opts.label, false, null, msg, Date.now() - t0, actor);
-      return { ok: false, total: 0, note: null, truncated: false, error: `${opts.label} başarısız.`, duration: Date.now() - t0 };
+      return { ok: false, error: `${opts.label} başarısız.`, duration: Date.now() - t0 };
     }
   }
 
@@ -1334,6 +1434,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   function makeMikroSqlImport(opts: SqlImportOpts) {
     SQL_IMPORT_TANIMLARI.push(opts);   // cron da aynı tanımları kullanır
     if (!opts.route) return;
+    // İş adı KAYIT KAPSAMINDA, rota başına 1 kez (kapı yaması 5): `route?: string` daraltması nested
+    // async handler'a TAŞINMAZ (handler içinde TS2345 string | undefined — tsc ile ÖLÇÜLDÜ) ve `!` /
+    // `?? ''` kural dışı. Yan etki İSTENEN: bilinmeyen önek boot'ta throw = fail-fast (12 tanımın hepsi
+    // /api/mikro/import/<slug>). 'mikroImport-<slug>' — src/lib/mikroIsAdi.ts TEK sözlük.
+    const isAdi = mikroIsAdi(opts.route);
     // MFA + ROL KAPISI (2026-08-25 denetimi): bu fabrika 12 import ucu kaydeder
     // (siparis, fatura-listesi, cari-hareket, stok-hareket, banka, kasa,
     // odeme-plan, depo, barkod, fiyat, demirbas, maliyet-merkezi) ve UCUNDE de
@@ -1349,16 +1454,41 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
              C.requireCollectionAccess(opts.collection, 'write'),
              async (req: Request, res: Response) => {
       if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-      const sonuc = await mikroSqlImportCalistir(
-        opts,
-        await C.reqCompanyId(req),
-        sqlTarih(req.body?.ilkTarih, '2020-01-01'),
-        sqlTarih(req.body?.sonTarih, mikroBugun()),
-        C.reqActor(req),
-      );
-      if (!sonuc.ok) return res.status(502).json({ success: false, error: sonuc.error });
-      res.json({ success: true, total: sonuc.total, note: sonuc.note, tablo: opts.tablo, guidsizSatir: sonuc.guidsizSatir ?? 0,
-                 ...(sonuc.truncated ? { truncated: true, limit: 40 * 500 } : {}), duration: sonuc.duration });
+      // ARKA PLAN İŞİ (2026-09-24): eski kod SQL import çekirdeğini `await` ile isteğin içinde bitiriyor, tek bayt
+      // dönmüyordu → IIS/ARR 502 (teşhis, CONFIRMED). req YALNIZ burada okunur (yanıt ÖNCESİ).
+      const companyId = await C.reqCompanyId(req);
+      const actor = C.reqActor(req);
+      const ilk = sqlTarih(req.body?.ilkTarih, '2020-01-01');
+      const son = ustSinir(req.body?.sonTarih);   // yoksa null = üst sınır yok (tarihKosulu gerekçesi)
+      const sonuc = await arkaPlanIsiBaslat(arkaPlanDep(), {
+        isAdi, companyId, actor,
+        // kendiYazar: mikroSqlImportCalistir syncLog/audit'i KENDİSİ yazar (cron paritesi) — helper çift satır atmaz.
+        senkronKaydi: { operation: `SQL:${opts.tablo}`, entityType: opts.collection, kendiYazar: true },
+        // yaziciAdi YOK: bugün bu uçlarda bakım kilidi yok (parite; açık soru 5).
+        calistir: async (ilerle) => {
+          // `...a`: S5'in verdiği HER alan (sayfa, satir, sonSayfaMs — K-A) OLDUĞU GİBİ jobs'a geçer;
+          // sarmalayıcı alan adı SAYMAZ (eski `({ sayfa, satir }) => …` imzası yeni alanı sessizce
+          // DÜŞÜRÜRDÜ — kapı:4). processed = satir: istemci çubuğu okur; total koşarken BİLİNMİYOR →
+          // YAZILMAZ (belirsiz çubuk, K-J).
+          const s = await mikroSqlImportCalistir(opts, companyId, ilk, son, actor, a => ilerle({ ...a, processed: a.satir }));
+          if (!s.ok) {
+            // Başarısız koşu SAYILMADI: total/truncated/guidsizSatir YAZILMAZ (yazılmayan = bilinmiyor —
+            // istemci `total?`; eski yanıt `?? 0`, ara sürüm `total: 0` yazıyordu → kart '500/0 işlendi').
+            // Koşu sırasında yazılan processed/satir/sayfa dokümanda KALIR (gerçekten yazılan satırlar).
+            // Mikro reddi zaten HTTP 200 sınıfıydı; hata artık 502 yerine jobs/<isAdi>.error'da.
+            return { jobAlanlari: { tablo: opts.tablo }, ozet: s.error, basarili: false, hata: s.error };
+          }
+          return {
+            jobAlanlari: {
+              total: s.total, note: s.note, tablo: opts.tablo,
+              guidsizSatir: s.guidsizSatir,   // başarıda HER ZAMAN sayılır (0 = gerçek sayım)
+              truncated: s.truncated, ...(s.truncated ? { limit: 40 * 500 } : {}),
+            },
+            ozet: `${s.total} kayıt`, basarili: true, hata: null,
+          };
+        },
+      });
+      return arkaPlanYaniti(res, sonuc);
     });
   }
 
@@ -1529,6 +1659,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // rakamları iptal edilen her fatura kadar şişiyordu.
     ekKosul: '(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6)) AND ISNULL(cha.cha_iptal, 0) = 0',
     iptalKolonu: 'cha_iptal',
+    // K-B eki (orkestratör onaylı 2026-09-24): aynı tablonun (CARI_HESAP_HAREKETLERI, ölçüldü 1.594
+    // satır) alt kümesi ≤ 1.594 → her gece TAM; geriye tarihli fatura da 90 günde düşmesin.
+    gecePenceresi: 'tam',
     postProcess: async (rows) => {
       // Tanilama sayaci: `Number(r.kdvTutari ?? 0) > 0` hem NULL'u hem mesru ₺0'i "eslesmedi"
       // sayiyordu ve ikisini AYIRT EDEMIYORDU. `bilinenSayi` ile uc kova ayrilir: KDV'si okunan
@@ -1574,6 +1707,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     ekKosul: 'ISNULL(cha_iptal, 0) = 0',
     iptalKolonu: 'cha_iptal',
     tarihKolonu: 'cha_tarihi',
+    // ÖLÇÜLDÜ 2026-09-24: CARI_HESAP_HAREKETLERI toplam 1.594 satır (LUCA 572) = 4 sayfa; 90 gün
+    // penceresi `cha_tarihi`'ye baktığı için GERİYE TARİHLİ dekontu (Hesap Açılış Fişi, 2025) HİÇ
+    // getirmiyordu — ödemeler müşteri ekranına gelmiyordu (teşhis kök neden c). Her gece TAM.
+    gecePenceresi: 'tam',
     collection: 'mikroCariHareketler', label: 'Mikro Cari Hareketleri',
     postProcess: async (rows) => {
       // PG aynası (off-server yedek + raporlama). Fatura import'uyla aynı tablo.
@@ -2516,20 +2653,37 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       return '';
     };
 
+    // Gece penceresi TANIM BAŞINA (K-B, 2026-09-24): `gecePenceresi:'tam'` → tüm geçmiş; yoksa son
+    // GECE_PENCERESI_GUN gün. 90 = POLİTİKA (tam geçmişi her gece yeniden çekmek gereksiz yük; ilk dolum
+    // elle ERP Hub'dan, cron tazeler), ölçüm değil. Tarih kolonu olmayan 8 tanımda etkisiz.
+    const GECE_PENCERESI_GUN = 90;
+    const geceIlkTarih = (pencere: SqlImportOpts['gecePenceresi']): string =>
+      pencere === 'tam'
+        ? '2000-01-01'
+        : new Date(Date.now() - (pencere ? pencere.gun : GECE_PENCERESI_GUN) * 864e5).toISOString().slice(0, 10);
+
     // 03:20 İstanbul (zamanla.ts). Yedek görevi 03:30 SUNUCU-yerel saattedir;
     // sunucu dilimi düzeltilene kadar ikisi arasında sıra ilişkisi yoktur.
+    // CRON ÇAĞRI DESENİ DEĞİŞMEZ: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DOĞRUDAN; arka plan
+    // yardımcısına (arkaPlanIsiBaslat) BAĞLANMAZ, kilit ALMAZ, `ilerle` geçmez (parite testi d).
+    // BİLİNÇLİ FARK (S5/K-A ortak gövde, 2026-09-25): sayfa sorgusu + iptal süpürgesi listeZamanAsimiMs()
+    // kullanır → burada da sayfa zaman aşımı 30 sn → 120 sn (env ile en çok 600 sn). SQL yolunda devre
+    // kesici YOK (yalnız stok/cari adaptif sayfalamada): Mikro bağlantıyı kabul edip yanıt vermezse her
+    // tanım bir zaman aşımıyla düşer → 12 × 120 sn ≈ 24 dk (HEAD ≈ 6 dk; 600 sn'de ≈ 2 saat). Veri kaybı yok
+    // (tanım syncLog'a false yazar, sıradakine geçer); kilit almadığı için bu sürede elle başlatılan arka
+    // plan işi de aynı asılı servise gider. Değer parite testi (d)'de kilitli.
     zamanla('20 3 * * *', async () => {
       const companyId = await sqlSenkronHedefTenant();
       if (!companyId) return;
       if (!(await getMikroCreds())) { console.warn('Mikro SQL senkron: kimlik yok, atlandı.'); return; }
       const actor = { uid: 'system', email: '' };
-      // Son 90 gün: tam geçmişi her gece yeniden çekmek gereksiz yük.
-      // İlk dolum elle (ERP Hub) yapılır; cron güncellemeyi taze tutar.
-      const son = mikroBugun();
-      const ilk = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10);
-      console.log(`Mikro SQL senkron başlıyor (${ilk} → ${son}, ${SQL_IMPORT_TANIMLARI.length} adım)`);
+      // Üst sınır YOK (son = null): eski `mikroBugun()` sınırı ileri tarihli kaydı (30.09.2026 LUCA
+      // satırı) düşürüyordu; `tarihKosulu` `>=` üretir.
+      const son = null;
+      console.log(`Mikro SQL senkron başlıyor (pencere tanım başına: 'tam' | ${GECE_PENCERESI_GUN} gün, üst sınır yok, ${SQL_IMPORT_TANIMLARI.length} adım)`);
       let ok = 0, hata = 0;
       for (const opts of SQL_IMPORT_TANIMLARI) {
+        const ilk = geceIlkTarih(opts.gecePenceresi);
         try {
           const r = await mikroSqlImportCalistir(opts, companyId, ilk, son, actor);
           if (r.ok) { ok++; console.log(`  ${opts.label}: ${r.total} kayıt`); }
@@ -2553,9 +2707,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       if (!companyId) return;
       if (!(await getMikroCreds())) { console.warn('Mikro TAM senkron: kimlik yok, atlandı.'); return; }
       const actor = { uid: 'system', email: '' };
-      const son = mikroBugun();
+      const son = null;           // üst sınır yok (gece cron ile aynı gerekçe)
       const ilk = '2000-01-01';   // tüm geçmiş
-      console.log(`Mikro TAM senkron başlıyor (${ilk} → ${son}, ${SQL_IMPORT_TANIMLARI.length} adım)`);
+      console.log(`Mikro TAM senkron başlıyor (${ilk} → sınırsız, ${SQL_IMPORT_TANIMLARI.length} adım)`);
       let ok = 0, hata = 0;
       for (const opts of SQL_IMPORT_TANIMLARI) {
         try {
@@ -2572,16 +2726,22 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   /** POST /api/mikro/import/stok-miktar — stok miktarlarını Mikro'dan çek.
    *  StokListesiV2 miktar DÖNDÜRMEZ; tek kaynak GenelAmacliMaliyetListesiV2
    *  (SKU başına tek çağrı, EldekiMiktar + MaliyetBedeli döner).
-   *  1700+ SKU = uzun iş → hemen { started: true } döner, ilerleme
+   *  1700+ SKU = uzun iş → hemen { started: true, job: 'stokMiktarImport' } döner, ilerleme
    *  jobs/stokMiktarImport dokümanına canlı yazılır (panel onSnapshot ile izler).
+   *  2026-09-24: arka plan deseni (kilit + IIFE + jobs + anında yanıt) buradan
+   *  src/server/mikro/arkaPlanIsi.ts'e ÇIKARILDI — 15 import ucu aynı yardımcıyı kullanır;
+   *  doküman id'si/alanları AYNEN (panel paritesi), +companyId/isAdi damgası.
    */
-  let stokMiktarJobRunning = false;
   app.post('/api/mikro/import/stok-miktar', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
-    { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
-    // Kısa devre ÖNCE: iş zaten koşuyorsa hiçbir yoklama/sorgu maliyeti ödeme.
-    if (stokMiktarJobRunning) return res.json({ success: true, started: false, alreadyRunning: true });
+    // Kısa devre ÖNCE (HEAD 2582 kuralı): iş zaten koşuyorsa ya da bakım kilidi varsa hiçbir yoklama/sorgu
+    // maliyeti ödeme. Delta hakem 2026-09-25 (bulgu 3/8): kısa devre helper'a taşınınca V17 yoklamasının
+    // ARKASINA kaymıştı — kilit doluyken yoklama koşan işe paralel Mikro'ya gidiyor, yük altında düşerse
+    // `false` 10 dk önbelleğe giriyor ve kullanıcı "Başka bir iş çalışıyor" yerine yanıltıcı 501 görüyordu.
+    // Otorite yine arkaPlanIsiBaslat (yoklama sürerken durum değişebilir); bu yalnız maliyet kısa devresi.
+    const onKontrol = await arkaPlanOnKontrol(arkaPlanDep(), { bakimKilidi: true });
+    if (onKontrol) return arkaPlanYaniti(res, onKontrol);
     const cidStok = await C.reqCompanyId(req);
     // Bayrak "hayır" derse metodu GERÇEKTEN yokla (önbellekli — bkz. mikroClient).
     const v17Var = await v17MetoduKullanilabilir('GenelAmacliMaliyetListesiV2', async () => {
@@ -2609,30 +2769,39 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     }
 
     const actor = C.reqActor(req);
-    const jobRef = C.getAdminDb().collection('jobs').doc('stokMiktarImport');
-    stokMiktarJobRunning = true;
-
-    // Arka plan işi — yanıt hemen döner
-    (async () => {
-      const t0 = Date.now();
-      let processed = 0, updated = 0, failed = 0;
-      /** Mikro yanıtında okunamayan alanların satır sayacı (miktar/maliyet). */
-      const miktarSayac = sayacOlustur();
-      // Per-depo dağılımı otoriter toplamla tutmayan SKU sayısı (bkz. mutabakat kontrolü).
-      let depoUyusmazlik = 0;
-      /** Dağılımı yazılan ürün sayısı — hareketi olmayan ürün hiç kontrol edilmez. */
-      let depoDagilimliUrun = 0;
-      /** Dağılımına `__devir` kovası eklenen ürün sayısı (açılış stoğu defterde yok). */
-      let depoDevirli = 0;
-      const uyusmazlikOrnek: { sku: string; toplam: number; beklenen: number }[] = [];
-      try {
-        const invSnap = await C.getAdminDb()!.collection('inventory').where('source', '==', 'mikro_import').get();
+    // 'stokMiktarImport' — panel paritesi, sözlük istisnası (src/lib/mikroIsAdi.ts). Kısa devre
+    // (alreadyRunning) + bakım kilidi (423) yoklamadan ÖNCE `arkaPlanOnKontrol` ile soruldu; helper aynı
+    // kararı yetkili olarak yeniden verir (yazıcı kaydıyla birlikte).
+    const isAdi = mikroIsAdi('/api/mikro/import/stok-miktar');
+    const sonuc = await arkaPlanIsiBaslat(arkaPlanDep(), {
+      isAdi, companyId: cidStok, actor,
+      senkronKaydi: { operation: 'GenelAmacliMaliyetListesiV2', entityType: 'inventory', denetimEtiketi: 'Mikro Stok Miktarları' },
+      // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts); kayıt İŞ ömrünce durur.
+      yaziciAdi: arkaPlanYaziciAdi(isAdi, Date.now()),
+      calistir: async (ilerle) => {
+        const t0 = Date.now();
+        let processed = 0, updated = 0, failed = 0;
+        /** Mikro yanıtında okunamayan alanların satır sayacı (miktar/maliyet). */
+        const miktarSayac = sayacOlustur();
+        // Per-depo dağılımı otoriter toplamla tutmayan SKU sayısı (bkz. mutabakat kontrolü).
+        let depoUyusmazlik = 0;
+        /** Dağılımı yazılan ürün sayısı — hareketi olmayan ürün hiç kontrol edilmez. */
+        let depoDagilimliUrun = 0;
+        /** Dağılımına `__devir` kovası eklenen ürün sayısı (açılış stoğu defterde yok). */
+        let depoDevirli = 0;
+        const uyusmazlikOrnek: { sku: string; toplam: number; beklenen: number }[] = [];
+        // Kiracı süzgeci ŞART (inceleme bulgusu 2026-09-25): eskiden yalnız `source` ile
+        // okunuyordu → iş, başka kiracının Mikro ürünlerine de bu kiracının Mikro'sundan
+        // okunan miktarı yazardı. Yoklama (yukarıda) ile AYNI koşul.
+        const invSnap = await C.getAdminDb()!.collection('inventory')
+          .where('companyId', '==', cidStok).where('source', '==', 'mikro_import').get();
         const items = invSnap.docs
           .map(d => ({ ref: d.ref, sku: ((d.data().sku as string) || '').trim() }))
           .filter(x => x.sku);
         const total = items.length;
         // companyId + depo listesi bir kez (döngü içinde tekrar tekrar değil).
-        const companyId = await C.reqCompanyId(req);
+        // Kiracı yanıt ÖNCESİ çözüldü (cidStok = reqCompanyId); `calistir` gövdesi req/res bilmez.
+        const companyId = cidStok;
         const wiId = await C.mikroIdCozucu('warehouseItems', companyId);
         // Depo numaraları warehouses'tan (mikro-depo-<n>). Kart sto_yer_kod GÜVENİLMEZ
         // (hepsi HAVALIMANI); gerçek stok yeri per-depo miktarla bulunur.
@@ -2670,7 +2839,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             if (depoArizasi) console.warn('[import/stok-miktar] per-depo:', depoArizasi);
         }
         
-        await jobRef.set({ running: true, processed: 0, updated: 0, failed: 0, total, startedAt: pgServerTimestamp(), finishedAt: null, error: null });
+        // Helper başlangıç dokümanı (running/startedAt/finishedAt:null/error:null/companyId/isAdi) + bu
+        // merge = eski 2671 alanları. GÖRÜNÜR fark: running:true birkaç sn ERKEN yazılır (envanter
+        // snapshot + per-depo SQL öncesi); panel `total ?? '?'` bunu zaten karşılıyor.
+        await ilerle({ processed: 0, updated: 0, failed: 0, total });
 
         const sonTarih = mikroBugun();
         const CONCURRENCY = 8;
@@ -2792,19 +2964,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           }
           if (processed % 48 === 0 || processed === total) {
             await commitBatch();
-            await jobRef.set({ running: true, processed, updated, failed, total }, { merge: true });
+            await ilerle({ processed, updated, failed, total });
           }
         }
         await commitBatch();
         const duration = Date.now() - t0;
-        await jobRef.set({
-          running: false, processed, updated, failed,
-          // Panel bunu gösterir. depoDagilimliUrun ŞART: hareketi olmayan ürün hiç
-          // kontrol edilmediği için "uyuşmazlık 0" tek başına "hepsi doğrulandı"
-          // ANLAMINA GELMEZ — kapsamı da göstermeliyiz.
-          depoUyusmazlik, depoDagilimliUrun, depoDevirli, uyusmazlikOrnek,
-          finishedAt: pgServerTimestamp(), durationMs: duration,
-        }, { merge: true });
         const depoNot =
           `, ${depoDagilimliUrun} üründe depo dağılımı yazıldı` +
           (depoDevirli > 0 ? ` (${depoDevirli}'inde devir kovası)` : '') +
@@ -2818,20 +2982,28 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           `${updated} ürünün miktarı güncellendi, ${failed} hata${depoNot}` +
           (miktarSayacMetni ? `, ${miktarSayacMetni}` : '') +
           ` (${Math.round(duration / 1000)}sn)`;
-        await C.writeSyncLog('GenelAmacliMaliyetListesiV2', 'inventory', miktarOzet, failed === 0, null, failed ? `${failed} SKU okunamadı` : null, duration, actor);
-        await C.writeAuditLog(actor, 'Mikro Stok Miktarları', miktarOzet);
         console.log(`Stok miktar import bitti: ${updated} güncellendi, ${failed} hata, depo uyuşmazlık ${depoUyusmazlik}, ${duration}ms`);
         if (uyusmazlikOrnek.length) console.warn('Depo dağılımı uyuşmazlık örnekleri:', uyusmazlikOrnek);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        await jobRef.set({ running: false, error: msg, finishedAt: pgServerTimestamp() }, { merge: true }).catch(() => {});
-        console.error('Stok miktar import hatası:', err);
-      } finally {
-        stokMiktarJobRunning = false;
-      }
-    })();
-
-    res.json({ success: true, started: true });
+        // Bitiş dokümanı `jobs/stokMiktarImport` (helper merge'ler; şekil 2798-2803 ile BİREBİR — panel okur).
+        // syncLog (2819) + audit 'Mikro Stok Miktarları' (2820) helper'da aynı argümanlarla.
+        return {
+          jobAlanlari: {
+            processed, updated, failed,
+            // Panel bunu gösterir. depoDagilimliUrun ŞART: hareketi olmayan ürün hiç
+            // kontrol edilmediği için "uyuşmazlık 0" tek başına "hepsi doğrulandı"
+            // ANLAMINA GELMEZ — kapsamı da göstermeliyiz.
+            depoUyusmazlik, depoDagilimliUrun, depoDevirli, uyusmazlikOrnek,
+          },
+          ozet: miktarOzet, basarili: failed === 0, hata: failed ? `${failed} SKU okunamadı` : null,
+          // Okunamayan SKU İŞ HATASI DEĞİL (hakem 2026-09-25, parite): sayısı `failed`da, syncLog yukarıdaki
+          // gibi success:false + 'N SKU okunamadı' (2819 AYNEN); jobs `error` null kalır — HEAD bitiş merge'i
+          // (2798-2803) error'a dokunmuyordu. Dolu olsa kart '⚠ N hata · tamamlandı' yerine 'Son koşu hatası'
+          // basar, Tümünü Çek adımı HATA sayılırdı. (Kısmi SKU arızası iş hatası mı: kullanıcı kararı, açık soru.)
+          isHatasi: null,
+        };
+      },
+    });
+    return arkaPlanYaniti(res, sonuc);
   });
 
   /** GET /api/mikro/cari-hareket/turler — bu firmanın GERÇEKTEN kullandığı

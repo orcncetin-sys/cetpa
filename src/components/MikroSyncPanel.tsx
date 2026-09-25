@@ -3,17 +3,18 @@ import {
   RefreshCw, CheckCircle2, XCircle, AlertCircle, Download,
   Package, Users, Activity, Clock, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { collection, doc, query, where, limit, orderBy, onSnapshot } from '../lib/dbClient';
+import { collection, query, where, limit, orderBy, onSnapshot } from '../lib/dbClient';
 import { db, auth } from '../firebase';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import {
-  getMikroStatus,
-  importStokFromMikro,
-  importCariFromMikro,
-  MikroStatus,
-  MikroImportResult,
-} from '../services/mikroService';
+import { getMikroStatus, mikroImportBaslat, MikroStatus } from '../services/mikroService';
+import { mikroIsAdi } from '../lib/mikroIsAdi';
+import { isAllowed } from '../lib/rbac';
+import { useAppStore } from '../store/appStore';
+import { isiBaslatVeBekle, IsZamanAsimiHatasi, BaskaIsKosuyorHatasi, type ArkaPlanIsi } from '../hooks/useArkaPlanIsi';
+import { tumunuCekBaslat, useTumunuCek, SirayiDurdurHatasi, type TumunuCekAdimi } from '../hooks/useTumunuCek';
+import ArkaPlanIsiKarti from './mikro/ArkaPlanIsiKarti';
+import { sayiMetni, sonluSayi } from '../utils/sayiMetni';
 import { getSyncQueueStats, clearDeadJobs } from '../services/syncRetryService';
 import { processMikroRetries } from '../services/mikroEvrak';
 import { paraYaz } from '../utils/currency';
@@ -37,12 +38,6 @@ interface SyncLogEntry {
   error: string | null;
   duration: number;
   timestamp?: { toDate: () => Date };
-}
-
-interface ImportState {
-  running: boolean;
-  result: MikroImportResult | null;
-  error: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -83,6 +78,11 @@ interface MikroSyncPanelProps {
 
 export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPanelProps) {
   const t = currentLanguage === 'tr';
+  // Senkron Geçmişi rol kapısı (rbac.ts: syncLog okuma yalnız Admin/Manager). Sunucu yetkisiz koleksiyona
+  // BOŞ init yollar, hata yollamaz → onSnapshot hata geri çağrısı hiç tetiklenmez ve ekran "Henüz kayıt yok"
+  // derdi. Yetkisizlik ≠ boşluk: metin ayrılır; KURAL gevşetilmez (kullanıcı kararı, açık soru 1).
+  const userRole = useAppStore(s => s.userRole);
+  const gecmisOkunabilir = isAllowed(userRole, 'syncLog', 'read');
 
   // Status
   const [status, setStatus] = useState<MikroStatus | null>(null);
@@ -97,72 +97,12 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   }, []);
   useEffect(() => { void refreshQueue(); }, [refreshQueue]);
 
-  // Import states
-  const [stokImport, setStokImport] = useState<ImportState>({ running: false, result: null, error: null });
-  const [cariImport, setCariImport] = useState<ImportState>({ running: false, result: null, error: null });
-
   // Pull-flow states
   const defaultPeriod = ayAnahtari(new Date()) ?? '';   // YEREL ay (toISOString UTC ayı verirdi: ayın 1'i 00:00-03:00 arası önceki ay) // YYYY-MM
   const [pullPeriod, setPullPeriod] = useState(defaultPeriod);
   const [bakiyePull, setBakiyePull] = useState<PullState>({ running: false, result: null, error: null });
   const [mizanPull,  setMizanPull]  = useState<PullState>({ running: false, result: null, error: null });
   const [kdvPull,    setKdvPull]    = useState<PullState>({ running: false, result: null, error: null });
-
-  // Stok miktar işi (jobs/stokMiktarImport canlı izlenir)
-  const [miktarJob, setMiktarJob] = useState<{
-    running?: boolean; processed?: number; updated?: number; failed?: number; total?: number; error?: string | null;
-    /** Depo dağılımı toplamı otoriter miktarla tutmayan SKU sayısı. */
-    depoUyusmazlik?: number;
-    /** Dağılımı YAZILAN ürün sayısı = kontrolün gerçek kapsamı.
-     *  Hareket kaydı olmayan ürün hiç kontrol edilmez, o yüzden "uyuşmazlık 0"
-     *  tek başına "hepsi doğrulandı" anlamına GELMEZ. */
-    depoDagilimliUrun?: number;
-    /** Açılış/devir stoğu hareket defterinde olmadığı için `__devir` kovası eklenen ürün. */
-    depoDevirli?: number;
-    uyusmazlikOrnek?: { sku: string; toplam: number; beklenen: number }[];
-  } | null>(null);
-  const [miktarStarting, setMiktarStarting] = useState(false);
-  /**
-   * "Başlatılamadı" hatası — `miktarJob`tan AYRI tutulur.
-   *
-   * Eskiden bu hata `setMiktarJob(prev => ({ ...prev, error }))` ile iş
-   * kaydının anlık görüntüsüne MERGE ediliyordu. `prev` ise GEÇMİŞ, BAŞARILI
-   * bir koşunun DB aynasıydı. Sonuç ekranda iki gerçeğin üst üste binmesiydi:
-   * kırmızı "Miktar çekme başlatılamadı" ile yeşil "2375/2375 · tamamlandı"
-   * aynı anda görünüyordu ve hangisinin geçerli olduğu belli değildi
-   * (2026-08-28 kullanıcı ekran görüntüsü).
-   *
-   * Bunlar iki AYRI olay: biri BU denemenin sonucu, diğeri ÖNCEKİ koşunun
-   * kaydı. Ayrı state + arayüzde ayrı etiket ile ayrıldılar.
-   */
-  const [miktarBaslatmaHatasi, setMiktarBaslatmaHatasi] = useState<string | null>(null);
-  useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'jobs', 'stokMiktarImport'), snap => {
-      setMiktarJob(snap.exists() ? snap.data() as typeof miktarJob : null);
-    }, () => {});
-    return () => unsub();
-  }, []);
-
-  async function handleStartMiktar() {
-    setMiktarStarting(true);
-    // Yeni deneme, eski denemenin hatasını SİLER. Aksi hâlde bir kez
-    // başarısız olan çağrının mesajı ekranda süresiz kalıyordu.
-    setMiktarBaslatmaHatasi(null);
-    try {
-      // body ZORUNLU: govdesiz POST'ta Content-Length olmadigi icin uretimdeki
-      // IIS istegi Node'a hic iletmeden `411 Length Required` ile reddediyor —
-      // dugme sessizce oluyordu (2026-08-18 canli olcum). Bu dosyadaki diger
-      // TUM POST'lar zaten `JSON.stringify({})` gonderiyor; yalniz burasi
-      // atlanmisti.
-      const r = await fetch('/api/mikro/import/stok-miktar', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({}) });
-      const d = await r.json() as { success: boolean; started?: boolean; alreadyRunning?: boolean; error?: string };
-      if (!d.success) throw new Error(d.error || 'Hata');
-    } catch (e) {
-      setMiktarBaslatmaHatasi(e instanceof Error ? e.message : String(e));
-    } finally {
-      setMiktarStarting(false);
-    }
-  }
 
   // ── Gelen e-Fatura Kabul / Ret ────────────────────────────────────────────
   interface GelenFatura { id: string; cha_Guid?: string; cha_evrakno_seri?: string; cha_evrakno_sira?: string; cha_tarihi?: string; cha_kod?: string; cha_meblag?: number; gibDurumu?: string; gibKabulAt?: unknown; gibRetAt?: unknown; gibRetAciklama?: string; }
@@ -256,26 +196,49 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
 
   useEffect(() => { checkStatus(); }, [checkStatus]);
 
-  // ── Import handlers ────────────────────────────────────────────────────────
-  async function handleImportStok() {
-    setStokImport({ running: true, result: null, error: null });
-    try {
-      const result = await importStokFromMikro();
-      setStokImport({ running: false, result, error: result.success ? null : (result.error || 'Bilinmeyen hata') });
-    } catch (e) {
-      setStokImport({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
-    }
-  }
+  // ── Arka plan import adımı (Tümünü Çek) ─────────────────────────────────────
+  // 14 import ucu (stok, cari, 12 SQL) + stok-miktar = 15 uç anında `{ started, job }` döner; adım işin
+  // `jobs/<isAdi>` BİTİŞİNİ bekler (K-C global kilit: beklemeyen döngü 2. adımdan itibaren hepsine
+  // `alreadyRunning` verirdi). İş adı TEK sözlükten.
+  // İnceleme bulgusu 2026-09-25: (1) SQL işi sayfa tavanına çarptıysa (`truncated`) iş 'başarılı' biter ama
+  // veri EKSİKTİR — özet eskiden onu 'tamam' sayıyordu; artık adım hatalı. (2) Bekleme tavanı dolarsa iş
+  // sunucuda hâlâ sürüyor ve kilidi tutuyor → sıra DURUR (SirayiDurdurHatasi), kalan adımlar koşturulmaz.
+  // (3) Aynısı 'başka bir iş çalışıyor' yanıtında (delta hakem 2026-09-25): elle başlatılmış bir iş koşarken
+  // sıra sürseydi senkron adımlar onunla EŞZAMANLI Mikro'ya giderdi.
+  const arkaPlanAdimi = (route: string): Promise<void> =>
+    isiBaslatVeBekle(mikroIsAdi(route), () => mikroImportBaslat(route), { tr: t }).then(
+      is => {
+        if (is.truncated !== true) return;
+        const sinir = typeof is.limit === 'number' && Number.isFinite(is.limit) ? is.limit : null;
+        throw new Error(t
+          ? `Sayfa tavanına çarptı — veri EKSİK${sinir !== null ? ` (yalnız ilk ${sinir.toLocaleString('tr-TR')} satır alındı)` : ''}`
+          : `Hit the page cap — data INCOMPLETE${sinir !== null ? ` (only the first ${sinir.toLocaleString('en-US')} rows)` : ''}`);
+      },
+      (e: unknown) => {
+        if (e instanceof IsZamanAsimiHatasi) {
+          throw new SirayiDurdurHatasi(t
+            ? `${e.message} — iş hâlâ sürüyor olabilir, sıra durduruldu`
+            : `${e.message} — the job may still be running, queue stopped`);
+        }
+        if (e instanceof BaskaIsKosuyorHatasi) {
+          throw new SirayiDurdurHatasi(t
+            ? `${e.message.replace(/ — bitince deneyin\.$/, '')} — sıra durduruldu; o iş bitince Tümünü Çek'i yeniden başlatın`
+            : `${e.message.replace(/ — try again when it finishes\.$/, '')} — queue stopped; restart Pull All when that job finishes`);
+        }
+        throw e;
+      },
+    );
 
-  async function handleImportCari() {
-    setCariImport({ running: true, result: null, error: null });
-    try {
-      const result = await importCariFromMikro();
-      setCariImport({ running: false, result, error: result.success ? null : (result.error || 'Bilinmeyen hata') });
-    } catch (e) {
-      setCariImport({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
-    }
-  }
+  // ── Senkron adım (Tümünü Çek) ────────────────────────────────────────────────
+  // Delta hakem 2026-09-25 (bulgu 10, yarım düzeltme): 7 senkron adım (4 senkron uç + bakiye/mizan/kdv)
+  // hatayı KENDİ kartına yazıp resolve ediyordu → Tümünü Çek onları hep 'tamam' sayıyordu (pull/personel
+  // HTML 502 → kart kırmızı, özet YEŞİL "22 adım tamam"). Handler'lar artık hata metnini DÖNDÜRÜR (kartın
+  // onClick'i yok sayar — reddedilmiş söz sızmaz); Tümünü Çek'e TEK yerden, bu sarmalayıcıyla bağlanır.
+  const senkronAdim = (calistir: () => Promise<string | null>) => async (): Promise<void> => {
+    const hata = await calistir();
+    if (hata !== null) throw new Error(hata);
+  };
+  const hataMetni = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   // ── Pull-flow handlers ─────────────────────────────────────────────────────
   async function authHeaders(): Promise<Record<string, string>> {
@@ -283,7 +246,8 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
   }
 
-  async function handlePullBakiye() {
+  /** Hata metni döner (başarıda null) — Tümünü Çek `senkronAdim` ile sayar; kart kendi state'inden okur. */
+  async function handlePullBakiye(): Promise<string | null> {
     setBakiyePull({ running: true, result: null, error: null });
     try {
       const r = await fetch('/api/mikro/pull/bakiye', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({}) });
@@ -293,12 +257,14 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
       setBakiyePull({ running: false, result: `${t ? 'Güncellendi' : 'Updated'}: ${d.updated ?? 0} / ${t ? 'Atlandı' : 'Skipped'}: ${d.skipped ?? 0}${d.note ? ` · ${d.note}` : ''}`, error: null });
+      return null;
     } catch (e) {
-      setBakiyePull({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
+      setBakiyePull({ running: false, result: null, error: hataMetni(e) });
+      return hataMetni(e);
     }
   }
 
-  async function handlePullMizan() {
+  async function handlePullMizan(): Promise<string | null> {
     setMizanPull({ running: true, result: null, error: null });
     try {
       const r = await fetch('/api/mikro/pull/mizan', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ period: pullPeriod }) });
@@ -309,12 +275,14 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
       setMizanPull({ running: false, result: `${t ? 'Dönem' : 'Period'}: ${d.period ?? pullPeriod} · ${d.rowCount ?? 0} ${t ? 'satır' : 'rows'}` + (d.note ? ` · ${d.note}` : ''), error: null });
+      return null;
     } catch (e) {
-      setMizanPull({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
+      setMizanPull({ running: false, result: null, error: hataMetni(e) });
+      return hataMetni(e);
     }
   }
 
-  async function handlePullKdv() {
+  async function handlePullKdv(): Promise<string | null> {
     setKdvPull({ running: true, result: null, error: null });
     try {
       const r = await fetch('/api/mikro/pull/kdv', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ period: pullPeriod }) });
@@ -325,14 +293,17 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
       setKdvPull({ running: false, result: `${t ? 'Matrah' : 'Base'}: ${paraYaz(d.kdvMatrahi, { ondalik: 0 })} · KDV: ${paraYaz(d.hesaplananKdv, { ondalik: 0 })}` + (d.note ? ` · ${d.note}` : ''), error: null });
+      return null;
     } catch (e) {
-      setKdvPull({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
+      setKdvPull({ running: false, result: null, error: hataMetni(e) });
+      return hataMetni(e);
     }
   }
 
-  // ── Diğer Mikro listeleri (genel import factory endpoint'leri) ─────────────
+  // ── Diğer Mikro listeleri — YALNIZ 4 senkron uç (faturadan-siparis, pull/personel, pull/uretim-receteleri,
+  // pull/cari-adres) buradan koşar; 12 SQL import ucu `arkaPlan` bayrağıyla ArkaPlanIsiKarti'na bağlı.
   const [extraPulls, setExtraPulls] = useState<Record<string, PullState>>({});
-  async function handleExtraPull(key: string, route: string) {
+  async function handleExtraPull(key: string, route: string): Promise<string | null> {
     setExtraPulls(p => ({ ...p, [key]: { running: true, result: null, error: null } }));
     try {
       const r = await fetch(route, { method: 'POST', headers: await authHeaders(), body: JSON.stringify({}) });
@@ -341,11 +312,13 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
       if (!d.success) throw new Error(d.error || 'Hata');
       setExtraPulls(p => ({ ...p, [key]: {
         running: false,
-        result: `${d.total ?? 0} ${t ? 'kayıt' : 'records'}${d.note ? ` · ${d.note}` : ''}`,
+        result: `${sayiMetni(d.total)} ${t ? 'kayıt' : 'records'}${d.note ? ` · ${d.note}` : ''}`,
         error: null,
       } }));
+      return null;
     } catch (e) {
-      setExtraPulls(p => ({ ...p, [key]: { running: false, result: null, error: e instanceof Error ? e.message : String(e) } }));
+      setExtraPulls(p => ({ ...p, [key]: { running: false, result: null, error: hataMetni(e) } }));
+      return hataMetni(e);
     }
   }
 
@@ -384,69 +357,69 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     }
   }
 
-  const [tumuRunning, setTumuRunning] = useState(false);
-  const [tumuAdim, setTumuAdim] = useState<string | null>(null);
-  const [tumuOzet, setTumuOzet] = useState<{ ok: number; hata: number; bitti: boolean } | null>(null);
+  // Sıra durumu MODÜL düzeyinde (src/hooks/useTumunuCek.ts, delta bulgu 9): panel kapanıp açılınca sürmekte
+  // olan sıra görünür, ikinci döngü başlamaz (senkron uçlar birincinin koşan işiyle eşzamanlı gitmez).
+  const tumu = useTumunuCek();
 
-  async function handleTumunuCek() {
-    if (tumuRunning) return;
-    setTumuRunning(true);
-    setTumuOzet(null);
-    let ok = 0, hata = 0;
-
+  function handleTumunuCek() {
     // Sıra bilinçli: önce kart/tanım verisi, sonra hareket verisi, en son
-    // arka planda koşan uzun iş (stok miktarı) — o bittiğinde diğerleri hazır olur.
-    const adimlar: { ad: string; calistir: () => Promise<void> }[] = [
-      { ad: t ? 'Stok kartları' : 'Stock cards',   calistir: handleImportStok },
-      { ad: t ? 'Cariler' : 'Customers',           calistir: handleImportCari },
-      ...extraPullDefs.map(d => ({ ad: d.title, calistir: () => handleExtraPull(d.key, d.route) })),
-      { ad: t ? 'Cari bakiyeler' : 'Balances',     calistir: handlePullBakiye },
-      { ad: t ? 'Mizan' : 'Trial balance',         calistir: handlePullMizan },
-      { ad: t ? 'KDV özeti' : 'VAT summary',       calistir: handlePullKdv },
-      // En son: ürün başına bir Mikro çağrısı yapar, arka planda sürer.
-      { ad: t ? 'Stok miktarları' : 'Stock qty',   calistir: handleStartMiktar },
+    // en uzun iş (stok miktarı) — o bittiğinde diğerleri hazır olur.
+    // Arka plan adımları (stok, cari, 12 SQL, miktar) `arkaPlanAdimi` ile BİTİŞİ BEKLER; elle başlatılmış
+    // BAŞKA bir iş koşuyorsa ya da bekleme tavanı dolarsa sıra DURUR (kalan adımlar koşturulmaz — senkron
+    // adımlar koşan işle eşzamanlı Mikro'ya gitmesin). Diğer hatalar özete yazılır, sıra sürer. Senkron
+    // adımlar `senkronAdim` ile: hata metinleri de özete girer (delta bulgu 10).
+    const adimlar: TumunuCekAdimi[] = [
+      { ad: t ? 'Stok kartları' : 'Stock cards',   calistir: () => arkaPlanAdimi('/api/mikro/import/stok') },
+      { ad: t ? 'Cariler' : 'Customers',           calistir: () => arkaPlanAdimi('/api/mikro/import/cari') },
+      ...extraPullDefs.map(d => ({
+        ad: d.title,
+        calistir: d.arkaPlan ? () => arkaPlanAdimi(d.route) : senkronAdim(() => handleExtraPull(d.key, d.route)),
+      })),
+      { ad: t ? 'Cari bakiyeler' : 'Balances',     calistir: senkronAdim(handlePullBakiye) },
+      { ad: t ? 'Mizan' : 'Trial balance',         calistir: senkronAdim(handlePullMizan) },
+      { ad: t ? 'KDV özeti' : 'VAT summary',       calistir: senkronAdim(handlePullKdv) },
+      // En son: ürün başına bir Mikro çağrısı yapar; artık bitişi beklenir.
+      { ad: t ? 'Stok miktarları' : 'Stock qty',   calistir: () => arkaPlanAdimi('/api/mikro/import/stok-miktar') },
     ];
-
-    for (const adim of adimlar) {
-      setTumuAdim(adim.ad);
-      try { await adim.calistir(); ok++; }
-      catch { hata++; }   // adım kendi hatasını zaten kartında gösteriyor
-    }
-
-    setTumuAdim(null);
-    setTumuRunning(false);
-    setTumuOzet({ ok, hata, bitti: true });
+    // Hata metni sıra İÇİNDE toplanır ve özette basılır. Arka plan kartının `baslatmaHatasi` state'i yalnız
+    // KENDİ düğmesiyle dolar — Tümünü Çek'in başlatma hatasını (423 bakım kilidi, 'Başka bir iş çalışıyor',
+    // HTTP 502, 403) kart GÖRMEZ. Eskiden özet kullanıcıyı karta yönlendiriyordu, kartta ise önceki koşunun
+    // yeşil "tamamlandı" satırı duruyordu (hakem bulgusu 2026-09-25; 2026-08-28'de düzeltilen "başlatılamadı
+    // ile önceki koşu karışıyor" arızasının aynısı). Zaten koşuyorsa `null` döner — ikinci döngü YOK.
+    // Oturum değişirse (çıkış / başka kullanıcı) sıra kalan adımları KOŞTURMAZ (inceleme bulgusu 2026-09-25).
+    void tumunuCekBaslat(adimlar, { kimlik: () => auth.currentUser?.uid ?? null });
   }
 
   // NOT: 'stok-miktar' bilerek BURADA YOK. Aynı uç yukarıdaki "Stok Miktarlarını
-  // Çek" kartında ilerleme çubuğuyla sunuluyor. Jenerik kart olarak da listelenince
-  // aynı iş iki düğmede görünüyordu ve jenerik olan YANILTICIYDI: uç arka plan işi
-  // başlatıp hemen döndüğü için kart işi "bitti" sanıyordu. (Zaten "Tümünü Çek"
-  // de bu girdiyi eleyip ilerleme çubuklu olanı çağırıyordu.)
-  const extraPullDefs: { key: string; route: string; title: string; desc: string }[] = [
-    { key: 'siparis',      route: '/api/mikro/import/siparis',        title: t ? 'Siparişler' : 'Orders',                desc: t ? 'Mikro\'daki satış siparişlerini çek.' : 'Pull sales orders from Mikro.' },
-    { key: 'fatura',       route: '/api/mikro/import/fatura-listesi', title: t ? 'Faturalar' : 'Invoices',               desc: t ? 'Mikro\'da kesilen faturaları çek.' : 'Pull invoices issued in Mikro.' },
+  // Çek" kartında sunuluyor; iki düğmede görünmesin. (Eskiden jenerik kart yanıltıcıydı:
+  // uç arka plan işi başlatıp hemen döndüğü için kart işi "bitti" sanıyordu — artık
+  // 12 SQL ucu da aynı ArkaPlanIsiKarti bileşeni: `arkaPlan` bayrağı → iş adı
+  // mikroIsAdi(route), ilerleme jobs/<isAdi>'dan; `key` iş adı DEĞİLDİR ('fatura' ≠ 'fatura-listesi').)
+  // 4 senkron uç (arkaPlan yok) PullCard + handleExtraPull ile kalır (bu tur dışı, 502 sınıfında).
+  const extraPullDefs: { key: string; route: string; title: string; desc: string; arkaPlan?: true }[] = [
+    { key: 'siparis',      route: '/api/mikro/import/siparis', arkaPlan: true,        title: t ? 'Siparişler' : 'Orders',                desc: t ? 'Mikro\'daki satış siparişlerini çek.' : 'Pull sales orders from Mikro.' },
+    { key: 'fatura',       route: '/api/mikro/import/fatura-listesi', arkaPlan: true, title: t ? 'Faturalar' : 'Invoices',               desc: t ? 'Mikro\'da kesilen faturaları çek.' : 'Pull invoices issued in Mikro.' },
     // 2026-09-01 kullanıcı isteği: "faturası kesilen her şeyin siparişi olmalı".
     // Önce Faturalar çekilmiş olmalı; idempotent (tekrar basmak kopya üretmez).
     { key: 'faturadan-siparis', route: '/api/mikro/import/faturadan-siparis', title: t ? 'Faturadan Sipariş Türet' : 'Derive Orders from Invoices', desc: t ? 'Her SATIŞ faturası için fatura tarihli bir Cetpa siparişi oluştur (kalemleriyle). Ciro kartları çift saymaz.' : 'Create a Cetpa order (with line items) for each sales invoice, dated by the invoice.' },
-    { key: 'cari-hareket', route: '/api/mikro/import/cari-hareket',   title: t ? 'Cari Hareketler (Tümü)' : 'Account Movements (All)', desc: t ? 'TÜM cari hareketleri çek (fatura + masraf + dekont + tahsilat + virman). Cari Ekstre bunu okur; fatura-olmayan hareketleri de gösterir.' : 'Pull ALL account movements (invoice + expense + note + collection + transfer). Feeds the Account Statement.' },
-    { key: 'stok-hareket', route: '/api/mikro/import/stok-hareket',   title: t ? 'Stok Hareketleri' : 'Stock Movements', desc: t ? 'Stok giriş/çıkış hareketlerini çek.' : 'Pull stock in/out movements.' },
-    { key: 'banka',        route: '/api/mikro/import/banka',          title: t ? 'Bankalar' : 'Banks',                   desc: t ? 'Banka hesap tanımlarını çek.' : 'Pull bank account definitions.' },
-    { key: 'kasa',         route: '/api/mikro/import/kasa',           title: t ? 'Kasalar' : 'Cash Registers',           desc: t ? 'Kasa tanımlarını çek.' : 'Pull cash register definitions.' },
-    { key: 'barkod',       route: '/api/mikro/import/barkod',         title: t ? 'Barkodlar' : 'Barcodes',               desc: t ? 'Barkodları çek ve ürünlere eşle.' : 'Pull barcodes and map to products.' },
+    { key: 'cari-hareket', route: '/api/mikro/import/cari-hareket', arkaPlan: true,   title: t ? 'Cari Hareketler (Tümü)' : 'Account Movements (All)', desc: t ? 'TÜM cari hareketleri çek (fatura + masraf + dekont + tahsilat + virman). Cari Ekstre bunu okur; fatura-olmayan hareketleri de gösterir.' : 'Pull ALL account movements (invoice + expense + note + collection + transfer). Feeds the Account Statement.' },
+    { key: 'stok-hareket', route: '/api/mikro/import/stok-hareket', arkaPlan: true,   title: t ? 'Stok Hareketleri' : 'Stock Movements', desc: t ? 'Stok giriş/çıkış hareketlerini çek.' : 'Pull stock in/out movements.' },
+    { key: 'banka',        route: '/api/mikro/import/banka', arkaPlan: true,          title: t ? 'Bankalar' : 'Banks',                   desc: t ? 'Banka hesap tanımlarını çek.' : 'Pull bank account definitions.' },
+    { key: 'kasa',         route: '/api/mikro/import/kasa', arkaPlan: true,           title: t ? 'Kasalar' : 'Cash Registers',           desc: t ? 'Kasa tanımlarını çek.' : 'Pull cash register definitions.' },
+    { key: 'barkod',       route: '/api/mikro/import/barkod', arkaPlan: true,         title: t ? 'Barkodlar' : 'Barcodes',               desc: t ? 'Barkodları çek ve ürünlere eşle.' : 'Pull barcodes and map to products.' },
     // Depo tanımları — uç 2026-07-31'de eklendi ama BU LİSTEYE eklenmemişti,
     // yani düğmesi hiç görünmedi ve kullanıcı "çekmemişsin" dedi. Haklıydı.
-    { key: 'depo',         route: '/api/mikro/import/depo',           title: t ? 'Depo Tanımları' : 'Warehouses',        desc: t ? 'Mikro depo tanımlarını çek (Depo Tanımları ekranını doldurur).' : 'Pull warehouse definitions from Mikro.' },
-    { key: 'odeme-plan',   route: '/api/mikro/import/odeme-plan',     title: t ? 'Ödeme Planları' : 'Payment Plans',     desc: t ? 'Ödeme planı tanımlarını çek.' : 'Pull payment plan definitions.' },
+    { key: 'depo',         route: '/api/mikro/import/depo', arkaPlan: true,           title: t ? 'Depo Tanımları' : 'Warehouses',        desc: t ? 'Mikro depo tanımlarını çek (Depo Tanımları ekranını doldurur).' : 'Pull warehouse definitions from Mikro.' },
+    { key: 'odeme-plan',   route: '/api/mikro/import/odeme-plan', arkaPlan: true,     title: t ? 'Ödeme Planları' : 'Payment Plans',     desc: t ? 'Ödeme planı tanımlarını çek.' : 'Pull payment plan definitions.' },
     // Bu iki uç 2026-08-11'e kadar SUNUCUDA VARDI ama hiçbir istemci çağırmıyordu
     // ve veriyi hiçbir koleksiyona yazmıyorlardı — İK ve Üretim ekranları bu
     // yüzden hep boştu. Artık employees / bom koleksiyonlarına yazıyorlar.
     // Fiyat DOĞRU kaynaktan: stok kartında `sto_satis_fiyat*` kolonu bu kurulumda
     // YOK (sema-kesif: "Invalid column name"), fiyatlar STOK_SATIS_FIYAT_LISTELERI'nde
     // ve 2075 üründe dolu. Ürünlerin "0 TL" görünmesinin nedeni buydu.
-    { key: 'fiyat',        route: '/api/mikro/import/fiyat',          title: t ? 'Satış Fiyatları' : 'Sale Prices',      desc: t ? 'Fiyat listesinden satış fiyatlarını çek ve ürünlere işle (0 TL sorununu çözer).' : 'Pull sale prices from the price list into products.' },
-    { key: 'demirbas',     route: '/api/mikro/import/demirbas',       title: t ? 'Demirbaşlar' : 'Fixed Assets',         desc: t ? 'Mikro demirbaş kartlarını çek (Sabit Kıymetler ekranını doldurur).' : 'Pull fixed asset records.' },
-    { key: 'maliyet-mrk',  route: '/api/mikro/import/maliyet-merkezi', title: t ? 'Maliyet Merkezleri' : 'Cost Centers', desc: t ? 'Mikro sorumluluk/maliyet merkezlerini çek.' : 'Pull responsibility/cost centers.' },
+    { key: 'fiyat',        route: '/api/mikro/import/fiyat', arkaPlan: true,          title: t ? 'Satış Fiyatları' : 'Sale Prices',      desc: t ? 'Fiyat listesinden satış fiyatlarını çek ve ürünlere işle (0 TL sorununu çözer).' : 'Pull sale prices from the price list into products.' },
+    { key: 'demirbas',     route: '/api/mikro/import/demirbas', arkaPlan: true,       title: t ? 'Demirbaşlar' : 'Fixed Assets',         desc: t ? 'Mikro demirbaş kartlarını çek (Sabit Kıymetler ekranını doldurur).' : 'Pull fixed asset records.' },
+    { key: 'maliyet-mrk',  route: '/api/mikro/import/maliyet-merkezi', arkaPlan: true, title: t ? 'Maliyet Merkezleri' : 'Cost Centers', desc: t ? 'Mikro sorumluluk/maliyet merkezlerini çek.' : 'Pull responsibility/cost centers.' },
     { key: 'personel',     route: '/api/mikro/pull/personel',         title: t ? 'Personel' : 'Employees',               desc: t ? 'Mikro personel kartlarını çek (İK ekranını doldurur).' : 'Pull personnel records into HR.' },
     { key: 'recete',       route: '/api/mikro/pull/uretim-receteleri', title: t ? 'Üretim Reçeteleri' : 'BOM Recipes',   desc: t ? 'Üretim reçetelerini (BOM) çek (Üretim ekranını doldurur).' : 'Pull production recipes (BOM).' },
     // 2026-08-17: yalnız PUSH vardı (leads→Mikro), Mikro'daki cari adresleri
@@ -576,148 +549,50 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
       {/* ── Import Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-        {/* Stok Import */}
-        <ImportCard
-          icon={<Package className="w-5 h-5 text-blue-600" />}
-          iconBg="bg-blue-50"
-          title={t ? 'Stok İçeri Al' : 'Import Stock'}
-          description={t
+        {/* Stok Import — arka plan işi; ilerleme/sonuç jobs/mikroImport-stok */}
+        <ArkaPlanIsiKarti
+          isAdi={mikroIsAdi('/api/mikro/import/stok')}
+          baslik={t ? 'Stok İçeri Al' : 'Import Stock'}
+          aciklama={t
             ? 'Mikro\'daki tüm stok kartlarını Cetpa envanterine aktar. Mevcut ürünler güncellenir, yeniler oluşturulur.'
             : 'Import all Mikro stock cards into Cetpa inventory. Existing products updated, new ones created.'}
-          buttonLabel={t ? 'Stokları İçeri Al' : 'Import All Stock'}
-          buttonColor="bg-blue-600 hover:bg-blue-700"
-          running={stokImport.running}
-          result={stokImport.result}
-          error={stokImport.error}
+          dugmeMetni={t ? 'Stokları İçeri Al' : 'Import All Stock'}
+          gorunum={{ icon: <Package className="w-5 h-5 text-blue-600" />, iconBg: 'bg-blue-50', buttonColor: 'bg-blue-600 hover:bg-blue-700' }}
           disabled={!status?.connected}
-          onImport={handleImportStok}
+          baslat={() => mikroImportBaslat('/api/mikro/import/stok')}
+          ekOzet={is => fiyatRehberi(is, t)}
           lang={currentLanguage}
         />
 
-        {/* Cari Import */}
-        <ImportCard
-          icon={<Users className="w-5 h-5 text-purple-600" />}
-          iconBg="bg-purple-50"
-          title={t ? 'Cari İçeri Al' : 'Import Customers'}
-          description={t
+        {/* Cari Import — arka plan işi; jobs/mikroImport-cari */}
+        <ArkaPlanIsiKarti
+          isAdi={mikroIsAdi('/api/mikro/import/cari')}
+          baslik={t ? 'Cari İçeri Al' : 'Import Customers'}
+          aciklama={t
             ? 'Mikro\'daki tüm cari hesapları (müşteri & tedarikçi) Cetpa\'ya aktar. Mevcut kayıtlar güncellenir.'
             : 'Import all Mikro cari accounts (customers & suppliers) into Cetpa. Existing records updated.'}
-          buttonLabel={t ? 'Carileri İçeri Al' : 'Import All Customers'}
-          buttonColor="bg-purple-600 hover:bg-purple-700"
-          running={cariImport.running}
-          result={cariImport.result}
-          error={cariImport.error}
+          dugmeMetni={t ? 'Carileri İçeri Al' : 'Import All Customers'}
+          gorunum={{ icon: <Users className="w-5 h-5 text-purple-600" />, iconBg: 'bg-purple-50', buttonColor: 'bg-purple-600 hover:bg-purple-700' }}
           disabled={!status?.connected}
-          onImport={handleImportCari}
+          baslat={() => mikroImportBaslat('/api/mikro/import/cari')}
           lang={currentLanguage}
         />
       </div>
 
       {/* ── Stok Miktarları (GenelAmacliMaliyetListesiV2 — SKU başına) ── */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h4 className="font-bold text-sm text-gray-900">{t ? 'Stok Miktarlarını Çek' : 'Pull Stock Quantities'}</h4>
-            <p className="text-[11px] text-gray-400 mt-0.5">
-              {t
-                ? 'Mikro stok listesi miktar içermez — miktarlar SKU başına maliyet servisinden çekilir (1700+ ürün ≈ 3-6 dk, arka planda çalışır). Birim maliyet de güncellenir.'
-                : 'Mikro stock list has no quantities — pulled per-SKU from the cost service (runs in background). Unit cost updated too.'}
-            </p>
-          </div>
-          <button
-            onClick={handleStartMiktar}
-            disabled={miktarStarting || miktarJob?.running || !status?.connected}
-            className="apple-button-primary text-xs px-4 py-2 disabled:opacity-50"
-            style={{ background: '#1a3a5c' }}
-          >
-            {miktarJob?.running ? (t ? 'Çalışıyor…' : 'Running…') : miktarStarting ? '…' : (t ? 'Miktarları Çek' : 'Pull Quantities')}
-          </button>
-        </div>
-        {/* Hata-only durum ESKIDEN HIC CIZILMIYORDU: kosul yalniz
-            running||processed'e bakiyordu, dolayisiyla istek basarisiz
-            oldugunda kullaniciya hicbir sey gosterilmiyordu (dugme "bozuk"
-            goruntusunun ikinci yarisi). */}
-        {/* BU denemenin sonucu. `miktarJob.error` (ÖNCEKİ koşunun sunucu
-            hatası) ile karıştırılmaz — ikisi ayrı olaydır. */}
-        {miktarBaslatmaHatasi && (
-          <p className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
-            {t ? 'Miktar çekme başlatılamadı: ' : 'Could not start quantity pull: '}
-            <b>{miktarBaslatmaHatasi}</b>
-          </p>
-        )}
-        {miktarJob && (miktarJob.running || miktarJob.processed) ? (
-          <div className="space-y-1.5">
-            {/* Başlatma başarısız olduysa aşağıdaki ilerleme BU denemeye ait
-                DEĞİL — geçmiş bir koşunun kaydıdır. Etiketlenmezse kullanıcı
-                "başlatılamadı" ile "2375/2375 tamamlandı"yı aynı olay sanıyor. */}
-            {miktarBaslatmaHatasi && !miktarJob.running && (
-              <p className="text-[11px] text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
-                {t
-                  ? 'Aşağıdaki sonuç ÖNCEKİ bir koşuya aittir; bu deneme başlatılamadı.'
-                  : 'The result below is from a PREVIOUS run; this attempt did not start.'}
-              </p>
-            )}
-            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className={`h-full transition-all duration-500 ${miktarJob.running ? 'bg-[#1a3a5c]' : 'bg-emerald-500'}`}
-                style={{ width: `${miktarJob.total ? Math.round(((miktarJob.processed ?? 0) / miktarJob.total) * 100) : 0}%` }}
-              />
-            </div>
-            <p className="text-[11px] text-gray-500">
-              {miktarJob.processed ?? 0}/{miktarJob.total ?? '?'} {t ? 'işlendi' : 'processed'} · ✓ {miktarJob.updated ?? 0} {t ? 'güncellendi' : 'updated'}
-              {(miktarJob.failed ?? 0) > 0 && <span className="text-amber-600"> · ⚠ {miktarJob.failed} {t ? 'hata' : 'failed'}</span>}
-              {!miktarJob.running && <span className="text-emerald-600 font-semibold"> · {t ? 'tamamlandı' : 'done'}</span>}
-            </p>
-            {/* Depo dağılımı mutabakatı: dağılımın toplamı otoriter miktarla tutuyor mu?
-                Bu, per-depo SQL semantiğinin (sth_tip 0=giriş/1=çıkış) TÜM katalogdaki
-                kanıtıdır — örnek satıra bakmak yerine her SKU'da kontrol edilir. */}
-            {!miktarJob.running && miktarJob.depoDagilimliUrun != null && (
-              <div className="text-[11px] rounded-xl px-3 py-2 space-y-1 bg-gray-50 text-gray-700">
-                {/* KAPSAM önce yazılır: hareket kaydı olmayan ürün hiç kontrol
-                    edilmez, o yüzden "uyuşmazlık 0" tek başına yanıltıcıdır. */}
-                <p>
-                  📦 {t ? 'Depo dağılımı yazılan ürün' : 'Products with breakdown'}:{' '}
-                  <b>{miktarJob.depoDagilimliUrun}</b>
-                  <span className="text-gray-400"> / {miktarJob.total ?? '?'}</span>
-                  <span className="text-gray-400">
-                    {' '}— {t ? 'kalanların stok hareketi yok, kontrol edilmedi'
-                            : 'the rest have no stock movements'}
-                  </span>
-                </p>
-                {(miktarJob.depoDevirli ?? 0) > 0 && (
-                  <p className="text-blue-700">
-                    ↪ {miktarJob.depoDevirli} {t ? 'üründe açılış/devir stoğu hareket defterinde yok — "Devir (depo bilinmiyor)" olarak ayrıldı.'
-                                                 : 'products have opening stock outside the ledger — shown as "Devir".'}
-                  </p>
-                )}
-                {(miktarJob.depoUyusmazlik ?? 0) > 0 && (
-                  <div className="text-amber-800">
-                    <p className="font-semibold">
-                      ⚠ {miktarJob.depoUyusmazlik} {t ? 'üründe defter gerçek stoktan FAZLA — dağılım yazılmadı.'
-                                                       : 'products: ledger exceeds real stock — breakdown not written.'}
-                    </p>
-                    {miktarJob.uyusmazlikOrnek?.slice(0, 3).map(o => (
-                      <p key={o.sku} className="font-mono text-[10px]">
-                        {o.sku}: {t ? 'defter' : 'ledger'} {o.toplam} ≠ Mikro {o.beklenen}
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ) : null}
-        {/* ÖNCEKİ koşunun SUNUCU hatası (iş kaydından). Yukarıdaki
-            "başlatılamadı" kutusundan farklıdır: o bu denemeye, bu ise
-            kaydedilmiş son koşuya aittir. Eskiden aynı mesaj iki ayrı blokta
-            birden çiziliyordu (biri 2026-06-11, diğeri 2026-08-18 eklenmiş,
-            eskisi silinmemişti) — kullanıcı aynı uyarıyı iki kez görüyordu. */}
-        {miktarJob?.error && !miktarJob.running && (
-          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
-            {t ? '⚠ Son koşu hatası: ' : '⚠ Last run error: '}{miktarJob.error}
-          </p>
-        )}
-      </div>
+      {/* jobs/stokMiktarImport — sözlük istisnası (mikroIsAdi), literal yazılmaz; doküman canlıda VAR. */}
+      <ArkaPlanIsiKarti
+        isAdi={mikroIsAdi('/api/mikro/import/stok-miktar')}
+        baslik={t ? 'Stok Miktarlarını Çek' : 'Pull Stock Quantities'}
+        aciklama={t
+          ? 'Mikro stok listesi miktar içermez — miktarlar SKU başına maliyet servisinden çekilir (1700+ ürün ≈ 3-6 dk, arka planda çalışır). Birim maliyet de güncellenir.'
+          : 'Mikro stock list has no quantities — pulled per-SKU from the cost service (runs in background). Unit cost updated too.'}
+        dugmeMetni={t ? 'Miktarları Çek' : 'Pull Quantities'}
+        disabled={!status?.connected}
+        baslat={() => mikroImportBaslat('/api/mikro/import/stok-miktar')}
+        ekOzet={is => depoDagilimi(is, t)}
+        lang={currentLanguage}
+      />
 
       {/* ── Gelen e-Fatura GİB Onay / Red ── */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
@@ -890,18 +765,18 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
                 yükte çökebiliyor). Bir adım patlarsa kalanlar devam eder. */}
             <button
               onClick={handleTumunuCek}
-              disabled={tumuRunning}
+              disabled={tumu.calisiyor}
               title={t ? 'Tüm Mikro verilerini sırayla çeker' : 'Pulls all Mikro data sequentially'}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1a3a5c] text-white text-xs font-semibold hover:bg-[#16324f] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${tumuRunning ? 'animate-spin' : ''}`} />
-              {tumuRunning
-                ? (t ? `Çekiliyor: ${tumuAdim ?? '...'}` : `Pulling: ${tumuAdim ?? '...'}`)
+              <RefreshCw className={`w-3.5 h-3.5 ${tumu.calisiyor ? 'animate-spin' : ''}`} />
+              {tumu.calisiyor
+                ? (t ? `Çekiliyor: ${tumu.adim ?? '...'}` : `Pulling: ${tumu.adim ?? '...'}`)
                 : (t ? 'Tümünü Çek' : 'Pull All')}
             </button>
             <button
               onClick={handleHamSatirTemizle}
-              disabled={temizlikRunning || tumuRunning}
+              disabled={temizlikRunning || tumu.calisiyor}
               title="Banka/Kasa/Depo koleksiyonlarına yanlışlıkla yazılmış ham Mikro satırlarını siler (elle girilenlere dokunmaz)"
               className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 text-xs font-semibold hover:bg-amber-100 disabled:opacity-60 transition-colors"
             >
@@ -915,11 +790,34 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             {temizlikSonuc}
           </div>
         )}
-        {tumuOzet?.bitti && (
-          <div className={`mb-4 px-3 py-2 rounded-xl text-xs font-medium ${tumuOzet.hata > 0 ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-700'}`}>
+        {tumu.ozet && (
+          <div
+            role="status"
+            aria-label={t ? 'Tümünü Çek özeti' : 'Pull All summary'}
+            className={`mb-4 px-3 py-2 rounded-xl text-xs font-medium ${tumu.ozet.hatalar.length > 0 || tumu.ozet.durduruldu ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-700'}`}
+          >
             {t
-              ? `Bitti — ${tumuOzet.ok} adım tamam${tumuOzet.hata > 0 ? `, ${tumuOzet.hata} adım hatalı (ayrıntı ilgili kartta)` : ''}. Stok miktarları arka planda sürüyor olabilir.`
-              : `Done — ${tumuOzet.ok} steps OK${tumuOzet.hata > 0 ? `, ${tumuOzet.hata} failed (see the card)` : ''}. Stock quantities may still be running.`}
+              ? `Bitti — ${tumu.ozet.ok} adım tamam${tumu.ozet.hatalar.length > 0 ? `, ${tumu.ozet.hatalar.length} adım hatalı:` : '.'}`
+              : `Done — ${tumu.ozet.ok} steps OK${tumu.ozet.hatalar.length > 0 ? `, ${tumu.ozet.hatalar.length} failed:` : '.'}`}
+            {/* Arka plan adımının başlatma hatası kartta GÖRÜNMEZ (kart yalnız kendi düğmesinin hatasını tutar) —
+                metin burada. Senkron adım hatası hem kartında hem burada (delta bulgu 10). */}
+            {tumu.ozet.hatalar.length > 0 && (
+              <ul className="mt-1 pl-4 list-disc font-normal space-y-0.5">
+                {tumu.ozet.hatalar.map((h, i) => <li key={`${i}-${h.ad}`}><b>{h.ad}</b>: {h.metin}</li>)}
+              </ul>
+            )}
+            {tumu.ozet.durduruldu && (
+              <p className="mt-1">
+                {tumu.ozet.durduruldu.sebep === 'oturum'
+                  ? (t ? 'Oturum değişti — sıra durduruldu.' : 'Session changed — queue stopped.')
+                  : (t ? 'Sıra durduruldu.' : 'Queue stopped.')}
+                {tumu.ozet.durduruldu.kalan.length > 0 && (
+                  <span className="font-normal">
+                    {t ? ' Koşturulmayan adımlar: ' : ' Steps not run: '}{tumu.ozet.durduruldu.kalan.join(', ')}
+                  </span>
+                )}
+              </p>
+            )}
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -946,7 +844,19 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
         {/* Diğer Mikro listeleri (genel import endpoint'leri) */}
         <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mt-5 mb-3">{t ? 'Diğer Mikro Listeleri' : 'Other Mikro Lists'}</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {extraPullDefs.map(def => (
+          {extraPullDefs.map(def => def.arkaPlan ? (
+            <ArkaPlanIsiKarti
+              key={def.key}
+              isAdi={mikroIsAdi(def.route)}
+              baslik={def.title}
+              aciklama={def.desc}
+              dugmeMetni={t ? 'Çek' : 'Pull'}
+              gorunum={{ icon: <Package className="w-4 h-4 text-[#1a3a5c]" /> }}
+              disabled={!status?.configured}
+              baslat={() => mikroImportBaslat(def.route)}
+              lang={currentLanguage}
+            />
+          ) : (
             <PullCard
               key={def.key}
               icon={<Package className="w-4 h-4 text-[#1a3a5c]" />}
@@ -972,7 +882,7 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
             <span className="text-sm font-bold text-gray-700">
               {t ? 'Senkronizasyon Geçmişi' : 'Sync History'}
               {syncLog.length > 0 && (
-                <span className="ml-2 text-[11px] font-medium text-gray-400">({syncLog.length} kayıt)</span>
+                <span className="ml-2 text-[11px] font-medium text-gray-400">({syncLog.length} {t ? 'kayıt · son 30' : 'records · last 30'})</span>
               )}
             </span>
           </div>
@@ -985,6 +895,14 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
               <p className="text-center text-sm text-red-600 py-8">
                 {t ? 'Senkronizasyon geçmişi okunamadı: ' : 'Could not read sync history: '}
                 <b>{syncLogError}</b>
+              </p>
+            ) : !gecmisOkunabilir && syncLog.length === 0 ? (
+              // 'Göremez' notu yalnız liste BOŞKEN: rol istemci TAHMİNİ (appStore varsayılanı Sales; profil
+              // senkronu düşerse güncellenmez) — sunucu kayıt gönderdiyse onlar gizlenmez (hakem 2026-09-25).
+              <p className="text-center text-sm text-amber-700 bg-amber-50 py-8 px-4">
+                {t
+                  ? `Bu rol (${userRole}) senkronizasyon geçmişini göremez — yalnız Admin/Manager okur (rbac.ts). Kayıtlar tutulmaya devam ediyor.`
+                  : `This role (${userRole}) cannot read sync history — Admin/Manager only. Records are still being written.`}
               </p>
             ) : syncLog.length === 0 ? (
               <p className="text-center text-sm text-gray-400 py-8">
@@ -1062,128 +980,82 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   );
 }
 
-// ── ImportCard sub-component ──────────────────────────────────────────────────
+// ── Kart ekOzet yardımcıları (iş-özel; ArkaPlanIsiKarti genel özeti basar) ────
 
-interface ImportCardProps {
-  icon: React.ReactNode;
-  iconBg: string;
-  title: string;
-  description: string;
-  buttonLabel: string;
-  buttonColor: string;
-  running: boolean;
-  result: MikroImportResult | null;
-  error: string | null;
-  disabled: boolean;
-  onImport: () => void;
-  lang: string;
+/** Nesne mi (null değil) — iş dokümanındaki örnek satırlarını cast'siz daraltmak için. */
+const kayitMi = (o: unknown): o is Record<string, unknown> => typeof o === 'object' && o !== null;
+
+/** Stok kartına özel: `fiyatliUrun === 0` rehberi. Uyarı DOĞRU ama eskiden ÇIKMAZ SOKAKTI: Mikro stok
+ *  kartlarında fiyat zaten hiçbir zaman olmuyor, fiyatlar AYRI bir kaynaktan ("Satış Fiyatları" kartı)
+ *  geliyor. Kullanıcı ne yapacağını bilmeden "0 TL" uyarısıyla kalıyordu; çözüm doğrudan yazılır. */
+function fiyatRehberi(is: ArkaPlanIsi, t: boolean): React.ReactNode {
+  if (is.running || is.fiyatliUrun !== 0) return null;
+  return (
+    <div className="text-[11px] text-amber-800 bg-amber-50 rounded-lg px-2 py-1.5">
+      ⚠ {t
+        ? 'Mikro stok kartlarında fiyat alanı yok — bu normaldir. Fiyatlar ayrı gelir: aşağıdaki '
+        : 'Mikro stock cards carry no price field — this is normal. Prices come separately: run '}
+      <b>{t ? '"Satış Fiyatları → Çek"' : '"Sales Prices → Pull"'}</b>
+      {t
+        ? ' adımını çalıştırın, ürünler "0 TL" görünmekten çıkar.'
+        : ' below and the "0 TL" display resolves.'}
+    </div>
+  );
 }
 
-function ImportCard({
-  icon, iconBg, title, description, buttonLabel, buttonColor,
-  running, result, error, disabled, onImport, lang,
-}: ImportCardProps) {
-  const t = lang === 'tr';
-
+/** Miktar kartına özel: `failed` + depo dağılımı mutabakatı (dağılımın toplamı otoriter miktarla tutuyor mu?
+ *  Bu, per-depo SQL semantiğinin (sth_tip 0=giriş/1=çıkış) TÜM katalogdaki kanıtıdır — örnek satıra bakmak
+ *  yerine her SKU'da kontrol edilir). Alanlar: depoUyusmazlik = dağılım toplamı otoriter miktarla tutmayan
+ *  SKU; depoDagilimliUrun = dağılımı YAZILAN ürün = kontrolün gerçek kapsamı (hareket kaydı olmayan ürün hiç
+ *  kontrol edilmez, o yüzden "uyuşmazlık 0" tek başına "hepsi doğrulandı" anlamına GELMEZ); depoDevirli =
+ *  açılış/devir stoğu hareket defterinde olmadığı için `__devir` kovası eklenen ürün. Sayılar `sonluSayi` ile
+ *  (eski sıfır varsayılanı sahte kesinlikti). */
+function depoDagilimi(is: ArkaPlanIsi, t: boolean): React.ReactNode {
+  const failed = sonluSayi(is.failed);
+  const depoDagilimliUrun = sonluSayi(is.depoDagilimliUrun);
+  const depoDevirli = sonluSayi(is.depoDevirli);
+  const depoUyusmazlik = sonluSayi(is.depoUyusmazlik);
+  const ornekler = Array.isArray(is.uyusmazlikOrnek) ? is.uyusmazlikOrnek.slice(0, 3).filter(kayitMi) : [];
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 flex flex-col">
-      <div className="flex items-center gap-3">
-        <div className={`w-9 h-9 ${iconBg} rounded-xl flex items-center justify-center`}>
-          {icon}
-        </div>
-        <h4 className="font-bold text-sm text-gray-900">{title}</h4>
-      </div>
-
-      <p className="text-[11px] text-gray-400 leading-relaxed flex-1">{description}</p>
-
-      {/* Result banner */}
-      {result && !running && (
-        <div className={`rounded-xl p-3 text-xs space-y-1 ${result.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-          {result.success ? (
-            <>
-              <div className="flex items-center gap-1 font-bold">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                {t ? 'İçeri aktarma tamamlandı' : 'Import complete'}
-              </div>
-              <div className="flex gap-4 text-[11px] mt-1">
-                <span>🆕 {t ? 'Oluşturuldu' : 'Created'}: <b>{result.created}</b></span>
-                <span>🔄 {t ? 'Güncellendi' : 'Updated'}: <b>{result.updated}</b></span>
-                {result.errors > 0 && <span>⚠️ {t ? 'Hata' : 'Errors'}: <b>{result.errors}</b></span>}
-                {result.duration && <span>⏱ {Math.round(result.duration / 1000)}s</span>}
-              </div>
-              {/* Fiyat kapsamı: import "2367 güncellendi" deyip fiyatların hiç
-                  gelmediğini gizliyordu (ekranda 0 TL olarak fark edildi). */}
-              {result.fiyatliUrun != null && (
-                result.fiyatliUrun === 0 ? (
-                  <div className="text-[11px] text-amber-800 bg-amber-50 rounded-lg px-2 py-1.5 mt-1">
-                    {/* Uyari DOGRU ama eskiden CIKMAZ SOKAKTI: Mikro stok
-                        kartlarinda fiyat zaten hicbir zaman olmuyor, fiyatlar
-                        AYRI bir kaynaktan ("Satis Fiyatlari" karti) geliyor.
-                        Kullanici ne yapacagini bilmeden "0 TL" uyarisiyla
-                        kaliyordu; simdi cozum dogrudan yaziyor. */}
-                    ⚠ {t
-                      ? 'Mikro stok kartlarında fiyat alanı yok — bu normaldir. Fiyatlar ayrı gelir: aşağıdaki '
-                      : 'Mikro stock cards carry no price field — this is normal. Prices come separately: run '}
-                    <b>{t ? '"Satış Fiyatları → Çek"' : '"Sales Prices → Pull"'}</b>
-                    {t
-                      ? ' adımını çalıştırın, ürünler "0 TL" görünmekten çıkar.'
-                      : ' below and the "0 TL" display resolves.'}
-                  </div>
-                ) : (
-                  <div className="text-[11px] mt-1">
-                    💰 {t ? 'Fiyatlı ürün' : 'With price'}: <b>{result.fiyatliUrun}</b>
-                    <span className="text-gray-400"> / {result.created + result.updated}</span>
-                  </div>
-                )
-              )}
-              {/* Bilinmeyen alan sayacı / okuma arızası — sunucu 'note' olarak döner. */}
-              {result.note && (
-                <div className={`text-[11px] mt-1 ${result.note.startsWith('UYARI:') ? 'text-amber-800 bg-amber-50 rounded-lg px-2 py-1.5' : 'text-gray-500'}`}>
-                  {result.note}
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="flex items-center gap-1">
-              <XCircle className="w-3.5 h-3.5" />
-              <span className="font-bold">{t ? 'Hata: ' : 'Error: '}</span>
-              {error}
+    <>
+      {failed !== null && failed > 0 && (
+        <p className="text-[11px] text-amber-600">⚠ {failed} {t ? 'SKU okunamadı' : 'SKUs failed'}</p>
+      )}
+      {!is.running && depoDagilimliUrun !== null && (
+        <div className="text-[11px] rounded-xl px-3 py-2 space-y-1 bg-gray-50 text-gray-700">
+          {/* KAPSAM önce yazılır: hareket kaydı olmayan ürün hiç kontrol edilmez, o yüzden
+              "uyuşmazlık 0" tek başına yanıltıcıdır. */}
+          <p>
+            📦 {t ? 'Depo dağılımı yazılan ürün' : 'Products with breakdown'}:{' '}
+            <b>{depoDagilimliUrun}</b>
+            <span className="text-gray-400"> / {sayiMetni(is.total)}</span>
+            <span className="text-gray-400">
+              {' '}— {t ? 'kalanların stok hareketi yok, kontrol edilmedi'
+                      : 'the rest have no stock movements'}
+            </span>
+          </p>
+          {depoDevirli !== null && depoDevirli > 0 && (
+            <p className="text-blue-700">
+              ↪ {depoDevirli} {t ? 'üründe açılış/devir stoğu hareket defterinde yok — "Devir (depo bilinmiyor)" olarak ayrıldı.'
+                                 : 'products have opening stock outside the ledger — shown as "Devir".'}
+            </p>
+          )}
+          {depoUyusmazlik !== null && depoUyusmazlik > 0 && (
+            <div className="text-amber-800">
+              <p className="font-semibold">
+                ⚠ {depoUyusmazlik} {t ? 'üründe defter gerçek stoktan FAZLA — dağılım yazılmadı.'
+                                       : 'products: ledger exceeds real stock — breakdown not written.'}
+              </p>
+              {ornekler.map(o => (
+                <p key={String(o.sku)} className="font-mono text-[10px]">
+                  {String(o.sku)}: {t ? 'defter' : 'ledger'} {sayiMetni(o.toplam)} ≠ Mikro {sayiMetni(o.beklenen)}
+                </p>
+              ))}
             </div>
           )}
         </div>
       )}
-
-      {error && !result && !running && (
-        <div className="rounded-xl p-3 bg-red-50 text-red-600 text-xs flex items-center gap-1">
-          <XCircle className="w-3.5 h-3.5 flex-shrink-0" />
-          {error}
-        </div>
-      )}
-
-      <button
-        onClick={onImport}
-        disabled={running || disabled}
-        className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-white text-sm font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${buttonColor}`}
-      >
-        {running ? (
-          <>
-            <RefreshCw className="w-4 h-4 animate-spin" />
-            {t ? 'Aktarılıyor...' : 'Importing...'}
-          </>
-        ) : (
-          <>
-            <Download className="w-4 h-4" />
-            {buttonLabel}
-          </>
-        )}
-      </button>
-
-      {disabled && !running && (
-        <p className="text-[10px] text-center text-gray-400">
-          {t ? 'Mikro bağlantısı gerekli' : 'Mikro connection required'}
-        </p>
-      )}
-    </div>
+    </>
   );
 }
 

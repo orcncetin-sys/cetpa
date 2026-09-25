@@ -65,7 +65,7 @@ export async function eBelgeIndir(istek: EBelgeIstek, tr: boolean): Promise<stri
       ? { uuid: istek.uuid, tur: istek.belgeTuru ?? 'e-fatura', yon: istek.yon }
       : (istek.uuid ? { uuid: istek.uuid } : { faturaGuid: istek.faturaGuid });
 
-    // authFetch ŞART: /api/mikro/ebelge/* requireAuth arkasında. Düz fetch +
+    // authFetch ŞART: /api/mikro/ebelge/… uçları requireAuth arkasında. Düz fetch +
     // credentials:'same-origin' yetmiyor — oturum çerezle değil Firebase ID
     // token'ıyla taşınıyor, o yüzden "Missing Authorization header" dönüyordu.
     const r = await authFetch(url, {

@@ -107,10 +107,15 @@ function BucketBar({ buckets, lang }: { buckets: AgingBuckets; lang: string }) {
  *  Yalnız kanıtlı türler (Mikro V17 Postman DekontKaydet/FaturaKaydet/Tahsilat
  *  örneklerinden): 63 Fatura, 31 Borç Dekontu, 33 Virman, 34 Tahsilat/Tediye,
  *  57 Cari Virman, 58 Banka Virman, 100 Cari Borç Dekontu, 110 Kasa Virman.
+ *  29 Açılış fişi — Mikro'nun KENDİ cari ekstresi bu tipi böyle basıyor (2026-09-24,
+ *  kullanıcının yapıştırdığı Mikro çıktısı; ekran "Hesap Açılış Fişi (043400)").
+ *  LUCA dekontları (572 satır) bu tiptir; eskiden "Hareket (tip 29)" görünüyordu.
+ *  TR-only (kardeşleri gibi; EN karşılığı Mikro'nun İngilizce arayüzünden ÖLÇÜLMEDİ, uydurulmaz).
  *  Bilinmeyen tip ham numarayla gösterilir ("Hareket (tip N)") — uydurmak yok. */
-function hareketTipiEtiket(chaEvrakTip: unknown): string {
+export function hareketTipiEtiket(chaEvrakTip: unknown): string {
   const n = Number(chaEvrakTip);
   switch (n) {
+    case 29:  return 'Açılış fişi';
     case 63:  return 'Fatura';
     case 31:  return 'Borç Dekontu';
     case 33:  return 'Virman Dekontu';

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getMikroStatus, syncInventoryItemToMikro, syncLeadToMikro } from './mikroService';
+import { getMikroStatus, syncInventoryItemToMikro, syncLeadToMikro, mikroImportBaslat } from './mikroService';
 
 // Mock firebase auth
 vi.mock('../firebase', () => ({
@@ -119,5 +119,30 @@ describe('syncLeadToMikro', () => {
     const result = await syncLeadToMikro(mockLead as never, 'lead-1');
     expect(result.success).toBe(false);
     expect(result.error).toBe('Cari zaten mevcut');
+  });
+});
+
+// Arka plan import başlatma (mikro-import-arkaplan, 2026-09-24): 14 uç `{ success, started, job }` döner;
+// 12 SQL sarmalayıcısı YAZILMAZ, panel rotayı geçer. Rota sözlükte yoksa (mikroIsAdi throw) reject —
+// yanlış rotayla arka plan kartı kurulmasın.
+describe('mikroImportBaslat', () => {
+  it('rotaya gövdeli POST ({}) atar, yanıtı olduğu gibi geçirir', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ success: true, started: true, job: 'mikroImport-cari-hareket' }) });
+    const y = await mikroImportBaslat('/api/mikro/import/cari-hareket');
+    expect(y).toEqual({ success: true, started: true, job: 'mikroImport-cari-hareket' });
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('/api/mikro/import/cari-hareket');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe('{}');
+  });
+
+  it('502 ham HTML gövdesi (json reject) → { success:false, error:"HTTP 502" } — teşhis #1 kanıt yolu DEĞİŞMEZ', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 502, json: () => Promise.reject(new SyntaxError('Unexpected token <')) });
+    await expect(mikroImportBaslat('/api/mikro/import/stok')).resolves.toEqual({ success: false, error: 'HTTP 502' });
+  });
+
+  it('import rotası olmayan yol (pull/personel) → reject, fetch ÇAĞRILMAZ', async () => {
+    await expect(mikroImportBaslat('/api/mikro/pull/personel')).rejects.toThrow(/import rotası değil/);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

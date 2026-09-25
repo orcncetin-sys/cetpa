@@ -13,6 +13,7 @@
  */
 
 import { auth } from '../firebase';
+import { mikroIsAdi } from '../lib/mikroIsAdi';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -255,36 +256,42 @@ export async function fullCariSync(): Promise<MikroListResult<MikroCariItem>> {
   });
 }
 
-// ── Full import (Mikro → Firebase, paginated upsert) ─────────────────────────
+// ── Full import (Mikro → Firebase) — ARKA PLAN İŞİ başlatma ───────────────────
+// 2026-09-24 (mikro-import-arkaplan): eski iki sarmalayıcı (stok/cari import) işin bitmesini HTTP
+// yanıtında bekliyordu (`{created, updated, errors, …}` sonuç tipi); IIS/ARR ~120 sn'de bağlantıyı
+// kesip 502 döndüğü için Stok/Cari İçeri Al ve 12 SQL kartı hiç sonuç göstermiyordu (teşhis, CONFIRMED).
+// Artık 14 import ucu (stok, cari, 12 SQL) + stok-miktar = 15 uç anında `{ success, started, job }` döner;
+// ilerleme/sonuç `jobs/<job>` dokümanında (`src/hooks/useArkaPlanIsi.ts` okur; eski `fiyatliUrun`/`note`/
+// `duration` alanları orada — `ArkaPlanIsi`).
+// 12 SQL sarmalayıcısı YAZILMAZ: panel rotayı `mikroImportBaslat(def.route)` ile geçer.
 
-export interface MikroImportResult extends MikroSyncResult {
-  created: number;
-  updated: number;
-  errors:  number;
-  duration?: number;
-  /** Stok import'u: Mikro'dan en az bir satış fiyatı gelen ürün sayısı.
-   *  0 ise sorun Cetpa'da değil — Mikro stok kartlarında fiyat tanımlı değildir. */
-  fiyatliUrun?: number;
-  // `note` (bilinmeyen alan sayacı + okuma arızası uyarısı) artık MikroSyncResult'ta —
-  // cari/listesi de (MikroListResult) aynı notu döndürüyor (Faz 3 3/n, 2026-09-19).
+/** 14 import ucu (stok, cari, 12 SQL) + stok-miktar = 15 arka plan ucunun başlatma yanıtı.
+ *  `MikroSyncResult`'tan TÜRETİLMEZ: `note`/`duration` başlatma yanıtında yok, sahte alan taşımasın.
+ *  Yorumlama önceliği TEK yerde:
+ *  `baslatmaYanitiniYorumla` (useArkaPlanIsi.ts) — kart ve "Tümünü Çek" aynı tabloyu okur. */
+export interface MikroIsBaslatmaYaniti {
+  success: boolean;
+  /** true → iş başladı; bu durumda `job === mikroIsAdi(route)` ZORUNLU (aksi sözleşme ihlali → hata). */
+  started?: boolean;
+  /** true → KİLİT DOLU (started:false). Kilit GLOBAL tek iş (K-C): `job` = ÇALIŞAN işin adı — bu rota da
+   *  olabilir, BAŞKA bir iş de. İkincisi NORMAL durumdur, hata değil. */
+  alreadyRunning?: boolean;
+  /** ÖNEKSİZ iş adı ('mikroImport-stok', 'stokMiktarImport'); 'jobs/…' DEĞİL. */
+  job?: string;
+  error?: string;
+  /** 503 — Mikro kimlik bilgileri yok. */
+  notConfigured?: boolean;
 }
 
 /**
- * Import ALL stock from Mikro into Firebase inventory.
- * Server paginates automatically and upserts each item.
- * New items are created; existing ones (matched by SKU) are updated.
+ * Bir Mikro import işini arka planda başlatır (stok, cari, stok-miktar, 12 SQL ucu — hepsi
+ * `/api/mikro/import/<slug>`). Rota sözlükte yoksa (`mikroIsAdi` throw) REJECT: yanlış rotayla arka
+ * plan kartı kurulmasın. Ağ hatası / 502 ham gövde `apiPost` içinde `{ success:false, error }` olur.
  */
-export async function importStokFromMikro(): Promise<MikroImportResult> {
-  return apiPost<MikroImportResult>('/api/mikro/import/stok');
-}
-
-/**
- * Import ALL customers/suppliers from Mikro into Firebase leads.
- * Server paginates automatically and upserts each cari account.
- * New accounts are created; existing ones (matched by mikroCariKod) are updated.
- */
-export async function importCariFromMikro(): Promise<MikroImportResult> {
-  return apiPost<MikroImportResult>('/api/mikro/import/cari');
+export function mikroImportBaslat(route: string): Promise<MikroIsBaslatmaYaniti> {
+  try { mikroIsAdi(route); }
+  catch (e) { return Promise.reject(e instanceof Error ? e : new Error(String(e))); }
+  return apiPost<MikroIsBaslatmaYaniti>(route, {});
 }
 
 // ── Legacy / compatibility exports ────────────────────────────────────────────

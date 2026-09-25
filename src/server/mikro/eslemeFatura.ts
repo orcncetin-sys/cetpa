@@ -267,7 +267,7 @@ export function faturadanSiparis(
     // ekranlarında `reduce((s,o)=>s+o.totalPrice,0)` biçiminde HAM toplama hâlâ
     // duruyor ve tek bir tutarsız sipariş toplamı NaN yapıyor. Kapatılanlar:
     // müşteri ekstresi PDF'i (utils/pdf) ve haftalık rapor e-postası (server/crons).
-    // AÇIK: components/reports/* (LojistikRapor, GenelBloklar3/4, IKRapor, CrmBloklar8)
+    // AÇIK: components/reports altı (LojistikRapor, GenelBloklar3/4, IKRapor, CrmBloklar8)
     // — Faz 3'ün rapor sayfası turuna bırakıldı (bkz. açık sorular). Buraya "istemci
     // siparisTutari ile okur" YAZMAYIN: doğru değil, ölçülmesi gereken bir iddiadır.
     ...(tutarVar ? { totalPrice: Number(baslik.cha_meblag) } : {}),

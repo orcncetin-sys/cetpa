@@ -15,10 +15,14 @@
  * düzeneğin dört kopyası oluşmasın. İDDİALAR DEĞİŞMEDİ. Aşağıdaki vi.mock blokları
  * burada KALMAK ZORUNDA: vitest onları test dosyasının tepesine hoist eder, başka bir
  * modülden çağrılsalar modül grafiği çözüldükten sonra işlerler (tarif: `mikroMockTarifi`).
+ *
+ * 2026-09-24 (mikro-import-arkaplan): uçlar ARKA PLAN işi oldu — yanıt anında `{ started:true, job }`,
+ * sayılar `jobs/<job>` dokümanında. Yazım iddiaları `d.isBitisi(job)` SONRASI; İDDİALAR yine DEĞİŞMEDİ.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
 import { mikroPost } from '../mikroClient.js';
+import { mikroIsAdi } from '../../lib/mikroIsAdi.js';
 
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
 vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS' }));
@@ -47,7 +51,8 @@ function mikroYaniti(stok: Record<string, unknown>[], cari: Record<string, unkno
     return { ok: false, data: null };
   }) as unknown as typeof mikroPost);
 }
-const calistir = (yol: string) => d.cagir('POST', yol);
+/** Rotayı çağırır, arka plan işinin bitmesini bekler (kilit varken iş yok → hemen döner). */
+const calistir = async (yol: string) => { const res = await d.cagir('POST', yol); await d.isBitisi(mikroIsAdi(yol)); return res; };
 const koleksiyon = (coll: string) => d.koleksiyon(coll);
 
 describe('POST /api/mikro/import/stok', () => {
@@ -62,7 +67,8 @@ describe('POST /api/mikro/import/stok', () => {
     const kum = inv.find(y => y.data?.sku === 'KUM-01');
     expect(kum).toMatchObject({ op: 'update', ref: { id: 'esk' } });
     expect(kum?.data?.companyId).toBe('A');
-    expect(res.govde).toMatchObject({ success: true, created: 1, updated: 1, errors: 0 });
+    expect(res.govde).toMatchObject({ success: true, started: true, job: 'mikroImport-stok' });
+    expect(d.jobsDokumani('mikroImport-stok')).toMatchObject({ running: false, created: 1, updated: 1, errors: 0, companyId: 'A' });
     expect(d.syncLog).toHaveBeenCalledWith('ImportStok', 'inventory', expect.stringContaining('1 yeni / 1 güncel'), true, null, null, expect.any(Number), expect.anything());
   });
   it("sto_yer_kod boşsa depo UYDURULMAZ: warehouseId yok, 'Depo belirtilmemiş'; doluysa mikro-depo-<kod> + warehouses kaydı", async () => {
@@ -97,7 +103,8 @@ describe('POST /api/mikro/import/stok', () => {
     expect(f1.prices).toEqual({ 'B2B Standard': 90 });
     expect(f1.price, "Retail bilinmiyor → price alanı YOK (0 değil)").toBeUndefined();
     expect(f2).toMatchObject({ prices: { Retail: 120 }, price: 120 });
-    expect(res.govde).toMatchObject({ fiyatliUrun: 2 });
+    expect(res.govde).toMatchObject({ started: true });
+    expect(d.jobsDokumani('mikroImport-stok')).toMatchObject({ fiyatliUrun: 2 });
   });
 });
 
@@ -115,7 +122,8 @@ describe('POST /api/mikro/import/cari', () => {
     const c2 = leads.find(y => y.data?.mikroCariKod === 'C2');
     expect(c2).toMatchObject({ op: 'update', ref: { id: 'eskL' } });
     expect(c2?.data?.companyId).toBe('A');
-    expect(res.govde).toMatchObject({ success: true, created: 1, updated: 1 });
+    expect(res.govde).toMatchObject({ success: true, started: true, job: 'mikroImport-cari' });
+    expect(d.jobsDokumani('mikroImport-cari')).toMatchObject({ running: false, created: 1, updated: 1, companyId: 'A' });
   });
 });
 
@@ -139,6 +147,6 @@ describe('cari import — FİRMA anahtarı ve köken (source) koruması (lead-bi
       expect(res.kod).toBe(423);
       expect(String((res.govde as { error?: string })?.error)).toMatch(/Bakım kilidi/);
     }
-    expect(d.yazilan).toEqual([]);
+    expect(d.yazilan, 'kilit varken jobs dokümanı da YAZILMAMALI').toEqual([]);
   });
 });

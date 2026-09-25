@@ -23,6 +23,10 @@ import { mikroRoutes } from "./src/server/routes/mikroRoutes.js";
 import { resendGonderici, resendSagligi, resendSagligiOnbellekten, escapeHtml, isValidEmail } from "./src/server/eposta.js";
 import type { AdminDbLike, DocDaralt } from "./src/server/adminDbTypes.js";
 import { initCrons } from "./src/server/crons.js";
+import { yetimIsleriKapat, surecBaslangiciMs } from "./src/server/mikro/arkaPlanIsi.js";
+// Bu sürecin başlangıcı (epoch ms) — modül yüklenirken BİR KEZ. Açılış taraması bundan SONRA kaydolan yazıcı
+// kaydını canlı sayar, silmez (delta hakem 2026-09-25: varsayılana bırakılan hesap testle korunmuyordu).
+const SUREC_BASLANGICI_MS = surecBaslangiciMs();
 import {
   initMikroMirror, initMikroTables,
 } from "./src/server/mikroMirror.js";
@@ -369,7 +373,7 @@ async function getCompanyStatus(cid: string): Promise<string> {
 
 // ── PostgreSQL document store (Firestore replacement) ───────────────────────
 // One generic `docs` table: (coll, id, data jsonb). The React client talks to
-// /api/db/* through src/lib/dbClient.ts, which mimics the Firestore API.
+// /api/db/… routes through src/lib/dbClient.ts, which mimics the Firestore API.
 // Realtime fan-out is in-process (single server) via an EventEmitter feeding
 // the /api/db/stream SSE endpoint.
 
@@ -1188,7 +1192,8 @@ async function writeSyncLog(
   success:    boolean,
   mikroRef:   string | null,
   error:      string | null,
-  duration:   number,
+  // null = BİLİNMİYOR (açılış taraması: yarıda kalan işin süresi ölçülemedi — 0 uydurulmaz; panel '—' basar).
+  duration:   number | null,
   actor?:     { uid: string; email: string }
 ): Promise<void> {
   if (!adminDb) return;
@@ -2168,7 +2173,7 @@ async function startServer() {
     message: { success: false, error: 'Çok fazla takip sorgusu, lütfen biraz bekleyin.' },
   });
 
-  // Apply general limiter to all /api/* routes
+  // Apply general limiter to every /api/… route
   app.use('/api', apiLimiter);
   // Mikro yazma/senkron uçlarına ek kullanıcı-bazlı limit (import/kaydet/pull)
   app.use(['/api/mikro/import', '/api/mikro/stok', '/api/mikro/cari', '/api/mikro/fatura',
@@ -4213,7 +4218,7 @@ async function startServer() {
       },
     }));
     app.use((req, res) => {
-      // Eşleşmeyen /api/* → SPA index.html DEĞİL, JSON 404 (HTML-as-JSON karışıklığı engeli).
+      // Eşleşmeyen /api/… isteği → SPA index.html DEĞİL, JSON 404 (HTML-as-JSON karışıklığı engeli).
       if (req.path.startsWith('/api/')) {
         res.status(404).json({ error: 'Not found' });
         return;
@@ -4236,6 +4241,23 @@ async function startServer() {
     if (res.headersSent) return;
     res.status(500).json({ error: 'Sunucu hatası.' });
   });
+
+  // ── Yarıda kalan arka plan işleri (mikro-import-arkaplan delta hakem 2026-09-25, bulgu 1/11) ──────────
+  // `calisanlar` (src/server/mikro/arkaPlanIsi.ts) süreçle sıfırlanır ama jobs/<isAdi> running:true KALIR
+  // (deploy = Stop/Restart-Service, çökme): kart sonsuza dek 'Çalışıyor…', bekleyen Tümünü Çek adımı 30 dk
+  // asılı, syncLog'da o koşunun satırı yok, `yazici:mikro-import:*` 2 saat aktif sayılıyor. NSSM TEK süreç →
+  // açılışta running:true = kesin yetim. DİNLEMEDEN ÖNCE kapatılır (yeni başlayan bir iş ezilmesin). Yalnız
+  // PG yolunda: Firestore fallback (lokal geliştirme) canlı Firestore'a açılışta yazmasın. PG asılırsa
+  // açılış 10 sn'den fazla beklemez, tarama arkada sürer (koşan işleri atlar). Staging AYRI veritabanında
+  // (deploy/windows/setup-staging.ps1) — staging açılışı canlı işleri kapatamaz.
+  if (pgPool && adminDb) {
+    const tarama = yetimIsleriKapat({ db: adminDbZorunlu(), pgPool, writeSyncLog, surecBaslangici: SUREC_BASLANGICI_MS });
+    let taramaSayaci: ReturnType<typeof setTimeout> | undefined;
+    const taramaSuresi = new Promise<null>(r => { taramaSayaci = setTimeout(() => r(null), 10_000); });
+    const taramaSonucu = await Promise.race([tarama, taramaSuresi]);
+    clearTimeout(taramaSayaci);
+    if (taramaSonucu === null) console.warn('[arkaPlanIsi] açılış taraması 10 sn içinde bitmedi — dinleme başlıyor, tarama arkada sürüyor');
+  }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);

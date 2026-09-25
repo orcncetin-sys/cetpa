@@ -20,6 +20,7 @@ import type { Express, Request, Response } from 'express';
 import { vi } from 'vitest';
 import { mikroRoutes, type MikroRouteCtx } from './mikroRoutes.js';
 import type { Sema } from '../schemas.js';
+import { arkaPlanIsiBekle } from '../mikro/arkaPlanIsi.js';
 
 /**
  * Test dosyanın EN ÜSTÜNE (import'lardan önce/sonra fark etmez, vitest hoist eder)
@@ -55,7 +56,10 @@ vi.mock('../mikroClient.js', async (orig) => {
 export type Handler = (req: unknown, res: unknown) => Promise<unknown> | unknown;
 export type Metot = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'USE';
 export type Ref = { id: string; coll: string };
-/** Sahte adminDb'ye düşen TEK yazım. `data` yalnız set/update'te vardır. */
+/** Sahte adminDb'ye düşen TEK yazım. `data` yalnız set/update'te vardır. Şekil SABİT: mevcut testler
+ *  `toEqual([{ op, ref, data }])` der; `ref.set(d, { merge:true })` bilgisi bu yüzden nesneye EKLENMEZ,
+ *  `mergeMi(yazim)` ile sorulur (2026-09-24: arka plan işi `jobs/<isAdi>` dokümanını başlangıçta
+ *  merge'SİZ, ilerlemede merge ile yazar — `jobsDokumani` dokümanı bundan kurar). */
 export type Yazim = { op: 'set' | 'update' | 'delete'; ref: Ref; data?: Record<string, unknown> };
 export type SnapDoc = { id: string; data: () => Record<string, unknown>; ref: Ref };
 export type Kullanici = { uid?: string; email?: string; companyId?: string };
@@ -116,6 +120,15 @@ export interface Duzenek {
   sifirla(): void;
   /** Bir koleksiyona düşen yazımlar — `d.yazilan.filter(...)` kısayolu. */
   koleksiyon(coll: string): Yazim[];
+  /** `ref.set(d, { merge:true })` ile mi yazıldı? (Yazım nesnesinin şekli sabit kalsın diye ayrı.) */
+  mergeMi(yazim: Yazim): boolean;
+  /** `jobs/<isAdi>` dokümanının BİRİKMİŞ hâli: merge'siz `set` sıfırdan başlatır, merge üstüne yazar
+   *  (pgShim mergeDocData shallow paritesi). Hiç yazılmadıysa `null`. */
+  jobsDokumani(isAdi: string): Record<string, unknown> | null;
+  /** Arka plan işinin (`arkaPlanIsiBaslat`, mikro-import-arkaplan 2026-09-24) bitişini bekler ve
+   *  `jobs/<isAdi>`'nin son hâlini döner. Rota `{ started:true, job }` ile ANINDA döndüğü için yazım
+   *  iddiaları bundan SONRA yapılır; sabit `setTimeout` yoklaması YOK (hakem 7). */
+  isBitisi(isAdi: string): Promise<Record<string, unknown> | null>;
 }
 
 // ── Düzenek ──────────────────────────────────────────────────────────────────
@@ -131,6 +144,7 @@ export function duzenekKur(secenek: DuzenekSecenek = {}): Duzenek {
   const VARSAYILAN_KULLANICI: Required<Kullanici> = { uid: 'u1', email: 'a@cetpa.com.tr', companyId: 'A' };
 
   const yazilan: Yazim[] = [];
+  const mergeliYazimlar = new WeakSet<Yazim>();
   let snap: Record<string, SnapDoc[]> = {};
   let sayac = 0;
   let kilit: { aciklama: string; baslangic: string } | null = null;
@@ -149,13 +163,13 @@ export function duzenekKur(secenek: DuzenekSecenek = {}): Duzenek {
   // gerçekte var olmayan bir arıza. Yazımlar batch'inkiyle AYNI biçimde kaydedilir.
   const doc = (coll: string, id?: string) => {
     const ref: Ref & {
-      set: (d: Record<string, unknown>) => Promise<void>;
+      set: (d: Record<string, unknown>, opts?: { merge?: boolean }) => Promise<void>;
       update: (d: Record<string, unknown>) => Promise<void>;
       delete: () => Promise<void>;
       get: () => Promise<{ exists: boolean; id: string; data: () => Record<string, unknown> | undefined }>;
     } = {
       id: id ?? `yeni-${++sayac}`, coll,
-      set:    async (d) => { yazilan.push({ op: 'set',    ref: { id: ref.id, coll }, data: d }); },
+      set:    async (d, opts?: { merge?: boolean }) => { const y: Yazim = { op: 'set', ref: { id: ref.id, coll }, data: d }; if (opts?.merge) mergeliYazimlar.add(y); yazilan.push(y); },
       update: async (d) => { yazilan.push({ op: 'update', ref: { id: ref.id, coll }, data: d }); },
       delete: async ()  => { yazilan.push({ op: 'delete', ref: { id: ref.id, coll } }); },
       // 2026-09-19 (kiracı izolasyonu testleri): tek doküman okuma — sahiplik doğrulaması `doc(id).get()` ister.
@@ -309,6 +323,19 @@ export function duzenekKur(secenek: DuzenekSecenek = {}): Duzenek {
       vi.mocked(C.loadCompanyDocs).mockClear();
     },
     koleksiyon(coll) { return yazilan.filter(y => y.ref.coll === coll); },
+    mergeMi(yazim) { return mergeliYazimlar.has(yazim); },
+    jobsDokumani(isAdi) {
+      let dok: Record<string, unknown> | null = null;
+      for (const y of yazilan) {
+        if (y.ref.coll !== 'jobs' || y.ref.id !== isAdi || y.op !== 'set') continue;
+        dok = mergeliYazimlar.has(y) ? { ...(dok ?? {}), ...(y.data ?? {}) } : { ...(y.data ?? {}) };
+      }
+      return dok;
+    },
+    async isBitisi(isAdi) {
+      await arkaPlanIsiBekle(isAdi);
+      return duzenek.jobsDokumani(isAdi);
+    },
   };
   return duzenek;
 }

@@ -61,7 +61,10 @@ function sqlYaniti(rows: Record<string, unknown>[]) {
   }) as unknown as typeof mikroPost);
 }
 
+/** Senkron uçlar (cari/listesi, pull/bakiye) `note`u hâlâ yanıtta döner. */
 const govdesi = (res: { govde: unknown }) => res.govde as Record<string, unknown>;
+/** 2026-09-24 (mikro-import-arkaplan): cari import ARKA PLAN işi — sayılar/note `jobs/mikroImport-cari`'de; iş beklenir. */
+const cariImportu = async () => { await d.cagir('POST', '/api/mikro/import/cari'); return (await d.isBitisi('mikroImport-cari')) ?? {}; };
 
 describe('POST /api/mikro/import/cari — bilinmeyen alan YAZILMAZ', () => {
   it("Mikro boş/boşluk dönen alanlar güncellenen lead'de HİÇ YOK (CRM'deki e-posta/telefon ezilmez); sayaç note'a düşer", async () => {
@@ -74,7 +77,7 @@ describe('POST /api/mikro/import/cari — bilinmeyen alan YAZILMAZ', () => {
     // e-posta boş, telefon yalnız boşluk, vergi dairesi/no yok, bayrak ve tip kolonu yok.
     cariYaniti([{ cari_kod: 'C1', cari_unvan1: 'ŞİRİN İNŞAAT', cari_EMail: '', cari_CepTel: '   ' }]);
 
-    const res = await d.cagir('POST', '/api/mikro/import/cari');
+    const is = await cariImportu();
     const yazim = d.koleksiyon('leads').find(y => y.ref.id === 'eskL');
     expect(yazim?.op).toBe('update');
     const veri = yazim?.data ?? {};
@@ -83,8 +86,8 @@ describe('POST /api/mikro/import/cari — bilinmeyen alan YAZILMAZ', () => {
     }
     // Bilinen alanlar AYNEN yazılır (parite).
     expect(veri).toMatchObject({ name: 'ŞİRİN İNŞAAT', company: 'ŞİRİN İNŞAAT', mikroCariKod: 'C1', mikroSynced: true, mikroSyncedAt: 'TS', companyId: 'A' });
-    expect(govdesi(res)).toMatchObject({ success: true, created: 0, updated: 1 });
-    expect(String(govdesi(res).note)).toContain('1 satırın email alanı bilinmiyor');
+    expect(is).toMatchObject({ running: false, created: 0, updated: 1 });
+    expect(String(is.note)).toContain('1 satırın email alanı bilinmiyor');
   });
 
   // 2026-09-19 delta bulgusu: güncellemede yazmamak DOĞRU, ama YENİ kayıtta alanı hiç
@@ -93,14 +96,14 @@ describe('POST /api/mikro/import/cari — bilinmeyen alan YAZILMAZ', () => {
   it("YENİ lead'de bilinmeyen metin alanı '' ile açılır (tip sözleşmesi korunur)", async () => {
     cariYaniti([{ cari_kod: 'C9', cari_unvan1: 'ŞİRİN İNŞAAT', cari_EMail: '', cari_hareket_tipi: 0 }]);
 
-    const res = await d.cagir('POST', '/api/mikro/import/cari');
+    const is = await cariImportu();
     const yeni = d.koleksiyon('leads').find(y => y.op === 'set')?.data ?? {};
     expect(yeni).toMatchObject({
       company: 'ŞİRİN İNŞAAT', email: '', phone: '', taxId: '', taxOffice: '',
       status: 'Active', source: 'mikro_import',
     });
     // Bilinmeyen sayaç yine görünür: '' bir "veri var" iddiası değildir.
-    expect(String(govdesi(res).note)).toContain('1 satırın email alanı bilinmiyor');
+    expect(String(is.note)).toContain('1 satırın email alanı bilinmiyor');
   });
 
   it("`status` güncellemede YAZILMAZ (kullanıcının işaretlediği durum korunur), yeni kayıtta 'Active' + source 'mikro_import'", async () => {
@@ -110,7 +113,7 @@ describe('POST /api/mikro/import/cari — bilinmeyen alan YAZILMAZ', () => {
       { cari_kod: 'C9', cari_unvan1: 'YENİ BETON', cari_hareket_tipi: 1 },
     ]);
 
-    await d.cagir('POST', '/api/mikro/import/cari');
+    await cariImportu();
     const guncel = d.koleksiyon('leads').find(y => y.op === 'update')?.data ?? {};
     const yeni = d.koleksiyon('leads').find(y => y.op === 'set')?.data ?? {};
     expect('status' in guncel, 'güncellemede status yazılmamalı').toBe(false);

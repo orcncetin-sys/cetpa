@@ -40,7 +40,7 @@ export class Timestamp {
 }
 
 /** Revive {_seconds,_nanoseconds} (admin SDK) or {seconds,nanoseconds} (client SDK) into Timestamp. */
-function reviveTimestamps(v: unknown): unknown {
+export function reviveTimestamps(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(reviveTimestamps);
   if (v && typeof v === 'object') {
     const o = v as Record<string, unknown>;
@@ -152,7 +152,7 @@ function fieldValue(data: Record<string, unknown>, field: string): unknown {
   return v;
 }
 
-function cmpValues(a: unknown, b: unknown): number {
+export function cmpValues(a: unknown, b: unknown): number {
   const norm = (x: unknown): number | string => {
     if (x instanceof Timestamp) return x.toMillis();
     if (x instanceof Date) return x.getTime();
@@ -165,7 +165,7 @@ function cmpValues(a: unknown, b: unknown): number {
   return String(na) < String(nb) ? -1 : String(na) > String(nb) ? 1 : 0;
 }
 
-function applyConstraints(
+export function applyConstraints(
   docs: Array<{ id: string; data: Record<string, unknown> }>,
   constraints: QueryConstraint[],
 ): Array<{ id: string; data: Record<string, unknown> }> {

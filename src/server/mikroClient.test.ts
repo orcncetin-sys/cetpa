@@ -9,7 +9,7 @@
  *    (Mikro tanımsız kademeyi 0 döndürür; 0 yazmak elle girilen fiyatı ezer),
  *  - SqlVeriOkuV2 kapısında string birleştirilen değerlerin KATI doğrulandığını kilitler (SQLi).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   mikroStokMiktari, mikroSatisFiyatlari, mikroData, mikroSatirlar, mikroHata,
   sqlTarih, sqlTamsayi, sqlTanimlayici,
@@ -92,5 +92,81 @@ describe('SqlVeriOkuV2 kapısı — string literal’e giren her değer KATI do�
     expect(sqlTanimlayici('1abc')).toBeNull();
     expect(sqlTanimlayici('şube')).toBeNull();
     expect(sqlTanimlayici(null)).toBeNull();
+  });
+});
+
+// ── mikroPost `zamanAsimiMs` seçeneği (mikro-import-arkaplan, 2026-09-24) ─────────────────────
+// server.ts:76-79 global 30 sn `fetch` yaması yalnız `signal`SIZ çağrılara uygulanır. Import sayfası
+// (500 satır SqlVeriOkuV2) 30 sn'yi aşabildiği için liste çağrıları kendi `AbortSignal.timeout`unu
+// geçer; seçeneksiz çağrılar `signal` GEÇMEZ ki global yama aynen işlesin.
+//
+// Stub tarifi: `MIKRO_LOCAL=1` (getMikroCreds lokal mod, token yolu atlanır — MIKRO_LOCAL_MODE modül
+// sabiti olduğu için modül `vi.resetModules` + dinamik import ile taze yüklenir) + asılı `fetch`
+// stub'u (signal'e SAYGILI: iptal gelince reject — gerçek undici de böyle yapar). Gerçek zaman (5 ms).
+describe('mikroPost — secenek.zamanAsimiMs → AbortSignal.timeout; seçeneksiz çağrı signal geçmez', () => {
+  const fetchCagrilari: Array<{ url: string; init: RequestInit | undefined }> = [];
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv('MIKRO_LOCAL', '1');
+    fetchCagrilari.length = 0;
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      fetchCagrilari.push({ url, init });
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      // asılı sunucu: hiç yanıt vermez
+    }));
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it('zamanAsimiMs: 5 → asılı sunucuya karşı TimeoutError fırlatır (zamanAsimiMi ayırt eder)', async () => {
+    const { mikroPost } = await import('./mikroClient');
+    const { zamanAsimiMi } = await import('./mikro/adaptifSayfalama');
+    let hata: unknown = null;
+    try { await mikroPost('SqlVeriOkuV2', { SQLSorgu: 'SELECT 1' }, false, { zamanAsimiMs: 5 }); }
+    catch (e) { hata = e; }
+    expect(hata, 'fırlatmalı').not.toBeNull();
+    expect((hata as { name?: string }).name).toBe('TimeoutError');
+    expect(zamanAsimiMi(hata)).toBe(true);
+    expect(fetchCagrilari[0]?.init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('seçeneksiz çağrı `signal` GEÇMEZ (global 30 sn yaması bozulmadı); mikroSql seçeneği mikroPost\'a geçirir', async () => {
+    const { mikroPost, mikroSql } = await import('./mikroClient');
+    const asili = mikroPost('SqlVeriOkuV2', { SQLSorgu: 'SELECT 1' });
+    await vi.waitFor(() => expect(fetchCagrilari).toHaveLength(1));
+    expect(fetchCagrilari[0].init?.signal).toBeUndefined();
+    void asili.catch(() => {});   // stub hiç çözmez; test bitince çöp toplanır
+
+    await expect(mikroSql('SELECT 1', { zamanAsimiMs: 5 })).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(fetchCagrilari[1].init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('listeZamanAsimiMs(): env yoksa 120 sn; 30-600 sn dışı env varsayılana düşer ve uyarır (birim ms)', async () => {
+    const uyar = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { listeZamanAsimiMs } = await import('./mikroClient');
+    vi.stubEnv('MIKRO_LISTE_ZAMAN_ASIMI_MS', undefined);
+    expect(listeZamanAsimiMs()).toBe(120_000);
+    vi.stubEnv('MIKRO_LISTE_ZAMAN_ASIMI_MS', '120');   // sn sanıp yazılmış: min altı
+    uyar.mockClear();
+    expect(listeZamanAsimiMs()).toBe(120_000);
+    expect(uyar).toHaveBeenCalledWith(expect.stringContaining('MIKRO_LISTE_ZAMAN_ASIMI_MS'));
+    // Aynı geçersiz değer her sayfada log basmasın: uyarı değer başına BİR kez.
+    uyar.mockClear();
+    expect(listeZamanAsimiMs()).toBe(120_000);
+    expect(uyar).not.toHaveBeenCalled();
+    vi.stubEnv('MIKRO_LISTE_ZAMAN_ASIMI_MS', '300000');
+    expect(listeZamanAsimiMs()).toBe(300_000);
+    uyar.mockRestore();
+  });
+
+  // Delta hakem 2026-09-25 (bulgu 7, CONFIRMED): değer modül YÜKLENİRKEN okunuyordu; server.ts ise
+  // `dotenv.config()`'i tüm statik import'lar (mikroClient dâhil) değerlendirildikten SONRA çağırıyor (ESM).
+  // Prod'da NSSM yalnız NODE_ENV/PORT geçiriyor, gerisi C:/cetpa/.env'den → .env'e yazılan
+  // MIKRO_LISTE_ZAMAN_ASIMI_MS=300000 hiç okunmuyor, değer 120000 kalıyordu ("yazıldı ama bağlanmadı").
+  it('env modül yüklendikten SONRA atanırsa (dotenv sırası) değer YİNE okunur — çağrı anında okuma', async () => {
+    vi.stubEnv('MIKRO_LISTE_ZAMAN_ASIMI_MS', undefined);
+    vi.resetModules();
+    const { listeZamanAsimiMs } = await import('./mikroClient');   // modül env YOKKEN yüklendi
+    vi.stubEnv('MIKRO_LISTE_ZAMAN_ASIMI_MS', '300000');            // server.ts:68 dotenv.config() paritesi
+    expect(listeZamanAsimiMs()).toBe(300_000);
   });
 });
