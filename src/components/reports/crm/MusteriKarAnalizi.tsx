@@ -53,22 +53,32 @@ export default function MusteriKarAnalizi({ orders, inventory, inventoryMovement
   // hesaplanabilen müşteri 2'den az olsa bile hesap dışı sipariş varsa kart bu notla çizilir.
   const tumMusteriler = Object.entries(custProfit);
   const hesapDisiSiparis = tumMusteriler.reduce((n, [, d]) => n + d.hesapDisi, 0);
-  const listeDisiMusteri = tumMusteriler.filter(([, d]) => !(d.rev > 0)).length;
+  // İki AYRI neden (delta hakem 2026-09-25): (a) siparişlerinin HİÇBİRİ hesaba giremeyen müşteri; (b) cirosu bilinen ama
+  // sıfır/eksi (ör. yalnız iade) müşteri — marj bölmesine girmez. Tek sayaçta birleşince not kendi içinde çelişiyordu.
+  const hesapDisiMusteri = tumMusteriler.filter(([, d]) => d.rev === 0 && d.hesapDisi > 0).length;
+  const sifirCiroMusteri = tumMusteriler.filter(([, d]) => !(d.rev > 0) && !(d.rev === 0 && d.hesapDisi > 0)).length;
   const profitList = tumMusteriler
     .filter(([, d]) => d.rev > 0)
     .map(([name, d]) => ({ name, rev: d.rev, cogs: d.cogs, maliyetsiz: d.maliyetsiz, hesapDisi: d.hesapDisi, profit: d.rev - d.cogs, margin: Math.round(((d.rev - d.cogs) / d.rev) * 100) }))
     .sort((a, b) => b.profit - a.profit)
     .slice(0, 8);
-  if (profitList.length < 2 && hesapDisiSiparis === 0) return null;
+  if (profitList.length < 2 && hesapDisiSiparis === 0 && sifirCiroMusteri === 0) return null;
   const maxProfit = Math.max(...profitList.map(p => p.profit), 1);
   return (
     <div className="apple-card p-6">
       <h3 className="font-bold text-gray-800 mb-4">{currentLanguage === 'tr' ? '💹 Müşteri Bazlı Kâr Analizi' : '💹 Profit by Customer'}</h3>
-      {(hesapDisiSiparis > 0 || listeDisiMusteri > 0) && (
+      {hesapDisiSiparis > 0 && (
         <p role="status" className="text-[11px] text-amber-800 bg-amber-50 rounded-lg px-3 py-2 mb-3">
           {currentLanguage === 'tr'
-            ? `${listeDisiMusteri} müşteri / ${hesapDisiSiparis} sipariş kâr hesabına girmedi (kalemsiz, Mikro kalemi yenilenmemiş ya da ciro bilinmiyor) — Entegrasyon → "MF Sipariş Kalemlerini Yenile".`
-            : `${listeDisiMusteri} customers / ${hesapDisiSiparis} orders excluded from profit (no lines, Mikro lines not refreshed or unknown revenue) — Integration → "Refresh MF Order Lines".`}
+            ? `${hesapDisiSiparis} sipariş kâr hesabına girmedi${hesapDisiMusteri > 0 ? ` (${hesapDisiMusteri} müşteri bu yüzden listede yok)` : ''} — kalemsiz, Mikro kalemi yenilenmemiş ya da ciro bilinmiyor. Entegrasyon → "MF Sipariş Kalemlerini Yenile".`
+            : `${hesapDisiSiparis} orders excluded from profit${hesapDisiMusteri > 0 ? ` (${hesapDisiMusteri} customers not listed because of this)` : ''} — no lines, Mikro lines not refreshed or unknown revenue. Integration → "Refresh MF Order Lines".`}
+        </p>
+      )}
+      {sifirCiroMusteri > 0 && (
+        <p role="status" className="text-[11px] text-gray-600 bg-gray-50 rounded-lg px-3 py-2 mb-3">
+          {currentLanguage === 'tr'
+            ? `${sifirCiroMusteri} müşterinin cirosu sıfır ya da eksi (ör. yalnız iade) — marj hesaplanamaz, listede yok.`
+            : `${sifirCiroMusteri} customers with zero or negative revenue (e.g. returns only) — no margin, not listed.`}
         </p>
       )}
       <div className="space-y-2.5">

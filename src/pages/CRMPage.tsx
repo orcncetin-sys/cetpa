@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import IptalEdilenFaturalar from '../components/siparis/IptalEdilenFaturalar';
 import type { IadeSatiri } from '../hooks/useSekmeVerileri';
 import { huniAsamasi } from '../lib/huni';
 // Arama süzgeci TEK KAYNAK (lib/leadArama): eksik alan çökertmez + tr-TR duyarlı.
@@ -3698,7 +3699,7 @@ export default function CRMPage({
             return (
               <motion.div key="iade" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-10}} className="space-y-4">
                 <ModuleHeader
-                  title={tr549?'İade & Değişim Yönetimi':'Return & Exchange (RMA)'}
+                  title={tr549?'İptal & İade Yönetimi':'Cancellations & Returns'}
                   subtitle={tr549?'Müşteri iade talepleri ve onay süreci (SAP SD Return Order)':'Customer return requests and approval workflow'}
                   icon={RefreshCw}
                   actionButton={hasFullAccess('crm') ? (
@@ -3805,6 +3806,8 @@ export default function CRMPage({
                     </div>
                   )}
                 </div>
+                {/* 2026-09-25: Mikro'da İPTAL edilen faturalar — hiçbir hesaba girmez, yalnız burada listelenir. */}
+                <IptalEdilenFaturalar dil={currentLanguage} rol={userRole} />
               </motion.div>
             );
           })()}

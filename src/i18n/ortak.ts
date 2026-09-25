@@ -288,7 +288,7 @@ export const ORTAK = {
   ornek_cetpa_com: 'örnek@cetpa.com',   // ×2
   muhasebe: 'Muhasebe',   // ×2
   uretim: 'Üretim',   // ×2
-  iade_degisim: 'İade & Değişim',   // ×2
+  iade_degisim: 'İptal & İade',   // ×2 — 2026-09-25: iptal edilen Mikro faturaları da bu sayfada
   mesai_devam: 'Mesai & Devam',   // ×2
   mobil_wms: 'Mobil WMS',   // ×2
   performans: 'Performans',   // ×2
@@ -909,7 +909,7 @@ export const ORTAK = {
   ornek_cetpa_com: 'example@cetpa.com',
   muhasebe: 'Accounting',
   uretim: 'Production',
-  iade_degisim: 'Returns (RMA)',
+  iade_degisim: 'Cancellations & Returns',
   mesai_devam: 'Time & Attendance',
   mobil_wms: 'Mobile WMS',
   performans: 'Performance',

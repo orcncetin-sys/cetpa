@@ -8,7 +8,7 @@
  * tarih bilinmiyorsa BUGÜNE DÜŞMEZ; Mikro türevinde `paid` yokluğu "ödenmedi" değildir.
  */
 import { describe, it, expect } from 'vitest';
-import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli, siparisTutari } from './siparis';
+import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli, siparisTutari, siparisIptalMi } from './siparis';
 
 describe('gorunenSiparisNo — üreticiden bağımsız numara', () => {
   it('Cetpa-native / Mikro türevi: orderNumber (Türkçe karakterli seri dahil) aynen', () => {
@@ -98,5 +98,13 @@ describe('siparisTutari — totalPrice ?? totalAmount (sunucuyla aynı), ikisi d
     expect(siparisTutari({ totalPrice: undefined, totalAmount: null })).toBeNaN();
     expect(siparisTutari({ totalPrice: 'abc', totalAmount: '' })).toBeNaN();
     expect(siparisTutari({ totalPrice: Infinity })).toBeNaN();
+  });
+});
+
+// K2 "iptal hariç" tek tanımı (2026-09-25): rapor özeti, haftalık e-posta ve pano bunu kullanır.
+describe('siparisIptalMi', () => {
+  it("yalnız status 'Cancelled' iptaldir; diğer durumlar ve durumsuz kayıt iptal DEĞİL", () => {
+    expect(siparisIptalMi({ status: 'Cancelled' })).toBe(true);
+    for (const status of ['Pending', 'Processing', 'Shipped', 'Delivered', undefined, null, 'cancelled']) expect(siparisIptalMi({ status })).toBe(false);
   });
 });

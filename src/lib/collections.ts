@@ -30,6 +30,8 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   'capacityLines', 'letterOfCredit', 'intercompanyTxns', 'approvalRequests',
   'payrolls', 'leaveRequests', 'warranties', 'workflowTasks', 'categories',
   'commissionRules', 'subeler', 'vergiTakvimi', 'mikroFaturalar', 'mikroCariHareketler',
+  // 2026-09-25: Mikro'da İPTAL edilen faturalar — yalnız İptal & İade listesinde okunur, hiçbir hesap okumaz.
+  'mikroIptalFaturalar',
   // 2026-08-18: 'mikroSiparisler' ve 'stockCounts' BU LISTEDE DEGILDI —
   // capraz-kiraci sizintisi. Her ikisi de companyId ile DOGRU yaziliyordu
   // (mikroSiparisler'i makeMikroSqlImport, stockCounts'u istemci), ama liste

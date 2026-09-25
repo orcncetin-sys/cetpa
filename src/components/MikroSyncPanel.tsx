@@ -401,6 +401,8 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   const extraPullDefs: { key: string; route: string; title: string; desc: string; arkaPlan?: true }[] = [
     { key: 'siparis',      route: '/api/mikro/import/siparis', arkaPlan: true,        title: t ? 'Siparişler' : 'Orders',                desc: t ? 'Mikro\'daki satış siparişlerini çek.' : 'Pull sales orders from Mikro.' },
     { key: 'fatura',       route: '/api/mikro/import/fatura-listesi', arkaPlan: true, title: t ? 'Faturalar' : 'Invoices',               desc: t ? 'Mikro\'da kesilen faturaları çek.' : 'Pull invoices issued in Mikro.' },
+    // 2026-09-25: iptal edilen faturalar AYRI koleksiyona iner; hiçbir hesap okumaz, yalnız CRM → İptal & İade listesi.
+    { key: 'iptal-fatura', route: '/api/mikro/import/iptal-faturalar', arkaPlan: true, title: t ? 'İptal Edilen Faturalar' : 'Cancelled Invoices', desc: t ? 'Mikro\'da iptal edilen faturaları çek (İptal & İade listesinde görünür, hesaplara girmez).' : 'Pull invoices cancelled in Mikro (shown on Cancellations & Returns, excluded from all totals).' },
     // 2026-09-01 kullanıcı isteği: "faturası kesilen her şeyin siparişi olmalı".
     // Önce Faturalar çekilmiş olmalı; idempotent (tekrar basmak kopya üretmez).
     { key: 'faturadan-siparis', route: '/api/mikro/import/faturadan-siparis', title: t ? 'Faturadan Sipariş Türet' : 'Derive Orders from Invoices', desc: t ? 'Her SATIŞ faturası için fatura tarihli bir Cetpa siparişi oluştur (kalemleriyle). Ciro kartları çift saymaz.' : 'Create a Cetpa order (with line items) for each sales invoice, dated by the invoice.' },

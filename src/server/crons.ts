@@ -36,7 +36,7 @@ import { sayacOlustur, sayacaEkle, okumaArizalari, STOK_KRITIK } from './mikro/e
 import { isimAnahtari, firmaAnahtari } from '../lib/isimAnahtari.js';
 // Sipariş tutarı TEK KAYNAK: bilinmeyen tutar 0 SAYILMAZ, ayrıca sayılır.
 import { toplaBilinen, donemKarsilastir } from '../utils/para.js';
-import { siparisTutari } from '../utils/siparis.js';
+import { siparisTutari, siparisIptalMi } from '../utils/siparis.js';
 import { bakimKilidiVar, yaziciOlarakCalistir, type SqlCalistirici } from './bakimKilidi.js';
 
 
@@ -426,8 +426,11 @@ if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
         return raw.toDate?.() ?? new Date(0);
       }
 
-      const thisWeek = orders.filter(o => dateOf(o) >= d7);
-      const prevWeek = orders.filter(o => dateOf(o) >= d14 && dateOf(o) < d7);
+      // İPTAL HARİÇ (K2; inceleme 2026-09-25): Mikro'da faturası iptal edilen MF siparişi 'Cancelled' olur — haftalık
+      // ciro ve sipariş sayısına GİRMEZ.
+      const gecerli = orders.filter(o => !siparisIptalMi(o));
+      const thisWeek = gecerli.filter(o => dateOf(o) >= d7);
+      const prevWeek = gecerli.filter(o => dateOf(o) >= d14 && dateOf(o) < d7);
       // TUTARI BİLİNMEYEN SİPARİŞ SESSİZCE ₺0 SAYILMAZ (2026-09-19): Mikro faturasından
       // türetilen siparişte `cha_meblag` okunamazsa `totalPrice` alanı HİÇ YAZILMIYOR
       // (eslemeFatura sözleşmesi). Eski `|| 0` o siparişi bedava satış sayıyor, haftalık

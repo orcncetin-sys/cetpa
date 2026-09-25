@@ -86,6 +86,14 @@ export function odemeTakipli(o: SiparisKaynakAlani): boolean {
 }
 
 /**
+ * Sipariş İPTAL mi — TEK tanım (K2 "iptal hariç"; inceleme 2026-09-25). Mikro'da faturası iptal edilen MF siparişi de
+ * 'Cancelled' olur (faturadan-sipariş importu); iptal edilen sipariş satış DEĞİLDİR, ciro/adet toplamlarına girmez.
+ */
+export function siparisIptalMi(o: { status?: unknown }): boolean {
+  return o.status === 'Cancelled';
+}
+
+/**
  * Siparişin tutarı: `totalPrice ?? totalAmount`; ikisi de bilinmiyorsa NaN (ASLA 0).
  * TEK KAYNAK (Faz 3 1/n hakem turu, 2026-09-13): nakitBilanco (`||` önceliği) ve mutabakatMasraf
  * (`??` önceliği) aynı PR'da iki farklı kopya taşıyordu — {totalPrice: 0, totalAmount: 500} siparişi

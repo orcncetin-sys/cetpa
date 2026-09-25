@@ -56,10 +56,10 @@ async function cizVeBekle() {
 }
 
 describe('MikroSyncPanel — 14 uç + miktar = 15 arka plan kartı (çalışma zamanı)', () => {
-  it('render → role=group kart sayısı 15 (stok, cari, miktar, 12 SQL); düğmeler ≥ 15', async () => {
+  it('render → role=group kart sayısı 16 (stok, cari, miktar, 13 SQL); düğmeler ≥ 15', async () => {
     await cizVeBekle();
     const gruplar = screen.getAllByRole('group');
-    expect(gruplar).toHaveLength(15);
+    expect(gruplar).toHaveLength(16);   // 2026-09-25: + İptal Edilen Faturalar (13. SQL importu)
     const adlar = gruplar.map(g => g.getAttribute('aria-label'));
     expect(adlar).toEqual(expect.arrayContaining(['Stok İçeri Al', 'Cari İçeri Al', 'Stok Miktarlarını Çek', 'Cari Hareketler (Tümü)', 'Faturalar', 'Siparişler']));
     expect(screen.getAllByRole('button', { name: /Çek$|İçeri Al$|Miktarları Çek/ }).length).toBeGreaterThanOrEqual(15);
@@ -91,10 +91,10 @@ describe('MikroSyncPanel — 14 uç + miktar = 15 arka plan kartı (çalışma z
 });
 
 describe('MikroSyncPanel — statik bağ (kaynak tarayan)', () => {
-  it('ImportCard yok; eski importXFromMikro/MikroImportResult 0; arkaPlan: true 12; d.total ?? 0 yok; isiBaslatVeBekle ≥ 1; <ArkaPlanIsiKarti 4; literal "stokMiktarImport"/"jobs" yok', () => {
+  it('ImportCard yok; eski importXFromMikro/MikroImportResult 0; arkaPlan: true 13; d.total ?? 0 yok; isiBaslatVeBekle ≥ 1; <ArkaPlanIsiKarti 4; literal "stokMiktarImport"/"jobs" yok', () => {
     expect(say('ImportCard')).toBe(0);
     expect(say('importStokFromMikro') + say('importCariFromMikro') + say('MikroImportResult')).toBe(0);
-    expect(say('arkaPlan: true')).toBe(12);
+    expect(say('arkaPlan: true')).toBe(13);
     expect(say('d.total ?? 0')).toBe(0);
     expect(say('isiBaslatVeBekle(')).toBeGreaterThanOrEqual(1);
     expect(say('<ArkaPlanIsiKarti')).toBe(4);
@@ -138,12 +138,12 @@ describe('MikroSyncPanel — Tümünü Çek işin bitişini BEKLER (Mikro eşzam
     fireEvent.click(screen.getByRole('button', { name: /Tümünü Çek/ }));
     const ozet = await screen.findByRole('status', { name: 'Tümünü Çek özeti' });
     const metin = ozet.textContent ?? '';
-    expect(metin).toContain('15 adım hatalı');    // stok, cari, 12 SQL, miktar (arka plan adımları)
+    expect(metin).toContain('16 adım hatalı');    // stok, cari, 13 SQL, miktar (arka plan adımları)
     expect(metin).toContain('7 adım tamam');      // 4 senkron uç + bakiye/mizan/kdv
     expect(metin).toContain('Stok kartları: Bakım kilidi: lead-birlestir');
     expect(metin).toContain('Cariler: HTTP 403');
     expect(metin).toContain('Stok miktarları: HTTP 502');
-    expect(within(ozet).getAllByRole('listitem')).toHaveLength(15);
+    expect(within(ozet).getAllByRole('listitem')).toHaveLength(16);
     expect(metin).not.toContain('ayrıntı ilgili kartta');
     expect(say('ayrıntı ilgili kartta') + say('see the card')).toBe(0);
   });
@@ -253,7 +253,7 @@ describe('MikroSyncPanel — Tümünü Çek: SENKRON adım hatası da özete gir
     const ozet = await screen.findByRole('status', { name: 'Tümünü Çek özeti' });
     const metin = ozet.textContent ?? '';
     expect(metin).toContain('5 adım tamam');       // 7 senkron adımdan 2'si hatalı
-    expect(metin).toContain('17 adım hatalı');     // 15 arka plan + personel + bakiye
+    expect(metin).toContain('18 adım hatalı');     // 16 arka plan + personel + bakiye
     expect(metin).toContain('Personel: HTTP 502');
     expect(metin).toContain("Cari bakiyeler: Unexpected token '<'");
     // Kart da kendi hatasını gösterir (davranış korunur).
@@ -285,7 +285,7 @@ describe('MikroSyncPanel — Tümünü Çek panel ömründen BAĞIMSIZ', () => {
     await act(async () => { yayinla('mikroImport-stok', { running: false, finishedAt: { _seconds: 2, _nanoseconds: 0 } }); });
     const ozet = await screen.findByRole('status', { name: 'Tümünü Çek özeti' });
     expect(ozet.textContent).toContain('8 adım tamam');   // stok + 7 senkron
-    expect(ozet.textContent).toContain('14 adım hatalı');
+    expect(ozet.textContent).toContain('15 adım hatalı');
     expect(screen.getByRole('button', { name: /Tümünü Çek/ })).toBeEnabled();
   });
 });

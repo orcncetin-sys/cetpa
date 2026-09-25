@@ -214,6 +214,85 @@ describe('POST /api/mikro/import/faturadan-siparis', () => {
     expect(String((res.govde as { note?: string }).note)).toMatch(/1 faturanın stok hareketi yok — kalemsiz yazıldı/);
   });
 
+  // 2026-09-25 (kullanıcı: "iptal faturaları da iptal olarak görünsün ama başka bir hesaplamaya dahil olmasın"; şartname v2 D2).
+  describe("Mikro'da iptal edilen SATIŞ faturasının MF siparişi", () => {
+    const iptalKur = (faturalar: Record<string, unknown>[], iptaller: Record<string, unknown>[], mevcut: Record<string, unknown>[]) => {
+      vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) =>
+        coll === 'mikroFaturalar' ? faturalar : coll === 'mikroIptalFaturalar' ? iptaller : coll === 'orders' ? mevcut : []) as typeof d.C.loadCompanyDocs);
+    };
+    const MF = (sira: number, p: Record<string, unknown> = {}) => ({ id: `mikrofat__A__-${sira}`, source: 'mikro-fatura', orderNumber: `MF-${sira}`,
+      status: 'Shipped', faturali: true, mikroFaturaNo: String(sira), mikroEvrak: { seri: '', sira: String(sira) }, lineItems: [{ kalemSurumu: 2 }], ...p });
+
+    it("iptal listesinde (satış) + geçerli listede YOK → 'Cancelled', önceki durum saklanır; tekrar koşuda yeniden yazılmaz", async () => {
+      iptalKur([BASLIK], [{ cha_evrakno_seri: '', cha_evrakno_sira: 400, cha_tip: 0 }], [MF(321), MF(400)]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      const yazim = d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-400');
+      expect(yazim).toHaveLength(1);
+      expect(yazim[0]).toMatchObject({ op: 'update', data: { status: 'Cancelled', iptalKaynagi: 'mikro', iptalOncekiDurum: 'Shipped' } });
+      expect(res.govde).toMatchObject({ iptalEdilen: 1, iptalGeriAlinan: 0 });
+      expect(String((res.govde as { note?: string }).note)).toMatch(/1 MF siparişi Mikro'da faturası iptal edildiği için 'İptal' yapıldı/);
+      d.sifirla();
+      iptalKur([BASLIK], [{ cha_evrakno_seri: '', cha_evrakno_sira: 400, cha_tip: 0 }], [MF(321), MF(400, { status: 'Cancelled', iptalKaynagi: 'mikro', iptalOncekiDurum: 'Shipped' })]);
+      await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      expect(d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-400')).toEqual([]);
+    });
+
+    it('iptal GERİ alındı (geçerli listede, iptal listesinde yok) → önceki durum; işaretler AÇIKÇA null (PATCH-merge)', async () => {
+      iptalKur([BASLIK], [], [MF(321, { status: 'Cancelled', iptalKaynagi: 'mikro', iptalOncekiDurum: 'Shipped' })]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      const yazim = d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-321');
+      expect(yazim[0]).toMatchObject({ op: 'update', data: { status: 'Shipped', iptalKaynagi: null, iptalOncekiDurum: null, mikroIptalGoruldu: null } });
+      expect(res.govde).toMatchObject({ iptalGeriAlinan: 1 });
+    });
+
+    it('ALIŞ iptali eşlenmez; anahtar hem geçerli hem iptal listesindeyse DOKUNULMAZ ve sayılır; kullanıcının iptal ettiği (işaretsiz) sipariş geri alınmaz', async () => {
+      iptalKur([BASLIK], [{ cha_evrakno_seri: '', cha_evrakno_sira: 321, cha_tip: 0 }, { cha_evrakno_seri: '', cha_evrakno_sira: 500, cha_tip: 1 }],
+        [MF(321), MF(500), MF(321, { id: 'x', mikroEvrak: { seri: 'Z', sira: '9' }, status: 'Cancelled' })]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      expect(d.koleksiyon('orders').filter(y => ['mikrofat__A__-321', 'mikrofat__A__-500', 'x'].includes(y.ref.id))).toEqual([]);
+      expect(res.govde).toMatchObject({ iptalEdilen: 0, iptalBelirsiz: 1 });
+    });
+
+    // İnceleme 2026-09-25: geri alma YALNIZ fatura yeniden GEÇERLİ listedeyse — Mikro'da silinmiş (iki listede de yok)
+    // iptalli sipariş geri alınmaz.
+    it('iptal listesinden de geçerli listeden de DÜŞMÜŞ (silinmiş) iptalli sipariş GERİ ALINMAZ', async () => {
+      iptalKur([BASLIK], [], [MF(400, { status: 'Cancelled', iptalKaynagi: 'mikro', iptalOncekiDurum: 'Shipped' })]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      expect(d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-400')).toEqual([]);
+      expect(res.govde).toMatchObject({ iptalGeriAlinan: 0 });
+    });
+
+    it('HİÇ geçerli satış faturası kalmasa da (erken dönüş) iptal işaretlemesi koşar ve note bildirir', async () => {
+      iptalKur([], [{ cha_evrakno_seri: '', cha_evrakno_sira: 400, cha_tip: 0 }], [MF(400)]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      expect(d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-400')[0]).toMatchObject({ op: 'update', data: { status: 'Cancelled', iptalKaynagi: 'mikro' } });
+      expect(String((res.govde as { note?: string }).note)).toMatch(/1 MF siparişi Mikro'da faturası iptal edildiği için 'İptal' yapıldı/);
+    });
+
+    it('erken dönüş yolunda da: kalem modunda KOŞMAZ; yön okunamadığı için düşüldüyse (yönsüz fatura) KOŞMAZ', async () => {
+      iptalKur([], [{ cha_evrakno_seri: '', cha_evrakno_sira: 400, cha_tip: 0 }], [MF(400)]);
+      await d.cagir('POST', '/api/mikro/import/faturadan-siparis', { kalemYenile: 'uygula' });
+      expect(d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-400')).toEqual([]);
+      d.sifirla();
+      iptalKur([{ ...BASLIK, cha_evrakno_sira: 400, cha_tip: null }], [{ cha_evrakno_seri: '', cha_evrakno_sira: 400, cha_tip: 0 }], [MF(400)]);
+      await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      expect(d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-400')).toEqual([]);
+    });
+
+    it('ana yolda yönü okunamayan fatura varsa iptal eşlemesi KOŞMAZ ve not bildirir', async () => {
+      iptalKur([BASLIK, { ...BASLIK, cha_evrakno_sira: 400, cha_tip: null }], [{ cha_evrakno_seri: '', cha_evrakno_sira: 400, cha_tip: 0 }], [MF(321), MF(400)]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      expect(d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-400')).toEqual([]);
+      expect(String((res.govde as { note?: string }).note)).toMatch(/1 faturanın yönü okunamadığı için iptal eşlemesi ATLANDI/);
+    });
+
+    it("kalem modunda (önizle/uygula) iptal işaretlemesi KOŞMAZ", async () => {
+      iptalKur([BASLIK], [{ cha_evrakno_seri: '', cha_evrakno_sira: 400, cha_tip: 0 }], [MF(400)]);
+      await d.cagir('POST', '/api/mikro/import/faturadan-siparis', { kalemYenile: 'uygula' });
+      expect(d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-400')).toEqual([]);
+    });
+  });
+
   describe('mevcut MF siparişinin kalemini yenileme (kalemYenile)', () => {
     const MEVCUT = { id: 'mikrofat__A__-321', source: 'mikro-fatura', orderNumber: 'MF-321', status: 'Shipped', notes: 'kullanıcı notu',
       faturali: true, mikroFaturaNo: '321', lineItems: [] as unknown[] };

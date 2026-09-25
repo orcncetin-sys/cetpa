@@ -112,7 +112,7 @@ describe('Mikro SQL import hedefleri', () => {
   // durumdaydı: kardeşleri (mikroDepolar/Bankalar/Kasalar) listedeyken bu ikisi
   // atlanmıştı ve yetki kapısı eklenince iki import ucu kilitlenecekti.
   const IMPORT_HEDEFLERI = [
-    'mikroSiparisler', 'mikroFaturalar', 'mikroCariHareketler', 'inventoryMovements',
+    'mikroSiparisler', 'mikroFaturalar', 'mikroIptalFaturalar', 'mikroCariHareketler', 'inventoryMovements',
     'mikroBankalar', 'mikroKasalar', 'odemePlanlari', 'mikroDepolar',
     'barkodlar', 'mikroFiyatListeleri', 'mikroDemirbaslar', 'mikroMaliyetMerkezleri',
   ];

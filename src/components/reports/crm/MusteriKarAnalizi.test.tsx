@@ -24,6 +24,10 @@ describe('MusteriKarAnalizi — maliyeti bilinmeyen kalem', () => {
       exchangeRates={{} as never} currentLanguage="tr" fmtAna={fmtAna as never} />);
     expect(screen.getByText('₺900')).toBeTruthy();                  // 1.900 − 10 × 100 (KUM maliyetsiz, eklenmedi)
     expect(screen.getByText(/1 sipariş hesap dışı/)).toBeTruthy();
+    // Genel not: müşteri LİSTEDE (başka siparişiyle) — "müşteri bu yüzden listede yok" DENMEZ (delta hakem 2026-09-25).
+    const genel = screen.getByText(/sipariş kâr hesabına girmedi/);
+    expect(genel.textContent).toMatch(/^1 sipariş kâr hesabına girmedi — /);
+    expect(genel.textContent).not.toMatch(/müşteri bu yüzden/);
     expect(screen.getAllByText(/1 kalem maliyetsiz — kâr kısmi/)).toHaveLength(2);
     expect(document.body.textContent).not.toMatch(/NaN/);
   });
@@ -40,8 +44,24 @@ describe('MusteriKarAnalizi — hesap dışı kalanlar görünür', () => {
     ];
     render(<MusteriKarAnalizi orders={orders as never} inventory={inventory as never} inventoryMovements={[] as never}
       exchangeRates={{} as never} currentLanguage="tr" fmtAna={fmtAna as never} />);
-    expect(screen.getByText(/1 müşteri \/ 1 sipariş kâr hesabına girmedi/)).toBeTruthy();
+    expect(screen.getByText(/1 sipariş kâr hesabına girmedi \(1 müşteri bu yüzden listede yok\)/)).toBeTruthy();
     expect(screen.queryByText('ESKİ MF')).toBeNull();
+    expect(screen.queryByText(/cirosu sıfır ya da eksi/)).toBeNull();   // hesap dışı müşteri İKİNCİ notta sayılmaz
+    expect(screen.getByText('NATIVE')).toBeTruthy();
+  });
+});
+
+describe('MusteriKarAnalizi — sıfır/eksi cirolu müşteri AYRI nedenle görünür', () => {
+  it('yalnız iade (eksi ciro) müşterisi "hesap dışı sipariş" sayılmaz; kendi notuyla bildirilir ve kart kaybolmaz', () => {
+    const inventory = [{ id: 'i1', sku: 'CMT-50', name: 'ÇİMENTO 50KG', costPrice: 100, currency: 'TRY' }];
+    const orders = [
+      { id: 'r', customerName: 'İADECİ', status: 'Delivered', totalPrice: -300, lineItems: [{ sku: 'CMT-50', name: 'ÇİMENTO 50KG', quantity: -1, price: 300 }] },
+      { id: 'n', customerName: 'NATIVE', status: 'Delivered', totalPrice: 1000, lineItems: [{ sku: 'CMT-50', name: 'ÇİMENTO 50KG', quantity: 5, price: 200 }] },
+    ];
+    render(<MusteriKarAnalizi orders={orders as never} inventory={inventory as never} inventoryMovements={[] as never}
+      exchangeRates={{} as never} currentLanguage="tr" fmtAna={fmtAna as never} />);
+    expect(screen.getByText(/1 müşterinin cirosu sıfır ya da eksi/)).toBeTruthy();
+    expect(screen.queryByText(/kâr hesabına girmedi/)).toBeNull();
     expect(screen.getByText('NATIVE')).toBeTruthy();
   });
 });

@@ -15,6 +15,7 @@ import { stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, birimSapmalari, netCo
 import { bilinenSayi } from '../../utils/para.js';
 import { cariBakiyeToplamlari } from '../../utils/muhasebe/finansalOranlar.js';
 import { zamanMs } from '../../utils/zaman.js';
+import { siparisIptalMi } from '../../utils/siparis.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface ReportsRouteCtx {
@@ -52,8 +53,11 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
         return raw.toDate?.() ?? new Date(0);
       }
 
-      const thisOrders = orders.filter(o => dateOf(o) >= d30 && dateOf(o) <= now);
-      const prevOrders = orders.filter(o => dateOf(o) >= d60 && dateOf(o) < d30);
+      // İPTAL HARİÇ (K2; inceleme 2026-09-25): Mikro'da faturası iptal edilen MF siparişi artık 'Cancelled' — özet onu
+      // sipariş sayısına ve ciroya katıyordu. İptal edilen sipariş satış değildir.
+      const iptalsiz = orders.filter(o => !siparisIptalMi(o));
+      const thisOrders = iptalsiz.filter(o => dateOf(o) >= d30 && dateOf(o) <= now);
+      const prevOrders = iptalsiz.filter(o => dateOf(o) >= d60 && dateOf(o) < d30);
 
       const revenue = (arr: typeof orders) => arr.reduce((s, o) => s + ((o.totalPrice as number) || 0), 0);
       const thisRevenue = revenue(thisOrders);

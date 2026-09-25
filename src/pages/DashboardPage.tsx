@@ -1,5 +1,5 @@
 import { sayiBicimleyici } from '../utils/recharts';
-import { gorunenSiparisNo, siparisTutari } from '../utils/siparis';
+import { gorunenSiparisNo, siparisTutari, siparisIptalMi } from '../utils/siparis';
 import { panoCirosu, panoMikroSiparisleri, panoSiparisleri } from '../utils/pano/mikroBirlesim';
 import { ekranTutari, sayiSirala } from '../utils/para';
 import {
@@ -196,7 +196,10 @@ export default function DashboardPage(props: Props) {
   // DIŞLANIR — aynı fatura hem mikroFaturalar hem orders üzerinden iki kez ciroya
   // girmesin. Kural + toplama artık TEK YERDE: utils/pano/mikroBirlesim → panoCirosu
   // (sparkline ve 7 günlük şerit de aynı fonksiyonu çağırır; üçü sessizce ayrışamaz).
-  const ciro = panoCirosu(filteredOrders, filteredMikroFaturalar);
+  // İPTAL HARİÇ (K2; 2026-09-25): KPI ve grafikler AYNI küme — grafikler iptali dışlarken kart saymaya devam ediyordu.
+  // (Mikro iptali zaten dışarıda: panoCirosu Mikro türevi siparişi değil, iptalleri ayıklanmış faturaları toplar.)
+  const iptalsizSiparisler = filteredOrders.filter(o => !siparisIptalMi(o));
+  const ciro = panoCirosu(iptalsizSiparisler, filteredMikroFaturalar);
   const revenueT = ciro.tutar;
   const combinedRevenue = ciro.ekran;   // hiç bilinen yoksa NaN → fmtKpi '—'
   // 'orders' ve 'mikroFaturalar' SSE ile KADEMELİ akıyor (mikroFaturalar 600+
@@ -339,7 +342,8 @@ export default function DashboardPage(props: Props) {
                 return (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
-                  { label: dashT.total_orders, value: filteredOrders.length, ready: ordersCountReady, icon: Package, color: 'text-blue-500', bg: 'bg-blue-50', sub: `${filteredOrders.filter(o => o.status === 'Pending').length} ${dashT.pending}`, tab: 'orders', delta: summaryData?.orders?.delta, prev: summaryData?.orders?.prevCount },
+                  // Değer ve artış rozeti AYNI küme (iptal hariç — /api/reports/summary de öyle, 2026-09-25).
+                  { label: dashT.total_orders, value: iptalsizSiparisler.length, ready: ordersCountReady, icon: Package, color: 'text-blue-500', bg: 'bg-blue-50', sub: `${filteredOrders.filter(o => o.status === 'Pending').length} ${dashT.pending}`, tab: 'orders', delta: summaryData?.orders?.delta, prev: summaryData?.orders?.prevCount },
                   { label: dashT.active_leads, value: filteredLeads.filter(l => !['Closed Won','Closed Lost'].includes(l.status)).length, ready: leadsCountReady, icon: Users, color: 'text-brand', bg: 'bg-brand/10', sub: `${filteredLeads.length} ${dashT.total}`, tab: 'crm', delta: null },
                   // Düşük stok sayısı TEK KAPIDAN (`dusukStok`): ham `i.stockLevel <= i.lowStockThreshold`
                   // karşılaştırması alanlardan biri bilinmiyorken `undefined <= 5` → false veriyordu,
@@ -448,7 +452,9 @@ export default function DashboardPage(props: Props) {
                         // KPI kartıyla AYNI yere (utils/pano/mikroBirlesim → panoCirosu) devrediyor.
                         // Gün süzgeci orada, kural onun da altında: 2026-09-04'te sparkline korumayı
                         // kaçırdığı için çubuklar gerçeğin iki katına çıkmıştı.
-                        const days = gunlukCiro(orders, mikroFaturalar, 7, new Date(), { iptalHaric: false });
+                        // İPTAL HARİÇ (K2; 2026-09-25): Mikro'da faturası iptal edilen MF siparişi 'Cancelled' olur — kullanıcı:
+                        // "başka bir hesaplamaya dahil olmasın". Eskiden `iptalHaric: false` PARİTE idi.
+                        const days = gunlukCiro(orders, mikroFaturalar, 7, new Date(), { iptalHaric: true });
                         // Bilinmeyen gün ('—') ölçeğe girmez; alt sınır 1 sıfıra-bölme koruması (para iddiası değil).
                         const maxRev = olcekTavani(days);
                         return (
@@ -515,7 +521,7 @@ export default function DashboardPage(props: Props) {
                 // Pencere BU KARTA özel: KAYAN 7×24 saat (`sonNGunToplami`), yukarıdaki
                 // sparkline ise TAKVİM günü kovalıyor — ikisi de "son 7 gün" diyor ama
                 // rakamları eşit değil. Bilerek ayrı tutuldu (bkz. utils/pano/ciroDonem).
-                const weekRevenueT = sonNGunToplami(orders, mikroFaturalar, 7);
+                const weekRevenueT = sonNGunToplami(orders.filter(o => !siparisIptalMi(o)), mikroFaturalar, 7);   // iptal hariç (K2)
                 const weekRevenue = ekranTutari(weekRevenueT);
 
                 return (
@@ -784,9 +790,9 @@ export default function DashboardPage(props: Props) {
                 // projeksiyonu TÜRETME kapısından geçer (tek kayıt bile tutarsızsa hesaplanmaz,
                 // '—' basılır — eskiden kısmi toplamdan "▲ %25" ve "Projeksiyon ₺X" üretiliyordu).
                 // Ay sınırları / yuvarlamalar birebir korundu: utils/pano/ciroDonem → mtdKarsilastir.
-                // `iptalHaric: false` PARİTE: bu panel iptal siparişleri bugün ciroya sayıyor
-                // (yanındaki Phase 99 Satış Hedefi saymıyor — tutarsızlık açık iş olarak bildirildi).
-                const mtd = mtdKarsilastir(orders, new Date(), { iptalHaric: false });
+                // İPTAL HARİÇ (K2; 2026-09-25): eskiden `iptalHaric: false` PARİTE idi — yanındaki Phase 99 Satış Hedefi
+                // saymıyordu (tutarsızlık kapandı). Mikro'da iptal edilen faturanın siparişi de ciroya girmez.
+                const mtd = mtdKarsilastir(orders, new Date(), { iptalHaric: true });
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-3">
@@ -992,7 +998,8 @@ export default function DashboardPage(props: Props) {
                 // girmez (eski hâli her tutarsız kaydı ₺0'lık sipariş sanıp ortalamayı aşağı çekiyordu);
                 // liste boşken oran 0 DEĞİL null ('—'); adı olmayan siparişler "undefined" kovasında
                 // birikip sahte "tekrar eden alıcı" üretmez.
-                const kpi42 = finansKpilari({ filtreliSiparisler: filteredOrders, siparisler: orders, adaylar: leads });
+                // Ortalama sipariş tutarı iptal hariç (K2; 2026-09-25). Teslimat/tahsilat/tekrar alıcı oranları ciro değil — `orders`.
+                const kpi42 = finansKpilari({ filtreliSiparisler: iptalsizSiparisler, siparisler: orders, adaylar: leads });
                 const aov = kpi42.aov, teslimat = kpi42.teslimat, donusum = kpi42.donusum, tekrar = kpi42.tekrarAlici;
                 return (
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1586,7 +1593,7 @@ export default function DashboardPage(props: Props) {
                 // toplam KISMİdir ve ondan çıkarılan "%100 B2B" sahte kesinliktir. `segmentCirosu`
                 // (src/utils/pano/musteriAnaliz.ts, testli) o durumda yuzde=null döner → çubuk
                 // ÇİZİLMEZ, yerine "N siparişin tutarı bilinmiyor" notu yazılır.
-                const s79 = segmentCirosu(filteredOrders, b2bSegmenti, ['B2B', 'Diger']);
+                const s79 = segmentCirosu(iptalsizSiparisler, b2bSegmenti, ['B2B', 'Diger']);   // iptal hariç (K2)
                 const b2bSeg = s79.segmentler[0], perakendeSeg = s79.segmentler[1];
                 const b2bRev = b2bSeg.ciro, retailRev = perakendeSeg.ciro;
                 if (s79.toplam === 0) return null;   // gerçek ₺0 — eski davranış
@@ -1638,7 +1645,7 @@ export default function DashboardPage(props: Props) {
 
               {/* ── Phase 106: Revenue Donut by Customer Type ── */}
               {orders.length > 0 && (() => {
-                const s106 = segmentCirosu(orders, donutSegmenti, ['B2B', 'Dealer', 'Retail']);
+                const s106 = segmentCirosu(orders.filter(o => !siparisIptalMi(o)), donutSegmenti, ['B2B', 'Dealer', 'Retail']);   // iptal hariç (K2)
                 const etiket106: Record<string, { label: string; color: string }> = {
                   B2B:    { label: 'B2B',                          color: '#3b82f6' },
                   Dealer: { label: oc(currentLanguage).bayi,       color: '#ff4000' },
@@ -2091,8 +2098,8 @@ export default function DashboardPage(props: Props) {
                 // yapıp recharts alanını komple bozuyordu).
                 // BİLİNÇLİ FARK: tarih artık `createdAt ?? syncedAt` (eskiden yalnız `createdAt`) —
                 // yanındaki Phase 103 çubuğu o siparişleri zaten sayıyordu, iki grafik aynı ekranda
-                // farklı ciro veriyordu. `iptalHaric: false` PARİTE (trend bugün iptali sayıyor).
-                const aylar = aylikCiro(orders, 6, new Date(), { iptalHaric: false }, currentLanguage === 'tr' ? 'tr' : 'en');
+                // farklı ciro veriyordu. İPTAL HARİÇ (K2; 2026-09-25 — eskiden trend iptali sayıyordu).
+                const aylar = aylikCiro(orders, 6, new Date(), { iptalHaric: true }, currentLanguage === 'tr' ? 'tr' : 'en');
                 const months: { label: string; revenue: number | null; orders: number }[] =
                   aylar.map(a => ({ label: a.etiket, revenue: a.grafik, orders: a.adet }));
 

@@ -253,6 +253,77 @@ describe('(a) anında döner + jobs/<isAdi> dokümanı; sonSayfaMs zinciri', () 
   });
 });
 
+// 2026-09-25: iptal edilen faturalar AYRI koleksiyona iner; Mikro'da iptal GERİ ALINAN fatura ters süpürgeyle kalkar.
+// Şartname kapısı D1: iptalKolonu verilseydi süpürge `<> 0` GUID'leri, yani bu koleksiyonun KENDİ kayıtlarını silerdi.
+describe('import/iptal-faturalar — ayrı koleksiyon + TERS süpürge (yalnız eksiksiz sonuçta, pencere içinde)', () => {
+  const MEVCUT = [
+    { id: 'g1', data: { companyId: 'A', cha_tarihi: '2026-01-05T00:00:00' } },   // hâlâ iptal → kalır
+    { id: 'g2', data: { companyId: 'A', cha_tarihi: '2025-03-01T00:00:00' } },   // iptali geri alındı → SİLİNİR
+    { id: 'g0', data: { companyId: 'A', cha_tarihi: '2019-12-31T00:00:00' } },   // pencere (2020+) DIŞI → kalır
+    { id: 'gx', data: { companyId: 'A' } },                                      // tarih okunamıyor → kalır
+  ];
+  const pgKur = () => d.pgAyarla(async (sql: string, params?: unknown[]) =>
+    (/SELECT id, data FROM docs WHERE coll = \$1 AND data->>'companyId' = \$2/.test(sql) && params?.[0] === 'mikroIptalFaturalar' && params?.[1] === 'A'
+      ? { rows: MEVCUT } : { rows: [] }));
+
+  it("sorgu: evrak koşulu + ISNULL(cha.cha_iptal, 0) <> 0; iptal süpürgesi YOK; yazım mikroIptalFaturalar'a; ters süpürge yalnız g2'yi siler", async () => {
+    pgKur();
+    vi.mocked(mikroSql).mockResolvedValue({ rows: [{ cha_Guid: 'g1', cha_tarihi: '2026-01-05T00:00:00', cha_tip: 0 }], hata: null });
+    const res = await d.cagir('POST', '/api/mikro/import/iptal-faturalar');
+    expect(res.govde).toEqual({ success: true, started: true, job: 'mikroImport-iptal-faturalar' });
+    const son = await d.isBitisi('mikroImport-iptal-faturalar');
+    expect(son).toMatchObject({ running: false, error: null, total: 1 });
+    const sql = String(vi.mocked(mikroSql).mock.calls[0][0]);
+    expect(sql).toContain('(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6)) AND ISNULL(cha.cha_iptal, 0) <> 0');
+    expect(vi.mocked(mikroPost).mock.calls.filter(c => c[0] === 'SqlVeriOkuV2')).toEqual([]);   // iptal süpürgesi koşmadı
+    expect(d.koleksiyon('mikroIptalFaturalar').filter(y => y.op === 'set').map(y => y.ref.id)).toEqual(['g1']);
+    expect(d.koleksiyon('mikroIptalFaturalar').filter(y => y.op === 'delete').map(y => y.ref.id)).toEqual(['g2']);
+    expect(d.syncLog).toHaveBeenCalledWith('SQL:CARI_HESAP_HAREKETLERI cha', 'mikroIptalFaturalar',
+      expect.stringContaining('1 kayıt artık sonuçta yok'), true, null, null, expect.any(Number), expect.anything());
+  });
+
+  it('üst sınır (sonTarih) verilirse sonuç eksiksiz DEĞİL → ters süpürge atlanır ve söylenir; hiçbir şey silinmez', async () => {
+    pgKur();
+    vi.mocked(mikroSql).mockResolvedValue({ rows: [{ cha_Guid: 'g1', cha_tarihi: '2026-01-05T00:00:00' }], hata: null });
+    await d.cagir('POST', '/api/mikro/import/iptal-faturalar', { sonTarih: '2026-09-30' });
+    await d.isBitisi('mikroImport-iptal-faturalar');
+    expect(d.koleksiyon('mikroIptalFaturalar').filter(y => y.op === 'delete')).toEqual([]);
+    expect(d.syncLog).toHaveBeenCalledWith('SQL:CARI_HESAP_HAREKETLERI cha', 'mikroIptalFaturalar',
+      expect.stringContaining('ters süpürge atlandı (sonuç eksiksiz değil)'), true, null, null, expect.any(Number), expect.anything());
+  });
+
+  it('BOŞ sonuçta ters süpürge atlanır (okunamayan yanıt da `rows: []` döner) — hiçbir şey silinmez', async () => {
+    pgKur();
+    vi.mocked(mikroSql).mockResolvedValue({ rows: [], hata: null });
+    await d.cagir('POST', '/api/mikro/import/iptal-faturalar');
+    await d.isBitisi('mikroImport-iptal-faturalar');
+    expect(d.koleksiyon('mikroIptalFaturalar').filter(y => y.op === 'delete')).toEqual([]);
+    expect(d.syncLog).toHaveBeenCalledWith('SQL:CARI_HESAP_HAREKETLERI cha', 'mikroIptalFaturalar',
+      expect.stringContaining('ters süpürge atlandı (sonuç boş'), true, null, null, expect.any(Number), expect.anything());
+  });
+
+  it('sayfa TAVANINA çarpılırsa (sonuç eksik) ters süpürge atlanır', async () => {
+    pgKur();
+    let n = 0;
+    vi.mocked(mikroSql).mockImplementation((async () => ({
+      rows: Array.from({ length: 500 }, () => ({ cha_Guid: `p${n++}`, cha_tarihi: '2026-01-05T00:00:00' })), hata: null,
+    })) as unknown as typeof mikroSql);
+    await d.cagir('POST', '/api/mikro/import/iptal-faturalar');
+    await d.isBitisi('mikroImport-iptal-faturalar');
+    expect(d.koleksiyon('mikroIptalFaturalar').filter(y => y.op === 'delete')).toEqual([]);
+    expect(d.syncLog).toHaveBeenCalledWith('SQL:CARI_HESAP_HAREKETLERI cha', 'mikroIptalFaturalar',
+      expect.stringContaining('ters süpürge atlandı (sonuç eksiksiz değil)'), true, null, null, expect.any(Number), expect.anything());
+  });
+
+  it("GUID'siz satır varsa (eşleşme kurulamaz) ters süpürge atlanır", async () => {
+    pgKur();
+    vi.mocked(mikroSql).mockResolvedValue({ rows: [{ cha_tarihi: '2026-01-05T00:00:00' }], hata: null });
+    await d.cagir('POST', '/api/mikro/import/iptal-faturalar');
+    await d.isBitisi('mikroImport-iptal-faturalar');
+    expect(d.koleksiyon('mikroIptalFaturalar').filter(y => y.op === 'delete')).toEqual([]);
+  });
+});
+
 describe('(b) KİLİT: süreç-geneli TEK iş — farklı isAdi de alreadyRunning, job = ÇALIŞAN iş', () => {
   it('stok sürerken ikinci stok VE cari isteği alreadyRunning; mikroPost sayısı artmaz; jobs\'a ikinci set yok; bitince üçüncü başlar', async () => {
     const sayfa = ertelenen<MikroYanit>();
@@ -345,7 +416,7 @@ describe('(c) istisna: syncLog(false) HER ZAMAN ve TAM 1 kez; bekle çözülür;
 });
 
 describe('(d) cron paritesi: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DOĞRUDAN; pencere K-B', () => {
-  it("03:20: cari-hareket + fatura-listesi TAM (>= '2000-01-01'), siparis/stok-hareket 90 gün, BETWEEN YOK, üst sınır YOK; sayfa + süpürge zaman aşımı 120 sn (env 600 sn'ye kadar); arkaPlanIsiBaslat HİÇ; syncLog tanım başına 1", async () => {
+  it("03:20: cari-hareket + fatura-listesi + iptal-faturalar TAM (>= '2000-01-01'), siparis/stok-hareket 90 gün, BETWEEN YOK, üst sınır YOK; sayfa + süpürge zaman aşımı 120 sn (env 600 sn'ye kadar); arkaPlanIsiBaslat HİÇ; syncLog tanım başına 1", async () => {
     vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-09-24T12:00:00Z') });
     vi.stubEnv('MIKRO_CRON_SYNC', 'true');
     vi.stubEnv('MIKRO_CRON_COMPANY_ID', 'A');
@@ -373,13 +444,15 @@ describe('(d) cron paritesi: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DO�
     expect(sorgular.some(s => s.includes("sth_tarih >= '2026-06-26'"))).toBe(true);
     expect(sorgular.filter(s => /BETWEEN/.test(s))).toEqual([]);
     expect(arkaPlanIsiBaslat).not.toHaveBeenCalled();
-    expect(dc.syncLog).toHaveBeenCalledTimes(12);
+    expect(dc.syncLog).toHaveBeenCalledTimes(13);   // 2026-09-25: + iptal-faturalar (13. tanım)
+    // iptal-faturalar: fatura-listesiyle AYNI evrak koşulu + `<> 0`; iptal süpürgesi YOK (kendi yazdığını silerdi).
+    expect(sorgular.some(s => s.includes('ISNULL(cha.cha_iptal, 0) <> 0') && s.includes("cha.cha_tarihi >= '2000-01-01'"))).toBe(true);
     // BİLİNÇLİ FARK (S5/K-A ortak gövde; kapanış hakemi 2026-09-25): cron'un ÇAĞRI deseni değişmedi, ama
     // sayfa sorgusu ve iptal süpürgesi artık listeZamanAsimiMs() taşır → gece/aylık cron'da sayfa zaman aşımı
     // 30 sn (server.ts global yaması) → 120 sn. SQL yolunda devre kesici YOK: asılı Mikro'da tanım başına bir
     // zaman aşımı (12 × 120 sn ≈ 24 dk; HEAD ≈ 6 dk). Bu iddialar farkı KİLİTLER — seçenek yalnız HTTP yoluna
     // daraltılırsa (ör. `ilerle ? {…} : undefined`) ya da varsayılan değişirse KIRMIZI.
-    expect(secenekler).toEqual(new Array(12).fill({ zamanAsimiMs: 120_000 }));
+    expect(secenekler).toEqual(new Array(13).fill({ zamanAsimiMs: 120_000 }));
     expect(supurgeler().map(c => c[3])).toEqual(new Array(3).fill({ zamanAsimiMs: 120_000 }));
     expect(supurgeler().filter(c => /BETWEEN/.test(String((c[1] as { SQLSorgu?: string }).SQLSorgu)))).toEqual([]);   // süpürge de üst sınırsız (hakem 7)
 
@@ -388,10 +461,10 @@ describe('(d) cron paritesi: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DO�
     vi.stubEnv('MIKRO_LISTE_ZAMAN_ASIMI_MS', '600000');
     const aylik = vi.mocked(cron.schedule).mock.calls.find(c => c[0] === '0 2 1 * *');
     await (aylik![1] as () => Promise<void>)();   // ! : kayıt yoksa test zaten patlar
-    expect(sorgular.length).toBe(12);
+    expect(sorgular.length).toBe(13);
     expect(sorgular.filter(s => /BETWEEN/.test(s))).toEqual([]);
-    expect(sorgular.filter(s => s.includes("cha_tarihi >= '2000-01-01'"))).toHaveLength(2);
-    expect(secenekler).toEqual(new Array(12).fill({ zamanAsimiMs: 600_000 }));
+    expect(sorgular.filter(s => s.includes("cha_tarihi >= '2000-01-01'"))).toHaveLength(3);
+    expect(secenekler).toEqual(new Array(13).fill({ zamanAsimiMs: 600_000 }));
     expect(supurgeler().map(c => c[3])).toEqual(new Array(3).fill({ zamanAsimiMs: 600_000 }));
     vi.useRealTimers(); vi.unstubAllEnvs();
   });

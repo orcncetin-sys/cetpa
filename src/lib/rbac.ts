@@ -219,6 +219,8 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   payments: { read: ['Admin', 'Manager', 'Accounting', 'Sales'], write: ['Admin', 'Manager', 'Accounting'] },
   payrollEntries: { read: ['Admin', 'Manager', 'Accounting', 'HR'], write: ['Admin', 'Manager', 'Accounting', 'HR'] },
   mikroFaturalar: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
+  // İptal edilen Mikro faturaları (2026-09-25): mikroFaturalar ile AYNI roller (şartname kapısı C4/D1).
+  mikroIptalFaturalar: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
   mikroCariHareketler: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
   // Ham Mikro fiyat listesi aynasi; asil kullanim inventory.prices uzerinden.
   // Fiyat aynası inventory ile aynı geniş kapsamda (satışçının fiyat görmesi
