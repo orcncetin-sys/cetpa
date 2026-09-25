@@ -313,6 +313,17 @@ export function kalemTutari(s: SatisSatiri): number {
 }
 
 /**
+ * Ekranda satırın BİRİM fiyatı, `kalemTutari` ile aynı kaynaktan: `price` biliniyorsa o; yoksa (Mikro türevi kalem)
+ * `total / quantity` (KDV dâhil — `kdvDahilKalemVar` dipnotu); ikisi de yoksa ya da miktar 0 ise NaN ('—').
+ * Neden (2026-09-25, MF-383): sipariş detayı ve fişi Mikro kalemine `price` okuyup birim ve tutarı '—' basıyordu.
+ */
+export function kalemBirimFiyati(s: SatisSatiri): number {
+  if (bilinenSayi(s.price)) return Number(s.price);
+  if (bilinenSayi(s.total) && bilinenSayi(s.quantity) && Number(s.quantity) !== 0) return Number(s.total) / Number(s.quantity);
+  return NaN;
+}
+
+/**
  * `kalemTutari`nin `total` yolu en az BİR kalemde kullanıldı mı — "Mikro faturasından türeyen kalemlerde satır
  * tutarı KDV dâhildir" dipnotunun kapısı (seçicinin ilk dalıyla AYNI kural: `total` alanının VARLIĞI değil,
  * BİLİNİRLİĞİ). Mikro'suz kiracıda dipnot basılmaz — açıkladığı satır yoksa not gürültüdür. `lineItems`

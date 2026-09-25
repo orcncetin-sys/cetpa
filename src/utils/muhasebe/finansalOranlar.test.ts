@@ -9,8 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   mikroCiro, cetpaCiro, cetpaMaliyet, cetpaAlacak, cetpaBorc, stokDegeri,
-  cariBakiyeToplamlari, finansalOranlar,
-} from './finansalOranlar';
+  cariBakiyeToplamlari, finansalOranlar } from './finansalOranlar';
 import { siparisMaliyeti } from '../para';
 
 const BILINMEYENLER: unknown[] = [undefined, null, '', NaN, 'abc', Infinity];

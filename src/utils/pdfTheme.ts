@@ -59,6 +59,8 @@ export interface PdfBaslikOpts {
   altBaslik?: string;
   /** Bant rengi — Belge Tasarımcısı şablonu (`sablonRengi`) ya da belge türü rengi (mal kabul yeşil). Varsayılan marka. */
   renk?: RGB;
+  /** Marka logosu. Verilmezse `pdfLogoHazirla`nın önbelleği; `null` = logo yerine "CETPA" yazısı (bilerek). */
+  logo?: PdfLogo | null;
 }
 
 /**
@@ -66,6 +68,42 @@ export interface PdfBaslikOpts {
  * Font olarak Roboto bekler — çağıran taraf `registerTurkishFont(doc)`
  * çağırmış olmalı (jsPDF'in gömülü fontları ş/ğ/ı/İ taşımıyor).
  */
+// ── Marka logosu ─────────────────────────────────────────────────────────────────────────────────────
+/** Başlık bandındaki logo: PNG dataURL + en/boy oranı. */
+export interface PdfLogo { dataUrl: string; oran: number }
+let logoOnbellek: { url: string; logo: PdfLogo } | null = null;
+
+/**
+ * Marka logosunu (varsayılan `/cetpalogo.avif`, uygulama başlığıyla AYNI dosya) PNG'ye çevirip önbelleğe alır.
+ * Neden (2026-09-25 kullanıcı bildirimi "fiş te logo hatalı"): bant logonun yerine düz Roboto "CETPA" yazıyordu.
+ * jsPDF AVIF gömemez → tarayıcı çözer, canvas PNG verir. Başarısızlık (ağ, eski tarayıcı, test ortamı) önbelleğe
+ * YAZILMAZ ve fırlatmaz — bant yazıyla basılır, PDF yine üretilir. `registerTurkishFont` her belgede bunu çağırır.
+ */
+export async function pdfLogoHazirla(url = '/cetpalogo.avif'): Promise<PdfLogo | null> {
+  if (logoOnbellek?.url === url) return logoOnbellek.logo;
+  try {
+    if (typeof document === 'undefined' || typeof createImageBitmap !== 'function') return null;
+    const yanit = await fetch(url);
+    if (!yanit.ok) throw new Error(`HTTP ${yanit.status}`);
+    const bmp = await createImageBitmap(await yanit.blob());
+    const tuval = document.createElement('canvas');
+    tuval.width = bmp.width; tuval.height = bmp.height;
+    const ctx = tuval.getContext('2d');
+    if (!ctx || !(bmp.width > 0) || !(bmp.height > 0)) throw new Error('logo çizilemedi');
+    ctx.drawImage(bmp, 0, 0);
+    const logo = { dataUrl: tuval.toDataURL('image/png'), oran: bmp.width / bmp.height };
+    logoOnbellek = { url, logo };
+    return logo;
+  } catch (e) {
+    console.warn('[pdfTheme] logo yüklenemedi, başlık yazıyla basılır:', e);
+    return null;
+  }
+}
+
+/** Logo yüksekliği (mm) ve beyaz zemin iç boşluğu — logo kırmızı; renkli bantta okunsun diye beyaz rozet üstünde. */
+const LOGO_YUKSEKLIK = 9;
+const LOGO_BOSLUK = 2.5;
+
 export function pdfBaslik(doc: jsPDF, opts: PdfBaslikOpts): number {
   const W = doc.internal.pageSize.getWidth();
 
@@ -73,15 +111,24 @@ export function pdfBaslik(doc: jsPDF, opts: PdfBaslikOpts): number {
   doc.setFillColor(...renk);
   doc.rect(0, 0, W, PDF_BANT_YUKSEKLIK, 'F');
 
-  doc.setFont('Roboto', 'bold');
-  doc.setFontSize(22);
-  doc.setTextColor(...PDF_RENK.white);
-  doc.text('CETPA', 14, 15);
+  // `logo` verilmezse önbellekteki (registerTurkishFont'un hazırladığı); `null` = bilerek yazı.
+  const logo = opts.logo === undefined ? logoOnbellek?.logo ?? null : opts.logo;
+  if (logo) {
+    const lw = LOGO_YUKSEKLIK * logo.oran;
+    doc.setFillColor(...PDF_RENK.white);
+    doc.roundedRect(14 - LOGO_BOSLUK, 5, lw + 2 * LOGO_BOSLUK, LOGO_YUKSEKLIK + 2 * LOGO_BOSLUK, 2, 2, 'F');
+    doc.addImage(logo.dataUrl, 'PNG', 14, 5 + LOGO_BOSLUK, lw, LOGO_YUKSEKLIK);
+  } else {
+    doc.setFont('Roboto', 'bold');
+    doc.setFontSize(22);
+    doc.setTextColor(...PDF_RENK.white);
+    doc.text('CETPA', 14, 15);
+  }
 
   doc.setFontSize(8);
   doc.setFont('Roboto', 'normal');
   doc.setTextColor(...ikincilTon(renk, 0.75));
-  doc.text(opts.altBaslik ?? 'SATIŞ & LOJİSTİK', 14, 21);
+  doc.text(opts.altBaslik ?? 'SATIŞ & LOJİSTİK', 14, logo ? 25.5 : 21);
 
   doc.setFontSize(16);
   doc.setFont('Roboto', 'bold');

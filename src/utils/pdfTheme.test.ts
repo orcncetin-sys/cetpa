@@ -19,7 +19,7 @@ function sahteDoc(sayfa = 1) {
   return {
     c, internal: { pageSize: { getWidth: () => 210, getHeight: () => 297 } },
     getNumberOfPages: () => sayfa, setPage: kaydet('setPage'),
-    setFillColor: kaydet('setFillColor'), rect: kaydet('rect'), roundedRect: kaydet('roundedRect'),
+    setFillColor: kaydet('setFillColor'), rect: kaydet('rect'), roundedRect: kaydet('roundedRect'), addImage: kaydet('addImage'),
     setFont: kaydet('setFont'), setFontSize: kaydet('setFontSize'), setTextColor: kaydet('setTextColor'), text: kaydet('text'),
     splitTextToSize: (t: string) => [t],
   };
@@ -38,6 +38,23 @@ describe('pdfBaslik', () => {
     expect(m[1]).toMatchObject({ metin: 'SATIŞ & LOJİSTİK', x: 14, y: 21 });
     expect(m[2]).toMatchObject({ metin: 'SİPARİŞ FORMU', x: 196, y: 15, opts: { align: 'right' } });
     expect(m[3]).toMatchObject({ metin: 'No: SIP-1 | Tarih: 05.09.2026', y: 26 });
+  });
+  it("logo verilince 'CETPA' YAZISI yerine gerçek logo, renkli bantta beyaz rozet üstünde (2026-09-25 \"fiş te logo hatalı\")", () => {
+    const d = sahteDoc();
+    pdfBaslik(d as never, { belgeAdi: 'SİPARİŞ FİŞİ', logo: { dataUrl: 'data:image/png;base64,AAAA', oran: 3 } });
+    const resim = d.c.filter(x => x[0] === 'addImage');
+    expect(resim).toHaveLength(1);
+    expect(resim[0].slice(1, 3)).toEqual(['data:image/png;base64,AAAA', 'PNG']);
+    expect(resim[0][5]).toBeCloseTo(27, 5);                              // genişlik = yükseklik (9 mm) × oran
+    expect(d.c.some(x => x[0] === 'roundedRect')).toBe(true);           // beyaz zemin
+    expect(metinler(d).some(m => m.metin === 'CETPA')).toBe(false);
+    expect(metinler(d).find(m => m.metin === 'SATIŞ & LOJİSTİK')?.y).toBeGreaterThan(21);   // rozetin altında
+  });
+  it("logo: null → bilerek yazı ('CETPA')", () => {
+    const d = sahteDoc();
+    pdfBaslik(d as never, { belgeAdi: 'X', logo: null });
+    expect(d.c.some(x => x[0] === 'addImage')).toBe(false);
+    expect(metinler(d)[0]).toMatchObject({ metin: 'CETPA' });
   });
   it('şablon rengi (Belge Tasarımcısı) bandı boyar — marka DEĞİL; meta yoksa 3 metin', () => {
     const d = sahteDoc();

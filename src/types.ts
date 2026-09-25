@@ -18,6 +18,8 @@ export type PriceTier = 'Retail' | 'B2B Standard' | 'B2B Premium' | 'Dealer';
 
 export interface Shipment {
   id: string;
+  /** Hızlı Sevkiyat'la siparişten açıldıysa o sipariş (OrdersPage yazar) — "siparişin açık sevkiyatı var" kapısı okur. */
+  orderId?: string;
   customerName: string;
   destination: string;
   driver: string;
@@ -94,7 +96,11 @@ export interface OrderLineItem {
   name: string;
   title?: string;
   quantity: number;
+  /** Mikro faturasından türeyen kalemde YOK (çalışma anında `undefined`) — tutar `total`dadır. Okurken `kalemTutari` /
+   *  `kalemBirimFiyati` (utils/pano/stokSevkiyat) kullanın, `price × quantity` değil. */
   price: number;
+  /** Mikro faturasından türeyen kalemin satır tutarı (KDV DÂHİL — server/mikro/eslemeFatura SiparisSatiri). */
+  total?: number | null;
   costPrice?: number;
   vatRate?: number;
   inventoryId?: string;

@@ -1,4 +1,5 @@
 import type { jsPDF } from 'jspdf';
+import { pdfLogoHazirla } from './pdfTheme';
 
 /**
  * jsPDF'nin gömülü Helvetica/Times/Courier fontları WinAnsi kodlamasında —
@@ -23,12 +24,18 @@ export async function registerTurkishFont(doc: jsPDF): Promise<void> {
     doc.addFont('Roboto-Bold.ttf', 'Roboto', 'bold');
     doc.setFont('Roboto', 'normal');
   } catch (err) {
-    // Font chunk'ı inemezse (ağ hatası, ya da deploy sonrası açık sekmede eski
-    // hash'li dosyanın 404'lemesi) ESKİDEN buradan fırlayan hata her PDF
-    // düğmesini sessizce ölü tıklamaya çeviriyordu (code-review bulgusu).
-    // Artık Helvetica'ya düşüyoruz: PDF yine üretilir, yalnız ş/ğ/ı/İ glifleri
-    // bozuk çıkar — hiç PDF vermemekten iyidir, ve sebep konsola yazılır.
-    console.warn('[pdfFont] Roboto yüklenemedi, Helvetica ile devam ediliyor (Türkçe karakterler bozuk çıkabilir):', err);
-    doc.setFont('helvetica', 'normal');
+    fontHatasi(doc, err);
   }
+  // Marka logosu (başlık bandı — pdfTheme.pdfBaslik). Tüm belge üreticileri bu fonksiyonu await ettiği için logo
+  // hazırlığının TEK kapısı burası (2026-09-25 "fiş te logo hatalı"). Hata fırlatmaz: logo yoksa bant yazıyla basılır.
+  await pdfLogoHazirla();
+}
+
+/** Font chunk'ı inemezse (ağ hatası, ya da deploy sonrası açık sekmede eski hash'li dosyanın 404'lemesi) ESKİDEN
+ *  buradan fırlayan hata her PDF düğmesini sessizce ölü tıklamaya çeviriyordu (code-review bulgusu). Artık
+ *  Helvetica'ya düşüyoruz: PDF yine üretilir, yalnız ş/ğ/ı/İ glifleri bozuk çıkar — hiç PDF vermemekten iyidir,
+ *  ve sebep konsola yazılır. */
+function fontHatasi(doc: jsPDF, err: unknown): void {
+  console.warn('[pdfFont] Roboto yüklenemedi, Helvetica ile devam ediliyor (Türkçe karakterler bozuk çıkabilir):', err);
+  doc.setFont('helvetica', 'normal');
 }

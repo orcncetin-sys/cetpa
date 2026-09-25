@@ -9,10 +9,12 @@
  * bagimliliklar ACIK baglam nesnesiyle gecer, `import` DEGIL - server.ts bu
  * modulu import ettigi icin ters yonde import DONGU olurdu.
  */
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, Response, RequestHandler } from 'express';
 import type { AdminDbLike, DocDaralt } from '../adminDbTypes.js';
 import { stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, birimSapmalari, netCozumleri } from '../../lib/stokFiyat.js';
 import { bilinenSayi } from '../../utils/para.js';
+import { cariBakiyeToplamlari } from '../../utils/muhasebe/finansalOranlar.js';
+import { zamanMs } from '../../utils/zaman.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface ReportsRouteCtx {
@@ -21,6 +23,8 @@ export interface ReportsRouteCtx {
   getUserCompanyId: (uid: string) => Promise<string>;
   /** Kiraci filtresini SQL'e iten yardimci - tum-koleksiyon taramasi yapmaz. */
   loadCompanyDocs: (coll: string, cid: string, daralt?: DocDaralt) => Promise<Array<Record<string, unknown>>>;
+  /** RBAC koleksiyon kapısı (server.ts) — rapor ucu kaynak koleksiyonun okuma rolleriyle sınırlanır. */
+  requireCollectionAccess: (coll: string, op: 'read') => RequestHandler;
 }
 
 export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
@@ -122,6 +126,27 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
       });
       // iskontoKolonlari: aynada GERÇEKTEN bulunan sth_iskonto<N> kolonları — boşsa ekran "iskonto kolonu yok" der.
       res.json({ success: true, rows, toplamSku: rows.length, iskontoKolonlari: ozet.iskontoKolonlari, netKaynaklari: ozet.netKaynaklari, sapmalar });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // GET /api/reports/mikro-cari-alacak — Mikro cari bakiyelerinden ALACAK toplamı (2026-09-25 kullanıcı bildirimi:
+  // Siparişler "Alacak Toplam" kartı, tüm siparişler Mikro kaynaklıyken '—' basıyordu). Kaynak ve küme Muhasebe ile
+  // BİREBİR (MuhasebePage `cariBalances` + finansalOranlar.cariBakiyeToplamlari): /api/mikro/pull/bakiye'nin yazdığı,
+  // lead'e bağlı carilerin bakiyesi — iki ekran aynı rakamı basar. Ham hareket aynası KULLANILMAZ: orada cari türü
+  // kolonu yok, kasa/banka kodları da toplanırdı (inceleme 2026-09-25). Rol kapısı `cariBalances` okuma rolleri
+  // (Admin/Manager/Accounting/Sales) — B2B/bayi gibi dış roller Cetpa'nın alacak toplamını OKUYAMAZ. Yalnız alacak
+  // döner (borç ve cari dökümü değil). Veri yoksa `veriYok`; hiçbir bakiye okunamadıysa `alacak: null` — ₺0 DEĞİL.
+  app.get('/api/reports/mikro-cari-alacak', C.requireAuth, C.requireCollectionAccess('cariBalances', 'read'), async (req: Request, res: Response) => {
+    try {
+      const cid = await C.getUserCompanyId((req as Request & { uid?: string }).uid || '');
+      const docs = await C.loadCompanyDocs('cariBalances', cid);
+      if (docs.length === 0) return res.json({ success: true, veriYok: true, alacak: null, cariSayisi: 0, bilinmeyenCari: 0, guncellemeMs: null });
+      const t = cariBakiyeToplamlari(docs.map(d => d.bakiye));
+      let guncellemeMs: number | null = null;
+      for (const d of docs) { const ms = zamanMs(d.updatedAt); if (ms !== null && (guncellemeMs === null || ms > guncellemeMs)) guncellemeMs = ms; }
+      res.json({ success: true, veriYok: false, alacak: t.bilinen > 0 ? t.ar : null, cariSayisi: t.bilinen, bilinmeyenCari: t.bilinmeyen, guncellemeMs });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
     }

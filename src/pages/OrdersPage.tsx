@@ -4,6 +4,13 @@ import { eslesir } from '../utils/arama';
 import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli } from '../utils/siparis';
 import { irsaliyeIstegi, irsaliyeNedenMetni } from '../utils/siparisler/irsaliyeGonder';
 import { faturaKesilebilir, mikroyaFaturaGonderilebilir } from '../utils/siparisler/faturaDurumu';
+import { yerelDegistirilebilir, sevkiyatEngeli, sevkiyatEngeliMetni, yerelDegistirilemezMetni } from '../utils/siparisler/siparisIslemleri';
+import { useMikroSiparisKalemleri } from '../hooks/useMikroSiparisKalemleri';
+import MikroSiparisKalemleri from '../components/siparis/MikroSiparisKalemleri';
+import { kalemleriMikrodanOkunacak, mikroFaturaKalemleriGetir, mikroKalemNotlari } from '../services/mikroFaturaKalemleri';
+import { kalemTutari, kalemBirimFiyati, kdvDahilKalemVar } from '../utils/pano/stokSevkiyat';
+import { kalemleriCoz, kalemSaglamasi } from '../lib/stokFiyat';
+import { authFetch } from '../services/authFetch';
 import { mikroDepoSecenekleri } from '../utils/muhasebe/depoNo';
 import { onayAcikMi } from '../lib/confirm';
 import { siparisBelgeTipi, type BelgeTipi } from '../utils/siparisler/belgeTipi';
@@ -52,7 +59,7 @@ import LocationStockReport from '../components/LocationStockReport';
 import { faturaTipiEtiketi, siparisDurumEtiketi } from '../utils/durumEtiketi';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz } from '../utils/belgeSablonu';
 import { siparisStokPlani, stokGecisi, ATLANMA_SEBEBI } from '../utils/siparisStok';
-import { satirTutari, ekranTutari, sayiSirala } from '../utils/para';
+import { satirTutari, ekranTutari, sayiSirala, toplaBilinen } from '../utils/para';
 import { teslimPerformansi, oranYuzde, ihracatToplami, ihracatToplamiYaz, memnuniyetOrtalamasi } from '../utils/siparisler/lojistikKpi';
 import { siparisKarliligi, mesajTutari, kalemlerTutari, stokKartiBul, BILINMIYOR } from '../utils/siparisler/siparisKarlilik';
 import { odenmemisOzeti, kovaTutari } from '../utils/siparisler/tahsilatVade';
@@ -237,6 +244,30 @@ export default function OrdersPage({
   const [copiedOrderId, setCopiedOrderId] = useState<string|null>(null);
   const [starredOrders, setStarredOrders] = useState<Set<string>>(new Set());
   const [showQuickShipment, setShowQuickShipment] = useState<Order|null>(null);
+  /** Detay/pencere bir anın kopyasını tutar; kural kararları canlı listedeki GÜNCEL kayıttan verilir. */
+  const guncelSiparis = (o: Order): Order => orders.find(x => x.id === o.id) ?? o;
+  /** Mikro faturasından türeyip kalemleri Cetpa'ya aktarılmamış siparişin kalemleri — Mikro'dan canlı (MF-383, 2026-09-25). */
+  const mikroKalemler = useMikroSiparisKalemleri(selectedOrder, currentLanguage === 'tr');
+  /** "Alacak Toplam" kartı: ödeme takibi Cetpa'da OLMAYAN (Mikro kaynaklı) siparişlerde alacağın gerçeği Mikro cari
+   *  bakiyesindedir — /api/reports/mikro-cari-alacak (2026-09-25: tüm siparişler Mikro kaynaklıyken kart '—' idi). */
+  const [mikroAlacak, setMikroAlacak] = useState<{ alacak: number | null; cariSayisi: number; bilinmeyenCari: number; guncellemeMs: number | null } | 'yok' | null>(null);
+  useEffect(() => {
+    let iptal = false;
+    authFetch('/api/reports/mikro-cari-alacak')
+      .then(r => r.json())
+      .then((d: { success?: boolean; veriYok?: boolean; alacak?: unknown; cariSayisi?: unknown; bilinmeyenCari?: unknown; guncellemeMs?: unknown }) => {
+        if (iptal) return;
+        // 'yok' = uç yetki vermedi / hata / Mikro bakiyesi hiç çekilmemiş → kart eski metinle '—'.
+        if (!d || !d.success || d.veriYok) { setMikroAlacak('yok'); return; }
+        setMikroAlacak({
+          alacak: typeof d.alacak === 'number' && Number.isFinite(d.alacak) ? d.alacak : null,   // null = hiçbir bakiye okunamadı → '—'
+          cariSayisi: Number(d.cariSayisi), bilinmeyenCari: Number(d.bilinmeyenCari),
+          guncellemeMs: typeof d.guncellemeMs === 'number' ? d.guncellemeMs : null,
+        });
+      })
+      .catch(() => { if (!iptal) setMikroAlacak('yok'); });
+    return () => { iptal = true; };
+  }, []);
   const [showInvoiceAging, setShowInvoiceAging] = useState(false);
   const [isEditingOrder, setIsEditingOrder] = useState(false);
   const [editingOrderData, setEditingOrderData] = useState<Partial<Order>>({});
@@ -502,11 +533,21 @@ export default function OrdersPage({
    * `customerName`'siz kayıt süzgeçleri düşürüyor, `panoSiparisleri` (native kazanır) gerçek Mikro satırını
    * listeden atıyordu (2026-09-19 son inceleme). Dönen değer yoksa çağıran YAZMAZ.
    */
-  const yazilabilirSiparis = (orderId: string): Order | undefined => {
+  /** `orders`ta GERÇEKTEN var mı (sözde Mikro siparişi satırı değil). Yalnız Cetpa'ya ait alanlar (iç not) bu kapıdan
+   *  geçer — iç not Mikro verisiyle çelişmez, Mikro kaynaklı siparişe de yazılır. */
+  const ordersKaydi = (orderId: string): Order | undefined => {
     const ord = orders.find(o => o.id === orderId);
     if (!ord) toast(currentLanguage === 'tr'
       ? "Bu sipariş Mikro'dan okunuyor — Cetpa'da değiştirilemez."
       : 'This order is read from Mikro — it cannot be changed in Cetpa.', 'warning');
+    return ord;
+  };
+  /** Siparişin KENDİSİNİ değiştiren yazmalar (durum, teslim notu, düzenleme) — Mikro faturasından türeyen sipariş
+   *  `orders`ta DURUR ama değiştirilmez: gerçeği Mikro'dadır (inceleme 2026-09-25 — durum seçici ve toplu işlem bu
+   *  kapıdan geçiyordu). İç not bu kapıdan GEÇMEZ (`ordersKaydi`). */
+  const yazilabilirSiparis = (orderId: string): Order | undefined => {
+    const ord = ordersKaydi(orderId);
+    if (ord && !yerelDegistirilebilir(ord)) { toast(yerelDegistirilemezMetni(currentLanguage), 'warning'); return undefined; }
     return ord;
   };
 
@@ -553,7 +594,7 @@ export default function OrdersPage({
 
   const handleSaveOrderNote = async () => {
     if (!selectedOrder || orderNoteText === (selectedOrder.notes ?? '')) return;
-    if (!yazilabilirSiparis(selectedOrder.id)) return;
+    if (!ordersKaydi(selectedOrder.id)) return;          // iç not: Mikro kaynaklı siparişe de yazılır (delta hakemi 2026-09-25)
     setOrderNoteSaving(true);
     try {
       await updateDoc(doc(db, 'orders', selectedOrder.id), { notes: orderNoteText, updatedAt: serverTimestamp() });
@@ -715,13 +756,21 @@ export default function OrdersPage({
                       { label: oc(currentLanguage).bekleyen, value: pending522.toString(), color: pending522 > 0 ? 'text-amber-600' : 'text-gray-400', bg: 'bg-white', sub: null },
                       { label: op(currentLanguage).hazirlaniyor_kargoda, value: inProgress522.toString(), color: inProgress522 > 0 ? 'text-blue-600' : 'text-gray-400', bg: 'bg-white', sub: null },
                       { label: op(currentLanguage).alacak_toplam,
-                        value: izlenenVar ? kisaTutar(unpaidTotal, { fmt: Number.isFinite(unpaidTotal) && unpaidTotal >= 1e6 ? 'M' : 'K', ondalik: 1 }) : '—',
+                        // Cetpa'da izlenen sipariş yoksa Mikro cari bakiyelerinden (Muhasebe ile AYNI kural: pozitif bakiye = alacak).
+                        value: izlenenVar ? kisaTutar(unpaidTotal, { fmt: Number.isFinite(unpaidTotal) && unpaidTotal >= 1e6 ? 'M' : 'K', ondalik: 1 })
+                          : mikroAlacak !== null && mikroAlacak !== 'yok' && mikroAlacak.alacak !== null ? kisaTutar(mikroAlacak.alacak, { fmt: mikroAlacak.alacak >= 1e6 ? 'M' : 'K', ondalik: 1 }) : '—',
                         // BİLİNMİYOR yeşil DEĞİL: eski `unpaidTotal > 0 ? kırmızı : yeşil` kapısı, tutarların
                         // hepsi bilinmediğinde (NaN > 0 === false) kartı yeşile çevirip "alacağın yok" diyordu.
-                        color: !izlenenVar || !Number.isFinite(unpaidTotal) ? 'text-gray-400' : unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600',
+                        color: !izlenenVar
+                          ? (mikroAlacak !== null && mikroAlacak !== 'yok' && mikroAlacak.alacak !== null ? 'text-gray-900' : 'text-gray-400')
+                          : !Number.isFinite(unpaidTotal) ? 'text-gray-400' : unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600',
                         bg: izlenenVar && Number.isFinite(unpaidTotal) && unpaidTotal > 0 ? 'bg-red-50' : 'bg-white',
                         sub: !izlenenVar
-                          ? (op(currentLanguage).mikro_cari_hesapta_izleniyor)
+                          ? (mikroAlacak !== null && mikroAlacak !== 'yok'
+                            ? (currentLanguage === 'tr'
+                              ? `Mikro cari bakiyeleri · ${mikroAlacak.cariSayisi} cari${mikroAlacak.bilinmeyenCari > 0 ? ` · ${mikroAlacak.bilinmeyenCari} cari okunamadı` : ''}${mikroAlacak.guncellemeMs !== null ? ` · ${tarihYaz(mikroAlacak.guncellemeMs)} güncel` : ''}`
+                              : `Mikro account balances · ${mikroAlacak.cariSayisi} accounts${mikroAlacak.bilinmeyenCari > 0 ? ` · ${mikroAlacak.bilinmeyenCari} unreadable` : ''}${mikroAlacak.guncellemeMs !== null ? ` · as of ${tarihYaz(mikroAlacak.guncellemeMs)}` : ''}`)
+                            : (op(currentLanguage).mikro_cari_hesapta_izleniyor))
                           : vadeOzeti.adet > 0
                             ? `${vadeOzeti.adet} ${oc(currentLanguage).siparis}${vadeOzeti.toplam.bilinmeyen > 0 ? (currentLanguage === 'tr' ? ` · ${vadeOzeti.toplam.bilinmeyen} kayıt tutarsız` : ` · ${vadeOzeti.toplam.bilinmeyen} without amount`) : ''}`
                             : null },
@@ -814,9 +863,16 @@ export default function OrdersPage({
                             ? orders.filter(o => selectedOrderIds.has(o.id) && !o.irsaliyeNo && !o.irsaliyeGonderildi
                                 && irsaliyeIstegi(o, leads.find(l => l.id === o.leadId)).gonderilebilir).length
                             : 0;
+                          // Mikro kaynaklı kayıtlar ATLANIR (Cetpa'da değiştirilmez) — kaç tane olduğu söylenir, tek tek uyarı basılmaz.
+                          const atlanan = [...selectedOrderIds].filter(id => { const x = orders.find(o => o.id === id); return !x || !yerelDegistirilebilir(x); }).length;
                           for (const id of selectedOrderIds) {
+                            const x = orders.find(o => o.id === id);
+                            if (!x || !yerelDegistirilebilir(x)) continue;
                             await handleUpdateOrderStatus(id, s, { irsaliyeSor: false });
                           }
+                          if (atlanan > 0) toast(currentLanguage === 'tr'
+                            ? `${atlanan} Mikro kaydı atlandı — durumları Mikro'da değişir.`
+                            : `${atlanan} Mikro record(s) skipped — change them in Mikro.`, 'info');
                           if (irsaliyeBekleyen > 0) toast(currentLanguage === 'tr'
                             ? `${irsaliyeBekleyen} sipariş e-İrsaliye bekliyor — sipariş detayından onaylayarak gönderin.`
                             : `${irsaliyeBekleyen} order(s) await an e-waybill — send them from the order detail.`, 'info');
@@ -1337,9 +1393,10 @@ export default function OrdersPage({
                                 );
                               })()}
                               <select value={order.status}
-                                // Sözde Mikro siparişinin durumu Cetpa'da tutulmaz ('Pending' sabit bir yer tutucudur) — kilitli.
-                                disabled={order.source === 'mikro-siparis'}
-                                title={order.source === 'mikro-siparis' ? (op(currentLanguage).mikro_siparisi_durumu_mikro_da_izlenir) : undefined}
+                                // Sözde Mikro siparişinin durumu Cetpa'da tutulmaz ('Pending' sabit bir yer tutucudur); Mikro faturasından
+                                // türeyen sipariş de Cetpa'da değiştirilmez — kilitli (siparisIslemleri.yerelDegistirilebilir).
+                                disabled={!yerelDegistirilebilir(order)}
+                                title={order.source === 'mikro-siparis' ? (op(currentLanguage).mikro_siparisi_durumu_mikro_da_izlenir) : !yerelDegistirilebilir(order) ? yerelDegistirilemezMetni(currentLanguage) : undefined}
                                 onChange={(e) => {
                                 e.stopPropagation();
                                 const newStatus = e.target.value as Order['status'];
@@ -1499,13 +1556,16 @@ export default function OrdersPage({
                                 >
                                   ★
                                 </button>
-                                <button onClick={() => openConfirm({
+                                <button onClick={() => { if (!yerelDegistirilebilir(order)) return; openConfirm({
                                   title: currentT.confirm_delete_title,
                                   message: currentT.confirm_delete,
                                   confirmLabel: currentT.delete,
                                   variant: 'danger',
                                   onConfirm: () => handleDeleteOrder(order.id)
-                                })} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors" title={currentT.delete_order}>
+                                }); }}
+                                  disabled={!yerelDegistirilebilir(order)}
+                                  className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-400"
+                                  title={yerelDegistirilebilir(order) ? currentT.delete_order : yerelDegistirilemezMetni(currentLanguage)}>
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
@@ -1532,8 +1592,9 @@ export default function OrdersPage({
                                           <td className="px-4 py-2 text-gray-400 font-mono">{li.sku}</td>
                                           <td className="px-4 py-2 text-gray-700 font-medium">{li.title ?? li.name}</td>
                                           <td className="px-4 py-2 text-right text-gray-600">{li.quantity}</td>
-                                          <td className="px-4 py-2 text-right text-gray-600">{paraYaz(li.price)}</td>
-                                          <td className="px-4 py-2 text-right font-bold text-gray-800">{paraYaz(li.price * li.quantity)}</td>
+                                          {/* Mikro türevi kalem `price` taşımaz; `price * quantity` NaN → '—' idi (ortak seçiciler, 2026-09-25). */}
+                                          <td className="px-4 py-2 text-right text-gray-600">{paraYaz(kalemBirimFiyati(li))}</td>
+                                          <td className="px-4 py-2 text-right font-bold text-gray-800">{paraYaz(kalemTutari(li))}</td>
                                         </tr>
                                       ))}
                                     </tbody>
@@ -2069,6 +2130,10 @@ export default function OrdersPage({
                           if (o.shippingAddress) doc505.text(o.shippingAddress, 14, govdeY505 + 6);
                           if (o.customerEmail) doc505.text(o.customerEmail, 14, govdeY505 + 11);
                           const lineItems505 = (o.lineItems || []);
+                          // Kalemleri Cetpa'ya aktarılmamış Mikro faturası siparişi: kalemler Mikro'dan canlı (MF-383, 2026-09-25:
+                          // "fiş pdf diyince detayı olmadığı için çekemiyor"). Tutarlar NET, KDV hariç (lib/stokFiyat.kalemleriCoz).
+                          const mikroEvrak505 = lineItems505.length === 0 ? kalemleriMikrodanOkunacak(o) : null;
+                          const mikroKalem505 = mikroEvrak505 ? await mikroFaturaKalemleriGetir(mikroEvrak505, currentLanguage === 'tr') : null;
                           if (lineItems505.length > 0) {
                             autoTable(doc505, {
                               ...pdfTabloStili(marka505),
@@ -2079,14 +2144,57 @@ export default function OrdersPage({
                               // gomuluyordu (inceleme buldu). Gorunur geometri degismez, yalniz esik.
                               margin: { bottom: PDF_ALT_BANT_YUKSEKLIK + 20 },
                               head: [[ oc(currentLanguage).urun, 'SKU', oc(currentLanguage).adet_2, oc(currentLanguage).birim_fiyat, oc(currentLanguage).toplam ]],
-                              body: lineItems505.map(li => [ li.name || li.title || '', li.sku || '', li.quantity, paraYaz(li.price), paraYaz(satirTutari(li.price, li.quantity)) ]),
-                              foot: [[{ content: oc(currentLanguage).toplam_2, colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, paraYaz(o.totalPrice)]],
+                              // Mikro türevi kalem `price` taşımaz — ortak seçiciler (ekrandaki tabloyla aynı).
+                              body: lineItems505.map(li => [ li.name || li.title || '', li.sku || '', li.quantity, paraYaz(kalemBirimFiyati(li)), paraYaz(kalemTutari(li)) ]),
+                              foot: [
+                                [{ content: oc(currentLanguage).toplam_2, colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, paraYaz(o.totalPrice)],
+                                ...(kdvDahilKalemVar([o]) ? [[{ content: currentLanguage === 'tr' ? 'Mikro faturasından gelen kalemlerde tutar KDV dâhildir.' : 'Amounts on lines from Mikro invoices include VAT.', colSpan: 5, styles: { halign: 'right' as const, fontStyle: 'normal' as const, fontSize: 7, textColor: [120, 120, 120] as [number, number, number] } }]] : []),
+                              ],
+                              footStyles: { fillColor: PDF_RENK.light, fontStyle: 'bold', fontSize: 10 },
+                            });
+                          } else if (mikroKalem505 && mikroKalem505.ok && mikroKalem505.kalemler.length > 0) {
+                            const kalemler505 = mikroKalem505.kalemler;
+                            const coz505 = kalemleriCoz(kalemler505, o.totalPrice);
+                            const tr505 = currentLanguage === 'tr';
+                            const ara505 = toplaBilinen(coz505, c => c.net);
+                            const kdv505 = toplaBilinen(kalemler505, k => k.sth_vergi);
+                            // Ekrandaki tabloyla AYNI notlar (MikroSiparisKalemleri): okunamayan kalem ve tutmayan sağlama SESSİZ geçmez.
+                            const saglama505 = kalemSaglamasi(kalemler505, coz505, o.totalPrice);
+                            const notlar505 = mikroKalemNotlari(ara505.bilinmeyen, kdv505.bilinmeyen, saglama505, currentLanguage);
+                            autoTable(doc505, {
+                              ...pdfTabloStili(marka505),
+                              startY: govdeY505 + 20,
+                              margin: { bottom: PDF_ALT_BANT_YUKSEKLIK + 20 },
+                              head: [[ oc(currentLanguage).urun, 'SKU', oc(currentLanguage).adet_2, tr505 ? 'Birim (KDV hariç)' : 'Unit (excl. VAT)', tr505 ? 'Tutar (KDV hariç)' : 'Amount (excl. VAT)' ]],
+                              body: kalemler505.map((k, i) => [
+                                String(k.urunAdi ?? '').trim() || String(k.sth_stok_kod ?? ''),
+                                String(k.sth_stok_kod ?? ''),
+                                `${coz505[i]?.miktar ?? '—'}${typeof k.birim === 'string' && k.birim ? ` ${k.birim}` : ''}`,
+                                paraYaz(coz505[i]?.birimFiyat ?? null),
+                                paraYaz(coz505[i]?.net ?? null),
+                              ]),
+                              foot: [
+                                [{ content: tr505 ? 'Ara toplam (KDV hariç)' : 'Subtotal (excl. VAT)', colSpan: 4, styles: { halign: 'right' } }, paraYaz(ekranTutari(ara505))],
+                                // Masraf ekranla AYNI koşulla (MikroSiparisKalemleri) — yoksa fişte ara + KDV toplamı tutmaz, fark açıklamasız kalırdı.
+                                ...(saglama505 !== null && saglama505.masraf > 0 ? [[{ content: tr505 ? 'Masraf' : 'Charges', colSpan: 4, styles: { halign: 'right' as const } }, paraYaz(saglama505.masraf)]] : []),
+                                [{ content: oc(currentLanguage).kdv, colSpan: 4, styles: { halign: 'right' } }, paraYaz(ekranTutari(kdv505))],
+                                [{ content: oc(currentLanguage).toplam_2, colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, paraYaz(o.totalPrice)],
+                                ...notlar505.map(n => [{ content: n, colSpan: 5, styles: { halign: 'right' as const, fontStyle: 'normal' as const, fontSize: 7, textColor: [180, 90, 0] as [number, number, number] } }]),
+                              ],
                               footStyles: { fillColor: PDF_RENK.light, fontStyle: 'bold', fontSize: 10 },
                             });
                           } else {
                             const y505 = govdeY505 + 20;
                             doc505.setFontSize(10); doc505.setTextColor(30,30,30);
                             doc505.text(`${oc(currentLanguage).toplam_tutar}: ${paraYaz(o.totalPrice)}`, 14, y505);
+                            // Mikro'dan kalem okunamadıysa ya da faturada kalem yoksa SESSİZ geçme — fişte neden yazılır
+                            // (ekrandaki metinlerle aynı).
+                            if (mikroKalem505) {
+                              doc505.setFontSize(8); doc505.setTextColor(180, 90, 0);
+                              doc505.text(!mikroKalem505.ok
+                                ? `${currentLanguage === 'tr' ? 'Kalemler Mikro faturasından alınamadı' : 'Lines could not be read from the Mikro invoice'}: ${mikroKalem505.hata}`
+                                : (currentLanguage === 'tr' ? 'Mikro faturasında kalem bulunamadı.' : 'No lines on the Mikro invoice.'), 14, y505 + 6);
+                            }
                           }
                           const finalY505 = (doc505 as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 80;
                           doc505.setFontSize(8); doc505.setTextColor(150,150,150);
@@ -2134,10 +2242,13 @@ export default function OrdersPage({
                         {op(currentLanguage).fis_pdf}
                       </button>
                       {/* Phase 512: Quick Shipment from Order */}
+                      {/* Teslim edilmiş / iptal / açık sevkiyatı olan siparişe sevkiyat AÇILMAZ (2026-09-25: "teslim edilen bir
+                          şeye tekrar sevkiyat oluşturulamaz") — kural utils/siparisler/siparisIslemleri.sevkiyatEngeli. */}
                       <button
-                        onClick={() => setShowQuickShipment(selectedOrder)}
-                        className="bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-blue-200 transition-colors"
-                        title={op(currentLanguage).sevkiyat_olustur}
+                        onClick={() => { if (sevkiyatEngeli(guncelSiparis(selectedOrder), shipments) === null) setShowQuickShipment(selectedOrder); }}
+                        disabled={sevkiyatEngeli(guncelSiparis(selectedOrder), shipments) !== null}
+                        className="bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-blue-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:text-gray-700 disabled:hover:border-gray-200"
+                        title={(() => { const e = sevkiyatEngeli(guncelSiparis(selectedOrder), shipments); return e ? sevkiyatEngeliMetni(e, currentLanguage) : op(currentLanguage).sevkiyat_olustur; })()}
                       >
                         <Truck className="w-4 h-4" />
                         {oc(currentLanguage).sevkiyat}
@@ -2329,22 +2440,30 @@ export default function OrdersPage({
                           : (oc(currentLanguage).odenmedi)}
                       </button>
                       )}
-                      <button onClick={() => openConfirm({
-                        title: currentT.confirm_delete_title,
-                        message: currentT.confirm_delete,
-                        confirmLabel: currentT.edit,
-                        onConfirm: () => { setEditingOrderData(selectedOrder); setEditingTutarHam(sayiGirdisi(selectedOrder.totalPrice)); setEditingKdvHam(sayiGirdisi(selectedOrder.kdvOran)); setIsEditingOrder(true); }
-                      })} className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors">
-                        <Edit2 className="w-4 h-4" /> Edit
+                      {/* Düzenle ONAY İSTEMEZ: eskiden silme onayının kopyasıyla ("Kaydı Sil — silmek istediğinize emin
+                          misiniz?", onay düğmesi "Düzenle") açılıyordu (2026-09-25 bildirimi). Düzenleme yıkıcı değil; kalıcı
+                          adım kaydetmedir. Mikro kaynaklı kayıt Cetpa'da düzenlenmez/silinmez — gerçeği Mikro'da
+                          (utils/siparisler/siparisIslemleri.yerelDegistirilebilir). Etiketler dil sözlüğünden ("Edit"/"Delete"
+                          sabit İngilizceydi). */}
+                      <button
+                        onClick={() => { if (!yerelDegistirilebilir(selectedOrder)) return; setEditingOrderData(selectedOrder); setEditingTutarHam(sayiGirdisi(selectedOrder.totalPrice)); setEditingKdvHam(sayiGirdisi(selectedOrder.kdvOran)); setIsEditingOrder(true); }}
+                        disabled={!yerelDegistirilebilir(selectedOrder)}
+                        title={yerelDegistirilebilir(selectedOrder) ? undefined : yerelDegistirilemezMetni(currentLanguage)}
+                        className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                        <Edit2 className="w-4 h-4" /> {oc(currentLanguage).duzenle}
                       </button>
-                      <button onClick={() => openConfirm({
-                        title: currentT.confirm_delete_title,
-                        message: currentT.confirm_delete,
-                        confirmLabel: currentT.delete,
-                        variant: 'danger',
-                        onConfirm: () => { handleDeleteOrder(selectedOrder.id); setSelectedOrder(null); }
-                      })} className="bg-white hover:bg-red-50 text-red-600 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors">
-                        <Trash2 className="w-4 h-4" /> Delete
+                      <button
+                        onClick={() => { if (!yerelDegistirilebilir(selectedOrder)) return; openConfirm({
+                          title: currentT.confirm_delete_title,
+                          message: currentT.confirm_delete,
+                          confirmLabel: currentT.delete,
+                          variant: 'danger',
+                          onConfirm: () => { handleDeleteOrder(selectedOrder.id); setSelectedOrder(null); }
+                        }); }}
+                        disabled={!yerelDegistirilebilir(selectedOrder)}
+                        title={yerelDegistirilebilir(selectedOrder) ? undefined : yerelDegistirilemezMetni(currentLanguage)}
+                        className="bg-white hover:bg-red-50 text-red-600 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                        <Trash2 className="w-4 h-4" /> {oc(currentLanguage).sil}
                       </button>
                     </div>
                   }
@@ -2367,8 +2486,8 @@ export default function OrdersPage({
                             yerelde siler, düğme 'Delivered' koşuluyla yeniden ETKİN olur ve
                             aynı sevkiyat için İKİNCİ resmî belge kesilir (2026-09-19 delta). */}
                         <select value={selectedOrder.status}
-                          disabled={selectedOrder.source === 'mikro-siparis'}
-                          title={selectedOrder.source === 'mikro-siparis' ? op(currentLanguage).mikro_siparisi_durumu_mikro_da_izlenir : undefined}
+                          disabled={!yerelDegistirilebilir(selectedOrder)}
+                          title={selectedOrder.source === 'mikro-siparis' ? op(currentLanguage).mikro_siparisi_durumu_mikro_da_izlenir : !yerelDegistirilebilir(selectedOrder) ? yerelDegistirilemezMetni(currentLanguage) : undefined}
                           onChange={(e) => {
                           const yeniDurum = e.target.value as 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled';
                           const id = selectedOrder.id;
@@ -2523,12 +2642,13 @@ export default function OrdersPage({
                             {selectedOrder.lineItems.map((item, idx) => (
                               <tr key={idx}>
                                 <td className="px-4 py-3">
-                                  <p className="font-bold text-[#1D2226]">{item.title}</p>
+                                  <p className="font-bold text-[#1D2226]">{item.title || item.name}</p>
                                   {item.sku && <p className="text-[10px] text-gray-400">{item.sku}</p>}
                                 </td>
                                 <td className="px-4 py-3 text-center font-medium">{item.quantity}</td>
-                                <td className="px-4 py-3 text-right text-gray-500">{paraYaz(item.price)}</td>
-                                <td className="px-4 py-3 text-right font-bold text-[#1D2226]">{paraYaz(satirTutari(item.price, item.quantity))}</td>
+                                {/* Mikro türevi kalemde `price` yok, tutar `total`da (KDV dâhil) — ortak seçici (MF-383, 2026-09-25). */}
+                                <td className="px-4 py-3 text-right text-gray-500">{paraYaz(kalemBirimFiyati(item))}</td>
+                                <td className="px-4 py-3 text-right font-bold text-[#1D2226]">{paraYaz(kalemTutari(item))}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -2539,7 +2659,8 @@ export default function OrdersPage({
                               (TÜRETME, tek eksikte '—') BİLEREK ayrıdır. */}
                           <tfoot className="border-t border-gray-200 bg-gray-50">
                             {(() => {
-                              const kalemT = kalemlerTutari(selectedOrder);
+                              const kalemT = toplaBilinen(selectedOrder.lineItems ?? [], kalemTutari);
+                              const kdvDahil = kdvDahilKalemVar([selectedOrder]);
                               return (
                                 <tr>
                                   <td colSpan={3} className="px-4 py-3 font-bold text-gray-500 text-sm">
@@ -2549,6 +2670,11 @@ export default function OrdersPage({
                                         {currentLanguage === 'tr'
                                           ? `${kalemT.bilinmeyen} kalemin tutarı bilinmiyor — toplama girmedi.`
                                           : `Amount unknown for ${kalemT.bilinmeyen} item(s) — excluded from total.`}
+                                      </span>
+                                    )}
+                                    {kdvDahil && (
+                                      <span className="block text-[10px] font-normal text-gray-400">
+                                        {currentLanguage === 'tr' ? 'Mikro faturasından gelen kalemlerde tutar KDV dâhildir.' : 'Amounts on lines from Mikro invoices include VAT.'}
                                       </span>
                                     )}
                                   </td>
@@ -2561,6 +2687,15 @@ export default function OrdersPage({
                           </tfoot>
                         </table>
                       </div>
+                    ) : mikroKalemler.durum !== 'gerekmez' ? (
+                      <MikroSiparisKalemleri
+                        durum={mikroKalemler.durum}
+                        kalemler={mikroKalemler.kalemler}
+                        hata={mikroKalemler.hata}
+                        genelToplam={selectedOrder.totalPrice}
+                        evrakNo={[selectedOrder.mikroEvrak?.seri, selectedOrder.mikroEvrak?.sira].filter(Boolean).join('') || gorunenSiparisNo(selectedOrder)}
+                        dil={currentLanguage}
+                      />
                     ) : (
                       <div className="text-center py-12 border-2 border-dashed border-gray-100 rounded-xl">
                         <Package className="w-12 h-12 text-gray-200 mx-auto mb-3" />
@@ -4020,14 +4155,18 @@ export default function OrdersPage({
               </div>
               <div className="p-5 space-y-2 text-sm text-gray-600">
                 <p>{op(currentLanguage).bu_siparisten_sevkiyat_olusturulsun_mu}</p>
-                <p className="font-semibold text-gray-800">{showQuickShipment.customerName} — #{showQuickShipment.id.slice(0, 6)}</p>
+                <p className="font-semibold text-gray-800">{showQuickShipment.customerName} — {gorunenSiparisNo(showQuickShipment)}</p>
                 <p className="text-xs text-gray-400">{showQuickShipment.shippingAddress}</p>
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
                 <button onClick={() => setShowQuickShipment(null)} className="apple-button-secondary text-sm">{oc(currentLanguage).iptal}</button>
                 <button
                   onClick={async () => {
-                    const o = showQuickShipment;
+                    // İkinci çit: pencere açıkken durum değişmiş olabilir (başka sekmeden teslim/sevkiyat) — GÜNCEL kayıt okunur,
+                    // pencerenin açıldığı andaki kopya değil (inceleme 2026-09-25).
+                    const o = guncelSiparis(showQuickShipment);
+                    const engel = sevkiyatEngeli(o, shipments);
+                    if (engel) { toast(sevkiyatEngeliMetni(engel, currentLanguage), 'error'); setShowQuickShipment(null); return; }
                     try {
                       await addDoc(collection(db, 'shipments'), {
                         customerName: o.customerName ?? '', destination: o.shippingAddress ?? '',

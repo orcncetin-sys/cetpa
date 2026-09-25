@@ -676,7 +676,7 @@ describe('urunSatislari — `tutarSec` (6b hakem, K-KALEM=A): satır cirosu seç
 // aynı ürünün cirosunu FARKLI basar (yarım düzeltme sınıfı). Dipnot kapısı da (yalnız UrunlerRapor'da vardı)
 // aynı kuralı ikinci kez yazıyordu. Karar B'ye dönerse YALNIZ bu iki gövde değişir.
 // ═══════════════════════════════════════════════════════════════════════════════════════════
-import { kalemTutari, kdvDahilKalemVar, type SatisSatiri } from './stokSevkiyat';
+import { kalemTutari, kalemBirimFiyati, kdvDahilKalemVar, type SatisSatiri } from './stokSevkiyat';
 
 describe('kalemTutari — K-KALEM=A seçicisi (6b kapanış, TEK tanım)', () => {
   it('şartname vakaları: `{ total: 1180 }` → 1180; `{ total: null, price: 100, quantity: 2 }` → 200; ikisi de yok → NaN', () => {
@@ -724,3 +724,14 @@ describe('kdvDahilKalemVar — "Mikro kalemlerinde KDV dâhildir" dipnot kapıs�
     expect(kdvDahilKalemVar([{ lineItems: [{ sku: 'X', total: Number.NaN }] }])).toBe(false);
   });
 });
+
+describe('kalemBirimFiyati — ekrandaki birim fiyat kalemTutari ile aynı kaynaktan (2026-09-25, MF-383)', () => {
+  it('native: price; Mikro türevi (price yok): total / miktar; ikisi de yoksa ya da miktar 0 → NaN (₺0 değil)', () => {
+    expect(kalemBirimFiyati({ price: 130, quantity: 100 })).toBe(130);
+    expect(kalemBirimFiyati({ total: 15000, quantity: 100 })).toBe(150);
+    expect(Number.isNaN(kalemBirimFiyati({ total: 15000, quantity: 0 }))).toBe(true);
+    expect(Number.isNaN(kalemBirimFiyati({ quantity: 5 }))).toBe(true);
+    expect(Number.isNaN(kalemBirimFiyati({ total: null, price: null, quantity: 5 }))).toBe(true);
+  });
+});
+

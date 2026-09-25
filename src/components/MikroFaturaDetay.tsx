@@ -18,7 +18,7 @@ import { eBelgeIndir } from '../services/ebelgeIndir';
 import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
 import { VERGI_PNTR_ORAN } from '../hooks/useMikroFaturalar';
-import { kalemleriCoz, satirMasrafi, birimFiyatOndaligi } from '../lib/stokFiyat';
+import { kalemleriCoz, kalemSaglamasi, birimFiyatOndaligi } from '../lib/stokFiyat';
 import { bilinenSayi } from '../utils/para';
 import { oc } from '../i18n/ortak';
 
@@ -124,23 +124,8 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
     return [...map.values()].sort((a, b) => (b.oran ?? -1) - (a.oran ?? -1));
   }, [kalemler, cozumler]);
 
-  /** SAĞLAMA (2026-09-18): Σ kalem neti + Σ masraf + Σ KDV, fatura toplamını tutuyor mu? İskontonun doğru düşüldüğünün
-   *  ekrandaki kanıtı — tutmuyorsa kullanıcı bunu GÖRÜR (sessiz yanlış fiyat yerine). */
-  const saglama = useMemo(() => {
-    if (!kalemler?.length || !bilinenSayi(fatura.tutar)) return null;
-    let net = 0, kdv = 0, masraf = 0, brut = 0, eksik = 0;
-    for (const [i, k] of kalemler.entries()) {
-      const c = cozumler[i];
-      // Miktarı 0 olan satırın (fiyat farkı) TUTARI da toplanır — yalnız KDV'si toplanınca sağlama yanlış alarm veriyordu.
-      if (c && c.net !== null && c.brut !== null) { net += c.net; brut += c.brut; } else eksik++;
-      if (bilinenSayi(k.sth_vergi)) kdv += Math.abs(Number(k.sth_vergi)); else eksik++;
-      masraf += satirMasrafi(k);
-    }
-    const toplam = Math.abs(Number(fatura.tutar));
-    const kalemToplami = net + masraf + kdv, fark = kalemToplami - toplam;
-    // Pay: kuruş yuvarlamaları satır sayısıyla birikir; on binde 5 (200 bin ₺'lik faturada 100 ₺) — %0,5 çok gevşekti.
-    return { net, kdv, masraf, iskonto: brut - net, kalemToplami, fark, tutuyor: eksik === 0 && Math.abs(fark) <= Math.max(1, toplam * 0.0005), eksik };
-  }, [kalemler, cozumler, fatura.tutar]);
+  /** SAĞLAMA — tek tanım lib/stokFiyat.kalemSaglamasi (sipariş detayı ve fişi de aynısını kullanır). */
+  const saglama = useMemo(() => (kalemler?.length ? kalemSaglamasi(kalemler, cozumler, fatura.tutar) : null), [kalemler, cozumler, fatura.tutar]);
 
   const indir = async (tur: 'xml' | 'pdf') => {
     if (indiriliyor) return;

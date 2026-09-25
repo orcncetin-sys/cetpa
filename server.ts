@@ -3959,7 +3959,7 @@ async function startServer() {
   });
 
   reportsRoutes(app, {
-    getAdminDb: adminDbZorunlu, requireAuth, getUserCompanyId, loadCompanyDocs,
+    getAdminDb: adminDbZorunlu, requireAuth, getUserCompanyId, loadCompanyDocs, requireCollectionAccess,
   });
 
   // KONUM: digerleriyle AYNI nokta - express.json + apiLimiter'dan SONRA.

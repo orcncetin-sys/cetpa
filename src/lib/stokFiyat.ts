@@ -498,3 +498,39 @@ export function birimSapmalari(hareketler: readonly StokHareketi[], secenek?: Ne
   return { satirlar: satirlar.sort((a, b) => sapma(b.kat) - sapma(a.kat)), degerlendirilen };
 }
 
+// ── Fatura sağlaması ─────────────────────────────────────────────────────────────────────────────────
+
+export interface KalemSaglamasi {
+  net: number; kdv: number; masraf: number; iskonto: number;
+  /** Σ net + Σ masraf + Σ KDV. */
+  kalemToplami: number;
+  /** kalemToplami − |fatura toplamı|. */
+  fark: number;
+  /** Okunamayan alan yok VE fark kuruş yuvarlaması payı içinde. */
+  tutuyor: boolean;
+  /** Neti ya da KDV'si okunamayan alan sayısı (toplama girmedi). */
+  eksik: number;
+}
+
+/**
+ * SAĞLAMA (2026-09-18): Σ kalem neti + Σ masraf + Σ KDV, fatura toplamını tutuyor mu? İskontonun doğru düşüldüğünün
+ * ekrandaki kanıtı — tutmuyorsa kullanıcı bunu GÖRÜR (sessiz yanlış fiyat yerine). Tek tanım (2026-09-25): fatura
+ * detayı, sipariş detayındaki Mikro kalem tablosu ve sipariş fişi PDF'i aynı hesabı kullanır. Fatura toplamı
+ * bilinmiyorsa ya da kalem yoksa `null`. Pay: kuruş yuvarlamaları satır sayısıyla birikir; on binde 5 (200 bin ₺'lik
+ * faturada 100 ₺) — %0,5 çok gevşekti.
+ */
+export function kalemSaglamasi(kalemler: readonly StokHareketi[], cozumler: readonly KalemCozumu[], meblag: unknown): KalemSaglamasi | null {
+  if (!kalemler.length || !bilinenSayi(meblag)) return null;
+  let net = 0, kdv = 0, masraf = 0, brut = 0, eksik = 0;
+  for (const [i, k] of kalemler.entries()) {
+    const c = cozumler[i];
+    // Miktarı 0 olan satırın (fiyat farkı) TUTARI da toplanır — yalnız KDV'si toplanınca sağlama yanlış alarm veriyordu.
+    if (c && c.net !== null && c.brut !== null) { net += c.net; brut += c.brut; } else eksik++;
+    if (bilinenSayi(k.sth_vergi)) kdv += Math.abs(Number(k.sth_vergi)); else eksik++;
+    masraf += satirMasrafi(k);
+  }
+  const toplam = Math.abs(Number(meblag));
+  const kalemToplami = net + masraf + kdv, fark = kalemToplami - toplam;
+  return { net, kdv, masraf, iskonto: brut - net, kalemToplami, fark, tutuyor: eksik === 0 && Math.abs(fark) <= Math.max(1, toplam * 0.0005), eksik };
+}
+

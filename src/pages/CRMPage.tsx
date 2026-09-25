@@ -27,6 +27,7 @@ import { twMerge } from 'tailwind-merge';
 import Papa from 'papaparse';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { odemeTakipli } from '../utils/siparis';
+import { yerelDegistirilebilir, yerelDegistirilemezMetni } from '../utils/siparisler/siparisIslemleri';
 import { hedefGirdisi, hedefOnDoldur } from '../utils/pano/hedefButce';
 import { zamanDate, zamanMs, gunFarki, ayAnahtari, gunAnahtari, tarihYaz } from '../utils/zaman';
 import { authFetch } from '../services/authFetch';
@@ -485,6 +486,10 @@ export default function CRMPage({
   };
 
   const handleDeleteOrder = async (orderId: string) => {
+    // Mikro kaynaklı kayıt Cetpa'da silinmez — Siparişler sayfasıyla AYNI kural (utils/siparisler/siparisIslemleri;
+    // inceleme 2026-09-25: yalnız Siparişler kapatılmıştı, buradaki iki Sil düğmesi açık kalmıştı).
+    const ord = orders.find(o => o.id === orderId);
+    if (ord && !yerelDegistirilebilir(ord)) { toast(yerelDegistirilemezMetni(currentLanguage), 'warning'); return; }
     if (!await confirmDelete(undefined, currentLanguage === 'tr' ? 'tr' : 'en')) return;
     try {
       await deleteDoc(doc(db, 'orders', orderId));
@@ -495,6 +500,8 @@ export default function CRMPage({
   };
 
   const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
+    const ord = orders.find(o => o.id === orderId);
+    if (ord && !yerelDegistirilebilir(ord)) { toast(yerelDegistirilemezMetni(currentLanguage), 'warning'); return; }
     try {
       await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: serverTimestamp() });
     } catch (error) {
@@ -667,7 +674,7 @@ export default function CRMPage({
                                   </div>
                                 </td>
                                 <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                  <button onClick={() => handleDeleteOrder(order.id)} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors p-1">
+                                  <button onClick={() => handleDeleteOrder(order.id)} disabled={!yerelDegistirilebilir(order)} title={yerelDegistirilebilir(order) ? undefined : yerelDegistirilemezMetni(currentLanguage)} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors p-1 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-400">
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 </td>
@@ -3423,13 +3430,13 @@ export default function CRMPage({
                               <p className="text-[10px] text-gray-400 mt-1 truncate max-w-[200px]">{order.shippingAddress}</p>
                             </div>
                             <div className="text-right flex flex-col items-end gap-2">
-                              <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors">
+                              <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} disabled={!yerelDegistirilebilir(order)} title={yerelDegistirilebilir(order) ? undefined : yerelDegistirilemezMetni(currentLanguage)} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-400">
                                 <Trash2 className="w-4 h-4" />
                               </button>
                               <div>
                                 <p className="font-bold text-lg text-[#1D2226]">{formatCurrency(order.totalPrice, exchangeRates ?? undefined)}</p>
                                 <div className="flex items-center gap-1.5 mt-1 justify-end flex-wrap">
-                                  <select value={order.status} onChange={(e) => { e.stopPropagation(); handleUpdateOrderStatus(order.id, e.target.value as Order['status']); }}
+                                  <select value={order.status} disabled={!yerelDegistirilebilir(order)} title={yerelDegistirilebilir(order) ? undefined : yerelDegistirilemezMetni(currentLanguage)} onChange={(e) => { e.stopPropagation(); handleUpdateOrderStatus(order.id, e.target.value as Order['status']); }}
                                     className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full inline-block outline-none cursor-pointer appearance-none",
                                       order.status === 'Pending' ? "bg-amber-50 text-amber-600" :
                                         order.status === 'Processing' ? "bg-purple-50 text-purple-600" :
