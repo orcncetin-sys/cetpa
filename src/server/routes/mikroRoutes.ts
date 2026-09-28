@@ -98,6 +98,7 @@ import {
 } from '../mikro/eslemeFatura.js';
 import { eBelgeNormalize, eBelgeleriNormalize, cariHareketYonOzeti } from '../mikro/eBelge.js';
 import { belgeNoMetni, yanitAnahtarYollari } from '../mikro/belgeNo.js';
+import { iskontoTutarsizlikRaporu, satirKolonPlani } from '../mikro/iskontoTutarsizlik.js';
 // KDV özeti / mizan eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/raporKdvMizan.ts
 import { kdvKirilimi, mizanSatirlari, mizanToplami } from '../mikro/raporKdvMizan.js';
 
@@ -2115,6 +2116,64 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       sonuc[q.ad] = hata ? { hata } : rows;
     }
     res.json({ success: true, sonuc });
+  });
+
+  /** GET /api/mikro/iskonto-tutarsizlik — "Mikro'da iskonto brüte bir kez daha eklenmiş" faturaların TÜM GEÇMİŞİ.
+   *
+   *  Kullanıcı (2026-09-28): "başka böyle bir kayıt var mı bana bilgi ver". Evrak 420 (SİZGEN) Mikro'da 317.236,50,
+   *  e-faturası 202.419 — satır tutarına iskonto bir kez daha eklenmiş. Cetpa'nın stok hareketi aynası yalnız son ~90
+   *  günü tuttuğu için Fiyat Karşılaştırma listesi eski faturaları GÖREMEZ; bu uç Mikro'nun kendi tablolarını okur.
+   *  sema-kesif ile AYNI token koruması (yalnız başlık — sorgu dizesindeki jeton IIS günlüğüne düşerdi); SALT OKUMA
+   *  (SqlVeriOkuV2) — Mikro'ya hiçbir şey YAZMAZ. Kural tek kaynak: lib/stokFiyat.mikroTutarsizliklari
+   *  (mikro/iskontoTutarsizlik.ts gruplar). Kolonlar ŞEMADAN (mikroKolonlar): temel kolon eksikse rapor koşmaz, eksikler
+   *  adıyla döner — kolon adı TAHMİN EDİLMEZ. Başlık hakemi evrakın TÜM satırlarını ister: iskontolu satırı olan
+   *  faturaların bütün satırları okunur. */
+  app.get('/api/mikro/iskonto-tutarsizlik', async (req: Request, res: Response) => {
+    const expected = process.env.OPS_SUMMARY_TOKEN || '';
+    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
+    const got = (req.headers['x-ops-token'] as string) || '';
+    const a = Buffer.from(got), b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    try {
+      const semaKolonlari = await mikroKolonlar('STOK_HAREKETLERI');
+      // STOK_HAREKETLERI'nin sıfır kolonu OLAMAZ: boş liste = şema okunamadı (Mikro erişilemedi / INFORMATION_SCHEMA hatası —
+      // mikroKolonlar hatayı yutup [] döner). "Kolon yok" demek sahte bir şema hükmü olur ve kolon adı değiştirmeye yöneltir.
+      if (!semaKolonlari.length) {
+        return res.status(502).json({ success: false, error: 'Mikro şeması okunamadı (INFORMATION_SCHEMA yanıtı boş/hatalı) — Mikro erişimini/kilidini kontrol edin; kolon adlarını DEĞİŞTİRMEYİN.' });
+      }
+      const plan = satirKolonPlani(semaKolonlari);
+      if (plan.eksik.length) {
+        return res.status(500).json({ success: false, error: `STOK_HAREKETLERI şemasında beklenen kolon yok: ${plan.eksik.join(', ')}` });
+      }
+      if (!plan.iskonto.length) return res.json({ success: true, iskontoKolonuYok: true, faturalar: [], ozet: null });
+      // Kolon adları şemadan geldi ve katı desenle süzüldü (^sth_iskonto<rakam>$) — SQL'e yalnız bunlar girer.
+      const iskKosul = plan.iskonto.map(k => `ISNULL(x.${k}, 0) <> 0`).join(' OR ');
+      const SINIR = 50000;
+      const satir = await mikroSql(
+        `SELECT TOP ${SINIR} ${plan.secim.map(k => `s.${k}`).join(', ')} FROM STOK_HAREKETLERI s ` +
+        'WHERE s.sth_evraktip IN (3, 4) AND ISNULL(s.sth_iptal, 0) = 0 AND EXISTS (SELECT 1 FROM STOK_HAREKETLERI x ' +
+        'WHERE x.sth_evraktip = s.sth_evraktip AND x.sth_evrakno_seri = s.sth_evrakno_seri AND x.sth_evrakno_sira = s.sth_evrakno_sira ' +
+        `AND ISNULL(x.sth_iptal, 0) = 0 AND (${iskKosul})) ORDER BY s.sth_tarih DESC`,
+        // Tüm geçmişi tarayan ağır okuma: global 30 sn değil import sayfalarının uzun zaman aşımı (inceleme 2026-09-28).
+        { zamanAsimiMs: listeZamanAsimiMs() },
+      );
+      if (satir.hata) return res.status(502).json({ success: false, error: `Satırlar okunamadı: ${satir.hata}` });
+      const baslik = await mikroSql(
+        'SELECT cha.cha_evrakno_seri, cha.cha_evrakno_sira, cha.cha_tip, cha.cha_meblag, cha.cha_iptal, cha.cha_tarihi, cha.cha_kod ' +
+        `FROM CARI_HESAP_HAREKETLERI cha WHERE ${FATURA_EVRAK_KOSULU} AND EXISTS (SELECT 1 FROM STOK_HAREKETLERI x ` +
+        'WHERE x.sth_evrakno_seri = cha.cha_evrakno_seri AND x.sth_evrakno_sira = cha.cha_evrakno_sira ' +
+        `AND x.sth_evraktip = CASE WHEN cha.cha_tip = 0 THEN 4 ELSE 3 END AND ISNULL(x.sth_iptal, 0) = 0 AND (${iskKosul}))`,
+        { zamanAsimiMs: listeZamanAsimiMs() },
+      );
+      if (baslik.hata) return res.status(502).json({ success: false, error: `Fatura başlıkları okunamadı: ${baslik.hata}` });
+      const rapor = iskontoTutarsizlikRaporu(satir.rows, baslik.rows);
+      // Sınıra dayandıysa en eski faturaların satırları eksik olabilir (başlık hakemi eksik satırla yanlış hüküm verebilir).
+      res.json({ success: true, kesildi: satir.rows.length >= SINIR, iskontoKolonlari: plan.iskonto, ...rapor });
+    } catch (e) {
+      console.error('[mikro/iskonto-tutarsizlik]', e);
+      res.status(500).json({ success: false, error: 'Rapor üretilemedi.' });
+    }
   });
 
   /** GET /api/mikro/ebelge-tani — GelenFaturalarV2'nin HAM yanıtını döndürür.

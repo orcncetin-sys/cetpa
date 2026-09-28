@@ -186,7 +186,7 @@ describe('mfKalemleri — KDV hariç net + iskonto ayrı (K-KALEM / K-İSKONTO),
     ], 1780, ad);
     expect(kalemler[0]).toEqual({ sku: 'CIM50', name: 'ÇİMENTO 50KG', quantity: 10, price: 90, birim: null,
       brutTutar: 1000, iskonto: 100, netTutar: 900, kdv: 180, masraf: 0, netKaynagi: 'satirIskontosu',
-      total: 1080, kalemSurumu: MF_KALEM_SURUMU });
+      kdvUyumsuz: false, ciftIskontoBelirsiz: false, total: 1080, kalemSurumu: MF_KALEM_SURUMU });
     expect(kalemler[1]).toMatchObject({ name: 'KUM', netTutar: 500, iskonto: 0, total: 600 });
     expect([miktarsiz, tutarsiz]).toEqual([0, 0]);
   });
@@ -231,6 +231,17 @@ describe('kalemYenilenmeli — mevcut MF siparişinin kalemi yenilensin mi', () 
     expect(kalemYenilenmeli(tam, tam)).toBe(false);
     const fiyatDegisti = mfKalemleri([h('A', 100), h('B', 50), h('C', 30)], undefined, () => undefined).kalemler;
     expect(kalemYenilenmeli(tam, fiyatDegisti)).toBe(true);               // aynı sayı, Σ net farklı
+  });
+  // İnceleme 2026-09-28: kaynak sırası (sth_satir_no yoksa PG yığın sırası) kararsız — aynı kalemler başka sırayla
+  // gelince "değişmiş" sayılıp gereksiz yenileme önerilmemeli; ama içerik (ör. netKaynagi) değişirse yine yakalanmalı.
+  it('karşılaştırma SIRADAN BAĞIMSIZ; aynı toplamlarla içerik değişimi (iki kalem takas) yine yakalanır', () => {
+    const T = { sth_tarih: '2025-09-06' };
+    const h = (sku: string, tutar: number) => ({ ...T, sth_stok_kod: sku, sth_miktar: 1, sth_tutar: tutar, sth_vergi: tutar * 0.2 });
+    const tam = mfKalemleri([h('A', 100), h('B', 50), h('C', 25)], undefined, () => undefined).kalemler;
+    expect(kalemYenilenmeli([tam[2], tam[0], tam[1]], tam)).toBe(false);
+    // Aynı Σ net/KDV ama tutarlar ürünler arasında yer değiştirmiş (A 50, B 100): gerçekten farklı.
+    const takas = mfKalemleri([h('A', 50), h('B', 100), h('C', 25)], undefined, () => undefined).kalemler;
+    expect(kalemYenilenmeli(tam, takas)).toBe(true);
   });
 });
 
@@ -393,5 +404,45 @@ describe('okumaArizasiUyarisi', () => {
   it('birden çok alan tek cümlede toplanır', () => {
     expect(okumaArizasiUyarisi(['cha_meblag', 'cha_kod']))
       .toBe('UYARI: cha_meblag, cha_kod alanı hiçbir satırda okunamadı — kolon adı/şema kontrol edin');
+  });
+});
+
+// D6 (2026-09-26): Mikro kaydı KENDİ İÇİNDE tutarsız (evrak 420 — iskonto brüte bir kez daha eklenmiş). mfKalemleri
+// lib/stokFiyat'ın kaynağını ve DOĞRU (iskontolu, KDV'den) netini OLDUĞU GİBİ yazar; kayıtlı tablo bayrağı bu alandan okur.
+describe("mfKalemleri — 'mikroKaydiTutarsiz' kaynağı olduğu gibi yazılır (evrak 420)", () => {
+  const h420 = { sth_tarih: '2026-08-31', sth_evraktip: 3, sth_evrakno_sira: 420, sth_stok_kod: 'RULO1081', sth_miktar: 1050,
+    sth_tutar: 398317.5, sth_iskonto1: 85050, sth_iskonto2: 29767.5, sth_vergi: 33736.5, sth_vergi_pntr: 4 };
+  it('başlık 317.236,50: net 168.682,50, brüt 283.500 (e-fatura Mal Hizmet Tutarı), iskonto 114.817,50, birim 160,65, total 202.419', () => {
+    const { kalemler, tutarsiz } = mfKalemleri([h420], 317236.5, () => undefined);
+    expect(kalemler[0]).toMatchObject({ sku: 'RULO1081', quantity: 1050, brutTutar: 283500, iskonto: 114817.5, netTutar: 168682.5,
+      kdv: 33736.5, masraf: 0, netKaynagi: 'mikroKaydiTutarsiz', total: 202419, kalemSurumu: MF_KALEM_SURUMU });
+    expect(kalemler[0].price).toBeCloseTo(160.65, 6);
+    expect(tutarsiz).toBe(0);
+  });
+  it('başlıksız yol DEĞİŞMEZ: net yine 168.682,50 ama kaynak faturaAltiKdvden (işaret yalnız başlık hakemiyle)', () => {
+    const { kalemler } = mfKalemleri([h420], undefined, () => undefined);
+    expect(kalemler[0]).toMatchObject({ netTutar: 168682.5, netKaynagi: 'faturaAltiKdvden' });
+  });
+});
+
+describe('tur 2 (2026-09-28): kalıcı kaleme satır bayrakları + kalemYenilenmeli satır parmak izi', () => {
+  const T = { sth_tarih: '2026-08-31' };
+  const E420s = { ...T, sth_stok_kod: 'RULO1081', sth_miktar: 1050, sth_tutar: 398317.5, sth_iskonto1: 85050, sth_iskonto2: 29767.5, sth_vergi: 33736.5, sth_vergi_pntr: 4 };
+  const bayraksiz = (l: readonly object[]) => l.map(k => { const c: Record<string, unknown> = { ...k }; delete c.kdvUyumsuz; delete c.ciftIskontoBelirsiz; return c; });
+  it('mfKalemleri kdvUyumsuz / ciftIskontoBelirsiz yazar (kalemSaglamasi ile AYNI ölçü); net çözülemezse null (false DEĞİL)', () => {
+    const a = mfKalemleri([{ ...T, sth_stok_kod: 'A', sth_miktar: 1, sth_tutar: 1000, sth_vergi: 100, sth_vergi_pntr: 4 }], 1100, () => undefined).kalemler;
+    const b = mfKalemleri([{ ...T, sth_stok_kod: 'B', sth_miktar: 1, sth_tutar: 1100, sth_iskonto1: 100, sth_vergi: 180, sth_vergi_pntr: 4 }], 1180, () => undefined).kalemler;
+    const c = mfKalemleri([{ ...T, sth_stok_kod: 'C', sth_miktar: 1, sth_tutar: null, sth_vergi: 10 }], undefined, () => undefined).kalemler;
+    expect([...a, ...b, ...c].map(k => [k.kdvUyumsuz, k.ciftIskontoBelirsiz])).toEqual([[true, false], [true, true], [null, null]]);
+    expect(mfKalemleri([E420s], 317236.5, () => undefined).kalemler[0]).toMatchObject({ netKaynagi: 'mikroKaydiTutarsiz', kdvUyumsuz: false, ciftIskontoBelirsiz: false });
+  });
+  it('Mikro kaydı düzeltildi: Σ net / Σ KDV AYNI ama netKaynagi değişti → yenilenir; bayraksız (tur 2 öncesi) kalem → yenilenir', () => {
+    const eski = mfKalemleri([E420s], 317236.5, () => undefined).kalemler;
+    const duz = mfKalemleri([{ ...E420s, sth_tutar: 283500 }], 202419, () => undefined).kalemler;
+    expect(duz[0]).toMatchObject({ netKaynagi: 'satirIskontosu', netTutar: 168682.5, kdv: 33736.5, brutTutar: 283500 });
+    expect(kalemYenilenmeli(eski, duz)).toBe(true);
+    expect(kalemYenilenmeli(duz, duz)).toBe(false);
+    expect(kalemYenilenmeli(JSON.parse(JSON.stringify(duz)), duz)).toBe(false);     // PG/JSON gidiş-dönüşü fark SAYILMAZ
+    expect(kalemYenilenmeli(bayraksiz(duz), duz)).toBe(true);
   });
 });

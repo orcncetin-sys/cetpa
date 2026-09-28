@@ -60,12 +60,29 @@ export function mikroKalemNotlari(araBilinmeyen: number, kdvBilinmeyen: number, 
   const notlar: string[] = [];
   if (araBilinmeyen > 0) notlar.push(tr ? `${araBilinmeyen} kalemin tutarı çözülemedi — brüt, iskonto ve ara toplama girmedi.` : `${araBilinmeyen} line(s) could not be resolved — excluded from gross, discount and subtotal.`);
   if (kdvBilinmeyen > 0) notlar.push(tr ? `${kdvBilinmeyen} kalemin KDV'si okunamadı — KDV toplamına girmedi.` : `${kdvBilinmeyen} line(s) with unreadable VAT — excluded from VAT total.`);
-  if (saglama && !saglama.tutuyor && saglama.eksik === 0) {
-    const f = (n: number) => n.toLocaleString(tr ? 'tr-TR' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const f = (n: number) => n.toLocaleString(tr ? 'tr-TR' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // D6 (2026-09-26): fark TAM OLARAK Mikro'nun fazladan eklediği iskonto kadarsa kalem netleri doğrudur (KDV ile sağlanır);
+  // tutmayan Mikro KAYDIDIR — "tevkifat/ÖTV olabilir" açıklaması yanıltırdı. Genel toplam satırı Mikro'nun rakamını
+  // bastığı için KDV ile tutarlı toplam ayrıca yazılır.
+  if (saglama && saglama.mikroKaydiTutarsiz === true) {
+    const mikroToplam = saglama.kalemToplami - saglama.fark;
+    notlar.push(tr
+      ? `KDV ile tutarlı toplam ₺${f(saglama.kalemToplami)}; Mikro'daki fatura toplamı ₺${f(mikroToplam)} — fark ₺${f(-saglama.fark)}: satır iskontosu Mikro'da brüte bir kez daha eklenmiş.`
+      : `VAT-consistent total ₺${f(saglama.kalemToplami)}; invoice total in Mikro ₺${f(mikroToplam)} — diff ₺${f(-saglama.fark)}: the line discount was added to the gross once more in Mikro.`);
+  } else if (saglama && !saglama.tutuyor && saglama.eksik === 0) {
     notlar.push(tr
       ? `Sağlama tutmuyor: ara toplam + masraf + KDV = ₺${f(saglama.kalemToplami)}, fatura toplamı farklı (fark ₺${f(saglama.fark)}) — tevkifat, ÖTV ya da dağıtılamayan iskonto olabilir; faturayı Mikro'da kontrol edin.`
       : `Totals don't reconcile: subtotal + charges + VAT = ₺${f(saglama.kalemToplami)} (diff ₺${f(saglama.fark)}) — withholding, excise or undistributed discount; check the invoice in Mikro.`);
   }
+  // Tur 2 (2026-09-28): fatura detayı (MikroFaturaDetay) bu iki durumda uyarı basıyordu, sipariş tablosu ve fiş SESSİZDİ —
+  // toplam tutsa bile. Sayı bilinmiyorsa (bayraksız eski kalıcı kalem) not yok: hüküm de verilmez (saglamaKur).
+  const kdvUyumsuz = saglama?.kdvUyumsuz ?? 0, ciftBelirsiz = saglama?.ciftBelirsiz ?? 0;
+  if (kdvUyumsuz > 0) notlar.push(tr
+    ? `${kdvUyumsuz} kalemde KDV satırın KDV oranıyla tutmuyor — net doğrulanamadı; Mikro kaydını kontrol edin.`
+    : `VAT on ${kdvUyumsuz} line(s) does not match the line's VAT rate — net not verified; check the Mikro record.`);
+  if (ciftBelirsiz > 0) notlar.push(tr
+    ? `${ciftBelirsiz} kalemde iskontonun Mikro'da brüte bir kez daha eklenip eklenmediği satırdan ayırt edilemiyor — e-faturayla karşılaştırın.`
+    : `On ${ciftBelirsiz} line(s) it cannot be told from the line whether Mikro added the discount to the gross once more — compare with the e-invoice.`);
   return notlar;
 }
 
@@ -85,6 +102,9 @@ export interface MikroKalemSatiri {
   faturaAltiKaynagi: 'baslik' | 'kdv' | null;
   /** KDV hariç net tutar (iskonto düşülmüş). */
   net: number | null;
+  /** D6 (2026-09-26): Mikro kaydı KENDİ İÇİNDE tutarsız (lib/stokFiyat 'mikroKaydiTutarsiz' — iskonto brüte bir kez daha
+   *  eklenmiş): net satırın KDV'sinden (iskontolu, e-faturadaki), brüt = Mikro tutarı − Σiskonto. Satır ⚠ ile işaretlenir. */
+  mikroTutarsiz: boolean;
 }
 export interface MikroKalemTablosu {
   satirlar: MikroKalemSatiri[];
@@ -121,6 +141,7 @@ export function mikroKalemTablosu(kalemler: readonly Record<string, unknown>[], 
       iskonto: c?.iskonto ?? null,
       faturaAltiKaynagi: faturaAltiKaynagi(c?.kaynak),
       net: c?.net ?? null,
+      mikroTutarsiz: c?.kaynak === 'mikroKaydiTutarsiz',
     };
   });
   const brut = toplaBilinen(cozumler, c => c.brut);
@@ -129,7 +150,7 @@ export function mikroKalemTablosu(kalemler: readonly Record<string, unknown>[], 
   const kdv = toplaBilinen(kalemler, k => k.sth_vergi);
   const saglama = kalemSaglamasi(kalemler, cozumler, genelToplam);
   const notlar = mikroKalemNotlari(ara.bilinmeyen, kdv.bilinmeyen, saglama, dil);
-  notlar.push(...faturaAltiNotlari(satirlar, tr));
+  notlar.push(...faturaAltiNotlari(satirlar, tr), ...mikroTutarsizNotlari(satirlar, tr));
   return { satirlar, brut, iskonto, ara, kdv, masraf: saglama ? saglama.masraf : null, notlar };
 }
 
@@ -152,6 +173,16 @@ function faturaAltiNotlari(satirlar: readonly MikroKalemSatiri[], tr: boolean): 
   return notlar;
 }
 
+/** D6 (2026-09-26, kullanıcı: "net tutar iskontolu halde göstermeli"): Mikro kaydı tutarsız kalem sayısı — ham ve kalıcı
+ *  tablo AYNI metni basar. Kayıt Cetpa'da düzeltilmez (lib/stokFiyat kural 6); düzeltme Mikro'da. */
+function mikroTutarsizNotlari(satirlar: readonly MikroKalemSatiri[], tr: boolean): string[] {
+  const n = satirlar.filter(s => s.mikroTutarsiz).length;
+  if (n === 0) return [];
+  return [tr
+    ? `${n} kalemde Mikro kaydı tutarsız — net satırın KDV'sinden (iskontolu); faturayı Mikro'da düzeltin.`
+    : `Mikro record inconsistent on ${n} line(s) — net derived from the line VAT (discounted); correct the invoice in Mikro.`];
+}
+
 const faturaAltiKaynagi = (k: unknown): MikroKalemSatiri['faturaAltiKaynagi'] =>
   (k === 'faturaAltiBasliktan' ? 'baslik' : k === 'faturaAltiKdvden' ? 'kdv' : null);
 
@@ -159,6 +190,8 @@ const faturaAltiKaynagi = (k: unknown): MikroKalemSatiri['faturaAltiKaynagi'] =>
 export interface KayitliMikroKalem {
   sku?: unknown; name?: unknown; quantity?: unknown; birim?: unknown;
   brutTutar?: unknown; iskonto?: unknown; netTutar?: unknown; kdv?: unknown; masraf?: unknown; netKaynagi?: unknown;
+  /** Tur 2 (2026-09-28) importun yazdığı satır bayrakları (eslemeFatura.SiparisSatiri); eski kalemde YOK = bilinmiyor. */
+  kdvUyumsuz?: unknown; ciftIskontoBelirsiz?: unknown;
 }
 const sayiYaDaNull = (x: unknown): number | null => (bilinenSayi(x) ? Number(x) : null);
 
@@ -181,6 +214,7 @@ export function kayitliKalemTablosu(kalemler: readonly KayitliMikroKalem[], gene
       iskonto: sayiYaDaNull(k.iskonto),
       faturaAltiKaynagi: faturaAltiKaynagi(k.netKaynagi as NetKaynagi | null),
       net: sayiYaDaNull(k.netTutar),
+      mikroTutarsiz: k.netKaynagi === ('mikroKaydiTutarsiz' satisfies NetKaynagi),
     };
   });
   const brut = toplaBilinen(kalemler, k => k.brutTutar);
@@ -190,9 +224,23 @@ export function kayitliKalemTablosu(kalemler: readonly KayitliMikroKalem[], gene
   // Sağlama ham yolla AYNI: KDV mutlak değerle (kalemSaglamasi `Math.abs(sth_vergi)`), masraf her satırdan.
   const kdvMutlak = toplaBilinen(kalemler, k => (bilinenSayi(k.kdv) ? Math.abs(Number(k.kdv)) : k.kdv));
   const masrafT = toplaBilinen(kalemler, k => k.masraf);
+  // D6: Mikro'nun fazladan eklediği iskonto = Σ(brüt − net), yalnız 'mikroKaydiTutarsiz' kalemler (ham yol kalemSaglamasi
+  // ile AYNI tanım). Böyle kalem yoksa ya da birinin brüt/neti bilinmiyorsa VERİLMEZ (hüküm yok; bilinmeyen 0 değil —
+  // bu kural öncesi yazılmış kalemde kaynak eski hakemin sonucudur, "fazla yok" denemez).
+  const tutarsizlar = kalemler.filter(k => k.netKaynagi === ('mikroKaydiTutarsiz' satisfies NetKaynagi));
+  const fazla = toplaBilinen(tutarsizlar, k => (bilinenSayi(k.brutTutar) && bilinenSayi(k.netTutar) ? Number(k.brutTutar) - Number(k.netTutar) : null));
+  const mikroFazlasi = tutarsizlar.length > 0 && fazla.bilinmeyen === 0 ? fazla.toplam : undefined;
+  // Tur 2 (2026-09-28): ham yolun (kalemSaglamasi) kdvUyumsuz / ciftBelirsiz sayaçları, importun kaleme yazdığı bayraklardan.
+  // Yalnız neti bilinen kalemler sayılır (ham yolla aynı); bu kalemlerden birinde bayrak yoksa (tur 2 öncesi yazılmış) sayı
+  // BİLİNMİYOR → verilmez, saglamaKur "kalem netleri doğru" hükmünü vermez (eskiden `?? 0` ile 0 sayılıyordu).
+  const sayac = (alan: 'kdvUyumsuz' | 'ciftIskontoBelirsiz'): number | undefined => {
+    const netli = kalemler.filter(k => bilinenSayi(k.netTutar));
+    return netli.every(k => typeof k[alan] === 'boolean') ? netli.filter(k => k[alan] === true).length : undefined;
+  };
   const saglama = kalemler.length && bilinenSayi(genelToplam)
-    ? saglamaKur({ net: ara.toplam, kdv: kdvMutlak.toplam, masraf: masrafT.toplam, brut: brut.toplam, eksik: ara.bilinmeyen + kdv.bilinmeyen }, genelToplam)
+    ? saglamaKur({ net: ara.toplam, kdv: kdvMutlak.toplam, masraf: masrafT.toplam, brut: brut.toplam, eksik: ara.bilinmeyen + kdv.bilinmeyen,
+        mikroFazlasi, kdvUyumsuz: sayac('kdvUyumsuz'), ciftBelirsiz: sayac('ciftIskontoBelirsiz') }, genelToplam)
     : null;
-  const notlar = [...mikroKalemNotlari(ara.bilinmeyen, kdv.bilinmeyen, saglama, dil), ...faturaAltiNotlari(satirlar, tr)];
+  const notlar = [...mikroKalemNotlari(ara.bilinmeyen, kdv.bilinmeyen, saglama, dil), ...faturaAltiNotlari(satirlar, tr), ...mikroTutarsizNotlari(satirlar, tr)];
   return { satirlar, brut, iskonto, ara, kdv, masraf: saglama ? masrafT.toplam : null, notlar };
 }

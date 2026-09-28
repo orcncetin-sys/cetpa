@@ -11,7 +11,7 @@
  */
 import type { Express, Request, Response, RequestHandler } from 'express';
 import type { AdminDbLike, DocDaralt } from '../adminDbTypes.js';
-import { stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, birimSapmalari, netCozumleri } from '../../lib/stokFiyat.js';
+import { stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, birimSapmalari, netCozumleri, mikroTutarsizliklari } from '../../lib/stokFiyat.js';
 import { bilinenSayi } from '../../utils/para.js';
 import { cariBakiyeToplamlari } from '../../utils/muhasebe/finansalOranlar.js';
 import { zamanMs } from '../../utils/zaman.js';
@@ -112,7 +112,7 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
       }
 
       const secenek = { faturaToplamlari: faturaToplamlari(basliklar) };
-      const cozum = netCozumleri(movements, secenek);          // tek tarama — özet ve sapma aynı çözümü paylaşır
+      const cozum = netCozumleri(movements, secenek);          // tek tarama — özet, sapma ve tutarsızlık aynı çözümü paylaşır
       const ozet = stokFiyatOzeti(movements, secenek, cozum);
       // Birim sapması (koli/adet karışıklığı — lib/stokFiyat.birimSapmalari, 2026-09-25 kullanıcı isteği: "bu tip fark
       // olanları listelemem gerekli"): liste + ürün başına sayı. Ortalama bu satırları İÇERİR (sessizce ayıklanmaz);
@@ -123,13 +123,28 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
       // üründe (< 3 fiyatı bilinen satır) BİLİNMİYOR → null (ekran '0 şüpheli' demez — inceleme 2026-09-25).
       const sapmaSayisi = new Map<string, number>();
       for (const s of sapmalar) { const n = sapmaSayisi.get(s.sku); sapmaSayisi.set(s.sku, n === undefined ? 1 : n + 1); }
+      // "Mikro'da düzeltilecek" (lib/stokFiyat.mikroTutarsizliklari, 2026-09-26 kullanıcı: "net tutar iskontolu halde
+      // göstermeli"): Mikro kaydı KENDİ İÇİNDE tutarsız satırlar — iskonto brüte bir kez daha eklenmiş (evrak 420:
+      // sth_tutar 398.317,50; gerçek net KDV'den 168.682,50). Birim sapması kalıbıyla BİREBİR: AYNI `cozum` (hareketler
+      // iki kez çözülmez), aynı ad eşlemesi, ürün başına sayaç. Cetpa Mikro kaydını düzeltmez — liste kullanıcı içindir.
+      const tutarsizlik = mikroTutarsizliklari(movements, secenek, cozum);
+      const tutarsizliklar = tutarsizlik.satirlar.map(s => ({ ...s, ad: adMap.get(s.sku) ?? s.sku }));
+      // Sayaç: değerlendirilen üründe listede yoksa tutarsız satırı gerçekten yoktur → 0; değerlendirilemeyen üründe
+      // (KDV'siz iskontolu satır, başlığın doğrulamadığı imzalı satır…) BİLİNMİYOR → null — 0 DEĞİL.
+      const tutarsizlikSayisi = new Map<string, number>();
+      for (const s of tutarsizliklar) { const n = tutarsizlikSayisi.get(s.sku); tutarsizlikSayisi.set(s.sku, n === undefined ? 1 : n + 1); }
       const rows = ozet.satirlar.map(r => {
         const n = sapmaSayisi.get(r.sku);
         const sayi = !sapma.degerlendirilen.has(r.sku) ? null : n === undefined ? 0 : n;
-        return { ...r, ad: adMap.get(r.sku) ?? r.sku, kalanStok: stokMap.get(r.sku) ?? null, sapmaSayisi: sayi };
+        const t = tutarsizlikSayisi.get(r.sku);
+        const tSayi = !tutarsizlik.degerlendirilen.has(r.sku) ? null : t === undefined ? 0 : t;
+        // Tur 2 (2026-09-28): bulgulu üründe hüküm verilemeyen BAŞKA satır da varsa sayı ALT SINIRDIR — kesin sayı gibi
+        // okunmasın (bulgu kesin olduğu için null da denmez; "en az N").
+        const tEnAz = tSayi !== null && tSayi > 0 && tutarsizlik.belirsizUrunler.has(r.sku);
+        return { ...r, ad: adMap.get(r.sku) ?? r.sku, kalanStok: stokMap.get(r.sku) ?? null, sapmaSayisi: sayi, tutarsizlikSayisi: tSayi, tutarsizlikEnAz: tEnAz };
       });
       // iskontoKolonlari: aynada GERÇEKTEN bulunan sth_iskonto<N> kolonları — boşsa ekran "iskonto kolonu yok" der.
-      res.json({ success: true, rows, toplamSku: rows.length, iskontoKolonlari: ozet.iskontoKolonlari, netKaynaklari: ozet.netKaynaklari, sapmalar });
+      res.json({ success: true, rows, toplamSku: rows.length, iskontoKolonlari: ozet.iskontoKolonlari, netKaynaklari: ozet.netKaynaklari, sapmalar, tutarsizliklar });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
     }

@@ -59,7 +59,7 @@
  *   dokümanına EŞLER. İkisini karıştırma.
  */
 import { bilinenSayi } from '../../utils/para.js';
-import { kalemleriCoz, faturaAnahtari, satirMasrafi, type StokHareketi, type NetKaynagi } from '../../lib/stokFiyat.js';
+import { kalemleriCoz, faturaAnahtari, satirMasrafi, kdvOranaUymuyor, type StokHareketi, type NetKaynagi } from '../../lib/stokFiyat.js';
 
 /** Bir alanın "hiçbir satırda okunamadı" sayılması için gereken en az satır sayısı. */
 export const OKUMA_ARIZASI_ESIK = 5;
@@ -194,6 +194,14 @@ export interface SiparisSatiri {
   masraf: number | null;
   /** Net tutarın nasıl belirlendiği (lib/stokFiyat) — 'dogrulanamadi' / 'faturaAltiKdvden' kesin rakam gibi okunmasın. */
   netKaynagi: NetKaynagi | null;
+  /** Satırın KDV'si pntr'nin (o tarihte geçerli) oranıyla çözülen nete [+ masrafa] UYMUYOR (lib/stokFiyat.kdvOranaUymuyor —
+   *  kalemSaglamasi'nın kdvUyumsuz sayacıyla AYNI ölçü). Net çözülemediyse null. Tur 2 (2026-09-28): kalıcı yol
+   *  (services/mikroFaturaKalemleri.kayitliKalemTablosu) "kalem netleri doğru" hükmünü ham yolla AYNI kapıdan geçirsin diye;
+   *  alanı OLMAYAN (tur 2 öncesi) kalem = bilinmiyor → hüküm verilmez, kalemYenilenmeli yeniler. */
+  kdvUyumsuz: boolean | null;
+  /** Gösterilen net, KDV'ye aynı ölçüde oturan çift iskonto okumasından ayırt EDİLEMİYOR (KalemCozumu.ciftIskontoBelirsiz —
+   *  kalemSaglamasi'nın ciftBelirsiz sayacıyla AYNI). Net çözülemediyse null. */
+  ciftIskontoBelirsiz: boolean | null;
   /** netTutar + kdv (ikisi de biliniyorsa), yoksa null. Eski sürümün karışık rakamı DEĞİL. */
   total: number | null;
   kalemSurumu: number;
@@ -261,6 +269,9 @@ export function mfKalemleri(hareketler: readonly StokHareketi[], meblag: unknown
       // Masraf satırın KENDİ kolonlarından — netin çözülmesine bağlı değil (ham tablo `kalemSaglamasi` ile AYNI kural).
       masraf: kurus(satirMasrafi(h)),
       netKaynagi: c.kaynak,
+      // Ham kalemSaglamasi ile AYNI ölçü, YUVARLANMAMIŞ net üzerinden (kuruşa yuvarlama KDV payını kaydırmasın).
+      kdvUyumsuz: c.net !== null ? kdvOranaUymuyor(h, c.net) : null,
+      ciftIskontoBelirsiz: c.net !== null ? c.ciftIskontoBelirsiz === true : null,
       total: net !== null && kdv !== null ? kurus(net + kdv) : null,
       kalemSurumu: MF_KALEM_SURUMU,
     };
@@ -278,10 +289,26 @@ const topla = (k: readonly unknown[], alan: 'netTutar' | 'kdv'): number | null =
   return Math.round(t * 100) / 100;
 };
 
+/** Kalemin satır PARMAK İZİ (tur 2, 2026-09-28): toplamlar aynı kalsa da değişen satır alanını görür. Sayılar 4 ondalığa
+ *  normalize edilir (PG/JSON gidiş-dönüşü fark sayılmaz); alan YOKSA '∅' — tur 2 öncesi yazılmış bayraksız kalem kaynaktan
+ *  farklı çıkar ve yenilenir (MF_KALEM_SURUMU artırılmadı: kayıtlı-kalem seçicisi sürüm 2'ye bağlı). */
+const IZ_ALANLARI = ['sku', 'quantity', 'brutTutar', 'iskonto', 'netTutar', 'kdv', 'masraf', 'netKaynagi', 'kdvUyumsuz', 'ciftIskontoBelirsiz'] as const;
+const satirIzi = (l: unknown): string => {
+  const r = (l ?? {}) as Record<string, unknown>;
+  return IZ_ALANLARI.map(a => {
+    const v = r[a];
+    if (v === undefined) return '∅';
+    if (typeof v === 'number') return Number.isFinite(v) ? String(Math.round(v * 1e4) / 1e4) : 'NaN';
+    return JSON.stringify(v);
+  }).join('|');
+};
+
 /**
  * Mevcut MF siparişinin kalemleri yenilenmeli mi: hiç kalem yok, sürüm-2 olmayan kalem var, ya da (verilirse) kaynaktan
- * kurulan kalemler kayıtlıdan FARKLI — kalem sayısı ya da Σ net / Σ KDV kuruş düzeyinde (inceleme 2026-09-25: stok
- * hareketi importu yarıda kalınca kısmi kalem sürüm 2 damgasıyla kalıcı oluyor, bir daha hiç yenilenmiyordu).
+ * kurulan kalemler kayıtlıdan FARKLI — kalem sayısı, Σ net / Σ KDV kuruş düzeyinde (inceleme 2026-09-25: stok
+ * hareketi importu yarıda kalınca kısmi kalem sürüm 2 damgasıyla kalıcı oluyor, bir daha hiç yenilenmiyordu) ya da SATIR
+ * parmak izi (tur 2, 2026-09-28: kullanıcı Mikro kaydını düzeltince net ve KDV aynı kalıyor, yalnız netKaynagi
+ * 'mikroKaydiTutarsiz' → 'satirIskontosu' değişiyor; kalıcı ⚠ ve "faturayı Mikro'da düzeltin" notu hiç kalkmıyordu).
  * Sağlamaya BAKILMAZ: tevkifat/ÖTV'li fatura meşru olarak tutmaz.
  */
 export function kalemYenilenmeli(lineItems: unknown, kaynak?: readonly SiparisSatiri[]): boolean {
@@ -289,7 +316,12 @@ export function kalemYenilenmeli(lineItems: unknown, kaynak?: readonly SiparisSa
   if (lineItems.some(l => !l || typeof l !== 'object' || (l as { kalemSurumu?: unknown }).kalemSurumu !== MF_KALEM_SURUMU)) return true;
   if (!kaynak) return false;
   if (kaynak.length !== lineItems.length) return true;
-  return topla(kaynak, 'netTutar') !== topla(lineItems, 'netTutar') || topla(kaynak, 'kdv') !== topla(lineItems, 'kdv');
+  if (topla(kaynak, 'netTutar') !== topla(lineItems, 'netTutar') || topla(kaynak, 'kdv') !== topla(lineItems, 'kdv')) return true;
+  // SIRADAN BAĞIMSIZ (çoklu küme): kaynak sırası sth_satir_no yoksa PG yığın sırasına kalıyor — sıra numarasıyla
+  // eşlemek aynı kalemleri "değişmiş" sayıp gereksiz yenileme önerirdi (inceleme 2026-09-28). netKaynagi değişimi
+  // (Mikro'da düzeltilen evrak) yine yakalanır: izi değişen kalem kümede eşini bulamaz.
+  const a = kaynak.map(satirIzi).sort(), b = lineItems.map(satirIzi).sort();
+  return a.some((x, i) => x !== b[i]);
 }
 
 export interface SiparisTuretmesi {

@@ -12,13 +12,13 @@
  * gönderilmemiş (ya da kağıt fatura) olabilir. O durumda düğmeler yerine
  * sebebi yazılır — sessizce boş buton göstermek yanıltıcı olur.
  */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { X, Download, FileCode, Loader2, AlertTriangle, Package } from 'lucide-react';
 import { eBelgeIndir } from '../services/ebelgeIndir';
 import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
 import { VERGI_PNTR_ORAN } from '../hooks/useMikroFaturalar';
-import { kalemleriCoz, kalemSaglamasi, birimFiyatOndaligi } from '../lib/stokFiyat';
+import { kalemleriCoz, kalemSaglamasi, birimFiyatOndaligi, satirMasrafi } from '../lib/stokFiyat';
 import { bilinenSayi } from '../utils/para';
 import { oc } from '../i18n/ortak';
 
@@ -116,8 +116,10 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
       const cur = map.get(key) ?? { oran, matrah: 0, kdv: 0 };
       // Matrah NET'tir (iskonto düşülmüş — lib/stokFiyat.satirNet, KDV ile sağlanır); eskiden BRÜT sth_tutar toplanıyordu
       // ve iskontolu faturada matrah + KDV fatura toplamını tutmuyordu. Hesaplanamayan satır 0 SAYILMAZ, atlanır.
+      // Tur 2 (2026-09-28): satır masrafı (nakliye vb.) KDV matrahına girer — sağlama kutusu ve kdvUyumsuz KDV'yi
+      // (net + masraf) üzerinden kabul ediyor; kırılımın matrahı da aynı taban (üstteki Matrah satırıyla tutarlı).
       const net = cozumler[i]?.net;
-      if (net != null) cur.matrah += net;
+      if (net != null) cur.matrah += net + satirMasrafi(k);
       if (bilinenSayi(k.sth_vergi)) cur.kdv += Math.abs(Number(k.sth_vergi));
       map.set(key, cur);
     }
@@ -126,6 +128,46 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
 
   /** SAĞLAMA — tek tanım lib/stokFiyat.kalemSaglamasi (sipariş detayı ve fişi de aynısını kullanır). */
   const saglama = useMemo(() => (kalemler?.length ? kalemSaglamasi(kalemler, cozumler, fatura.tutar) : null), [kalemler, cozumler, fatura.tutar]);
+
+  /** Sağlama 3 durum (2026-09-26, evrak 420). Eskiden başlık hakemi Mikro'nun tutarsız başlığıyla KDV'nin ele verdiği
+   *  doğru neti eziyor ve sağlama YAPI GEREĞİ tutuyordu (döngüsel) → yanıltıcı yeşil "✓". Artık:
+   *   • mikroTutarsiz — fark TAM Mikro'nun fazladan eklediği iskonto kadar: Mikro kaydı kendi içinde tutarsız, kalem
+   *     netleri (KDV ile sağlanan, iskontolu) doğru. Kullanıcı: "net tutar iskontolu halde göstermeli". YEŞİLDEN ÖNCE
+   *     bakılır: büyük faturada sağlama payı (on binde 5) Mikro'nun fazlasından büyük olabilir → "tutuyor" ile birlikte
+   *     true olur ve yeşil ✓ kalem satırındaki ⚠ ile çelişirdi (tur 1, 2026-09-28);
+   *   • yeşil — toplam tutuyor, satır KDV'leri pntr oranına uyuyor (kdvUyumsuz yok), hiçbir kalemin neti çift iskonto
+   *     okumasından ayırt edilemez değil (ciftBelirsiz yok) ve Mikro fazlası yok;
+   *   • toplamTutuyor — toplam tutuyor ama yukarıdakilerden biri yok (yeşil verilmez, TEK kutu, kesin hükümle);
+   *   • tutmuyor — eski amber uyarı. */
+  const kdvUyumsuz = saglama?.kdvUyumsuz ?? 0;
+  const ciftBelirsiz = saglama?.ciftBelirsiz ?? 0;
+  const saglamaDurum: 'yesil' | 'mikroTutarsiz' | 'toplamTutuyor' | 'tutmuyor' | null = !saglama ? null
+    : saglama.mikroKaydiTutarsiz ? 'mikroTutarsiz'
+    : saglama.tutuyor && kdvUyumsuz === 0 && ciftBelirsiz === 0 && !((saglama.mikroFazlasi ?? 0) > 0) ? 'yesil'
+    : saglama.tutuyor ? 'toplamTutuyor'
+    : 'tutmuyor';
+  /** Matrah: kalemler eksiksiz çözüldüyse Σ kalem neti + Σ satır masrafı (iskontolu; e-faturadaki KDV matrahı — KDV bu
+   *  tabana oturur, sağlama kutusu da bunu kullanır). Mikro başlığındaki matrah (import `SUM(sth_tutar)`) satır
+   *  iskontosunu düşmüyor. Kalemler yok/eksikse başlık değeri (bugünkü davranış). */
+  const kalemMatrahi = saglama && saglama.eksik === 0 ? saglama.net + saglama.masraf : null;
+  const baslikMatrahi = bilinenSayi(fatura.matrah) ? Math.abs(Number(fatura.matrah)) : null;
+  /** Not RAKAMLA kapanır (tur 2, 2026-09-28): başlık − iskonto − Mikro'nun fazladan eklediği + masraf = Matrah. Eskiden
+   *  "brüte bir kez daha eklenmiş" dalı faturanın genel durumuna (mikroTutarsiz) bağlıydı — karma faturada (başka kalemin
+   *  KDV'si uymayınca durum "tutmuyor") yalnız "iskonto düşülmemiş" deniyor, fark yarı açıklanıyordu; kalem satırındaki ⚠
+   *  ise mikroFazlasi'na bağlı. Artık ikisi AYNI ölçü (mikroFazlasi > 0). Parçalar başlık farkını kapatmıyorsa (ör. tutarı
+   *  zaten net satır) açıklama UYDURULMAZ, yalnız başlık değeri yazılır. */
+  const matrahNotu = (() => {
+    if (!saglama || kalemMatrahi === null || baslikMatrahi === null || Math.abs(baslikMatrahi - kalemMatrahi) <= 0.01) return undefined;
+    const fazla = saglama.mikroFazlasi ?? 0;
+    const parcalar: string[] = [];
+    if (saglama.iskonto > 0.005) parcalar.push(tr ? `iskonto ${tl(saglama.iskonto)} düşülmemiş` : `discount ${tl(saglama.iskonto)} not deducted`);
+    if (fazla > 0) parcalar.push(tr ? `${tl(fazla)} brüte bir kez daha eklenmiş` : `${tl(fazla)} added to the gross once more`);
+    if (saglama.masraf > 0) parcalar.push(tr ? `masraf ${tl(saglama.masraf)} matraha dahil` : `charges ${tl(saglama.masraf)} included in the base`);
+    const kapaniyor = Math.abs(baslikMatrahi - saglama.iskonto - fazla + saglama.masraf - kalemMatrahi) <= Math.max(0.01, kalemler?.length ? kalemler.length * 0.01 : 0.01);
+    const bas = tr ? `Mikro başlığı ${tl(fatura.matrah)}` : `Mikro header ${tl(fatura.matrah)}`;
+    return kapaniyor && parcalar.length ? `${bas} — ${parcalar.join(', ')}` : bas;
+  })();
+  const masrafMetni = (s: { masraf: number }) => (s.masraf > 0 ? (tr ? ` + masraf ${tl(s.masraf)}` : ` + charges ${tl(s.masraf)}`) : '');
 
   const indir = async (tur: 'xml' | 'pdf') => {
     if (indiriliyor) return;
@@ -145,10 +187,13 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
     setIndiriliyor(null);
   };
 
-  const satir = (etiket: string, deger: string) => (
+  const satir = (etiket: string, deger: string, not?: ReactNode) => (
     <div className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
       <span className="text-xs text-gray-500">{etiket}</span>
-      <span className="text-sm font-semibold text-[#1D1D1F]">{deger}</span>
+      <span className="text-sm font-semibold text-[#1D1D1F] text-right">
+        {deger}
+        {not && <span className="block text-[10px] font-normal text-amber-700">{not}</span>}
+      </span>
     </div>
   );
 
@@ -180,7 +225,7 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
           {/* `typeof === 'number'` NaN'ı SAYI SANIYORDU: hook grubu (2026-09-18) okunamayan
               tutar/kdv/matrahı NaN yaptığından bu kontrol "biliniyor" deyip `tl(NaN)`e giriyordu.
               `bilinenSayi` NaN'ı da eler — bilinmeyen alan '—' basar (oranı da yazılmaz). */}
-          {satir(tr ? 'Matrah' : 'Base', bilinenSayi(fatura.matrah) ? tl(fatura.matrah) : '—')}
+          {satir(tr ? 'Matrah' : 'Base', kalemMatrahi !== null ? tl(kalemMatrahi) : bilinenSayi(fatura.matrah) ? tl(fatura.matrah) : '—', matrahNotu)}
           {satir(oc(tr).kdv, bilinenSayi(fatura.kdv) ? `${tl(fatura.kdv)}${fatura.oranKarma ? (tr ? ' (Karma oran)' : ' (Mixed rate)') : (fatura.oran !== null ? ` (%${fatura.oran})` : '')}` : '—')}
           {fatura.oranKarma && oranKirilim && oranKirilim.length > 1 && (
             <div className="bg-amber-50 rounded-xl px-3 py-2 my-2 space-y-1">
@@ -193,7 +238,9 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
               ))}
             </div>
           )}
-          {satir(oc(tr).toplam, bilinenSayi(fatura.tutar) ? tl(fatura.tutar) : '—')}
+          {/* Toplam Mikro'nunki KALIR (cari borç o rakamla); kayıt KDV ile tutarsızsa KDV ile tutarlı toplam yanında. */}
+          {satir(oc(tr).toplam, bilinenSayi(fatura.tutar) ? tl(fatura.tutar) : '—',
+            saglama?.mikroKaydiTutarsiz ? (tr ? `KDV ile tutarlı toplam ${tl(saglama.kalemToplami)}` : `VAT-consistent total ${tl(saglama.kalemToplami)}`) : undefined)}
           {fatura.baslikYok && (
             <p className="text-[11px] text-amber-600 mt-1">
               {tr
@@ -256,6 +303,14 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                       const miktar = bilinenSayi(k.sth_miktar) ? Number(k.sth_miktar) : null;
                       const kdv = bilinenSayi(k.sth_vergi) ? Number(k.sth_vergi) : null;
                       const fa = n?.kaynak === 'faturaAltiKdvden' || n?.kaynak === 'faturaAltiBasliktan';
+                      // Mikro kaydı kendi içinde tutarsız: brüt = sth_tutar − Σisk (e-faturanın Mal Hizmet Tutarı); Mikro'nun
+                      // ham tutarı tooltip'te — kullanıcı Mikro'daki rakamla karşılaştırabilsin.
+                      const mikroTutarsiz = n?.kaynak === 'mikroKaydiTutarsiz';
+                      const mikroTutarMetni = bilinenSayi(k.sth_tutar) ? tl(Math.abs(Number(k.sth_tutar))) : '—';
+                      const mikroTutarIpucu = mikroTutarsiz
+                        ? (tr ? `Mikro tutarı ${mikroTutarMetni} — satır iskontosu Mikro'da brüte bir kez daha eklenmiş; brüt = Mikro tutarı − iskonto (e-faturadaki Mal Hizmet Tutarı)`
+                              : `Mikro amount ${mikroTutarMetni} — the line discount was added to the gross once more in Mikro; gross = Mikro amount − discount (Goods/Services Amount on the e-invoice)`)
+                        : undefined;
                       // Birim = MİKTARIN birimi (ana birim) — Mikro miktarı ana birime çevirip saklar (canlı ölçüm 2026-09-19,
                       // bkz. server/mikro/eslemeFatura.kalemleriBirimle). Satır başka birimle GİRİLDİYSE sunucu `girisBirimi`
                       // yollar; o yalnız bilgi notudur — Miktar ve Net Birim ana birim üzerindendir.
@@ -280,7 +335,10 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                               </span>
                             )}
                           </td>
-                          <td className="py-1.5 px-1 text-right tabular-nums text-gray-400">{n?.brut != null ? tl(n.brut) : '—'}</td>
+                          <td className={`py-1.5 px-1 text-right tabular-nums whitespace-nowrap ${mikroTutarsiz ? 'text-red-700' : 'text-gray-400'}`} title={mikroTutarIpucu}>
+                            {mikroTutarsiz && <span role="img" aria-label={mikroTutarIpucu} className="mr-0.5">⚠</span>}
+                            {n?.brut != null ? tl(n.brut) : '—'}
+                          </td>
                           <td className={`py-1.5 px-1 text-right tabular-nums ${n?.iskonto ? 'text-amber-700' : 'text-gray-300'}`}
                             title={fa ? (tr ? 'Fatura altı iskonto — satırda yazılı değil; fatura toplamından / satırın KDV\'sinden türetildi' : 'Invoice-level discount — not on the line; derived from the invoice total / line VAT') : undefined}>
                             {n?.iskonto != null ? (n.iskonto > 0 ? `−${tl(n.iskonto)}` : tl(0)) : '—'}
@@ -298,11 +356,52 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
                     })}
                   </tbody>
                 </table>
-                {saglama && (
-                  <p className={`mt-2 text-[11px] rounded-lg px-2.5 py-1.5 ${saglama.tutuyor ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50 border border-amber-200'}`}>
-                    {saglama.tutuyor
-                      ? (tr ? `✓ Sağlama: kalem neti ${tl(saglama.net)}${saglama.masraf > 0 ? ` + masraf ${tl(saglama.masraf)}` : ''} + KDV ${tl(saglama.kdv)} = fatura toplamı ${tl(saglama.kalemToplami)}${saglama.iskonto > 0 ? ` (iskonto −${tl(saglama.iskonto)} düşülmüş)` : ''}` : `✓ Check: line net ${tl(saglama.net)}${saglama.masraf > 0 ? ` + charges ${tl(saglama.masraf)}` : ''} + VAT ${tl(saglama.kdv)} = invoice total ${tl(saglama.kalemToplami)}${saglama.iskonto > 0 ? ` (discount −${tl(saglama.iskonto)} deducted)` : ''}`)
-                      : (tr ? `Sağlama TUTMUYOR: kalem neti + KDV = ${tl(saglama.kalemToplami)}, fatura toplamı ${tl(Math.abs(Number(fatura.tutar)))} (fark ${tl(saglama.fark)})${saglama.eksik > 0 ? ` · ${saglama.eksik} alan okunamadı` : ''} — iskonto/masraf dağılımı bu faturada doğrulanamadı.` : `Check FAILED: line net + VAT = ${tl(saglama.kalemToplami)}, invoice total ${tl(Math.abs(Number(fatura.tutar)))} (diff ${tl(saglama.fark)})${saglama.eksik > 0 ? ` · ${saglama.eksik} unreadable fields` : ''} — discount/charge allocation could not be verified for this invoice.`)}
+                {saglama && saglamaDurum === 'yesil' && (
+                  <p className="mt-2 text-[11px] rounded-lg px-2.5 py-1.5 text-emerald-700 bg-emerald-50">
+                    {tr ? `✓ Sağlama: kalem neti ${tl(saglama.net)}${masrafMetni(saglama)} + KDV ${tl(saglama.kdv)} = fatura toplamı ${tl(saglama.kalemToplami)}${saglama.iskonto > 0 ? ` (iskonto −${tl(saglama.iskonto)} düşülmüş)` : ''}` : `✓ Check: line net ${tl(saglama.net)}${masrafMetni(saglama)} + VAT ${tl(saglama.kdv)} = invoice total ${tl(saglama.kalemToplami)}${saglama.iskonto > 0 ? ` (discount −${tl(saglama.iskonto)} deducted)` : ''}`}
+                  </p>
+                )}
+                {saglama && saglamaDurum === 'mikroTutarsiz' && (
+                  <p className="mt-2 text-[11px] rounded-lg px-2.5 py-1.5 text-red-700 bg-red-50 border border-red-200">
+                    {tr
+                      ? `Mikro kaydı KDV ile TUTARSIZ: kalem neti ${tl(saglama.net)}${masrafMetni(saglama)} + KDV ${tl(saglama.kdv)} = ${tl(saglama.kalemToplami)}; Mikro'daki fatura toplamı ${tl(Math.abs(Number(fatura.tutar)))} — fark ${tl(Math.abs(saglama.fark))}: satır iskontosu Mikro'da brüte bir kez daha eklenmiş. Net tutarlar iskontolu (KDV ile sağlanan) gösteriliyor; faturayı Mikro'da düzeltin.`
+                      : `Mikro record INCONSISTENT with VAT: line net ${tl(saglama.net)}${masrafMetni(saglama)} + VAT ${tl(saglama.kdv)} = ${tl(saglama.kalemToplami)}; invoice total in Mikro ${tl(Math.abs(Number(fatura.tutar)))} — diff ${tl(Math.abs(saglama.fark))}: the line discount was added to the gross once more in Mikro. Net amounts are shown after discount (reconciled with VAT); correct the invoice in Mikro.`}
+                  </p>
+                )}
+                {saglama && saglamaDurum === 'toplamTutuyor' && (
+                  <p className="mt-2 text-[11px] rounded-lg px-2.5 py-1.5 text-amber-700 bg-amber-50 border border-amber-200">
+                    {/* TEK kutu: oranı bilinen satır ÖLÇÜLDÜ ve uymadıysa kesin hüküm ("tutmuyor"), "doğrulanamadı" değil. Son seçeneğe
+                        YALNIZ mikroFazlasi > 0 iken ulaşılır (yoksa durum yeşildir): satır KDV'si o durumda ZATEN doğrulanmıştır —
+                        gerekçe asıl bulguyu (Mikro'nun fazlası) söyler (tur 3, 2026-09-28; eskiden "satır KDV'si doğrulanamadı"). */}
+                    {tr
+                      ? `Toplam tutuyor (kalem neti ${tl(saglama.net)}${masrafMetni(saglama)} + KDV ${tl(saglama.kdv)} = fatura toplamı ${tl(saglama.kalemToplami)}), ancak ${
+                        kdvUyumsuz > 0 ? `${kdvUyumsuz} kalemde KDV satırın KDV oranıyla tutmuyor — Mikro kaydını kontrol edin.`
+                        : ciftBelirsiz > 0 ? `${ciftBelirsiz} kalemde iskontonun Mikro'da brüte bir kez daha eklenip eklenmediği satırdan ayırt edilemiyor — e-faturayla karşılaştırın.`
+                        : `Mikro'da ${tl(saglama.mikroFazlasi ?? 0)} satır iskontosu brüte bir kez daha eklenmiş (kalem netleri KDV ile sağlandı, iskontolu gösteriliyor); Mikro'daki fatura toplamı bu fazlayı tam açıklamıyor (fark ${tl(Math.abs(saglama.fark))}) — faturayı e-faturayla karşılaştırıp Mikro'da düzeltin.`}`
+                      : `Total matches (line net ${tl(saglama.net)}${masrafMetni(saglama)} + VAT ${tl(saglama.kdv)} = invoice total ${tl(saglama.kalemToplami)}), but ${
+                        kdvUyumsuz > 0 ? `VAT on ${kdvUyumsuz} line(s) does not match the line's VAT rate — check the Mikro record.`
+                        : ciftBelirsiz > 0 ? `on ${ciftBelirsiz} line(s) it cannot be told from the line whether Mikro added the discount to the gross once more — compare with the e-invoice.`
+                        : `in Mikro ${tl(saglama.mikroFazlasi ?? 0)} of line discount was added to the gross once more (line nets reconciled with VAT, shown after discount); the invoice total in Mikro does not fully account for this excess (diff ${tl(Math.abs(saglama.fark))}) — compare with the e-invoice and correct it in Mikro.`}`}
+                  </p>
+                )}
+                {saglama && saglamaDurum === 'tutmuyor' && (
+                  <p className="mt-2 text-[11px] rounded-lg px-2.5 py-1.5 text-amber-700 bg-amber-50 border border-amber-200">
+                    {tr ? `Sağlama TUTMUYOR: kalem neti + KDV = ${tl(saglama.kalemToplami)}, fatura toplamı ${tl(Math.abs(Number(fatura.tutar)))} (fark ${tl(saglama.fark)})${saglama.eksik > 0 ? ` · ${saglama.eksik} alan okunamadı` : ''} — iskonto/masraf dağılımı bu faturada doğrulanamadı.` : `Check FAILED: line net + VAT = ${tl(saglama.kalemToplami)}, invoice total ${tl(Math.abs(Number(fatura.tutar)))} (diff ${tl(saglama.fark)})${saglama.eksik > 0 ? ` · ${saglama.eksik} unreadable fields` : ''} — discount/charge allocation could not be verified for this invoice.`}
+                  </p>
+                )}
+                {/* Başlık hakeminin sağlaması döngüsel olabilir; satır KDV'sinin pntr oranına uyması BAĞIMSIZ güvenlik ağı. */}
+                {kdvUyumsuz > 0 && saglamaDurum !== 'toplamTutuyor' && (
+                  <p className="mt-1.5 text-[11px] rounded-lg px-2.5 py-1.5 text-amber-700 bg-amber-50 border border-amber-200">
+                    {tr
+                      ? `${kdvUyumsuz} kalemde KDV, satırın KDV oranıyla tutmuyor — Mikro kaydını kontrol edin.`
+                      : `VAT on ${kdvUyumsuz} line(s) does not match the line's VAT rate — check the Mikro record.`}
+                  </p>
+                )}
+                {ciftBelirsiz > 0 && kdvUyumsuz === 0 && saglamaDurum !== 'toplamTutuyor' && (
+                  <p className="mt-1.5 text-[11px] rounded-lg px-2.5 py-1.5 text-amber-700 bg-amber-50 border border-amber-200">
+                    {tr
+                      ? `${ciftBelirsiz} kalemde iskontonun Mikro'da brüte bir kez daha eklenip eklenmediği satırdan ayırt edilemiyor — e-faturayla karşılaştırın.`
+                      : `On ${ciftBelirsiz} line(s) it cannot be told from the line whether Mikro added the discount to the gross once more — compare with the e-invoice.`}
                   </p>
                 )}
               </div>

@@ -19,7 +19,7 @@ import ModuleHeader from './ModuleHeader';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
 import { SortHeader } from './accounting/shared';
 import { hareketFaturasi } from '../utils/faturaEsle';
-import { BIRIM_SAPMA_KATI, type FaturaAnahtari } from '../lib/stokFiyat';
+import { BIRIM_SAPMA_KATI, type FaturaAnahtari, type MikroTutarsizligi } from '../lib/stokFiyat';
 import { yuzdeYaz } from '../utils/rapor/bicim';
 import { eslesir } from '../utils/arama';
 import { authFetch } from '../services/authFetch';
@@ -42,6 +42,10 @@ interface FiyatKarsilastirmaRow {
   /** Birim fiyatı ürünün fiyat düzeyinden ≥ BIRIM_SAPMA_KATI kat sapan satır sayısı (koli/adet karışıklığı olabilir).
    *  null = değerlendirilemedi (< 3 fiyatı bilinen satır); eski yanıtta alan yok (undefined). */
   sapmaSayisi?: number | null;
+  /** Mikro kaydı tutarsız satır sayısı (lib/stokFiyat.mikroTutarsizliklari). null = değerlendirilemedi; eski yanıtta yok. */
+  tutarsizlikSayisi?: number | null;
+  /** true → sayı ALT SINIR: ürünün başka satırı hükme bağlanamadı (o satır da Mikro'da şişmiş olabilir). Eski yanıtta yok. */
+  tutarsizlikEnAz?: boolean;
 }
 
 /** Sunucu: lib/stokFiyat.BirimSapmasi + ürün adı. */
@@ -49,6 +53,10 @@ interface BirimSapmaSatiri {
   sku: string; ad: string; tarih: string | null; yon: 'alis' | 'satis'; miktar: number;
   birimFiyat: number; medyan: number; kat: number; belirsiz: boolean; cariKod: string | null; evrakNo: string | null; fatura: FaturaAnahtari | null;
 }
+/** Sunucu: lib/stokFiyat.MikroTutarsizligi + ürün adı — Mikro kaydı kendi içinde tutarsız satır (evrak 420, 2026-09-26). */
+type MikroTutarsizlikSatiri = MikroTutarsizligi & { ad: string };
+/** Liste satırının cari kodu `unknown` gelir (Mikro alanı): yalnız metin/sayı kabul, gerisi null (uydurma yok). */
+const cariMetni = (v: unknown): string | null => typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : null;
 interface FiyatDetaySatiri {
   tarih: string | null; yon: 'alis' | 'satis'; miktar: number | null;
   /** null = hesaplanamadı (tutar/miktar bilinmiyor ya da iskonto brütü aşıyor) → '—', ₺0 değil. `tutar` NET'tir. */
@@ -58,6 +66,8 @@ interface FiyatDetaySatiri {
   kaynak: NetKaynagi | null;
   /** Hareketin faturası (lib/stokFiyat.faturaAnahtari); irsaliye/sayımda null. Eski sunucu yanıtında alan yok → undefined. */
   fatura?: FaturaAnahtari | null;
+  /** YALNIZ kaynak 'mikroKaydiTutarsiz' iken: Mikro'daki ham satır tutarı (sth_tutar). Eski sunucuda yok → ipucu tutar yazmaz. */
+  mikroTutar?: number;
 }
 type FkSortKey = 'ad' | 'alisOrtFiyat' | 'alisMiktar' | 'satisOrtFiyat' | 'satisMiktar' | 'marjTL' | 'kalanStok';
 
@@ -82,6 +92,10 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
   /** Birim sapması listesi (koli/adet karışıklığı — 2026-09-25 kullanıcı isteği) ve açık/kapalı. */
   const [fkSapmalar, setFkSapmalar] = useState<BirimSapmaSatiri[]>([]);
   const [fkSapmaAcik, setFkSapmaAcik] = useState(false);
+  /** "Mikro'da düzeltilecek" listesi (2026-09-26, evrak 420): Mikro kaydında iskonto satır tutarına bir kez daha eklenmiş.
+   *  Kullanıcı: "net tutar iskontolu halde göstermeli" — ekran iskontolu neti gösterir, liste Mikro'da düzeltilecekleri. */
+  const [fkTutarsizliklar, setFkTutarsizliklar] = useState<MikroTutarsizlikSatiri[]>([]);
+  const [fkTutarsizlikAcik, setFkTutarsizlikAcik] = useState(false);
   // Sıralama (2026-08-13 kullanıcı bildirimi: tablo hiç sıralanmıyordu — kolon
   // başlıkları tıklanabilir değildi). AccountingModule'deki SortHeader deseni
   // ortak modülden geliyor; sıralama mantığı bu tek tabloya özel ve hafif.
@@ -109,7 +123,7 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
       .then(r => r.json())
       .then(json => {
         if (iptal) return;
-        if (json.success) { setFkRows(json.rows); setFkSapmalar(Array.isArray(json.sapmalar) ? json.sapmalar : []); setFkIskontoKolonlari(Array.isArray(json.iskontoKolonlari) ? json.iskontoKolonlari : null); setFkNetKaynaklari(json.netKaynaklari && typeof json.netKaynaklari === 'object' ? json.netKaynaklari : {}); }
+        if (json.success) { setFkRows(json.rows); setFkSapmalar(Array.isArray(json.sapmalar) ? json.sapmalar : []); setFkTutarsizliklar(Array.isArray(json.tutarsizliklar) ? json.tutarsizliklar : []); setFkIskontoKolonlari(Array.isArray(json.iskontoKolonlari) ? json.iskontoKolonlari : null); setFkNetKaynaklari(json.netKaynaklari && typeof json.netKaynaklari === 'object' ? json.netKaynaklari : {}); }
         else setFkError(json.error || (oc(currentLanguage).veri_alinamadi));
       })
       .catch(() => { if (!iptal) setFkError(oc(currentLanguage).veri_alinamadi); })
@@ -167,6 +181,11 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
 
   // Şüpheli satır listesi arama kutusuna uyar (ekrandaki "dayson" araması listeyi de daraltır).
   const sapmaFiltreli = fkSapmalar.filter(s => aramaEsler(s.sku, s.ad));
+  const tutarsizFiltreli = fkTutarsizliklar.filter(t => aramaEsler(t.sku, t.ad));
+  // Ürün rozeti: SÜZÜLMEMİŞ listeden sayılır (listede olan satır kesin bulgudur). Listede olmayan ürün için sayı YAZILMAZ —
+  // "0" demek "değerlendirildi, temiz" iddiası olurdu (lib `degerlendirilen`); rozet yalnız > 0 iken basılır.
+  const tutarsizSayisi = new Map<string, number>();
+  for (const t of fkTutarsizliklar) { const n = tutarsizSayisi.get(t.sku); tutarsizSayisi.set(t.sku, n === undefined ? 1 : n + 1); }
 
   return (
     <motion.div key="satinalma-fiyat-karsilastirma" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -179,14 +198,71 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
         <Search size={14} className="text-gray-400" />
         <input value={fkSearch} onChange={e => setFkSearch(e.target.value)} placeholder={trFk ? 'SKU veya ürün adı ara...' : 'Search SKU or name...'} className="apple-input px-3 py-2 text-sm flex-1 max-w-xs" />
         {!fkLoading && <span className="text-xs text-gray-400">{filtered.length} {trFk ? 'ürün' : 'items'}</span>}
-        {!fkLoading && sapmaFiltreli.length > 0 && (
-          <button onClick={() => setFkSapmaAcik(a => !a)}
-            className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
-            title={trFk ? `Birim fiyatı ürünün kendi medyanından ${BIRIM_SAPMA_KATI} kat ve üzeri sapan satırlar — koli/adet karışıklığı olabilir` : `Lines whose unit price deviates ${BIRIM_SAPMA_KATI}× or more from the product median — possible box/unit mix-up`}>
-            ⚠ {trFk ? `Birim şüpheli satır: ${sapmaFiltreli.length}` : `Suspicious unit lines: ${sapmaFiltreli.length}`}
-          </button>
+        {!fkLoading && (sapmaFiltreli.length > 0 || tutarsizFiltreli.length > 0) && (
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {tutarsizFiltreli.length > 0 && (
+              <button onClick={() => setFkTutarsizlikAcik(a => !a)} aria-expanded={fkTutarsizlikAcik}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
+                title={trFk ? "Mikro kaydında iskonto satır tutarına bir kez daha eklenmiş satırlar — bu ekrandaki net iskontolu (satırın KDV'sinden); kaydın Mikro'da düzeltilmesi gerekir" : 'Lines where Mikro added the discount to the line amount once more — net here is discounted (from the line VAT); the record must be fixed in Mikro'}>
+                ⚠ {trFk ? `Mikro'da düzeltilecek: ${tutarsizFiltreli.length}` : `To fix in Mikro: ${tutarsizFiltreli.length}`}
+              </button>
+            )}
+            {sapmaFiltreli.length > 0 && (
+              <button onClick={() => setFkSapmaAcik(a => !a)} aria-expanded={fkSapmaAcik}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
+                title={trFk ? `Birim fiyatı ürünün kendi medyanından ${BIRIM_SAPMA_KATI} kat ve üzeri sapan satırlar — koli/adet karışıklığı olabilir` : `Lines whose unit price deviates ${BIRIM_SAPMA_KATI}× or more from the product median — possible box/unit mix-up`}>
+                ⚠ {trFk ? `Birim şüpheli satır: ${sapmaFiltreli.length}` : `Suspicious unit lines: ${sapmaFiltreli.length}`}
+              </button>
+            )}
+          </div>
         )}
       </div>
+      {fkTutarsizlikAcik && tutarsizFiltreli.length > 0 && (
+        <div className="apple-card overflow-hidden border border-amber-200">
+          <p className="px-4 pt-3 text-[11px] text-amber-700">
+            {trFk
+              ? "Mikro kaydı kendi içinde tutarsız: satırın KDV'si iskontolu neti tutuyor, ama Mikro'daki satır tutarı ve fatura toplamı \"Mikro'nun fazlası\" kadar yüksek. Bu ekrandaki net, ortalama ve marj iskontolu (doğru) netle hesaplanır. Mikro'da düzeltilir: satır tutarı e-faturadaki Mal Hizmet Tutarı olmalı (iskonto bir kez daha eklenmiş). Düzeltince Stok Hareketleri + Faturalar yeniden çekilir."
+              : "The Mikro record is internally inconsistent: the line VAT matches the discounted net, but Mikro's line amount and invoice total are higher by \"Mikro excess\". Net, averages and margin here use the discounted (correct) net. Fix in Mikro: the line amount should be the e-invoice goods/services amount (the discount was added once more). After fixing, re-pull Stock Movements + Invoices."}
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[720px]">
+              <thead>
+                <tr className="bg-amber-50/60 border-b border-amber-100 text-[10px] font-bold text-gray-500 uppercase">
+                  <th className="text-left py-2 px-3">{oc(currentLanguage).urun}</th>
+                  <th className="text-left py-2 px-2">{oc(currentLanguage).tarih}</th>
+                  <th className="text-left py-2 px-2">{trFk ? 'Evrak' : 'Doc'}</th>
+                  <th className="text-right py-2 px-2" title={trFk ? 'Mikro\'daki satır tutarı (sth_tutar) — e-fatura brütü + iskonto' : 'Line amount in Mikro (sth_tutar) — e-invoice gross + discount'}>{trFk ? 'Mikro tutarı' : 'Mikro amount'}</th>
+                  <th className="text-right py-2 px-2">{trFk ? 'İskonto' : 'Discount'}</th>
+                  <th className="text-right py-2 px-2">{oc(currentLanguage).kdv}</th>
+                  <th className="text-right py-2 px-2" title={trFk ? "Satırın KDV'si ile sağlanan net — e-faturanın neti (iskontolu)" : 'Net matched by the line VAT — the e-invoice net (discounted)'}>{trFk ? 'Doğru net' : 'Correct net'}</th>
+                  <th className="text-right py-2 px-3" title={trFk ? "Mikro'nun fazladan eklediği tutar — Mikro'daki fatura toplamı bu kadar yüksek" : 'Amount Mikro added on top — the Mikro invoice total is higher by this much'}>{trFk ? "Mikro'nun fazlası" : 'Mikro excess'}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {tutarsizFiltreli.map((t, i) => {
+                  const f = t.evrakNo ? hareketFaturasi(mikroFaturalar, { evrakSira: t.fatura?.sira ?? t.evrakNo, cariKod: cariMetni(t.cariKod), tarih: t.tarih ? String(t.tarih).slice(0, 10) : null }, t.fatura) : null;
+                  return (
+                    <tr key={`${t.sku}|${t.evrakNo ?? ''}|${i}`} className="hover:bg-amber-50/40">
+                      <td className="py-2 px-3"><p className="font-semibold text-gray-800">{t.ad}</p><p className="text-[10px] text-gray-400 font-mono">{t.sku}</p></td>
+                      <td className="py-2 px-2 text-gray-600">{t.tarih ? String(t.tarih).slice(0, 10) : '—'}</td>
+                      <td className="py-2 px-2">
+                        {!t.evrakNo ? <span className="text-gray-400">—</span>
+                          : f ? <button onClick={() => setFkFatura(f)} className="text-brand hover:underline font-medium">{t.evrakNo}</button>
+                          : <span className="text-gray-400" title={trFk ? 'Fatura değil (irsaliye/sayım)' : 'Not an invoice'}>{t.evrakNo}</span>}
+                      </td>
+                      <td className="py-2 px-2 text-right text-gray-500">{fmtF(t.mikroTutar)}</td>
+                      <td className="py-2 px-2 text-right text-amber-700">{fmtF(t.iskonto)}</td>
+                      <td className="py-2 px-2 text-right text-gray-600">{fmtF(t.kdv)}{typeof t.oran === 'number' && t.oran > 0 ? ` (${yuzdeYaz(t.oran, 0, trFk ? 'tr' : 'en')})` : ''}</td>
+                      <td className="py-2 px-2 text-right font-semibold text-gray-800">{fmtF(t.net)}</td>
+                      <td className="py-2 px-3 text-right font-bold text-amber-700">{fmtF(t.fazla)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       {fkSapmaAcik && sapmaFiltreli.length > 0 && (
         <div className="apple-card overflow-hidden border border-amber-200">
           <p className="px-4 pt-3 text-[11px] text-amber-700">
@@ -268,6 +344,43 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
                             ⚠ {r.sapmaSayisi}
                           </span>
                         )}
+                        {(() => {
+                          // Tur 3 (2026-09-28): sayı ve "alt sınır" bayrağı SUNUCUDAN (reportsRoutes: tutarsizlikSayisi /
+                          // tutarsizlikEnAz); istemci listesinden saymak yalnız alanı göndermeyen eski sunucu için yedek.
+                          // Eskiden bayrak hiç okunmuyor, alt sınır KESİN sayı gibi basılıyordu ("yalnız 1 satır düzeltilecek").
+                          // Delta 2 (2026-09-28): sunucunun null'u (hüküm VERİLEMEDİ — reportsRoutes "BİLİNMİYOR → null, 0 DEĞİL")
+                          // ile alanın hiç gelmemesi (eski sunucu → istemci listesi yedeği) ayrılır; sunucunun 0'ı da kesindir.
+                          // Eskiden null yedeğe düşüyor, listede ürün olmadığı için hiçbir iz kalmıyordu: belirsiz satır bir
+                          // üründe "≥N" uyarısı, başka üründe temiz ürünle aynı sessizlik üretiyordu (sahte kesinlik).
+                          if (r.tutarsizlikSayisi === null) {
+                            const bilinmiyor = trFk
+                              ? "Bu ürünün iskontolu satırlarından en az biri hükme bağlanamadı (tutarı/KDV'si okunamayan, KDV'si sıfır, iskontosu tutarı aşan, KDV oranı tutmayan ya da başlığın doğrulamadığı çift iskonto okuması olan satır) — Mikro kaydı şişmiş olabilir, ortalama ve marj kesin değil; e-faturayla karşılaştırın"
+                              : 'At least one discounted line of this product could not be assessed (amount/VAT unreadable, zero VAT, discount exceeding the amount, VAT not matching its rate, or a double-discount reading the invoice header did not confirm) — the Mikro record may be inflated, so averages and margin are not definitive; compare with the e-invoice';
+                            return (
+                              <>
+                                <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-50 text-gray-600 border border-gray-200" title={bilinmiyor}>? Mikro</span>
+                                <span className="sr-only">{bilinmiyor}</span>
+                              </>
+                            );
+                          }
+                          const n = typeof r.tutarsizlikSayisi === 'number'
+                            ? (r.tutarsizlikSayisi > 0 ? r.tutarsizlikSayisi : undefined)
+                            : tutarsizSayisi.get(r.sku);
+                          if (n === undefined) return null;
+                          const enAz = r.tutarsizlikEnAz === true;
+                          const aciklama = enAz
+                            ? (trFk ? `En az ${n} satırın Mikro kaydı tutarsız: iskonto satır tutarına bir kez daha eklenmiş. Ürünün başka satırı hükme bağlanamadı (e-faturayla karşılaştırın) — o satır da Mikro'da şişmiş olabilir, ortalama ve marj kesin değil; tespit edilen satırları Mikro'da düzeltin` : `At least ${n} lines have an inconsistent Mikro record (discount added to the line amount once more). Another line of this product could not be assessed (compare with the e-invoice) — it may also be inflated in Mikro, so averages and margin are not definitive; fix the detected lines in Mikro`)
+                            : (trFk ? `${n} satırın Mikro kaydı tutarsız: iskonto satır tutarına bir kez daha eklenmiş — ortalama ve marj iskontolu (KDV'den) netle hesaplandı; kaydı Mikro'da düzeltin` : `${n} lines have an inconsistent Mikro record (discount added to the line amount once more) — averages and margin use the discounted net (from VAT); fix in Mikro`);
+                          // Açıklama yalnız title'da kalırsa ekran okuyucu ve dokunmatik kullanıcı göremez → sr-only kardeş.
+                          return (
+                            <>
+                              <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200" title={aciklama}>
+                                {enAz ? `⚠ Mikro ≥${n}` : `⚠ Mikro ${n}`}
+                              </span>
+                              <span className="sr-only">{aciklama}</span>
+                            </>
+                          );
+                        })()}
                       </p>
                       <p className="text-[10px] text-gray-400 font-mono">{r.sku}</p>
                     </td>
@@ -307,7 +420,8 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
             ['iskontosuz', trFk ? 'iskontosuz' : 'no discount'],
             ['satirIskontosu', trFk ? 'satır iskontosu düşüldü' : 'line discount deducted'],
             ['faturaAltiBasliktan', trFk ? 'fatura altı iskonto fatura toplamından dağıtıldı' : 'invoice-level discount allocated from invoice total'],
-            ['faturaAltiKdvden', trFk ? "fatura altı iskonto KDV'den türetildi (fatura başlığı yok)" : 'invoice-level discount derived from VAT (no invoice header)'],
+            ['faturaAltiKdvden', trFk ? "fatura altı iskonto satırın KDV'sinden türetildi (fatura başlığıyla doğrulanamadı)" : 'invoice-level discount derived from the line VAT (not verified against the invoice header)'],
+            ['mikroKaydiTutarsiz', trFk ? "Mikro kaydı tutarsız — net KDV'den, iskontolu" : 'Mikro record inconsistent — net from VAT, discounted'],
             ['tutarZatenNet', trFk ? 'tutar zaten net' : 'amount already net'],
             ['dogrulanamadi', trFk ? "KDV'yle doğrulanamadı" : 'not verifiable via VAT'],
           ] as [NetKaynagi, string][]).filter(([k]) => (fkNetKaynaklari[k] ?? 0) > 0).map(([k, ad]) => `${fkNetKaynaklari[k]} ${trFk ? 'satır' : 'lines'} ${ad}`).join(' · ')}
@@ -367,12 +481,27 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
                         <td className="py-2 px-2 text-right text-gray-400 hidden sm:table-cell">{fmtF(s.brutTutar)}</td>
                         <td className={`py-2 px-2 text-right ${s.iskonto ? 'text-amber-700 font-medium' : 'text-gray-300'}`}
                           title={s.kaynak === 'faturaAltiBasliktan' ? (trFk ? 'Fatura altı iskonto — fatura toplamı (başlık) ile satırlar arasındaki farktan, satırlara orantılı dağıtıldı' : 'Invoice-level discount — allocated pro rata from the gap between the invoice total and its lines')
-                            : s.kaynak === 'faturaAltiKdvden' ? (trFk ? "Fatura altı iskonto — satırda yazılı değil, fatura başlığı bulunamadı; satırın KDV'sinden türetildi. (\"Faturaları Çek\" çalıştırılırsa başlıkla kesinleşir.)" : 'Invoice-level discount — not on the line and no invoice header found; derived from the line VAT. (Pull invoices to confirm via the header.)')
+                            : s.kaynak === 'faturaAltiKdvden' ? (trFk ? "Fatura altı iskonto — satırda yazılı değil; satırın KDV'sinden türetildi (fatura başlığıyla doğrulanamadı). Faturalar henüz çekilmediyse \"Faturaları Çek\" sonrası başlıkla kesinleşebilir." : 'Invoice-level discount — not on the line; derived from the line VAT (not verified against the invoice header). If invoices have not been pulled yet, pulling them may confirm it.')
+                            : s.kaynak === 'mikroKaydiTutarsiz' ? (trFk ? "İskonto e-faturadaki gibi düşüldü — Mikro iskontoyu satır tutarına bir kez daha eklemiş (bkz. Net Tutar ⚠)" : 'Discount deducted as on the e-invoice — Mikro added it to the line amount once more (see Net Amount ⚠)')
                             : s.kaynak === 'tutarZatenNet' ? (trFk ? 'Mikro tutarı zaten iskontolu yazmış — tekrar düşülmedi' : 'Mikro amount already net — not deducted again')
                             : s.kaynak === 'dogrulanamadi' ? (trFk ? "KDV'yle doğrulanamadı (KDV'siz satır) — satırdaki iskonto alanları düşüldü" : 'Not verifiable via VAT — line discount fields deducted') : undefined}>
                           {s.iskonto == null ? '—' : s.iskonto > 0 ? `−${fmtF(s.iskonto)}` : fmtF(0)}{(s.kaynak === 'faturaAltiKdvden' || s.kaynak === 'faturaAltiBasliktan') && <span className="text-[9px] text-amber-600"> ᶠ</span>}
                         </td>
-                        <td className="py-2 px-2 text-right text-gray-600">{fmtF(s.tutar)}</td>
+                        <td className="py-2 px-2 text-right text-gray-600">
+                          {fmtF(s.tutar)}
+                          {s.kaynak === 'mikroKaydiTutarsiz' && (() => {
+                            // Tutar yalnız sunucu gönderdiyse yazılır (eski yanıtta alan yok → tutar uydurulmaz).
+                            const mt = typeof s.mikroTutar === 'number' && Number.isFinite(s.mikroTutar) ? s.mikroTutar : null;
+                            const ipucu = trFk
+                              ? `${mt !== null ? `Mikro kaydında satır tutarı ${fmtF(mt)}` : 'Mikro kaydı tutarsız'}; iskonto brüte bir kez daha eklenmiş — net satırın KDV'sinden`
+                              : `${mt !== null ? `Mikro record line amount ${fmtF(mt)}` : 'Mikro record inconsistent'}; the discount was added to the gross once more — net from the line VAT`;
+                            // role="img": rolsüz span'daki aria-label'ı ARIA yasaklar, ekran okuyucu yok sayar (kardeş bileşenlerle aynı).
+                            // Dokunmatikte title açılmaz ve sm altında Brüt/Evrak kolonları gizli → ipucu orada satırda YAZILI
+                            // (aria-hidden: ekran okuyucu zaten aria-label'ı okur, iki kez okunmasın).
+                            return <>{' '}<span role="img" className="text-amber-600 font-bold cursor-help" title={ipucu} aria-label={ipucu}>⚠</span>
+                              <span className="sm:hidden block mt-0.5 text-[10px] leading-snug font-normal text-amber-700 text-left" aria-hidden="true">{ipucu}</span></>;
+                          })()}
+                        </td>
                         <td className="py-2 px-2 hidden sm:table-cell">
                           {(() => {
                             if (!s.evrakNo) return <span className="text-gray-400">—</span>;

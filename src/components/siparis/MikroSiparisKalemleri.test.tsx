@@ -112,7 +112,8 @@ describe('mikroKalemTablosu — liste birim fiyatı → iskonto → net (ekran +
     // Aynı satır, başlık iskonto olmadığını gösterirse: kaynak yok, not yok.
     const iskontosuz = mikroKalemTablosu([kalem({ ...tarih, sth_miktar: 10, sth_tutar: 1000, sth_vergi: 180 })], 1180, 'tr');
     expect(iskontosuz.satirlar[0]).toMatchObject({ faturaAltiKaynagi: null, iskonto: 0 });
-    expect(iskontosuz.notlar).toEqual([]);
+    // Tur 2 (2026-09-28): pntr 4 (%20) ama KDV 180 = %18 → fatura detayı "KDV oranıyla tutmuyor" der; tablo + fiş de AYNI uyarıyı basar.
+    expect(iskontosuz.notlar).toEqual(["1 kalemde KDV satırın KDV oranıyla tutmuyor — net doğrulanamadı; Mikro kaydını kontrol edin."]);
   });
   it('miktarı 0 olan satırda (fiyat farkı) birim fiyat YOK ("—"), tutar yine sayılır; genel toplam bilinmiyorsa masraf null (0 uydurulmaz)', () => {
     const t = mikroKalemTablosu([kalem({ ...tarih, sth_miktar: 0, sth_tutar: 50, sth_vergi: 10 })], null, 'tr');
@@ -188,5 +189,120 @@ describe('kalıcı (sürüm-2) MF kalemi — canlı okumayla aynı tablo', () =>
     expect(screen.queryByText(/yükleniyor/)).toBeNull();
     expect(screen.getAllByText(/^−₺100,00$/).length).toBe(2);
     expect(authFetch).not.toHaveBeenCalled();
+  });
+});
+
+// D6 (2026-09-26, kullanıcı: "net tutar iskontolu halde göstermeli"): Mikro kaydı KENDİ İÇİNDE tutarsız (evrak 420 —
+// iskonto brüte bir kez daha eklenmiş). Net satırın KDV'sinden (iskontolu); satır ⚠ ile işaretlenir; "Sağlama tutmuyor"
+// yerine Mikro'da düzeltme notu basılır (tutarsızlık kalem netinde değil Mikro kaydında).
+describe('Mikro kaydı tutarsız kalem (evrak 420 / 435) — ekran + fiş ORTAK model', () => {
+  const k420 = { sth_stok_kod: 'RULO1081', urunAdi: 'RULO 1081', birim: 'ADET', sth_tarih: '2026-08-31', sth_evraktip: 3,
+    sth_evrakno_sira: 420, sth_miktar: 1050, sth_tutar: 398317.5, sth_iskonto1: 85050, sth_iskonto2: 29767.5, sth_vergi: 33736.5, sth_vergi_pntr: 4 };
+  const k435 = { ...k420, sth_evrakno_sira: 435, sth_miktar: 2, sth_tutar: 758.7, sth_iskonto1: 162, sth_iskonto2: 56.7, sth_vergi: 64.26 };
+  const NOT_420 = /^1 kalemde Mikro kaydı tutarsız — net satırın KDV'sinden \(iskontolu\); faturayı Mikro'da düzeltin/;
+  // Kalıcı kalem, importun (eslemeFatura.mfKalemleri) yazacağı biçimde.
+  // Importun yazdığı biçim — tur 2 satır bayrakları dâhil (bayraksız kalemde "kalem netleri doğru" hükmü verilmez).
+  const kay = (p: Record<string, unknown>) => ({ kdvUyumsuz: false, ciftIskontoBelirsiz: false, sku: 'RULO1081', name: 'RULO 1081', quantity: 1050, brutTutar: 283500, iskonto: 114817.5,
+    netTutar: 168682.5, kdv: 33736.5, masraf: 0, netKaynagi: 'mikroKaydiTutarsiz', total: 202419, kalemSurumu: 2, ...p });
+
+  it('ham 420: satır mikroTutarsiz, net 168.682,50 (iskontolu), brüt birim 270; not Mikro düzeltmesi, "Sağlama tutmuyor" YOK', () => {
+    const t = mikroKalemTablosu([k420], 317236.5, 'tr');
+    expect(t.satirlar[0].mikroTutarsiz).toBe(true);
+    expect(t.satirlar[0].faturaAltiKaynagi).toBeNull();                  // anlamı DEĞİŞMEZ ('baslik'/'kdv' değil)
+    expect(t.satirlar[0].net).toBeCloseTo(168682.5, 2);
+    expect(t.satirlar[0].iskonto).toBeCloseTo(114817.5, 2);
+    expect(t.satirlar[0].birimFiyat).toBeCloseTo(270, 4);
+    expect(t.ara.toplam).toBeCloseTo(168682.5, 2);
+    expect(t.notlar.some(n => NOT_420.test(n))).toBe(true);
+    expect(t.notlar.some(n => /Sağlama tutmuyor/.test(n))).toBe(false);
+    expect(t.notlar.some(n => /KDV ile tutarlı toplam ₺202\.419,00.*₺317\.236,50.*fark ₺114\.817,50/.test(n))).toBe(true);
+  });
+  it('ham 435 aynı desen; tutarlı satır iskontosu ve iskontosuz satır mikroTutarsiz DEĞİL, not yok', () => {
+    const t = mikroKalemTablosu([k435], 604.26, 'tr');
+    expect(t.satirlar[0].mikroTutarsiz).toBe(true);
+    expect(t.satirlar[0].net).toBeCloseTo(321.3, 2);
+    expect(t.notlar.some(n => NOT_420.test(n))).toBe(true);
+    const normal = mikroKalemTablosu([kalem({ sth_tarih: '2025-03-10', sth_miktar: 10, sth_tutar: 1000, sth_iskonto1: 100, sth_vergi: 180 })], 1080, 'tr');
+    expect(normal.satirlar[0].mikroTutarsiz).toBe(false);
+    expect(normal.notlar).toEqual([]);
+    expect(mikroKalemTablosu([kalem({})], 15000, 'tr').satirlar[0].mikroTutarsiz).toBe(false);
+  });
+  it('kayıtlı (sürüm-2) 420/435: ham tabloyla AYNI satır bayrağı ve AYNI notlar (mikroFazlasi saglamaKur\'a geçer)', () => {
+    for (const [ham, kayitli, meblag] of [
+      [k420, kay({}), 317236.5],
+      [k435, kay({ quantity: 2, brutTutar: 540, iskonto: 218.7, netTutar: 321.3, kdv: 64.26, total: 385.56 }), 604.26],
+    ] as const) {
+      const a = mikroKalemTablosu([ham], meblag, 'tr'), b = kayitliKalemTablosu([kayitli], meblag, 'tr');
+      expect(b.satirlar[0].mikroTutarsiz).toBe(true);
+      expect(b.notlar).toEqual(a.notlar);
+      expect(b.notlar.some(n => /Sağlama tutmuyor/.test(n))).toBe(false);
+    }
+  });
+  it('fark Mikro fazlasıyla AÇIKLANMIYORSA "Sağlama tutmuyor" KALIR (+ satır notu); eski kaynaklı kayıtlı kalem bayraksız', () => {
+    const t = kayitliKalemTablosu([kay({})], 250000, 'tr');
+    expect(t.notlar.some(n => /Sağlama tutmuyor/.test(n))).toBe(true);
+    expect(t.notlar.some(n => NOT_420.test(n))).toBe(true);
+    expect(t.notlar.some(n => /KDV ile tutarlı toplam/.test(n))).toBe(false);
+    const eski = kayitliKalemTablosu([kay({ netKaynagi: 'satirIskontosu' })], 202419, 'tr');
+    expect(eski.satirlar[0].mikroTutarsiz).toBe(false);
+    expect(eski.notlar).toEqual([]);
+  });
+  it('tutarsız kalemin brütü BİLİNMİYORSA Mikro fazlası kısmi toplamla UYDURULMAZ — hüküm yok, "Sağlama tutmuyor" kalır', () => {
+    // 420 + 435 (brüt yok): bilinen fazla 114.817,50; meblağ farkı TAM bu kadar seçildi — kısmi fazla sahte "tutarsız" hükmü verirdi.
+    const t = kayitliKalemTablosu([kay({}), kay({ sku: 'B', quantity: 2, brutTutar: null, iskonto: 218.7, netTutar: 321.3, kdv: 64.26, total: 385.56 })], 317622.06, 'tr');
+    expect(t.notlar.some(n => /KDV ile tutarlı toplam/.test(n))).toBe(false);
+    expect(t.notlar.some(n => /Sağlama tutmuyor/.test(n))).toBe(true);
+    expect(t.notlar.some(n => /^2 kalemde Mikro kaydı tutarsız/.test(n))).toBe(true);
+  });
+  it('İngilizce not', () => {
+    const t = mikroKalemTablosu([k420], 317236.5, 'en');
+    expect(t.notlar.some(n => /^Mikro record inconsistent on 1 line\(s\)/.test(n))).toBe(true);
+  });
+  it('bileşen: tutarsız satırda ⚠ + tooltip, net iskontolu; tutarlı satırda ⚠ YOK', () => {
+    const { unmount } = render(<MikroSiparisKalemleri durum="hazir" kalemler={[k420]} hata={null} genelToplam={317236.5} evrakNo="420" dil="tr" />);
+    const isaret = screen.getByTitle(/Mikro kaydı tutarsız/);
+    expect(isaret.textContent).toBe('⚠');
+    expect(screen.getAllByText(/^₺168\.682,50$/).length).toBe(2);          // satır neti + ara toplam
+    expect(screen.getByText(NOT_420)).toBeTruthy();
+    expect(screen.queryByText(/Sağlama tutmuyor/)).toBeNull();
+    unmount();
+    render(<MikroSiparisKalemleri durum="hazir" kalemler={[kalem({ sth_tarih: '2025-03-10', sth_miktar: 10, sth_tutar: 1000, sth_iskonto1: 100, sth_vergi: 180 })]} hata={null} genelToplam={1080} evrakNo="390" dil="tr" />);
+    expect(screen.queryByTitle(/Mikro kaydı tutarsız/)).toBeNull();
+  });
+});
+
+describe('tur 2 (2026-09-28): kalıcı yol ham yolla AYNI hükmü verir; kdvUyumsuz / ciftBelirsiz notu ekran + fişte', () => {
+  const kk = (p: Record<string, unknown>) => ({ sku: 'X', name: 'X', quantity: 1, masraf: 0, total: null, kalemSurumu: 2, ...p });
+  // Evrak 420 satırı + KDV'si pntr oranına uymayan, çift okuması da oturan ikinci satır (1.100 / 100 / KDV 180, %20'de 900).
+  const ham = [
+    { sth_tarih: '2026-08-31', sth_stok_kod: 'RULO1081', sth_miktar: 1050, sth_tutar: 398317.5, sth_iskonto1: 85050, sth_iskonto2: 29767.5, sth_vergi: 33736.5, sth_vergi_pntr: 4 },
+    { sth_tarih: '2026-08-31', sth_stok_kod: 'B', sth_miktar: 1, sth_tutar: 1100, sth_iskonto1: 100, sth_vergi: 180, sth_vergi_pntr: 4 },
+  ];
+  const meblag = 318416.5;
+  // Importun yazdığı kalıcı kalem (eslemeFatura.mfKalemleri ile aynı alanlar, bayraklar dâhil).
+  const kayitli = [
+    kk({ sku: 'RULO1081', quantity: 1050, brutTutar: 283500, iskonto: 114817.5, netTutar: 168682.5, kdv: 33736.5, netKaynagi: 'mikroKaydiTutarsiz', kdvUyumsuz: false, ciftIskontoBelirsiz: false }),
+    kk({ sku: 'B', brutTutar: 1100, iskonto: 100, netTutar: 1000, kdv: 180, netKaynagi: 'satirIskontosu', kdvUyumsuz: true, ciftIskontoBelirsiz: true }),
+  ];
+  it('karma faturada "KDV ile tutarlı toplam" kesin hükmü İKİ yolda da YOK; notlar birebir aynı', () => {
+    const a = mikroKalemTablosu(ham, meblag, 'tr');
+    expect(a.notlar.some(n => /KDV ile tutarlı toplam/.test(n))).toBe(false);
+    expect(a.notlar.some(n => /Sağlama tutmuyor/.test(n))).toBe(true);
+    expect(a.notlar.some(n => /1 kalemde KDV satırın KDV oranıyla tutmuyor/.test(n))).toBe(true);
+    expect(a.notlar.some(n => /1 kalemde iskontonun .* ayırt edilemiyor/.test(n))).toBe(true);
+    expect(kayitliKalemTablosu(kayitli, meblag, 'tr').notlar).toEqual(a.notlar);
+  });
+  it('bayraksız (tur 2 öncesi yazılmış) kalıcı kalem: bilinmeyen 0 sayılmaz → kesin hüküm yok', () => {
+    const tek = kayitli.slice(0, 1).map(k => { const c: Record<string, unknown> = { ...k }; delete c.kdvUyumsuz; delete c.ciftIskontoBelirsiz; return c; });
+    const n = kayitliKalemTablosu(tek, 317236.5, 'tr').notlar;
+    expect(n.some(x => /KDV ile tutarlı toplam/.test(x))).toBe(false);
+    // Bayraklı tek 420 kalemi: hüküm verilir (ham yolla aynı).
+    expect(kayitliKalemTablosu(kayitli.slice(0, 1), 317236.5, 'tr').notlar.some(x => /KDV ile tutarlı toplam ₺202\.419,00/.test(x))).toBe(true);
+  });
+  it('toplam tutuyor ama KDV oranına uymayan kalem: ekran + fiş uyarı basar (fatura detayının karşılığı)', () => {
+    const n = mikroKalemTablosu([{ sth_tarih: '2026-08-31', sth_stok_kod: 'A', sth_miktar: 1, sth_tutar: 1000, sth_vergi: 100, sth_vergi_pntr: 4 }], 1100, 'tr').notlar;
+    expect(n).toEqual(["1 kalemde KDV satırın KDV oranıyla tutmuyor — net doğrulanamadı; Mikro kaydını kontrol edin."]);
+    expect(mikroKalemTablosu([{ sth_tarih: '2026-08-31', sth_stok_kod: 'A', sth_miktar: 1, sth_tutar: 1000, sth_vergi: 100, sth_vergi_pntr: 4 }], 1100, 'en').notlar)
+      .toEqual(["VAT on 1 line(s) does not match the line's VAT rate — net not verified; check the Mikro record."]);
   });
 });

@@ -38,6 +38,29 @@
  *   5. FATURA BAŞLIĞI HAKEMDİR: 3 ve 4 tek satırdan ayırt edilemeyen durumlar içerir ("%18 KDV iskontosuz" ≡ "%20 KDV +
  *      %10 fatura altı"). Evrakın başlığı (`mikroFaturalar`.cha_meblag) eldeyse bu satırlar başlık toplamıyla çözülür:
  *      meblağ satırları tutuyorsa iskonto yoktur, daha küçükse fark fatura altı iskontodur ('faturaAltiBasliktan').
+ *   6. MİKRO KAYDI KENDİ İÇİNDE TUTARSIZ ('mikroKaydiTutarsiz', 2026-09-26). Kullanıcı: "fiyat karşılaştırmada iskonto
+ *      hesaplamada sorun var. net tutar iskontolu halde göstermeli demiştim." Vaka: tedarikçi e-faturası SİZGEN
+ *      SZN2026000001284 (1.050 × 270 = 283.500 brüt, %30 + %15 iskonto = 114.817,50, NET 168.682,50, KDV 33.736,50,
+ *      TOPLAM 202.419); Mikro'daki alış (evrak 420): sth_tutar 398.317,50 (= brüt + Σiskonto — iskonto brüte BİR KEZ DAHA
+ *      eklenmiş), başlık 317.236,50. KDV Mikro'nun netinin (283.500) %20'si DEĞİL; KDV/%20 = 168.682,50 = gerçek net.
+ *      Eskiden başlık hakemi (5) "net = tutar − Σisk" diye KDV'nin ele verdiği doğru neti EZİYOR ve sağlama yapı gereği
+ *      "✓" veriyordu (döngüsel). İMZA: KDV (tutar − 2·Σisk)[+masraf]'a geçerli oranda (pntr biliniyorsa O oranda)
+ *      oturuyor VE Mikro'nun okuması (tutar − Σisk)[+masraf] HİÇBİR tarihsel orana oturmuyor (aralık koruması: isk =
+ *      tutar/11'de %18 ≡ %20). İmza YALNIZ başlık "net = tutar − Σisk" derken uygulanır: net = tutar − 2·Σisk, brüt =
+ *      tutar − Σisk (e-faturanın Mal Hizmet Tutarı), iskonto = Σisk. Başlıksız yol değişmez (meşru "satır iskontosu X +
+ *      aynı tutarda fatura altı iskonto" ile aritmetik olarak ayırt edilemez; net orada zaten doğru). Sağlama artık
+ *      döngüsel değil: `kalemSaglamasi` Mikro'nun fazlasını (`mikroFazlasi`) ve satır KDV'sinin pntr oranına uymadığı
+ *      kalemleri (`kdvUyumsuz`) ayrıca verir. Kayıt Cetpa'da DÜZELTİLMEZ; "Mikro'da düzeltilecek" listesi
+ *      (`mikroTutarsizliklari`) kullanıcıya gösterilir. BİLİNEN SINIRLAR: karma faturada imzalı + imzasız belirsiz satır
+ *      birlikteyse başlık onayı gelmez (işaret yok, sonuç eskisi gibi); çift iskonto + tevkifat; pntr imzayla çelişirse
+ *      işaret yok (kdvUyumsuz sayar). AYIRT EDİLEMEYEN OKUMALAR (tur 1, 2026-09-28): aralık koruması en yaygın TEK %10
+ *      iskontoda da devreye girer (1.100/100/KDV 180: 1.000 × %18 ≡ 900 × %20) ve güncel oranlar arası çakışma olur
+ *      (%50 iskonto: 10.000 × %10 ≡ 5.000 × %20; %33⅓'te tutarZatenNet dalı). Net orada Mikro'nun okuması KALIR (D1);
+ *      ama satır "temiz" sayılmaz (`mikroTutarsizliklari` belirsiz → ürün değerlendirilemedi), sağlama yeşil ✓ ve
+ *      "kalem netleri doğru" hükmü vermez (`ciftBelirsiz`, `kdvUyumsuz`). TUR 3 (2026-09-28): etiket için başlık Mikro'nun
+ *      okumasını SAĞLAMA PAYINDA doğrulamalı VE çift okumayı doğrulamamalı (başlık çift okumaya yakınsa fark meşru fatura altı
+ *      iskontodur); o tarihte geçerli olmayan pntr BİLİNMİYOR sayılır (`pntrOrani`); ayırt edilemezlik kuruş yuvarlamasıyla
+ *      (yarım kuruş) ölçülür, sabit 1 kuruş KDV payıyla değil.
  * Geçerli KDV oranları tarihe bağlıdır (2023-07-10: %18→%20, %8→%10); tarih yoksa hepsi denenir. `sth_vergi_pntr`
  * yalnız belirsizlikte hakem olarak kullanılır (uygulamanın zaten kullandığı 1→%0, 2→%1, 3→%10, 4→%20 eşlemesi).
  * Canlı teyit için ayrıca `GET /api/mikro/sema-kesif` → `sthIskontoKolonlari`, `iskontoluAlisSatirOrnegi`,
@@ -52,7 +75,7 @@ const ISKONTO_KOLONU = /^sth_iskonto\d+$/i;
 const MASRAF_KOLONU = /^sth_masraf\d+$/i;
 
 /** Net tutarın hangi yolla belirlendiği (ekranda ve raporda görünür). */
-export type NetKaynagi = 'iskontosuz' | 'satirIskontosu' | 'tutarZatenNet' | 'faturaAltiKdvden' | 'faturaAltiBasliktan' | 'dogrulanamadi';
+export type NetKaynagi = 'iskontosuz' | 'satirIskontosu' | 'tutarZatenNet' | 'faturaAltiKdvden' | 'faturaAltiBasliktan' | 'mikroKaydiTutarsiz' | 'dogrulanamadi';
 
 export type SatirNet =
   | { durum: 'tamam'; miktar: number; brut: number; iskonto: number; net: number; birimFiyat: number; iskontoKolonlari: string[]; kaynak: NetKaynagi }
@@ -93,6 +116,19 @@ function gecerliOranlar(tarih: unknown): readonly number[] {
 }
 /** Uygulamanın fatura ekranlarında zaten kullandığı işaretçi→oran eşlemesi (hooks/useMikroFaturalar VERGI_PNTR_ORAN). */
 const PNTR_ORAN: Readonly<Record<string, number>> = { '1': 0, '2': 1, '3': 10, '4': 20 };
+/**
+ * Satırın KDV oranı işaretçiden — YALNIZ o tarihte GEÇERLİ bir oransa; değilse BİLİNMİYOR (undefined) ve tarihin geçerli
+ * oranlarının hepsi denenir. Tur 3 (2026-09-28): 2023-07-10 öncesi satırda pntr 4 (→ %20) / 3 (→ %10) geçerli kümede
+ * yoktu; çift iskonto okuması hiç denenmiyor (artık ∞), `kdvOranaUymuyor` "hüküm yok" diyor ve liste bu BİLİNMEYENİ
+ * "tutuyor" sayıp satırı TEMİZ sınıflıyordu (evrak 420 deseni 2022'de tespit edilmiyordu). İşaretçi Mikro'nun oran
+ * TABLOSUNDAKİ sıradır; tablo oran değişiminde güncellendiği için eski satırdaki 4'ün o gün %18 olduğu makul ama TEYİTSİZ —
+ * eşleme TAHMİN EDİLMEZ (CLAUDE.md: teyitsiz Mikro alanında kör varsayım yok). Tek tanım: tutarCoz, mikroTutarsizliklari,
+ * kdvOranaUymuyor.
+ */
+function pntrOrani(h: StokHareketi): number | undefined {
+  const r = PNTR_ORAN[String(h.sth_vergi_pntr ?? '')];
+  return r !== undefined && (r === 0 || gecerliOranlar(h.sth_tarih).includes(r)) ? r : undefined;
+}
 
 /**
  * Kuruş yuvarlaması + kayan nokta payı. SIKI tutulur (on binde 5): gevşek pay (%0,4) küçük iskontoda "tutar zaten net"
@@ -100,9 +136,20 @@ const PNTR_ORAN: Readonly<Record<string, number>> = { '1': 0, '2': 1, '3': 10, '
  */
 const tol = (x: number): number => Math.max(0.06, Math.abs(x) * 0.0005);
 
+/** KDV kuruşa yuvarlanır: gerçek matrahın KDV artığı en çok yarım kuruştur (belirsizlik ölçüsü, tur 3). EPS: kayan nokta. */
+const YARIM_KURUS = 0.005;
+const EPS = 1e-9;
+
 /** Net tutarın hangi yolla belirlendiği (ekranda ve raporda görünür). */
 type TutarCozumu =
-  | { ok: true; tutar: number; isk: number; mas: number; vergi: number; brut: number; net: number; kaynak: NetKaynagi; kdvDogrulandi: boolean; iskontoKolonlari: string[] }
+  | { ok: true; tutar: number; isk: number; mas: number; vergi: number; brut: number; net: number; kaynak: NetKaynagi; kdvDogrulandi: boolean; iskontoKolonlari: string[];
+      /** Çift iskonto imzası: KDV (tutar − 2·Σisk)[+masraf]'a oturuyor, (tutar − Σisk)'ye hiçbir oranda oturmuyor → o net; yoksa null. Yalnız başlık hakemi kullanır. */
+      ciftIskontoNeti: number | null;
+      /** İmza YOK ama çift iskonto okuması (tutar − 2·Σisk)[+masraf] da geçerli oranda (pntr biliniyorsa O oranda) KDV'ye
+       *  GÖSTERİLEN okuma kadar iyi ya da yarım kuruş içinde (kuruş yuvarlaması — tur 3) oturuyor: Mikro'nun okuması da tutarlı (aralık koruması / geçerli oranlar arası çakışma, ör. TEK %10 iskontoda
+       *  1.000 × %18 ≡ 900 × %20, %50 iskontoda 10.000 × %10 ≡ 5.000 × %20). Net DEĞİŞMEZ (D1) — yalnız "temiz" / yeşil
+       *  hükmü verilmez (sahte kesinlik yasağı, tur 1 2026-09-28). */
+      ciftIskontoBelirsiz: boolean }
   | { ok: false; neden: 'tutarBilinmiyor' | 'iskontoTutarsiz' };
 
 /** Satırın TUTAR çözümü — miktardan bağımsız (miktarı 0 olan fiyat farkı satırı da fatura sağlamasına girer). */
@@ -114,11 +161,24 @@ function tutarCoz(h: StokHareketi): TutarCozumu {
   if (isk > tutar + tol(tutar)) return { ok: false, neden: 'iskontoTutarsiz' };
   const a = Math.max(0, tutar - isk);                       // belgelenmiş Mikro davranışı: brüt − Σiskonto
   const vergi = bilinenSayi(h.sth_vergi) ? Math.abs(Number(h.sth_vergi)) : NaN;
-  const sonuc = (brut: number, net: number, kaynak: NetKaynagi, kdvDogrulandi: boolean): TutarCozumu =>
-    ({ ok: true, tutar, isk, mas, vergi, brut, net, kaynak, kdvDogrulandi, iskontoKolonlari: kolonlar });
+  const oranlar = gecerliOranlar(h.sth_tarih);
+  const pntr = pntrOrani(h);
+  // Çift iskonto okumasının KDV artığı — her dalda (erken dönüşlerde de) hesaplanır. İmza bulunmadıysa ve çift okuma
+  // GÖSTERİLEN okuma kadar iyi oturuyorsa (artığı ≤ gösterilenin artığı + 1 kuruş) iki okuma ayırt edilemez → belirsiz.
+  // Tur 2 (2026-09-28): eskiden "KDV payı içinde" (tol(vergi) — tabanı 0,06 KDV kuruşu, %20'de 0,30 TL matrah, büyük
+  // faturada 10 TL KDV) yetiyordu; kuruş yuvarlama / küsurat iskontolu TUTARLI satır (100,25 / 0,25 / KDV 20; 5.000 / 5 /
+  // KDV 49,95 %1'de; 100.037,50 / 37,50 / KDV 20.000) belirsiz sayılıyor, yeşil ✓ kayboluyordu. Gerçek çift iskontoda
+  // (evrak 420) çift okuma KDV'ye kuruşu kuruşuna oturur, gösterilen okuma hiç oturmaz → belirsizlik korunur.
+  // Tur 3 (2026-09-28): sabit "+ 1 kuruş KDV" payı oranla ölçeklenmiyordu — %1'de 1 kuruş KDV 1 TL matrah (1.000 / 1 / KDV
+  // 9,99: çift okuma 998 → 9,98 bu KDV'yi VEREMEZ ama belirsiz sayılıyordu) ve sonuç kayan noktaya bağlıydı (0,01 ≤ 0 + 0,01).
+  // Ölçü artık kuruş YUVARLAMASI: KDV kuruşa yuvarlanır, gerçek matrahın artığı ≤ yarım kuruştur. Çift okuma ya gösterilen
+  // kadar iyi oturuyor ya da yarım kuruş içinde (bu KDV'yi üretebilir) → ayırt edilemez; EPS yalnız kayan nokta için.
+  const ciftArtik = vergi > 0 ? ciftOkumaArtigi(tutar, isk, mas, vergi, oranlar, pntr) : Infinity;
+  const sonuc = (brut: number, net: number, kaynak: NetKaynagi, kdvDogrulandi: boolean, ciftIskontoNeti: number | null = null, gosterilenArtik = Infinity): TutarCozumu =>
+    ({ ok: true, tutar, isk, mas, vergi, brut, net, kaynak, kdvDogrulandi, iskontoKolonlari: kolonlar, ciftIskontoNeti,
+      ciftIskontoBelirsiz: ciftIskontoNeti === null && ciftArtik !== Infinity && ciftArtik <= Math.max(gosterilenArtik, YARIM_KURUS) + EPS });
   if (!(vergi > 0)) return sonuc(tutar, a, 'dogrulanamadi', false);      // KDV'siz ya da KDV'si bilinmeyen satır sağlanamaz
 
-  const oranlar = gecerliOranlar(h.sth_tarih);
   /** Matrah adayının KDV'ye en iyi oturan geçerli orandaki artığı; tolerans dışındaysa Infinity. */
   const artik = (matrah: number): number => {
     if (!(matrah > 0)) return Infinity;
@@ -128,8 +188,8 @@ function tutarCoz(h: StokHareketi): TutarCozumu {
   const artikA = Math.min(artik(a), mas > 0 ? artik(a + mas) : Infinity);
   const artikT = isk > 0 ? Math.min(artik(tutar), mas > 0 ? artik(tutar + mas) : Infinity) : Infinity;
   // İkisi de oturuyorsa ARTIĞI KÜÇÜK olan kazanır; eşitlikte belgelenmiş davranış (brüt − iskonto).
-  if (artikA !== Infinity && artikA <= artikT) return sonuc(tutar, a, isk > 0 ? 'satirIskontosu' : 'iskontosuz', true);
-  if (artikT !== Infinity) return sonuc(tutar + isk, tutar, 'tutarZatenNet', true);
+  if (artikA !== Infinity && artikA <= artikT) return sonuc(tutar, a, isk > 0 ? 'satirIskontosu' : 'iskontosuz', true, null, artikA);
+  if (artikT !== Infinity) return sonuc(tutar + isk, tutar, 'tutarZatenNet', true, null, artikT);
 
   // Satıra yazılmamış fatura altı iskonto: KDV / oran, (brüt − Σiskonto)'nun ALTINDA tek bir makul matrah vermeli.
   // BİLİNEN SINIR: "%18 KDV, iskonto yok" ile "%20 KDV + %10 fatura altı iskonto" tek satırda aritmetik olarak AYNIDIR.
@@ -137,10 +197,41 @@ function tutarCoz(h: StokHareketi): TutarCozumu {
   // toptan alımda olağandır — başlık yoksa olası okuma seçilir ve satır 'faturaAltiKdvden' diye İŞARETLENİR. Fatura
   // başlığı (cha_meblag) eldeyse hakem ODUR: bkz. netleriCoz.
   const makul = oranlar.map(r => ({ r, m: vergi / (r / 100) })).filter(x => x.m <= a + tol(a) && x.m >= a * 0.5);
-  const pntr = PNTR_ORAN[String(h.sth_vergi_pntr ?? '')];
-  const secilen = pntr !== undefined && pntr > 0 ? makul.find(x => x.r === pntr) : makul.length === 1 ? makul[0] : undefined;
-  if (secilen) return sonuc(tutar, Math.min(a, secilen.m), 'faturaAltiKdvden', false);
-  return sonuc(tutar, a, 'dogrulanamadi', false);
+  // Fatura altı aday seçimi HAM işaretçiyle (canlıdaki davranış): tarih süzgeçli `pntr` burada kullanılırsa 2022 tarihli
+  // pntr 3/4 satırı 'dogrulanamadi'dan 'faturaAltiKdvden'e geçip başlıksız yolun netini değiştiriyordu (son kontrol 2026-09-28,
+  // 50.585 satırın 1.092'si). Tarih süzgeçli işaretçi yalnız çift iskonto imzası / belirsizlik / kdvUyumsuz için.
+  const pntrHam = PNTR_ORAN[String(h.sth_vergi_pntr ?? '')];
+  const secilen = pntrHam !== undefined && pntrHam > 0 ? makul.find(x => x.r === pntrHam) : makul.length === 1 ? makul[0] : undefined;
+  const cift = ciftIskontoNetiBul(tutar, isk, mas, vergi, oranlar, pntr);
+  if (secilen) { const n = Math.min(a, secilen.m); return sonuc(tutar, n, 'faturaAltiKdvden', false, cift, Math.abs(vergi - (n * secilen.r) / 100)); }
+  return sonuc(tutar, a, 'dogrulanamadi', false, cift);
+}
+
+/** Her dönemde görülmüş KDV oranları — Mikro'nun kendi okuması (tutar − Σisk) bunlardan BİRİNE oturuyorsa kayıt tutarlı SAYILIR. */
+const TUM_ORANLAR: readonly number[] = [20, 18, 10, 8, 1];
+/**
+ * ÇİFT İSKONTO İMZASI (evrak 420/435, 2026-09-26): Mikro satırında sth_tutar = e-fatura brütü + Σiskonto. Gerçek net =
+ * tutar − 2·Σisk; KDV ona (masraf matraha girdiyse + masraf) tarihin geçerli oranında (pntr biliniyorsa O oranda) oturur.
+ * Mikro'nun kendi okuması (tutar − Σisk) herhangi bir tarihsel orana oturuyorsa (ör. isk = tutar/11 → %18 ≡ %20)
+ * iki okuma aritmetik olarak ayırt edilemez → null (Mikro'nun tutarlı okuması korunur).
+ */
+function ciftIskontoNetiBul(tutar: number, isk: number, mas: number, vergi: number, oranlar: readonly number[], pntr: number | undefined): number | null {
+  if (ciftOkumaArtigi(tutar, isk, mas, vergi, oranlar, pntr) === Infinity) return null;
+  const a = tutar - isk;
+  const oturur = (m: number) => m > 0 && TUM_ORANLAR.some(r => Math.abs(vergi - (m * r) / 100) <= tol(vergi));
+  if (oturur(a) || (mas > 0 && oturur(a + mas))) return null;             // aralık koruması (D1 — DEĞİŞMEZ)
+  return tutar - 2 * isk;
+}
+/** Çift iskonto okuması (tutar − 2·Σisk)[+masraf], KDV'ye tarihin geçerli oranında (pntr biliniyorsa O oranda) oturuyorsa
+ *  EN İYİ artığı (|KDV − matrah·oran|), oturmuyorsa Infinity. Mikro okumasından BAĞIMSIZ — imza (ciftIskontoNetiBul) bunun
+ *  üstüne aralık korumasını ekler; belirsizlik (tutarCoz) bunu GÖSTERİLEN okumanın artığıyla kıyaslar (tur 2). */
+function ciftOkumaArtigi(tutar: number, isk: number, mas: number, vergi: number, oranlar: readonly number[], pntr: number | undefined): number {
+  if (!(isk > 0) || !(vergi > 0) || (pntr !== undefined && !(pntr > 0))) return Infinity;
+  const n2 = tutar - 2 * isk;
+  if (!(n2 > 0)) return Infinity;
+  const artik = (m: number) => Math.min(Infinity, ...oranlar.filter(r => pntr === undefined || pntr === r).map(r => Math.abs(vergi - (m * r) / 100)));
+  const enIyi = Math.min(artik(n2), mas > 0 ? artik(n2 + mas) : Infinity);
+  return enIyi <= tol(vergi) ? enIyi : Infinity;
 }
 
 const miktarOku = (h: StokHareketi): number | null => (bilinenSayi(h.sth_miktar) ? Math.abs(Number(h.sth_miktar)) : null);
@@ -212,7 +303,12 @@ export interface NetSecenegi { faturaToplamlari?: ReadonlyMap<string, number> }
  * Bir evrakın satır çözümlerini BAŞLIK TOPLAMIYLA hakemler. Yalnız KDV ile doğrulanamamış satırlara ('faturaAltiKdvden',
  * 'dogrulanamadi') dokunur: KDV'si geçerli orana oturan satır doğrudur (tevkifatlı faturada meblağ düşük çıkar, satır değil).
  *   hedef = meblağ − ΣKDV − Σmasraf − Σ(doğrulanmış satır neti);  oran = hedef / Σ(belirsiz satırların brüt − iskonto)
- *   oran ≈ 1            → iskonto YOK (ör. eski oranlı %18 satır): net = brüt − iskonto
+ *   oran ≈ 1            → iskonto YOK (ör. eski oranlı %18 satır): net = brüt − iskonto; imzalı satır yalnız başlık Mikro
+ *                          okumasını sağlama payında doğrulayıp çift okumayı doğrulamıyorsa 'mikroKaydiTutarsiz' (tur 3)
+ *   belirsiz satırların HEPSİ imzalıyken başlık ÇİFT okumaya Mikro okumasından yakın ya da eşit → ≈1 SAYILMAZ, aşağıdaki
+ *                          fatura altı dalı (tur 3). İmzasız ya da karma faturada bu kıyas YAPILMAZ: davranış canlıyla
+ *                          (origin/main) aynı (KAPSAM KARARI, aşağıda; bilinen sınır: küçük fatura altı %0,15 pay içinde
+ *                          yutulur, kdvUyumsuz yakalar)
  *   0,5 ≤ oran < 1      → fark FATURA ALTI iskontodur, belirsiz satırlara orantılı dağıtılır ('faturaAltiBasliktan')
  *   diğer / eksik veri  → başlık satırlarla bağdaşmıyor (tevkifat, ÖTV, aynada eksik satır): satır sonucu KALIR
  */
@@ -227,8 +323,43 @@ function basliklaHakemle(cozumler: TutarCozumu[], meblag: number): void {
   if (!belirsiz.length || !(belirsizTaban > 0)) return;
   const hedef = meblag - kdv - mas - dogrulanmis;
   const pay = Math.max(0.5, meblag * 0.0015);                // kuruş yuvarlamaları satır sayısıyla birikir
-  if (Math.abs(hedef - belirsizTaban) <= pay) {
-    for (const c of belirsiz) { c.net = Math.max(0, c.tutar - c.isk); c.brut = c.tutar; c.kaynak = c.isk > 0 ? 'satirIskontosu' : 'iskontosuz'; }
+  // Tur 3 (2026-09-28): imzalı satır varken başlık İKİ okumayla da kıyaslanır. Eskiden geniş pay (%0,15) içindeki her başlık
+  // "Mikro'nun okumasını doğruluyor" sayılıyordu: küçük satır iskontosu + aynı büyüklükte küçük fatura altı olan MEŞRU
+  // faturada (100.000 / 100 / fatura altı 100, başlık 119.760 = ÇİFT okuma) satır "Mikro kaydı tutarsız" diye işaretleniyor,
+  // fatura altı 60'ta gösterilen net 99.800 (gerçek 99.840) oluyor ve sağlama yine ✓ veriyordu.
+  //   • Başlık çift okumaya Mikro okumasından YAKIN (ya da eşit) → "≈1" değil: fark fatura altı iskontodur (orantılı dal).
+  //   • Etiket ('mikroKaydiTutarsiz') yalnız başlık Mikro okumasını SAĞLAMA PAYINDA doğruluyor VE ona çift okumadan kuruş
+  //     yuvarlaması ötesinde (satır başına 1 kuruş) YAKINSA. Pay `saglamaKur`un payıyla AYNI → etiket ⇔ sağlamanın "Mikro
+  //     kaydı tutarsız" hükmü (|fark + mikroFazlasi| = |hedef − belirsizTaban|). Ayırt payı BİLEREK meblağla ölçeklenmez:
+  //     büyük faturadaki küçük imzalı satırda (1,2 M / Mikro fazlası 400) başlık Mikro okumasını kuruşu kuruşuna doğrular.
+  //   • Aradaki bölge (başlık iki okumayı ayırt etmiyor): imzalı satır KENDİ çözümünü korur (KDV'den; onaysız → liste belirsiz).
+  // KAPSAM KARARI (orkestratör, 2026-09-28): İMZASIZ satırlarda (Mikro'da tutarlı, NORMAL fatura) hakem CANLIDAKİ davranışın
+  // AYNISIDIR — "iki okuma" kıyası yalnız imzalı satır varken yapılır. Delta turlarında imzasız satıra genişletilen kıyas her
+  // turda yeni bir gerileme üretti (yakınsamadı) ve kullanıcının istemediği, canlı kanıtı olmayan bir davranış değişikliğiydi
+  // (normal faturaların neti). Normal faturada küçük fatura altı iskontonun %0,15 pay içinde yutulması ÖNCEDEN VAR OLAN bir
+  // sınır; Obsidian açık işi: "Başlık hakemi: küçük fatura altı iskonto pay içinde yutuluyor".
+  let ciftTaban = 0, imzaliIsk = 0;
+  for (const c of belirsiz) {
+    if (c.ciftIskontoNeti !== null) { ciftTaban += c.ciftIskontoNeti; imzaliIsk += c.isk; } else ciftTaban += Math.max(0, c.tutar - c.isk);
+  }
+  const mikroFark = Math.abs(hedef - belirsizTaban), ciftFark = Math.abs(hedef - ciftTaban);
+  const kesinPay = Math.max(1, meblag * 0.0005);             // saglamaKur ile AYNI pay
+  const ayirtPay = Math.max(0.06, 0.01 * (cozumler.length + 1)); // meblağ + her satırın KDV'si kuruşa yuvarlanır
+  // Kıyas yalnız belirsiz satırların HEPSİ imzalıyken: karma faturada (imzalı + imzasız belirsiz satır) orantılı dal farkı
+  // İMZASIZ satıra da dağıtıp canlıdan sapıyordu (son kontrol 2026-09-28: %0'lık 200.000 satıra 133 TL uydurma fatura altı).
+  const tumuImzali = belirsiz.every(c => c.ciftIskontoNeti !== null);
+  const ciftYakin = imzaliIsk > 0 && tumuImzali && ciftFark <= mikroFark;
+  const mikroOnayli = mikroFark <= kesinPay && ciftFark - mikroFark > ayirtPay;
+  if (mikroFark <= pay && !ciftYakin) {
+    for (const c of belirsiz) {
+      // Başlık "net = tutar − Σisk" diyor ama satırın KDV'si o nete hiçbir oranda oturmuyor, (tutar − 2·Σisk)'ye oturuyor:
+      // Mikro kaydı KENDİ İÇİNDE tutarsız (iskonto brüte bir kez daha eklenmiş). KDV beyan edilen rakamdır → gerçek net.
+      if (c.ciftIskontoNeti !== null) {
+        if (mikroOnayli) { c.net = c.ciftIskontoNeti; c.brut = c.tutar - c.isk; c.kaynak = 'mikroKaydiTutarsiz'; c.kdvDogrulandi = true; }
+        continue;                                              // onaysız: satırın KDV'den çözümü KALIR (etiket yok)
+      }
+      c.net = Math.max(0, c.tutar - c.isk); c.brut = c.tutar; c.kaynak = c.isk > 0 ? 'satirIskontosu' : 'iskontosuz';
+    }
   } else if (hedef < belirsizTaban && hedef >= belirsizTaban * 0.5) {
     const oran = hedef / belirsizTaban;
     for (const c of belirsiz) { c.net = Math.max(0, c.tutar - c.isk) * oran; c.brut = c.tutar; c.kaynak = 'faturaAltiBasliktan'; }
@@ -253,7 +384,10 @@ function netleriCoz(hareketler: readonly StokHareketi[], secenek?: NetSecenegi):
   return sonuc;
 }
 
-export interface KalemCozumu { miktar: number | null; brut: number | null; iskonto: number | null; net: number | null; birimFiyat: number | null; kaynak: NetKaynagi | null }
+export interface KalemCozumu { miktar: number | null; brut: number | null; iskonto: number | null; net: number | null; birimFiyat: number | null; kaynak: NetKaynagi | null;
+  /** Gösterilen net, çift iskonto okumasından (tutar − 2·Σisk) FARKLI ve o okuma da KDV'ye oturuyor: iki okuma ayırt
+   *  edilemiyor (aralık koruması / oran çakışması). Yalnız kalemleriCoz yazar; eski kayıtlı kalemde yok = bilinmiyor. */
+  ciftIskontoBelirsiz?: boolean }
 
 /**
  * Fatura modalı: TEK evrakın kalemleri + (biliniyorsa) başlık toplamı. Miktarı 0 olan satırın (fiyat farkı) TUTARI da
@@ -265,8 +399,16 @@ export function kalemleriCoz(kalemler: readonly StokHareketi[], meblag?: unknown
   return kalemler.map((k, i): KalemCozumu => {
     const c = cozumler[i], miktar = miktarOku(k);
     if (!c || !c.ok) return { miktar, brut: null, iskonto: null, net: null, birimFiyat: null, kaynak: null };
-    return { miktar, brut: c.brut, iskonto: Math.max(0, c.brut - c.net), net: c.net, birimFiyat: miktar !== null && miktar > 0 ? c.net / miktar : null, kaynak: c.kaynak };
+    return { miktar, brut: c.brut, iskonto: Math.max(0, c.brut - c.net), net: c.net, birimFiyat: miktar !== null && miktar > 0 ? c.net / miktar : null, kaynak: c.kaynak,
+      ciftIskontoBelirsiz: ciftNetFarkli(c) };
   });
+}
+/** Çözüm, ayırt edilemeyen çift iskonto okumasından FARKLI bir net mi gösteriyor? (Net aynıysa — ör. eşit tutarda meşru
+ *  fatura altı — gösterilen rakam iki okumada da doğrudur, belirsizlik yoktur.) */
+function ciftNetFarkli(c: Extract<TutarCozumu, { ok: true }>): boolean {
+  if (c.kaynak === 'mikroKaydiTutarsiz') return false;
+  if (!(c.ciftIskontoBelirsiz || c.ciftIskontoNeti !== null)) return false;
+  return Math.abs(c.net - (c.tutar - 2 * c.isk)) > tol(c.net);
 }
 
 /**
@@ -364,6 +506,8 @@ export interface StokFiyatDetaySatiri {
   cariKod: unknown; evrakNo: string | null;
   /** Hareketin faturası (`faturaAnahtari`); fatura olmayan evrakta (irsaliye, sayım) `null`. */
   fatura: FaturaAnahtari | null;
+  /** YALNIZ kaynak 'mikroKaydiTutarsiz' iken: Mikro'daki ham satır tutarı (sth_tutar) — ekran "Mikro'da ₺X" der. */
+  mikroTutar?: number;
 }
 
 /** Bir SKU'nun tüm alım/satım satırları (iptal hariç), yeniden eskiye. */
@@ -373,7 +517,8 @@ export function stokFiyatDetay(hareketler: readonly StokHareketi[], sku: string,
   return hareketler
     .filter(h => skuOku(h) === sku && !iptalMi(h))
     .map((h): StokFiyatDetaySatiri => {
-      const s = satirdan(h, cozumler.get(h) ?? tutarCoz(h));
+      const c = cozumler.get(h) ?? tutarCoz(h);
+      const s = satirdan(h, c);
       const tamam = s.durum === 'tamam';
       return {
         tarih: h.sth_tarih ?? null,
@@ -384,6 +529,7 @@ export function stokFiyatDetay(hareketler: readonly StokHareketi[], sku: string,
         cariKod: h.sth_cari_kodu ?? h.sth_cari_kod ?? null,
         evrakNo: [h.sth_evrakno_seri, h.sth_evrakno_sira].filter(v => v !== '' && v != null).join('-') || null,
         fatura: faturaAnahtari(h),
+        ...(tamam && c.ok && s.kaynak === 'mikroKaydiTutarsiz' ? { mikroTutar: c.tutar } : {}),
       };
     })
     .sort((a, b) => String(b.tarih ?? '').localeCompare(String(a.tarih ?? '')));
@@ -498,6 +644,109 @@ export function birimSapmalari(hareketler: readonly StokHareketi[], secenek?: Ne
   return { satirlar: satirlar.sort((a, b) => sapma(b.kat) - sapma(a.kat)), degerlendirilen };
 }
 
+// ── Mikro'da düzeltilecek: iskonto brüte bir kez daha eklenmiş ─────────────────────────────────────
+
+export interface MikroTutarsizligi {
+  sku: string;
+  /** YYYY-AA-GG; tarihsiz satırda null. */
+  tarih: string | null;
+  yon: 'alis' | 'satis';
+  miktar: number | null;
+  fatura: FaturaAnahtari | null;
+  evrakNo: string | null;
+  cariKod: unknown;
+  /** Satırın KDV oranı: pntr'den; yoksa imzanın oturduğu geçerli oran. */
+  oran: number | null;
+  /** Mikro'daki ham satır tutarı (sth_tutar) — e-fatura brütü + Σiskonto. */
+  mikroTutar: number;
+  /** Σ sth_iskonto. */
+  iskonto: number;
+  kdv: number;
+  /** GERÇEK net (satırın KDV'si ile sağlanan) = e-faturanın neti. */
+  net: number;
+  /** Mikro'nun okuduğu net (tutar − Σisk) = e-faturanın Mal Hizmet Tutarı (brüt). */
+  mikroNet: number;
+  /** Mikro'nun fazladan eklediği tutar (= Σisk) — Mikro'da cari borç ve stok maliyeti bu kadar fazla. */
+  fazla: number;
+}
+export interface MikroTutarsizlikSonucu {
+  satirlar: MikroTutarsizligi[];
+  /** Hüküm verilebilen ürünler. Listede olmayan ama burada olan ürünün tutarsız satırı GERÇEKTEN yoktur; burada olmayan
+   *  ürün DEĞERLENDİRİLEMEDİ (imzalı ama başlığı doğrulamayan ya da KDV'si bilinmeyen iskontolu satırı var) — 0 değil. */
+  degerlendirilen: ReadonlySet<string>;
+  /** Fatura anahtarı (`yon|seri|sira`, faturaAnahtari ile) → hüküm verilemeyen satır sayısı. Bu faturadaki bulgunun
+   *  "doğru toplamı" KESİN DEĞİLDİR (şüpheli satırın fazlası da olabilir) — rapor bunu null + kesin: false verir. */
+  belirsizFaturalar: ReadonlyMap<string, number>;
+  /** Hüküm verilemeyen satırı OLAN ürünler — bulgusu olsa da (tur 2, 2026-09-28: bulgulu ürünün BAŞKA faturasındaki
+   *  belirsiz satır `degerlendirilen` kümesinde görünmüyordu). Bulgulu ürün burada da varsa sayısı bir ALT SINIRDIR. */
+  belirsizUrunler: ReadonlySet<string>;
+}
+
+const tarihMetni = (t: unknown): string | null =>
+  typeof t === 'string' && /^\d{4}-\d{2}-\d{2}/.test(t) ? t.slice(0, 10)
+    : t instanceof Date && Number.isFinite(t.getTime()) ? t.toISOString().slice(0, 10) : null;
+
+/**
+ * "Mikro'da düzeltilecek" listesi (birim sapması kalıbı, 2026-09-26): kaynak 'mikroKaydiTutarsiz' olan satırlar,
+ * fazlası büyükten küçüğe. Cetpa Mikro kaydını DÜZELTMEZ (kullanıcı kararı 2026-09-25) — liste kullanıcının Mikro'da
+ * düzeltmesi içindir; düzeltilince Stok Hareketleri + Faturalar yeniden çekilir ve satır listeden düşer.
+ * Hüküm: satır ya BULGU (imza + başlık onayı), ya TEMİZ (iskontosuz → çift iskonto imkânsız; ya da KDV'si bilinen, imzası
+ * olmayan, çift iskonto okuması KDV'ye oturmayan ve çözülen neti pntr oranıyla tutan), ya da BELİRSİZ (tutarı çözülemeyen,
+ * KDV'si bilinmeyen iskontolu, imzalı ama başlığı onaylamayan, çift iskonto okuması da oturan [aralık koruması / oran
+ * çakışması], neti pntr oranıyla tutmayan). Bulgusu olan
+ * ürün değerlendirilmiştir (bulgu kesin, sayı alt sınır); bulgusuz ürün yalnız belirsiz satırı yoksa değerlendirilmiştir.
+ */
+export function mikroTutarsizliklari(hareketler: readonly StokHareketi[], secenek?: NetSecenegi, hazirCozum?: NetCozumleri): MikroTutarsizlikSonucu {
+  const cozumler = hazirCozum ?? netleriCoz(hareketler, secenek);
+  const satirlar: MikroTutarsizligi[] = [];
+  const durum = new Map<string, { bulgu: number; belirsiz: number }>();
+  const belirsizFaturalar = new Map<string, number>();
+  const belirsizSay = (h: StokHareketi) => { const k = satirAnahtari(h); if (k) belirsizFaturalar.set(k, (belirsizFaturalar.get(k) ?? 0) + 1); };
+  for (const h of hareketler) {
+    if (iptalMi(h)) continue;
+    const sku = skuOku(h);
+    if (!sku) continue;
+    const d = durum.get(sku) ?? { bulgu: 0, belirsiz: 0 };
+    durum.set(sku, d);
+    const c = cozumler.get(h) ?? tutarCoz(h);
+    // Tutarı okunamayan İSKONTOSUZ satırda çift iskonto imkânsız → belirsiz sayılmaz (bilinmeyen tutar zaten ortalamada
+    // bilinmeyenSatir olarak görünür; son kontrol 2026-09-28: gri "? Mikro" rozeti yanlış sebep söylüyordu).
+    if (!c.ok) { if (c.neden === 'tutarBilinmiyor' && !(aileToplami(h, ISKONTO_KOLONU).toplam > 0)) continue; d.belirsiz++; belirsizSay(h); continue; }
+    if (c.kaynak === 'mikroKaydiTutarsiz') {
+      d.bulgu++;
+      const pntr = pntrOrani(h);
+      const imzaOrani = gecerliOranlar(h.sth_tarih).find(r => Math.abs(c.vergi - (c.net * r) / 100) <= tol(c.vergi)
+        || (c.mas > 0 && Math.abs(c.vergi - ((c.net + c.mas) * r) / 100) <= tol(c.vergi)));
+      satirlar.push({
+        sku, tarih: tarihMetni(h.sth_tarih), yon: yonOku(h), miktar: miktarOku(h), fatura: faturaAnahtari(h),
+        evrakNo: [h.sth_evrakno_seri, h.sth_evrakno_sira].filter(v => v !== '' && v != null).join('-') || null,
+        cariKod: h.sth_cari_kodu ?? h.sth_cari_kod ?? null,
+        oran: pntr !== undefined && pntr > 0 ? pntr : imzaOrani ?? null,
+        mikroTutar: c.tutar, iskonto: c.isk, kdv: c.vergi, net: c.net, mikroNet: c.tutar - c.isk, fazla: c.brut - c.net,
+      });
+      continue;
+    }
+    if (!(c.isk > 0)) continue;                                         // iskontosuz: çift iskonto imkânsız → temiz
+    if (!(Number.isFinite(c.vergi) && c.vergi > 0)) { d.belirsiz++; belirsizSay(h); continue; }   // KDV'siz: sağlanamaz
+    // BELİRSİZ (tur 1, 2026-09-28 — "temiz" hükmü sahte kesinlik olurdu; netler DEĞİŞMEZ): imzalı ama başlık onaylamadı
+    // (meşru olabilir); imza yok ama çift iskonto okuması da KDV'ye oturuyor (aralık koruması — TEK %10 iskontoda
+    // 1.000 × %18 ≡ 900 × %20; oran çakışması — %50 iskontoda 10.000 × %10 ≡ 5.000 × %20); ya da çözülen net pntr'nin
+    // oranıyla tutmuyor (kdvUyumsuz ile aynı ölçü).
+    // Tur 2 (2026-09-28): ayırt edilemezlik ölçüsü fatura modalıyla (kalemleriCoz.ciftIskontoBelirsiz → ciftBelirsiz) TEK:
+    // ciftNetFarkli — gösterilen net iki okumada da aynıysa (eşit tutarda meşru fatura altı) belirsizlik yoktur. İmzalı satır
+    // AYRICA: başlık fatura altını doğrulamadıysa (faturaAltiBasliktan değil) Mikro kaydının tutarlılığı bilinmiyor.
+    const imzaOnaysiz = c.ciftIskontoNeti !== null && c.kaynak !== 'faturaAltiBasliktan';
+    if (imzaOnaysiz || ciftNetFarkli(c) || kdvOranaUymuyor(h, c.net)) { d.belirsiz++; belirsizSay(h); }
+  }
+  const degerlendirilen = new Set<string>();
+  const belirsizUrunler = new Set<string>();
+  for (const [sku, d] of durum) {
+    if (d.bulgu > 0 || d.belirsiz === 0) degerlendirilen.add(sku);
+    if (d.belirsiz > 0) belirsizUrunler.add(sku);
+  }
+  return { satirlar: satirlar.sort((a, b) => b.fazla - a.fazla), degerlendirilen, belirsizFaturalar, belirsizUrunler };
+}
+
 // ── Fatura sağlaması ─────────────────────────────────────────────────────────────────────────────────
 
 export interface KalemSaglamasi {
@@ -510,6 +759,19 @@ export interface KalemSaglamasi {
   tutuyor: boolean;
   /** Neti ya da KDV'si okunamayan alan sayısı (toplama girmedi). */
   eksik: number;
+  /** Mikro'nun fazladan eklediği iskonto: Σ(brüt − net), yalnız 'mikroKaydiTutarsiz' kalemler (0 = gerçekten yok).
+   *  Çağıran vermediyse (ör. eski kayıtlı kalem) alan HİÇ yazılmaz — bilinmiyor ≠ 0. */
+  mikroFazlasi?: number;
+  /** Fark TAM OLARAK Mikro'nun fazlası kadar: Mikro kaydı KDV ile tutarsız, kalem netleri doğru (e-fatura). */
+  mikroKaydiTutarsiz?: boolean;
+  /** Çözüm SONRASI satır KDV'si, pntr'nin o tarihte geçerli oranıyla (net [+ masraf]) tutmayan kalem sayısı — başlık
+   *  hakeminin döngüsel sağlamasına BAĞIMSIZ güvenlik ağı; netleri değiştirmez. Oranı bilinmeyen kalem, tarihin olası
+   *  oranlarının HİÇBİRİ tutmuyorsa sayılır (delta 2026-09-28; bkz. kdvOranaUymuyor). */
+  kdvUyumsuz?: number;
+  /** Gösterilen neti, KDV'ye AYNI ölçüde oturan çift iskonto okumasından (tutar − 2·Σisk) ayırt edilemeyen kalem sayısı
+   *  (aralık koruması / oran çakışması; pntr yokken kdvUyumsuz bunu SAYAMAZ). > 0 iken yeşil ✓ ve "kalem netleri doğru"
+   *  (mikroKaydiTutarsiz) hükmü verilmez. Çağıran vermediyse alan yazılmaz. */
+  ciftBelirsiz?: number;
 }
 
 /**
@@ -521,23 +783,79 @@ export interface KalemSaglamasi {
  */
 export function kalemSaglamasi(kalemler: readonly StokHareketi[], cozumler: readonly KalemCozumu[], meblag: unknown): KalemSaglamasi | null {
   if (!kalemler.length || !bilinenSayi(meblag)) return null;
-  let net = 0, kdv = 0, masraf = 0, brut = 0, eksik = 0;
+  let net = 0, kdv = 0, masraf = 0, brut = 0, eksik = 0, mikroFazlasi = 0, kdvUyumsuz = 0, ciftBelirsiz = 0;
   for (const [i, k] of kalemler.entries()) {
     const c = cozumler[i];
     // Miktarı 0 olan satırın (fiyat farkı) TUTARI da toplanır — yalnız KDV'si toplanınca sağlama yanlış alarm veriyordu.
-    if (c && c.net !== null && c.brut !== null) { net += c.net; brut += c.brut; } else eksik++;
+    if (c && c.net !== null && c.brut !== null) {
+      net += c.net; brut += c.brut;
+      if (c.kaynak === 'mikroKaydiTutarsiz') mikroFazlasi += c.brut - c.net;
+      if (kdvOranaUymuyor(k, c.net)) kdvUyumsuz++;
+      if (c.ciftIskontoBelirsiz === true) ciftBelirsiz++;
+    } else eksik++;
     if (bilinenSayi(k.sth_vergi)) kdv += Math.abs(Number(k.sth_vergi)); else eksik++;
     masraf += satirMasrafi(k);
   }
-  return saglamaKur({ net, kdv, masraf, brut, eksik }, meblag);
+  return saglamaKur({ net, kdv, masraf, brut, eksik, mikroFazlasi, kdvUyumsuz, ciftBelirsiz }, meblag);
 }
 
 /** Toplamlardan sağlama — TEK formül (pay dahil): ham satırdan (`kalemSaglamasi`) ve kalıcı sipariş kaleminden
  *  (services/mikroFaturaKalemleri.kayitliKalemTablosu) AYNI kural. `meblag` bilinmeyen çağıranda kullanılmaz. */
-export function saglamaKur(t: { net: number; kdv: number; masraf: number; brut: number; eksik: number }, meblag: unknown): KalemSaglamasi {
+export function saglamaKur(
+  t: { net: number; kdv: number; masraf: number; brut: number; eksik: number; mikroFazlasi?: number; kdvUyumsuz?: number; ciftBelirsiz?: number },
+  meblag: unknown,
+): KalemSaglamasi {
   const toplam = Math.abs(Number(meblag));
   const kalemToplami = t.net + t.masraf + t.kdv, fark = kalemToplami - toplam;
-  return { net: t.net, kdv: t.kdv, masraf: t.masraf, iskonto: t.brut - t.net, kalemToplami, fark,
-    tutuyor: t.eksik === 0 && Math.abs(fark) <= Math.max(1, toplam * 0.0005), eksik: t.eksik };
+  const pay = Math.max(1, toplam * 0.0005);
+  const s: KalemSaglamasi = { net: t.net, kdv: t.kdv, masraf: t.masraf, iskonto: t.brut - t.net, kalemToplami, fark,
+    tutuyor: t.eksik === 0 && Math.abs(fark) <= pay, eksik: t.eksik };
+  // Mikro'nun fazlası farkı TAM açıklıyorsa kayıt tutarsızdır (kalem netleri doğru). Fazla bilinmiyorsa (NaN / verilmedi)
+  // hüküm YOK — alan yazılmaz.
+  if (t.mikroFazlasi !== undefined && bilinenSayi(t.mikroFazlasi)) {
+    s.mikroFazlasi = t.mikroFazlasi;
+    // "Kalem netleri doğru" hükmü: başka bir kalemin KDV'si oranına uymuyorsa ya da bir kalemin neti çift iskonto
+    // okumasından ayırt edilemiyorsa VERİLMEZ (o kalemin fazlası da düşülmemiş olabilir — tur 1, 2026-09-28).
+    // Tur 2 (2026-09-28): iki sayı da AÇIKÇA verilmiş olmalı — `?? 0` bilinmeyeni 0 sayıyordu ve bayrağı saklanmayan kalıcı
+    // sipariş kalemi (kayitliKalemTablosu) bu kapıdan hiç geçmeden kesin hüküm alıyordu (yarım düzeltme + sahte kesinlik).
+    s.mikroKaydiTutarsiz = t.mikroFazlasi > 0 && t.eksik === 0 && t.kdvUyumsuz === 0 && t.ciftBelirsiz === 0
+      && Math.abs(fark + t.mikroFazlasi) <= pay;
+  }
+  if (t.kdvUyumsuz !== undefined) s.kdvUyumsuz = t.kdvUyumsuz;
+  if (t.ciftBelirsiz !== undefined) s.ciftBelirsiz = t.ciftBelirsiz;
+  return s;
+}
+
+/**
+ * Satırın tarihinde KESİLEBİLECEK her KDV oranı (uyumsuzluk hükmü için). `gecerliOranlar` okuma SEÇERKEN 2024+ dönemde
+ * %18/%8'i dışarıda bırakır (fatura altı okuması öne geçsin diye); ama eski oranlı iade/düzeltme o dönemde de meşrudur —
+ * hükümde dışarıda bırakılsa meşru iade "uyumsuz" alarmı alırdı. 2023-07-10 öncesinde %20/%10 YOKTU → yalnız geçerli küme.
+ */
+function olasiOranlar(tarih: unknown): readonly number[] {
+  const g = gecerliOranlar(tarih);
+  return g.includes(20) ? TUM_ORANLAR : g;
+}
+
+/**
+ * Satırın KDV'si çözülen nete [+ masrafa] uymuyor mu? pntr'nin oranı (o tarihte GEÇERLİ) biliniyorsa O oranla; oran
+ * BİLİNMİYORSA (pntr yok / eşlenmemiş / o tarihte geçerli değil) tarihin OLASI oranlarının HİÇBİRİ tutmuyorsa uyumsuz.
+ * KDV yok/bilinmiyor ya da %0 işaretçisi → HÜKÜM YOK (false).
+ * Delta (2026-09-28): eskiden oran bilinmiyorsa hiç hüküm verilmiyordu. Tur 3 2023 öncesi pntr 4/3'ü "bilinmiyor" yapınca
+ * bu açık büyüdü: 2022 satırında (283.500 / iskonto 85.050 — e-faturanın %30+%15'inden yalnız %30 girilmiş — KDV 30.362,85,
+ * başlık 228.812,85) gösterilen net 198.450'ye 2022'nin HİÇBİR oranı bu KDV'yi vermiyor, ama modal yeşil ✓ veriyor ve liste
+ * satırı TEMİZ sayıyordu; iskonto hiç girilmemişse net = brüt (283.500) yeşil ✓ ile gösteriliyordu ("net tutar iskontolu
+ * halde göstermeli" şikâyetinin aynısı). "Hiçbir olası oran tutmuyor" tahmin DEĞİL, her olası oran için ölçülmüş hükümdür.
+ * Dışa açık (tur 2): faturadan-sipariş importu (eslemeFatura.mfKalemleri) kalıcı kaleme AYNI ölçüyü bayrak olarak yazar.
+ */
+export function kdvOranaUymuyor(h: StokHareketi, net: number): boolean {
+  if (!bilinenSayi(h.sth_vergi)) return false;
+  const vergi = Math.abs(Number(h.sth_vergi));
+  if (!(vergi > 0)) return false;
+  const r = pntrOrani(h);
+  if (r !== undefined && !(r > 0)) return false;                       // %0 işaretçisi + KDV: hüküm yok (anlam DEĞİŞMEDİ)
+  const oranlar = r !== undefined ? [r] : olasiOranlar(h.sth_tarih);
+  const mas = satirMasrafi(h);
+  const uyar = (m: number, o: number) => Math.abs(vergi - (m * o) / 100) <= tol(vergi);
+  return !oranlar.some(o => uyar(net, o) || (mas > 0 && uyar(net + mas, o)));
 }
 

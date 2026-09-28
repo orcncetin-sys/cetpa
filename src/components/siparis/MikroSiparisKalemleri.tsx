@@ -72,7 +72,17 @@ export default function MikroSiparisKalemleri({ durum, kalemler, hata, genelTopl
                     : undefined}>
                   {s.iskonto === null ? '—' : s.iskonto > 0 ? `−${paraYaz(s.iskonto)}` : paraYaz(0)}
                 </td>
-                <td className="px-4 py-3 text-right font-bold text-[#1D2226] tabular-nums">{paraYaz(s.net)}</td>
+                <td className="px-4 py-3 text-right font-bold text-[#1D2226] tabular-nums">
+                  {/* D6 (2026-09-26, kullanıcı: "net tutar iskontolu halde göstermeli"): Mikro kaydı kendi içinde tutarsız
+                      (iskonto brüte bir kez daha eklenmiş) — net satırın KDV'sinden; düzeltme Mikro'da. */}
+                  {s.mikroTutarsiz && (() => {
+                    const ipucu = tr
+                      ? "Mikro kaydı tutarsız: satır tutarında iskonto brüte bir kez daha eklenmiş. Net satırın KDV'sinden (iskontolu); faturayı Mikro'da düzeltin."
+                      : 'Mikro record inconsistent: the discount was added to the line gross once more. Net derived from the line VAT (discounted); correct the invoice in Mikro.';
+                    return <span className="mr-1 text-amber-600 cursor-help" title={ipucu} aria-label={ipucu} role="img">⚠</span>;
+                  })()}
+                  {paraYaz(s.net)}
+                </td>
               </tr>
             ))}
           </tbody>

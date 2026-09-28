@@ -115,3 +115,190 @@ describe('Fiyat Karşılaştırma — birim şüpheli satırlar (koli/adet)', ()
     expect(screen.queryByRole('button', { name: /Birim şüpheli satır/ })).toBeNull();
   });
 });
+
+// ── Mikro kaydı kendi içinde tutarsız (evrak 420/435, 2026-09-26) ─────────────────────────────────────────────────
+// Kullanıcı: "net tutar iskontolu halde göstermeli". SİZGEN YAPI e-faturası: 1.050 × 270 = 283.500 brüt, iskonto
+// 114.817,50, net 168.682,50, KDV %20 = 33.736,50. Mikro evrak 420: sth_tutar 398.317,50 (iskonto brüte bir kez daha
+// eklenmiş). Sunucu (lib/stokFiyat.mikroTutarsizliklari + ad) bu satırları `tutarsizliklar` dizisiyle gönderir.
+describe('Fiyat Karşılaştırma — Mikro\'da düzeltilecek (iskonto brüte bir kez daha eklenmiş)', () => {
+  const RULO = 'RULO1081';
+  const ruloSatir = { ...satir, sku: RULO, ad: 'RULO ŞERİT 10x8', sapmaSayisi: 0, alisOrtFiyat: 160.65 };
+  const tutarsiz = (sira: string, tarih: string, miktar: number, mikroTutar: number, iskonto: number, kdv: number, net: number, oran: number | null) => ({
+    sku: RULO, ad: ruloSatir.ad, tarih, yon: 'alis', miktar, fatura: { seri: '', sira, yon: 'gelen' }, evrakNo: sira, cariKod: '320.11',
+    oran, mikroTutar, iskonto, kdv, net, mikroNet: mikroTutar - iskonto, fazla: iskonto,
+  });
+  const t420 = tutarsiz('420', '2026-08-31', 1050, 398317.5, 114817.5, 33736.5, 168682.5, 20);
+  const t435 = tutarsiz('435', '2026-09-02', 2, 758.7, 218.7, 64.26, 321.3, null);
+  const ozetT = { ...ozet, rows: [ruloSatir, satir], tutarsizliklar: [t420, t435],
+    netKaynaklari: { satirIskontosu: 4, mikroKaydiTutarsiz: 2, faturaAltiKdvden: 1 } };
+  const detayT = { success: true, satirlar: [
+    { tarih: '2026-08-31', yon: 'alis', miktar: 1050, brutTutar: 283500, iskonto: 114817.5, tutar: 168682.5, birimFiyat: 160.65,
+      kaynak: 'mikroKaydiTutarsiz', mikroTutar: 398317.5, cariKod: '320.11', evrakNo: '420', fatura: { seri: '', sira: '420', yon: 'gelen' } },
+    { tarih: '2026-08-20', yon: 'alis', miktar: 10, brutTutar: 2700, iskonto: 270, tutar: 2430, birimFiyat: 243,
+      kaynak: 'faturaAltiKdvden', cariKod: '320.11', evrakNo: '401', fatura: { seri: '', sira: '401', yon: 'gelen' } },
+    { tarih: '2026-08-10', yon: 'alis', miktar: 10, brutTutar: 2700, iskonto: 0, tutar: 2700, birimFiyat: 270,
+      kaynak: 'iskontosuz', cariKod: '320.11', evrakNo: '390', fatura: { seri: '', sira: '390', yon: 'gelen' } },
+  ] };
+  const yonlendirT = (govde: unknown = ozetT) => authFetch.mockImplementation((url: string) => {
+    if (url === '/api/reports/stok-fiyat-karsilastirma') return json(govde);
+    if (url.endsWith('/detay')) return json(detayT);
+    if (url === '/api/mikro/fatura/kalemler') return json({ success: true, kalemler: [
+      { sth_stok_kod: RULO, urunAdi: ruloSatir.ad, birim: 'ADET', sth_birim_pntr: 1, sth_miktar: 1050, sth_tutar: 398317.5, sth_iskonto1: 85050, sth_iskonto2: 29767.5, sth_vergi: 33736.5, sth_vergi_pntr: 4 },
+    ] });
+    return json({ success: false, error: `beklenmeyen istek ${url}` });
+  });
+  const dugmeT = () => screen.findByRole('button', { name: /Mikro'da düzeltilecek: 2/ });
+  const kartT = async () => {
+    fireEvent.click(await dugmeT());
+    const kart = (await screen.findByText(/satır tutarı e-faturadaki Mal Hizmet Tutarı olmalı/)).closest('.apple-card');
+    if (!(kart instanceof HTMLElement)) throw new Error('tutarsızlık kartı yok');
+    return kart;
+  };
+
+  beforeEach(() => { yonlendirT(); });
+
+  it('liste: evrak 420 satırı Mikro tutarı / iskonto / KDV (%20) / DOĞRU net / Mikro\'nun fazlası; fazlası büyük olan önce', async () => {
+    cizdir();
+    const kart = await kartT();
+    expect(kart.textContent).toContain("Düzeltince Stok Hareketleri + Faturalar yeniden çekilir.");
+    const satirlar = within(kart).getAllByRole('row').slice(1);             // başlık hariç
+    expect(satirlar).toHaveLength(2);
+    const hucre = (tr: HTMLElement) => within(tr).getAllByRole('cell').map(c => c.textContent ?? '');
+    const [urun, tarih, evrak, mikroTutar, iskonto, kdv, net, fazla] = hucre(satirlar[0]);
+    expect(urun).toContain(RULO);
+    expect(tarih).toBe('2026-08-31');
+    expect(evrak).toBe('420');
+    expect(mikroTutar).toBe('₺398317.50');
+    expect(iskonto).toBe('₺114817.50');
+    expect(kdv).toBe('₺33736.50 (%20)');
+    expect(net).toBe('₺168682.50');
+    expect(fazla).toBe('₺114817.50');
+    // 435: oran bilinmiyor → yalnız tutar, sahte "%0" YOK
+    expect(hucre(satirlar[1])[5]).toBe('₺64.26');
+    expect(hucre(satirlar[1])[2]).toBe('435');
+  });
+
+  it('evrak düğmesi faturayı açar (kalemler Mikro\'dan, fatura anahtarıyla)', async () => {
+    cizdir();
+    const kart = await kartT();
+    fireEvent.click(within(kart).getByRole('button', { name: '420' }));
+    expect(await screen.findByText(/Fatura başlığı Cetpa'da yok/)).toBeTruthy();
+    const kalemIstegi = authFetch.mock.calls.find(c => c[0] === '/api/mikro/fatura/kalemler');
+    expect(JSON.parse(String((kalemIstegi?.[1] as { body?: string } | undefined)?.body))).toEqual({ seri: '', sira: '420', yon: 'gelen' });
+  });
+
+  it('iki amber düğme TEK ml-auto sarmalayıcıda; birim şüpheli kartı ayrı kalır', async () => {
+    cizdir();
+    const t = await dugmeT();
+    const s = screen.getByRole('button', { name: /Birim şüpheli satır: 2/ });
+    expect(t.parentElement).toBe(s.parentElement);
+    expect(t.parentElement?.className).toMatch(/\bml-auto\b/);
+    expect(t.className).not.toMatch(/\bml-auto\b/);
+    expect(s.className).not.toMatch(/\bml-auto\b/);
+    const kart = await kartT();
+    expect(within(kart).queryByText(/fiyat düzeyinden en az 4 kat/)).toBeNull();
+    fireEvent.click(s);
+    const sapmaKarti = (await screen.findByText(/fiyat düzeyinden en az 4 kat/)).closest('.apple-card');
+    expect(sapmaKarti).not.toBe(kart);
+  });
+
+  it('ürün rozeti: tutarsız satırı olan üründe "⚠ Mikro 2"; olmayan üründe yok', async () => {
+    cizdir();
+    const rozet = await screen.findByText('⚠ Mikro 2');
+    expect(rozet.getAttribute('title')).toMatch(/2 satırın Mikro kaydı tutarsız/);
+    expect(rozet.closest('tr')?.textContent).toContain(RULO);
+    expect(screen.getAllByText(/^⚠ Mikro \d+$/)).toHaveLength(1);        // DAYSON satırında yok
+  });
+
+  it('tur 3: sunucu tutarsizlikEnAz → rozet ALT SINIR ("⚠ Mikro ≥2"), açıklama kesin sayı iddia etmez (sr-only kardeşte de)', async () => {
+    yonlendirT({ ...ozetT, rows: [{ ...ruloSatir, tutarsizlikSayisi: 2, tutarsizlikEnAz: true }, satir] });
+    cizdir();
+    const rozet = await screen.findByText('⚠ Mikro ≥2');
+    const baslik = rozet.getAttribute('title') ?? '';
+    expect(baslik).toMatch(/^En az 2 satırın Mikro kaydı tutarsız/);
+    expect(baslik).toMatch(/hükme bağlanamadı/);
+    expect(baslik).not.toMatch(/ortalama ve marj iskontolu \(KDV'den\) netle hesaplandı/);
+    expect(screen.getAllByText(/^En az 2 satırın Mikro kaydı tutarsız/).some(e => e.className.includes('sr-only'))).toBe(true);
+  });
+
+  it('tur 3: rozet sayısı sunucunun tutarsizlikSayisi değeri (istemci listesinden saymak yalnız eski sunucu yedeği)', async () => {
+    yonlendirT({ ...ozetT, rows: [{ ...ruloSatir, tutarsizlikSayisi: 3, tutarsizlikEnAz: false }, satir] });
+    cizdir();
+    expect(await screen.findByText('⚠ Mikro 3')).toBeTruthy();
+    expect(screen.queryByText('⚠ Mikro 2')).toBeNull();
+  });
+
+  it('delta 2: sunucu tutarsizlikSayisi = null (hüküm VERİLEMEDİ) → gri "? Mikro" rozeti, açıklama ortalama/marjın kesin olmadığını söyler; 0 → rozet yok', async () => {
+    yonlendirT({ ...ozetT, rows: [{ ...ruloSatir, tutarsizlikSayisi: 0, tutarsizlikEnAz: false }, { ...satir, tutarsizlikSayisi: null, tutarsizlikEnAz: false }] });
+    cizdir();
+    const rozet = await screen.findByText('? Mikro');
+    expect(rozet.closest('tr')?.textContent).toContain(satir.ad);
+    const baslik = rozet.getAttribute('title') ?? '';
+    expect(baslik).toMatch(/hükme bağlanamadı/);
+    expect(baslik).toMatch(/ortalama ve marj kesin değil/);
+    expect(screen.getAllByText(/hükme bağlanamadı/).some(e => e.className.includes('sr-only'))).toBe(true);
+    expect(screen.queryByText(/^⚠ Mikro ≥?\d+$/)).toBeNull();            // RULO: sunucu 0 dedi — istemci listesine düşülmez
+    expect(screen.getAllByText('? Mikro')).toHaveLength(1);
+  });
+
+  it('arama listeyi de daraltır: "rulo" listeyi tutar, "çimento" düğmeyi gizler', async () => {
+    cizdir();
+    await dugmeT();
+    fireEvent.change(screen.getByPlaceholderText(/SKU veya ürün adı ara/), { target: { value: 'rulo' } });
+    expect(screen.getByRole('button', { name: /Mikro'da düzeltilecek: 2/ })).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(/SKU veya ürün adı ara/), { target: { value: 'çimento' } });
+    expect(screen.queryByRole('button', { name: /Mikro'da düzeltilecek/ })).toBeNull();
+  });
+
+  it('eski sunucu yanıtı (tutarsizliklar alanı yok): düğme ve rozet yok, çökme yok', async () => {
+    yonlendirT({ ...ozet, rows: [ruloSatir] });
+    cizdir();
+    await screen.findByText(ruloSatir.ad);
+    expect(screen.queryByRole('button', { name: /Mikro'da düzeltilecek/ })).toBeNull();
+    expect(screen.queryByText(/^⚠ Mikro \d+$/)).toBeNull();
+  });
+
+  it('altbilgi: mikroKaydiTutarsiz sayılır; faturaAltiKdvden artık "fatura başlığı yok" DEMEZ', async () => {
+    cizdir();
+    const alt = await screen.findByText(/Net tutar nasıl belirlendi/);
+    expect(alt.textContent).toContain("2 satır Mikro kaydı tutarsız — net KDV'den, iskontolu");
+    expect(alt.textContent).toContain("1 satır fatura altı iskonto satırın KDV'sinden türetildi (fatura başlığıyla doğrulanamadı)");
+    expect(alt.textContent).not.toMatch(/başlığı yok|bulunamadı/);
+  });
+
+  it('İşlem Detayı: mikroKaydiTutarsiz satırında ⚠ + "Mikro kaydında satır tutarı ₺398317.50" ipucu; net iskontolu', async () => {
+    cizdir();
+    fireEvent.click(await screen.findByText(ruloSatir.ad));
+    const uyari = await screen.findByTitle(/^Mikro kaydında satır tutarı ₺398317\.50; iskonto brüte bir kez daha eklenmiş — net satırın KDV'sinden/);
+    expect(uyari.textContent).toContain('⚠');
+    // Ekran okuyucu: rolsüz span'daki aria-label yok sayılır → role="img" şart (kardeş bileşenlerle aynı).
+    expect(uyari.getAttribute('role')).toBe('img');
+    expect(uyari.getAttribute('aria-label')).toBe(uyari.getAttribute('title'));
+    // Dokunmatik/mobil: title açılmaz, Brüt/Evrak kolonları gizli → ipucu sm altı ekranda satırda YAZILI.
+    const mobil = uyari.parentElement?.querySelector('.sm\\:hidden');
+    expect(mobil?.textContent).toBe(uyari.getAttribute('title'));
+    const tr420 = uyari.closest('tr');
+    if (!(tr420 instanceof HTMLElement)) throw new Error('satır yok');
+    expect(tr420.textContent).toContain('₺168682.50');                     // net = iskontolu (KDV'den)
+    expect(tr420.textContent).toContain('₺160.65');
+    // yalnız bu kaynakta: diğer satırlarda Mikro-tutarsız ipucu yok
+    expect(screen.getAllByTitle(/Mikro kaydında satır tutarı/)).toHaveLength(1);
+    expect(screen.getAllByTitle(/iskonto brüte bir kez daha eklenmiş/)).toHaveLength(1);   // ⚠ yalnız 420 satırında
+    // faturaAltiKdvden ipucu başlığın varlığı hakkında hüküm vermez
+    const kdvden = screen.getAllByTitle(/satırın KDV'sinden türetildi/);
+    expect(kdvden.length).toBeGreaterThan(0);
+    for (const e of kdvden) expect(e.getAttribute('title')).not.toMatch(/başlığı bulunamadı|başlığı yok|no invoice header/);
+  });
+
+  it('İşlem Detayı: eski sunucu (mikroTutar yok) → ipucu tutar uydurmaz', async () => {
+    authFetch.mockImplementation((url: string) => {
+      if (url === '/api/reports/stok-fiyat-karsilastirma') return json(ozetT);
+      if (url.endsWith('/detay')) return json({ success: true, satirlar: [{ ...detayT.satirlar[0], mikroTutar: undefined }] });
+      return json({ success: false });
+    });
+    cizdir();
+    fireEvent.click(await screen.findByText(ruloSatir.ad));
+    const uyari = await screen.findByTitle(/iskonto brüte bir kez daha eklenmiş — net satırın KDV'sinden/);
+    expect(uyari.getAttribute('title')).not.toMatch(/₺|NaN|undefined/);
+  });
+});
