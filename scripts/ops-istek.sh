@@ -100,7 +100,9 @@ fi
 # Geçici dosya mktemp ile 0600 açılır (gövde müşteri verisi içerebilir) ve çıkışta silinir.
 GOVDE="$CIKTI"
 if [ -z "$GOVDE" ]; then
-  GOVDE="$(mktemp -t ops-istek)"
+  # Taşınabilir şablon: `mktemp -t ad` yalnız BSD/macOS'ta çalışır; GNU (CI Ubuntu) şablonda en az üç X ister ve betik
+  # set -e ile düşüyordu (CI 2026-09-28, 22 test). Açık XXXXXX şablonu ikisinde de 0600 dosya açar.
+  GOVDE="$(mktemp "${TMPDIR:-/tmp}/ops-istek.XXXXXX")"
   trap 'rm -f "$GOVDE"' EXIT
 fi
 # curl hatası `set -e`'ye BIRAKILMAZ: curl'ün 5/6 çıkış kodları (proxy/DNS çözülemedi) betiğin 401/503 için ayırdığı

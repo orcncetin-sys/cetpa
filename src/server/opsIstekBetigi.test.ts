@@ -22,6 +22,10 @@ beforeAll(() => {
   writeFileSync(join(bin, 'security'), '#!/bin/sh\nfor a; do son="$a"; done\ncase "$son" in -w) printf \'testjeton123\' ;; -g) echo \'password: "testjeton123"\' >&2 ;; esac\nexit 0\n');
   // Sahte curl: çağrıyı iz dosyasına yazar; SAHTE_RC ≠ 0 ise -w kodunu basıp o kodla çıkar, yoksa gövdeyi -o dosyasına yazar.
   writeFileSync(join(bin, 'curl'), '#!/bin/sh\necho cagrildi >> "$CURL_IZ"\ncikti=""\nwhile [ $# -gt 0 ]; do case "$1" in -o) cikti="$2"; shift 2 ;; *) shift ;; esac; done\nif [ "${SAHTE_RC:-0}" != 0 ]; then printf \'%s\' "${SAHTE_KOD:-000}"; exit "$SAHTE_RC"; fi\n[ -n "$cikti" ] && printf \'{"ok":true}\' > "$cikti"\nprintf \'%s\' "${SAHTE_KOD:-200}"\n');
+  // GNU mktemp taklidi (CI Ubuntu): şablonda en az üç X yoksa reddeder. Mac'te BSD `mktemp -t ad` çalıştığı için bu fark
+  // yalnız CI'da görünüyordu (2026-09-28, 22 test) — test düzeneği artık yerelde de aynı katılıkta.
+  writeFileSync(join(bin, 'mktemp'), '#!/bin/sh\nfor a; do son="$a"; done\ncase "$son" in *XXX*) exec /usr/bin/mktemp "$@" ;; esac\necho "mktemp: too few X\'s in template \'$son\'" >&2\nexit 1\n');
+  chmodSync(join(bin, 'mktemp'), 0o755);
   chmodSync(join(bin, 'security'), 0o755);
   chmodSync(join(bin, 'curl'), 0o755);
 });
