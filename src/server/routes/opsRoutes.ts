@@ -18,7 +18,7 @@ import { MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, getMikroCreds, mikr
 import { saatTanisi } from '../saatTanisi.js';
 import path from 'path';
 import fs from 'fs';
-import { timingSafeEqual } from 'crypto';
+import { opsJetonuGecerli } from '../opsJeton.js';
 import { broadcastDocChange } from '../pgShim.js';
 import express from 'express';
 
@@ -69,11 +69,6 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
     }
   });
-  /** GET /api/ops/summary — SALT-OKUNUR ops özeti, token korumalı (2026-07-28).
-   *  Amacı: günlük bulut rutini (Claude routine) tarayıcı/oturum olmadan sistemin
-   *  durumunu okuyabilsin. Sadece operasyonel metrik döner — kişisel/iş verisi YOK.
-   *  OPS_SUMMARY_TOKEN env'i tanımlı değilse uç KAPALIDIR (503).
-   *  Token: `X-Ops-Token` başlığı veya ?token= ile; karşılaştırma sabit-zamanlı. */
   /** POST /api/ops/disk-test — disk uyarı YOLUNU elle sına.
    *
    *  Neden gerekli: 2026-07-31 kesintisinde izleme sessiz kaldı. Uyarı
@@ -85,11 +80,7 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
    *  işaretler. /api/ops/summary ile AYNI token korumasını kullanır.
    */
   app.post('/api/ops/disk-test', async (req: Request, res: Response) => {
-    const expected = process.env.OPS_SUMMARY_TOKEN || '';
-    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
-    const got = (req.headers['x-ops-token'] as string) || String(req.query.token ?? '');
-    const a = Buffer.from(got), b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    if (!opsJetonuGecerli(req, res)) return;
     const sonuc = await diskNobetcisi(true);
     res.json({
       success: !sonuc.hata,
@@ -109,11 +100,7 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
    * buraya {coll, ids, silinen} gönderir; istemciler taze veriyi alır. Token: X-Ops-Token.
    */
   app.post('/api/ops/yayinla', express.json({ limit: '256kb' }), async (req: Request, res: Response) => {
-    const expected = process.env.OPS_SUMMARY_TOKEN || '';
-    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
-    const got = (req.headers['x-ops-token'] as string) || '';
-    const a = Buffer.from(got), b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    if (!opsJetonuGecerli(req, res)) return;
     const govde = (req.body ?? {}) as { coll?: unknown; ids?: unknown; silinen?: unknown };
     const coll = String(govde.coll ?? '');
     const ids = Array.isArray(govde.ids) ? govde.ids.map(String).slice(0, 2000) : [];
@@ -130,12 +117,13 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
     res.json({ success: true, yayin });
   });
 
+  /** GET /api/ops/summary — SALT-OKUNUR ops özeti, token korumalı (2026-07-28).
+   *  Amacı: tarayıcı/oturum olmadan sistemin durumunu okumak (scripts/ops-istek.sh; eskiden günlük bulut rutini).
+   *  Sadece operasyonel metrik döner — kişisel/iş verisi YOK. OPS_SUMMARY_TOKEN env'i tanımlı değilse uç KAPALIDIR (503).
+   *  Token: YALNIZ `X-Ops-Token` başlığı (opsJeton.ts — 2026-09-28'e kadar ?token= de kabul ediliyordu; sorgu dizesi
+   *  erişim günlüklerine düşer). Karşılaştırma sabit zamanlı. */
   app.get('/api/ops/summary', async (req: Request, res: Response) => {
-    const expected = process.env.OPS_SUMMARY_TOKEN || '';
-    if (!expected) return res.status(503).json({ error: 'ops summary kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
-    const got = (req.headers['x-ops-token'] as string) || String(req.query.token ?? '');
-    const a = Buffer.from(got), b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    if (!opsJetonuGecerli(req, res, 'ops summary kapalı — OPS_SUMMARY_TOKEN tanımlı değil')) return;
     try {
       let latest: Record<string, unknown> | null = null;
       let previous: Record<string, unknown> | null = null;

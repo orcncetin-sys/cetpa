@@ -32,7 +32,7 @@ import type { AdminDbLike, AdminDocRef, DocDaralt } from '../adminDbTypes.js';
 import type { Express, Request, Response } from 'express';
 import { FaturaKaydetSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema, type Sema } from '../schemas.js';
 import { zamanla, isGunu } from '../zamanla.js';
-import { timingSafeEqual } from 'crypto';
+import { opsJetonuGecerli } from '../opsJeton.js';
 import { findKey, kolonSec } from '../../lib/mikroKolon.js';
 import {
   MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, detectMikroGatewayBlock, v17MetoduKullanilabilir,
@@ -1902,11 +1902,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  Yalnız şema/örnek veri döner; toplu iş verisi dökmez (TOP 3/5).
    */
   app.get('/api/mikro/sema-kesif', async (req: Request, res: Response) => {
-    const expected = process.env.OPS_SUMMARY_TOKEN || '';
-    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
-    const got = (req.headers['x-ops-token'] as string) || String(req.query.token ?? '');
-    const a = Buffer.from(got), b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    if (!opsJetonuGecerli(req, res)) return;
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const sorgular: Array<{ ad: string; sql: string }> = [
@@ -2120,17 +2116,6 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     }
     res.json({ success: true, sonuc });
   });
-
-  /** Tüm-geçmiş tanı uçlarının jeton kapısı (iskonto-tutarsizlik, birim-sapmasi): sema-kesif ile aynı kural — jeton YALNIZ
-   *  başlıkta (sorgu dizesindeki jeton IIS günlüğüne düşerdi), sabit zamanlı karşılaştırma. Tanımsız 503, yanlış 401. */
-  const opsJetonuGecerli = (req: Request, res: Response): boolean => {
-    const expected = process.env.OPS_SUMMARY_TOKEN || '';
-    if (!expected) { res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' }); return false; }
-    const got = (req.headers['x-ops-token'] as string) || '';
-    const a = Buffer.from(got), b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) { res.status(401).json({ error: 'unauthorized' }); return false; }
-    return true;
-  };
 
   /** GET /api/mikro/iskonto-tutarsizlik — "Mikro'da iskonto brüte bir kez daha eklenmiş" faturaların TÜM GEÇMİŞİ.
    *
@@ -2387,11 +2372,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  hangisi çalışıyor / Mikro tam olarak ne diyor görülür. sema-kesif ile
    *  aynı token koruması; toplu veri dökmez (Size 5). */
   app.get('/api/mikro/ebelge-tani', async (req: Request, res: Response) => {
-    const expected = process.env.OPS_SUMMARY_TOKEN || '';
-    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
-    const got = (req.headers['x-ops-token'] as string) || String(req.query.token ?? '');
-    const a = Buffer.from(got), b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    if (!opsJetonuGecerli(req, res)) return;
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const yil = new Date().getFullYear();
