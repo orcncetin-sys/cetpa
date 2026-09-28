@@ -60,6 +60,7 @@ import { mikroIsAdi } from '../../lib/mikroIsAdi.js';
 import { arkaPlanIsiBaslat, arkaPlanOnKontrol, arkaPlanYaziciAdi, bakimKilidiMesaji, type ArkaPlanBagimlilik, type BaslatSonucu } from '../mikro/arkaPlanIsi.js';
 import { araligiTopla, ALT_STOK, ALT_CARI, type SayfaSayaclari } from '../mikro/adaptifSayfalama.js';
 import { bilinenSayi } from '../../utils/para.js';
+import { birimSapmasiRaporu } from '../mikro/birimSapmasi.js';
 // Varlık eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeVarlik.ts
 // (demirbaş / maliyet merkezi / personel / üretim reçetesi import gövdeleri)
 // ALIAS GEREKÇESİ: `okumaArizasi`/`okumaArizasiUyarisi` adları bu dosyada ZATEN
@@ -2118,6 +2119,17 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     res.json({ success: true, sonuc });
   });
 
+  /** Tüm-geçmiş tanı uçlarının jeton kapısı (iskonto-tutarsizlik, birim-sapmasi): sema-kesif ile aynı kural — jeton YALNIZ
+   *  başlıkta (sorgu dizesindeki jeton IIS günlüğüne düşerdi), sabit zamanlı karşılaştırma. Tanımsız 503, yanlış 401. */
+  const opsJetonuGecerli = (req: Request, res: Response): boolean => {
+    const expected = process.env.OPS_SUMMARY_TOKEN || '';
+    if (!expected) { res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' }); return false; }
+    const got = (req.headers['x-ops-token'] as string) || '';
+    const a = Buffer.from(got), b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) { res.status(401).json({ error: 'unauthorized' }); return false; }
+    return true;
+  };
+
   /** GET /api/mikro/iskonto-tutarsizlik — "Mikro'da iskonto brüte bir kez daha eklenmiş" faturaların TÜM GEÇMİŞİ.
    *
    *  Kullanıcı (2026-09-28): "başka böyle bir kayıt var mı bana bilgi ver". Evrak 420 (SİZGEN) Mikro'da 317.236,50,
@@ -2129,11 +2141,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  adıyla döner — kolon adı TAHMİN EDİLMEZ. Başlık hakemi evrakın TÜM satırlarını ister: iskontolu satırı olan
    *  faturaların bütün satırları okunur. */
   app.get('/api/mikro/iskonto-tutarsizlik', async (req: Request, res: Response) => {
-    const expected = process.env.OPS_SUMMARY_TOKEN || '';
-    if (!expected) return res.status(503).json({ error: 'kapalı — OPS_SUMMARY_TOKEN tanımlı değil' });
-    const got = (req.headers['x-ops-token'] as string) || '';
-    const a = Buffer.from(got), b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+    if (!opsJetonuGecerli(req, res)) return;
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     try {
       const semaKolonlari = await mikroKolonlar('STOK_HAREKETLERI');
@@ -2172,6 +2180,74 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       res.json({ success: true, kesildi: satir.rows.length >= SINIR, iskontoKolonlari: plan.iskonto, ...rapor });
     } catch (e) {
       console.error('[mikro/iskonto-tutarsizlik]', e);
+      res.status(500).json({ success: false, error: 'Rapor üretilemedi.' });
+    }
+  });
+
+  /** GET /api/mikro/birim-sapmasi — koli/paket ↔ adet karışıklığı şüphesi taşıyan fatura satırlarının TÜM GEÇMİŞİ.
+   *
+   *  Kullanıcı (2026-09-28): "DAYSON-DYS.029 alış faturaları 410 ve 394 adet olması gerekirken paket girilmiş. bu tip hata
+   *  var mı?". Fiyat Karşılaştırma'nın koli/adet listesi ~90 günlük aynayı okur; bu uç Mikro'nun kendi tablolarını.
+   *  iskonto-tutarsizlik ile AYNI kapı ve kolon planı; SALT OKUMA (SqlVeriOkuV2). Kural tek kaynak: lib/stokFiyat.birimSapmalari
+   *  (mikro/birimSapmasi.ts rapora çevirir). Medyan ürünün BÜTÜN satırlarını ister → iptal olmayan tüm fatura satırları;
+   *  net çözümü (başlık hakemi) için tüm fatura başlıkları. Ürün adı STOKLAR'dan, yalnız şemada sto_kod + sto_isim varsa ve
+   *  yalnız listedeki ürünler için; okunamazsa ad null + adHatasi (rapor düşmez). */
+  app.get('/api/mikro/birim-sapmasi', async (req: Request, res: Response) => {
+    if (!opsJetonuGecerli(req, res)) return;
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    try {
+      const semaKolonlari = await mikroKolonlar('STOK_HAREKETLERI');
+      if (!semaKolonlari.length) {
+        return res.status(502).json({ success: false, error: 'Mikro şeması okunamadı (INFORMATION_SCHEMA yanıtı boş/hatalı) — Mikro erişimini/kilidini kontrol edin; kolon adlarını DEĞİŞTİRMEYİN.' });
+      }
+      const plan = satirKolonPlani(semaKolonlari);
+      if (plan.eksik.length) {
+        return res.status(500).json({ success: false, error: `STOK_HAREKETLERI şemasında beklenen kolon yok: ${plan.eksik.join(', ')}` });
+      }
+      const SINIR = 50000;
+      const satir = await mikroSql(
+        `SELECT TOP ${SINIR} ${plan.secim.join(', ')} FROM STOK_HAREKETLERI ` +
+        // İkincil sıralama: kesilirse sınır evrak düzeyinde koşudan koşuya aynı kalsın (aynı evrakın satırları arası sıra
+        // sabit DEĞİL — sınır bir faturanın ortasına düşebilir; bu durumda zaten kesildi: true ve ürün sayaçları null).
+        'WHERE sth_evraktip IN (3, 4) AND ISNULL(sth_iptal, 0) = 0 ORDER BY sth_tarih DESC, sth_evrakno_seri, sth_evrakno_sira DESC',
+        { zamanAsimiMs: listeZamanAsimiMs() },
+      );
+      if (satir.hata) return res.status(502).json({ success: false, error: `Satırlar okunamadı: ${satir.hata}` });
+      const baslik = await mikroSql(
+        'SELECT cha.cha_evrakno_seri, cha.cha_evrakno_sira, cha.cha_tip, cha.cha_meblag, cha.cha_iptal, cha.cha_tarihi, cha.cha_kod ' +
+        `FROM CARI_HESAP_HAREKETLERI cha WHERE ${FATURA_EVRAK_KOSULU}`,
+        { zamanAsimiMs: listeZamanAsimiMs() },
+      );
+      if (baslik.hata) return res.status(502).json({ success: false, error: `Fatura başlıkları okunamadı: ${baslik.hata}` });
+      // Sınıra dayandıysa en eski satırlar okunmadı: ürün sayaçları (temiz / değerlendirilemeyen) null döner — medyan eksik
+      // satırla hesaplandı ve yalnız eski satırlarda geçen ürün hiçbir sayaçta görünmez (inceleme 2026-09-28).
+      const kesildi = satir.rows.length >= SINIR;
+      const rapor = birimSapmasiRaporu(satir.rows, baslik.rows, { kesildi });
+
+      const adlar = new Map<string, string>();
+      let adHatasi: string | null = null;
+      const skular = [...new Set(rapor.satirlar.map(s => s.sku))];
+      if (skular.length) {
+        const stokKolonlari = await mikroKolonlar('STOKLAR');
+        const gercekAd = new Map(stokKolonlari.map(k => [k.toLowerCase(), k]));
+        const kodKolonu = gercekAd.get('sto_kod'), adKolonu = gercekAd.get('sto_isim');
+        if (kodKolonu && adKolonu) {
+          // Değerler Mikro'nun kendi stok kodları; yine de tek tırnak kaçırılır (N'' — Türkçe karakterli kod).
+          const kodlar = skular.map(s => `N'${s.replace(/'/g, "''")}'`).join(', ');
+          const ad = await mikroSql(`SELECT ${kodKolonu} AS kod, ${adKolonu} AS ad FROM STOKLAR WHERE ${kodKolonu} IN (${kodlar})`);
+          if (ad.hata) adHatasi = ad.hata;
+          else for (const r of ad.rows) {
+            const kod = String(r.kod ?? '').trim(), isim = String(r.ad ?? '').trim();
+            if (kod && isim) adlar.set(kod, isim);
+          }
+        } else adHatasi = stokKolonlari.length ? 'STOKLAR şemasında sto_kod / sto_isim yok' : 'STOKLAR şeması okunamadı';
+      }
+      res.json({
+        success: true, kesildi, adHatasi,
+        satirlar: rapor.satirlar.map(s => ({ ...s, ad: adlar.get(s.sku) ?? null })), ozet: rapor.ozet,
+      });
+    } catch (e) {
+      console.error('[mikro/birim-sapmasi]', e);
       res.status(500).json({ success: false, error: 'Rapor üretilemedi.' });
     }
   });

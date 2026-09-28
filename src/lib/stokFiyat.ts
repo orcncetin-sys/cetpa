@@ -283,10 +283,14 @@ const satirAnahtari = (h: StokHareketi): string | null => {
  * `mikroFaturalar` aynasındaki başlıklardan (cha_*) evrak → genel toplam (cha_meblag, KDV dâhil) eşlemesi. İptal başlık,
  * meblağı bilinmeyen başlık ve AYNI anahtara düşen birden çok başlık (belirsiz) hakem olamaz → eşlemeye girmez.
  */
+/** İptal edilmiş fatura başlığı (cha_iptal) — başlık hakemi ve başlıktan bilgi okuyan her rapor AYNI kuralla eler. */
+export const baslikIptalMi = (b: Readonly<Record<string, unknown>>): boolean =>
+  b.cha_iptal === true || (bilinenSayi(b.cha_iptal) && Number(b.cha_iptal) === 1);
+
 export function faturaToplamlari(basliklar: readonly Readonly<Record<string, unknown>>[]): Map<string, number> {
   const sayac = new Map<string, number>(), toplam = new Map<string, number>();
   for (const b of basliklar) {
-    if (b.cha_iptal === true || (bilinenSayi(b.cha_iptal) && Number(b.cha_iptal) === 1)) continue;
+    if (baslikIptalMi(b)) continue;
     if (!bilinenSayi(b.cha_meblag)) continue;
     const k = anahtar(b.cha_evrakno_seri, b.cha_evrakno_sira, Number(b.cha_tip) === 1 ? 'gelen' : 'giden');
     if (!k) continue;
@@ -561,13 +565,21 @@ export interface BirimSapmasi {
    *  fiyattan anlaşılamaz; yalnız ana gruptan sapan satırlar listelenir, ekran "belirsiz" der. */
   belirsiz: boolean;
   cariKod: unknown; evrakNo: string | null; fatura: FaturaAnahtari | null;
+  /** Referans fiyat düzeyinin (ana grup) medyan TARİHİ, YYYY-AA-GG; tarihli satırı yoksa null. Tüm geçmiş taramasında
+   *  (mikro/birimSapmasi.ts) satırın bu tarihten yıllarca uzak olması sapmanın fiyat artışı olabileceğini gösterir
+   *  (inceleme 2026-09-28: 2022 ₺25 / 2026 ₺110 → kat 0,23). Kural bunu AYIKLAMAZ — yalnız bilgi. */
+  anaGrupTarihi: string | null;
 }
 
 export interface BirimSapmaSonucu {
   satirlar: BirimSapmasi[];
   /** Kontrol EDİLEBİLEN ürünler (≥ BIRIM_SAPMA_ASGARI_SATIR fiyatı bilinen satır). Listede olmayan ama burada olan
-   *  ürünün şüpheli satırı GERÇEKTEN yoktur; burada olmayan ürün DEĞERLENDİRİLEMEDİ (0 değil, bilinmiyor). */
+   *  ürünün şüpheli satırı GERÇEKTEN yoktur — FİYATI BİLİNEN satırları için; burada olmayan ürün DEĞERLENDİRİLEMEDİ
+   *  (0 değil, bilinmiyor). */
   degerlendirilen: ReadonlySet<string>;
+  /** Ürün → net birim fiyatı ÇÖZÜLEMEYEN (tutar/miktar bilinmiyor, miktar 0, iskonto tutarsız) iptalsiz satır sayısı. Bu
+   *  satırlar gruba girmez ve şüpheli de sayılmaz; koli hatası tam böyle bir satırda olabilir (inceleme 2026-09-28). */
+  fiyatsiz: ReadonlyMap<string, number>;
 }
 
 const medyanOf = (sirali: readonly number[]): number => {
@@ -596,12 +608,14 @@ const medyanOf = (sirali: readonly number[]): number => {
 export function birimSapmalari(hareketler: readonly StokHareketi[], secenek?: NetSecenegi, hazirCozum?: NetCozumleri): BirimSapmaSonucu {
   const cozumler = hazirCozum ?? netleriCoz(hareketler, secenek);
   const gruplar = new Map<string, { h: StokHareketi; miktar: number; birimFiyat: number }[]>();
+  const fiyatsiz = new Map<string, number>();
   for (const h of hareketler) {
     if (iptalMi(h)) continue;
     const sku = skuOku(h);
     if (!sku) continue;
     const s = satirdan(h, cozumler.get(h) ?? tutarCoz(h));
-    if (s.durum !== 'tamam' || !(s.birimFiyat > 0)) continue;
+    if (s.durum !== 'tamam') { fiyatsiz.set(sku, (fiyatsiz.get(sku) ?? 0) + 1); continue; }
+    if (!(s.birimFiyat > 0)) continue;                                  // bedelsiz satır: bilinen sıfır, fiyat düzeyi değil
     const g = gruplar.get(sku) ?? [];
     g.push({ h, miktar: s.miktar, birimFiyat: s.birimFiyat });
     gruplar.set(sku, g);
@@ -630,18 +644,20 @@ export function birimSapmalari(hareketler: readonly StokHareketi[], secenek?: Ne
     const sapan = g.filter(x => { const k = x.birimFiyat / medyan; return k >= BIRIM_SAPMA_KATI || k <= 1 / BIRIM_SAPMA_KATI; });
     if (sapan.length === 0) continue;
     const belirsiz = (g.length - sapan.length) * 4 < g.length * 3;     // olağan satırlar ¾'ün altında
+    const anaTarihler = ana.map(x => tarihMetni(x.h.sth_tarih)).filter((t): t is string => t !== null).sort();
+    const anaGrupTarihi = anaTarihler.length ? anaTarihler[Math.floor((anaTarihler.length - 1) / 2)] : null;
     for (const x of sapan) {
       satirlar.push({
         sku, tarih: x.h.sth_tarih ?? null, yon: yonOku(x.h), miktar: x.miktar, birimFiyat: x.birimFiyat, medyan,
         kat: x.birimFiyat / medyan, belirsiz,
         cariKod: x.h.sth_cari_kodu ?? x.h.sth_cari_kod ?? null,
         evrakNo: [x.h.sth_evrakno_seri, x.h.sth_evrakno_sira].filter(v => v !== '' && v != null).join('-') || null,
-        fatura: faturaAnahtari(x.h),
+        fatura: faturaAnahtari(x.h), anaGrupTarihi,
       });
     }
   }
   const sapma = (k: number) => Math.max(k, 1 / k);
-  return { satirlar: satirlar.sort((a, b) => sapma(b.kat) - sapma(a.kat)), degerlendirilen };
+  return { satirlar: satirlar.sort((a, b) => sapma(b.kat) - sapma(a.kat)), degerlendirilen, fiyatsiz };
 }
 
 // ── Mikro'da düzeltilecek: iskonto brüte bir kez daha eklenmiş ─────────────────────────────────────
