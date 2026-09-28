@@ -61,6 +61,8 @@ import { arkaPlanIsiBaslat, arkaPlanOnKontrol, arkaPlanYaziciAdi, bakimKilidiMes
 import { araligiTopla, ALT_STOK, ALT_CARI, type SayfaSayaclari } from '../mikro/adaptifSayfalama.js';
 import { bilinenSayi } from '../../utils/para.js';
 import { birimSapmasiRaporu } from '../mikro/birimSapmasi.js';
+import { durumDenemesiOzeti, ettnGecerli, hucreleriKes, type DurumDenemesi } from '../mikro/ebelgeDurumTani.js';
+import { zamanAsimiMi } from '../mikro/adaptifSayfalama.js';
 // Varlık eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeVarlik.ts
 // (demirbaş / maliyet merkezi / personel / üretim reçetesi import gövdeleri)
 // ALIAS GEREKÇESİ: `okumaArizasi`/`okumaArizasiUyarisi` adları bu dosyada ZATEN
@@ -2249,6 +2251,127 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     } catch (e) {
       console.error('[mikro/birim-sapmasi]', e);
       res.status(500).json({ success: false, error: 'Rapor üretilemedi.' });
+    }
+  });
+
+  /** GET /api/mikro/ebelge-durum-tani — GİB durum sorgusunun HAM yanıtı + e-belge kod dağılımı + gönderim kuyruğu günlüğü.
+   *
+   *  Kullanıcı (2026-09-25): "GİB'den kabul edilmeyen faturaları da çekelim". Ölçüm (sema-kesif 2026-09-28): muhasebe
+   *  tablolarında GİB red kolonu YOK; durum EBelgeDurumSorgulamaV2'den gelir ama yanıt alanları hiç ölçülmedi
+   *  (mikro/ebelgeDurumTani.ts). Bu uç kural YAZMAZ — ölçer: (1) EBELGE_GONDERIM_KUYRUK_LOG kolonları + son 10 kayıt (durum
+   *  sorgularından ÖNCE okunur: tanının kendi izi "son 10"u doldurmasın); (2) giden/gelen faturaların cha_ebelge_turu /
+   *  cha_efatura_belge_tipi / cha_ebelge_Islemturu / ETTN var-yok dağılımı; (3) her (tür, belge tipi) grubundan son 2 giden
+   *  faturanın durum yanıtı — EBelgeTipi 0 (e-fatura) VE 1 (e-arşiv) HER İKİSİ sorulur, yanıtlar yan yana döner; hangi kodun
+   *  hangi türe denk düştüğünü okuyan çıkarır (ilk "başarılı"da durmak, yanlış türün IsError:true döneceği ÖLÇÜLMEMİŞ
+   *  varsayımına dayanıyordu — inceleme 2026-09-28). Aynı jeton kapısı; Mikro'ya YAZMAZ, Cetpa'ya YAZMAZ. Kolon adları şemadan
+   *  GERÇEK yazımıyla (Türkçe harmanlamada 'cha_ebelge_Islemturu' ≠ küçük harfli yazım). Süre: IIS/ARR ~120 sn'de 502 verir
+   *  ve yanıt tek `res.json` ile gittiği için o ana kadarki her şey kaybolur — bütçe İSTEĞİN BAŞINDAN sayılır (100 sn; düzeltme
+   *  turu 2026-09-28: önce yalnız durum faziydi, öncesindeki 5 okuma dışarıda kalıyordu). Her SQL okuması en çok 20 sn, her
+   *  durum sorgusu en çok 15 sn ve ikisi de KALAN süreyle sınırlı; süre dolunca kalan adımlar "süre bütçesi doldu" ile döner.
+   *  Durum sorguları sırayla (Mikro kilidi); zaman aşımında aynı ETTN'nin öbür tipi sorulmaz (tip reddi değil). Sınır:
+   *  mikroKolonlar seçenek almaz (genel 30 sn, 10 dk önbellek) — iki şema okuması bütçenin başını yiyebilir, sonrası kısalır.
+   *  Bulut modunda stub yanıtında mikroPost bir kez daha dener (çağrı ~2×15 sn); canlı LOKAL modda bu yol yok. */
+  app.get('/api/mikro/ebelge-durum-tani', async (req: Request, res: Response) => {
+    if (!opsJetonuGecerli(req, res)) return;
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const baslangic = new Date().toISOString();
+    const TOPLAM_MS = 100000, SQL_MS = 20000, CAGRI_MS = 15000, istekT0 = Date.now();
+    const kalan = () => TOPLAM_MS - (Date.now() - istekT0);
+    const sureler: Record<string, number> = {};
+    try {
+      const chaKolonlari = await mikroKolonlar('CARI_HESAP_HAREKETLERI');
+      if (!chaKolonlari.length) {
+        return res.status(502).json({ success: false, error: 'Mikro şeması okunamadı (INFORMATION_SCHEMA yanıtı boş/hatalı) — kolon adlarını DEĞİŞTİRMEYİN.' });
+      }
+
+      // Her okuma kendi hatasını taşır (fırlayan zaman aşımı dâhil): biri düşerse tanının geri kalanı kaybolmasın (inceleme 2026-09-28).
+      const sqlGuvenli = async (sql: string, adim: string): Promise<{ rows: Record<string, unknown>[]; hata: string | null }> => {
+        if (kalan() < 5000) return { rows: [], hata: 'süre bütçesi doldu — okunmadı' };
+        const a0 = Date.now();
+        try { return await mikroSql(sql, { zamanAsimiMs: Math.min(SQL_MS, kalan()) }); }
+        catch (e) { return { rows: [], hata: e instanceof Error ? `${e.name}: ${e.message}` : String(e) }; }
+        finally { sureler[adim] = (sureler[adim] ?? 0) + Date.now() - a0; }
+      };
+
+      // (1) Gönderim kuyruğu günlüğü.
+      const kuyrukKolonlari = await mikroKolonlar('EBELGE_GONDERIM_KUYRUK_LOG').catch(() => [] as string[]);
+      sureler.semaMs = Date.now() - istekT0;                           // iki şema okuması (CHA + kuyruk)
+      const kuyruk: Record<string, unknown> = { kolonlar: kuyrukKolonlari, okunamadi: !kuyrukKolonlari.length };
+      if (kuyrukKolonlari.length) {
+        const sirala = kolonBul(kuyrukKolonlari, /create_date$/i) ?? kolonBul(kuyrukKolonlari, /tarih|date/i);
+        const siraGuvenli = sirala && sqlTanimlayici(sirala) ? sirala : null;
+        kuyruk.siralama = siraGuvenli;
+        const oku = async (sql: string) => { const r = await sqlGuvenli(sql, 'kuyrukMs'); return r.hata ? { hata: r.hata } : hucreleriKes(r.rows); };
+        kuyruk.adet = await oku('SELECT COUNT(*) AS adet FROM EBELGE_GONDERIM_KUYRUK_LOG');
+        kuyruk.son = await oku(`SELECT TOP 10 * FROM EBELGE_GONDERIM_KUYRUK_LOG${siraGuvenli ? ` ORDER BY ${siraGuvenli} DESC` : ''}`);
+      }
+
+      const gercek = new Map(chaKolonlari.map(k => [k.toLowerCase(), k]));
+      const kol = (ad: string) => gercek.get(ad.toLowerCase());
+      const uuidK = kol('cha_uuid'), turK = kol('cha_ebelge_turu'), tipK = kol('cha_efatura_belge_tipi'), islemK = kol('cha_ebelge_Islemturu');
+      const eksik = [['cha_uuid', uuidK], ['cha_ebelge_turu', turK], ['cha_efatura_belge_tipi', tipK], ['cha_ebelge_Islemturu', islemK]]
+        .filter(([, k]) => !k).map(([ad]) => ad as string);
+      const kodlar = [turK, tipK, islemK].filter((k): k is string => !!k);
+      // ETTN tipi ölçülmedi (nvarchar / uniqueidentifier) — metne çevirerek karşılaştır, tip ne olursa olsun çalışsın.
+      const ettnMetin = uuidK ? `ISNULL(CAST(cha.${uuidK} AS nvarchar(40)), '')` : null;
+
+      // (2) Dağılım — ETTN var/yok ve iptal kırılımıyla. Sabit ifade GROUP BY'a giremez (SQL Server) — ETTN yoksa kırılım da yok.
+      const ettnVar = ettnMetin ? `CASE WHEN ${ettnMetin} = '' THEN 0 ELSE 1 END` : null;
+      const grup = ['cha.cha_tip', ...kodlar.map(k => `cha.${k}`), ...(ettnVar ? [ettnVar] : []), 'ISNULL(cha.cha_iptal, 0)'];
+      const dagilim = await sqlGuvenli(
+        `SELECT cha.cha_tip, ${kodlar.map(k => `cha.${k} AS ${k}, `).join('')}${ettnVar ? `${ettnVar} AS ettnVar, ` : ''}` +
+        `ISNULL(cha.cha_iptal, 0) AS iptal, COUNT(*) AS adet, SUM(cha.cha_meblag) AS toplam ` +
+        `FROM CARI_HESAP_HAREKETLERI cha WHERE ${FATURA_EVRAK_KOSULU} GROUP BY ${grup.join(', ')} ORDER BY ${grup.join(', ')}`,
+        'dagilimMs',
+      );
+
+      // (3) Örnek giden faturalar + durum sorgusu (iki tip de; süre bütçeli).
+      const ornekler: Array<Record<string, unknown>> = [];
+      let ornekHata: string | null = null;
+      let t0 = Date.now();
+      if (ettnMetin) {
+        const bolum = kodlar.length ? `PARTITION BY ${kodlar.slice(0, 2).map(k => `cha.${k}`).join(', ')} ` : '';
+        const orn = await sqlGuvenli(
+          `SELECT TOP 8 * FROM (SELECT cha.cha_evrakno_seri, cha.cha_evrakno_sira, cha.cha_tarihi, cha.cha_kod, cha.cha_meblag, ` +
+          `${kodlar.map(k => `cha.${k} AS ${k}, `).join('')}${ettnMetin} AS ettn, ` +
+          `ROW_NUMBER() OVER (${bolum}ORDER BY cha.cha_tarihi DESC, cha.cha_evrakno_sira DESC) AS sn ` +
+          `FROM CARI_HESAP_HAREKETLERI cha WHERE ${FATURA_EVRAK_KOSULU} AND cha.cha_tip = 0 AND ISNULL(cha.cha_iptal, 0) = 0 ` +
+          `AND ${ettnMetin} <> '') t WHERE t.sn <= 2 ORDER BY t.sn, t.cha_tarihi DESC`,
+          'ornekMs',
+        );
+        t0 = Date.now();                                               // durumMs yalnız durum sorgularını ölçer
+        if (orn.hata) ornekHata = orn.hata;
+        for (const f of orn.rows) {
+          const ettn = String(f.ettn ?? '').trim();
+          const denemeler: DurumDenemesi[] = [];
+          const atlanan: Array<{ eBelgeTipi: 0 | 1; neden: string }> = [];
+          if (ettnGecerli(ettn)) {
+            for (const eBelgeTipi of [0, 1] as const) {
+              if (kalan() < CAGRI_MS) { atlanan.push({ eBelgeTipi, neden: 'süre bütçesi doldu' }); continue; }
+              const c0 = Date.now();
+              try {
+                const sonuc = await mikroPost('EBelgeDurumSorgulamaV2', { EBelge: { EFaturaTipi: 0, EBelgeTipi: eBelgeTipi, UUID: ettn } }, true, { zamanAsimiMs: Math.min(CAGRI_MS, kalan()) });
+                denemeler.push({ ...durumDenemesiOzeti(eBelgeTipi, sonuc), sureMs: Date.now() - c0 });
+              } catch (e) {
+                denemeler.push({ eBelgeTipi, httpOk: false, httpDurum: 0, zarfTuru: 'bos', isError: null,
+                  hata: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+                  ustAnahtarlar: [], r0Anahtarlari: [], dataAnahtarlari: [], dataHam: null, govdeHam: null, sureMs: Date.now() - c0 });
+                if (zamanAsimiMi(e)) { if (eBelgeTipi === 0) atlanan.push({ eBelgeTipi: 1, neden: 'tip 0 zaman aşımı — tip reddi değil' }); break; }
+              }
+            }
+          }
+          ornekler.push({ ...f, ettnGecerli: ettnGecerli(ettn), denemeler, ...(atlanan.length ? { atlanan } : {}) });
+        }
+      }
+
+      res.json({
+        success: true, baslangic, sureler: { ...sureler, durumMs: Date.now() - t0, toplamMs: Date.now() - istekT0 }, eksikKolonlar: eksik,
+        dagilim: dagilim.hata ? { hata: dagilim.hata } : dagilim.rows,
+        ornekHata, ornekler, kuyruk,
+      });
+    } catch (e) {
+      console.error('[mikro/ebelge-durum-tani]', e);
+      res.status(500).json({ success: false, error: 'Tanı üretilemedi.' });
     }
   });
 
