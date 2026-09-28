@@ -14,7 +14,8 @@
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import { runOpsWatchdog, diskNobetcisi } from '../opsWatchdog.js';
-import { MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE } from '../mikroClient.js';
+import { MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, getMikroCreds, mikroSql } from '../mikroClient.js';
+import { saatTanisi } from '../saatTanisi.js';
 import path from 'path';
 import fs from 'fs';
 import { timingSafeEqual } from 'crypto';
@@ -147,6 +148,13 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
         previous = rows[1] ?? null;
       }
       const failing = ((latest?.checks as Array<{ key: string; ok: boolean; detail: string }>) || []).filter(c => !c.ok);
+      // Sunucunun üç saati (Node süreci / PostgreSQL GUC / Mikro SQL Server) — tzutil doğrulaması (2026-09-28).
+      const pool = C.getPgPool?.();
+      const saat = await saatTanisi({
+        pgSorgu: pool ? (sql: string) => pool.query(sql) : null,
+        // Mikro isteği KENDİ zaman aşımıyla kesilir (yalnız beklenen söz bırakılırsa istek global 30 sn yamasına kadar açık kalırdı).
+        mikroSorgu: (await getMikroCreds()) ? (sql: string) => mikroSql(sql, { zamanAsimiMs: 8000 }) : null,
+      });
       res.json({
         generatedAt: new Date().toISOString(),
         uptimeSeconds: Math.round(process.uptime()),
@@ -161,6 +169,7 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
           previousOk: previous?.ok ?? null,
         },
         mikro: { apiBase: MIKRO_API_BASE, localMode: MIKRO_LOCAL_MODE, surum: MIKRO_JUMP_SURUM },
+        saat,
       });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
