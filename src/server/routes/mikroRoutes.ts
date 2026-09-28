@@ -2330,7 +2330,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       let ornekHata: string | null = null;
       let t0 = Date.now();
       if (ettnMetin) {
-        const bolum = kodlar.length ? `PARTITION BY ${kodlar.slice(0, 2).map(k => `cha.${k}`).join(', ')} ` : '';
+        // Üç kodun HEPSİYLE bölümle: ilk ölçümde (2026-09-28) yalnız tür+belge tipi vardı, 37 faturalık işlem türü 2 grubu örneğe girmedi.
+        const bolum = kodlar.length ? `PARTITION BY ${kodlar.map(k => `cha.${k}`).join(', ')} ` : '';
         const orn = await sqlGuvenli(
           `SELECT TOP 8 * FROM (SELECT cha.cha_evrakno_seri, cha.cha_evrakno_sira, cha.cha_tarihi, cha.cha_kod, cha.cha_meblag, ` +
           `${kodlar.map(k => `cha.${k} AS ${k}, `).join('')}${ettnMetin} AS ettn, ` +

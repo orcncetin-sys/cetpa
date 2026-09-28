@@ -90,7 +90,7 @@ describe('GET /api/mikro/ebelge-durum-tani', () => {
     expect(ornekSql).toMatch(/^SELECT TOP 8 \* FROM \(/);
     expect(ornekSql).toContain('AND cha.cha_tip = 0 AND ISNULL(cha.cha_iptal, 0) = 0');
     expect(ornekSql).toContain("AND ISNULL(CAST(cha.cha_uuid AS nvarchar(40)), '') <> ''");
-    expect(ornekSql).toContain('PARTITION BY cha.cha_ebelge_turu, cha.cha_efatura_belge_tipi');
+    expect(ornekSql).toContain('PARTITION BY cha.cha_ebelge_turu, cha.cha_efatura_belge_tipi, cha.cha_ebelge_Islemturu ');
     expect(ornekSql).toContain('WHERE t.sn <= 2');
     for (const c of vi.mocked(mikroSql).mock.calls) expect(c[1]).toEqual({ zamanAsimiMs: 20000 });
   });
