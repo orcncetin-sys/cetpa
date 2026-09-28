@@ -61,6 +61,7 @@ import { arkaPlanIsiBaslat, arkaPlanOnKontrol, arkaPlanYaziciAdi, bakimKilidiMes
 import { araligiTopla, ALT_STOK, ALT_CARI, type SayfaSayaclari } from '../mikro/adaptifSayfalama.js';
 import { bilinenSayi } from '../../utils/para.js';
 import { birimSapmasiRaporu } from '../mikro/birimSapmasi.js';
+import { matrahTaniRaporu } from '../mikro/matrahTani.js';
 import { durumDenemesiOzeti, ettnGecerli, hucreleriKes, type DurumDenemesi } from '../mikro/ebelgeDurumTani.js';
 import { zamanAsimiMi } from '../mikro/adaptifSayfalama.js';
 // Varlık eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeVarlik.ts
@@ -2357,6 +2358,69 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       });
     } catch (e) {
       console.error('[mikro/ebelge-durum-tani]', e);
+      res.status(500).json({ success: false, error: 'Tanı üretilemedi.' });
+    }
+  });
+
+  /** GET /api/mikro/matrah-tani — fatura MATRAHININ doğru tanımını ölçer (mikro/matrahTani.ts). Salt okuma, kural yazmaz.
+   *
+   *  fatura-listesi importu `SUM(sth_tutar) AS matrah` yazıyor ve sth_tutar BRÜT (canlı ölçüm 2026-09-28) — iskontolu faturada
+   *  matrah şişik. Düzeltmeden önce: başlık toplamı satırlardan hangi formülle çıkıyor (iskonto düşülür mü, masraf ve masraf
+   *  KDV'si ekleniyor mu), cha_aratoplam ne, kaç fatura satırsız, kaçında başlık satırlardan AZ (fatura altı iskonto / tevkifat).
+   *  İki SQL okuması (iptalsiz fatura satırları fatura başına toplanmış + tüm fatura başlıkları); kolonlar ŞEMADAN gerçek
+   *  yazımıyla (iskonto/masraf aileleri katı desenle, sth_masraf_vergi / cha_aratoplam / cha_ft_iskonto<N> yalnız varsa).
+   *  NULL tutar/vergi 0 sayılmaz — o fatura 'satirBilinmiyor'. Aynı jeton kapısı; Mikro'ya ve Cetpa'ya YAZMAZ. */
+  app.get('/api/mikro/matrah-tani', async (req: Request, res: Response) => {
+    if (!opsJetonuGecerli(req, res)) return;
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    try {
+      const [sthKolonlari, chaKolonlari] = [await mikroKolonlar('STOK_HAREKETLERI'), await mikroKolonlar('CARI_HESAP_HAREKETLERI')];
+      if (!sthKolonlari.length || !chaKolonlari.length) {
+        return res.status(502).json({ success: false, error: 'Mikro şeması okunamadı (INFORMATION_SCHEMA yanıtı boş/hatalı) — kolon adlarını DEĞİŞTİRMEYİN.' });
+      }
+      const plan = satirKolonPlani(sthKolonlari);
+      if (plan.eksik.length) return res.status(500).json({ success: false, error: `STOK_HAREKETLERI şemasında beklenen kolon yok: ${plan.eksik.join(', ')}` });
+      const sthGercek = new Map(sthKolonlari.map(k => [k.toLowerCase(), k]));
+      const chaGercek = new Map(chaKolonlari.map(k => [k.toLowerCase(), k]));
+      const masrafK = sthKolonlari.filter(k => /^sth_masraf\d+$/i.test(k));
+      const masrafVergiK = sthGercek.get('sth_masraf_vergi');
+      const aratoplamK = chaGercek.get('cha_aratoplam');
+      const ftIskK = chaKolonlari.filter(k => /^cha_ft_iskonto\d+$/i.test(k));
+      // Kolon adları şemadan geldi ve katı desenle süzüldü — SQL'e yalnız bunlar girer.
+      const topla = (kolonlar: readonly string[], on = '') => (kolonlar.length ? kolonlar.map(k => `ISNULL(${on}${k}, 0)`).join(' + ') : '0');
+      // İptal süzgeci toplamların İÇİNDE (inceleme 2026-09-28): fatura-listesi importunun satır JOIN'i iptal süzmüyor — tanı
+      // iptalsizleri toplar, iptal satırlarını ayrıca sayar; yalnız iptal satırlı grup da görünür (WHERE'de süzülse kaybolurdu).
+      const aktif = (ifade: string, degilse = 'ELSE 0 ') => `CASE WHEN ISNULL(sth_iptal, 0) = 0 THEN ${ifade} ${degilse}END`;
+      const negatif = plan.iskonto.length ? plan.iskonto.map(k => `ISNULL(${k}, 0) < 0`).join(' OR ') : null;
+      const satir = await mikroSql(
+        'SELECT sth_evraktip, sth_evrakno_seri, sth_evrakno_sira, ' +
+        `SUM(${aktif('1')}) AS n, SUM(${aktif('sth_tutar', '')}) AS tutar, ` +
+        `SUM(${aktif(`(${topla(plan.iskonto)})`)}) AS isk, SUM(${aktif(`(${topla(masrafK)})`)}) AS masraf, SUM(${aktif('sth_vergi', '')}) AS vergi, ` +
+        'SUM(CASE WHEN ISNULL(sth_iptal, 0) = 0 AND (sth_tutar IS NULL OR sth_vergi IS NULL) THEN 1 ELSE 0 END) AS bilinmeyen, ' +
+        'SUM(CASE WHEN ISNULL(sth_iptal, 0) <> 0 THEN 1 ELSE 0 END) AS iptalSatir, ' +
+        'SUM(CASE WHEN ISNULL(sth_iptal, 0) <> 0 THEN ISNULL(sth_tutar, 0) ELSE 0 END) AS iptalTutar, ' +
+        `SUM(${negatif ? `CASE WHEN ISNULL(sth_iptal, 0) = 0 AND (${negatif}) THEN 1 ELSE 0 END` : '0'}) AS negatifIsk` +
+        `${masrafVergiK ? `, SUM(${aktif(`ISNULL(${masrafVergiK}, 0)`)}) AS masrafVergi` : ''} ` +
+        'FROM STOK_HAREKETLERI WHERE sth_evraktip IN (3, 4) GROUP BY sth_evraktip, sth_evrakno_seri, sth_evrakno_sira',
+        { zamanAsimiMs: listeZamanAsimiMs() },
+      );
+      if (satir.hata) return res.status(502).json({ success: false, error: `Satırlar okunamadı: ${satir.hata}` });
+      const baslik = await mikroSql(
+        'SELECT cha.cha_tip, cha.cha_evrakno_seri, cha.cha_evrakno_sira, cha.cha_tarihi, cha.cha_kod, cha.cha_meblag, ' +
+        `${aratoplamK ? `cha.${aratoplamK}` : 'NULL'} AS aratoplam, ${ftIskK.length ? `(${topla(ftIskK, 'cha.')})` : 'NULL'} AS ftIsk, ` +
+        `ISNULL(cha.cha_iptal, 0) AS iptal FROM CARI_HESAP_HAREKETLERI cha WHERE ${FATURA_EVRAK_KOSULU}`,
+        { zamanAsimiMs: listeZamanAsimiMs() },
+      );
+      if (baslik.hata) return res.status(502).json({ success: false, error: `Fatura başlıkları okunamadı: ${baslik.hata}` });
+      const rapor = matrahTaniRaporu(satir.rows, baslik.rows);
+      res.json({
+        success: true,
+        kolonlar: { iskonto: plan.iskonto, masraf: masrafK, masrafVergi: masrafVergiK ?? null, aratoplam: aratoplamK ?? null, ftIskonto: ftIskK },
+        okunan: { faturaSatirGrubu: satir.rows.length, baslik: baslik.rows.length },
+        ...rapor,
+      });
+    } catch (e) {
+      console.error('[mikro/matrah-tani]', e);
       res.status(500).json({ success: false, error: 'Tanı üretilemedi.' });
     }
   });
