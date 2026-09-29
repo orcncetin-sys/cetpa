@@ -22,6 +22,8 @@
  * birden çok iptalsiz başlık ('ortakAnahtar') sınıflanmaz (stokFiyat.faturaToplamlari da belirsiz sayar).
  */
 
+import { saglamaPayi } from '../../lib/faturaMatrahi.js';
+
 /** Fatura başına toplanmış iptalsiz satırlar (SQL satırı): sth_evraktip, sth_evrakno_seri, sth_evrakno_sira, n, tutar, isk,
  *  masraf, vergi, bilinmeyen (NULL tutar/vergili satır sayısı — bilinmeyen ≠ 0, o fatura sınıflanmaz), masrafVergi (kolon varsa). */
 export type SatirToplami = Readonly<Record<string, unknown>>;
@@ -103,9 +105,8 @@ const tarihMetni = (t: unknown): string | null =>
   typeof t === 'string' && /^\d{4}-\d{2}-\d{2}/.test(t) ? t.slice(0, 10)
     : t instanceof Date && Number.isFinite(t.getTime()) ? t.toISOString().slice(0, 10) : null;
 const anahtar = (yon: string, seri: unknown, sira: unknown) => `${yon}|${metin(seri)}|${metin(sira)}`;
-/** Yuvarlama payı — YALNIZ yuvarlamaya bağlı: 0,06 taban + satır başına 2 kuruş (tutar ve KDV her satırda ayrı yuvarlanır).
- *  Oransal pay YOK (inceleme 2026-09-28: binde yarım, 600.000 ₺'lik faturada 300 ₺ ediyor ve iskonto farkını yutuyordu). */
-const pay = (satir: number) => 0.06 + 0.02 * Math.max(1, satir);
+/** Yuvarlama payı — tek kaynak lib/faturaMatrahi.saglamaPayi (0,06 + satır başına 0,02; oransal pay YOK). */
+const pay = (satir: number) => saglamaPayi(satir);
 const oran = (vergi: number, matrah: number) => (matrah > 0 ? Math.round((vergi / matrah) * 10000) / 100 : null);
 const iptalMi = (v: unknown) => v === true || sayi(v) === 1;
 

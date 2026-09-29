@@ -37,7 +37,10 @@ beforeEach(() => {
   vi.mocked(mikroKolonlar).mockReset();
   vi.mocked(mikroPost).mockReset();
 });
-afterEach(() => { if (yedek === undefined) delete process.env.OPS_SUMMARY_TOKEN; else process.env.OPS_SUMMARY_TOKEN = yedek; });
+afterEach(() => {
+  vi.restoreAllMocks();                                        // sahte Date.now bir test kırılsa da sonrakine sızmasın
+  if (yedek === undefined) delete process.env.OPS_SUMMARY_TOKEN; else process.env.OPS_SUMMARY_TOKEN = yedek;
+});
 
 const YOL = '/api/mikro/matrah-tani';
 const cagir = (headers: Record<string, string> = { 'x-ops-token': JETON }, query: Record<string, unknown> = {}) =>
@@ -117,6 +120,57 @@ describe('GET /api/mikro/matrah-tani', () => {
     expect(g.okunan).toEqual({ faturaSatirGrubu: 1, baslik: 2 });
     expect(d.yazilan).toEqual([]);
     expect(mikroPost).not.toHaveBeenCalled();
+  });
+
+  it('?onizleme=1: importun YENİ SELECT\'i gerçek biçimde (secim + fromEk + ORDER BY cha_Guid OFFSET/FETCH) SALT OKUMA koşar; yazım yok', async () => {
+    tablolar([...STH, 'sth_fat_uid'], CHA);
+    vi.mocked(mikroSql)
+      .mockResolvedValueOnce({ rows: [{ cha_tip: 1, cha_evrakno_sira: 420, matrah: 283500, kdvTutari: 33736.5, matrahKaynagi: 'baslik', ortakAnahtar: 0, cha_aciklama: 'gizli değil ama gereksiz' }], hata: null })
+      .mockResolvedValueOnce({ rows: [{ fatura: 700, saglamaTutmayan: 2 }], hata: null })
+      .mockRejectedValueOnce(Object.assign(new Error('zaman aşımı'), { name: 'TimeoutError' }))   // tutmayan: fırlatır → yakalanır
+      .mockResolvedValueOnce({ rows: [{ sth_evraktip: 1, n: 2, faturayaBagli: 2 }], hata: null })
+      .mockResolvedValueOnce({ rows: [], hata: 'Conversion failed' })                              // bagliFaturalar: Mikro reddi
+      .mockResolvedValueOnce({ rows: [{ sth_evraktip: 1 }], hata: null });
+    const r = await cagir({ 'x-ops-token': JETON }, { onizleme: '1' });
+    expect(r.kod).toBe(200);
+    const g = r.govde as Record<string, unknown> & { ornek: Array<Record<string, unknown>>; baglanti: Record<string, unknown>; sorgu: Record<string, unknown> };
+    expect(g).toMatchObject({ success: true, onizleme: true, genel: [{ fatura: 700, saglamaTutmayan: 2 }], tutmayan: { hata: 'TimeoutError: zaman aşımı' } });
+    expect(g.sorgu).toEqual({ matrahYazilir: true, notlar: [] });
+    expect(g.ornek[0]).toMatchObject({ cha_evrakno_sira: 420, matrah: 283500, matrahKaynagi: 'baslik' });
+    expect(g.ornek[0]).not.toHaveProperty('cha_aciklama');
+    expect(g.baglanti).toMatchObject({ bagKolonu: 'sth_fat_uid', dagilim: [{ sth_evraktip: 1, n: 2, faturayaBagli: 2 }], bagliFaturalar: { hata: 'Conversion failed' } });
+    const sqller = vi.mocked(mikroSql).mock.calls.map(c => c[0] as string);
+    expect(sqller).toHaveLength(6);
+    expect(sqller[0]).toContain('CROSS APPLY (SELECT (cha.cha_aratoplam - (ISNULL(cha.cha_ft_iskonto1, 0) + ISNULL(cha.cha_ft_iskonto2, 0))) AS bm) b');
+    expect(sqller[0]).toContain('ORDER BY cha.cha_Guid OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY');
+    for (const c of vi.mocked(mikroSql).mock.calls) expect(c[1]).toEqual({ zamanAsimiMs: 20000 });
+    for (const sql of sqller) expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE|MERGE)\b/i);
+    expect(d.yazilan).toEqual([]);
+    expect(mikroPost).not.toHaveBeenCalled();
+  });
+
+  it('?onizleme=1 süre bütçesi İSTEK BAŞINDAN: şema okuması bütçeyi yerse sorgular yapılmaz, yanıt yine 200', async () => {
+    let saat = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => saat);
+    vi.mocked(mikroKolonlar).mockImplementation(async (t: string) => { saat += 48000; return t === 'STOK_HAREKETLERI' ? [...STH, 'sth_fat_uid'] : CHA; });
+    const r = await cagir({ 'x-ops-token': JETON }, { onizleme: '1' });
+    expect(r.kod).toBe(200);
+    expect(mikroSql).not.toHaveBeenCalled();
+    expect((r.govde as { genel: unknown }).genel).toEqual({ hata: 'süre bütçesi doldu — okunmadı' });
+  });
+
+  it('?onizleme=1 okuma zaman aşımı KALAN süreyle sınırlı: şema 88 sn yerse ilk okuma 12 sn ile istenir', async () => {
+    let saat = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => saat);
+    vi.mocked(mikroKolonlar).mockImplementation(async (t: string) => { saat += 44000; return t === 'STOK_HAREKETLERI' ? STH : CHA; });
+    vi.mocked(mikroSql).mockResolvedValue({ rows: [], hata: null });
+    await cagir({ 'x-ops-token': JETON }, { onizleme: '1' });
+    expect(vi.mocked(mikroSql).mock.calls[0][1]).toEqual({ zamanAsimiMs: 12000 });
+  });
+
+  it('?onizleme=1 de jeton kapısından geçer (sorgu dizesindeki jeton 401)', async () => {
+    expect((await cagir({}, { onizleme: '1', token: JETON })).kod).toBe(401);
+    expect(mikroSql).not.toHaveBeenCalled();
   });
 
   it('şema okunamadıysa 502; temel kolon eksikse 500 adıyla; SQL hatası 502', async () => {

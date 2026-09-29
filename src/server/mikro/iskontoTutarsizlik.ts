@@ -14,6 +14,7 @@
  * YAZMAZ; düzeltme kullanıcının Mikro'da yapacağı iştir.
  */
 import { faturaToplamlari, mikroTutarsizliklari, faturaAnahtari, type MikroTutarsizligi, type StokHareketi } from '../../lib/stokFiyat.js';
+import { SATIR_ISKONTO_DESENI, SATIR_MASRAF_DESENI } from '../../lib/faturaMatrahi.js';
 
 export interface TutarsizFatura {
   yon: 'gelen' | 'giden';
@@ -144,8 +145,8 @@ export interface SatirKolonPlani { secim: string[]; iskonto: string[]; eksik: st
 export function satirKolonPlani(semaKolonlari: readonly string[]): SatirKolonPlani {
   const kucuk = new Map(semaKolonlari.map(k => [k.toLowerCase(), k]));
   const eksik = TEMEL_SATIR_KOLONLARI.filter(k => !kucuk.has(k));
-  const iskonto = semaKolonlari.filter(k => /^sth_iskonto\d+$/i.test(k));
-  const masraf = semaKolonlari.filter(k => /^sth_masraf\d+$/i.test(k));
+  const iskonto = semaKolonlari.filter(k => SATIR_ISKONTO_DESENI.test(k));     // aile desenleri tek kaynak: lib/faturaMatrahi
+  const masraf = semaKolonlari.filter(k => SATIR_MASRAF_DESENI.test(k));
   const secim = [...TEMEL_SATIR_KOLONLARI.filter(k => kucuk.has(k)).map(k => kucuk.get(k) as string), ...iskonto, ...masraf];
   return { secim, iskonto, eksik };
 }

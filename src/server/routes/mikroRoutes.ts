@@ -62,6 +62,9 @@ import { araligiTopla, ALT_STOK, ALT_CARI, type SayfaSayaclari } from '../mikro/
 import { bilinenSayi } from '../../utils/para.js';
 import { birimSapmasiRaporu } from '../mikro/birimSapmasi.js';
 import { matrahTaniRaporu } from '../mikro/matrahTani.js';
+import { faturaListesiSorgusu } from '../mikro/faturaListesiSorgusu.js';
+import { onizlemeSorgulari, baglantiSorgulari, onizlemeSatiri } from '../mikro/matrahOnizleme.js';
+import { FT_ISKONTO_DESENI, SATIR_MASRAF_DESENI } from '../../lib/faturaMatrahi.js';
 import { durumDenemesiOzeti, ettnGecerli, hucreleriKes, type DurumDenemesi } from '../mikro/ebelgeDurumTani.js';
 import { zamanAsimiMi } from '../mikro/adaptifSayfalama.js';
 // Varlık eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeVarlik.ts
@@ -2372,6 +2375,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  NULL tutar/vergi 0 sayılmaz — o fatura 'satirBilinmiyor'. Aynı jeton kapısı; Mikro'ya ve Cetpa'ya YAZMAZ. */
   app.get('/api/mikro/matrah-tani', async (req: Request, res: Response) => {
     if (!opsJetonuGecerli(req, res)) return;
+    const istekT0 = Date.now();
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     try {
       const [sthKolonlari, chaKolonlari] = [await mikroKolonlar('STOK_HAREKETLERI'), await mikroKolonlar('CARI_HESAP_HAREKETLERI')];
@@ -2380,12 +2384,35 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       }
       const plan = satirKolonPlani(sthKolonlari);
       if (plan.eksik.length) return res.status(500).json({ success: false, error: `STOK_HAREKETLERI şemasında beklenen kolon yok: ${plan.eksik.join(', ')}` });
+      // ?onizleme=1 — matrah düzeltmesinin 1. aşaması (şartname v2 kapı E1/E3): importun YENİ SELECT'i (faturaListesiSorgusu)
+      // gerçek motorda, HİÇBİR ŞEY YAZMADAN koşar + fatura dışı satırların faturaya bağlantısı ölçülür. Her okuma kendi hatasını
+      // taşır (fırlatmaz); bütçe İSTEK BAŞINDAN 100 sn (IIS/ARR ~120 sn — ebelge-durum-tani kalıbı), okuma başına ≤ 20 sn.
+      if (req.query.onizleme === '1') {
+        const kalan = () => 100000 - (Date.now() - istekT0);
+        const oku = async (sql: string | null) => {
+          if (!sql) return null;
+          if (kalan() < 5000) return { hata: 'süre bütçesi doldu — okunmadı' };
+          try { const r = await mikroSql(sql, { zamanAsimiMs: Math.min(20000, kalan()) }); return r.hata ? { hata: r.hata } : r.rows; }
+          catch (e) { return { hata: e instanceof Error ? `${e.name}: ${e.message}` : String(e) }; }
+        };
+        const q = faturaListesiSorgusu({ ana: chaKolonlari, satir: sthKolonlari });
+        const o = onizlemeSorgulari(q, FATURA_EVRAK_KOSULU);
+        const b = baglantiSorgulari(sthKolonlari);
+        const ornek = await oku(o.ornek);
+        return res.json({
+          success: true, onizleme: true, sorgu: { matrahYazilir: q.matrahYazilir, notlar: q.notlar },
+          ornek: Array.isArray(ornek) ? ornek.map(onizlemeSatiri) : ornek,
+          genel: await oku(o.genel), tutmayan: await oku(o.tutmayan),
+          baglanti: { bagKolonu: b.bagKolonu, adaylar: b.adaylar, dagilim: await oku(b.dagilim),
+            bagliFaturalar: await oku(b.bagliFaturalar), irsaliyeOrnek: await oku(b.irsaliyeOrnek) },
+        });
+      }
       const sthGercek = new Map(sthKolonlari.map(k => [k.toLowerCase(), k]));
       const chaGercek = new Map(chaKolonlari.map(k => [k.toLowerCase(), k]));
-      const masrafK = sthKolonlari.filter(k => /^sth_masraf\d+$/i.test(k));
+      const masrafK = sthKolonlari.filter(k => SATIR_MASRAF_DESENI.test(k));
       const masrafVergiK = sthGercek.get('sth_masraf_vergi');
       const aratoplamK = chaGercek.get('cha_aratoplam');
-      const ftIskK = chaKolonlari.filter(k => /^cha_ft_iskonto\d+$/i.test(k));
+      const ftIskK = chaKolonlari.filter(k => FT_ISKONTO_DESENI.test(k));
       // Kolon adları şemadan geldi ve katı desenle süzüldü — SQL'e yalnız bunlar girer.
       const topla = (kolonlar: readonly string[], on = '') => (kolonlar.length ? kolonlar.map(k => `ISNULL(${on}${k}, 0)`).join(' + ') : '0');
       // İptal süzgeci toplamların İÇİNDE (inceleme 2026-09-28): fatura-listesi importunun satır JOIN'i iptal süzmüyor — tanı
