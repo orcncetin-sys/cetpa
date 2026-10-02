@@ -286,6 +286,77 @@ describe('POST /api/mikro/import/faturadan-siparis', () => {
       expect(String((res.govde as { note?: string }).note)).toMatch(/1 faturanın yönü okunamadığı için iptal eşlemesi ATLANDI/);
     });
 
+    // 2026-10-02 (fatura 389): alıcının REDDETTİĞİ e-Fatura (GİB 2002 → `gibRed`) Mikro'da iptal bayrağı taşımaz ve geçerli listede durur.
+    describe('alıcının reddettiği satış faturası (gibRed)', () => {
+      const RED = { ...BASLIK, cha_Guid: 'G389', cha_evrakno_sira: 389, gibRed: true };
+      it("yeni MF siparişi TÜRETİLMEZ; mevcut MF siparişi 'Cancelled' olur ve not reddi AYRI söyler", async () => {
+        iptalKur([BASLIK, RED], [], [MF(321), MF(389)]);
+        const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+        const y389 = d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-389');
+        expect(y389).toHaveLength(1);
+        expect(y389[0]).toMatchObject({ op: 'update', data: { status: 'Cancelled', iptalKaynagi: 'mikro', iptalOncekiDurum: 'Shipped' } });
+        const not = String((res.govde as { note?: string }).note);
+        expect(not).toMatch(/1 MF siparişi faturasını alıcı reddettiği \(GİB 2002\) için 'İptal' yapıldı/);
+        expect(not).not.toMatch(/Mikro'da faturası iptal edildiği için/);
+        expect(res.govde).toMatchObject({ iptalEdilen: 1 });
+      });
+      it('MF siparişi henüz YOKKEN reddedilen faturadan sipariş OLUŞTURULMAZ', async () => {
+        iptalKur([BASLIK, RED], [], []);
+        await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+        const idler = d.koleksiyon('orders').map(y => y.ref.id);
+        expect(idler).toContain('mikrofat__A__-321');
+        expect(idler).not.toContain('mikrofat__A__-389');
+      });
+      it('aynı evrak numarasında hem reddedilmiş hem GEÇERLİ satış başlığı varsa siparişe DOKUNULMAZ, sayılır', async () => {
+        iptalKur([BASLIK, RED, { ...BASLIK, cha_Guid: 'G389b', cha_evrakno_sira: 389 }], [], [MF(321), MF(389)]);
+        const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+        expect(d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-389' && y.data?.status === 'Cancelled')).toEqual([]);
+        expect(res.govde).toMatchObject({ iptalEdilen: 0, iptalBelirsiz: 1 });
+        expect(String((res.govde as { note?: string }).note)).toMatch(/1 evrak numarasında hem geçerli hem iptal\/reddedilmiş başlık var/);
+      });
+      it('aynı sıra numaralı ALIŞ başlığı karışmaz: alış geçerli diye satış siparişi "geçerli" sayılmaz, alıştaki bayrak red sayılmaz', async () => {
+        iptalKur([BASLIK, RED, { ...BASLIK, cha_Guid: 'A389', cha_evrakno_sira: 389, cha_tip: 1 }, { ...BASLIK, cha_Guid: 'A321', cha_evrakno_sira: 321, cha_tip: 1, gibRed: true }], [], [MF(321), MF(389)]);
+        const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+        expect(res.govde).toMatchObject({ iptalEdilen: 1, iptalBelirsiz: 0 });
+        expect(d.koleksiyon('orders').filter(y => y.data?.status === 'Cancelled').map(y => y.ref.id)).toEqual(['mikrofat__A__-389']);
+      });
+      it("Cetpa'dan kesilmiş (MF olmayan) siparişe bağlı red ETTN ile eşlenir: sipariş DEĞİŞMEZ, notta adıyla söylenir", async () => {
+        const ETTN = 'BBBBBBBB-1111-2222-3333-000000000389';
+        iptalKur([BASLIK, { ...RED, cha_uuid: `{${ETTN}}` }], [], [MF(321), { id: 'ord-7', orderNumber: 'CTP-7', status: 'Delivered', ettn: ETTN.toLowerCase(), mikroFaturaNo: '389' }]);
+        const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+        expect(d.koleksiyon('orders').filter(y => y.ref.id === 'ord-7')).toEqual([]);
+        expect(String((res.govde as { note?: string }).note)).toMatch(/1 reddedilen fatura Cetpa'dan kesilmiş siparişe bağlı: CTP-7 \(fatura 389\) — siparişi elle iptal edin/);
+      });
+      // İnceleme 2026-10-02: `mikroEvrakNo` SİPARİŞ evrak numarasıdır (fatura sayacından bağımsız) — aynı sayıyı taşıyan ilgisiz bir
+      // sipariş "elle iptal edin" diye GÖSTERİLMEZ; zaten iptal edilmiş sipariş de sayılmaz.
+      it('numara çakışması (mikroEvrakNo = reddedilen faturanın sırası) yanlış alarm ÜRETMEZ; iptal edilmiş sipariş sayılmaz', async () => {
+        const ETTN = 'BBBBBBBB-1111-2222-3333-000000000389';
+        iptalKur([BASLIK, { ...RED, cha_uuid: ETTN }], [], [MF(321),
+          { id: 'ord-8', orderNumber: 'CTP-8', status: 'Delivered', mikroEvrakNo: '389' },
+          { id: 'ord-9', orderNumber: 'CTP-9', status: 'Cancelled', ettn: ETTN }]);
+        const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+        expect(String((res.govde as { note?: string }).note ?? '')).not.toMatch(/Cetpa'dan kesilmiş siparişe bağlı/);
+      });
+    });
+
+    // Mikro'dan SİLİNEN faturanın MF siparişi (325, ölçüm 2026-10-02): bu turda yalnız SAYILIR.
+    it('KAYNAKSIZ MF siparişi (faturası ne geçerli ne iptal listesinde) sayılır ve notta adıyla yazılır; durumu DEĞİŞMEZ', async () => {
+      iptalKur([BASLIK], [], [MF(321), MF(325)]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      expect(d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-325')).toEqual([]);
+      expect(String((res.govde as { note?: string }).note)).toMatch(/1 MF siparişinin kaynağı Mikro fatura listesinde yok \(silinmiş olabilir\): MF-325 — durum değiştirilmedi/);
+    });
+    it('zaten İPTAL edilmiş kaynaksız MF siparişi her koşuda yeniden uyarı ÜRETMEZ', async () => {
+      iptalKur([BASLIK], [], [MF(321), MF(325, { status: 'Cancelled', iptalKaynagi: 'mikro' })]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      expect(String((res.govde as { note?: string }).note ?? '')).not.toMatch(/kaynağı Mikro fatura listesinde yok/);
+    });
+    it('hiç geçerli satış faturası yokken (faturalar çekilmemiş) kaynaksız SAYILMAZ — tüm siparişler yanlış alarm olurdu', async () => {
+      iptalKur([], [], [MF(321), MF(325)]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+      expect(String((res.govde as { note?: string }).note ?? '')).not.toMatch(/kaynağı Mikro fatura listesinde yok/);
+    });
+
     it("kalem modunda (önizle/uygula) iptal işaretlemesi KOŞMAZ", async () => {
       iptalKur([BASLIK], [{ cha_evrakno_seri: '', cha_evrakno_sira: 400, cha_tip: 0 }], [MF(400)]);
       await d.cagir('POST', '/api/mikro/import/faturadan-siparis', { kalemYenile: 'uygula' });

@@ -22,6 +22,7 @@ import {
 import { collection, getDocs, query, where, limit, Timestamp } from '../lib/dbClient';
 import { zamanDate, ayAnahtari, bugunAnahtari } from '../utils/zaman';
 import { auth, db } from '../firebase';
+import { gibReddedildi } from '../lib/gibDurum';
 import { oc } from '../i18n/ortak';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -109,7 +110,8 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
 
       const orders   = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() } as RawOrder));
       const inventory = invSnap.docs.map(d => ({ id: d.id, ...d.data() } as RawInv));
-      const mikroFaturalar = mFaturaSnap.docs.map(d => d.data());
+      // Alıcının reddettiği e-Fatura (GİB 2002) talep/ciro sayılmaz — useMikroFaturalar ile aynı kural (lib/gibDurum).
+      const mikroFaturalar = mFaturaSnap.docs.map(d => d.data()).filter(f => !gibReddedildi(f as Record<string, unknown>));
       const mikroHareketler = mHareketSnap.docs.map(d => d.data());
 
       if (orders.length === 0 && mikroFaturalar.length === 0 && mikroHareketler.length === 0) {

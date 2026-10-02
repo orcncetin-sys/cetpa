@@ -3,6 +3,7 @@ import { collection, onSnapshot } from '../lib/dbClient';
 import { db } from '../firebase';
 import { bilinenSayi } from '../utils/para';
 import { ebelgeTuruCoz } from '../utils/muhasebe/ebelgeTuru';
+import { gibReddedildi } from '../lib/gibDurum';
 
 /** Mikro faturası — istemci tarafı normalize edilmiş şekil.
  *  KAYNAK: `mikroFaturalar` koleksiyonu (server: /api/mikro/import/fatura-listesi).
@@ -89,7 +90,12 @@ export function mapMikroFatura(id: string, x: Record<string, unknown>): MikroFat
 }
 
 /** mikroFaturalar koleksiyonunu dinle. `enabled` false iken abone OLMAZ.
- *  Mikro kayıt silmez (*_iptal=1 işaretler) → iptal edilenler dışlanır. */
+ *  HESAPLARA GİRMEYENLER burada, TEK yerde düşer (tüm ekranlar bu kancadan beslenir):
+ *    • iptal bayraklı kayıt (savunma — import iptalleri zaten indirmez, süpürgeyle siler);
+ *    • ALICININ REDDETTİĞİ satış e-Faturası (`gibRed`, GİB 2002 — lib/gibDurum). Mikro'da iptal bayrağı taşımaz ve import onu
+ *      geçerli fatura diye indirir; durum yalnız GİB taramasından bilinir (fatura 389, 2026-10-02). Kullanıcı kararı
+ *      (2026-09-25): reddedilen fatura ciro / KDV / mizan / Ba-Bs'ye girmez, yalnız İptal & İade listesinde görünür.
+ *  (Eski not "Mikro kayıt silmez" YANLIŞTI: silinen fatura 325 ölçüldü; onu import'un ters süpürgesi kaldırır.) */
 export function useMikroFaturalar(enabled: boolean): MikroFatura[] {
   const [faturalar, setFaturalar] = useState<MikroFatura[]>([]);
   useEffect(() => {
@@ -103,7 +109,7 @@ export function useMikroFaturalar(enabled: boolean): MikroFatura[] {
               const x = d.data();
               // `?? 0` MEŞRU: Mikro iptali AÇIKÇA işaretler (*_iptal=1); alan yoksa iptal DEĞİLdir.
               const iptal = x.cha_iptal === true || Number(x.cha_iptal ?? 0) === 1;
-              return { f: mapMikroFatura(d.id, x), iptal };
+              return { f: mapMikroFatura(d.id, x), iptal: iptal || gibReddedildi(x) };
             })
             .filter(r => !r.iptal)
             .map(r => r.f),

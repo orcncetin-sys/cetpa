@@ -253,6 +253,9 @@ describe('(a) anında döner + jobs/<isAdi> dokümanı; sonSayfaMs zinciri', () 
   });
 });
 
+/** Ters süpürgenin küme sağlaması sorgusu: `SELECT [takma.]<guid> AS guid FROM <tablo> <WHERE>` (sayfasız, fromEk'siz). */
+const KUME_SORGUSU = /^SELECT (\w+\.)?\w+ AS guid FROM /;
+
 // 2026-09-25: iptal edilen faturalar AYRI koleksiyona iner; Mikro'da iptal GERİ ALINAN fatura ters süpürgeyle kalkar.
 // Şartname kapısı D1: iptalKolonu verilseydi süpürge `<> 0` GUID'leri, yani bu koleksiyonun KENDİ kayıtlarını silerdi.
 describe('import/iptal-faturalar — ayrı koleksiyon + TERS süpürge (yalnız eksiksiz sonuçta, pencere içinde)', () => {
@@ -268,7 +271,10 @@ describe('import/iptal-faturalar — ayrı koleksiyon + TERS süpürge (yalnız 
 
   it("sorgu: evrak koşulu + ISNULL(cha.cha_iptal, 0) <> 0; iptal süpürgesi YOK; yazım mikroIptalFaturalar'a; ters süpürge yalnız g2'yi siler", async () => {
     pgKur();
-    vi.mocked(mikroSql).mockResolvedValue({ rows: [{ cha_Guid: 'g1', cha_tarihi: '2026-01-05T00:00:00', cha_tip: 0 }], hata: null });
+    // Küme sağlaması (2026-10-02): ters süpürge ancak Mikro'nun ANLIK GUID kümesi okunanla birebir aynıysa siler.
+    vi.mocked(mikroSql).mockImplementation((async (sql: string) => (KUME_SORGUSU.test(sql)
+      ? { rows: [{ guid: 'g1' }], hata: null }
+      : { rows: [{ cha_Guid: 'g1', cha_tarihi: '2026-01-05T00:00:00', cha_tip: 0 }], hata: null })) as unknown as typeof mikroSql);
     const res = await d.cagir('POST', '/api/mikro/import/iptal-faturalar');
     expect(res.govde).toEqual({ success: true, started: true, job: 'mikroImport-iptal-faturalar' });
     const son = await d.isBitisi('mikroImport-iptal-faturalar');
@@ -280,6 +286,52 @@ describe('import/iptal-faturalar — ayrı koleksiyon + TERS süpürge (yalnız 
     expect(d.koleksiyon('mikroIptalFaturalar').filter(y => y.op === 'delete').map(y => y.ref.id)).toEqual(['g2']);
     expect(d.syncLog).toHaveBeenCalledWith('SQL:CARI_HESAP_HAREKETLERI cha', 'mikroIptalFaturalar',
       expect.stringContaining('1 kayıt artık sonuçta yok'), true, null, null, expect.any(Number), expect.anything());
+  });
+
+  // Şartname kapısı + inceleme 2026-10-02: sayfa döngüsü boş sayfada biter; Mikro bir ara sayfayı hatasız ama BOŞ dönerse ya da
+  // OFFSET kayarsa `allRows` eksik kalır — eksik sonuca bakıp silmek geçerli kayıtları götürürdü.
+  const sayfaVeKume = (sayfa: Record<string, unknown>[], kume: { rows: Record<string, unknown>[]; hata: string | null }, sorgular?: string[]) =>
+    vi.mocked(mikroSql).mockImplementation((async (sql: string) => { sorgular?.push(sql); return KUME_SORGUSU.test(sql) ? kume : { rows: sayfa, hata: null }; }) as unknown as typeof mikroSql);
+  const G1 = [{ cha_Guid: 'g1', cha_tarihi: '2026-01-05T00:00:00', cha_tip: 0 }];
+  const silinenYok = async () => {
+    await d.cagir('POST', '/api/mikro/import/iptal-faturalar');
+    await d.isBitisi('mikroImport-iptal-faturalar');
+    expect(d.koleksiyon('mikroIptalFaturalar').filter(y => y.op === 'delete')).toEqual([]);
+  };
+  it('KÜME SAĞLAMASI: Mikro\'nun anlık kümesi okunandan BÜYÜKSE ters süpürge ATLANIR; küme sorgusu `fromEk`siz ve aynı WHERE ile', async () => {
+    pgKur();
+    const sorgular: string[] = [];
+    sayfaVeKume(G1, { rows: [{ guid: 'g1' }, { guid: 'g7' }, { guid: 'g8' }], hata: null }, sorgular);
+    await silinenYok();
+    expect(d.syncLog).toHaveBeenCalledWith('SQL:CARI_HESAP_HAREKETLERI cha', 'mikroIptalFaturalar',
+      expect.stringContaining("ters süpürge atlandı: Mikro'daki küme okunanla aynı değil (Mikro 3, okunan 1)"), true, null, null, expect.any(Number), expect.anything());
+    expect(sorgular.find(q => KUME_SORGUSU.test(q))).toBe("SELECT cha.cha_Guid AS guid FROM CARI_HESAP_HAREKETLERI cha WHERE (cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6)) "
+      + "AND ISNULL(cha.cha_iptal, 0) <> 0 AND cha.cha_tarihi >= '2020-01-01'");
+  });
+  // İnceleme 2026-10-02 (CONFIRMED): iki sayfa arasında bir kayıt silinirse OFFSET kayar — bir geçerli kayıt hiç okunmaz ama ADET
+  // yine tutar (bir eksilme + bir atlama). Yalnız sayı karşılaştıran sağlama burada geçerli kaydı sildirirdi.
+  it('ADET TUTUYOR ama küme FARKLI (OFFSET kayması): hiçbir şey silinmez', async () => {
+    pgKur();
+    sayfaVeKume([...G1, { cha_Guid: 'gD', cha_tarihi: '2026-01-06T00:00:00', cha_tip: 0 }], { rows: [{ guid: 'g1' }, { guid: 'g2' }], hata: null });
+    await silinenYok();                                                        // g2 PG'de var ve okunanlarda yok — yine de SİLİNMEZ
+    expect(d.syncLog).toHaveBeenCalledWith('SQL:CARI_HESAP_HAREKETLERI cha', 'mikroIptalFaturalar',
+      expect.stringContaining("Mikro'daki küme okunanla aynı değil (Mikro 2, okunan 2)"), true, null, null, expect.any(Number), expect.anything());
+  });
+  it('anlık küme okunamazsa (hata / boş yanıt) ters süpürge ATLANIR', async () => {
+    for (const kume of [{ rows: [], hata: 'timeout' }, { rows: [], hata: null }]) {
+      d.sifirla(); pgKur();
+      sayfaVeKume(G1, kume);
+      await silinenYok();
+    }
+  });
+  it('SİLME TAVANI: 20\'den fazla ve pencerenin %10\'undan fazlası silinecekse HİÇBİRİ silinmez (yanlış firmaya dönen bağlantı)', async () => {
+    const cok = [{ id: 'g1', data: { companyId: 'A', cha_tarihi: '2026-01-05T00:00:00' } },
+      ...Array.from({ length: 30 }, (_, i) => ({ id: `eski${i}`, data: { companyId: 'A', cha_tarihi: '2025-06-01T00:00:00' } }))];
+    d.pgAyarla(async (sql: string) => (/SELECT id, data FROM docs WHERE coll = \$1/.test(sql) ? { rows: cok } : { rows: [] }));
+    sayfaVeKume(G1, { rows: [{ guid: 'g1' }], hata: null });
+    await silinenYok();
+    expect(d.syncLog).toHaveBeenCalledWith('SQL:CARI_HESAP_HAREKETLERI cha', 'mikroIptalFaturalar',
+      expect.stringContaining('30 / 31 kayıt silinecekti — OLAĞANDIŞI'), true, null, null, expect.any(Number), expect.anything());
   });
 
   it('üst sınır (sonTarih) verilirse sonuç eksiksiz DEĞİL → ters süpürge atlanır ve söylenir; hiçbir şey silinmez', async () => {
@@ -322,6 +374,42 @@ describe('import/iptal-faturalar — ayrı koleksiyon + TERS süpürge (yalnız 
     await d.isBitisi('mikroImport-iptal-faturalar');
     expect(d.koleksiyon('mikroIptalFaturalar').filter(y => y.op === 'delete')).toEqual([]);
   });
+});
+
+// 2026-10-02: Mikro kayıt SİLEBİLİYOR (satış 325 — Cetpa 709 / Mikro 708). İptal süpürgesi yalnız `<> 0` GUID'leri görür;
+// silinen fatura yetim kalıp ciro/KDV'ye katılıyordu → fatura-listesi de ters süpürgeli (iptal süpürgesiyle BİRLİKTE).
+describe('import/fatura-listesi — Mikro\'dan SİLİNEN fatura ters süpürgeyle kalkar', () => {
+  const MEVCUT = [
+    { id: 'f1', data: { companyId: 'A', cha_tarihi: '2026-09-01 00:00:00' } },   // Mikro'da duruyor → kalır
+    { id: 'f325', data: { companyId: 'A', cha_tarihi: '2026-08-06 00:00:00' } }, // Mikro'dan silinmiş → SİLİNİR
+    { id: 'eski', data: { companyId: 'A', cha_tarihi: '2019-05-01 00:00:00' } }, // pencere (2020+) dışı → kalır
+  ];
+  const kur = (mikroAdet: number) => {
+    d.pgAyarla(async (sql: string, params?: unknown[]) =>
+      (/SELECT id, data FROM docs WHERE coll = \$1 AND data->>'companyId' = \$2/.test(sql) && params?.[0] === 'mikroFaturalar' && params?.[1] === 'A'
+        ? { rows: MEVCUT } : { rows: [] }));
+    vi.mocked(mikroKolonlar).mockResolvedValue(['cha_Guid', 'cha_iptal', 'cha_tarihi']);
+    vi.mocked(mikroPost).mockImplementation((async () => ({ ok: true, status: 200, data: { result: [{ Data: [] }] } })) as unknown as typeof mikroPost);
+    vi.mocked(mikroSql).mockImplementation((async (sql: string) => (KUME_SORGUSU.test(sql)
+      ? { rows: Array.from({ length: mikroAdet }, (_, i) => ({ guid: `f${i + 1}` })), hata: null }
+      : { rows: [{ cha_Guid: 'f1', cha_tarihi: '2026-09-01 00:00:00', cha_tip: 0, cha_meblag: 100, kdvTutari: 20 }], hata: null })) as unknown as typeof mikroSql);
+  };
+  it('yetim kopya silinir, duran ve pencere dışı kalır; iptal süpürgesi de koşar; özet "Mikro\'da artık yok"', async () => {
+    kur(1);
+    await d.cagir('POST', '/api/mikro/import/fatura-listesi');
+    await d.isBitisi('mikroImport-fatura-listesi');
+    expect(d.koleksiyon('mikroFaturalar').filter(y => y.op === 'delete').map(y => y.ref.id)).toEqual(['f325']);
+    expect(vi.mocked(mikroPost).mock.calls.filter(c => c[0] === 'SqlVeriOkuV2')).toHaveLength(1);          // iptal süpürgesi
+    expect(d.syncLog).toHaveBeenCalledWith('SQL:CARI_HESAP_HAREKETLERI cha', 'mikroFaturalar',
+      expect.stringContaining("1 kayıt Mikro'da artık yok (silinmiş ya da koşuldan çıkmış), kaldırıldı"), true, null, null, expect.any(Number), expect.anything());
+  });
+  it('anlık küme okunandan büyükse (eksik sayfa) HİÇBİR fatura silinmez', async () => {
+    kur(2);
+    await d.cagir('POST', '/api/mikro/import/fatura-listesi');
+    await d.isBitisi('mikroImport-fatura-listesi');
+    expect(d.koleksiyon('mikroFaturalar').filter(y => y.op === 'delete')).toEqual([]);
+  });
+
 });
 
 describe('(b) KİLİT: süreç-geneli TEK iş — farklı isAdi de alreadyRunning, job = ÇALIŞAN iş', () => {
@@ -444,7 +532,8 @@ describe('(d) cron paritesi: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DO�
     expect(sorgular.some(s => s.includes("sth_tarih >= '2026-06-26'"))).toBe(true);
     expect(sorgular.filter(s => /BETWEEN/.test(s))).toEqual([]);
     expect(arkaPlanIsiBaslat).not.toHaveBeenCalled();
-    expect(dc.syncLog).toHaveBeenCalledTimes(13);   // 2026-09-25: + iptal-faturalar (13. tanım)
+    expect(dc.syncLog).toHaveBeenCalledTimes(14);   // 13 tanım (2026-09-25: + iptal-faturalar) + GİB durum taraması (2026-10-02, döngüden SONRA)
+    expect(dc.syncLog).toHaveBeenLastCalledWith('EBelgeDurumSorgulamaV2', 'mikroFaturalar', expect.stringContaining('GİB durum taraması'), true, null, null, expect.any(Number), expect.anything());
     // iptal-faturalar: fatura-listesiyle AYNI evrak koşulu + `<> 0`; iptal süpürgesi YOK (kendi yazdığını silerdi).
     expect(sorgular.some(s => s.includes('ISNULL(cha.cha_iptal, 0) <> 0') && s.includes("cha.cha_tarihi >= '2000-01-01'"))).toBe(true);
     // BİLİNÇLİ FARK (S5/K-A ortak gövde; kapanış hakemi 2026-09-25): cron'un ÇAĞRI deseni değişmedi, ama

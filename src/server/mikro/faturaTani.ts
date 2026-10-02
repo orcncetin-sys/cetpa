@@ -18,6 +18,9 @@ export interface CetpaFatura {
   tarih: string | null;
   meblag: string | null;
   guncelleme: string | null;
+  /** Taramanın yazdığı bayrak ('true' / null) ve GİB belge kodu — kapanış ölçüsü için. */
+  gibRed?: string | null;
+  gibBelgeKodu?: string | null;
 }
 
 /** GUID karşılaştırma anahtarı: süslü parantez ve harf büyüklüğü farkı eşleşmeyi bozmasın. */

@@ -630,11 +630,12 @@ describe("§5 · DEĞİŞMEZ: `collection('jobs')` yalnız `mikro/arkaPlanIsi.ts
 // §6 · yazıcı kaydı: senkron uçlar `yaziciyiIstegeBagla`, arka plan işi iş ömrünce kayıt
 // ---------------------------------------------------------------------------
 
-describe('§6 · DEĞİŞMEZ: `yaziciyiIstegeBagla(` mikroRoutes.ts TAM 5 (senkron uçlar); yardımcıda 0 + `yaziciSil(`', () => {
-  it('mikroRoutes.ts tam 5 — arka plana alınan 3 uç (stok, cari, stok-miktar) `res.finish`e bağlı kaydı KULLANMAZ', () => {
-    // Neden 5: bakimKilidi `res.once('finish', sil)` — kayıt YANIT bitince silinir; arka plan işi dakikalarca
-    // yazmaya devam ederken bakım scripti "yazıcı yok" görürdü. Kalan 5 senkron uç Faz 4 listesi.
-    expect(bul([ROTA], DESEN.yaziciBagla).map(b => b.site)).toHaveLength(5);
+describe('§6 · DEĞİŞMEZ: `yaziciyiIstegeBagla(` mikroRoutes.ts TAM 6 (senkron uçlar); yardımcıda 0 + `yaziciSil(`', () => {
+  it('mikroRoutes.ts tam 6 — arka plana alınan 3 uç (stok, cari, stok-miktar) `res.finish`e bağlı kaydı KULLANMAZ', () => {
+    // Neden senkron uçlar: bakimKilidi `res.once('finish', sil)` — kayıt YANIT bitince silinir; arka plan işi dakikalarca
+    // yazmaya devam ederken bakım scripti "yazıcı yok" görürdü. 5 senkron uç Faz 4 listesi + 2026-10-02 `import/gib-durum`
+    // (senkron, 90 sn bütçeli; mikroFaturalar + orders'a yazar → bakım scripti bitmesini beklemeli).
+    expect(bul([ROTA], DESEN.yaziciBagla).map(b => b.site)).toHaveLength(6);
   });
 
   it('yardımcı `yaziciyiIstegeBagla` çağırmaz; `yaziciSil(` (veya `yaziciOlarakCalistir(`) ≥ 1', () => {

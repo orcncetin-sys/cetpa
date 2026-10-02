@@ -139,7 +139,7 @@ describe('MikroSyncPanel — Tümünü Çek işin bitişini BEKLER (Mikro eşzam
     const ozet = await screen.findByRole('status', { name: 'Tümünü Çek özeti' });
     const metin = ozet.textContent ?? '';
     expect(metin).toContain('16 adım hatalı');    // stok, cari, 13 SQL, miktar (arka plan adımları)
-    expect(metin).toContain('7 adım tamam');      // 4 senkron uç + bakiye/mizan/kdv
+    expect(metin).toContain('8 adım tamam');      // 5 senkron uç (2026-10-02: + GİB durumları) + bakiye/mizan/kdv
     expect(metin).toContain('Stok kartları: Bakım kilidi: lead-birlestir');
     expect(metin).toContain('Cariler: HTTP 403');
     expect(metin).toContain('Stok miktarları: HTTP 502');
@@ -208,7 +208,7 @@ describe('MikroSyncPanel — Tümünü Çek: sayfa tavanı = hatalı adım; zama
     await act(async () => { yayinla('mikroImport-stok', { running: false, truncated: true, limit: 20000, finishedAt: { _seconds: 5, _nanoseconds: 0 } }); });
     const ozet = await screen.findByRole('status', { name: 'Tümünü Çek özeti' });
     expect(ozet.textContent).toContain('Stok kartları: Sayfa tavanına çarptı — veri EKSİK (yalnız ilk 20.000 satır alındı)');
-    expect(ozet.textContent).toContain('7 adım tamam');   // yalnız senkron adımlar; stok artık 'tamam' DEĞİL
+    expect(ozet.textContent).toContain('8 adım tamam');   // yalnız senkron adımlar (2026-10-02: + GİB durumları); stok artık 'tamam' DEĞİL
   });
 
   it('bekleme tavanı dolarsa sıra DURUR: 2. adım başlatılmaz, özet "Sıra durduruldu" + koşturulmayan adımları listeler', async () => {
@@ -252,7 +252,7 @@ describe('MikroSyncPanel — Tümünü Çek: SENKRON adım hatası da özete gir
     fireEvent.click(screen.getByRole('button', { name: /Tümünü Çek/ }));
     const ozet = await screen.findByRole('status', { name: 'Tümünü Çek özeti' });
     const metin = ozet.textContent ?? '';
-    expect(metin).toContain('5 adım tamam');       // 7 senkron adımdan 2'si hatalı
+    expect(metin).toContain('6 adım tamam');       // 8 senkron adımdan 2'si hatalı
     expect(metin).toContain('18 adım hatalı');     // 16 arka plan + personel + bakiye
     expect(metin).toContain('Personel: HTTP 502');
     expect(metin).toContain("Cari bakiyeler: Unexpected token '<'");
@@ -284,7 +284,7 @@ describe('MikroSyncPanel — Tümünü Çek panel ömründen BAĞIMSIZ', () => {
     baslat.mockImplementation(() => Promise.resolve({ success: false, error: 'X' }));
     await act(async () => { yayinla('mikroImport-stok', { running: false, finishedAt: { _seconds: 2, _nanoseconds: 0 } }); });
     const ozet = await screen.findByRole('status', { name: 'Tümünü Çek özeti' });
-    expect(ozet.textContent).toContain('8 adım tamam');   // stok + 7 senkron
+    expect(ozet.textContent).toContain('9 adım tamam');   // stok + 8 senkron
     expect(ozet.textContent).toContain('15 adım hatalı');
     expect(screen.getByRole('button', { name: /Tümünü Çek/ })).toBeEnabled();
   });

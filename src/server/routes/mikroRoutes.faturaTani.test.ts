@@ -31,8 +31,10 @@ const yedek = process.env.OPS_SUMMARY_TOKEN;
 const G = (n: number) => `AAAAAAAA-0000-0000-0000-${String(n).padStart(12, '0')}`;
 // Türkçe harmanlamada kolonun GERÇEK yazımı kullanılmalı (cha_Guid ≠ CHA_GUID olabilir).
 const SEMA = ['CHA_GUID', 'cha_tip', 'cha_iptal', 'cha_uuid', 'cha_ebelge_turu', 'cha_ebelge_Islemturu'];
+// Mikro uniqueidentifier değerini SÜSLÜ PARANTEZLE döndürür (canlı ölçüm 2026-10-02: kimlikler 38 karakter) — fikstür gerçek biçimde.
+const P = (n: number) => `{${G(n)}}`;
 const kopya = (n: number, o: Record<string, unknown> = {}) => ({
-  id: G(n), companyId: 'K1', seri: '', sira: String(n), tip: '0', tarih: `2026-09-${String(n % 28 + 1).padStart(2, '0')}T00:00:00`, meblag: '8500', guncelleme: '2026-09-30 03:20:00+03', ...o,
+  id: P(n), companyId: 'K1', seri: '', sira: String(n), tip: '0', tarih: `2026-09-${String(n % 28 + 1).padStart(2, '0')}T00:00:00`, meblag: '8500', guncelleme: '2026-09-30 03:20:00+03', ...o,
 });
 let d: Duzenek;
 let pgSorgulari: string[];
@@ -91,7 +93,7 @@ describe('GET /api/mikro/fatura-tani', () => {
   it('silinen fatura YETİM çıkar; GUID kolonu şemadaki yazımıyla; yetim kimlik Mikro\'da başka evrak tipiyle aranır', async () => {
     pgKur([kopya(388), kopya(389)]);
     vi.mocked(mikroSql)
-      .mockResolvedValueOnce({ rows: [{ guid: G(388), iptal: false }], hata: null })
+      .mockResolvedValueOnce({ rows: [{ guid: P(388), iptal: false }], hata: null })
       .mockResolvedValueOnce({ rows: [], hata: null });
     const y = await cagir();
     expect(y.kod).toBe(200);
@@ -101,7 +103,8 @@ describe('GET /api/mikro/fatura-tani', () => {
     const [ilk, ikinci] = vi.mocked(mikroSql).mock.calls.map(c => c[0]);
     expect(ilk).toBe("SELECT cha.CHA_GUID AS guid, ISNULL(cha.cha_iptal, 0) AS iptal FROM CARI_HESAP_HAREKETLERI cha "
       + 'WHERE (cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6))');
-    expect(ikinci).toContain(`WHERE cha.CHA_GUID IN ('${G(389)}')`);
+    // Süslü parantez SOYULUR: soyulmasa biçim denetimi kimliği eler ve bu sorgu hiç koşmazdı (ilk canlı ölçümdeki boş sonuç).
+    expect(ikinci).toContain(`WHERE cha.CHA_GUID IN ('${G(389).toLowerCase()}')`);
     expect(pgSorgulari).toHaveLength(1);
     expect(pgSorgulari[0]).toMatch(/^SELECT id, /);
     expect(d.yazilan).toEqual([]);                                             // Cetpa'ya yazım yok
@@ -119,7 +122,7 @@ describe('GET /api/mikro/fatura-tani', () => {
   it('?sira=389: Mikro başlıkları fatura koşulu bayrağıyla, Cetpa kopyası, giden faturada GİB durumu iki tipte de sorulur', async () => {
     pgKur([kopya(389)]);
     vi.mocked(mikroSql)
-      .mockResolvedValueOnce({ rows: [{ guid: G(389), iptal: 0 }], hata: null })
+      .mockResolvedValueOnce({ rows: [{ guid: P(389), iptal: 0 }], hata: null })
       .mockResolvedValueOnce({ rows: [
         { guid: G(389), cha_tip: '0', faturaKosulu: 1, iptal: false, cha_ebelge_Islemturu: '2', ettn: 'BBBBBBBB-1111-2222-3333-444444444444' },
         { guid: G(900), cha_tip: '1', faturaKosulu: 1, iptal: false, ettn: 'CCCCCCCC-1111-2222-3333-444444444444' },   // gelen: sorulmaz
@@ -142,13 +145,33 @@ describe('GET /api/mikro/fatura-tani', () => {
     expect(evrakSql).toContain('cha.cha_ebelge_Islemturu AS cha_ebelge_Islemturu');
     expect(evrakSql).toContain("ISNULL(CAST(cha.cha_uuid AS nvarchar(40)), '') AS ettn");
     expect(evrakSql).not.toMatch(/[^\x00-\x7F]/);
+    // Evrağa bağlı Cetpa siparişleri de okunur (MF mi, Cetpa'dan mı kesilmiş; durumu) — salt okuma.
+    expect(pgSorgulari).toHaveLength(2);
+    expect(pgSorgulari[1]).toContain("FROM docs WHERE coll = 'orders'");
+    expect(pgSorgulari[1]).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b/i);
+  });
+
+  it('?ettn=<GUID>: evrak numarası bilinmeden ETTN ile bulunur; biçimsiz ETTN ya da sira ile birlikte 400', async () => {
+    pgKur([kopya(3)]);
+    const ETTN = '6A68A5F6-9F68-4283-9E76-0B2A878BBEAE';
+    for (const query of [{ ettn: "x' OR 1=1 --" }, { ettn: ETTN, sira: '3' }, { ettn: ['a'] }]) expect((await cagir(undefined, query)).kod).toBe(400);
+    expect(mikroSql).not.toHaveBeenCalled();
+    vi.mocked(mikroSql)
+      .mockResolvedValueOnce({ rows: [{ guid: P(3), iptal: 0 }], hata: null })
+      .mockResolvedValueOnce({ rows: [{ guid: P(3), cha_tip: '1', faturaKosulu: 1, iptal: false, cha_evrakno_sira: 3, cha_ebelge_Islemturu: '2', ettn: ETTN }], hata: null });
+    const y = await cagir(undefined, { ettn: `{${ETTN}}` });                    // parantezli de kabul edilir, soyulur
+    expect(y.kod).toBe(200);
+    const e = (y.govde as Govde).evrak as { sira: number | null; ettn: string; cetpa: unknown[] };
+    expect(e).toMatchObject({ sira: null, ettn: ETTN.toLowerCase() });
+    expect(e.cetpa).toHaveLength(1);                                           // Mikro'da bulunan başlığın sırasıyla (3) eşlendi
+    expect(vi.mocked(mikroSql).mock.calls[1][0]).toContain(`WHERE CAST(cha.cha_uuid AS nvarchar(40)) = '${ETTN.toLowerCase()}' ORDER BY`);
   });
 
   it("?sira=0389: iki taraf da AYNI değeri arar (Mikro 389, Cetpa '389') — baştaki sıfır kopyayı \"yok\" göstermez", async () => {
     pgKur([kopya(389)]);
     vi.mocked(mikroSql)
-      .mockResolvedValueOnce({ rows: [{ guid: G(389), iptal: 0 }], hata: null })
-      .mockResolvedValueOnce({ rows: [{ guid: G(389), cha_tip: '1', faturaKosulu: 1, iptal: false, ettn: '' }], hata: null });
+      .mockResolvedValueOnce({ rows: [{ guid: P(389), iptal: 0 }], hata: null })
+      .mockResolvedValueOnce({ rows: [{ guid: P(389), cha_tip: '1', faturaKosulu: 1, iptal: false, ettn: '' }], hata: null });
     const e = ((await cagir(undefined, { sira: '0389' })).govde as Govde).evrak as { sira: number; cetpa: unknown[] };
     expect(e.sira).toBe(389);
     expect(e.cetpa).toHaveLength(1);

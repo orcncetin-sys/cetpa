@@ -309,7 +309,7 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     setExtraPulls(p => ({ ...p, [key]: { running: true, result: null, error: null } }));
     try {
       const r = await fetch(route, { method: 'POST', headers: await authHeaders(), body: JSON.stringify({}) });
-      const d = await r.json() as { success: boolean; total?: number; note?: string | null; error?: string; notConfigured?: boolean };
+      const d = await r.json() as { success: boolean; total?: number; note?: string | null; error?: string; notConfigured?: boolean; eksik?: boolean };
       if (d.notConfigured) throw new Error(t ? 'Mikro yapılandırılmamış.' : 'Mikro not configured.');
       if (!d.success) throw new Error(d.error || 'Hata');
       setExtraPulls(p => ({ ...p, [key]: {
@@ -317,7 +317,9 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
         result: `${sayiMetni(d.total)} ${t ? 'kayıt' : 'records'}${d.note ? ` · ${d.note}` : ''}`,
         error: null,
       } }));
-      return null;
+      // `eksik` (GİB taraması yarım kaldı: süre doldu / bazı sorgular düştü): kart sonucu gösterir ama "Tümünü Çek" özeti adımı
+      // "tamam" SAYMAZ — not özete girer (inceleme 2026-10-02: yarım tarama yeşil görünüyordu).
+      return d.eksik ? (d.note || (t ? 'eksik tamamlandı' : 'incomplete')) : null;
     } catch (e) {
       setExtraPulls(p => ({ ...p, [key]: { running: false, result: null, error: hataMetni(e) } }));
       return hataMetni(e);
@@ -405,6 +407,9 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     { key: 'fatura',       route: '/api/mikro/import/fatura-listesi', arkaPlan: true, title: t ? 'Faturalar' : 'Invoices',               desc: t ? 'Mikro\'da kesilen faturaları çek.' : 'Pull invoices issued in Mikro.' },
     // 2026-09-25: iptal edilen faturalar AYRI koleksiyona iner; hiçbir hesap okumaz, yalnız CRM → İptal & İade listesi.
     { key: 'iptal-fatura', route: '/api/mikro/import/iptal-faturalar', arkaPlan: true, title: t ? 'İptal Edilen Faturalar' : 'Cancelled Invoices', desc: t ? 'Mikro\'da iptal edilen faturaları çek (İptal & İade listesinde görünür, hesaplara girmez).' : 'Pull invoices cancelled in Mikro (shown on Cancellations & Returns, excluded from all totals).' },
+    // 2026-10-02 (fatura 389): alıcının REDDETTİĞİ e-Fatura Mikro'da iptal bayrağı taşımaz; durum yalnız GİB sorgusundan bilinir.
+    // Senkron uç (90 sn bütçe; kalan belge varsa not söyler). "Tümünü Çek"te Faturalar'dan SONRA, Faturadan Sipariş'ten ÖNCE.
+    { key: 'gib-durum', route: '/api/mikro/import/gib-durum', title: t ? 'GİB Durumlarını Sorgula' : 'Query GİB Statuses', desc: t ? 'Satış e-Faturalarının alıcı/GİB durumunu sorgula. Alıcının reddettiği fatura hesaplardan çıkar, İptal & İade listesinde görünür. Her gece kendiliğinden de çalışır.' : 'Query recipient/GİB status of sales e-invoices. Rejected invoices leave the totals and appear under Cancellations & Returns. Also runs nightly.' },
     // 2026-09-01 kullanıcı isteği: "faturası kesilen her şeyin siparişi olmalı".
     // Önce Faturalar çekilmiş olmalı; idempotent (tekrar basmak kopya üretmez).
     { key: 'faturadan-siparis', route: '/api/mikro/import/faturadan-siparis', title: t ? 'Faturadan Sipariş Türet' : 'Derive Orders from Invoices', desc: t ? 'Her SATIŞ faturası için fatura tarihli bir Cetpa siparişi oluştur (kalemleriyle). Ciro kartları çift saymaz.' : 'Create a Cetpa order (with line items) for each sales invoice, dated by the invoice.' },
