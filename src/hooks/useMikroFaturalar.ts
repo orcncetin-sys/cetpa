@@ -18,8 +18,15 @@ export interface MikroFatura {
   faturaNo: string;
   /** Fatura satırlarından JOIN'li KDV (başlıkta yok). **NaN = BİLİNMİYOR** — `toplaBilinen` ile topla. */
   kdv: number;
-  /** KDV matrahı (satır JOIN'i / başlık ara toplamı). **NaN = BİLİNMİYOR** — `toplaBilinen` ile topla. */
+  /** KDV matrahı = Mikro'nun NET okuması: başlıktan `cha_aratoplam − Σcha_ft_iskonto` (tek kaynak `lib/faturaMatrahi`),
+   *  başlık okunamazsa satır neti Σ(sth_tutar − Σiskonto + Σmasraf) — hangisi olduğu `matrahKaynagi`nda. Alan yoksa ESKİ
+   *  doküman (brüt Σsth_tutar / aratoplam; gece 'tam' yenilemesiyle düzelir). **NaN = BİLİNMİYOR** — `toplaBilinen` ile topla. */
   matrah: number;
+  /** Import'un matrahı nereden yazdığı; `undefined` = alan yok (matrah aşama 2 öncesi doküman). */
+  matrahKaynagi?: MatrahKaynagi;
+  /** Mikro'da AYNI yön + evrak numarasında birden çok fatura başlığı var (canlıda giden 246): satır grubu paylaşılır, kalemler
+   *  hepsinin toplamıdır — matrah/KDV başlıktan; `undefined` = alan yok (eski doküman). */
+  ortakAnahtar?: boolean;
   oran: number | null;           // vergiPntr indeksinden; çözülemezse null
   oranKarma: boolean;            // true: faturada birden fazla KDV oranı var (ör. %10 + %20) — oran tek başına yanıltıcı
   yon: 'gelen' | 'giden';        // cha_tip 1=gelen(alış), 0=giden(satış)
@@ -29,6 +36,9 @@ export interface MikroFatura {
   /** cha_subeno — şube bazlı P&L eşleşmesi için. **NaN = BİLİNMİYOR** (0 = merkez, meşru değer). */
   subeNo: number;
 }
+
+/** fatura-listesi importunun yazdığı matrah kaynağı ('baslik' | 'satir'; null = ikisi de okunamadı). */
+export type MatrahKaynagi = 'baslik' | 'satir' | null;
 
 export const VERGI_PNTR_ORAN: Record<string, number> = { '1': 0, '2': 1, '3': 10, '4': 20 };
 
@@ -47,12 +57,12 @@ export function mapMikroFatura(id: string, x: Record<string, unknown>): MikroFat
   const sira = x.cha_evrakno_sira;
 
   // BAYAT ₺0 KORUMASI (delta turu, 2026-09-18): sunucudaki `ISNULL(…, 0)` yedeği bugün kalktı ama
-  // DAHA ÖNCE import edilmiş dokümanlara `kdvTutari: 0` / `matrah: 0` yazmıştı. Gece cron'u yalnız
-  // son 90 günü yeniliyor; eski faturalar elle tam import edilene kadar o sahte sıfırı taşır ve
-  // buradan "bilinen 0" olarak Ba/Bs eşiğine, KDV Analizi'ne ve mizana yayılır.
+  // DAHA ÖNCE import edilmiş dokümanlara `kdvTutari: 0` / `matrah: 0` yazmıştı. fatura-listesi gece
+  // penceresi 2026-09-24'ten beri 'tam' (tüm geçmiş her gece yenilenir); o yenilemeye kadar doküman
+  // sahte sıfırı taşır ve buradan "bilinen 0" olarak Ba/Bs eşiğine, KDV Analizi'ne ve mizana yayılır.
   //
   // Ayırt edici: `oranSayisi` satır alt sorgusunun COUNT'udur — JOIN tuttuysa EN AZ 1, tutmadıysa
-  // NULL/eksik. Zincirin ikinci halkası matrahta `cha_aratoplam`, KDV'de `cha_meblag − cha_aratoplam`.
+  // NULL/eksik. Satır yoksa matrah başlıktan (`cha_aratoplam` − Σ`cha_ft_iskonto`), KDV `cha_meblag − matrah`.
   // İkisi de okunamıyorsa YENİ SQL zaten NULL indirir; aynı sonucu eski dokümanda da üretiriz.
   // Koruma YALNIZ TAM 0'a uygulanır: gerçek bir tutar hiçbir koşulda düşürülmez, satır JOIN'i tutan
   // meşru ₺0 faturası (istisna/ihracat) 0 kalır.
@@ -73,6 +83,9 @@ export function mapMikroFatura(id: string, x: Record<string, unknown>): MikroFat
     faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
     kdv:      tutarOku(x.kdvTutari, kdvTuretilebilir),
     matrah:   tutarOku(x.matrah, matrahTuretilebilir),
+    // Tanınmayan değer kaynak SAYILMAZ (undefined → detay notu eski dala düşer, açıklama uydurmaz).
+    matrahKaynagi: x.matrahKaynagi === 'baslik' || x.matrahKaynagi === 'satir' || x.matrahKaynagi === null ? x.matrahKaynagi : undefined,
+    ortakAnahtar: bilinenSayi(x.ortakAnahtar) ? Number(x.ortakAnahtar) === 1 : undefined,
     oran:     VERGI_PNTR_ORAN[String(x.vergiPntr ?? '')] ?? null,
     oranKarma: Number(x.oranSayisi ?? 1) > 1,
     uuid:     String(x.cha_uuid ?? x.cha_ettn ?? x.uuid ?? '') || undefined,

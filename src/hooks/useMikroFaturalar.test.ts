@@ -161,8 +161,8 @@ describe('toplaBilinen ile birlikte — tüketicinin göreceği davranış', () 
  * BAYAT ₺0 KORUMASI (delta turu, 2026-09-18) — sunucudaki `ISNULL(…, 0)` yedeği bugün kalktı,
  * ama o yedek DAHA ÖNCE import edilmiş dokümanlara `kdvTutari: 0` / `matrah: 0` yazdı. Yeniden
  * import edilene kadar hook onları "bilinen 0" okur: Ba/Bs ₺5.000 eşiği, KDV Analizi ve mizan
- * ₺0 KDV'li gerçek bir fatura görür, `bilinmeyen` sayacı 0 kalır. Gece cron'u yalnız son 90 günü
- * yeniliyor, 90 günden eskisi elle import beklemek zorunda.
+ * ₺0 KDV'li gerçek bir fatura görür, `bilinmeyen` sayacı 0 kalır. (fatura-listesi gece penceresi
+ * 2026-09-24'ten beri 'tam' — tüm geçmiş her gece yenilenir; koruma o yenilemeye kadar olan dokümanlar için.)
  *
  * Ayırt edici: `oranSayisi`, satır alt sorgusunun COUNT'udur — satır JOIN'i tuttuysa EN AZ 1,
  * tutmadıysa NULL/eksik. Zincirin ikinci halkası `cha_aratoplam` (matrah) ve `cha_meblag −
@@ -205,5 +205,46 @@ describe('mapMikroFatura — 2026-09-18 öncesi importun bayat ₺0\'ı bilinmey
     const f = mapMikroFatura('B5', { ...tamKayit, oranSayisi: null, cha_meblag: null, cha_aratoplam: 800, kdvTutari: 0, matrah: 800 });
     expect(f.matrah).toBe(800);
     expect(Number.isNaN(f.kdv)).toBe(true);
+  });
+});
+
+/**
+ * `matrahKaynagi` (matrah aşama 2, 2026-09-29): fatura-listesi importu matrahı Mikro'nun NET okumasıyla yazar
+ * (lib/faturaMatrahi: `cha_aratoplam − Σcha_ft_iskonto`, başlık okunamazsa satır neti) ve kaynağını bu alana koyar.
+ * Fatura detayı matrah notunun dalını BUNA göre seçer (alan varsa başlık net, yoksa ESKİ brüt doküman). Hook yalnız TAŞIR.
+ */
+describe('mapMikroFatura — ortakAnahtar (aynı numaralı birden çok Mikro başlığı) taşınır', () => {
+  it('1 → true, 0 → false, alan yok → undefined (eski doküman)', () => {
+    expect(mapMikroFatura('O1', { ...tamKayit, ortakAnahtar: 1 }).ortakAnahtar).toBe(true);
+    expect(mapMikroFatura('O2', { ...tamKayit, ortakAnahtar: '0' }).ortakAnahtar).toBe(false);
+    expect(mapMikroFatura('O3', { ...tamKayit }).ortakAnahtar).toBeUndefined();
+  });
+});
+
+describe('mapMikroFatura — matrahKaynagi taşınır (eski dokümanda undefined)', () => {
+  it("'baslik' / 'satir' / null aynen geçer", () => {
+    expect(mapMikroFatura('M1', { ...tamKayit, matrahKaynagi: 'baslik' }).matrahKaynagi).toBe('baslik');
+    expect(mapMikroFatura('M2', { ...tamKayit, matrahKaynagi: 'satir' }).matrahKaynagi).toBe('satir');
+    expect(mapMikroFatura('M3', { ...tamKayit, matrahKaynagi: null }).matrahKaynagi).toBeNull();
+  });
+
+  it('alan hiç yoksa (gece yenilemesinden önceki doküman) undefined — null DEĞİL', () => {
+    expect('matrahKaynagi' in tamKayit).toBe(false);
+    expect(mapMikroFatura('M4', tamKayit).matrahKaynagi).toBeUndefined();
+  });
+
+  it("tanınmayan değer ('BASLIK', 'x', 1) kaynak SAYILMAZ → undefined (eski dal: not uydurmaz)", () => {
+    expect(mapMikroFatura('M5', { ...tamKayit, matrahKaynagi: 'BASLIK' }).matrahKaynagi).toBeUndefined();
+    expect(mapMikroFatura('M6', { ...tamKayit, matrahKaynagi: 'x' }).matrahKaynagi).toBeUndefined();
+    expect(mapMikroFatura('M7', { ...tamKayit, matrahKaynagi: 1 }).matrahKaynagi).toBeUndefined();
+  });
+
+  it('matrah/KDV okuması kaynağa göre DEĞİŞMEZ (alan adı `matrah` aynı — okuyucular kendiliğinden düzelir)', () => {
+    const net = { ...tamKayit, cha_meblag: 317236.5, kdvTutari: 33736.5, matrah: 283500 };
+    const yeni = mapMikroFatura('M8', { ...net, matrahKaynagi: 'baslik' });
+    const eski = mapMikroFatura('M8', net);
+    expect(yeni.matrah).toBe(283500);
+    expect(yeni.kdv).toBe(33736.5);
+    expect({ ...yeni, matrahKaynagi: undefined }).toEqual(eski);
   });
 });

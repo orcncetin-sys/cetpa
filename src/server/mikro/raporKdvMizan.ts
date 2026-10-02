@@ -51,12 +51,11 @@
  *     değil OKUMA ARIZASIDIR: `okumaArizasi` döner, rota notun BAŞINA uyarı yazar
  *     + `console.warn` basar.
  *
- * ── MATRAH TANIMI: AÇIK SORU, DEĞİŞTİRİLMEDİ ────────────────────────────────
- * KDV sorgusundaki `SUM(sth_tutar) AS matrah` iskontolu faturada ŞİŞİK olabilir
- * (2026-09-18, canlı teyit bekliyor — bkz. Karar Defteri "Mikro iskonto / net tutar").
- * Bu modül matrahın NE OLDUĞUNU değiştirmez; yalnız "okunamadı → 0" zorlamasını
- * kaldırır. Net tutar gerekirse src/lib/stokFiyat.ts (satirTutarlari/kalemleriCoz)
- * kullanılır — burada kopya hesap YAZILMAZ.
+ * ── MATRAH TANIMI (2026-09-29 ÖLÇÜLDÜ VE DÜZELDİ) ──────────────────────────
+ * sth_tutar BRÜT; KDV sorgusunun matrahı artık iskonto düşülmüş satır neti ve yalnız
+ * fatura + faturaya bağlı irsaliye satırları (src/server/mikro/kdvOzetSorgusu.ts; kural
+ * tek kaynak src/lib/faturaMatrahi.ts). Bu modül matrahın NE OLDUĞUNU tanımlamaz —
+ * gelen değeri taşır, yalnız "okunamadı → 0" zorlamasını kaldırır; kopya hesap YAZILMAZ.
  *
  * ── TAŞINAN CANLI DOĞRULAMA NOTLARI (rotadan) ───────────────────────────────
  * • KDV kaynağı 2026-07-31'de İKİNCİ KEZ yeniden yazıldı: önce `KdvOzetV2` (V17'de

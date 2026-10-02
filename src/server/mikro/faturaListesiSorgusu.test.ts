@@ -1,6 +1,6 @@
 /** faturaListesiSorgusu — import + önizlemenin ORTAK SQL metni (kapı E1/E2, 2026-09-28). */
 import { describe, it, expect } from 'vitest';
-import { faturaListesiSorgusu } from './faturaListesiSorgusu';
+import { faturaListesiSorgusu, faturaListesiSaglamasi } from './faturaListesiSorgusu';
 
 const ANA = ['cha_Guid', 'cha_tip', 'cha_meblag', 'cha_aratoplam', 'cha_ft_iskonto1', 'cha_ft_iskonto2', 'cha_isk_mas1'];
 const SATIR = ['sth_evraktip', 'sth_evrakno_seri', 'sth_evrakno_sira', 'sth_tutar', 'sth_vergi', 'sth_vergi_pntr', 'sth_iptal', 'sth_iskonto1', 'sth_masraf1', 'sth_masraf_vergi'];
@@ -51,5 +51,31 @@ describe('faturaListesiSorgusu', () => {
       expect(q.secim).not.toMatch(/matrah|kdvTutari/);
       expect(q.notlar[0]).toContain('GÜNCELLENMEDİ');
     }
+  });
+});
+
+describe('faturaListesiSaglamasi (kapanış ölçüsü)', () => {
+  const f = (o: Record<string, unknown>) => ({ matrahKaynagi: 'baslik', ortakAnahtar: 0, satirSayisi: 1, ...o });
+  it('tutarlı fatura tutar; tevkifat (311: meblağ KDV/2 kadar düşük) tutmayan sayılır', () => {
+    expect(faturaListesiSaglamasi([f({ matrah: 283500, kdvTutari: 33736.5, cha_meblag: 317236.5 })])).toBe('matrah sağlaması: tümü tutuyor');
+    expect(faturaListesiSaglamasi([f({ matrah: 11190.86, kdvTutari: 2238.17, cha_meblag: 12309.95, satirSayisi: 4 })]))
+      .toContain('1 faturada matrah + KDV ≠ meblağ');
+  });
+  it('KDV\'si türetilen (ortak anahtar / satırsız) sağlamaya girmez, ayrı sayılır; satır kaynaklı, bilinmeyen, eksi KDV sayılır', () => {
+    const t = faturaListesiSaglamasi([
+      f({ matrah: 10000, kdvTutari: 2000, cha_meblag: 12000, ortakAnahtar: 1, satirSayisi: 2 }),
+      f({ matrah: 16769.52, kdvTutari: 3353.9, cha_meblag: 20123.42, satirSayisi: null }),
+      f({ matrah: 100, kdvTutari: 20, cha_meblag: 120, matrahKaynagi: 'satir' }),
+      f({ matrah: null, kdvTutari: null, cha_meblag: 50 }),
+      f({ matrah: 500, kdvTutari: -1, cha_meblag: 499 }),
+    ]);
+    expect(t).toContain('2 faturada KDV meblağdan türetildi');
+    expect(t).toContain('1 faturada matrah satırlardan');
+    expect(t).toContain('1 faturada matrah BİLİNMİYOR');
+    expect(t).toContain('⚠ 1 faturada KDV eksi');
+    expect(t).not.toContain('≠ meblağ');
+  });
+  it('şema okunamadığı koşuda (satırlarda matrah alanı yok) boş metin', () => {
+    expect(faturaListesiSaglamasi([{ cha_meblag: 100 }])).toBe('');
   });
 });

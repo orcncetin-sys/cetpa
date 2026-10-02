@@ -3249,10 +3249,10 @@ export default function MuhasebePage(props: Props) {
                   {muhasebeTab === 'kdv-mutabakat' && (() => {
                     const tr617 = currentLanguage === 'tr';
                     // KAYNAK: Mikro GİDEN (satış) faturaları — seçili dönem (YYYY-MM).
-                    // orders (Cetpa) boştu → panel hep 0. matrah/kdv/oran Mikro'da ZATEN
-                    // ayrık (fatura-listesi import'u STOK_HAREKETLERI'nden JOIN'liyor);
-                    // eski kod totalPrice'ı 1.18'e bölüyordu — burada bölme YOK, gerçek
-                    // matrah/kdv kullanılır (daha doğru). oran vergiPntr'den (20/10/0/1).
+                    // orders (Cetpa) boştu → panel hep 0. matrah/kdv/oran import'tan ayrık gelir:
+                    // matrah Mikro'nun net okuması (cha_aratoplam − Σcha_ft_iskonto, lib/faturaMatrahi;
+                    // başlık okunamazsa satır neti), KDV satırlardan; eski kod totalPrice'ı 1.18'e
+                    // bölüyordu — burada bölme YOK. Tevkifat modellenmez. oran vergiPntr'den (20/10/0/1).
                     // Hesap tek kaynakta (utils/muhasebe/butceVaryans.kdvMutabakat): giden fatura + faturasız
                     // (iptal/faturalı/hasInvoice/Mikro-kaynaklı DIŞI) sipariş; oran bantları veriden, karma
                     // bantta tek oran uydurulmaz (null). Bilinmeyen tutar 0 değil — toplama girmez, sayılır;

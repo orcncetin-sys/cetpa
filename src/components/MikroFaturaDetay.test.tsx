@@ -7,10 +7,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
+import { kalemleriCoz } from '../lib/stokFiyat';
 
 const authFetch = vi.fn();
 vi.mock('../services/authFetch', () => ({ authFetch: (...a: unknown[]) => authFetch(...a) }));
 vi.mock('../services/ebelgeIndir', () => ({ eBelgeIndir: vi.fn() }));
+// Gerçek çözücü, yalnız ÇAĞRI argümanı izlenir (K3: ortak anahtarda başlık toplamı hakem olarak VERİLMEZ).
+vi.mock('../lib/stokFiyat', async (orig) => {
+  const gercek = await orig<typeof import('../lib/stokFiyat')>();
+  return { ...gercek, kalemleriCoz: vi.fn(gercek.kalemleriCoz) };
+});
 
 const fatura: MikroFaturaDetayVerisi = {
   id: 'f1', faturaNo: '359', musteri: 'ACCADO KİLİT SİSTEMLERİ', cariKod: '0040488682', tarih: '2026-09-03',
@@ -121,8 +127,9 @@ describe('MikroFaturaDetay — Mikro kaydı KDV ile tutarsız (evrak 420)', () =
     expect(screen.queryByText(/KDV oranıyla tutmuyor/)).toBeNull();   // kdvUyumsuz = 0
 
     // Başlık: Matrah = Σ kalem neti (+ Mikro başlığı notu); Toplam Mikro'nunki + KDV ile tutarlı toplam.
-    // Not başlıktaki şişkinliğin İKİ yarısını da söyler: 398.317,50 − 114.817,50 = 283.500 ≠ 168.682,50 (iskonto iki kez girmiş).
-    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺168.682,50Mikro başlığı ₺398.317,50 — iskonto ₺114.817,50 düşülmemiş, ₺114.817,50 brüte bir kez daha eklenmiş');
+    // F420 ESKİ doküman (matrahKaynagi yok, brüt başlık): not şişkinliğin İKİ yarısını da söyler —
+    // 398.317,50 − 114.817,50 = 283.500 ≠ 168.682,50 (iskonto iki kez girmiş). Yeni doküman: aşağıdaki "matrah aşama 2" bloğu.
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺168.682,50Mikro başlığı ₺398.317,50 — iskonto ₺114.817,50 düşülmemiş (eski kayıt — Faturaları yeniden çekin), ₺114.817,50 brüte bir kez daha eklenmiş');
     expect(baslikSatiri('Toplam').textContent).toBe('Toplam₺317.236,50KDV ile tutarlı toplam ₺202.419,00');
   });
 
@@ -189,13 +196,13 @@ describe('MikroFaturaDetay — Mikro kaydı KDV ile tutarsız (evrak 420)', () =
   });
 });
 
-describe('MikroFaturaDetay — tur 2: Matrah notu rakamla kapanır (fazla eklenen iskonto + masraf)', () => {
+describe('MikroFaturaDetay — tur 2: Matrah notu rakamla kapanır (ESKİ doküman — matrahKaynagi yok, brüt başlık)', () => {
   it('420 + KDV oranına uymayan ikinci kalem (durum "tutmuyor"): not yine İKİ yarıyı rakamla söyler; kesin toplam notu yok', async () => {
     const K2 = { ...K420, sth_stok_kod: 'EK', urunAdi: 'EK KALEM', sth_miktar: 1, sth_tutar: 1000, sth_iskonto1: 0, sth_iskonto2: 0, sth_vergi: 100 };
     authFetch.mockReturnValue(yanit([K420, K2]));
     render(<MikroFaturaDetay fatura={{ ...F420, tutar: 318336.5, kdv: 33836.5, matrah: 399317.5 }} currentLanguage="tr" onClose={() => {}} />);
     await satirOf('EK KALEM');
-    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺169.682,50Mikro başlığı ₺399.317,50 — iskonto ₺114.817,50 düşülmemiş, ₺114.817,50 brüte bir kez daha eklenmiş');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺169.682,50Mikro başlığı ₺399.317,50 — iskonto ₺114.817,50 düşülmemiş (eski kayıt — Faturaları yeniden çekin), ₺114.817,50 brüte bir kez daha eklenmiş');
     expect(baslikSatiri('Toplam').textContent).toBe('Toplam₺318.336,50');
   });
   it('masraflı iskontolu satır: Matrah = net + masraf (KDV\'nin tabanı), not masrafı söyler', async () => {
@@ -203,7 +210,133 @@ describe('MikroFaturaDetay — tur 2: Matrah notu rakamla kapanır (fazla eklene
     authFetch.mockReturnValue(yanit([KM]));
     render(<MikroFaturaDetay fatura={{ ...F420, tutar: 11400, kdv: 1900, matrah: 10000 }} currentLanguage="tr" onClose={() => {}} />);
     await satirOf('MASRAFLI');
-    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺9.500,00Mikro başlığı ₺10.000,00 — iskonto ₺1.000,00 düşülmemiş, masraf ₺500,00 matraha dahil');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺9.500,00Mikro başlığı ₺10.000,00 — iskonto ₺1.000,00 düşülmemiş (eski kayıt — Faturaları yeniden çekin), masraf ₺500,00 matraha dahil');
     expect(await screen.findByText(/✓ Sağlama/)).toBeTruthy();
+  });
+  it('İngilizce: eski kayıt eki çevrilir', async () => {
+    authFetch.mockReturnValue(yanit([K420]));
+    render(<MikroFaturaDetay fatura={F420} currentLanguage="en" onClose={() => {}} />);
+    await satirOf('RULO 1081');
+    expect(baslikSatiri('Base').textContent).toBe('Base₺168.682,50Mikro header ₺398.317,50 — discount ₺114.817,50 not deducted (old record — re-pull invoices), ₺114.817,50 added to the gross once more');
+  });
+});
+
+// ── Matrah aşama 2 (2026-09-29): YENİ doküman — başlık Mikro'nun NET okuması ─────────────────────────────────────────
+// fatura-listesi importu matrahı `cha_aratoplam − Σcha_ft_iskonto` (lib/faturaMatrahi; başlık okunamazsa satır neti) ile
+// yazar ve `matrahKaynagi` koyar. Başlıkta iskonto ZATEN düşülü → not "iskonto düşülmemiş" DEMEZ; kalan fark Mikro'nun
+// brüte fazladan eklediği iskonto (+ başlık formülünün içermediği masraf). Kapanmıyorsa yalnız başlık değeri (uydurma yok).
+describe('MikroFaturaDetay — matrah aşama 2: YENİ doküman (matrahKaynagi dolu)', () => {
+  /** SİZGEN evrak 420 yeni dokümanı: aratoplam 398.317,50 − ft iskonto 114.817,50 = 283.500 (Mikro kaydının matrahı). */
+  const F420_YENI: MikroFaturaDetayVerisi = { ...F420, matrah: 283500, matrahKaynagi: 'baslik' };
+  /** Tutarlı iskontolu satır: brüt 10.000, iskonto 1.000, net 9.000, KDV %20 = 1.800. */
+  const TUTARLI = { sth_stok_kod: 'T1', urunAdi: 'TUTARLI İSKONTOLU', birim: 'ADET', sth_birim_pntr: 1, sth_tarih: '2026-08-31', sth_miktar: 10, sth_tutar: 10000, sth_iskonto1: 1000, sth_vergi: 1800, sth_vergi_pntr: 4 };
+
+  it("SİZGEN 420: başlık 283.500 − fazla 114.817,50 = kalem neti 168.682,50 → not KAPANIR, 'iskonto düşülmemiş' YOK", async () => {
+    authFetch.mockReturnValue(yanit([K420]));
+    render(<MikroFaturaDetay fatura={F420_YENI} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('RULO 1081');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺168.682,50Mikro başlığı ₺283.500,00 — ₺114.817,50 brüte bir kez daha eklenmiş');
+    expect(screen.queryByText(/düşülmemiş/)).toBeNull();
+    expect(screen.queryByText(/eski kayıt/)).toBeNull();
+  });
+
+  it('aynı numaralı birden çok başlık (ortakAnahtar): Matrah BAŞLIKTAN, not bunu söyler; sağlama/tutarsızlık kutusu GÖSTERİLMEZ', async () => {
+    authFetch.mockReturnValue(yanit([K420]));
+    render(<MikroFaturaDetay fatura={{ ...F420_YENI, ortakAnahtar: true }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('RULO 1081');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺283.500,00başlıktan — aynı evrak numaralı başka bir Mikro faturasıyla kalemler paylaşılıyor');
+    expect(screen.getByText(/BİRDEN ÇOK fatura başlığı var/)).toBeTruthy();
+    expect(screen.queryByText(/TUTARSIZ|TUTMUYOR|Sağlama:/)).toBeNull();
+  });
+
+  // Hakem 2026-09-29 (K2/K3): ortak anahtarda kalemler öbür başlıkla PAYLAŞILIR — bu başlığın toplamı kalemlere hakem olamaz,
+  // kalemlerden hesaplanan KDV kırılımı da bu faturanın başlıktan gelen KDV'siyle tutmaz.
+  it('ortakAnahtar: kalem çözücüye başlık toplamı VERİLMEZ (K3); karma oranlı faturada KDV Kırılımı kutusu GÖSTERİLMEZ (K2)', async () => {
+    const KARMA = [
+      { sth_stok_kod: 'A', urunAdi: 'YÜZDE ON', birim: 'ADET', sth_tarih: '2026-08-31', sth_miktar: 1, sth_tutar: 10000, sth_vergi: 1000, sth_vergi_pntr: 3 },
+      { sth_stok_kod: 'B', urunAdi: 'YÜZDE YİRMİ', birim: 'ADET', sth_tarih: '2026-08-31', sth_miktar: 1, sth_tutar: 2500, sth_vergi: 500, sth_vergi_pntr: 4 },
+    ];
+    const F246: MikroFaturaDetayVerisi = { ...fatura, id: 'f246', faturaNo: '246', tutar: 12000, kdv: 2000, matrah: 10000, oran: null, oranKarma: true, matrahKaynagi: 'baslik' };
+    authFetch.mockReturnValue(yanit(KARMA));
+    vi.mocked(kalemleriCoz).mockClear();
+    const { unmount } = render(<MikroFaturaDetay fatura={{ ...F246, ortakAnahtar: true }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('YÜZDE ON');
+    expect(screen.queryByText('KDV Kırılımı')).toBeNull();
+    expect(vi.mocked(kalemleriCoz).mock.calls.length).toBeGreaterThan(0);
+    expect(vi.mocked(kalemleriCoz).mock.calls.every(c => c[1] === undefined)).toBe(true);
+    unmount();
+    // Karşı örnek: ortak anahtar DEĞİLSE kırılım görünür ve çözücü başlık toplamını alır.
+    vi.mocked(kalemleriCoz).mockClear();
+    render(<MikroFaturaDetay fatura={{ ...F246, tutar: 14000, kdv: 1500, matrah: 12500 }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('YÜZDE ON');
+    expect(screen.getByText('KDV Kırılımı')).toBeTruthy();
+    expect(vi.mocked(kalemleriCoz).mock.calls.some(c => c[1] === 14000)).toBe(true);
+  });
+
+  it("kaynak 'satir' de yeni dal (başlık yine net)", async () => {
+    authFetch.mockReturnValue(yanit([K420]));
+    render(<MikroFaturaDetay fatura={{ ...F420_YENI, matrahKaynagi: 'satir' }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('RULO 1081');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺168.682,50Mikro başlığı ₺283.500,00 — ₺114.817,50 brüte bir kez daha eklenmiş');
+  });
+
+  it('tutarlı iskontolu fatura: başlık (net 9.000) = kalem neti → NOT YOK; aynı fatura eski dokümanda iskontoyu söyler', async () => {
+    authFetch.mockReturnValue(yanit([TUTARLI]));
+    const { unmount } = render(<MikroFaturaDetay fatura={{ ...fatura, tutar: 10800, kdv: 1800, matrah: 9000, matrahKaynagi: 'baslik' }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('TUTARLI İSKONTOLU');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺9.000,00');
+    unmount();
+    // Karşı örnek: gece yenilemesinden ÖNCEKİ doküman brüt 10.000 taşır → eski dal iskontoyu açıklar.
+    render(<MikroFaturaDetay fatura={{ ...fatura, tutar: 10800, kdv: 1800, matrah: 10000 }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('TUTARLI İSKONTOLU');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺9.000,00Mikro başlığı ₺10.000,00 — iskonto ₺1.000,00 düşülmemiş (eski kayıt — Faturaları yeniden çekin)');
+  });
+
+  it('masraflı (başlık formülü masrafı içermez): başlık 9.000 + masraf 500 = 9.500 → not masrafı söyler', async () => {
+    const KM = { ...TUTARLI, urunAdi: 'MASRAFLI', sth_masraf1: 500, sth_vergi: 1900 };
+    authFetch.mockReturnValue(yanit([KM]));
+    render(<MikroFaturaDetay fatura={{ ...fatura, tutar: 11400, kdv: 1900, matrah: 9000, matrahKaynagi: 'baslik' }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('MASRAFLI');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺9.500,00Mikro başlığı ₺9.000,00 — masraf ₺500,00 matraha dahil');
+  });
+
+  it("masraflı 'satir' kaynağı: başlık (satır neti) masrafı ZATEN içerir → 9.500 = kalem → NOT YOK (masraf ikinci kez eklenmez)", async () => {
+    const KM = { ...TUTARLI, urunAdi: 'MASRAFLI', sth_masraf1: 500, sth_vergi: 1900 };
+    authFetch.mockReturnValue(yanit([KM]));
+    render(<MikroFaturaDetay fatura={{ ...fatura, tutar: 11400, kdv: 1900, matrah: 9500, matrahKaynagi: 'satir' }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('MASRAFLI');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺9.500,00');
+  });
+
+  it("masraflı + fazlalı 'satir' kaynağı: başlık − fazla = kalem → not KAPANIR, masraf parçası YOK", async () => {
+    // KDV gerçek taban (net 168.682,50 + masraf 500) × %20 = 33.836,50; satır başlığı = tutar − Σisk + masraf = 284.000.
+    const KM = { ...K420, sth_stok_kod: 'M', urunAdi: 'MASRAFLI', sth_masraf1: 500, sth_vergi: 33836.5 };
+    authFetch.mockReturnValue(yanit([KM]));
+    render(<MikroFaturaDetay fatura={{ ...F420_YENI, tutar: 317836.5, matrah: 284000, kdv: 33836.5, matrahKaynagi: 'satir' }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('MASRAFLI');
+    const metin = baslikSatiri('Matrah').textContent ?? '';
+    expect(metin).toContain('brüte bir kez daha eklenmiş');
+    expect(metin).not.toContain('masraf');
+  });
+
+  it('kapanmayan fark: yeni dokümanda BRÜT görünen başlık (10.000) iskontoyla AÇIKLANMAZ → yalnız başlık değeri', async () => {
+    authFetch.mockReturnValue(yanit([TUTARLI]));
+    render(<MikroFaturaDetay fatura={{ ...fatura, tutar: 10800, kdv: 1800, matrah: 10000, matrahKaynagi: 'baslik' }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('TUTARLI İSKONTOLU');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺9.000,00Mikro başlığı ₺10.000,00');
+  });
+
+  it("matrahKaynagi null (kaynak bilinmiyor) YENİ dal SAYILMAZ — eski dal", async () => {
+    authFetch.mockReturnValue(yanit([TUTARLI]));
+    render(<MikroFaturaDetay fatura={{ ...fatura, tutar: 10800, kdv: 1800, matrah: 10000, matrahKaynagi: null }} currentLanguage="tr" onClose={() => {}} />);
+    await satirOf('TUTARLI İSKONTOLU');
+    expect(baslikSatiri('Matrah').textContent).toBe('Matrah₺9.000,00Mikro başlığı ₺10.000,00 — iskonto ₺1.000,00 düşülmemiş (eski kayıt — Faturaları yeniden çekin)');
+  });
+
+  it('İngilizce: yeni dal çevrilir', async () => {
+    authFetch.mockReturnValue(yanit([K420]));
+    render(<MikroFaturaDetay fatura={F420_YENI} currentLanguage="en" onClose={() => {}} />);
+    await satirOf('RULO 1081');
+    expect(baslikSatiri('Base').textContent).toBe('Base₺168.682,50Mikro header ₺283.500,00 — ₺114.817,50 added to the gross once more');
   });
 });

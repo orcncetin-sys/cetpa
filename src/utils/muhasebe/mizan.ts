@@ -63,8 +63,11 @@ export const MIKRO_HESAP = {
  * yapılan Mikro-additive düzeltme buraya hiç uygulanmamıştı). mikroFaturalar'dan
  * GERÇEK çift-taraflı (double-entry) satırlar sentezlenir — tahmini bir toplam
  * değil, standart Türk hesap planına göre borç/alacak ayrımı:
- *  giden (satış):  120-Alıcılar borç = tutar  ↔  600-Satışlar alacak = matrah + 391-Hesaplanan KDV alacak = kdv
- *  gelen (alış):   153-Ticari Mallar borç = matrah + 191-İndirilecek KDV borç = kdv  ↔  320-Satıcılar alacak = tutar
+ *  giden (satış):  120-Alıcılar borç = matrah + kdv  ↔  600-Satışlar alacak = matrah + 391-Hesaplanan KDV alacak = kdv
+ *  gelen (alış):   153-Ticari Mallar borç = matrah + 191-İndirilecek KDV borç = kdv  ↔  320-Satıcılar alacak = matrah + kdv
+ * 120/320 fatura toplamı (cha_meblag) DEĞİL matrah + KDV'dir. Matrah Mikro'nun net okuması (`cha_aratoplam − Σcha_ft_iskonto`,
+ * lib/faturaMatrahi), KDV satırlardan → normalde meblağa eşittir; tevkifatlı faturada meblağ tevkifat kadar düşüktür ve
+ * 120/320 onu aşar (tevkifat modellenmez — sınır). Matrah aşama 2 öncesi doküman brüt matrah taşır (gece 'tam' yenilemesi).
  * Alış, GİDER değil VARLIK (stok) hesabına (153) düşer — satır maliyeti bilinmediği
  * için COGS'a (620) atanamaz; bu ayrım Finansal Oranlar'daki "COGS bilinmiyor"
  * ilkesiyle tutarlı, yanlış bir gider rakamı üretmez.

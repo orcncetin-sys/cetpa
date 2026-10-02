@@ -62,9 +62,10 @@ import { araligiTopla, ALT_STOK, ALT_CARI, type SayfaSayaclari } from '../mikro/
 import { bilinenSayi } from '../../utils/para.js';
 import { birimSapmasiRaporu } from '../mikro/birimSapmasi.js';
 import { matrahTaniRaporu } from '../mikro/matrahTani.js';
-import { faturaListesiSorgusu } from '../mikro/faturaListesiSorgusu.js';
+import { faturaListesiSorgusu, faturaListesiSaglamasi } from '../mikro/faturaListesiSorgusu.js';
 import { onizlemeSorgulari, baglantiSorgulari, onizlemeSatiri } from '../mikro/matrahOnizleme.js';
 import { FT_ISKONTO_DESENI, SATIR_MASRAF_DESENI, gercekAd } from '../../lib/faturaMatrahi.js';
+import { kdvOzetSorgusu } from '../mikro/kdvOzetSorgusu.js';
 import { yetimRaporu, guidBicimli, guidAnahtari, type CetpaFatura } from '../mikro/faturaTani.js';
 import { gibDurumTara, taramaNotu, type TaramaFaturasi } from '../mikro/gibDurumTarama.js';
 import { gibDurumCoz, gibRedMi, gibReddedildi, faturaEttn } from '../../lib/gibDurum.js';
@@ -1171,6 +1172,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     secimKolonlari?: string[];
     /** FROM'a eklenecek JOIN ifadesi. Kod içinde SABİT — istemciden gelmez. */
     fromEk?:      string;
+    /** SELECT + JOIN'i çalışma anında ŞEMAYA göre üretir (`secim`/`fromEk`'in yerine geçer; kod içinde — istemciden gelmez).
+     *  `sema(tablo)` FIRLATMAZ: okunamayan şema `[]` döner — üretici "okunamadı" ile "kolon yok"u AYIRIR (fatura-listesi:
+     *  şema okunamadıysa matrah/KDV hiç seçilmez, merge önceki değerleri korur). Notlar koşu özetine (syncLog) eklenir.
+     *  Neden (matrah, 2026-09-28): iskonto/masraf/fatura altı iskonto kolon aileleri şemadan gelmeli — sabit metin tahmin olurdu. */
+    secimUret?: (sema: (tablo: string) => Promise<string[]>) => Promise<{ secim: string; fromEk: string; notlar: string[] }>;
     /**
      * İptal bayrağı kolonu (ör. 'cha_iptal', 'sth_iptal'). Verilirse import
      * sonrası "iptal süpürgesi" koşar: aynı tarih penceresinde Mikro'da İPTAL
@@ -1263,6 +1269,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       }
       // Şema okunamadıysa '*' ile devam — daraltılmış liste uydurmaktan güvenli.
     }
+    let fromEk = opts.fromEk ?? '';
+    let uretNotlari: string[] = [];
+    if (opts.secimUret) {
+      const sema = async (t: string): Promise<string[]> => { try { return await mikroKolonlar(t); } catch { return []; } };
+      const u = await opts.secimUret(sema);
+      secim = u.secim; fromEk = u.fromEk; uretNotlari = u.notlar;
+    }
 
     // ORDER BY kolonu da şemaya karşı doğrulanır: OFFSET/FETCH için ZORUNLU
     // olduğundan yanlış tek bir ad ("Invalid column name 'dbs_Guid'") ilk sayfayı,
@@ -1292,7 +1305,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         // gelir (DOMException TimeoutError) → catch → syncLog(false), ok:false.
         const sayfaT0 = Date.now();
         const { rows, hata } = await mikroSql(
-          `SELECT ${secim} FROM ${opts.tablo}${opts.fromEk ?? ''}${where} ` +
+          `SELECT ${secim} FROM ${opts.tablo}${fromEk}${where} ` +
           `ORDER BY ${siralama} OFFSET ${offset} ROWS FETCH NEXT ${SAYFA} ROWS ONLY`,
           { zamanAsimiMs: listeZamanAsimiMs() },
         );
@@ -1487,6 +1500,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const duration = Date.now() - t0;
       const ozet = `${total} kayıt${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}` +
         `${dusenKolonlar.length ? ` — şemada olmayan kolonlar atlandı: ${dusenKolonlar.join(', ')}` : ''}` +
+        `${uretNotlari.length ? ` — ${uretNotlari.join('; ')}` : ''}` +
         `${siralama !== opts.siralama ? ` — sıralama kolonu '${opts.siralama}' bulunamadı, '${siralama}' kullanıldı` : ''}` +
         `${postNote ? ` — ${postNote}` : ''}` +
         `${supurulen ? ` — ${supurulen} iptal edilmiş kayıt silindi` : ''}` +
@@ -1506,7 +1520,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // kadar buraya HİÇ yazmıyordu, panel bu yüzden boş görünüyordu.
       await C.writeSyncLog(`SQL:${opts.tablo}`, opts.collection, ozet, true, null, null, duration, actor);
       await C.writeAuditLog(actor, opts.label, `${ozet} (SQL: ${opts.tablo})`);
-      return { ok: true, total, note: postNote, truncated: tavanaCarpti, duration, guidsizSatir };
+      // İş kartı (HTTP yolu) da üretici notlarını görsün (şema okunamadı / kolon yok) — yalnız syncLog'da kalmasın.
+      return { ok: true, total, note: [...uretNotlari, postNote].filter(Boolean).join(' — ') || null, truncated: tavanaCarpti, duration, guidsizSatir };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[sqlImport ${opts.tablo}]`, msg);
@@ -1678,8 +1693,12 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   // 2. Faturalar → mikroFaturalar     (eski: FaturaListesiV2, V17'de YOK)
   //
   // Fatura BAŞLIĞI = CARI_HESAP_HAREKETLERI, cha_evrak_tip 63.
-  // Ama başlıkta KDV ve MATRAH YOK — onlar SATIRLARDA (STOK_HAREKETLERI).
-  // Bu yüzden satırlar fatura bazında toplanıp başlığa JOIN'leniyor.
+  // KDV SATIRLARDA (STOK_HAREKETLERI) — satırlar fatura bazında toplanıp başlığa JOIN'leniyor.
+  // MATRAH (2026-09-28 ölçüldü, şartname faz3-2n-specs/matrah-2026-09-28): eskiden `SUM(sth_tutar)` yazılıyordu ama sth_tutar
+  // BRÜT → iskontolu faturada matrah iskonto kadar şişikti (Mizan 600/153, KDV kırılımı, 617, Gelir/Gider, Faturalar). Başlık
+  // matrahı taşır: cha_aratoplam (BRÜT) − Σcha_ft_iskonto (= Σ satır iskontosu) → 693/700 fatura + satırsız + aynı numaralı iki
+  // başlık (giden 246 — satır JOIN'i ikisine de matrah/KDV'yi ÇİFT yazıyordu) + tevkifat doğru. SELECT/JOIN metni tek üreticide:
+  // src/server/mikro/faturaListesiSorgusu.ts (şema → kolon aileleri; önizleme `matrah-tani?onizleme=1` aynı metni gerçek motorda sınar).
   //
   // Birleştirme anahtarı canlıda DOĞRULANDI (2026-08-01):
   //   sth_evraktip = 4 (satış faturası satırı), sth_evrakno_sira = cha_evrakno_sira
@@ -1691,45 +1710,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   makeMikroSqlImport({
     route: '/api/mikro/import/fatura-listesi',
     tablo: 'CARI_HESAP_HAREKETLERI cha',
-    fromEk: ' LEFT JOIN (' +
-              'SELECT sth_evrakno_seri, sth_evrakno_sira, sth_evraktip, ' +
-              'SUM(sth_vergi) AS kdv, SUM(sth_tutar) AS matrah, MIN(sth_vergi_pntr) AS vergiPntr, ' +
-              // Karma KDV tespiti (2026-08-17, kullanıcı bildirdi): bir faturada
-              // hem %10 hem %20'li ürün olabilir. Tek `vergiPntr` (MIN) o zaman
-              // yanıltıcı — matrah/kdv toplamları doğru ama görünen tek oran
-              // faturanın tamamını temsil etmiyor. Karma ise istemci "Karma" gösterir.
-              // ISNULL(...,-1): COUNT(DISTINCT) NULL'ları görmezden gelir — bir
-              // satırın gerçek orana (ör. %20) diğerinin NULL/çözülemeyen orana
-              // sahip olduğu fatura, ISNULL olmadan "tek oran" gibi görünürdü.
-              // CAST ONCE, ISNULL SONRA — sirasi KRITIK.
-              // SQL Server'da ISNULL(kolon, deger) donus tipini KOLONDAN alir.
-              // sth_vergi_pntr tinyint (0-255) oldugu icin `ISNULL(col, -1)`
-              // -1'i tinyint'e cevirmeye calisiyor ve TUM SORGU
-              // "Arithmetic overflow error for data type tinyint, value = -1"
-              // ile oluyordu — yani fatura import'u komple calismiyordu
-              // (2026-08-18 canli bildirimi; hatayi 2026-08-17'de karma-KDV
-              // duzeltmesinde ben eklemistim).
-              // Once INT'e cast edilince nobet degeri sorunsuz sigiyor.
-              // NOT: COUNT(DISTINCT) NULL'lari saymaz; bu yuzden NULL'u ayri
-              // bir deger olarak isaretlemek SART — aksi halde "bir gercek
-              // oran + NULL satirlar" tek oranmis gibi gorunur ve fatura
-              // yanlislikla karma-KDV sayilmaz.
-              'COUNT(DISTINCT ISNULL(CAST(sth_vergi_pntr AS INT), -1)) AS oranSayisi ' +
-              'FROM STOK_HAREKETLERI WHERE sth_evraktip IN (3, 4) ' +
-              'GROUP BY sth_evrakno_seri, sth_evrakno_sira, sth_evraktip' +
-            ') sat ON sat.sth_evrakno_seri = cha.cha_evrakno_seri ' +
-            'AND sat.sth_evrakno_sira = cha.cha_evrakno_sira ' +
-            // Yön eşleşmesi ŞART: satış ve alış aynı evrak numarasını
-            // kullanabiliyor (seri boş). evraktip'i de anahtara katmazsak
-            // bir satış faturasına alış satırının KDV'si bağlanabilir.
-            'AND sat.sth_evraktip = CASE WHEN cha.cha_tip = 0 THEN 4 ELSE 3 END',
-    // KDV/MATRAH ZINCIRI: satir JOIN'i (sat.*) -> baslik farki (cha_meblag - cha_aratoplam) -> NULL.
-    // SON `0` YEDEGI KALDIRILDI (Faz 3 2/n, 2026-09-18): ISNULL(..., 0) ile "satirlari da
-    // baslik aratoplami da okunamayan" fatura SQL'DE ₺0 KDV'ye zorlanıyordu; istemci (hook)
-    // bunu gercek bir sifir sanip Ba/Bs esigine, KDV Analizi'ne ve Sube P&L'ine yaziyordu.
-    // Artik NULL iner ve mapMikroFatura onu NaN (= bilinmiyor) yapar - ekranda '—' + sayac.
-    // Zincirin KENDISI durur: satir yoksa baslik farkindan turetme davranisi aynen korunur.
-    secim: 'cha.*, ISNULL(sat.kdv, cha.cha_meblag - cha.cha_aratoplam) AS kdvTutari, ISNULL(sat.matrah, cha.cha_aratoplam) AS matrah, sat.vergiPntr, sat.oranSayisi',
+    // Seçim + JOIN şemadan üretilir (secimUret): başlık matrahı (aratoplam − Σft iskonto), satır KDV'si, karma KDV tespiti
+    // (oranSayisi — 2026-08-17; CAST ÖNCE ISNULL SONRA: tinyint taşması tüm importu öldürüyordu, 2026-08-18), yön eşleşmeli
+    // satır JOIN'i (satış ve alış aynı evrak numarasını kullanabiliyor), iptal satırı süzgeci. Şema OKUNAMADIYSA matrah/KDV hiç
+    // seçilmez → merge önceki değerleri korur (yanlış/brüt değer doğru değerin üstüne yazılmaz). NULL yedek yok: bilinmeyen
+    // matrah/KDV NULL iner, mapMikroFatura NaN (= bilinmiyor) yapar — ekranda '—' + sayaç (Faz 3 2/n, 2026-09-18 kuralı korunur).
+    secimUret: async (sema) => {
+      const q = faturaListesiSorgusu({ ana: await sema('CARI_HESAP_HAREKETLERI'), satir: await sema('STOK_HAREKETLERI') });
+      return { secim: q.secim, fromEk: q.fromEk, notlar: q.notlar };
+    },
     siralama: 'cha.cha_Guid',
     collection: 'mikroFaturalar', label: 'Mikro Fatura Listesi',
     tarihKolonu: 'cha.cha_tarihi',
@@ -1767,15 +1756,19 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // satır) alt kümesi ≤ 1.594 → her gece TAM; geriye tarihli fatura da 90 günde düşmesin.
     gecePenceresi: 'tam',
     postProcess: async (rows) => {
+      // Şema okunamadığı koşuda seçim matrah/KDV İÇERMEZ (secimUret E2) — sayaçlar "BİLİNMİYOR" dememeli (değerler korunuyor).
+      if (!rows.some(r => 'kdvTutari' in r)) return 'matrah/KDV bu koşuda seçilmedi (şema okunamadı) — önceki değerler korunuyor';
       // Tanilama sayaci: `Number(r.kdvTutari ?? 0) > 0` hem NULL'u hem mesru ₺0'i "eslesmedi"
       // sayiyordu ve ikisini AYIRT EDEMIYORDU. `bilinenSayi` ile uc kova ayrilir: KDV'si okunan
       // (0 dahil), KDV'si 0 OLAN, KDV'si hic okunamayan (NULL -> istemcide NaN).
       const bilinen  = rows.filter(r => bilinenSayi(r.kdvTutari)).length;
       const sifir    = rows.filter(r => bilinenSayi(r.kdvTutari) && Number(r.kdvTutari) === 0).length;
       const okunmaz  = rows.length - bilinen;
+      const saglama = faturaListesiSaglamasi(rows);
       return `${bilinen}/${rows.length} faturada KDV okundu` +
              (sifir > 0 ? ` (${sifir}'i ₺0)` : '') +
-             (okunmaz > 0 ? ` · ${okunmaz} faturada KDV BİLİNMİYOR` : '');
+             (okunmaz > 0 ? ` · ${okunmaz} faturada KDV BİLİNMİYOR` : '') +
+             (saglama ? ` · ${saglama}` : '');
     },
   });
 
@@ -1824,7 +1817,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
                      'cha_kasa_hizkod', 'cha_kasa_hizmet', 'cha_ettn', 'cha_uuid',
                      // Vade: Tahsilat & Vade Takibi ekranı gecikme hesabı için kullanır.
                      // Yoksa istemci fatura tarihine düşer (uydurma vade YAZILMAZ).
-                     'cha_vade_tarihi'],
+                     'cha_vade_tarihi',
+                     // Fatura altı iskonto tutarları (matrah 2026-09-29): Cari Ekstre'nin fatura detayı matrahı
+                     // lib/faturaMatrahi.baslikMatrahi ile cha_aratoplam (BRÜT) − Σcha_ft_iskonto olarak türetir.
+                     ...Array.from({ length: 6 }, (_, i) => `cha_ft_iskonto${i + 1}`)],
     siralama: 'cha_tarihi DESC, cha_Guid',
     // ISNULL: cha_iptal NULL olan satir (or. API ile yazilan LUCA dekontlari) SESSIZCE
     // elenmesin — kardes sorgular (1530, 1791, 4337) ve denetim C16 ile ayni kural. 2026-09-24.
@@ -4014,7 +4010,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   // (kullanıcı 2026-07-31'de bunu özellikle belirtti).
   //
   // sth_tip: 0 = giriş (alış → indirilecek KDV), 1 = çıkış (satış → hesaplanan).
-  // sth_vergisiz_fl = 1 olan satırlar vergiye tabi değil, dışarıda bırakılır.
+  // Sorgu tek üreticide (src/server/mikro/kdvOzetSorgusu.ts, 2026-09-29): MATRAH iskonto düşülerek (tek kaynak satır neti —
+  // eskiden SUM(sth_tutar) BRÜT idi), YALNIZ fatura satırları + faturaya bağlı irsaliye satırları (depo transferi satırları
+  // alış matrahına giriyordu — canlı ölçüm). `sth_vergisiz_fl` SÜZÜLMÜYOR (eski yorum "dışarıda bırakılır" diyordu; ölçülmedi).
   //
   // ⚠️ Bu bir TÜRETME'dir. Tevkifat, iade, devreden KDV ve ÖTV/OİV beyannamede
   // ayrıca işlenir — bu özet onları KAPSAMAZ. Beyan öncesi Mikro'nun kendi KDV
@@ -4034,31 +4032,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
       const cols = await mikroKolonlar('STOK_HAREKETLERI');
       if (!cols.length) return res.status(502).json({ success: false, error: 'STOK_HAREKETLERI okunamadı (SqlVeriOkuV2 izni?).' });
-      const vergiCol   = kolonBul(cols, /^sth_vergi$/i);
-      const pntrCol    = kolonBul(cols, /vergi_pntr/i);
-      const tutarCol   = kolonBul(cols, /^sth_tutar$/i);
-      const tipCol     = kolonBul(cols, /^sth_tip$/i);
-      const tarihCol   = kolonBul(cols, /^sth_tarih$/i);
-      const iptalCol   = kolonBul(cols, /_iptal$/i);
-      if (!vergiCol || !tipCol || !tarihCol) {
-        return res.status(502).json({ success: false,
-          error: `KDV kolonları eşleşmedi (vergi=${vergiCol}, tip=${tipCol}, tarih=${tarihCol}). taxSummary'ye dokunulmadı.` });
-      }
-      for (const c of [vergiCol, pntrCol, tutarCol, tipCol, tarihCol, iptalCol].filter(Boolean)) {
-        if (!sqlTanimlayici(c)) return res.status(500).json({ success: false, error: 'Geçersiz kolon adı.' });
-      }
-
-      const kosul = [`${tarihCol} BETWEEN '${ilkTarih}' AND '${sonTarih}'`];
-      if (iptalCol) kosul.push(`ISNULL(${iptalCol}, 0) = 0`)   /* ISNULL: sabit kardesler (1530/1574/1593) ile ayni kural; hakem 2026-09-24 */;
-      const secim = [`${tipCol} AS tip`, `SUM(${vergiCol}) AS kdv`];
-      if (tutarCol) secim.push(`SUM(${tutarCol}) AS matrah`);
-      const grup = [tipCol];
-      if (pntrCol) { secim.unshift(`${pntrCol} AS oranPntr`); grup.push(pntrCol); }
-
-      const { rows, hata } = await mikroSql(
-        `SELECT ${secim.join(', ')} FROM STOK_HAREKETLERI WHERE ${kosul.join(' AND ')} ` +
-        `GROUP BY ${grup.join(', ')} ORDER BY ${tipCol}`,
-      );
+      const sorgu = kdvOzetSorgusu(cols, ilkTarih, sonTarih, FATURA_EVRAK_KOSULU);
+      if (!sorgu.ok) return res.status(sorgu.hata === 'Geçersiz kolon adı.' ? 500 : 502).json({ success: false, error: sorgu.hata });
+      const { rows, hata } = await mikroSql(sorgu.sql);
       if (hata) return res.status(502).json({ success: false, error: `KDV sorgusu başarısız: ${hata}. taxSummary'ye dokunulmadı.` });
 
       if (!rows.length) {
@@ -4070,9 +4046,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // Satır oranını gerçek yüzdeye çevir (pntr indekstir, yüzde değil).
       // Bilinmeyen KDV/yön ₺0 sayılmaz: satır kırılıma girmez, `note` sayacına düşer.
       const vergiTablosu = await mikroVergiOranlari();
-      const kdvSonuc = kdvKirilimi(rows, { vergiTablosu, oranKolonuVar: Boolean(pntrCol) });
+      const kdvSonuc = kdvKirilimi(rows, { vergiTablosu, oranKolonuVar: sorgu.oranKolonuVar });
       const { kirilim, kdvHesaplanan, kdvIndirilecek } = kdvSonuc;
-      const kdvNot = kdvSonuc.ozet.not;
+      const kdvNot = [kdvSonuc.ozet.not, ...sorgu.notlar].filter(Boolean).join(' · ') || null;
       if (kdvSonuc.ozet.okumaArizasi.length) {
         console.warn('[pull/kdv] okuma arızası:', kdvSonuc.ozet.okumaArizasi.join(', '), '— kolon adı/şema kontrol edin');
       }
@@ -4093,7 +4069,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         kdvOdenmesi: kdvSonuc.kdvOdenmesi,
         devredenKdv: kdvSonuc.devredenKdv,
         oranKirilimi: kirilim,
-        kaynak: `SQL:STOK_HAREKETLERI (${vergiCol}${pntrCol ? '/' + pntrCol : ''}) — TÜRETİLMİŞTİR; tevkifat/iade/devreden KAPSAM DIŞI, beyan öncesi Mikro KDV raporuyla karşılaştırın`,
+        kaynak: `SQL:STOK_HAREKETLERI (sth_vergi${sorgu.oranKolonuVar ? '/sth_vergi_pntr' : ''}; matrah iskonto düşülmüş; fatura + faturaya bağlı irsaliye satırları) — TÜRETİLMİŞTİR; tevkifat/iade/devreden KAPSAM DIŞI, beyan öncesi Mikro KDV raporuyla karşılaştırın`,
         syncedAt: pgServerTimestamp(),
       }, { merge: true });
 
@@ -4103,7 +4079,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       await C.writeAuditLog(C.reqActor(req), 'Mikro KDV Özeti Çekme', kdvOzet);
       // `|| 0` KALDIRILDI: matrahı okunamayan oran kovası ₺0 sayılıp satış matrahını
       // OLDUĞUNDAN AZ gösteriyordu. Hiç bilinen yoksa NaN → yanıtta null → istemci '—'.
-      // NOT: matrah TANIMI (SUM(sth_tutar)) burada DEĞİŞMEDİ — iskonto sorusu açık (2026-09-18).
+      // Matrah TANIMI 2026-09-29'da düzeldi: iskonto düşülmüş satır neti (kdvOzetSorgusu — ölçüm faz3-2n-specs/matrah-2026-09-28).
       const kdvMatrahiSatis = kdvSonuc.matrahSatis;
       res.json({ success: true, period, kdvHesaplanan, kdvIndirilecek,
                  kdvOdenmesi: kdvSonuc.kdvOdenmesi,

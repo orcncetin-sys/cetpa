@@ -55,6 +55,9 @@ export const gercekAd = (kolonlar: readonly string[], ad: string): string | null
 const topla = (kolonlar: readonly string[], on: string) => kolonlar.map(k => `ISNULL(${on}${k}, 0)`).join(' + ');
 
 /**
+ * NOT (inceleme 2026-09-29): SQL üreticisi NULL ft iskontosunu `ISNULL(…, 0)` ile 0 sayar, JS `baslikMatrahi` null (bilinmiyor)
+ * döner — Mikro'da cha_ft_iskonto kolonlarının NULL alıp almadığı ölçülmedi (700 faturada tutarsızlık görülmedi). NULL görülürse
+ * iki taraf aynı kurala çekilmeli.
  * Başlık matrahı SQL ifadesi: `(cha.cha_aratoplam - (ISNULL(cha.cha_ft_iskonto1, 0) + ...))`. Şemada cha_aratoplam YOKSA ya da HİÇ
  * ft kolonu yoksa null (çağıran satır formülüne düşer — brüt aratoplam matrah diye YAZILMAZ).
  */

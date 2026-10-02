@@ -528,6 +528,10 @@ describe('(d) cron paritesi: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DO�
 
     expect(sorgular.some(s => s.includes("FROM CARI_HESAP_HAREKETLERI WHERE ISNULL(cha_iptal, 0) = 0 AND cha_tarihi >= '2000-01-01' ORDER BY"))).toBe(true);
     expect(sorgular.some(s => s.includes("cha.cha_tarihi >= '2000-01-01'"))).toBe(true);     // fatura-listesi (alt küme)
+    // Matrah (2026-09-29): fatura-listesi seçimi şemadan üretilir (secimUret → faturaListesiSorgusu). Bu sahte şemada
+    // cha_aratoplam/ft iskonto yok → başlık matrahı NULL; seçim yine matrah/KDV alanlarını taşır.
+    expect(sorgular.some(s => s.includes("cha.cha_tarihi >= '2000-01-01'") && s.includes('CROSS APPLY (SELECT CAST(NULL AS FLOAT) AS bm) b')
+      && s.includes('AS matrahKaynagi'))).toBe(true);
     expect(sorgular.some(s => s.includes("sip_tarih >= '2026-06-26'"))).toBe(true);           // 90 gün (ÖLÇÜLMEDİ → kalır)
     expect(sorgular.some(s => s.includes("sth_tarih >= '2026-06-26'"))).toBe(true);
     expect(sorgular.filter(s => /BETWEEN/.test(s))).toEqual([]);
@@ -555,6 +559,40 @@ describe('(d) cron paritesi: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DO�
     expect(sorgular.filter(s => s.includes("cha_tarihi >= '2000-01-01'"))).toHaveLength(3);
     expect(secenekler).toEqual(new Array(13).fill({ zamanAsimiMs: 600_000 }));
     expect(supurgeler().map(c => c[3])).toEqual(new Array(3).fill({ zamanAsimiMs: 600_000 }));
+    vi.useRealTimers(); vi.unstubAllEnvs();
+  });
+
+  it('matrah: STOK_HAREKETLERI şeması OKUNAMAZSA (mikroKolonlar fırlatır) fatura-listesi matrah/KDV SEÇMEZ ve özet "GÜNCELLENMEDİ" der', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-09-24T12:00:00Z') });
+    vi.stubEnv('MIKRO_CRON_SYNC', 'true');
+    vi.stubEnv('MIKRO_CRON_COMPANY_ID', 'A');
+    vi.mocked(cron.schedule).mockClear();
+    const dc = duzenekKur();
+    const sorgular: string[] = [];
+    // fatura-listesi sayfası BİR satır döndürür → postProcess koşar (şema okunamadığı için satırda matrah/kdvTutari YOK).
+    let faturaSayfasi = 0;
+    vi.mocked(mikroSql).mockImplementation((async (sql: string) => {
+      sorgular.push(sql);
+      const fatura = sql.includes("cha.cha_tarihi >= '2000-01-01'") && !sql.includes('<> 0') && sql.includes('OFFSET 0 ROWS');
+      return { rows: fatura && faturaSayfasi++ === 0 ? [{ cha_Guid: 'g1', cha_meblag: 120 }] : [], hata: null };
+    }) as unknown as typeof mikroSql);
+    vi.mocked(mikroKolonlar).mockImplementation(async (tablo: string) => {
+      if (tablo === 'STOK_HAREKETLERI') throw new Error('INFORMATION_SCHEMA zaman aşımı');
+      return tablo === 'CARI_HESAP_HAREKETLERI' ? ['cha_Guid', 'cha_iptal', 'cha_tarihi', 'cha_aratoplam', 'cha_ft_iskonto1'] : [];
+    });
+    vi.mocked(mikroPost).mockImplementation((async () => ({ ok: true, status: 200, data: { result: [{ Data: [] }] } })) as unknown as typeof mikroPost);
+    const gece = vi.mocked(cron.schedule).mock.calls.find(c => c[0] === '20 3 * * *');
+    await (gece![1] as () => Promise<void>)();   // ! : önceki test gece cron'un kayıtlı olduğunu kanıtladı
+    const fatura = sorgular.filter(s => s.includes("cha.cha_tarihi >= '2000-01-01'") && !s.includes('<> 0'));
+    expect(fatura).toHaveLength(1);
+    expect(fatura[0]).toMatch(/^SELECT cha\.\* FROM CARI_HESAP_HAREKETLERI cha WHERE /);
+    expect(fatura[0]).not.toMatch(/AS matrah|kdvTutari/);
+    const ozetler = dc.syncLog.mock.calls.map(c => String(c[2]));
+    expect(ozetler.some(o => o.includes('GÜNCELLENMEDİ'))).toBe(true);
+    // postProcess "KDV BİLİNMİYOR" DEMEZ (değerler korunuyor; inceleme 2026-09-29 — üç ajan bağımsız buldu).
+    const faturaOzeti = ozetler.find(o => o.includes('GÜNCELLENMEDİ')) ?? '';
+    expect(faturaOzeti).toContain('bu koşuda seçilmedi');
+    expect(faturaOzeti).not.toContain('BİLİNMİYOR');
     vi.useRealTimers(); vi.unstubAllEnvs();
   });
 });

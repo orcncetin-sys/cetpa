@@ -11,10 +11,14 @@
  * SQL takma ada başvurmaz (T-SQL aynı SELECT'teki takma adı görmez): başlık matrahı CROSS APPLY ile `b.bm`; pencere sayımı
  * açıkça tekrarlanır. Yalnız ASCII.
  * Şema OKUNAMADIYSA (boş liste ≠ "kolon yok") matrah/KDV alanları SEÇİLMEZ → merge önceki değerleri korur (kapı E2).
+ * Sınır: satırsız başlığın (canlıda giden 119, 1) KDV'si meblağ − matrah'tan türer (doğru, tevkifatsız); faturaya sth_fat_uid ile
+ * bağlı irsaliye satırları bu JOIN'e girmez → vergiPntr/oranSayisi o faturada NULL (oran '—'; matrah/KDV doğru). KDV özeti
+ * (kdvOzetSorgusu) bağlı irsaliye satırlarını ayrıca sayar.
  * Sınır: `COUNT(*) OVER` WHERE sonrası (tarih penceresi) sayar — dar HTTP penceresi aynı numaralı ikinci başlığı dışarıda
  * bırakırsa o koşuda çift KDV geri gelir; gece koşusu 'tam' penceredir.
  */
-import { baslikMatrahSql, satirNetSql } from '../../lib/faturaMatrahi.js';
+import { baslikMatrahSql, satirNetSql, saglamaPayi } from '../../lib/faturaMatrahi.js';
+import { bilinenSayi } from '../../utils/para.js';
 
 export interface FaturaListesiSorgusu {
   secim: string;
@@ -62,4 +66,32 @@ export function faturaListesiSorgusu(sema: { ana: readonly string[]; satir: read
     `CASE WHEN ${PENCERE} > 1 THEN 1 ELSE 0 END AS ortakAnahtar`,
   ].join(', ');
   return { secim, fromEk, matrahYazilir: true, notlar };
+}
+
+/**
+ * Import KAPANIŞ ÖLÇÜSÜ (şartname M1.4): yazılan her faturada `matrah + kdvTutari ≈ cha_meblag` (pay tek kaynaktan). Tutmayan =
+ * tevkifat (meblağ KDV'nin tevkif edilen kısmı kadar düşük — bilinen 2 alış), masraf ya da tutarsız kayıt. KDV'si meblağdan
+ * TÜRETİLEN (satırsız / ortak anahtar) faturada sağlama yapı gereği tutar → ayrı sayılır (kör nokta, aşama 1 incelemesi).
+ * Şema okunamadığı koşuda satırlarda `matrah` alanı hiç yoktur → boş metin.
+ */
+export function faturaListesiSaglamasi(rows: readonly Readonly<Record<string, unknown>>[]): string {
+  if (!rows.some(r => 'matrah' in r)) return '';
+  const say = (v: unknown) => (bilinenSayi(v) ? Number(v) : null);
+  let tutmayan = 0, turetilmis = 0, satirKaynakli = 0, bilinmiyor = 0, negatifKdv = 0;
+  for (const r of rows) {
+    const matrah = say(r.matrah), kdv = say(r.kdvTutari), meblag = say(r.cha_meblag), satir = say(r.satirSayisi);
+    if (matrah === null) { bilinmiyor++; continue; }
+    if (r.matrahKaynagi === 'satir') satirKaynakli++;
+    const turet = say(r.ortakAnahtar) === 1 || satir === null;
+    if (turet) turetilmis++;
+    if (kdv !== null && kdv < 0) negatifKdv++;
+    if (!turet && kdv !== null && meblag !== null && Math.abs(matrah + kdv - meblag) > saglamaPayi(satir)) tutmayan++;
+  }
+  const parca: string[] = [];
+  if (tutmayan) parca.push(`${tutmayan} faturada matrah + KDV ≠ meblağ (tevkifat/masraf olabilir)`);
+  if (turetilmis) parca.push(`${turetilmis} faturada KDV meblağdan türetildi (satırsız / aynı numaralı başlık)`);
+  if (satirKaynakli) parca.push(`${satirKaynakli} faturada matrah satırlardan (başlıkta fatura altı iskonto kolonu yok)`);
+  if (bilinmiyor) parca.push(`${bilinmiyor} faturada matrah BİLİNMİYOR`);
+  if (negatifKdv) parca.push(`⚠ ${negatifKdv} faturada KDV eksi`);
+  return parca.length ? `matrah sağlaması: ${parca.join(' · ')}` : 'matrah sağlaması: tümü tutuyor';
 }

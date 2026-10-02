@@ -18,6 +18,7 @@ import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
 import { bilinenSayi } from '../utils/para';
+import { baslikMatrahi } from '../lib/faturaMatrahi';
 import { tarihYaz, zamanDate } from '../utils/zaman';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';
 import { type Order } from '../types';
@@ -491,7 +492,10 @@ export default function CariEkstrePanel({
                       // gösteriyordu — aynı modal hook'tan gelirken '—' basıyor, buradan gelirken ₺0
                       // basıyordu (yarım düzeltme sınıfı). KDV farkı da bilinmeyene dokununca NaN olur.
                       const tutar = bilinenSayi(x.cha_meblag) ? Number(x.cha_meblag) : NaN;
-                      const matrah = bilinenSayi(x.cha_aratoplam) ? Number(x.cha_aratoplam) : NaN;
+                      // Matrah TEK KAYNAKTAN (lib/faturaMatrahi): aratoplam − Σcha_ft_iskonto (aratoplam BRÜT'tür). ft alanı
+                      // henüz gelmemiş eski dokümanda BİLİNMİYOR ('—'); cari-hareket gece 'tam' yenilemesi getirir.
+                      const baslik = baslikMatrahi(x);
+                      const matrah = baslik ?? NaN;
                       setSelectedInvoice({
                         id: row.id,
                         faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
@@ -500,6 +504,13 @@ export default function CariEkstrePanel({
                         tarih: row.createdAt,
                         tutar,
                         matrah,
+                        matrahKaynagi: baslik === null ? null : 'baslik',
+                        // Aynı yön + evrak numaralı başka fatura başlığı bu cari listesinde var mı (canlıda giden 246): kalemler
+                        // paylaşılır, detay matrahı/sağlamayı kalemden TÜRETMEZ. Liste yalnız bu carinin hareketleri — ikizi başka
+                        // cariye aitse görülmez (sınır).
+                        ortakAnahtar: rows.filter(r => r.raw && Number(r.raw.cha_evrak_tip) === 63 && Number(r.raw.cha_tip ?? 0) === Number(x.cha_tip ?? 0)
+                          && String(r.raw.cha_evrakno_seri ?? '').trim() === seri && String(r.raw.cha_evrakno_sira ?? '') === String(sira ?? '')).length > 1,
+                        // Sınır: tevkifatlı faturada meblağ tevkifat kadar düşük → bu KDV o kadar eksik görünür (modellenmez).
                         kdv: tutar - matrah,
                         oran: null,
                         yon: Number(x.cha_tip ?? 0) === 1 ? 'gelen' : 'giden',

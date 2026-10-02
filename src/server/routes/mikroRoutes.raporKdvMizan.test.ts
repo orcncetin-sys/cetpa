@@ -49,7 +49,8 @@ vi.mock('../mikroClient.js', async (orig) => {
 });
 
 // ── Fikstürler (Türkçe; gerçek Mikro kolon adları) ───────────────────────────
-const STH_KOLONLARI = ['sth_tarih', 'sth_tip', 'sth_vergi', 'sth_vergi_pntr', 'sth_tutar', 'sth_iptal'];
+// Canlı şemanın ilgili alt kümesi (2026-09-29): evraktip + faturaya bağlama + iskonto ailesi — kdvOzetSorgusu bunlar yoksa not düşer.
+const STH_KOLONLARI = ['sth_tarih', 'sth_tip', 'sth_vergi', 'sth_vergi_pntr', 'sth_tutar', 'sth_iptal', 'sth_evraktip', 'sth_fat_uid', 'sth_iskonto1'];
 const FIS_KOLONLARI = ['fis_tarih', 'fis_hesap_kodu', 'fis_meblag0', 'fis_iptal'];
 /** Mikro VergiListesiV2 karşılığı: işaretçi → GERÇEK yüzde (pntr yüzde DEĞİLDİR). */
 const VERGI = new Map<number, number>([[0, 0], [3, 10], [4, 20]]);
@@ -119,6 +120,18 @@ describe('pull/kdv — parite (bilinen girdide bugünküyle BİREBİR aynı)', (
     expect(g.hesaplananKdv).toBe(2450);
     expect(g.kdvOdenmesi).toBe(1650);
     expect(g.note).toBeNull();
+  });
+
+  it('SQL: matrah iskonto düşülmüş, yalnız fatura + faturaya bağlı irsaliye satırları (kdvOzetSorgusu); eksik kolon notu yanıta düşer', async () => {
+    kdvKur([SATIS_20]);
+    await cagirKdv();
+    const sql = String(vi.mocked(mikroSql).mock.calls[0][0]);
+    expect(sql).toContain('SUM(sth_tutar - (ISNULL(sth_iskonto1, 0))) AS matrah');
+    expect(sql).toContain("((sth_evraktip IN (3, 4) AND sth_tarih BETWEEN '2026-08-01' AND '2026-08-31') OR (sth_evraktip NOT IN (3, 4) AND EXISTS (SELECT 1 FROM CARI_HESAP_HAREKETLERI cha WHERE cha.cha_Guid = STOK_HAREKETLERI.sth_fat_uid");
+    expect(sql).toContain("AND cha.cha_tarihi BETWEEN '2026-08-01' AND '2026-08-31'))");   // bağlı irsaliye FATURA tarihiyle
+    vi.mocked(mikroKolonlar).mockResolvedValue(['sth_tarih', 'sth_tip', 'sth_vergi', 'sth_vergi_pntr', 'sth_tutar', 'sth_iptal']);
+    const eski = await cagirKdv();
+    expect(String((eski.govde as Record<string, unknown>).note)).toContain('SÜZÜLMEDİ');
   });
 });
 
