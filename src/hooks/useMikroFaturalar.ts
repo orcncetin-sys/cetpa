@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot } from '../lib/dbClient';
 import { db } from '../firebase';
 import { bilinenSayi } from '../utils/para';
+import { ebelgeTuruCoz } from '../utils/muhasebe/ebelgeTuru';
 
 /** Mikro faturası — istemci tarafı normalize edilmiş şekil.
  *  KAYNAK: `mikroFaturalar` koleksiyonu (server: /api/mikro/import/fatura-listesi).
@@ -22,7 +23,8 @@ export interface MikroFatura {
   oranKarma: boolean;            // true: faturada birden fazla KDV oranı var (ör. %10 + %20) — oran tek başına yanıltıcı
   yon: 'gelen' | 'giden';        // cha_tip 1=gelen(alış), 0=giden(satış)
   uuid?: string;                 // GİB belge kimliği (e-belge XML/PDF)
-  ebelgeTuru: number;            // 0=e-Fatura, 1=e-Arşiv, 2=e-İrsaliye; -1=bilinmiyor
+  /** 0 = e-Fatura, 1 = e-Arşiv, -1 = bilinmiyor (gelen faturada hep -1) — `cha_ebelge_Islemturu`'ndan; bkz. utils/muhasebe/ebelgeTuru. */
+  ebelgeTuru: number;
   /** cha_subeno — şube bazlı P&L eşleşmesi için. **NaN = BİLİNMİYOR** (0 = merkez, meşru değer). */
   subeNo: number;
 }
@@ -73,7 +75,7 @@ export function mapMikroFatura(id: string, x: Record<string, unknown>): MikroFat
     oran:     VERGI_PNTR_ORAN[String(x.vergiPntr ?? '')] ?? null,
     oranKarma: Number(x.oranSayisi ?? 1) > 1,
     uuid:     String(x.cha_uuid ?? x.cha_ettn ?? x.uuid ?? '') || undefined,
-    ebelgeTuru: Number(x.cha_ebelge_turu ?? -1),
+    ebelgeTuru: ebelgeTuruCoz(x),
     // `?? 0` BURADA MEŞRU: para değil SINIFLANDIRMA varsayılanı (cha_tip 1=gelen/alış, 0=giden/satış).
     // Bilinen sınır: yönü okunamayan fatura SATIŞ sayılır ve ciroyu şişirebilir; `yon`un üçüncü bir
     // durumu olmadığı için düzeltmesi tüm tüketicileri değiştirir — Açık İşler.

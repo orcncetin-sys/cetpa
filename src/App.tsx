@@ -211,7 +211,7 @@ import QuickShipmentModal from './components/QuickShipmentModal';
 import OverduePanel from './components/OverduePanel';
 import PaymentMethodModal from './components/PaymentMethodModal';
 import { translations, type Language } from './translations';
-import { optimizeRoute } from './utils/logistics';
+import { optimizeRoute, sevkiyatiSuruyor } from './utils/logistics';
 import { itemCostTRY } from './utils/cost';
 import { hedefYamasi, hedefleriOku } from './utils/pano/hedefButce';
 import { kisaTutar, paraYaz } from './utils/currency';
@@ -2950,7 +2950,7 @@ function AppContent() {
   // --- Reports Filters ---
   // Nearest-neighbor TSP heuristic starting from Antalya (Eski Sanayi) depot
   const handleBuildRoute = () => {
-    const eligible = orders.filter(o => o.location && o.status !== 'Delivered' && o.status !== 'Cancelled');
+    const eligible = orders.filter(o => o.location && sevkiyatiSuruyor(o));
     if (eligible.length === 0) {
       toast(currentT.no_active_orders_to_route, 'info');
       return;
@@ -6111,6 +6111,7 @@ function AppContent() {
                 aracKonumlari={aracKonumlari}
                 konumYazabilir={isAllowed(userRole, 'vehiclePositions', 'write')}
                 irsaliyeKesebilir={isAllowed(userRole, 'shipments', 'write')}
+                siparisDetayiAcilabilir={canAccess('orders')}
                 kullaniciUid={user?.uid}
                 selectedOrder={selectedOrder}
                 setSelectedOrder={setSelectedOrder}

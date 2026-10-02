@@ -60,7 +60,8 @@ function eskiMikroFaturaSatirlari(
     .filter(f => {
       if (invoiceTypeFilter === 'all') return true;
       if (invoiceTypeFilter === 'e-fatura') return f.ebelgeTuru === 0 || f.ebelgeTuru === -1;
-      if (invoiceTypeFilter === 'e-arsiv') return f.ebelgeTuru === 1 || f.ebelgeTuru === -1;
+      // BİLİNÇLİ SAPMA (2026-10-02): eski zincir bilinmeyeni (-1) e-Arşiv'de de gösteriyordu; artık yalnız BİLİNEN e-Arşiv.
+      if (invoiceTypeFilter === 'e-arsiv') return f.ebelgeTuru === 1;
       return false;
     })
     .map(f => ({ ...f, musteri: cariAdMap.get(f.cariKod) || f.cariKod || '—' }))
@@ -90,9 +91,9 @@ describe('mikroFaturaSatirlari — filtre kuralları (AccountingModule 1729-1776
     expect(idler(mikroFaturaSatirlari(MIKRO, secim({ cetpaEvrakNolari: new Set(['']) })))).toContain('m6');
     expect(idler(mikroFaturaSatirlari(MIKRO, secim({ cetpaEvrakNolari: new Set() })))).toContain('m4');
   });
-  it('e-belge türü: bilinmeyen tür (-1) GİZLENMEZ; e-Fatura→0|-1, e-Arşiv→1|-1, İhracat→hiçbiri (cha_ebelge_turu’da yok)', () => {
+  it('e-belge türü: e-Fatura→0|-1 (bilinmeyen gizlenmez), e-Arşiv→YALNIZ 1 (bilinmeyen e-Arşiv sayılmaz), İhracat→hiçbiri', () => {
     expect(idler(mikroFaturaSatirlari(MIKRO, secim({ ebelgeTuru: 'e-fatura' })))).toEqual(['m1', 'm3', 'm6']);
-    expect(idler(mikroFaturaSatirlari(MIKRO, secim({ ebelgeTuru: 'e-arsiv' })))).toEqual(['m2', 'm3']);
+    expect(idler(mikroFaturaSatirlari(MIKRO, secim({ ebelgeTuru: 'e-arsiv' })))).toEqual(['m2']);
     expect(mikroFaturaSatirlari(MIKRO, secim({ ebelgeTuru: 'ihracat' }))).toEqual([]);
   });
   it('müşteri adı: cari haritasında varsa ad, yoksa cari kod, o da yoksa "—"', () => {

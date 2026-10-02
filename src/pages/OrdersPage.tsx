@@ -18,6 +18,7 @@ import { zamanMs, zamanDate, gunBasi, gunAnahtari, ayAnahtari, tarihYaz, tarihSa
 import type { BinSatiri } from '../hooks/useSekmeVerileri';
 import type { VehiclePosition } from '../types';
 import React, { useState, useEffect, useMemo } from 'react';
+import { sevkiyatiSuruyor } from '../utils/logistics';
 import { pdfBaslik, pdfAltBilgi, pdfTabloStili, PDF_RENK, PDF_ALT_BANT_YUKSEKLIK } from '../utils/pdfTheme';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
@@ -156,6 +157,9 @@ interface Props {
   DEPOTS: Record<DepotKey, Depot>;
   recurringOrders: Array<{ id: string; templateName: string; customerName: string; totalPrice: number; frequency: 'weekly' | 'monthly' | 'quarterly'; nextDue: string; active: boolean }>;
   hasFullAccess: (tab: string) => boolean;
+  /** `canAccess('orders')` — Lojistik rolü 'lojistik' sekmesinde tam yetkili ama 'orders' sekmesine ERİŞEMEZ: sevkiyat satırından
+   *  sipariş detayına geçiş yalnız bu true iken sunulur (aksi hâlde App'in yetki etkisi kullanıcıyı Pano'ya atıyordu — inceleme 2026-10-02). */
+  siparisDetayiAcilabilir: boolean;
   currentLanguage: 'tr' | 'en';
   currentT: Record<string, string>;
   orders: Order[];
@@ -224,7 +228,7 @@ interface Props {
 export default function OrdersPage({
   selectedOrder, setSelectedOrder, lojistikTab, setLojistikTab,
   routeStops, isRouteOptimized, selectedDepot, setSelectedDepot, DEPOTS,
-  recurringOrders, hasFullAccess, currentLanguage, currentT,
+  recurringOrders, hasFullAccess, siparisDetayiAcilabilir, currentLanguage, currentT,
   orders, leads, inventory, exchangeRates, employees,
   userRole, user, kpiCurrency, setKpiCurrency, activeTab, darkMode, warehouses, vehicles, aracKonumlari, konumYazabilir, irsaliyeKesebilir, kullaniciUid, locationStocks, shipments,
   newOrder, setNewOrder, orderLineItems, setOrderLineItems,
@@ -240,6 +244,19 @@ export default function OrdersPage({
   const [orderDateRange, setOrderDateRange] = useState<'all'|'today'|'week'|'month'|'quarter'>('all');
   const [expandedOrderId, setExpandedOrderId] = useState<string|null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  // Lojistik → "Aktif Sevkiyatlar": yalnız sevkiyatı SÜREN siparişler (rota kurucuyla aynı tanım); teslim edilenler isteğe bağlı.
+  const [teslimEdilenleriGoster, setTeslimEdilenleriGoster] = useState(false);
+  const sevkiyatListesi = useMemo(() => {
+    const suren = orders.filter(sevkiyatiSuruyor);
+    const teslim = orders.filter(o => o.status === 'Delivered');
+    const gorunen = teslimEdilenleriGoster ? [...suren, ...teslim] : suren;
+    // Harita: listedekiler + kurulmuş rotanın durakları. Rota kurulduktan SONRA teslim edilen siparişin işaretçisi kalmalı —
+    // rota çizgisi o noktadan geçmeye devam ediyor (routeStops yeniden hesaplanmaz); işaretçisiz köşe çizgiyi anlamsız kılardı.
+    const listede = new Set(gorunen.map(o => o.id));
+    const durak = new Set(routeStops.map(d => d.orderId));
+    const harita = [...gorunen, ...orders.filter(o => durak.has(o.id) && !listede.has(o.id))];
+    return { gorunen, harita, teslimEdilen: teslim.length };
+  }, [orders, routeStops, teslimEdilenleriGoster]);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [copiedOrderId, setCopiedOrderId] = useState<string|null>(null);
   const [starredOrders, setStarredOrders] = useState<Set<string>>(new Set());
@@ -3778,7 +3795,7 @@ export default function OrdersPage({
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 order-2 lg:order-1">
                   <React.Suspense fallback={<div className="h-[400px] md:h-[600px] w-full rounded-xl bg-gray-100 flex items-center justify-center"><div className="w-8 h-8 rounded-full border-2 border-[#ff4000] border-t-transparent animate-spin" /></div>}>
-                    <LogisticsMap orders={orders} routeStops={routeStops} depot={DEPOTS[selectedDepot]} currentT={currentT} />
+                    <LogisticsMap orders={sevkiyatListesi.harita} routeStops={routeStops} depot={DEPOTS[selectedDepot]} currentT={currentT} />
                   </React.Suspense>
                 </div>
                 <div className="apple-card flex flex-col order-1 lg:order-2">
@@ -3789,13 +3806,13 @@ export default function OrdersPage({
                     </span>
                   </div>
                   <div className="flex-1 overflow-y-auto max-h-[400px] lg:max-h-[520px] p-2 space-y-2">
-                    {orders.length === 0 ? (
+                    {sevkiyatListesi.gorunen.length === 0 ? (
                       <div className="p-8 text-center text-gray-400 text-sm">{currentT.no_active_orders_found}</div>
                     ) : (
-                      orders.map(order => {
+                      sevkiyatListesi.gorunen.map(order => {
                         const routeStop = routeStops.find(s => s.orderId === order.id);
-                        return (
-                          <div key={order.id} className="p-3 rounded-lg hover:bg-gray-50 transition-colors border border-transparent hover:border-gray-100 cursor-pointer">
+                        const icerik = (
+                          <>
                             <div className="flex justify-between items-start mb-1">
                               <h4 className="font-bold text-xs">{order.customerName}</h4>
                               <span className={cn("text-[9px] font-bold uppercase px-1.5 py-0.5 rounded",
@@ -3815,11 +3832,31 @@ export default function OrdersPage({
                               <MapPin className="w-3 h-3 shrink-0" />
                               <span className="truncate">{order.shippingAddress}</span>
                             </div>
-                          </div>
+                          </>
+                        );
+                        // Sipariş detayı 'orders' sekmesinde yaşar; o sekmeye erişimi olmayan rol (Lojistik) için satır düz kalır —
+                        // tıklanabilir GÖRÜNÜP başka yere atmasın.
+                        return siparisDetayiAcilabilir ? (
+                          <button type="button" key={order.id}
+                            onClick={() => { setSelectedOrder(order); setActiveTab('orders'); trackView({ type: 'order', id: order.id, label: `${gorunenSiparisNo(order)} — ${order.customerName}`, tab: 'orders' }); }}
+                            title={currentLanguage === 'tr' ? 'Sipariş detayını aç' : 'Open order details'}
+                            className="block w-full text-left p-3 rounded-lg hover:bg-gray-50 transition-colors border border-transparent hover:border-gray-100 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff4000]/40">
+                            {icerik}
+                          </button>
+                        ) : (
+                          <div key={order.id} className="p-3 rounded-lg border border-transparent">{icerik}</div>
                         );
                       })
                     )}
                   </div>
+                  {sevkiyatListesi.teslimEdilen > 0 && (
+                    <button type="button" onClick={() => setTeslimEdilenleriGoster(v => !v)}
+                      className="p-3 border-t border-gray-100 text-[11px] font-semibold text-gray-500 hover:text-brand text-center">
+                      {teslimEdilenleriGoster
+                        ? (currentLanguage === 'tr' ? 'Teslim edilenleri gizle' : 'Hide delivered')
+                        : (currentLanguage === 'tr' ? `Teslim edilenleri göster (${sevkiyatListesi.teslimEdilen})` : `Show delivered (${sevkiyatListesi.teslimEdilen})`)}
+                    </button>
+                  )}
                 </div>
               </div>
               </>}

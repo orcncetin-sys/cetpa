@@ -350,13 +350,16 @@ export function faturaGovdesi(fatura: FaturaGirdisi, secenek: FaturaSecenekleri)
     //    Cetpa'nın kendi Faturalar ekranında "e-Arşiv" görünürdü; 8'in ise
     //    okuma tarafında karşılığı yok, -1/bilinmiyor'a düşerdi.
     //
-    //    Doğru eşleme İKİ BAĞIMSIZ kaynakla sabitlendi (tahmin değil):
-    //      1. Okuma tarafı — canlı tie-out ile ölçüldü (HANDOFF.md:119:
-    //         satış 200×tür0 / 5×tür1, alış 91×tür0 / 58×tür1) →
-    //         src/hooks/useMikroFaturalar.ts:21 «0=e-Fatura, 1=e-Arşiv,
-    //         2=e-İrsaliye».
-    //      2. Mikro API spec'i — mikroRoutes.ts «EBelgeTipi 0=EFatura
-    //         1=EArsiv 2=EIrsaliye» ve aynı eşlemeyi kullanan gelen-fatura yolu.
+    //    Eşlemenin dayanağı (2026-08-25): Mikro API spec'i — mikroRoutes.ts «EBelgeTipi 0=EFatura 1=EArsiv 2=EIrsaliye»
+    //    ve aynı eşlemeyi kullanan gelen-fatura yolu.
+    //
+    // ⚠️ İKİNCİ DAYANAK ÇÜRÜDÜ (ölçüm 2026-10-02). O gün "okuma tarafı da böyle" denmişti (HANDOFF tie-out: satış
+    //    200×tür0 / 5×tür1 …) — o yalnız bir ADET KIRILIMIYDI. Canlı GİB durum sorgusu: e-belge türü
+    //    `cha_ebelge_Islemturu`'nda (1 = e-Fatura, 2 = e-Arşiv); `cha_ebelge_turu = 1` olan 6 giden faturanın HEPSİ
+    //    e-Fatura, 37 e-Arşiv'in hepsinde bu kolon 0 (utils/muhasebe/ebelgeTuru.ts). Yani bu alana 1 yazmanın faturayı
+    //    e-Arşiv yaptığı KANITLI DEĞİL; Mikro türü büyük olasılıkla alıcının mükellefiyetinden kendi belirliyor.
+    //    Gövde DEĞİŞTİRİLMEDİ: neyin yazılması gerektiği ölçülmedi (alan adı tahmin edilmez). V17'de Cetpa'dan kesilen
+    //    ilk e-Arşiv faturası `GET /api/mikro/fatura-tani?sira=N` ile ölçülmeli — Açık İşler.
     //
     //    İhracat 0'da BIRAKILDI: ihracat faturası e-Fatura ailesindendir ve
     //    okuma tarafında ayrı bir kodu yok. Uydurma bir kod yazmaktansa e-Fatura

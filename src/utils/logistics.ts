@@ -23,6 +23,14 @@ export const haversineDistance = (p1: LatLng, p2: LatLng): number => {
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
 
 /**
+ * Sevkiyatı SÜREN sipariş: teslim edilmemiş ve iptal edilmemiş (Pending / Processing / Shipped). Rota kurucu (App
+ * `handleBuildRoute`) ile Lojistik → "Aktif Sevkiyatlar" listesi AYNI tanımı kullanır — liste eskiden TÜM siparişleri
+ * basıyordu: başlık "Aktif", sayaç "0 Yolda", satırların hepsi "Teslim edildi" (kullanıcı bildirimi 2026-10-02).
+ * Not: lojistikKpi'deki `aktif` (Pending/Processing) başka bir ölçü — "henüz sevk edilmemiş"; ikisi birleştirilmez.
+ */
+export const sevkiyatiSuruyor = (o: { status?: string }): boolean => o.status !== 'Delivered' && o.status !== 'Cancelled';
+
+/**
  * Nearest-neighbour TSP heuristic.
  * Starting from depot (or first stop), always pick the closest unvisited stop next.
  * Returns stops in visit order with recalculated sequence and estimatedMinutes.

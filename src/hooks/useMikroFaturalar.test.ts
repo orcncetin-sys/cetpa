@@ -36,7 +36,8 @@ const tamKayit: Record<string, unknown> = {
   oranSayisi: 1,
   cha_tip: 0,
   cha_subeno: 2,
-  cha_ebelge_turu: 0,
+  cha_ebelge_turu: 0,                 // tür DEĞİL (ölçüm 2026-10-02): e-Arşiv faturalarında 0 duruyor
+  cha_ebelge_Islemturu: 2,            // tür BURADA: 1 = e-Fatura, 2 = e-Arşiv
   cha_uuid: 'UUID-1',
 };
 
@@ -48,7 +49,7 @@ describe('mapMikroFatura — bilinen alanlar', () => {
       id: 'F1', cariKod: '120-SIRIN', tarih: '2026-03-14',
       tutar: 1200, kdv: 200, matrah: 1000,
       faturaNo: 'A-1001', oran: 20, oranKarma: false,
-      yon: 'giden', subeNo: 2, ebelgeTuru: 0, uuid: 'UUID-1',
+      yon: 'giden', subeNo: 2, ebelgeTuru: 1, uuid: 'UUID-1',
     });
   });
 

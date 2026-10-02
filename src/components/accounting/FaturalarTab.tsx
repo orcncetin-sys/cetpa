@@ -34,6 +34,9 @@ const MIKRO_SORT_KEY: Record<string, keyof MikroFaturaRow> = {
   kdvOran: 'oran', kdvHaric: 'matrah', totalPrice: 'tutar', faturaTipi: 'yon',
 };
 
+/** Tür süzgeci çiplerinin etiketi — slug ('e-arsiv') ekrana BASILMAZ (ASCII'leşmiş Türkçe). */
+const TUR_CIPI = { 'e-fatura': { tr: 'e-Fatura', en: 'e-Invoice' }, 'e-arsiv': { tr: 'e-Arşiv', en: 'e-Archive' } } as const;
+
 interface FaturalarTabProps {
   currentLanguage: string;
   isAuthenticated: boolean;
@@ -69,6 +72,9 @@ export default function FaturalarTab({
   mikroFaturalar, mikroFaturaSatirlari, invoices, invoiceSearch, setInvoiceSearch,
   invoiceTypeFilter, setInvoiceTypeFilter, invoiceSort, setInvoiceSort, setFaturaDetay,
 }: FaturalarTabProps) {
+  // Tablo ile "türü bilinmiyor" notu AYNI kümeyi sayar (arama kutusu dâhil) — not arama öncesi toplamı yazıyordu (hakem 2026-10-02).
+  const mikroGorunen = mikroFaturaSatirlari.filter(f => eslesir(invoiceSearch, f.musteri, f.faturaNo, bilinenSayi(f.tutar) ? f.tutar : null));
+  const turuBilinmeyen = mikroGorunen.filter(f => f.ebelgeTuru === -1).length;
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
       {/* Invoice creation modal */}
@@ -226,10 +232,19 @@ export default function FaturalarTab({
           {(['all','e-fatura','e-arsiv','ihracat'] as const).map(f => (
             <button key={f} onClick={()=>setInvoiceTypeFilter(f)}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${invoiceTypeFilter===f?'bg-[#ff4000] text-white':'text-gray-500 hover:text-gray-700'}`}>
-              {f==='all'?(oc(currentLanguage).tumu):f==='ihracat'?(oc(currentLanguage).ihracat):f}
+              {f==='all'?(oc(currentLanguage).tumu):f==='ihracat'?(oc(currentLanguage).ihracat):TUR_CIPI[f][currentLanguage==='tr'?'tr':'en']}
             </button>
           ))}
         </div>
+        {/* e-Fatura çipi türü BİLİNMEYEN Mikro faturalarını da taşır (gelen faturada Mikro türü tutmuyor) — sessizce "e-Fatura"
+            diye sunulmasın (inceleme 2026-10-02): kaç tanesinin türü bilinmiyor, görünür yazılır. */}
+        {invoiceTypeFilter === 'e-fatura' && faturaKaynak !== 'cetpa' && turuBilinmeyen > 0 && (
+          <p className="order-last basis-full text-[11px] text-gray-500">
+            {currentLanguage === 'tr'
+              ? `Bu listedeki ${turuBilinmeyen} Mikro faturasının e-belge türü bilinmiyor (Mikro'da tür kaydı yok; gelen faturalarda hiç tutulmuyor). e-Arşiv olduğu bilinenler yalnız e-Arşiv süzgecinde görünür.`
+              : `${turuBilinmeyen} Mikro invoices in this list have an unknown e-document type (not recorded in Mikro; never recorded for incoming invoices).`}
+          </p>
+        )}
         {/* Kaynak seçici — Cetpa'da kesilen faturalar mı, Mikro'dan çekilenler mi.
             Varsayılan 'cetpa', yani ekran eskisi gibi davranır. */}
         <div className="flex gap-1 bg-white border border-gray-200 rounded-2xl p-1">
@@ -345,8 +360,7 @@ export default function FaturalarTab({
                   gelen tüm satırlar ekranda kalıyordu.
                   Tutar metnine YALNIZ bilinen sayı girer: hook bilinmeyeni NaN veriyor
                   (2026-09-18) ve `katla(NaN)` 'nan' üretip aramayla eşleşiyordu. */}
-              {faturaKaynak !== 'cetpa' && [...mikroFaturaSatirlari]
-                .filter(f => eslesir(invoiceSearch, f.musteri, f.faturaNo, bilinenSayi(f.tutar) ? f.tutar : null))
+              {faturaKaynak !== 'cetpa' && [...mikroGorunen]
                 // Sıralama tek kaynakta (utils/muhasebe/faturalar.faturaSatirKarsilastir): hook
                 // bilinmeyen tutar/kdv/matrahı NaN veriyor (2026-09-18) ve buradaki ham `<`/`>`
                 // karşılaştırması NaN'ı "her şeye eşit" sayıp BİLİNEN satırların da sırasını bozuyordu.
@@ -365,6 +379,12 @@ export default function FaturalarTab({
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase bg-blue-100 text-blue-600">mikro</span>
                     <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${f.yon === 'gelen' ? 'bg-purple-100 text-purple-600' : 'bg-teal-100 text-teal-700'}`}>
                       {f.yon === 'gelen' ? (oc(currentLanguage).gelen) : (oc(currentLanguage).giden)}
+                    </span>
+                    {/* Tür süzgeci neye göre süzdüyse satırda o görünür; bilinmeyen tür "e-Fatura" diye sunulmaz. */}
+                    <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${f.ebelgeTuru === 1 ? 'bg-amber-100 text-amber-700' : f.ebelgeTuru === 0 ? 'bg-gray-100 text-gray-600' : 'bg-gray-50 text-gray-400'}`}>
+                      {f.ebelgeTuru === 0 ? TUR_CIPI['e-fatura'][currentLanguage==='tr'?'tr':'en']
+                        : f.ebelgeTuru === 1 ? TUR_CIPI['e-arsiv'][currentLanguage==='tr'?'tr':'en']
+                        : (currentLanguage === 'tr' ? 'tür bilinmiyor' : 'type unknown')}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{f.tarih || '—'}</td>

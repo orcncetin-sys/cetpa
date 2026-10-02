@@ -64,7 +64,8 @@ import { birimSapmasiRaporu } from '../mikro/birimSapmasi.js';
 import { matrahTaniRaporu } from '../mikro/matrahTani.js';
 import { faturaListesiSorgusu } from '../mikro/faturaListesiSorgusu.js';
 import { onizlemeSorgulari, baglantiSorgulari, onizlemeSatiri } from '../mikro/matrahOnizleme.js';
-import { FT_ISKONTO_DESENI, SATIR_MASRAF_DESENI } from '../../lib/faturaMatrahi.js';
+import { FT_ISKONTO_DESENI, SATIR_MASRAF_DESENI, gercekAd } from '../../lib/faturaMatrahi.js';
+import { yetimRaporu, guidBicimli, type CetpaFatura } from '../mikro/faturaTani.js';
 import { durumDenemesiOzeti, ettnGecerli, hucreleriKes, type DurumDenemesi } from '../mikro/ebelgeDurumTani.js';
 import { zamanAsimiMi } from '../mikro/adaptifSayfalama.js';
 // Varlık eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeVarlik.ts
@@ -2448,6 +2449,128 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       });
     } catch (e) {
       console.error('[mikro/matrah-tani]', e);
+      res.status(500).json({ success: false, error: 'Tanı üretilemedi.' });
+    }
+  });
+
+  /** GET /api/mikro/fatura-tani[?sira=N] — Cetpa'daki fatura kopyaları (mikroFaturalar) ↔ Mikro'nun GÜNCEL fatura kümesi.
+   *
+   *  Kullanıcı (2026-10-02, fatura 389): "bu fatura Mikro'da iptal oldu, Cetpa'da hâlâ duruyor". Canlı ölçüm: 708 başlığın
+   *  hiçbirinde cha_iptal ≠ 0 yok → ya kayıt Mikro'dan SİLİNDİ (fatura-listesi yalnız iptal bayraklı GUID'i süpürür, silineni
+   *  görmez → yetim kopya) ya da iptal e-belge tarafında. Bu uç kural YAZMAZ — ayırt eder (mikro/faturaTani.ts):
+   *    (1) yetim / iptalKalan / yazım farkı / Cetpa'da eksik sayıları + en yeni 50 yetim;
+   *    (2) yetim kimlikler Mikro'da BAŞKA evrak tipiyle duruyor mu (fatura koşulundan çıkmış kayıt silinmiş sayılmasın);
+   *    (3) ?sira=N verilirse o evrak numarasının Mikro'daki TÜM başlıkları (fatura koşuluna uyup uymadığıyla), Cetpa kopyaları
+   *        ve giden faturaysa GİB durum yanıtı (EBelgeTipi 0 ve 1, ebelge-durum-tani kalıbı).
+   *  Salt okuma: Mikro'ya ve Cetpa'ya YAZMAZ. Jeton yalnız başlıkta. Kiracı süzgeci YOK (ops düzeyi tanı; kırılım `kiracilar`da).
+   *  Mikro listesi BOŞ dönerse yetim hesabı yapılmaz (okunamayan Mikro her kopyayı yetim gösterirdi). Bütçe istek başından 100 sn. */
+  app.get('/api/mikro/fatura-tani', async (req: Request, res: Response) => {
+    if (!opsJetonuGecerli(req, res)) return;
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    const pool = C.getPgPool?.();
+    if (!pool) return res.status(503).json({ success: false, error: 'DATABASE_URL tanımlı değil — Cetpa tarafı okunamaz.' });
+    const siraHam = req.query.sira;
+    if (siraHam !== undefined && (typeof siraHam !== 'string' || !/^\d{1,9}$/.test(siraHam))) {
+      return res.status(400).json({ success: false, error: 'sira yalnız rakam olabilir (en çok 9 hane).' });
+    }
+    const istekT0 = Date.now();
+    const kalan = () => 100000 - (Date.now() - istekT0);
+    const oku = async (sql: string): Promise<{ rows: Record<string, unknown>[]; hata: string | null }> => {
+      if (kalan() < 5000) return { rows: [], hata: 'süre bütçesi doldu — okunmadı' };
+      try { return await mikroSql(sql, { zamanAsimiMs: Math.min(20000, kalan()) }); }
+      catch (e) { return { rows: [], hata: e instanceof Error ? `${e.name}: ${e.message}` : String(e) }; }
+    };
+    try {
+      const chaKolonlari = await mikroKolonlar('CARI_HESAP_HAREKETLERI');
+      if (!chaKolonlari.length) {
+        return res.status(502).json({ success: false, error: 'Mikro şeması okunamadı (INFORMATION_SCHEMA yanıtı boş/hatalı) — kolon adlarını DEĞİŞTİRMEYİN.' });
+      }
+      const guidK = gercekAd(chaKolonlari, 'cha_Guid');
+      if (!guidK || !sqlTanimlayici(guidK)) return res.status(500).json({ success: false, error: 'CARI_HESAP_HAREKETLERI şemasında cha_Guid yok.' });
+
+      const mikro = await oku(`SELECT cha.${guidK} AS guid, ISNULL(cha.cha_iptal, 0) AS iptal FROM CARI_HESAP_HAREKETLERI cha WHERE ${FATURA_EVRAK_KOSULU}`);
+      if (mikro.hata) return res.status(502).json({ success: false, error: `Mikro fatura kimlikleri okunamadı: ${mikro.hata}` });
+      if (!mikro.rows.length) return res.status(502).json({ success: false, error: 'Mikro fatura listesi BOŞ döndü — yetim hesabı yapılmadı (okunamamış olabilir).' });
+
+      // PG okuması da bütçeye bağlı: havuz zaman aşımsız kurulu — tıkalıyken istek ARR sınırına kadar asılı kalır ve o ana kadar
+      // okunan her şey nedeni belirsiz bir 502'ye gömülürdü (inceleme 2026-10-02).
+      let pgSayaci: ReturnType<typeof setTimeout> | undefined;
+      const pgSuresi = Math.max(1000, Math.min(20000, kalan()));
+      let cetpaHam: unknown[];
+      try {
+        ({ rows: cetpaHam } = await Promise.race([
+          pool.query(
+            `SELECT id, data->>'companyId' AS "companyId", data->>'cha_evrakno_seri' AS seri, data->>'cha_evrakno_sira' AS sira,
+                    data->>'cha_tip' AS tip, data->>'cha_tarihi' AS tarih, data->>'cha_meblag' AS meblag, updated_at::text AS guncelleme
+               FROM docs WHERE coll = $1`, ['mikroFaturalar']) as Promise<{ rows: unknown[] }>,
+          new Promise<never>((_, reddet) => { pgSayaci = setTimeout(() => reddet(new Error('PG_ZAMAN_ASIMI')), pgSuresi); }),
+        ]));
+      } catch (e) {
+        if (e instanceof Error && e.message === 'PG_ZAMAN_ASIMI') {
+          return res.status(504).json({ success: false, error: `Cetpa (PG) fatura kopyaları ${Math.round(pgSuresi / 1000)} sn içinde okunamadı.` });
+        }
+        throw e;
+      } finally { clearTimeout(pgSayaci); }
+      const cetpa = cetpaHam as CetpaFatura[];
+      const rapor = yetimRaporu(cetpa, mikro.rows);
+
+      // (2) Yetim kimlikler Mikro'da fatura koşulu DIŞINDA duruyor mu? Kimlik PG'den gelir; yine de GUID biçimine uymayan SQL'e girmez.
+      const yetimKimlikleri = rapor.yetim.map(f => f.id).filter(guidBicimli);
+      const yetimMikroDurumu = yetimKimlikleri.length
+        ? await oku(`SELECT cha.${guidK} AS guid, cha.cha_evrak_tip, cha.cha_cinsi, cha.cha_tip, cha.cha_evrakno_sira, ISNULL(cha.cha_iptal, 0) AS iptal ` +
+            `FROM CARI_HESAP_HAREKETLERI cha WHERE cha.${guidK} IN (${yetimKimlikleri.map(g => `'${g}'`).join(', ')})`)
+        : { rows: [], hata: null };
+
+      // (3) Tek evrak numarası.
+      let evrak: Record<string, unknown> | null = null;
+      if (typeof siraHam === 'string') {
+        // Tek normalleştirilmiş değer: '0389' Mikro'da 389, Cetpa'da '0389' aranırsa kopya "yok" görünürdü (inceleme 2026-10-02).
+        const siraNo = Number(siraHam), sira = String(siraNo);
+        const gercek = new Map(chaKolonlari.map(k => [k.toLowerCase(), k]));
+        const istege = ['cha_uuid', 'cha_ebelge_turu', 'cha_efatura_belge_tipi', 'cha_ebelge_Islemturu']
+          .map(ad => gercek.get(ad.toLowerCase())).filter((k): k is string => !!k && sqlTanimlayici(k) !== null);
+        const uuidK = istege.find(k => k.toLowerCase() === 'cha_uuid');
+        const m = await oku(
+          `SELECT TOP 20 cha.${guidK} AS guid, cha.cha_tip, cha.cha_evrak_tip, cha.cha_cinsi, cha.cha_evrakno_seri, cha.cha_evrakno_sira, cha.cha_tarihi, ` +
+          `cha.cha_kod, cha.cha_meblag, ISNULL(cha.cha_iptal, 0) AS iptal, CASE WHEN ${FATURA_EVRAK_KOSULU} THEN 1 ELSE 0 END AS faturaKosulu` +
+          `${istege.filter(k => k !== uuidK).map(k => `, cha.${k} AS ${k}`).join('')}` +
+          `${uuidK ? `, ISNULL(CAST(cha.${uuidK} AS nvarchar(40)), '') AS ettn` : ''} ` +
+          `FROM CARI_HESAP_HAREKETLERI cha WHERE cha.cha_evrakno_sira = ${siraNo} ORDER BY cha.cha_tarihi DESC`);
+        const durumlar: Array<Record<string, unknown>> = [];
+        for (const f of m.rows) {
+          const ettn = String(f.ettn ?? '').trim();
+          if (Number(f.cha_tip) !== 0 || Number(f.faturaKosulu) !== 1 || !ettnGecerli(ettn)) continue;
+          const denemeler: DurumDenemesi[] = [];
+          for (const eBelgeTipi of [0, 1] as const) {
+            if (kalan() < 15000) break;
+            const c0 = Date.now();
+            try {
+              const sonuc = await mikroPost('EBelgeDurumSorgulamaV2', { EBelge: { EFaturaTipi: 0, EBelgeTipi: eBelgeTipi, UUID: ettn } }, true, { zamanAsimiMs: Math.min(15000, kalan()) });
+              denemeler.push({ ...durumDenemesiOzeti(eBelgeTipi, sonuc), sureMs: Date.now() - c0 });
+            } catch (e) {
+              denemeler.push({ eBelgeTipi, httpOk: false, httpDurum: 0, zarfTuru: 'bos', isError: null,
+                hata: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+                ustAnahtarlar: [], r0Anahtarlari: [], dataAnahtarlari: [], dataHam: null, govdeHam: null, sureMs: Date.now() - c0 });
+              if (zamanAsimiMi(e)) break;
+            }
+          }
+          durumlar.push({ guid: f.guid, denemeler });
+        }
+        evrak = {
+          sira: siraNo,
+          mikro: m.hata ? { hata: m.hata } : hucreleriKes(m.rows),
+          cetpa: cetpa.filter(f => f.sira === sira),
+          durumlar,
+        };
+      }
+
+      res.json({
+        success: true, sureMs: Date.now() - istekT0, ...rapor,
+        yetimMikroDurumu: yetimMikroDurumu.hata ? { hata: yetimMikroDurumu.hata } : yetimMikroDurumu.rows,
+        evrak,
+      });
+    } catch (e) {
+      console.error('[mikro/fatura-tani]', e);
       res.status(500).json({ success: false, error: 'Tanı üretilemedi.' });
     }
   });
@@ -4943,6 +5066,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       }
       // `belgeTipiIletildi`: belge tipi (e-Fatura/e-Arşiv) Mikro gövdesine YALNIZ V17 zarfında (`cha_ebelge_turu`) girer.
       // Ortamda MIKRO_JUMP_SURUM 16 ise seçim Mikro'ya HİÇ gitmez — istemci kullanıcıyı uyarır (sessiz kalmasın).
+      // SINIR (ölçüm 2026-10-02): bu bayrak yalnız alanın GÖVDEYE GİRDİĞİNİ söyler; Mikro'nun türü ona göre belirlediğini
+      // KANITLAMAZ. Canlıda tür `cha_ebelge_Islemturu`'nda duruyor ve `cha_ebelge_turu = 1` olan 6 giden faturanın hepsi GİB'de
+      // e-Fatura çıktı (utils/muhasebe/ebelgeTuru.ts). Cetpa'dan kesilmiş bir e-Arşiv faturası `GET /api/mikro/fatura-tani?sira=N`
+      // ile ölçülene kadar gövde DEĞİŞTİRİLMEDİ (alan adı tahmini olurdu) — Açık İşler.
       res.json({ success, mikroFaturaNo, ettn, localUpdateFailed, belgeTipiIletildi: MIKRO_JUMP_SURUM >= 17, error: errorMsg, data, duration });
     } catch (err) {
       const duration = Date.now() - t0;

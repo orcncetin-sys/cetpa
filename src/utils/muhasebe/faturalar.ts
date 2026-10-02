@@ -90,15 +90,18 @@ export function mikroFaturaSatirlari<F extends MikroFaturaGirdi>(
     // Yıl filtresi: tarih 'YYYY-...' ile başlıyorsa o yıl. 'hepsi' → tüm yıllar.
     .filter(f => s.yil === 'hepsi' || (typeof f.tarih === 'string' && f.tarih.startsWith(s.yil)))
     .filter(f => !f.faturaNo || !s.cetpaEvrakNolari.has(f.faturaNo))
-    // e-belge türü filtresi (eskiden yalnız Cetpa invoices'a uygulanıyordu):
-    // 0=e-Fatura, 1=e-Arşiv, 2=e-İrsaliye. Tür BİLİNMİYORSA (-1: cha_ebelge_turu
-    // Mikro'da dolu değil) filtreden GİZLEME — aksi halde alan boşsa e-Fatura/e-Arşiv
-    // seçince liste bombos görünür. Yalnız KESİN karşıt türü ele; İhracat türü
-    // cha_ebelge_turu'da YOK (ayrı kavram) → o filtrede Mikro faturası gösterilmez.
+    // e-belge türü filtresi. Tür `ebelgeTuruCoz`'dan gelir (0 = e-Fatura, 1 = e-Arşiv, -1 = bilinmiyor).
+    //   • e-Arşiv: YALNIZ türü e-Arşiv olarak BİLİNEN fatura. Eskiden bilinmeyen (-1) de gösteriliyordu ve tür yanlış
+    //     kolondan okunuyordu — süzgeç e-Arşiv olmayan 68 fatura listeliyordu (kullanıcı 2026-10-02: "bunlar e-arşiv değil").
+    //   • e-Fatura: e-Fatura + türü BİLİNMEYEN. Gelen faturada Mikro türü tutmuyor (hep bilinmiyor); bunları gizlemek
+    //     "e-Fatura" seçilince tüm alış faturalarını kaybettirirdi. Bilinmeyenin e-Fatura olduğu İDDİA EDİLMEZ (e-Fatura
+    //     mükellefi olmayan tedarikçinin e-Arşiv/kâğıt faturası da bu kümede olabilir) — FaturalarTab kaç tanesinin
+    //     türünün bilinmediğini listenin üstünde yazar.
+    //   • İhracat: Mikro başlığında karşılığı yok → Mikro faturası gösterilmez.
     .filter(f => {
       if (s.ebelgeTuru === 'all') return true;
       if (s.ebelgeTuru === 'e-fatura') return f.ebelgeTuru === 0 || f.ebelgeTuru === -1;
-      if (s.ebelgeTuru === 'e-arsiv') return f.ebelgeTuru === 1 || f.ebelgeTuru === -1;
+      if (s.ebelgeTuru === 'e-arsiv') return f.ebelgeTuru === 1;
       return false; // ihracat
     })
     .map(f => { const kod = f.cariKod ?? ''; return { ...f, musteri: s.cariAdMap.get(kod) || kod || '—' }; });
