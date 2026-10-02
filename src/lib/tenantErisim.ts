@@ -43,7 +43,50 @@ export async function kiraciWhere(coll: string, k: KiraciKimligi): Promise<{ sql
   if (coll === 'users') {
     return { sql: " AND (data->>'companyId' = $2 OR id = $3)", params: [await k.cid(), k.uid] };
   }
+  // `settings` TENANT listesinde DEĞİL (dağıtım düzeyi, global dokümanlar da taşır). Firma-bazlı ayarın sahibi DOKÜMAN KİMLİĞİNDEN
+  // okunur (`<cid>__<anahtar>` — bkz. `ayarSahibi`), `data.companyId`'den DEĞİL. Eskiden buraya kadar düşüp BOŞ filtre dönüyordu:
+  // GET /api/db/settings her kiracının firma-bazlı ayarlarını (içlerindeki sırlarla, Admin'e maskesiz) döküyordu (2026-10-02).
+  if (coll === 'settings') {
+    return { sql: " AND (position('__' in id) = 0 OR left(id, length($2)) = $2)", params: [`${await k.cid()}${AYAR_AYRACI}`] };
+  }
   return { sql: '', params: [] };
+}
+
+/**
+ * `settings` dokümanının SAHİBİ kimlikten okunur: firma-bazlı ayar `<cid>__<anahtar>` kimliğiyle saklanır (server.ts
+ * `settingsRealId`); `__` içermeyen kimlik GLOBAL (dağıtım düzeyi) ayardır → `null`.
+ *
+ * NEDEN `data.companyId` DEĞİL (2026-10-02 taraması): (1) `settings/luca` dokümanındaki `companyId` alanı LUCA FİRMA KİMLİĞİDİR —
+ * akış onu kiracı etiketi sanıp dokümanı sahibi dâhil HERKESTEN gizliyordu; (2) alan istemciden geldiği için bir kiracı global
+ * dokümana `companyId: '<kurban>'` yazıp görünürlüğünü kaçırabiliyordu; (3) sunucunun `adminDb` ile yazdığı firma-bazlı ayar
+ * (süper-admin firma profili) damgasız kalıp tüm kiracıların akışına düşüyordu. Kimlik sunucuda üretilir, istemci `__` içeren
+ * kimlik gönderemez (`rejectNamespacedSettings`) — taklit edilemez.
+ */
+export const AYAR_AYRACI = '__';
+export function ayarSahibi(id: string | undefined): string | null {
+  const i = id ? id.indexOf(AYAR_AYRACI) : -1;
+  return i > 0 ? (id as string).slice(0, i) : null;
+}
+/** İstemcinin gördüğü ayar anahtarı: firma-bazlı kimlikte kiracı öneki ATILIR (`<cid>__app` → `app`). */
+export function ayarAnahtari(id: string): string {
+  const i = id.indexOf(AYAR_AYRACI);
+  return i > 0 ? id.slice(i + AYAR_AYRACI.length) : id;
+}
+/**
+ * Akış (SSE) init'i ve REST listesi için `settings` satırlarını çağırana göre düzenler: yabancı kiracının firma-bazlı ayarı DÜŞER;
+ * kendi firma-bazlı ayarı DÜZ anahtarla döner (istemci `settings/app` dinler — ham `<cid>__app` kimliğiyle gönderilince bulamıyor,
+ * sayfa yenilenince bayat global dokümanı gösteriyordu); aynı anahtarın hem firma-bazlısı hem eski global kopyası varsa firma-bazlı
+ * kazanır (çift kayıt gitmez).
+ */
+export function ayarSatirlari<T extends { id: string }>(satirlar: readonly T[], cid: string): T[] {
+  const kendi = new Map<string, T>();
+  const global: T[] = [];
+  for (const r of satirlar) {
+    const sahip = ayarSahibi(r.id);
+    if (sahip === null) global.push(r);
+    else if (sahip === cid) kendi.set(ayarAnahtari(r.id), { ...r, id: ayarAnahtari(r.id) });
+  }
+  return [...global.filter(r => !kendi.has(r.id)), ...kendi.values()];
 }
 
 /**
@@ -72,7 +115,7 @@ export async function kiraciDamgala(coll: string, data: Record<string, unknown>,
  * kullanıcısını silebiliyordu. Yüklem tek yere alındı ve `users` açıkça dahil edildi.
  */
 export const sahiplikDenetimli = (coll: string): boolean =>
-  TENANT.has(coll) || USER_SCOPED.has(coll) || coll === 'users';
+  TENANT.has(coll) || USER_SCOPED.has(coll) || coll === 'users' || coll === 'settings';
 
 /**
  * Mevcut doküman sahibin mi? (etiketsiz legacy → erişilebilir — users HARİÇ.)
@@ -96,6 +139,12 @@ export async function dokumanSahibiMi(
     if (k.superAdmin) return true;
     const hedefCid = (docData.companyId as string) || null;
     return !!hedefCid && hedefCid === await k.cid();
+  }
+  // settings: sahip KİMLİKTEN (`ayarSahibi`). Firma-bazlı ayar yalnız sahibinin; global (dağıtım düzeyi) ayar bugün her kiracı
+  // yöneticisine açık — çok kiracıda sahip kiracıya daraltmak ayrı karar (Açık İşler «2. müşteri öncesi»). Süper-admin ayrıcalığı YOK.
+  if (coll === 'settings') {
+    const sahip = ayarSahibi(docId);
+    return sahip === null || sahip === await k.cid();
   }
   if (TENANT.has(coll)) {
     const dc = (docData.companyId as string) || null;
@@ -126,18 +175,21 @@ export function akisSatiriGorunur(
 ): boolean {
   if (!data) return true;
   if (coll === 'users') return (!!id && id === k.uid) || ((data.companyId as string) || null) === k.cid;
-  if (TENANT.has(coll) || coll === 'settings') { const dc = (data.companyId as string) || null; return dc === null || dc === k.cid; }
+  if (coll === 'settings') { const sahip = ayarSahibi(id); return sahip === null || sahip === k.cid; }   // kimlikten — `data.companyId` DEĞİL (bkz. ayarSahibi)
+  if (TENANT.has(coll)) { const dc = (data.companyId as string) || null; return dc === null || dc === k.cid; }
   if (USER_SCOPED.has(coll)) { const du = (data.userId as string) || null; return du === null || du === k.uid; }
   return true;
 }
 
-/** SSE init sorgusunun koleksiyon kovaları: `users` KENDİ kovasında (companyId = kiracı VEYA id = uid);
+/** SSE init sorgusunun koleksiyon kovaları: `users` KENDİ kovasında (companyId = kiracı VEYA id = uid); `settings` KENDİ kovasında
+ *  (global + yalnız çağıranın `<cid>__*` ayarları — eskiden filtresiz `diger`e düşüyor, her kiracının ayarı diskten okunuyordu);
  *  sunucuya özel koleksiyonlar hiçbir kovaya girmez (diske gitmez). */
-export function akisKovalari(colls: readonly string[]): { tenant: string[]; user: string[]; users: string[]; diger: string[] } {
+export function akisKovalari(colls: readonly string[]): { tenant: string[]; user: string[]; users: string[]; ayar: string[]; diger: string[] } {
   return {
     tenant: colls.filter(c => TENANT.has(c)),
     user:   colls.filter(c => USER_SCOPED.has(c)),
     users:  colls.filter(c => c === 'users'),
-    diger:  colls.filter(c => !TENANT.has(c) && !USER_SCOPED.has(c) && c !== 'users' && !SERVER_ONLY.has(c)),
+    ayar:   colls.filter(c => c === 'settings'),
+    diger:  colls.filter(c => !TENANT.has(c) && !USER_SCOPED.has(c) && c !== 'users' && c !== 'settings' && !SERVER_ONLY.has(c)),
   };
 }

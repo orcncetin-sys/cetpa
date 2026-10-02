@@ -51,7 +51,8 @@ export interface EpostaRouteCtx {
 
 export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
   // GET /api/email/status
-  app.get('/api/email/status', async (_req: Request, res: Response) => {
+  // requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
+  app.get('/api/email/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
     const creds = await C.getResendKey();
     res.json({ configured: !!creds });
   });

@@ -45,7 +45,9 @@ import {
   USER_SCOPED_COLLECTIONS as USER_SCOPED_COLLECTION_LIST,
   SERVER_ONLY_COLLECTIONS as SERVER_ONLY_COLLECTION_LIST,
 } from "./src/lib/collections.js";
-import { kiraciWhere, kiraciDamgala, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, type KiraciKimligi } from './src/lib/tenantErisim.js';
+import { kiraciWhere, kiraciDamgala, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, type KiraciKimligi } from './src/lib/tenantErisim.js';
+import { rolIcinMaskele, maskeyiGeriYukle, farkDegeriMaskele, ayarAdresAlaniDegisti } from './src/lib/sirMaske.js';
+import { izinliTaban, genelHttpsTaban, genelAdresMi, TabanAdresHatasi, LUCA_TABAN, IYZICO_TABAN } from './src/lib/guvenliTaban.js';
 import pg from "pg";
 // vite is imported dynamically below — only in development, never in production
 import path from "path";
@@ -238,19 +240,9 @@ function reqActor(req: Request): { uid: string; email: string } {
 }
 
 
-/** SSRF guard — yalnız public http(s) host'lara izin verir (iç ağ/metadata engeli). */
-function isSafePublicUrl(raw: string): boolean {
-  let u: URL;
-  try { u = new URL(raw); } catch { return false; }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-  const h = u.hostname.toLowerCase();
-  if (h === 'localhost' || h === '0.0.0.0' || h === '::1' || h === '169.254.169.254') return false;
-  if (h.endsWith('.internal') || h.endsWith('.local')) return false;
-  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return false;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
-  if (h.startsWith('fd') || h.startsWith('fe80') || h.startsWith('fc')) return false;
-  return true;
-}
+/** SSRF guard — yalnız public http(s) host'lara izin verir (iç ağ/metadata engeli). Kural ve testleri: src/lib/guvenliTaban.ts
+ *  `genelAdresMi` (2026-10-02: IPv6 yazımı hiç yakalanmıyor, `fc…`/`fd…` ile başlayan meşru alan adı reddediliyordu). */
+const isSafePublicUrl = genelAdresMi;
 
 // users/{uid} self-write'ta sunucu-kontrollü kimlik alanlarını koru.
 // Cross-tenant escalation engeli: bir kullanıcı kendi users dokümanına
@@ -558,9 +550,11 @@ async function processOutboundWebhook(data: any) {
     const bodyStr = JSON.stringify({ event, data: payload, sentAt: new Date().toISOString() });
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (secret) headers['x-webhook-signature'] = createHmac('sha256', secret).update(bodyStr).digest('hex');
-    const r = await fetch(url, { method: 'POST', headers, body: bodyStr });
+    // Yönlendirme İZLENMEZ: kapıdan geçen genel adres 307 ile iç ağa yönlendirirse gövde + imza başlığı oraya yeniden gönderilir.
+    const r = await fetch(url, { method: 'POST', headers, body: bodyStr, redirect: 'manual' });
     if (r.ok) console.log(`[webhook] ${event} → ${url} : ${r.status}`);
-    else console.warn(`[webhook] ${event} → ${url} FAILED:`, r.statusText);
+    // 3xx = hedef yönlendiriyor (izlenmez): kalıcı yapılandırma hatası — günlükte kod ve hedef görünsün ki nihai adres yazılabilsin.
+    else console.warn(`[webhook] ${event} → ${url} FAILED: ${r.status} ${r.statusText}${r.status >= 300 && r.status < 400 ? ` (yönlendirme izlenmez → ${r.headers.get('location') ?? '?'})` : ''}`);
   } catch (e) {
     console.warn(`[webhook] ${event} → ${url} FAILED:`, (e as Error).message);
     throw e;
@@ -806,6 +800,14 @@ async function getUserCompanyId(uid: string): Promise<string> {
   companyIdCache.set(uid, { cid, exp: Date.now() + 60_000 });
   return cid;
 }
+
+// Rol / kiracı önbelleği `users` dokümanı DEĞİŞTİĞİ AN düşer (2026-10-02 incelemesi). Eskiden yalnız 60 sn'lik süre vardı:
+// Admin'den düşürülen kullanıcı bir dakika boyunca eski rolle istek atabiliyor, o sırada açtığı akış ise ömrü boyunca eski
+// rolle — settings'te DÜZ METİN sırla — yayın alıyordu. Bütün yazma yolları (REST, süper-admin, silme) `broadcastDocChange`
+// üzerinden geçtiği için tek dinleyici hepsini kapsar; açık akışı olmayan kullanıcıda da çalışır.
+dbEvents.on('change', (ev: { coll?: string; id?: string }) => {
+  if (ev.coll === 'users' && ev.id) { roleCache.delete(ev.id); companyIdCache.delete(ev.id); }
+});
 
 // İstek bağlamında çağıranın firması (sunucu-tarafı doğrudan yazımlara companyId
 // enjekte etmek için — /api/db dışı adminDb.collection().add/set çağrıları
@@ -1252,7 +1254,9 @@ function computeFieldDiff(before: Record<string, unknown>, after: Record<string,
         if (typeof v === 'string' && v.length > 120) return v.slice(0, 120) + '…';
         return v;
       };
-      diff[k] = { from: clip(a), to: clip(b) };
+      // SIR MASKESİ (2026-10-02): eskiden yalnız kırpılıyordu — `settings` denetlenen koleksiyon olduğu için sırrın eski ve yeni
+      // değeri auditLog.diff'e DÜZ METİN giriyordu (auditLog'u Admin + Manager okur). Maske alan ADINA göre, koleksiyondan bağımsız.
+      diff[k] = { from: clip(farkDegeriMaskele(k, a)), to: clip(farkDegeriMaskele(k, b)) };
       n++;
     }
   }
@@ -1602,26 +1606,9 @@ async function startServer() {
     //
     // Rol akış başında BİR KEZ okunur (`streamRole`), satır başına DB'ye
     // gidilmez — bu yüzden çekirdek SENKRON.
-    const SECRET_FIELD_RE = /(password|sifre|secret|apikey|api_key|accesstoken|access_token|token|privatekey|private_key)/i;
-    const REDACTED = '***REDACTED***';
-    /** Derinlemesine maskeler. Eski sürüm yalnız üst düzey string alanlara
-     *  bakıyordu; settings/mikro gibi İÇ İÇE nesne tutan dokümanlarda
-     *  (`{ mikro: { idmPassword } }`) sır maskesiz geçiyordu. */
-    const maskSecrets = (v: unknown, anahtar?: string): unknown => {
-      if (typeof v === 'string') return (anahtar && SECRET_FIELD_RE.test(anahtar) && v !== '') ? REDACTED : v;
-      // Dizi elemanlarina ANAHTARI da gecir: `apiKeys: ['a','b']` gibi bir
-      // alanda eleman duzeyinde anahtar yoktur, dolayisiyla anahtar
-      // gecirilmezse dizideki sirlar MASKESIZ kalirdi.
-      if (Array.isArray(v)) return v.map(x => maskSecrets(x, anahtar));
-      if (v && typeof v === 'object') {
-        const out: Record<string, unknown> = {};
-        for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = maskSecrets(val, k);
-        return out;
-      }
-      return v;
-    };
-    const redactForRole = (role: AppRole | null, coll: string, data: unknown): unknown =>
-      (coll !== 'settings' || data == null || role === 'Admin') ? data : maskSecrets(data);
+    // Çekirdek `src/lib/sirMaske.ts`'e TAŞINDI (2026-10-02): burada kapanış olarak durduğu için import edilemiyordu ve HİÇ testi
+    // yoktu. Alan-adı deseni, derin maskeleme ve "Admin düz / diğerleri maskeli" kuralı artık orada, testli.
+    const redactForRole = rolIcinMaskele;
 
     app.get('/api/db/stream', dbLimiter, async (req: Request, res: Response) => {
       // Önce httpOnly session cookie (tercih edilen), sonra geriye-uyumluluk
@@ -1709,13 +1696,19 @@ async function startServer() {
                  (coll = ANY($1) AND (data->>'companyId' = $4 OR NOT (data ? 'companyId')))
               OR (coll = ANY($2) AND (data->>'userId'    = $5 OR NOT (data ? 'userId')))
               OR (coll = ANY($6) AND (data->>'companyId' = $4 OR id = $5))
+              OR (coll = ANY($7) AND (position('__' in id) = 0 OR left(id, length($8)) = $8))
               OR (coll = ANY($3))`,
-              [kova.tenant, kova.user, kova.diger, streamCid, streamUid, kova.users],
+              [kova.tenant, kova.user, kova.diger, streamCid, streamUid, kova.users, kova.ayar, `${streamCid}${AYAR_AYRACI}`],
             )
           : { rows: [] as Array<{ coll: string; id: string; data: unknown }> };
         const byColl: Record<string, Array<{ id: string; data: unknown }>> = {};
         for (const c of initColls) byColl[c] = [];
-        for (const r of rows) if (rowVisible(r.coll, String(r.id), r.data as Record<string, unknown>)) byColl[r.coll].push({ id: r.id, data: redactForRole(streamRole, r.coll, r.data) });
+        // settings: kendi firma-bazlı ayar DÜZ anahtarla gider (istemci `settings/app` dinler; ham `<cid>__app` kimliğiyle
+        // gönderilince bulamıyor, sayfa yenilenince bayat global kopyayı gösteriyordu) ve eski global kopyayı gölgeler —
+        // REST tek-doküman GET'iyle AYNI öncelik (2026-10-02).
+        const gorunur = rows.filter(r => rowVisible(r.coll, String(r.id), r.data as Record<string, unknown>));
+        const ayarlar = ayarSatirlari(gorunur.filter(r => r.coll === 'settings').map(r => ({ ...r, id: String(r.id) })), streamCid);
+        for (const r of [...gorunur.filter(r => r.coll !== 'settings'), ...ayarlar]) byColl[r.coll].push({ id: r.id, data: redactForRole(streamRole, r.coll, r.data) });
         for (const c of initColls) {
           const docs = byColl[c];
           // Sessiz kırpma YOK: tavana çarpınca logla ve istemciye bildir.
@@ -1732,24 +1725,65 @@ async function startServer() {
       } catch (e) {
         res.write(`event: err\ndata: ${JSON.stringify({ error: (e as Error).message })}\n\n`);
       }
-      const onChange = (ev: { coll: string; id?: string; cid?: string; uid?: string }) => {
+      // Akış rolü, kiracıyı ve koleksiyon yetkisini bağlantı AÇILIRKEN bir kez okur. Kullanıcının kendi rolü değişirse (Admin'den
+      // düşürüldü, çıkarıldı) ya da başka kiracıya taşınırsa açık akış eski yetkiyle — settings'te DÜZ METİN sırla — yayına devam
+      // ediyordu (2026-10-02). Kendi `users` dokümanında rol/kiracı değişince akış kapatılır; istemci yeniden bağlanır.
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
+      const kapat = () => { if (heartbeat) clearInterval(heartbeat); dbEvents.off('change', onChange); res.end(); };
+      const onChange = (ev: { coll: string; id?: string; cid?: string; uid?: string; type?: string; data?: unknown }) => {
+        // Karşılaştırma `getUserRole` / `getUserCompanyId` ile AYNI kuralla (boş → null / uid): ham değer karşılaştırılırsa boş rol
+        // alanı her profil güncellemesinde akışı kapatır, istemci sürekli yeniden bağlanırdı. Olay veri taşımıyorsa karar verilmez.
+        if (ev.coll === 'users' && ev.id === streamUid && (ev.type === 'delete' || ev.data !== undefined)) {
+          const yeni = (ev.type === 'delete' ? {} : ev.data) as { role?: unknown; companyId?: unknown };
+          const yeniRol = ev.type === 'delete' ? null : (yeni.role || null);
+          const yeniCid = (typeof yeni.companyId === 'string' && yeni.companyId) || streamUid;
+          if (yeniRol !== streamRole || (ev.type !== 'delete' && yeniCid !== streamCid)) {
+            roleCache.delete(streamUid); companyIdCache.delete(streamUid); kapat(); return;
+          }
+        }
         if (!colls.includes(ev.coll)) return;
         if (SERVER_ONLY_COLLECTIONS.has(ev.coll)) return; // sunucuya özel — yayınlanmaz
         // Başka kiracının/kullanıcının değişimini bu bağlantıya gönderme.
         if (TENANT_COLLECTIONS.has(ev.coll) && ev.cid && ev.cid !== streamCid) return;
         if (USER_SCOPED_COLLECTIONS.has(ev.coll) && ev.uid && ev.uid !== streamUid) return;
-        if (ev.coll === 'settings' && ev.cid && ev.cid !== streamCid) return; // firma-bazlı ayar yayını izolasyonu
+        // settings: kiracı olayın `cid`'inden (REST yazımı açık kapsam verir; sunucu yazımında doküman KİMLİĞİNDEN — pgShim
+        // broadcastDocChange); `data.companyId`'den DEĞİL. Sunucunun ham kimlikle (`<cid>__anahtar`) yayınladığı olay da kimlikten
+        // süzülür ve istemciye DÜZ anahtarla gider.
+        if (ev.coll === 'settings') {
+          const sahip = ayarSahibi(ev.id);
+          if ((ev.cid && ev.cid !== streamCid) || (sahip !== null && sahip !== streamCid)) return;
+          if (sahip !== null && ev.id) ev = { ...ev, id: ayarAnahtari(ev.id) };
+          else if (!ev.cid && ev.id && PER_COMPANY_SETTINGS.has(ev.id)) {
+            // Eski GLOBAL kopya (`settings/app`) değişti: kiracının KENDİ `<cid>__app` dokümanı varsa o gölgeler (init ve REST
+            // GET ile aynı öncelik) — olay gönderilirse istemci önbelleğinde kendi ayarının üstüne eski kopya yazılırdı.
+            // Okunamazsa GÖNDERME: bayat ekran, yanlış ayarı gösterip ilk kayıtta onu kalıcılaştırmaktan iyidir.
+            const olay = ev;
+            void docsDb.query('SELECT 1 FROM docs WHERE coll = $1 AND id = $2', ['settings', `${streamCid}${AYAR_AYRACI}${ev.id}`])
+              .then(({ rows }) => { if (!rows.length) yayinla(olay); })
+              .catch(() => { /* yukarıdaki not: gönderme */ });
+            return;
+          }
+        }
         // users: kendi kaydı ya da kendi kiracısı — etiketsiz users değişimi de yayınlanmaz
         // (init tarafı `akisSatiriGorunur` ile aynı kural; 4/n incelemesi).
         if (ev.coll === 'users' && !(ev.id === streamUid || (ev.cid && ev.cid === streamCid))) return;
+        yayinla(ev);
+      };
+      const yayinla = (ev: { coll: string; data?: unknown }) => {
+        if (res.writableEnded) return;   // gölge denetimi eşzamansız — o arada akış kapanmış olabilir
         // `broadcastDocChange` olaya dokümanın TAMAMINI iliştirir (pgShim.ts:97),
         // yani maskelenmezse sır buradan da akar.
-        const gonder = 'data' in ev ? { ...ev, data: redactForRole(streamRole, ev.coll, (ev as { data?: unknown }).data) } : ev;
+        const gonder = 'data' in ev ? { ...ev, data: redactForRole(streamRole, ev.coll, ev.data) } : ev;
         res.write(`event: change\ndata: ${JSON.stringify(gonder)}\n\n`);
       };
       dbEvents.on('change', onChange);
-      const heartbeat = setInterval(() => res.write(': hb\n\n'), 25000);
-      req.on('close', () => { clearInterval(heartbeat); dbEvents.off('change', onChange); });
+      heartbeat = setInterval(() => res.write(': hb\n\n'), 25000);
+      req.on('close', () => { if (heartbeat) clearInterval(heartbeat); dbEvents.off('change', onChange); });
+      // INIT PENCERESİ: rol ve kiracı init sorgusundan ÖNCE okundu, dinleyici SONRA bağlandı — arada gelen rol değişikliğini bu
+      // akış görmedi. Dinleyici bağlandıktan sonra yeniden okunur (yukarıdaki süreç dinleyicisi önbelleği düşürdüğü için taze);
+      // uyuşmuyorsa akış kapatılır, istemci yeni rolle bağlanır.
+      const [guncelRol, guncelCid] = await Promise.all([getUserRole(streamUid), getUserCompanyId(streamUid)]);
+      if (guncelRol !== streamRole || guncelCid !== streamCid) kapat();
     });
 
     // Ham hata mesajlarını sunucu loglarında tut, istemciye generic döndür.
@@ -1803,12 +1837,8 @@ async function startServer() {
       const uid = (req as Request & { uid?: string }).uid || '';
       return redactForRole(await getUserRole(uid), coll, data) as Record<string, unknown>;
     };
-    const stripRedacted = (coll: string, data: Record<string, unknown>): Record<string, unknown> => {
-      if (coll !== 'settings' || !data) return data;
-      const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(data)) if (v !== REDACTED) out[k] = v;
-      return out;
-    };
+    // Maskeli (***REDACTED***) gelen alan: `maskeyiGeriYukle` (lib/sirMaske) önceki değeri geri koyar — DERİN. Eski `stripRedacted`
+    // yalnız üst düzeye bakıyordu: iç içe nesnedeki maske gerçek sırrın ÜZERİNE yazılıyordu (2026-10-02).
 
     // Kiracı/kullanıcı kapsam kuralları `src/lib/tenantErisim.ts`'e TAŞINDI (Faz 1 4/n,
     // 2026-09-05) — saf ve testli (tenantErisim.test.ts); gerekçe yorumları da oraya gitti
@@ -1838,6 +1868,30 @@ async function startServer() {
       if (coll === 'settings' && id.includes('__')) { res.status(400).json({ error: 'Geçersiz ayar anahtarı.' }); return true; }
       return false;
     };
+    // settings değişiklik olayının KİRACI KAPSAMI açıkça verilir (`data.companyId`'den türetilmez — Luca firma kimliği de o adı
+    // taşıyor; pgShim.broadcastDocChange): firma-bazlı ayar → çağıranın kiracısı; global ayar → kapsamsız (`null`).
+    const ayarKapsami = (coll: string, perCompany: boolean, cid: string): { cid: string | null } | undefined =>
+      coll === 'settings' ? { cid: perCompany ? cid : null } : undefined;
+    // Atomik artırma / koşullu yazma `settings` için KAPALI (2026-10-02): bu iki uç `rejectNamespacedSettings` / `settingsRealId` /
+    // sahiplik / maske kapılarının HİÇBİRİNDEN geçmiyor ve dokümanın tamamını döndürüyordu — başka kiracının `<cid>__app` ayarı
+    // okunup yazılabiliyor, Manager maskeyi aşabiliyordu. settings'te sayaç ya da "claim" kullanan kod yok (ölçüldü).
+    const ayarAtomikYasak = (coll: string, res: Response): boolean => {
+      if (coll !== 'settings') return false;
+      res.status(400).json({ error: 'Bu işlem ayarlar üzerinde desteklenmez.' });
+      return true;
+    };
+    // BAĞLANTI ADRESİ yalnız Yönetici'nin (2026-10-02): Manager sırrı maskeli görür ama ayarı YAZABİLİR — entegrasyonun taban
+    // adresini kendi sunucusuna çevirince sunucu saklı kimlik bilgisini oraya KENDİSİ gönderiyordu (Luca, SAP, iyzico). Adres /
+    // sunucu / uç alanı (`ayarAdresAlaniDegisti`, lib/sirMaske) değişiyorsa Admin (ya da süper-admin) gerekir.
+    const ayarYazimiEngeli = async (req: Request, res: Response, coll: string, gelen: Record<string, unknown>, onceki: Record<string, unknown>): Promise<boolean> => {
+      if (coll !== 'settings' || isSuperAdmin(req)) return false;
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (await getUserRole(uid) === 'Admin') return false;
+      const alan = ayarAdresAlaniDegisti(gelen, onceki);
+      if (!alan) return false;
+      res.status(403).json({ error: `Bağlantı adresi (${alan}) yalnız Yönetici tarafından değiştirilebilir.` });
+      return true;
+    };
 
     app.get('/api/db/:coll', dbLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
       const coll = String(req.params.coll);
@@ -1846,9 +1900,13 @@ async function startServer() {
       try {
         const t = await tenantWhere(req, coll);
         const { rows } = await docsDb.query(`SELECT id, data FROM docs WHERE coll = $1${t.sql}`, [coll, ...t.params]);
-        // P4-2: settings gizli alanları Admin olmayana maskeli döner.
+        // settings: SQL süzgeci (kiraciWhere) yabancı kiracının firma-bazlı ayarını zaten getirmez; `ayarSatirlari` kendi firma-bazlı
+        // ayarı DÜZ anahtara çevirir ve eski global kopyayı gölgeler (akışla AYNI görünüm). P4-2: Admin olmayana maskeli.
         if (coll === 'settings') {
-          for (const r of rows) r.data = await redactSettings(req, coll, r.data as Record<string, unknown>);
+          const kendi = ayarSatirlari(rows as Array<{ id: string; data: unknown }>, await reqKimlik(req).cid());
+          for (const r of kendi) r.data = await redactSettings(req, coll, r.data as Record<string, unknown>);
+          res.json({ docs: kendi });
+          return;
         }
         res.json({ docs: rows });
       } catch (e) { dbErr(e, res, 'GET', coll); }
@@ -1925,7 +1983,7 @@ async function startServer() {
           [coll, id, JSON.stringify(data)],
         );
         broadcastDocChange(coll, 'set', id, data);
-        res.json({ id, data });
+        res.json({ id, data: await redactSettings(req, coll, data) });   // yanıt da maskeli (2026-10-02)
       } catch (e) { dbErr(e, res, 'POST', coll); }
     });
 
@@ -1941,23 +1999,25 @@ async function startServer() {
       if (await guardRoleEscalation(req, res, coll, id, (req.body ?? {}) as Record<string, unknown>)) return;
       try {
         const { realId, perCompany, cid } = await settingsRealId(req, coll, id);
-        // P4-2: maskeli (***REDACTED***) gelen gizli alanları YOK SAY — maskeli
-        // formu kaydeden biri gerçek secret'i ezmesin.
-        const incoming = stripRedacted(coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>);
+        const ham = resolveSentinels(req.body ?? {}) as Record<string, unknown>;
+        let incoming = ham;
         let data = incoming;
         let before: Record<string, unknown> = {};
         const audited = AUDITED_COLLECTIONS.has(coll);
         const scoped = sahiplikDenetimli(coll);
-        // Sahiplik: kapsamlı/audit/merge için mevcut kaydı çek
-        if (req.query.merge === '1' || audited || scoped) {
+        // Sahiplik: kapsamlı/audit/merge için mevcut kaydı çek. settings HER ZAMAN (maskeli alanın geri yüklenmesi öncekine bakar).
+        if (req.query.merge === '1' || audited || scoped || coll === 'settings') {
           let { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
           if (!rows.length && perCompany) ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id])); // merge tabanı: legacy global
           before = (rows[0]?.data as Record<string, unknown>) ?? {};
           if (rows.length && !(await ownsDoc(req, coll, before, realId))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
-          if (req.query.merge === '1') data = mergeDocData(before, incoming);
+          // P4-2: maskeli (***REDACTED***) gelen gizli alan gerçek sırrı EZMEZ ve SİLMEZ — önceki değer geri konur (derin).
+          incoming = maskeyiGeriYukle(coll, ham, before);
+          if (await ayarYazimiEngeli(req, res, coll, incoming, before)) return;
+          data = req.query.merge === '1' ? mergeDocData(before, incoming) : incoming;
         }
         data = await injectTenant(req, coll, data); // companyId/userId enjekte
-        if (perCompany) data = { ...data, companyId: cid }; // SSE firma filtresi için
+        if (perCompany) data = { ...data, companyId: cid }; // firma-bazlı ayar damgası (sahiplik KİMLİKTEN okunur — bkz. tenantErisim.ayarSahibi)
         if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before, isSuperAdmin(req)); // companyId/role/status escalation engeli
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
@@ -1965,14 +2025,15 @@ async function startServer() {
           [coll, realId, JSON.stringify(data)],
         );
         if (coll === 'settings' && realId === 'aiConfig') invalidateGeminiKeyCache(); // yeni anahtar anında etkir
-        broadcastDocChange(coll, 'set', id, data); // orijinal id ile yayınla (client settings/{id} dinler)
+        broadcastDocChange(coll, 'set', id, data, ayarKapsami(coll, perCompany, cid)); // orijinal id ile yayınla (client settings/{id} dinler)
         // before yalnızca audited/scoped/merge'de çekildiği için logu bununla sınırla
         // (aksi halde diff tüm alanları "yeni" gösterir = gürültü).
         if (shouldAudit(coll) && (audited || scoped || req.query.merge === '1')) {
           const fd = computeFieldDiff(before, data);
           if (Object.keys(fd).length) void writeAuditLog(reqActor(req), `${coll} kaydedildi`, `${coll}/${id}`, fd);
         }
-        res.json({ id, data });
+        // Yanıt da maskeli (2026-10-02): eskiden birleştirilmiş doküman MASKESİZ dönüyordu — Manager maskeyi bu yanıtla aşıyordu.
+        res.json({ id, data: await redactSettings(req, coll, data) });
       } catch (e) { dbErr(e, res, 'PUT', coll); }
     });
 
@@ -1987,15 +2048,16 @@ async function startServer() {
       if (await guardRoleEscalation(req, res, coll, id, (req.body ?? {}) as Record<string, unknown>)) return;
       try {
         const { realId, perCompany, cid } = await settingsRealId(req, coll, id);
-        // P4-2: maskeli gelen gizli alanlar gerçek secret'i ezmesin.
-        const patch = stripRedacted(coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>);
         let { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
         if (!rows.length && perCompany) ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id])); // merge tabanı: legacy global
         const before = (rows[0]?.data as Record<string, unknown>) ?? {};
         if (rows.length && !(await ownsDoc(req, coll, before, realId))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+        // P4-2: maskeli gelen gizli alan gerçek sırrı EZMEZ ve SİLMEZ — önceki değer geri konur (derin; lib/sirMaske).
+        const patch = maskeyiGeriYukle(coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>, before);
+        if (await ayarYazimiEngeli(req, res, coll, patch, before)) return;
         let data = mergeDocData(before, patch);
         data = await injectTenant(req, coll, data); // companyId/userId enjekte
-        if (perCompany) data = { ...data, companyId: cid }; // SSE firma filtresi için
+        if (perCompany) data = { ...data, companyId: cid }; // firma-bazlı ayar damgası (sahiplik KİMLİKTEN okunur)
         if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before, isSuperAdmin(req)); // companyId/role/status escalation engeli
         await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
@@ -2003,13 +2065,13 @@ async function startServer() {
           [coll, realId, JSON.stringify(data)],
         );
         if (coll === 'settings' && realId === 'aiConfig') invalidateGeminiKeyCache(); // yeni anahtar anında etkir
-        broadcastDocChange(coll, 'set', id, data); // orijinal id ile yayınla
+        broadcastDocChange(coll, 'set', id, data, ayarKapsami(coll, perCompany, cid)); // orijinal id ile yayınla
         // 'kim neyi değiştirdi' diff'i kaydet (bloklamadan); before her zaman çekildi.
         if (shouldAudit(coll)) {
           const fd = computeFieldDiff(before, data);
           if (Object.keys(fd).length) void writeAuditLog(reqActor(req), `${coll} güncellendi`, `${coll}/${id}`, fd);
         }
-        res.json({ id, data });
+        res.json({ id, data: await redactSettings(req, coll, data) });   // yanıt da maskeli (2026-10-02)
       } catch (e) { dbErr(e, res, 'PATCH', coll); }
     });
 
@@ -2029,7 +2091,8 @@ async function startServer() {
           if (existing.length && !(await ownsDoc(req, coll, prevData, realId))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
         }
         await docsDb.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
-        broadcastDocChange(coll, 'delete', id, prevData);   // kiracı/kullanıcı ETİKETİ için; içerik olaya iliştirilmez
+        { const a = await settingsRealId(req, coll, id);
+          broadcastDocChange(coll, 'delete', id, prevData, ayarKapsami(coll, a.perCompany, a.cid)); }   // kiracı/kullanıcı ETİKETİ için; içerik olaya iliştirilmez
         // Silme işlemini her zaman logla (efemeral koleksiyonlar hariç).
         if (shouldAudit(coll)) {
           const label = (prevData.name || prevData.title || prevData.adi || prevData.musteriAdi || id) as string;
@@ -2045,6 +2108,7 @@ async function startServer() {
     app.patch('/api/db/:coll/:id/increment', dbLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
+      if (ayarAtomikYasak(coll, res)) return;
       if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
       const { field, delta, min } = (req.body ?? {}) as { field?: string; delta?: number; min?: number };
       if (typeof field !== 'string' || !/^[A-Za-z0-9_]{1,40}$/.test(field) || typeof delta !== 'number' || !Number.isFinite(delta)) {
@@ -2078,6 +2142,7 @@ async function startServer() {
     app.patch('/api/db/:coll/:id/cas', dbLimiter, requireAuth, requireMfaVerified, dbJson, async (req: Request, res: Response) => {
       const coll = String(req.params.coll), id = String(req.params.id);
       if (!validColl(coll, res)) return;
+      if (ayarAtomikYasak(coll, res)) return;
       if (APPEND_ONLY_COLLECTIONS.has(coll)) { res.status(403).json({ error: 'Bu koleksiyon değiştirilemez (append-only).' }); return; }
       const { field, expect, set } = (req.body ?? {}) as { field?: string; expect?: unknown; set?: Record<string, unknown> };
       if (typeof field !== 'string' || !/^[A-Za-z0-9_]{1,40}$/.test(field) || typeof set !== 'object' || set === null) {
@@ -2677,7 +2742,7 @@ async function startServer() {
   mikroRoutes(app, {
     reqActor, writeSyncLog, reqCompanyId, writeAuditLog, tenantSnap,
     mikroIdCozucu, loadCompanyDocs, mikroLimiter, requireCollectionAccess,
-    requireAuth, requireMfaVerified,
+    requireAuth, requireMfaVerified, requireStaff,
     // Sonradan atanan baglantilar GETTER ile (bkz. diger modullerdeki gerekce).
     getAdminDb: adminDbZorunlu, getPgPool: () => pgPool,
     getUserCompanyId, mikroIdCozucuIds, validate, getBoss: () => boss, getUserRole,
@@ -2712,18 +2777,21 @@ async function startServer() {
 
   /** POST /api/mikro/token — IDM token al/yenile (env veya Firestore creds ile).
    *  Token client'a DÖNDÜRÜLMEZ — yalnızca alınabildiği bilgisi + süre döner.
+   *  2026-10-02: YALNIZ yönetici (eskiden her role açıktı — B2B/Dealer dâhil herkes Cetpa'nın Mikro kimliğiyle IDM oturumu
+   *  yeniletebiliyordu); token ön izlemesi (ilk 10 karakter) ve ham IDM hata metni artık DÖNMEZ — ayrıntı sunucu günlüğünde.
    */
-  app.post('/api/mikro/token', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  app.post('/api/mikro/token', requireAuth, requireMfaVerified, requireAdmin, async (req: Request, res: Response) => {
     const creds = await getMikroCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     try {
       // Cache'i atla — kullanıcı bilinçli yenileme istedi
       mikroTokenCacheMap.delete(`${creds.idmEmail}|${creds.alias}`);
-      const token = await getMikroToken(creds);
+      await getMikroToken(creds);
       await writeAuditLog(reqActor(req), 'Mikro Token Yenileme', 'IDM access token yenilendi');
-      res.json({ success: true, tokenPreview: `${token.slice(0, 10)}…`, expiresInHours: 6 });
+      res.json({ success: true, expiresInHours: 6 });
     } catch (e) {
-      res.json({ success: false, error: e instanceof Error ? e.message : String(e) });
+      console.error('[/api/mikro/token]', e instanceof Error ? e.message : String(e));
+      res.json({ success: false, error: 'Mikro IDM oturumu yenilenemedi. Ayrıntı sunucu günlüğünde.' });
     }
   });
 
@@ -3242,7 +3310,9 @@ async function startServer() {
    * Body: { url }
    * Sends a test ping to the given URL and returns { ok, status }.
    */
-  app.post('/api/webhooks/test', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı = webhook tanımlama yetkisi (rbac `webhookConfigs` yazma). Eskiden oturum açan HERKES (dış roller dâhil) sunucuya
+  // keyfi adrese istek attırabiliyordu (2026-10-02).
+  app.post('/api/webhooks/test', requireAuth, requireMfaVerified, requireCollectionAccess('webhookConfigs', 'write'), async (req: Request, res: Response) => {
     const { url } = req.body as { url: string };
     if (!url || !isSafePublicUrl(url)) return res.status(400).json({ error: 'Geçerli bir public http(s) URL gerekli (iç ağ adresleri engellidir).' });
     try {
@@ -3251,8 +3321,11 @@ async function startServer() {
         headers: { 'Content-Type': 'application/json', 'X-Cetpa-Event': 'test' },
         body: JSON.stringify({ event: 'test', data: { message: 'Cetpa webhook test ping' }, sentAt: new Date().toISOString() }),
         signal: AbortSignal.timeout(5000),
+        redirect: 'manual',   // 3xx izlenmez — yanıt { ok: false, status: 30x } (iç ağ için kapı / durum kâhini olmasın)
       });
-      return res.json({ ok: r.ok, status: r.status });
+      // Yönlendiren hedef: nihai adres yanıtta döner — kullanıcı "✗ 308"den nedenini anlayamıyordu.
+      const yonlendirme = r.status >= 300 && r.status < 400 ? r.headers.get('location') : null;
+      return res.json({ ok: r.ok, status: r.status, ...(yonlendirme ? { yonlendirme } : {}) });
     } catch (e) {
       return res.json({ ok: false, error: (e as Error).message });
     }
@@ -3321,7 +3394,8 @@ async function startServer() {
     if (!snap.exists) return null;
     const d = snap.data() as Record<string, string>;
     if (!d.apiKey || !d.companyId) return null;
-    return { apiKey: d.apiKey, companyId: d.companyId, baseUrl: d.baseUrl || 'https://api.luca.com.tr' };
+    // Ayardan gelen taban adres izin listesinden geçer (guvenliTaban.ts): yoksa Bearer anahtarı yazılan adrese giderdi.
+    return { apiKey: d.apiKey, companyId: d.companyId, baseUrl: izinliTaban(d.baseUrl, LUCA_TABAN) };
   }
 
   function lucaHeaders(creds: LucaCreds): Record<string, string> {
@@ -3380,10 +3454,11 @@ async function startServer() {
   });
 
   // GET /api/luca/status — test connection
-  app.get('/api/luca/status', async (_req: Request, res: Response) => {
-    const creds = await getLucaCreds();
-    if (!creds) return res.json({ configured: false, connected: false });
+  // requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
+  app.get('/api/luca/status', requireAuth, requireStaff, async (_req: Request, res: Response) => {
     try {
+      const creds = await getLucaCreds();   // try İÇİNDE: taban adres kuralı çiğnenmişse (TabanAdresHatasi) 'bağlı değil + neden' döner
+      if (!creds) return res.json({ configured: false, connected: false });
       const r = await fetch(`${creds.baseUrl}/v1/company`, {
         headers: lucaHeaders(creds),
         signal: AbortSignal.timeout(8000),
@@ -3525,7 +3600,8 @@ async function startServer() {
     if (!snap.exists) return null;
     const d = snap.data() as Record<string, string>;
     if (!d.apiKey || !d.secretKey) return null;
-    return { apiKey: d.apiKey, secretKey: d.secretKey, baseUrl: d.baseUrl || 'https://sandbox-api.iyzipay.com' };
+    // Ayardan gelen taban adres izin listesinden geçer (guvenliTaban.ts) — imzalı istek yabancı sunucuya gitmesin.
+    return { apiKey: d.apiKey, secretKey: d.secretKey, baseUrl: izinliTaban(d.baseUrl, IYZICO_TABAN) };
   }
 
   // HMAC-SHA256 Authorization header for iyzico v2
@@ -3624,8 +3700,8 @@ async function startServer() {
     return { messageId: msgs?.[0]?.id };
   }
 
-  // GET /api/whatsapp/status
-  app.get('/api/whatsapp/status', async (_req: Request, res: Response) => {
+  // GET /api/whatsapp/status — requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
+  app.get('/api/whatsapp/status', requireAuth, requireStaff, async (_req: Request, res: Response) => {
     const creds = await getWACreds();
     if (!creds) return res.json({ configured: false });
     // Verify the token by hitting the phone number endpoint
@@ -3921,7 +3997,7 @@ async function startServer() {
 
   opsRoutes(app, {
     getPgPool: () => pgPool,   // bakım kilidi / yazıcı kaydı / ops yayını (bakimKilidi.ts, opsRoutes)
-    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireSuperAdmin,
+    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireSuperAdmin, serverTenantId,
   });
 
   // Cerezsiz trafik sayaci - /api/hit (kimliksiz, kendi hiz limitiyle) +
@@ -3943,13 +4019,13 @@ async function startServer() {
   // rawBody undefined olur ve TUM webhook'lar sessizce 401 doner.
   kanalRoutes(app, {
     getAdminDb: adminDbZorunlu, getBoss: () => boss,
-    requireAuth, requireMfaVerified, reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp,
+    requireAuth, requireMfaVerified, requireStaff, reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp,
     processShopifyWebhook, getTrendyolCreds, getHepsiburadaCreds, getAmazonCreds,
   });
 
   paymentRoutes(app, {
     getAdminDb: adminDbZorunlu, getBoss: () => boss, getStripeClient: () => stripeClient,
-    requireAuth, requireMfaVerified, paymentLimiter,
+    requireAuth, requireMfaVerified, requireStaff, paymentLimiter,
     reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp,
     processStripeWebhook, getIyzicoCreds, iyzicoAuth, toPkiString, randStr,
     STRIPE_PLAN_PRICES,
@@ -3973,7 +4049,7 @@ async function startServer() {
   // KONUM: digerleriyle AYNI nokta - express.json + apiLimiter'dan SONRA.
   erpRoutes(app, {
     getPgPool: () => pgPool,   // bakım kilidi / yazıcı kaydı / ops yayını (bakimKilidi.ts, opsRoutes)
-    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin,
+    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, requireStaff,
     reqActor, reqCompanyId, writeAuditLog, writeSyncLog, pgServerTimestamp, tenantSnap,
     getParasutCreds, getParasutToken, parasutGetAll,
     getLogoCreds, getSAPSession, getSAPCredsFromFirestore,
@@ -3996,7 +4072,7 @@ async function startServer() {
 
   dynamicsRoutes(app, {
     getPgPool: () => pgPool,   // bakım kilidi / yazıcı kaydı / ops yayını (bakimKilidi.ts, opsRoutes)
-    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, reqActor, reqCompanyId,
+    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, requireStaff, reqActor, reqCompanyId,
     writeAuditLog, pgServerTimestamp, tenantSnap,
     getDynamicsToken, dynamicsGetAll, getDynamicsBase, getDynamicsCredsFromFirestore,
   });
@@ -4140,7 +4216,9 @@ async function startServer() {
   // Auth: POST /b1s/v1/Login { UserName, Password, CompanyDB } → Set-Cookie: B1SESSION
   // The session has a 5-minute idle timeout; server renews it automatically.
 
-  const SAP_SESSION: { sessionId?: string; lastUsed?: number } = {};
+  // `anahtar`: oturumun HANGİ adres + kimlikle alındığı (özet). Adres / kullanıcı / parola değişince eski sunucunun oturum
+  // çerezi yeni adrese gönderilmesin ve 'bağlı' yanlış çıkmasın (2026-10-02 incelemesi).
+  const SAP_SESSION: { sessionId?: string; lastUsed?: number; anahtar?: string } = {};
 
   type SAPCreds = { serviceLayerUrl: string; username: string; password: string; companyDb: string };
   async function getSAPCredsFromFirestore(): Promise<SAPCreds | null> {
@@ -4150,7 +4228,9 @@ async function startServer() {
     const d = snap.data() as Record<string, string>;
     if (!d.sapServiceLayerUrl && !d.serviceLayerUrl) return null;
     return {
-      serviceLayerUrl: d.sapServiceLayerUrl || d.serviceLayerUrl || '',
+      // Müşterinin kendi sunucusu → izin listesi olmaz; https + genel ağ adresi şartı (guvenliTaban.ts). `/Login` çağrısı
+      // kullanıcı adı + parolayı DÜZ METİN gönderir; adres ayardan geldiği için iç ağa/yabancı http'ye gidemesin.
+      serviceLayerUrl: genelHttpsTaban(d.sapServiceLayerUrl || d.serviceLayerUrl, 'SAP', isSafePublicUrl),
       username:        d.sapUsername || d.username || '',
       password:        d.sapPassword || d.password || '',
       companyDb:       d.sapCompanyDb || d.companyDb || '',
@@ -4170,7 +4250,8 @@ async function startServer() {
     if (!(serviceLayerUrl && username && password && companyDb)) return null;
     // If session is younger than 4 minutes, reuse it (SAP timeout is 5 min idle)
     const now = Date.now();
-    if (SAP_SESSION.sessionId && SAP_SESSION.lastUsed && now - SAP_SESSION.lastUsed < 4 * 60 * 1000) {
+    const anahtar = createHash('sha256').update([serviceLayerUrl, username, companyDb, password].join('\n')).digest('hex');
+    if (SAP_SESSION.sessionId && SAP_SESSION.anahtar === anahtar && SAP_SESSION.lastUsed && now - SAP_SESSION.lastUsed < 4 * 60 * 1000) {
       SAP_SESSION.lastUsed = now;
       return SAP_SESSION.sessionId;
     }
@@ -4178,6 +4259,9 @@ async function startServer() {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ UserName: username, Password: password, CompanyDB: companyDb }),
+      // Yönlendirme İZLENMEZ: 307/308'de gövde (kullanıcı adı + parola) yeni adrese YENİDEN gönderilir — doğrulanan adres ile
+      // isteğin gittiği adres ayrışır (iç ağa / düz http'ye). 3xx yanıtı `r.ok === false` → oturum yok.
+      redirect: 'manual',
     });
     if (!r.ok) return null;
     const cookie = r.headers.get('set-cookie') ?? '';
@@ -4185,6 +4269,7 @@ async function startServer() {
     if (!match) return null;
     SAP_SESSION.sessionId = match[1];
     SAP_SESSION.lastUsed  = now;
+    SAP_SESSION.anahtar   = anahtar;
     return SAP_SESSION.sessionId;
   }
 
@@ -4242,6 +4327,8 @@ async function startServer() {
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     console.error('[express error]', err?.message || err);
     if (res.headersSent) return;
+    // Ayardaki taban adres kuralı çiğnenmiş (guvenliTaban.ts): metin yalnız kuralı söyler, sır/adres yankılamaz → kullanıcıya açık.
+    if (err instanceof TabanAdresHatasi) { res.status(400).json({ success: false, error: err.message }); return; }
     res.status(500).json({ error: 'Sunucu hatası.' });
   });
 

@@ -91,7 +91,14 @@ import { format } from 'date-fns';
 import { confirmAction } from '../lib/confirm';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { oc } from '../i18n/ortak';
+import { sunucuHataMetni } from '../utils/sunucuHatasi';
+import { adresYamasi } from '../utils/adresYamasi';
 import { ac, type AccountingT } from '../i18n/accounting';
+
+// Luca / Mikro ayar formunun varsayılan bağlantı adresleri — durum başlangıcı, dinleyici ve "kullanıcı adresi değiştirdi mi"
+// karşılaştırması AYNI sabiti kullanır (2026-10-02: iki yerde ayrı yazılıydı).
+const LUCA_VARSAYILAN_ADRES = 'https://api.luca.com.tr';
+const MIKRO_VARSAYILAN_UC = 'https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods';
 
 interface AccountingModuleProps {
   orders: Order[];
@@ -313,14 +320,19 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [lucaEnabled, setLucaEnabled] = useState(true);
   const [lucaApiKey, setLucaApiKey] = useState('');
   const [lucaCompanyId, setLucaCompanyId] = useState('');
-  const [lucaBaseUrl, setLucaBaseUrl] = useState('https://api.luca.com.tr');
+  const [lucaBaseUrl, setLucaBaseUrl] = useState(LUCA_VARSAYILAN_ADRES);
+  // Kayıttaki HAM adres (yoksa undefined). Bağlantı adresini sunucu yalnız Yönetici'den kabul eder; form ise kutuyu varsayılanla
+  // doldurup her kayıtta gönderiyordu → adrese hiç dokunmayan Manager 'etkin' anahtarını bile kaydedemiyordu (403). Adres artık
+  // yalnız kullanıcı gerçekten değiştirdiyse gövdeye girer (`merge: true` — gönderilmeyen alan kayıtta olduğu gibi kalır).
+  const kayitliLucaBaseUrl = useRef<string | undefined>(undefined);
+  const kayitliMikroEndpoint = useRef<string | undefined>(undefined);
   const [lucaLastSync, setLucaLastSync] = useState<string | null>(null);
   const [lucaConnected, setLucaConnected] = useState(false);
 
   // Mikro
   const [mikroEnabled, setMikroEnabled] = useState(true);
   const [mikroAccessToken, setMikroAccessToken] = useState('');
-  const [mikroEndpoint, setMikroEndpoint] = useState('https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods');
+  const [mikroEndpoint, setMikroEndpoint] = useState(MIKRO_VARSAYILAN_UC);
   const [mikroConnected, setMikroConnected] = useState(false);
   const [mikroLastSync, setMikroLastSync] = useState<string | null>(null);
 
@@ -696,7 +708,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
         const cfg = docSnap.data() as LucaConfig;
         setLucaApiKey(cfg.apiKey || '');
         setLucaCompanyId(cfg.companyId || '');
-        setLucaBaseUrl(cfg.baseUrl || 'https://api.luca.com.tr');
+        kayitliLucaBaseUrl.current = cfg.baseUrl || undefined;
+        setLucaBaseUrl(cfg.baseUrl || LUCA_VARSAYILAN_ADRES);
         setLucaLastSync(cfg.lastSync || null);
         setLucaConnected(cfg.connected || false);
         setLucaEnabled(!!cfg.enabled);
@@ -711,7 +724,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       if (docSnap.exists()) {
         const cfg = docSnap.data() as MikroConfig;
         setMikroAccessToken(cfg.accessToken || '');
-        setMikroEndpoint(cfg.endpoint || 'https://jumpbulutapigw.mikro.com.tr/ApiJB/ApiMethods');
+        kayitliMikroEndpoint.current = cfg.endpoint || undefined;
+        setMikroEndpoint(cfg.endpoint || MIKRO_VARSAYILAN_UC);
         setMikroLastSync(cfg.lastSync || null);
         setMikroConnected(cfg.connected || false);
         setMikroEnabled(cfg.enabled || false);
@@ -722,10 +736,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   const saveLucaConfig = async () => {
     try {
-      const cfg: LucaConfig = {
+      const cfg: Omit<LucaConfig, 'baseUrl'> & { baseUrl?: string } = {
         apiKey: lucaApiKey,
         companyId: lucaCompanyId,
-        baseUrl: lucaBaseUrl,
+        ...adresYamasi('baseUrl', lucaBaseUrl, kayitliLucaBaseUrl.current, LUCA_VARSAYILAN_ADRES),
         lastSync: lucaLastSync,
         connected: lucaConnected,
         enabled: lucaEnabled,
@@ -741,7 +755,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       showToast(t.lucaSaved);
     } catch (err) {
       logFirestoreError(err, OperationType.UPDATE, 'settings/luca', auth.currentUser?.uid);
-      showToast(t.errorOccurred, 'error');
+      showToast(sunucuHataMetni(err) ?? t.errorOccurred, 'error');   // sunucunun yazdığı neden (ör. adres yalnız Yönetici'nin) görünsün
     }
   };
 
@@ -826,7 +840,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     try {
       const cfg: MikroConfig = {
         accessToken: mikroAccessToken,
-        endpoint: mikroEndpoint,
+        ...adresYamasi('endpoint', mikroEndpoint, kayitliMikroEndpoint.current, MIKRO_VARSAYILAN_UC),
         lastSync: mikroLastSync,
         connected: mikroConnected,
         enabled: mikroEnabled,
@@ -842,7 +856,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
       showToast(ac(currentLanguage).mikro_yapilandirmasi_kaydedildi);
     } catch (err) {
       logFirestoreError(err, OperationType.UPDATE, 'settings/mikro', auth.currentUser?.uid);
-      showToast(t.errorOccurred, 'error');
+      showToast(sunucuHataMetni(err) ?? t.errorOccurred, 'error');
     }
   };
 

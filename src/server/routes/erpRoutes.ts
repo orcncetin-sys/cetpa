@@ -33,6 +33,8 @@ export interface ErpRouteCtx {
   getPgPool?: () => any;
   getAdminDb: () => AdminDbLike;
   requireAuth: any;
+  /** Yalnız iç personel (server.ts requireStaff) — entegrasyon durum uçları için (2026-10-02). */
+  requireStaff: any;
   requireMfaVerified: any;
   requireAdmin: any;
   reqActor: (req: Request) => { uid: string; email: string };
@@ -52,7 +54,7 @@ export interface ErpRouteCtx {
 
 export function erpRoutes(app: Express, C: ErpRouteCtx): void {
   // ── Parasut - bulut on muhasebe (GERCEK entegrasyon) (4 rota) 
-  app.get('/api/parasut/status', C.requireAuth, async (_req: Request, res: Response) => {
+  app.get('/api/parasut/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
     const creds = await C.getParasutCreds();
     if (!creds) return res.json({ configured: false, connected: false, message: 'Paraşüt yapılandırılmamış.' });
     try {
@@ -231,7 +233,8 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
   });
 
   // ── Logo Tiger/Go - STUB (gercek REST spec bekliyor) (4 rota) 
-  app.get('/api/logo/status', async (_req: Request, res: Response) => {
+  // requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
+  app.get('/api/logo/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
     const creds = await C.getLogoCreds();
     const configured = !!creds;
     if (!configured) return res.json({ configured: false, connected: false });
@@ -270,29 +273,34 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
   });
 
   // ── SAP Business One - status GERCEK, digerleri stub (5 rota) 
-  app.get('/api/sap/status', async (_req: Request, res: Response) => {
+  // requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
+  app.get('/api/sap/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
     const hasEnvCreds = !!(process.env.SAP_SERVICE_LAYER_URL && process.env.SAP_USERNAME && process.env.SAP_PASSWORD && process.env.SAP_COMPANY_DB);
-    const fsCreds = hasEnvCreds ? null : await C.getSAPCredsFromFirestore();
-    const configured = hasEnvCreds || !!fsCreds;
-    if (!configured) return res.json({ configured: false, connected: false });
     try {
+      // try İÇİNDE: ayardaki adres kuralı çiğnenmişse (TabanAdresHatasi) 'bağlı değil + neden' döner, parola hiçbir yere gitmez.
+      const fsCreds = hasEnvCreds ? null : await C.getSAPCredsFromFirestore();
+      const configured = hasEnvCreds || !!fsCreds;
+      if (!configured) return res.json({ configured: false, connected: false });
       const session = await C.getSAPSession();
       if (!session) return res.json({ configured: true, connected: false, error: 'SAP B1 Login failed — check SAP_USERNAME, SAP_PASSWORD, SAP_COMPANY_DB' });
-      // Quick version check
-      const r = await fetch(`${process.env.SAP_SERVICE_LAYER_URL}/CompanyInfo`, {
+      // Quick version check — oturum HANGİ adresten alındıysa o adrese (kimlik ayardan geliyorsa ortam değişkeni boştur;
+      // eskiden burada hep ortam değişkeni okunuyor, ayarla kurulan bağlantı `undefined/CompanyInfo`'ya gidiyordu).
+      const taban = hasEnvCreds ? process.env.SAP_SERVICE_LAYER_URL : fsCreds?.serviceLayerUrl;
+      const r = await fetch(`${taban}/CompanyInfo`, {
         headers: { Cookie: `B1SESSION=${session}`, Accept: 'application/json' },
+        redirect: 'manual',   // oturum çerezi doğrulanmamış bir adrese taşınmasın (bkz. server.ts getSAPSession)
       });
       if (!r.ok) return res.json({ configured: true, connected: false, error: `SAP Service Layer returned HTTP ${r.status}` });
       const info = await r.json() as { CompanyName?: string; Version?: string };
       return res.json({
         configured:  true,
         connected:   true,
-        companyDb:   process.env.SAP_COMPANY_DB,
+        companyDb:   hasEnvCreds ? process.env.SAP_COMPANY_DB : fsCreds?.companyDb,
         sapVersion:  info.Version,
         companyName: info.CompanyName,
       });
     } catch (err) {
-      return res.json({ configured: true, connected: false, error: String(err) });
+      return res.json({ configured: true, connected: false, error: err instanceof Error ? err.message : String(err) });
     }
   });
 

@@ -106,7 +106,8 @@ async function apiPost<T>(path: string, body?: unknown): Promise<T> {
 
 async function apiGet<T>(path: string, fallback: Partial<T> = {}): Promise<T> {
   try {
-    const res = await fetch(path);
+    // Kimlik başlığıyla: /api/mikro/status artık kimlik ister (2026-10-02) — başlıksız çağrı 401 alır, 'bağlı değil' görünürdü.
+    const res = await fetch(path, { headers: await getAuthHeader() });
     const data = await res.json().catch(() => fallback);
     return data as T;
   } catch (e) {

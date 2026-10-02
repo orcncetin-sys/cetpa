@@ -17,6 +17,8 @@ export interface DynamicsRouteCtx {
   getPgPool?: () => any;
   getAdminDb: () => AdminDbLike;
   requireAuth: any;
+  /** Yalnız iç personel (server.ts requireStaff) — entegrasyon durum uçları için (2026-10-02). */
+  requireStaff: any;
   requireMfaVerified: any;
   requireAdmin: any;
   reqActor: (req: Request) => { uid: string; email: string };
@@ -31,7 +33,8 @@ export interface DynamicsRouteCtx {
 }
 
 export function dynamicsRoutes(app: Express, C: DynamicsRouteCtx): void {
-  app.get('/api/dynamics/status', async (_req: Request, res: Response) => {
+  // requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
+  app.get('/api/dynamics/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
     const hasEnvCreds = !!(process.env.DYNAMICS_TENANT_ID && process.env.DYNAMICS_CLIENT_ID && process.env.DYNAMICS_CLIENT_SECRET && process.env.DYNAMICS_COMPANY_ID);
     const fsCreds = hasEnvCreds ? null : await C.getDynamicsCredsFromFirestore();
     const configured = hasEnvCreds || !!fsCreds;

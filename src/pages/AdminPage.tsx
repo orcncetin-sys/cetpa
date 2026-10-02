@@ -23,6 +23,8 @@ import { tlYaz, kisaTutar } from '../utils/currency';
 import { basHarf } from '../utils/buyukHarf';
 import { zamanDate, zamanMs, tarihSaatYaz } from '../utils/zaman';
 import { oc } from '../i18n/ortak';
+import { noktaYolluYama } from '../utils/noktaYolluYama';
+import { sunucuHataMetni } from '../utils/sunucuHatasi';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -1055,12 +1057,16 @@ export default function AdminPage({
             <button
               onClick={async () => {
                 try {
-                  await setDoc(doc(db, 'settings', 'app'), { companySettings }, { merge: true });
+                  // Yalnız dokunulan alanlar, nokta-yollu yama olarak (noktaYolluYama.ts): nesneyi bütün göndermek kayıtlı diğer alanları siliyordu.
+                  const yama = noktaYolluYama('companySettings', companySettings);
+                  // Dokunulan alan yoksa istek gitmez — 'kaydedildi' demek ve denetim kaydı düşmek gerçekleşmemiş bir değişikliği bildirirdi.
+                  if (!Object.keys(yama).length) { toast(currentLanguage === 'tr' ? 'Değişiklik yok' : 'No changes', 'info'); return; }
+                  await setDoc(doc(db, 'settings', 'app'), yama, { merge: true });
                   logAuditAction('Ayar Değişikliği', 'Şirket ayarları kaydedildi');
                   toast(oc(currentLanguage).ayarlar_kaydedildi, 'success');
                 } catch (error) {
                   handleFirestoreError(error, OperationType.WRITE, 'settings/app');
-                  toast(currentLanguage==='tr'?'Hata oluştu!':'Error occurred!', 'error');
+                  toast(sunucuHataMetni(error) ?? (currentLanguage==='tr'?'Hata oluştu!':'Error occurred!'), 'error');
                 }
               }}
               className="apple-button-primary w-full mt-2"

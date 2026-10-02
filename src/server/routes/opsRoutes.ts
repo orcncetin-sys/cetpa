@@ -19,6 +19,7 @@ import { saatTanisi } from '../saatTanisi.js';
 import path from 'path';
 import fs from 'fs';
 import { opsJetonuGecerli } from '../opsJeton.js';
+import { auditSirSayimi, ayarOzeti } from '../sirTani.js';
 import { broadcastDocChange } from '../pgShim.js';
 import express from 'express';
 
@@ -30,6 +31,8 @@ export interface OpsRouteCtx {
   requireAuth: any;
   requireMfaVerified: any;
   requireSuperAdmin: any;
+  /** /api/ops/sir-tani için: oturumsuz sunucu bağlamının (webhook, cron) kiracısı çözülüyor mu. Opsiyonel. */
+  serverTenantId?: () => Promise<string>;
 }
 
 export function opsRoutes(app: Express, C: OpsRouteCtx): void {
@@ -115,6 +118,44 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
     }
     for (const id of silinen) { broadcastDocChange(coll, 'delete', id); yayin++; }
     res.json({ success: true, yayin });
+  });
+
+  /**
+   * GET /api/ops/sir-tani — SALT-OKUNUR ölçüm (2026-10-02, settings sır sızıntısı düzeltmesi). DEĞER DÖNDÜRMEZ, yalnız sayar:
+   *   • `ayarlar`: settings dokümanlarının anahtarları (kiracı kimliği gizli), firma-bazlı mı, kaç DOLU sır alanı taşıyor;
+   *   • `denetim`: auditLog'da alan farkı DÜZ METİN sır taşıyan satır sayısı (düzeltmeden ÖNCE yazılanlar — temizlik kararı
+   *     bu sayıya göre verilecek; auditLog append-only, silmek/değiştirmek kullanıcı kararı);
+   *   • `kiraci`: kaç kiracı var ve oturumsuz sunucu bağlamının kiracısı çözülüyor mu (aşama 2: global ayarları sahip
+   *     kiracıya daraltmanın ön koşulu);
+   *   • `siparisKaynaklari`: siparişlerin `source` dağılımı (çevrim içi mağaza siparişi var mı).
+   * Token: X-Ops-Token (scripts/ops-istek.sh).
+   */
+  app.get('/api/ops/sir-tani', async (req: Request, res: Response) => {
+    if (!opsJetonuGecerli(req, res)) return;
+    const pool = C.getPgPool?.();
+    if (!pool) return res.status(503).json({ error: 'pg havuzu yok (lokal Firestore fallback)' });
+    try {
+      const ayar = await pool.query("SELECT id, data FROM docs WHERE coll = 'settings'");
+      const denetim = await pool.query("SELECT data FROM docs WHERE coll = 'auditLog' AND data ? 'diff'");
+      const toplam = await pool.query("SELECT count(*)::int AS n FROM docs WHERE coll = 'auditLog'");
+      const kiraci = await pool.query("SELECT count(DISTINCT COALESCE(NULLIF(data->>'companyId', ''), id))::int AS n FROM docs WHERE coll = 'users'");
+      const kaynak = await pool.query("SELECT COALESCE(NULLIF(data->>'source', ''), '(boş)') AS kaynak, count(*)::int AS n FROM docs WHERE coll = 'orders' GROUP BY 1 ORDER BY 2 DESC");
+      const sahip = C.serverTenantId ? await C.serverTenantId() : '';
+      res.json({
+        success: true,
+        ayarlar: ayarOzeti(ayar.rows.map(r => ({ id: String(r.id), data: (r.data ?? {}) as Record<string, unknown> }))),
+        denetim: { toplamSatir: Number(toplam.rows[0]?.n), ...auditSirSayimi(denetim.rows.map(r => (r.data ?? {}) as Record<string, unknown>)) },
+        kiraci: {
+          sayi: Number(kiraci.rows[0]?.n),
+          sahipCozuluyor: sahip !== '',
+          sahipOrtamdan: !!(process.env.SERVER_TENANT_COMPANY_ID || process.env.MIKRO_CRON_COMPANY_ID),
+        },
+        siparisKaynaklari: Object.fromEntries(kaynak.rows.map(r => [String(r.kaynak), Number(r.n)])),
+      });
+    } catch (e) {
+      console.error('[/api/ops/sir-tani]', e instanceof Error ? e.message : String(e));
+      res.status(500).json({ success: false, error: 'Ölçüm yapılamadı. Ayrıntı sunucu günlüğünde.' });
+    }
   });
 
   /** GET /api/ops/summary — SALT-OKUNUR ops özeti, token korumalı (2026-07-28).

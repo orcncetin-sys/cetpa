@@ -104,7 +104,7 @@ export default function ErpSyncPanel({ cfg, lang = 'tr' }: { cfg: ErpPanelConfig
   const checkStatus = useCallback(async () => {
     setStatusLoading(true);
     try {
-      const r = await fetch(`/api/${cfg.key}/status`);
+      const r = await authFetch(`/api/${cfg.key}/status`);   // durum uçları kimlik ister (2026-10-02)
       setStatus(await r.json() as ErpStatusResult);
     } catch {
       setStatus({ configured: false, connected: false, error: t ? 'Sunucuya ulaşılamadı' : 'Server unreachable' });

@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { TENANT_COLLECTIONS, USER_SCOPED_COLLECTIONS, SERVER_ONLY_COLLECTIONS } from './collections';
-import { kiraciWhere, kiraciDamgala, sahiplikDenetimli, dokumanSahibiMi, akisSatiriGorunur, akisKovalari } from './tenantErisim';
+import { kiraciWhere, kiraciDamgala, sahiplikDenetimli, dokumanSahibiMi, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari } from './tenantErisim';
 
 const KIRACI = TENANT_COLLECTIONS[0];
 const KISI = USER_SCOPED_COLLECTIONS[0];
@@ -111,7 +111,7 @@ describe('akisSatiriGorunur — SSE ikinci kapı (4/n incelemesi: users dalı ek
   it('TENANT ve settings: etiketsiz VEYA kendi kiracısı; USER_SCOPED: etiketsiz VEYA kendi uid', () => {
     expect(akisSatiriGorunur(KIRACI, 'd1', {}, k)).toBe(true);
     expect(akisSatiriGorunur(KIRACI, 'd1', { companyId: 'B' }, k)).toBe(false);
-    expect(akisSatiriGorunur('settings', 'app', { companyId: 'B' }, k)).toBe(false);
+    expect(akisSatiriGorunur('settings', 'B__app', {}, k)).toBe(false);          // settings sahibi KİMLİKTEN (2026-10-02)
     expect(akisSatiriGorunur('settings', 'app', {}, k)).toBe(true);
     expect(akisSatiriGorunur(KISI, 'n1', { userId: 'u2' }, k)).toBe(false);
     expect(akisSatiriGorunur(KISI, 'n1', {}, k)).toBe(true);
@@ -129,6 +129,55 @@ describe('akisKovalari — SSE init SQL kovaları', () => {
     expect(kova.diger).toEqual([SINIFSIZ]);
     expect(kova.tenant).toEqual([KIRACI]);
     expect(kova.user).toEqual([KISI]);
-    expect([...kova.tenant, ...kova.user, ...kova.users, ...kova.diger]).not.toContain(SERVER_ONLY_COLLECTIONS[0]);
+    expect([...kova.tenant, ...kova.user, ...kova.users, ...kova.ayar, ...kova.diger]).not.toContain(SERVER_ONLY_COLLECTIONS[0]);
+  });
+  it("settings KENDİ kovasında — filtresiz 'diger'e düşerse her kiracının `<cid>__*` ayarı diskten okunur (2026-10-02)", () => {
+    const kova = akisKovalari(['settings', SINIFSIZ]);
+    expect(kova.ayar).toEqual(['settings']);
+    expect(kova.diger).toEqual([SINIFSIZ]);
+    expect(akisKovalari([KIRACI]).ayar).toEqual([]);
+  });
+});
+
+// 2026-10-02 — `settings` sızıntıları (ölçüldü): GET /api/db/settings kiracı süzgeçsizdi (başka kiracının `<cid>__app` dokümanları
+// + sırları dökülüyordu); yazma/silmede sahiplik yoktu; akış `data.companyId`'yi kiracı etiketi sanıyordu (Luca firma kimliği!) ve
+// firma-bazlı ayarı ham kimlikle gönderdiği için istemci kendi ayarını bulamıyordu. Kural artık DOKÜMAN KİMLİĞİNDEN.
+describe('settings — kiracı kuralları kimlikten (2026-10-02 sızıntı düzeltmesi)', () => {
+  it('ayarSahibi / ayarAnahtari: `<cid>__anahtar` → sahip + düz anahtar; `__` içermeyen kimlik global', () => {
+    expect(ayarSahibi('A__app')).toBe('A');
+    expect(ayarAnahtari('A__app')).toBe('app');
+    for (const id of ['mikro', 'luca', '', undefined, '__app']) expect(ayarSahibi(id)).toBeNull();
+    expect(ayarAnahtari('trendyol')).toBe('trendyol');
+  });
+  it('kiraciWhere: global ayarlar + YALNIZ kendi firma-bazlı ayarı — FİLTRESİZ dönmez; `data.companyId`\'ye bakmaz', async () => {
+    expect(await kiraciWhere('settings', kimlik())).toEqual({ sql: " AND (position('__' in id) = 0 OR left(id, length($2)) = $2)", params: ['A__'] });
+  });
+  it('sahiplikDenetimli: settings evet (silme yolunda da ownsDoc çağrılsın)', () => {
+    expect(sahiplikDenetimli('settings')).toBe(true);
+  });
+  it('dokumanSahibiMi: başka kiracının firma-bazlı ayarı HAYIR; kendi ve global evet; süper-admin ayrıcalığı yok', async () => {
+    expect(await dokumanSahibiMi('settings', { apiKey: 'x' }, kimlik(), 'B__app')).toBe(false);
+    expect(await dokumanSahibiMi('settings', { companyId: 'A' }, kimlik(), 'B__app')).toBe(false);          // veri etiketi kimliği EZMEZ
+    expect(await dokumanSahibiMi('settings', {}, kimlik(), 'A__app')).toBe(true);
+    expect(await dokumanSahibiMi('settings', { apiKey: 'x' }, kimlik(), 'trendyol')).toBe(true);
+    expect(await dokumanSahibiMi('settings', {}, kimlik({ superAdmin: true }), 'B__app')).toBe(false);
+  });
+  it('LUCA: `settings/luca` içindeki `companyId` (Luca firma kimliği) kiracı etiketi DEĞİLDİR — sahibine görünür ve yazılabilir', async () => {
+    const luca = { companyId: 'LUCA-FIRMA-77', apiKey: 'k' };
+    expect(akisSatiriGorunur('settings', 'luca', luca, { uid: 'u1', cid: 'A' })).toBe(true);
+    expect(await dokumanSahibiMi('settings', luca, kimlik(), 'luca')).toBe(true);
+  });
+  it('akisSatiriGorunur: yabancı kiracının firma-bazlı ayarı akışa çıkmaz — damgası OLMASA da (adminDb yazımı)', () => {
+    expect(akisSatiriGorunur('settings', 'B__companyProfile', { name: 'B A.Ş.' }, { uid: 'u1', cid: 'A' })).toBe(false);
+    expect(akisSatiriGorunur('settings', 'A__companyProfile', { name: 'A A.Ş.' }, { uid: 'u1', cid: 'A' })).toBe(true);
+    // İstemcinin global dokümana yazdığı sahte etiket görünürlüğü KAÇIRAMAZ.
+    expect(akisSatiriGorunur('settings', 'trendyol', { companyId: 'B' }, { uid: 'u1', cid: 'A' })).toBe(true);
+  });
+  it('ayarSatirlari: yabancı düşer; kendi firma-bazlı ayar DÜZ anahtarla; eski global kopya varsa firma-bazlı kazanır', () => {
+    const r = ayarSatirlari([
+      { id: 'mikro', data: 1 }, { id: 'app', data: 'eski-global' }, { id: 'A__app', data: 'kendi' }, { id: 'B__app', data: 'yabancı' },
+      { id: 'A__gib', data: 'gib' }, { id: 'erpHub', data: 'yalnız-global' },
+    ], 'A');
+    expect(r).toEqual([{ id: 'mikro', data: 1 }, { id: 'erpHub', data: 'yalnız-global' }, { id: 'app', data: 'kendi' }, { id: 'gib', data: 'gib' }]);
   });
 });

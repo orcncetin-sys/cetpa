@@ -32,6 +32,8 @@ export interface KanalRouteCtx {
   /** pg-boss kuyrugu - server.ts'te SONRADAN atanir, o yuzden GETTER. */
   getBoss: () => any;
   requireAuth: any;
+  /** Yalnız iç personel (server.ts requireStaff) — entegrasyon durum uçları için (2026-10-02). */
+  requireStaff: any;
   requireMfaVerified: any;
   reqActor: (req: Request) => { uid: string; email: string };
   reqCompanyId: (req: Request) => Promise<string>;
@@ -41,6 +43,20 @@ export interface KanalRouteCtx {
   getTrendyolCreds: () => Promise<any>;
   getHepsiburadaCreds: () => Promise<any>;
   getAmazonCreds: () => Promise<any>;
+}
+
+/**
+ * Pazar yeri sipariş eşleştirmesi YALNIZ çağıranın kiracısında (2026-10-02). Eskiden `where(<pazarYeriNo>).limit(1)` kiracı
+ * süzgeçsizdi: aynı numara başka kiracıda varsa O kiracının siparişi güncelleniyordu (müşteri adı, tutar, ham veri üzerine
+ * yazılıyordu). Desen CLAUDE.md'deki import kuralı: yabancı kiracıyı atla, etiketsiz (companyId'siz) eski kaydı eşleştir.
+ */
+type SiparisBelgesi = { data: () => unknown; ref: { set: (veri: Record<string, unknown>, secenek: { merge: boolean }) => Promise<unknown> } };
+export function kendiSiparisi<T extends SiparisBelgesi>(snap: { docs: T[] }, companyId: string): { empty: boolean; docs: T[] } {
+  const docs = snap.docs.filter(d => {
+    const dc = String((d.data() as { companyId?: unknown } | undefined)?.companyId ?? '');
+    return !dc || dc === companyId;
+  });
+  return { empty: docs.length === 0, docs };
 }
 
 export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
@@ -237,7 +253,8 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
 
   // ── trendyol (2 rota) ────────────────────────────────────────────────
   /** GET /api/trendyol/status */
-  app.get('/api/trendyol/status', async (_req: Request, res: Response) => {
+  // requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
+  app.get('/api/trendyol/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
     const creds = await C.getTrendyolCreds();
     if (!creds) return res.json({ configured: false, connected: false, message: 'Trendyol kimlik bilgileri eksik.' });
     try {
@@ -275,10 +292,11 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
       const orders = data.content ?? [];
       let created = 0, updated = 0;
       if (C.getAdminDb()) {
+        const companyId = await C.reqCompanyId(req);
         for (const o of orders) {
           const tyOrderNo = String(o.orderNumber ?? o.id ?? '');
           if (!tyOrderNo) continue;
-          const existing = await C.getAdminDb().collection('orders').where('trendyolOrderNo', '==', tyOrderNo).limit(1).get();
+          const existing = kendiSiparisi(await C.getAdminDb().collection('orders').where('trendyolOrderNo', '==', tyOrderNo).get(), companyId);
           const payload = {
             trendyolOrderNo: tyOrderNo,
             customerName:    (o.shipmentAddress as Record<string, unknown>)?.fullName as string ?? 'Trendyol',
@@ -290,10 +308,10 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
             updatedAt:       C.pgServerTimestamp(),
           };
           if (existing.empty) {
-            await C.getAdminDb().collection('orders').add({ companyId: await C.reqCompanyId(req), ...payload, createdAt: C.pgServerTimestamp() });
+            await C.getAdminDb().collection('orders').add({ companyId, ...payload, createdAt: C.pgServerTimestamp() });
             created++;
           } else {
-            await existing.docs[0].ref.set(payload, { merge: true });
+            await existing.docs[0].ref.set({ companyId, ...payload }, { merge: true });   // etiketsiz eski kayıt da damgalanır
             updated++;
           }
         }
@@ -308,7 +326,7 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
 
   // ── hepsiburada (2 rota) ─────────────────────────────────────────────
   /** GET /api/hepsiburada/status */
-  app.get('/api/hepsiburada/status', async (_req: Request, res: Response) => {
+  app.get('/api/hepsiburada/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
     const creds = await C.getHepsiburadaCreds();
     if (!creds) return res.json({ configured: false, connected: false, message: 'Hepsiburada kimlik bilgileri eksik.' });
     try {
@@ -343,10 +361,11 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
       const orders = data.data ?? [];
       let created = 0, updated = 0;
       if (C.getAdminDb()) {
+        const companyId = await C.reqCompanyId(req);
         for (const o of orders) {
           const hbOrderId = String(o.id ?? o.orderNumber ?? '');
           if (!hbOrderId) continue;
-          const existing = await C.getAdminDb().collection('orders').where('hepsiburadaOrderId', '==', hbOrderId).limit(1).get();
+          const existing = kendiSiparisi(await C.getAdminDb().collection('orders').where('hepsiburadaOrderId', '==', hbOrderId).get(), companyId);
           const payload = {
             hepsiburadaOrderId: hbOrderId,
             customerName:       String(o.customerFirstName ?? '') + ' ' + String(o.customerLastName ?? ''),
@@ -358,10 +377,10 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
             updatedAt:          C.pgServerTimestamp(),
           };
           if (existing.empty) {
-            await C.getAdminDb().collection('orders').add({ companyId: await C.reqCompanyId(req), ...payload, createdAt: C.pgServerTimestamp() });
+            await C.getAdminDb().collection('orders').add({ companyId, ...payload, createdAt: C.pgServerTimestamp() });
             created++;
           } else {
-            await existing.docs[0].ref.set(payload, { merge: true });
+            await existing.docs[0].ref.set({ companyId, ...payload }, { merge: true });   // etiketsiz eski kayıt da damgalanır
             updated++;
           }
         }
@@ -373,7 +392,7 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
   });
 
   // ── marketplace (2 rota) ─────────────────────────────────────────────
-  app.get('/api/marketplace/status', C.requireAuth, async (_req: Request, res: Response) => {
+  app.get('/api/marketplace/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
     res.json({
       trendyol: { configured: !!(await C.getTrendyolCreds()) },
       amazon: { configured: !!(await C.getAmazonCreds()) },

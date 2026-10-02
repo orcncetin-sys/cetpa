@@ -19,6 +19,7 @@
 import { EventEmitter } from 'events';
 import pg from 'pg';
 import { FieldValue } from 'firebase-admin/firestore';
+import { ayarSahibi } from '../lib/tenantErisim.js';
 
 export interface PgShimDeps {
   /** `pgServerTimestamp` PG modunda mi Firestore modunda mi oldugunu bilmeli. */
@@ -87,15 +88,24 @@ export function genDocId(): string {
   return s;
 }
 
-export function broadcastDocChange(coll: string, type: 'set' | 'delete', id: string, data?: unknown): void {
+/**
+ * `kapsam` (isteğe bağlı): olayın KİRACISINI açıkça verir (`{ cid: null }` = kapsamsız / global). `settings` için kiracı ASLA
+ * `data.companyId`'den türetilmez (2026-10-02): `settings/luca` dokümanındaki `companyId` LUCA FİRMA KİMLİĞİDİR — akış onu kiracı
+ * etiketi sanıp değişikliği sahibi dâhil herkesten gizliyordu; firma-bazlı ayarın damgası unutulursa da (süper-admin firma profili)
+ * olay tüm kiracılara gidiyordu. settings'te kapsam verilmediyse doküman KİMLİĞİNDEN okunur (`<cid>__<anahtar>`).
+ */
+export function broadcastDocChange(coll: string, type: 'set' | 'delete', id: string, data?: unknown, kapsam?: { cid: string | null }): void {
   // Kiracı/kullanıcı filtreleme için companyId + userId'yi olaya iliştir.
   // SİLMEDE `data` = silinen dokümanın SON hali: yalnız etiket için okunur, olaya İLİŞTİRİLMEZ (içerik akışa gitmez).
   // Etiketsiz silme olayı SSE'de BÜTÜN kiracılara gidiyordu (`ev.cid && …` filtresi) — MF kimliği kiracı kimliği +
   // fatura seri-sırası taşır (inceleme 2026-09-25).
   const d = (data ?? {}) as Record<string, unknown>;
+  const cid = kapsam ? kapsam.cid ?? undefined
+    : coll === 'settings' ? ayarSahibi(id) ?? undefined
+    : (d.companyId as string | undefined);
   dbEvents.emit('change', {
     coll, type, id,
-    cid: d.companyId as string | undefined,
+    cid,
     uid: d.userId as string | undefined,
     ...(data !== undefined && type !== 'delete' ? { data } : {}),
   });

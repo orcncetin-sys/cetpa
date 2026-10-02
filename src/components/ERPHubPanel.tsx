@@ -20,6 +20,8 @@ import {
   doc, onSnapshot, setDoc, getDoc,
 } from '../lib/dbClient';
 import { db } from '../firebase';
+import { authFetch } from '../services/authFetch';
+import { sunucuHataMetni } from '../utils/sunucuHatasi';
 import { SUPPORTED_ERPS, type ErpId, type ErpInfo, type ErpStatusResult } from '../types/erp';
 
 // ── Lazy-load each ERP panel ──────────────────────────────────────────────────
@@ -84,6 +86,7 @@ function ErpCredentialsEditor({ erp, lang, connected, onSaved }: CredsEditorProp
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [kayitHatasi, setKayitHatasi] = useState<string | null>(null);
 
   useEffect(() => {
     getDoc(doc(db, 'settings', erp.id)).then(snap => {
@@ -100,6 +103,7 @@ function ErpCredentialsEditor({ erp, lang, connected, onSaved }: CredsEditorProp
 
   const handleSave = useCallback(async () => {
     setSaving(true);
+    setKayitHatasi(null);
     try {
       const firestoreFields: Record<string, string> = {};
       erp.requiredEnvVars.forEach(v => { firestoreFields[envToField(v)] = values[v] ?? ''; });
@@ -107,10 +111,14 @@ function ErpCredentialsEditor({ erp, lang, connected, onSaved }: CredsEditorProp
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
       onSaved?.();
+    } catch (err) {
+      // Eskiden yakalanmıyordu: reddedilen kayıt (ör. bağlantı adresini yalnız Yönetici değiştirir — 403) ne 'Kaydedildi' ne hata
+      // gösteriyor, kutu reddedilen değerle kalıyordu. Sunucunun yazdığı neden gösterilir.
+      setKayitHatasi(sunucuHataMetni(err) ?? (lang ? 'Kaydedilemedi.' : 'Could not save.'));
     } finally {
       setSaving(false);
     }
-  }, [erp, values, onSaved]);
+  }, [erp, values, onSaved, lang]);
 
   const hasFirestoreValues = erp.requiredEnvVars.some(v => values[v]);
   const showConfigured = connected && !hasFirestoreValues && !editing;
@@ -193,6 +201,7 @@ function ErpCredentialsEditor({ erp, lang, connected, onSaved }: CredsEditorProp
           {lang ? 'Bilgiler güvenli olarak saklanır.' : 'Credentials stored securely.'}
         </span>
       </div>
+      {kayitHatasi && <p role="alert" className="text-[11px] font-medium text-red-600">{kayitHatasi}</p>}
       </>
       )}
     </div>
@@ -227,8 +236,10 @@ export default function ERPHubPanel({ currentLanguage = 'tr' }: { currentLanguag
   useEffect(() => {
     SUPPORTED_ERPS.forEach(erp => {
       setStatusCache(prev => ({ ...prev, [erp.id]: { configured: false, connected: false, fetching: true } }));
-      fetch(erp.statusPath)
-        .then(r => r.json())
+      // Durum uçları kimlik + personel rolü ister (2026-10-02). `r.ok` denetimi: 401/403 gövdesi (`{ error }`) durum nesnesi
+      // sanılıp çalışan bağlantı 'yapılandırılmamış' gösterilmesin — okunamayan durum aşağıdaki catch'e düşer.
+      authFetch(erp.statusPath)
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then((d: ErpStatusResult) => setStatusCache(prev => ({ ...prev, [erp.id]: { ...d, fetching: false } })))
         .catch(() => setStatusCache(prev => ({
           ...prev,

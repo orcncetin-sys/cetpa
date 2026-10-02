@@ -127,6 +127,8 @@ export interface MikroRouteCtx {
   requireCollectionAccess: (coll: string, op: 'read' | 'write' | 'delete') => any;
   requireAuth: any;
   requireMfaVerified: any;
+  /** Yalnız iç personel (server.ts requireStaff) — entegrasyon durum ucu için (2026-10-02). */
+  requireStaff: any;
   /** server.ts'te SONRADAN atanan `let` - deger degil GETTER. */
   getAdminDb: () => AdminDbLike;
   getPgPool: () => any;
@@ -186,7 +188,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     }
   });
 
-  app.get('/api/mikro/status', async (_req: Request, res: Response) => {
+  // requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
+  app.get('/api/mikro/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
     const statusCreds = await getMikroCreds();
     if (!statusCreds) {
       // Hangi alanın eksik olduğunu MODA göre söyle (secret DEĞERİ asla yazma).

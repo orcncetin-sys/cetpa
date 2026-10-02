@@ -131,7 +131,7 @@ function MarketplaceCard({
   const checkStatus = useCallback(async () => {
     setCheckingStatus(true);
     try {
-      const r = await fetch(statusEndpoint);
+      const r = await authFetch(statusEndpoint);   // durum uçları kimlik ister (2026-10-02)
       const d = await r.json() as MarketplaceStatus;
       setStatus(d);
     } catch {

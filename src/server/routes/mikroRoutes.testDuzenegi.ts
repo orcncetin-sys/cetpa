@@ -248,6 +248,7 @@ export function duzenekKur(secenek: DuzenekSecenek = {}): Duzenek {
     // HANGİ erişim kapısının durduğu `d.app.zincirler[...]` üzerinden doğrulanabilir (2026-09-19: e-İrsaliye rol kapısı).
     requireCollectionAccess: (coll: string, islem: string) => Object.assign(gecir(), { erisimKapisi: `${coll}:${islem}` }),
     requireAuth: gecir(),
+    requireStaff: gecir(),
     requireMfaVerified: gecir(),
     getAdminDb: () => adminDb as unknown as ReturnType<MikroRouteCtx['getAdminDb']>,
     // Kilit varken `docs`/`opsLocks` sorgusu satır döndürmeli (bakimKilidiVar).

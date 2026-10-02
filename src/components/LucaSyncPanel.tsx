@@ -133,7 +133,7 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
   const checkStatus = useCallback(async () => {
     setStatusLoading(true);
     try {
-      const r = await fetch('/api/luca/status');
+      const r = await authFetch('/api/luca/status');   // durum uçları kimlik ister (2026-10-02)
       const d = await r.json() as LucaStatus;
       setStatus(d);
     } catch {

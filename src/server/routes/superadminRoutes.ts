@@ -265,7 +265,9 @@ export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
         }
         if (Object.keys(patch).length) {
           await C.getAdminDb().collection('settings').doc(`${cid}__companyProfile`).set(
-            { ...patch, updatedAt: C.pgServerTimestamp(), updatedBy: C.reqActor(req).email }, { merge: true });
+            // companyId damgası REST yazımıyla aynı (server.ts PUT/PATCH). Sahiplik yine de doküman KİMLİĞİNDEN okunur
+            // (tenantErisim.ayarSahibi) — damgasız eski kayıt da yalnız sahibine görünür (2026-10-02).
+            { ...patch, companyId: cid, updatedAt: C.pgServerTimestamp(), updatedBy: C.reqActor(req).email }, { merge: true });
           changes.push('profil');
         }
       }

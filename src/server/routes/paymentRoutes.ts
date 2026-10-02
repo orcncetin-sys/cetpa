@@ -24,6 +24,8 @@ export interface PaymentRouteCtx {
   getBoss: () => any;
   getStripeClient: () => any;
   requireAuth: any;
+  /** Yalnız iç personel (server.ts requireStaff) — entegrasyon durum uçları için (2026-10-02). */
+  requireStaff: any;
   requireMfaVerified: any;
   paymentLimiter: any;
   reqActor: (req: Request) => { uid: string; email: string };
@@ -42,10 +44,11 @@ export interface PaymentRouteCtx {
 export function paymentRoutes(app: Express, C: PaymentRouteCtx): void {
   // ── iyzico (2 rota) ──────────────────────────────────────────────────
   // GET /api/iyzico/status
-  app.get('/api/iyzico/status', async (_req: Request, res: Response) => {
-    const creds = await C.getIyzicoCreds();
-    if (!creds) return res.json({ configured: false, connected: false });
+  // requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
+  app.get('/api/iyzico/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
     try {
+      const creds = await C.getIyzicoCreds();   // try İÇİNDE: taban adres kuralı çiğnenmişse 'bağlı değil + neden' döner
+      if (!creds) return res.json({ configured: false, connected: false });
       // Lightweight check: retrieve installment info for 1 TRY
       const body   = { locale: 'tr', conversationId: 'status-check', binNumber: '554960' };
       const rndStr = C.randStr();

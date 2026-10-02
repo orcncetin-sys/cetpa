@@ -24,6 +24,8 @@ import MarketplacePanel from '../components/MarketplacePanel';
 import type { WebhookConfig } from '../types';
 import type { UserSubscription, SubscriptionPlan, BillingCycle } from '../types/subscription';
 import { oc } from '../i18n/ortak';
+import { noktaYolluYama } from '../utils/noktaYolluYama';
+import { sunucuHataMetni } from '../utils/sunucuHatasi';
 
 type ClassValue = string | null | undefined | boolean | ClassValue[];
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
@@ -66,6 +68,8 @@ export default function SettingsPage({
   toast, logAuditAction,
   handleSelectPlan, handleCancelSubscription, setShowPricingPage,
 }: Props) {
+  // Entegrasyon bağlantı adresini sunucu yalnız Yönetici'den kabul eder (server.ts ayarYazimiEngeli) — kutular buna göre açılır.
+  const adresDuzenler = userRole === 'Admin' || isOwnerAdmin;
   const [savingGeminiKey, setSavingGeminiKey] = useState(false);
   const [testingGeminiKey, setTestingGeminiKey] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -256,8 +260,12 @@ export default function SettingsPage({
                         try {
                           const token = await auth.currentUser?.getIdToken();
                           const r = await fetch('/api/webhooks/test', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ url: wh.url }) });
-                          const d = await r.json() as { ok?: boolean; status?: number };
-                          toast(d.ok ? `✓ ${d.status ?? 200}` : `✗ ${d.status ?? 'error'}`, d.ok ? 'success' : 'error');
+                          const d = await r.json() as { ok?: boolean; status?: number; yonlendirme?: string; error?: string };
+                          // Yönlendiren hedef izlenmez (sunucu güvenlik kuralı): kullanıcı nihai adresi yazabilsin diye neden + hedef gösterilir.
+                          const neden = d.yonlendirme
+                            ? (currentLanguage === 'tr' ? `✗ ${d.status}: adres yönlendiriyor, yönlendirme izlenmez. Nihai adresi yazın: ${d.yonlendirme}` : `✗ ${d.status}: the URL redirects; redirects are not followed. Use the final URL: ${d.yonlendirme}`)
+                            : `✗ ${d.status ?? d.error ?? 'error'}`;
+                          toast(d.ok ? `✓ ${d.status ?? 200}` : neden, d.ok ? 'success' : 'error');
                         } catch { toast(currentLanguage === 'tr' ? 'Test başarısız' : 'Test failed', 'error'); }
                         finally { setWebhookTestLoading(null); }
                       }}
@@ -377,11 +385,14 @@ export default function SettingsPage({
               <input
                 type={f.isSecret ? 'password' : 'text'}
                 placeholder={f.placeholder}
-                onChange={e => setDoc(doc(db, 'settings', 'iyzico'), { [f.key]: e.target.value.trim() }, { merge: true })}
+                // Bağlantı adresini sunucu yalnız Yönetici'den kabul eder (403) — başka rolde kutu salt okunur, neden altında yazar.
+                readOnly={f.key === 'baseUrl' && !adresDuzenler}
+                onChange={e => { if (f.key === 'baseUrl' && !adresDuzenler) return; void setDoc(doc(db, 'settings', 'iyzico'), { [f.key]: e.target.value.trim() }, { merge: true }); }}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/10 transition-all font-mono"
               />
             </div>
           ))}
+          {!adresDuzenler && <p className="text-[10px] text-amber-600">{currentLanguage === 'tr' ? 'Base URL yalnız Yönetici tarafından değiştirilebilir.' : 'Base URL can only be changed by an Admin.'}</p>}
           <p className="text-[10px] text-gray-400">{currentLanguage === 'tr' ? '* Test için sandbox URL kullanın. Canlı: https://api.iyzipay.com' : '* Use sandbox for testing. Live: https://api.iyzipay.com'}</p>
         </div>
 
@@ -512,7 +523,11 @@ export default function SettingsPage({
           setSavingSettings(true);
           setSettingsSaved(false);
           try {
-            await setDoc(doc(db, 'settings', 'app'), { companySettings }, { merge: true });
+            // Yalnız dokunulan alanlar, nokta-yollu yama olarak (noktaYolluYama.ts): nesneyi bütün göndermek kayıtlı diğer alanları siliyordu.
+            const yama = noktaYolluYama('companySettings', companySettings);
+            // Dokunulan alan yoksa istek gitmez — 'kaydedildi' demek ve denetim kaydı düşmek gerçekleşmemiş bir değişikliği bildirirdi.
+            if (!Object.keys(yama).length) { toast(currentLanguage === 'tr' ? 'Değişiklik yok' : 'No changes', 'info'); return; }
+            await setDoc(doc(db, 'settings', 'app'), yama, { merge: true });
             logAuditAction('Ayar Değişikliği', 'Şirket ayarları kaydedildi');
             setSettingsSaved(true);
             toast(oc(currentLanguage).ayarlar_kaydedildi, 'success');
@@ -520,7 +535,7 @@ export default function SettingsPage({
           } catch (error) {
             console.error('[Settings save error]', error);
             handleFirestoreError(error, OperationType.WRITE, 'settings/app');
-            toast(currentLanguage === 'tr' ? 'Hata oluştu! Konsolu kontrol edin.' : 'Error occurred! Check console.', 'error');
+            toast(sunucuHataMetni(error) ?? (currentLanguage === 'tr' ? 'Hata oluştu! Konsolu kontrol edin.' : 'Error occurred! Check console.'), 'error');
           } finally {
             setSavingSettings(false);
           }
