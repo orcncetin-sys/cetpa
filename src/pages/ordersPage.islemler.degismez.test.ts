@@ -89,11 +89,14 @@ describe('Siparişler — işlem düğmeleri', () => {
     expect(kod).toMatch(/tablo505\.masraf !== null && tablo505\.masraf > 0/);
     expect(kod).not.toMatch(/\bkalemleriCoz\(|\bkalemSaglamasi\(/);
   });
-  it('CRM sayfası da AYNI kural: iki Sil düğmesi silmeYolu, durum seçicisi düzenleme kilidi; işleyiciler', () => {
+  it('CRM sayfası da AYNI kural: iki Sil düğmesi silmeYolu; sipariş DURUMU bu sayfadan değişmez (salt-okunur rozet); işleyiciler', () => {
     expect((crm.match(/disabled=\{silmeEngelMetni\(order, userRole, currentLanguage\) !== null\}/g) ?? []).length).toBe(2);
-    expect((crm.match(/disabled=\{!yerelDegistirilebilir\(order\)\}/g) ?? []).length).toBe(1);
-    expect((crm.match(/if \(ord && !yerelDegistirilebilir\(ord\)\)/g) ?? []).length).toBe(1);
-    const isleyici = crm.slice(crm.indexOf('const handleDeleteOrder'), crm.indexOf('const handleUpdateOrderStatus'));
+    // 2026-10-02: müşteri panelindeki durum <select>'i de rozete çevrildi — sayfa-yerel işleyici yalnız `{status}` yazıyordu
+    // (stok düşümü, `deliveredAt`, e-İrsaliye teklifi yok). CRM'de siparişin durumunu yazan HİÇBİR yol kalmadı.
+    expect(crm).not.toMatch(/handleUpdateOrderStatus/);
+    expect(crm).not.toMatch(/updateDoc\(doc\(db, 'orders', [^)]*\), \{ status\b/);
+    expect(crm).not.toMatch(/<select value=\{order\.status\}/);
+    const isleyici = crm.slice(crm.indexOf('const handleDeleteOrder'), crm.indexOf('  return (\n    <>'));
     expect(isleyici).toMatch(/const yol = ord \? silmeYolu\(ord\) : 'yerel';/);
     expect(isleyici).toMatch(/mikroSilOnayMetni\(currentLanguage\)/);
     expect(isleyici.indexOf("if (yol === 'mikroSunucu')")).toBeGreaterThan(-1);

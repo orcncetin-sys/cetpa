@@ -17,8 +17,9 @@ import { siparisBelgeTipi, type BelgeTipi } from '../utils/siparisler/belgeTipi'
 import { zamanMs, zamanDate, gunBasi, gunAnahtari, ayAnahtari, tarihYaz, tarihSaatYaz, bugunAnahtari } from '../utils/zaman';
 import type { BinSatiri } from '../hooks/useSekmeVerileri';
 import type { VehiclePosition } from '../types';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { sevkiyatiSuruyor } from '../utils/logistics';
+import { sevkiyatKovalari, slaOzeti, sevkiyatKovaEtiketi, SLA_GUN, type SevkiyatKovasi } from '../utils/siparisler/sevkiyatKartlari';
 import { pdfBaslik, pdfAltBilgi, pdfTabloStili, PDF_RENK, PDF_ALT_BANT_YUKSEKLIK } from '../utils/pdfTheme';
 import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
@@ -188,10 +189,8 @@ interface Props {
   kullaniciUid?: string;
   locationStocks: LocationStock[];
   shipments: Shipment[];
-  newOrder: Partial<Order>;
-  setNewOrder: React.Dispatch<React.SetStateAction<Partial<Order>>>;
-  orderLineItems: OrderLineItem[];
-  setOrderLineItems: React.Dispatch<React.SetStateAction<OrderLineItem[]>>;
+  /** "Siparişi kopyala": sipariş penceresini bu tohumla açar (pencere birim fiyatı kalemden yeniden türetir). */
+  setSiparisTohumu: (t: { order: Partial<Order>; kalemler: OrderLineItem[] } | null) => void;
   handleMikroFatura: (order: Order) => Promise<void>;
   handleEIrsaliye: (order: Order) => Promise<void>;
   /**
@@ -231,7 +230,7 @@ export default function OrdersPage({
   recurringOrders, hasFullAccess, siparisDetayiAcilabilir, currentLanguage, currentT,
   orders, leads, inventory, exchangeRates, employees,
   userRole, user, kpiCurrency, setKpiCurrency, activeTab, darkMode, warehouses, vehicles, aracKonumlari, konumYazabilir, irsaliyeKesebilir, kullaniciUid, locationStocks, shipments,
-  newOrder, setNewOrder, orderLineItems, setOrderLineItems,
+  setSiparisTohumu,
   handleMikroFatura, handleEIrsaliye, eIrsaliyeGonderiliyor, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute, p554Bins,
   handleToggleOrderPaid, trackView, openConfirm,
   toast, setActiveTab, setSelectedLead, setIsAddingOrder,
@@ -246,17 +245,34 @@ export default function OrdersPage({
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   // Lojistik → "Aktif Sevkiyatlar": yalnız sevkiyatı SÜREN siparişler (rota kurucuyla aynı tanım); teslim edilenler isteğe bağlı.
   const [teslimEdilenleriGoster, setTeslimEdilenleriGoster] = useState(false);
+  // Özet KARTLARI detaya gider (kullanıcı 2026-10-02): karta tıklamak listeyi o kovaya süzer ve listeye kaydırır. Kart sayısı
+  // ile liste AYNI kovadan gelir (utils/siparisler/sevkiyatKartlari). Ayrı sayfaya gidilmez: Lojistik rolü 'orders' sekmesine giremez.
+  const [sevkiyatKovasi, setSevkiyatKovasi] = useState<SevkiyatKovasi>('suren');
+  const [sevkiyatArama, setSevkiyatArama] = useState('');
+  const sevkiyatListeRef = useRef<HTMLDivElement>(null);
+  // Gün anahtarı memo'nun DIŞINDA okunur ve bağımlılıktır: sekme gece yarısından sonra açık kalınca (sipariş değişmese de)
+  // "Bugün teslim edilen" kovası dünü göstermeye devam etmesin.
+  const sevkiyatBugun = bugunAnahtari();
+  const sevkiyatKovalar = useMemo(() => sevkiyatKovalari(orders, sevkiyatBugun), [orders, sevkiyatBugun]);
+  const sevkiyatKovasiSec = (kova: SevkiyatKovasi) => {
+    setSevkiyatKovasi(kova);
+    setSevkiyatArama('');   // karttaki sayı ile liste AYNI olsun: önceki arama kovayı sessizce daraltmasın
+    sevkiyatListeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   const sevkiyatListesi = useMemo(() => {
     const suren = orders.filter(sevkiyatiSuruyor);
     const teslim = orders.filter(o => o.status === 'Delivered');
-    const gorunen = teslimEdilenleriGoster ? [...suren, ...teslim] : suren;
+    const kova = sevkiyatKovasi === 'suren' ? (teslimEdilenleriGoster ? [...suren, ...teslim] : suren) : sevkiyatKovalar[sevkiyatKovasi];
+    // Arama (eskiden ölü bir kutuydu — değer de işleyici de yoktu): sipariş no, takip no, müşteri, adres.
+    const gorunen = sevkiyatArama.trim() === '' ? kova
+      : kova.filter(o => eslesir(sevkiyatArama, gorunenSiparisNo(o), o.trackingNumber, o.customerName, o.shippingAddress));
     // Harita: listedekiler + kurulmuş rotanın durakları. Rota kurulduktan SONRA teslim edilen siparişin işaretçisi kalmalı —
     // rota çizgisi o noktadan geçmeye devam ediyor (routeStops yeniden hesaplanmaz); işaretçisiz köşe çizgiyi anlamsız kılardı.
     const listede = new Set(gorunen.map(o => o.id));
     const durak = new Set(routeStops.map(d => d.orderId));
     const harita = [...gorunen, ...orders.filter(o => durak.has(o.id) && !listede.has(o.id))];
     return { gorunen, harita, teslimEdilen: teslim.length };
-  }, [orders, routeStops, teslimEdilenleriGoster]);
+  }, [orders, routeStops, teslimEdilenleriGoster, sevkiyatKovasi, sevkiyatKovalar, sevkiyatArama]);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [copiedOrderId, setCopiedOrderId] = useState<string|null>(null);
   const [starredOrders, setStarredOrders] = useState<Set<string>>(new Set());
@@ -293,6 +309,19 @@ export default function OrdersPage({
   const [editingTutarHam, setEditingTutarHam] = useState('');
   /** KDV oranı kutusunun HAM metni — aynı sebeple ayrı: '' = bilinmiyor, `?? 20` uydurulmaz. */
   const [editingKdvHam, setEditingKdvHam] = useState('');
+  /** Düzenlenen siparişin RESMÎ BELGESİ kesilmiş mi (e-İrsaliye / fatura). Kesilmişse cari bağı, TUTAR ve KDV oranı kilitlenir:
+   *  belge o değerlerle kesildi; yerelde değiştirmek Cetpa kaydını belgeden ayırır (2026-10-07 — oran değişikliği artık
+   *  toplamı ve kalemleri de yeniden yazıyor). Ad ve adres düzenlenebilir kalır. */
+  const duzenlenenBelgeKesildi = !!selectedOrder && (selectedOrder.irsaliyeGonderildi === true || !!selectedOrder.irsaliyeNo || !!selectedOrder.mikroFaturaNo);
+  /** Düzenleme formunun KAYDEDİNCE yazacağı tutar, formda görünenden FARKLIYSA (pencereden açılmış kalemli siparişte oran
+   *  değişince tutar kalemlerden yeniden hesaplanır) — kullanıcı kaydetmeden önce görsün. Kayıtla AYNI işlev. */
+  const duzenlemeTutarOnizleme = (() => {
+    if (!isEditingOrder || !selectedOrder) return null;
+    const yama = siparisDuzenlemeYamasi({ tutarHam: editingTutarHam, kdvHam: editingKdvHam }, selectedOrder);
+    const yazilan = formSayisi(editingTutarHam);
+    if (!yama.lineItems || typeof yama.totalPrice !== 'number' || typeof yama.kdvHaricTutar !== 'number' || typeof yama.kdvTutari !== 'number') return null;
+    return yama.totalPrice === yazilan ? null : { toplam: yama.totalPrice, matrah: yama.kdvHaricTutar, kdv: yama.kdvTutari };
+  })();
   const [isAddingShipment, setIsAddingShipment] = useState(false);
   const [newShipment, setNewShipment] = useState<Partial<Shipment>>({ status: 'Pending' });
   const [editingShipmentId, setEditingShipmentId] = useState<string|null>(null);
@@ -2123,20 +2152,25 @@ export default function OrdersPage({
                       <button
                         onClick={() => {
                           const o = selectedOrder;
-                          setNewOrder({
-                            customerName: o.customerName,
-                            customerEmail: o.customerEmail,
-                            shippingAddress: o.shippingAddress,
-                            status: 'Pending',
-                            customerType: o.customerType,
-                            cargoCompany: o.cargoCompany,
-                            faturali: o.faturali,
-                            faturaTipi: o.faturaTipi,
-                            kdvOran: o.kdvOran,
-                            notes: o.notes,
-                            totalPrice: o.totalPrice,
+                          setSiparisTohumu({
+                            order: {
+                              customerName: o.customerName,
+                              customerEmail: o.customerEmail,
+                              shippingAddress: o.shippingAddress,
+                              status: 'Pending',
+                              customerType: o.customerType,
+                              cargoCompany: o.cargoCompany,
+                              faturali: o.faturali,
+                              faturaTipi: o.faturaTipi,
+                              // Faturasız siparişin `kdvOran: 0`'ı kullanıcının seçimi DEĞİL, kayıtta türetilen değerdir —
+                              // taşınırsa kopya "faturalı"ya çevrilince %0 KDV ile kaydedilirdi. Faturalı siparişin oranı
+                              // (gerçek %0 = istisna / ihracat dâhil) taşınır.
+                              ...(o.faturali ? { kdvOran: o.kdvOran } : {}),
+                              fiyatGirisi: o.fiyatGirisi,
+                              notes: o.notes,
+                            },
+                            kalemler: o.lineItems || [],   // kimlik ve türetilmiş alanlar pencerede yeniden kurulur (kopyaKalemi)
                           });
-                          setOrderLineItems((o.lineItems || []).map(li => ({ ...li, id: `${li.id}-clone-${Date.now()}` })));
                           setSelectedLead(leads.find(l => l.id === o.leadId) || null);
                           setIsAddingOrder(true);
                           toast(op(currentLanguage).siparis_kopyalandi_duzenleyebilirsiniz, 'success');
@@ -3453,19 +3487,13 @@ export default function OrdersPage({
 
               {/* Lojistik sub-tab: Sevkiyatlar (existing logistics content) */}
               {lojistikTab === 'sevkiyat' && <>
-              {/* ── Phase 60: Today's Shipment Summary ── */}
+              {/* ── Sevkiyat özeti: kartlar DÜĞMEDİR — tıklayınca alttaki liste o kovaya süzülür (sevkiyatKovasiSec) ── */}
               {(() => {
-                const bugun60 = bugunAnahtari();
-                const shipped   = orders.filter(o => o.status === 'Shipped');
-                const delivered = orders.filter(o => o.status === 'Delivered');
-                const todayShipped = orders.filter(o =>
-                  o.status === 'Shipped' && gunAnahtari(o.createdAt ?? o.syncedAt) === bugun60);
-                const pending = orders.filter(o => o.status === 'Processing');
-                const stats = [
-                  { label: oc(currentLanguage).kargoda,      value: shipped.length,     color: 'text-blue-700',    bg: 'bg-blue-50',    icon: Truck        },
-                  { label: op(currentLanguage).bugun_gonderildi, value: todayShipped.length, color: 'text-purple-700', bg: 'bg-purple-50', icon: Package     },
-                  { label: op(currentLanguage).hazirlaniyor,   value: pending.length,     color: 'text-amber-700',   bg: 'bg-amber-50',   icon: Clock        },
-                  { label: oc(currentLanguage).teslim_edildi,  value: delivered.length,   color: 'text-emerald-700', bg: 'bg-emerald-50', icon: CheckCircle2 },
+                const kartlar: Array<{ kova: SevkiyatKovasi; label: string; color: string; bg: string; icon: typeof Truck }> = [
+                  { kova: 'kargoda',      label: oc(currentLanguage).kargoda,          color: 'text-blue-700',    bg: 'bg-blue-50',    icon: Truck        },
+                  { kova: 'bugun',        label: op(currentLanguage).bugun_gonderildi, color: 'text-purple-700',  bg: 'bg-purple-50',  icon: Package      },
+                  { kova: 'hazirlaniyor', label: op(currentLanguage).hazirlaniyor,     color: 'text-amber-700',   bg: 'bg-amber-50',   icon: Clock        },
+                  { kova: 'teslim',       label: oc(currentLanguage).teslim_edildi,    color: 'text-emerald-700', bg: 'bg-emerald-50', icon: CheckCircle2 },
                 ];
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
@@ -3474,14 +3502,18 @@ export default function OrdersPage({
                       {op(currentLanguage).sevkiyat_ozeti}
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {stats.map((s, i) => {
+                      {kartlar.map(s => {
                         const Icon = s.icon;
+                        const secili = sevkiyatKovasi === s.kova;
                         return (
-                          <div key={i} className={cn("rounded-xl p-4 flex flex-col gap-2", darkMode ? "bg-white/5" : s.bg)}>
+                          <button type="button" key={s.kova} onClick={() => sevkiyatKovasiSec(s.kova)} aria-pressed={secili}
+                            title={currentLanguage === 'tr' ? `${s.label}: listeyi göster` : `${s.label}: show the list`}
+                            className={cn("rounded-xl p-4 flex flex-col gap-2 text-left transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50",
+                              darkMode ? "bg-white/5" : s.bg, secili && "ring-2 ring-brand/60")}>
                             <Icon className={`w-5 h-5 ${s.color}`} />
-                            <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+                            <p className={`text-2xl font-black ${s.color}`}>{sevkiyatKovalar[s.kova].length}</p>
                             <p className={cn("text-[10px] font-bold", darkMode ? "text-white/50" : "text-gray-500")}>{s.label}</p>
-                          </div>
+                          </button>
                         );
                       })}
                     </div>
@@ -3489,26 +3521,18 @@ export default function OrdersPage({
                 );
               })()}
 
-              {/* ── Phase 108: Delivery SLA Strip ── */}
+              {/* ── Teslimat SLA şeridi — süre GERÇEK teslim anından (deliveredAt); teslim anı olmayan teslimat ölçülemez sayılır.
+                  Eski şerit |syncedAt − createdAt| ile "ölçüyor", Mikro faturasından türeyen her siparişi "zamanında, 0,0 gün" sayıyordu. ── */}
               {(() => {
-                const SLA_DAYS = 7; // on-time = delivered within 7 days of creation
-                const deliveredOrders = orders.filter(o => o.status === 'Delivered');
-                if (deliveredOrders.length === 0) return null;
-
-                let onTimeCount = 0, totalDays = 0;
-                for (const o of deliveredOrders) {
-                  const created = zamanMs(o.createdAt ?? o.syncedAt);
-                  const synced  = zamanMs(o.syncedAt ?? o.createdAt);
-                  const days = created !== null && synced !== null ? Math.abs(synced - created) / 86400000 : SLA_DAYS;
-                  if (days <= SLA_DAYS) onTimeCount++;
-                  totalDays += Math.max(0, days);
-                }
-                const slaRate   = Math.round((onTimeCount / deliveredOrders.length) * 100);
-                const avgDays   = totalDays / deliveredOrders.length;
-                const lateCount = deliveredOrders.length - onTimeCount;
-                const slaColor  = slaRate >= 80 ? 'text-emerald-600' : slaRate >= 50 ? 'text-amber-600' : 'text-red-500';
-                const barColor  = slaRate >= 80 ? 'bg-emerald-400' : slaRate >= 50 ? 'bg-amber-400' : 'bg-red-400';
-
+                if (sevkiyatKovalar.teslim.length === 0) return null;
+                const sla = slaOzeti(sevkiyatKovalar);
+                const slaColor  = sla.oran === null ? 'text-gray-400' : sla.oran >= 80 ? 'text-emerald-600' : sla.oran >= 50 ? 'text-amber-600' : 'text-red-500';
+                const barColor  = sla.oran === null ? 'bg-gray-200' : sla.oran >= 80 ? 'bg-emerald-400' : sla.oran >= 50 ? 'bg-amber-400' : 'bg-red-400';
+                const olcumler: Array<{ kova: SevkiyatKovasi | null; label: string; value: string | number; color: string; bg: string }> = [
+                  { kova: 'zamaninda', label: op(currentLanguage).zamaninda, value: sla.zamaninda, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                  { kova: 'gecikmeli', label: oc(currentLanguage).gecikmeli, value: sla.gecikmeli, color: 'text-red-500',     bg: 'bg-red-50'     },
+                  { kova: null,        label: op(currentLanguage).ort_gun,   value: sla.ortGun === null ? '—' : sla.ortGun.toFixed(1), color: 'text-blue-600', bg: 'bg-blue-50' },
+                ];
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <div className="flex items-center justify-between mb-4">
@@ -3517,32 +3541,44 @@ export default function OrdersPage({
                         {op(currentLanguage).teslimat_sla_performansi}
                       </h3>
                       <span className="text-[10px] text-gray-400">
-                        {currentLanguage === 'tr' ? `≤${SLA_DAYS} gün = zamanında` : `≤${SLA_DAYS} days = on-time`}
+                        {currentLanguage === 'tr' ? `≤${SLA_GUN} gün = zamanında` : `≤${SLA_GUN} days = on-time`}
                       </span>
                     </div>
-                    {/* SLA bar */}
+                    {/* SLA bar — ölçülen teslimat yoksa oran BİLİNMİYOR: '—' ve boş çubuk ("%100" uydurulmaz) */}
                     <div className="flex items-center gap-3 mb-4">
                       <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden">
                         <div
                           className={`h-3 rounded-full transition-all duration-700 ${barColor}`}
-                          style={{ width: `${slaRate}%` }}
+                          style={{ width: `${sla.oran ?? 0}%` }}
                         />
                       </div>
-                      <span className={`text-lg font-black flex-shrink-0 ${slaColor}`}>{slaRate}%</span>
+                      <span className={`text-lg font-black flex-shrink-0 ${slaColor}`}>{sla.oran === null ? '—' : `${sla.oran}%`}</span>
                     </div>
                     {/* Metric grid */}
                     <div className="grid grid-cols-3 gap-3">
-                      {[
-                        { label: op(currentLanguage).zamaninda,      value: onTimeCount,             color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                        { label: oc(currentLanguage).gecikmeli,         value: lateCount,               color: 'text-red-500',     bg: 'bg-red-50'     },
-                        { label: op(currentLanguage).ort_gun,     value: avgDays.toFixed(1),      color: 'text-blue-600',    bg: 'bg-blue-50'    },
-                      ].map((m, i) => (
-                        <div key={i} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : m.bg)}>
+                      {olcumler.map(m => m.kova ? (
+                        <button type="button" key={m.label} onClick={() => sevkiyatKovasiSec(m.kova as SevkiyatKovasi)} aria-pressed={sevkiyatKovasi === m.kova}
+                          title={currentLanguage === 'tr' ? `${m.label}: listeyi göster` : `${m.label}: show the list`}
+                          className={cn("rounded-xl p-3 text-center transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50",
+                            darkMode ? "bg-white/5" : m.bg, sevkiyatKovasi === m.kova && "ring-2 ring-brand/60")}>
+                          <p className={`text-xl font-black ${m.color}`}>{m.value}</p>
+                          <p className={cn("text-[10px] font-bold mt-0.5", darkMode ? "text-white/65" : "text-gray-400")}>{m.label}</p>
+                        </button>
+                      ) : (
+                        <div key={m.label} className={cn("rounded-xl p-3 text-center", darkMode ? "bg-white/5" : m.bg)}>
                           <p className={`text-xl font-black ${m.color}`}>{m.value}</p>
                           <p className={cn("text-[10px] font-bold mt-0.5", darkMode ? "text-white/65" : "text-gray-400")}>{m.label}</p>
                         </div>
                       ))}
                     </div>
+                    {sla.olculemeyen > 0 && (
+                      <button type="button" onClick={() => sevkiyatKovasiSec('olculemeyen')}
+                        className="mt-3 text-[11px] text-gray-500 hover:text-brand underline decoration-dotted underline-offset-2 text-left">
+                        {currentLanguage === 'tr'
+                          ? `${sla.olculemeyen} teslimatın süresi ölçülemedi — teslim tarihi kaydı yok (ör. Mikro faturasından gelen sipariş). Listeyi göster`
+                          : `${sla.olculemeyen} deliveries could not be measured — no delivery date on record (e.g. orders derived from Mikro invoices). Show the list`}
+                      </button>
+                    )}
                   </div>
                 );
               })()}
@@ -3608,7 +3644,8 @@ export default function OrdersPage({
                 <div className="flex gap-2 w-full sm:w-auto">
                   <div className="apple-card px-4 py-2 flex items-center gap-2 text-sm w-full sm:w-auto">
                     <Search className="w-4 h-4 text-gray-400" />
-                    <input type="text" placeholder={currentT.search_tracking} className="bg-transparent outline-none w-full sm:w-40" />
+                    <input type="text" placeholder={currentT.search_tracking} value={sevkiyatArama} onChange={e => setSevkiyatArama(e.target.value)}
+                      className="bg-transparent outline-none w-full sm:w-40" />
                   </div>
                 </div>
               </div>
@@ -3798,16 +3835,35 @@ export default function OrdersPage({
                     <LogisticsMap orders={sevkiyatListesi.harita} routeStops={routeStops} depot={DEPOTS[selectedDepot]} currentT={currentT} />
                   </React.Suspense>
                 </div>
-                <div className="apple-card flex flex-col order-1 lg:order-2">
-                  <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-                    <h3 className="font-bold text-sm">{currentT.active_shipments}</h3>
-                    <span className="bg-blue-50 text-blue-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                      {orders.filter(o => o.status === 'Shipped').length} {currentT.on_the_way}
+                <div ref={sevkiyatListeRef} className="apple-card flex flex-col order-1 lg:order-2 scroll-mt-24">
+                  <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-2">
+                    {sevkiyatKovasi === 'suren' ? (
+                      <h3 className="font-bold text-sm">{currentT.active_shipments}</h3>
+                    ) : (
+                      <div className="min-w-0 flex items-center gap-2">
+                        <h3 className="font-bold text-sm truncate">{sevkiyatKovaEtiketi(sevkiyatKovasi, currentLanguage)}</h3>
+                        <button type="button" onClick={() => { setSevkiyatKovasi('suren'); setSevkiyatArama(''); }}
+                          className="text-[10px] font-semibold text-gray-400 hover:text-brand whitespace-nowrap">
+                          {currentLanguage === 'tr' ? '× Süzgeci kaldır' : '× Clear filter'}
+                        </button>
+                      </div>
+                    )}
+                    <span className="bg-blue-50 text-blue-600 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
+                      {sevkiyatKovasi === 'suren'
+                        ? <>{sevkiyatKovalar.kargoda.length} {currentT.on_the_way}</>
+                        : <>{sevkiyatListesi.gorunen.length} {oc(currentLanguage).siparis}</>}
                     </span>
                   </div>
                   <div className="flex-1 overflow-y-auto max-h-[400px] lg:max-h-[520px] p-2 space-y-2">
                     {sevkiyatListesi.gorunen.length === 0 ? (
-                      <div className="p-8 text-center text-gray-400 text-sm">{currentT.no_active_orders_found}</div>
+                      // Boş durumun NEDENİ söylenir: arama eşleşmedi / seçili kova boş / hiç süren sevkiyat yok.
+                      <div className="p-8 text-center text-gray-400 text-sm">
+                        {sevkiyatArama.trim() !== ''
+                          ? (currentLanguage === 'tr' ? 'Aramayla eşleşen sevkiyat yok.' : 'No shipment matches the search.')
+                          : sevkiyatKovasi !== 'suren'
+                            ? (currentLanguage === 'tr' ? 'Bu listede sipariş yok.' : 'No orders in this list.')
+                            : currentT.no_active_orders_found}
+                      </div>
                     ) : (
                       sevkiyatListesi.gorunen.map(order => {
                         const routeStop = routeStops.find(s => s.orderId === order.id);
@@ -3849,7 +3905,7 @@ export default function OrdersPage({
                       })
                     )}
                   </div>
-                  {sevkiyatListesi.teslimEdilen > 0 && (
+                  {sevkiyatKovasi === 'suren' && sevkiyatListesi.teslimEdilen > 0 && (
                     <button type="button" onClick={() => setTeslimEdilenleriGoster(v => !v)}
                       className="p-3 border-t border-gray-100 text-[11px] font-semibold text-gray-500 hover:text-brand text-center">
                       {teslimEdilenleriGoster
@@ -4077,7 +4133,7 @@ export default function OrdersPage({
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).musteri}</label>
                   {(() => {
-                    const belgeKesildi = !!selectedOrder && (selectedOrder.irsaliyeGonderildi === true || !!selectedOrder.irsaliyeNo || !!selectedOrder.mikroFaturaNo);
+                    const belgeKesildi = duzenlenenBelgeKesildi;
                     const bagliCari = editingOrderData.leadId ? leads.find(l => l.id === editingOrderData.leadId) : undefined;
                     if (belgeKesildi) {
                       // Ad DÜZENLENEBİLİR kalır (eski davranış — yazım hatası düzeltilebilmeli);
@@ -4124,7 +4180,8 @@ export default function OrdersPage({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).tutar}</label>
-                    <input type="number" className="apple-input w-full text-sm" placeholder={oc(currentLanguage).bilinmiyor} value={editingTutarHam} onChange={e => setEditingTutarHam(e.target.value)} />
+                    <input type="number" className="apple-input w-full text-sm disabled:opacity-60 disabled:cursor-not-allowed" placeholder={oc(currentLanguage).bilinmiyor}
+                      disabled={duzenlenenBelgeKesildi} value={editingTutarHam} onChange={e => setEditingTutarHam(e.target.value)} />
                   </div>
                   {/* DURUM alanı BURADAN KALDIRILDI (2026-09-19): bu pencere durumu yamayla doğrudan yazıyordu —
                       `handleUpdateOrderStatus`'tan GEÇMEDİĞİ için 'Kargoda' yapılınca stok DÜŞMÜYOR, `stockApplied`
@@ -4176,8 +4233,23 @@ export default function OrdersPage({
                   <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).kdv_orani}</label>
                   {/* Boş = BİLİNMİYOR (`?? 20` uydurması Mikro'ya yanlış vergi işaretçisi yazar);
                       bilinen 0 gerçek orandır (KDV'siz ihracat). */}
-                  <input type="number" min="0" max="100" className="apple-input w-full text-sm" placeholder={oc(currentLanguage).bilinmiyor}
-                    value={editingKdvHam} onChange={e => setEditingKdvHam(e.target.value)} />
+                  <input type="number" min="0" max="100" className="apple-input w-full text-sm disabled:opacity-60 disabled:cursor-not-allowed" placeholder={oc(currentLanguage).bilinmiyor}
+                    disabled={duzenlenenBelgeKesildi} value={editingKdvHam} onChange={e => setEditingKdvHam(e.target.value)} />
+                  {duzenlenenBelgeKesildi && (
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      {currentLanguage === 'tr' ? 'Resmî belge kesilmiş — tutar ve KDV oranı değiştirilemez.' : 'An official document was issued — amount and VAT rate cannot be changed.'}
+                    </p>
+                  )}
+                  {/* Pencereden açılmış kalemli siparişte oran değişince her kalem KENDİ çapasıyla yeniden hesaplanır
+                      (`siparisKalemFiyati.oranDegisimi`): KDV hariç girilende matrah, KDV dâhil girilende toplam sabit kalır
+                      (kesilecek faturayla aynı). Tutar kutusundaki eski değer YAZILMAZ — kaydedilecek değer burada gösterilir. */}
+                  {duzenlemeTutarOnizleme !== null && (
+                    <p role="status" className="text-[10px] text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mt-1.5 leading-snug">
+                      {currentLanguage === 'tr'
+                        ? `Tutar kalemlerden yeniden hesaplanır (KDV hariç girilen fiyatta matrah, KDV dâhil girilende toplam sabit kalır); bu oranla ${paraYaz(duzenlemeTutarOnizleme.toplam)} olarak kaydedilir (matrah ${paraYaz(duzenlemeTutarOnizleme.matrah)} + KDV ${paraYaz(duzenlemeTutarOnizleme.kdv)}).`
+                        : `The amount is recalculated from the items (net stays fixed for VAT-exclusive prices, total for VAT-inclusive ones); with this rate it will be saved as ${paraYaz(duzenlemeTutarOnizleme.toplam)} (net ${paraYaz(duzenlemeTutarOnizleme.matrah)} + VAT ${paraYaz(duzenlemeTutarOnizleme.kdv)}).`}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">

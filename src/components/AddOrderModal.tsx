@@ -10,8 +10,22 @@ import type { Lead, InventoryItem, Order, OrderLineItem, Warehouse } from '../ty
 import SevkDeposuSecici from './SevkDeposuSecici';
 import { musteriBelgeTipi } from '../utils/siparisler/belgeTipi';
 import { formSayisi } from '../utils/muhasebe/irsaliyeCalisan';
-import { miktarDuzelt } from '../utils/para';
+import { miktarDuzelt, kurusaYuvarla } from '../utils/para';
 import { oc } from '../i18n/ortak';
+import { eslesir } from '../utils/arama';
+import {
+  musteriFiyatKademesi, urunSiparisFiyati, kalemSorunu, fiyatGirdisi, fiyatKademesiEtiketi, kopyaKalemi,
+  siparisTutarlari, satirTutarlari, gorunenFiyat, kayitFiyati, kayitAlanlari, fiyatBirimiMi, VARSAYILAN_FIYAT_BIRIMI,
+  type KalemSorunu, type FiyatBirimi, type SiparisTutarlari,
+} from '../utils/siparisler/siparisKalemFiyati';
+
+/** Pencerenin kalemi: fiyat girilene / çözülene kadar `null` (kayıtta sayıya çevrilir — `kalemSorunu` kapısından sonra).
+ *  `fiyatBirimi`: `price`'ın ÇAPA birimi (KDV hariç / dâhil — girildiği birim; yoksa KDV hariç). Kayda KDV HARİÇ net birim gider.
+ *  `fiyatElle`: kullanıcı fiyatı kendisi yazdı → müşteri (fiyat kademesi) değişince yeniden fiyatlanmaz. */
+type Kalem = Omit<OrderLineItem, 'price'> & { price: number | null; fiyatBirimi?: FiyatBirimi; fiyatElle?: boolean };
+
+/** Ürün listesinde bir seferde çizilen satır tavanı — 2.000+ stok kartının hepsini düğme olarak çizmek pencereyi kilitliyordu. */
+const URUN_LISTE_TAVANI = 60;
 
 interface AddOrderModalProps {
   isOpen: boolean;
@@ -25,7 +39,14 @@ interface AddOrderModalProps {
   branchNames: string[];
   currentLanguage: 'tr' | 'en';
   currentT: Record<string, string>;
-  onSubmit: (orderData: Partial<Order>, lineItems: OrderLineItem[], computedTotal: number) => Promise<void>;
+  /** Güncel kurlar (TCMB) — dövizli stok kartının fiyatı TL'ye bununla çevrilir; kur yoksa fiyat "bilinmiyor" sayılır. */
+  kurlar: Record<string, number> | null | undefined;
+  /** "Siparişi kopyala" tohumu: pencere açılırken bu sipariş ve kalemlerle dolar (eskiden App'teki kopya durum okunmuyor,
+   *  "sipariş kopyalandı" denip pencere BOŞ açılıyordu). */
+  tohum?: { order: Partial<Order>; kalemler: OrderLineItem[] } | null;
+  /** Kayıt BAŞARISIZSA fırlatır (pencere açık kalır ve nedeni gösterir). */
+  /** `lineItems[].price` KDV HARİÇ net birimdir; `tutarlar` siparişin matrah / KDV / toplamı (faturasızda KDV 0). */
+  onSubmit: (orderData: Partial<Order>, lineItems: OrderLineItem[], tutarlar: SiparisTutarlari) => Promise<void>;
   onAddLeadClick: () => void;
   onGoToInventory: () => void;
 }
@@ -41,13 +62,22 @@ export default function AddOrderModal({
   branchNames,
   currentLanguage,
   currentT,
+  kurlar,
+  tohum,
   onSubmit,
   onAddLeadClick,
   onGoToInventory
 }: AddOrderModalProps) {
+  const tr = currentLanguage === 'tr';
   const [newOrder, setNewOrder] = useState<Partial<Order>>({ status: 'Pending', shippingAddress: '', faturali: true, kdvOran: 20 });
-  const [orderLineItems, setOrderLineItems] = useState<OrderLineItem[]>([]);
+  const [orderLineItems, setOrderLineItems] = useState<Kalem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  /** Kaydı engelleyen neden (boş sipariş, fiyatı girilmemiş kalem, müşteri adı yok) ya da kayıt hatası — alt bantta görünür. */
+  const [hata, setHata] = useState<string | null>(null);
+  /** Kalem fiyat girdisinin HAM metni (kalem id → metin): "12," yazılırken sayıya çevrilip silinmesin. */
+  const [fiyatHam, setFiyatHam] = useState<Record<string, string>>({});
+  /** Müşterinin fiyat kademesi (yoksa perakende) — ürün fiyatı buna göre çözülür. */
+  const kademe = musteriFiyatKademesi(selectedLead);
   const [belgeTipiEksik, setBelgeTipiEksik] = useState(false);
   /** Belge tipi seçicisi kaydırılabilir gövdenin içinde; kapı tetiklenince GÖRÜNÜR olsun diye kaydırılır. */
   const belgeTipiRef = useRef<HTMLDivElement>(null);
@@ -57,7 +87,32 @@ export default function AddOrderModal({
   const [productSearch, setProductSearch] = useState('');
   const [isOrderScannerOpen, setIsOrderScannerOpen] = useState(false);
 
-  const computedTotal = orderLineItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  /** KDV oranının TEK okuması: seçici, hızlı düğmeler, özet ve alt bant aynı değeri gösterir; kayıt (handleAddOrder) da
+   *  `kdvOran ?? 20` okur. Eskiden seçici `?? 20`, özet `|| 0` okuyordu — oran boşken biri %20 diğeri %0 gösteriyordu. */
+  const kdvOranEtkin = newOrder.kdvOran ?? 20;
+  /** Tutar hesabına giren oran: faturasız siparişte KDV YOKTUR (0 — iki fiyat birimi aynı sayıdır). */
+  const hesapOrani = newOrder.faturali ? kdvOranEtkin : 0;
+  /** Birim fiyatın GİRİŞ birimi (kullanıcı 2026-10-03: «KDV dâhil ya da KDV hariç birim fiyat girişi seçilebilmeli»).
+   *  Yalnız giriş ve gösterim birimidir: değiştirmek siparişin tutarını DEĞİŞTİRMEZ — her kalem girildiği birimi çapa olarak
+   *  taşır, öteki birimde çevrilmiş değeri gösterilir. Faturasız siparişte seçici gizlidir (KDV yok). */
+  const [fiyatModu, setFiyatModu] = useState<FiyatBirimi>(VARSAYILAN_FIYAT_BIRIMI);
+  const gosterimBirimi: FiyatBirimi = newOrder.faturali ? fiyatModu : 'kdvHaric';
+  /** Siparişin matrah / KDV / toplamı — TEK hesap (utils/siparisler/siparisKalemFiyati.siparisTutarlari). Fiyatı girilmemiş
+   *  kalem varken BİLİNMİYOR (null) — eksik kalem 0 sayılıp toplanmaz. */
+  const tutarlar = siparisTutarlari(orderLineItems, hesapOrani);
+  /** Kalemdeki KDV oranı (yeni üründe kart oranı, kopyada kaynak siparişin oranı) sipariş oranından FARKLI olan kalemler —
+   *  uyarıdaki SAYI bunların adedidir. */
+  const kartOraniFarkliKalemler = newOrder.faturali
+    ? orderLineItems.filter(k => typeof k.vatRate === 'number' && k.vatRate !== kdvOranEtkin)
+    : [];
+  /** Aynı kalemlerin BENZERSİZ oran etiketleri (ör. ['%10']) — uyarıdaki parantez. */
+  const kartOraniFarkli = [...new Set(kartOraniFarkliKalemler.map(k => `%${k.vatRate}`))];
+  /** Adres kutusundaki, kullanıcının YAZMADIĞI (müşteri kaydından / kopyalanan siparişten gelen) adres. Müşteri değişince
+   *  kutu yalnız boşsa ya da hâlâ bu değeri taşıyorsa yeni müşterinin adresiyle değişir: kullanıcının yazdığı adres ezilmez,
+   *  önceki müşterinin adresi de yeni müşterinin siparişinde kalmaz. */
+  const otoAdresRef = useRef('');
+  /** Pencere kopya tohumuyla açıldı: açılıştaki müşteri doldurması kopyalanan siparişin adresini EZMEZ. */
+  const adresKoruRef = useRef(false);
 
 
   // Modal kapanınca form durumunu sıfırla — `if (!isOpen) return null` unmount ETMEZ, state aksi halde
@@ -70,8 +125,58 @@ export default function AddOrderModal({
       setShowProductPicker(false);
       setBelgeTipiEksik(false);   // kapanışta sıfırla: bileşen unmount OLMAZ, kırmızı uyarı sonraki açılışa taşınırdı
       setMiktarHam({});
+      setFiyatHam({});
+      setHata(null);
+      setFiyatModu(VARSAYILAN_FIYAT_BIRIMI);
+      otoAdresRef.current = '';
+      adresKoruRef.current = false;
     }
   }, [isOpen]);
+
+  // "Siparişi kopyala": pencere açılırken tohumla dol.
+  const tohumRef = useRef(tohum);
+  tohumRef.current = tohum;
+  /** Açılış anındaki seçili müşteri (tohum effect'i `[isOpen]` ile koşar; müşteriyi bağımlılığa almadan okur). */
+  const seciliMusteriRef = useRef(selectedLead);
+  seciliMusteriRef.current = selectedLead;
+  useEffect(() => {
+    const t = tohumRef.current;
+    if (!isOpen || !t) return;   // kalemsiz siparişin kopyası da müşteri / adres / notu taşır
+    // Tohumdaki TANIMSIZ alan varsayılanı ezmez (kopyalanan siparişte `kdvOran` yoksa %20 varsayılanı `undefined` olmasın;
+    // Firestore `undefined` alanı da reddeder).
+    const dolu = Object.fromEntries(Object.entries(t.order).filter(([, v]) => v !== undefined && v !== null)) as Partial<Order>;
+    setNewOrder(prev => ({ ...prev, ...dolu, status: 'Pending' }));
+    if (fiyatBirimiMi(dolu.fiyatGirisi)) setFiyatModu(dolu.fiyatGirisi);   // kopya, kaynağın giriş birimiyle açılır
+    // Adres koruması yalnız kopyanın adresi DOLUYSA ve açılışta müşteri SEÇİLİYSE kurulur:
+    //   • adressiz kopya (Mikro faturasından türeyen sipariş adres taşımaz) → müşterinin kayıtlı adresi dolar;
+    //   • müşterisiz açılan kopya → bayrak açılış turunda tüketilemez (müşteri effect'i koşmaz) ve ilk müşteri seçimine
+    //     sarkardı; bunun yerine kopyanın adresi "yazılmamış" sayılır: sonradan seçilen müşterinin adresiyle değişir.
+    const tohumAdresi = String(dolu.shippingAddress ?? '').trim();
+    if (seciliMusteriRef.current) adresKoruRef.current = tohumAdresi !== '';
+    else otoAdresRef.current = tohumAdresi;
+    // Alanlar beyaz listeyle, birim fiyat ÇAPA birimiyle — bkz. `kopyaKalemi`. Fiyat çözülemiyorsa kalem fiyatsız açılır ve
+    // kullanıcı girer. `fiyatElle`: kopyalanan fiyat müşteri kademesiyle yeniden fiyatlanmaz.
+    setOrderLineItems(t.kalemler.map(k => ({ ...kopyaKalemi(k), fiyatElle: true })));
+  }, [isOpen]);
+
+  // Müşteri (fiyat kademesi) ya da kur değişince, fiyatı ELLE girilmemiş kalemler yeniden fiyatlanır: önce ürün, sonra müşteri
+  // seçilirse kalemler perakende fiyatla kalmasın.
+  useEffect(() => {
+    if (!isOpen) return;
+    setOrderLineItems(prev => {
+      let degisti = false;
+      const yeni = prev.map(k => {
+        if (k.fiyatElle || !k.inventoryId) return k;
+        const kart = inventory.find(i => i.id === k.inventoryId);
+        if (!kart) return k;
+        const fiyat = urunSiparisFiyati(kart, kademe, kurlar).fiyat;
+        if (fiyat === k.price) return k;
+        degisti = true;
+        return { ...k, price: fiyat, fiyatBirimi: 'kdvHaric' as const };   // stok kartı fiyatı KDV hariçtir
+      });
+      return degisti ? yeni : prev;
+    });
+  }, [isOpen, kademe, kurlar, inventory]);
 
   // Auto-fill from selectedLead — açılışta (veya seçili lead değişince) müşteri bilgisini doldur
   useEffect(() => {
@@ -80,18 +185,27 @@ export default function AddOrderModal({
       // hane → e-fatura" — kayıtlı olmayan firmaya e-Fatura, kayıtlı olana e-Arşiv kestirebiliyordu. Kayıt BİLİNMİYORSA
       // tip seçilmez (önceki müşteriden kalan seçim de TEMİZLENİR); kullanıcı aşağıdaki seçiciden seçer.
       const tip = musteriBelgeTipi(selectedLead);
+      const musteriAdresi = (selectedLead.address ?? '').trim();
+      const oncekiOto = otoAdresRef.current;
+      const koru = adresKoruRef.current;
+      adresKoruRef.current = false;
       setNewOrder(prev => {
         const { faturaTipi: oncekiTip, ...kalan } = prev;
         // 'ihracat' yalnız ELLE seçilir (müşteri kaydından türemez) — müşteri değişince sessizce ezilmez.
         const yeniTip = oncekiTip === 'ihracat' ? 'ihracat' : tip;
+        // Teslimat adresi müşterinin ADRESİNDEN (eskiden firma ADI yazılıyordu) — ama yalnız kutu boşsa ya da kullanıcının
+        // yazmadığı adresi taşıyorsa (bkz. `otoAdresRef`). "Faturalı / faturasız" seçimine DOKUNULMAZ.
+        const mevcut = (prev.shippingAddress ?? '').trim();
+        const degistir = !koru && (mevcut === '' || mevcut === oncekiOto);
         return {
           ...kalan,
           customerName: selectedLead.name,
-          shippingAddress: selectedLead.company || prev.shippingAddress,
-          faturali: true,
+          shippingAddress: degistir ? musteriAdresi : (prev.shippingAddress ?? ''),
           ...(yeniTip ? { faturaTipi: yeniTip } : {}),
         };
       });
+      // Kopya açılışında kutudaki adres kopyalanan siparişindir — sonraki müşteri değişiminde o da "yazılmamış" sayılır.
+      otoAdresRef.current = koru ? (tohumRef.current?.order.shippingAddress ?? '').trim() : musteriAdresi;
     }
   }, [isOpen, selectedLead]);
 
@@ -102,13 +216,13 @@ export default function AddOrderModal({
     // O durumda kullanıcının formda seçtiği oran korunur ve kaleme oran YAZILMAZ; sunucu başlık oranına düşer
     // (govdeSiparis: `sayi(k.vatRate) ?? sayi(siparis.kdvOran)`).
     const urunOrani = typeof item.vatRate === 'number' && Number.isFinite(item.vatRate) ? item.vatRate : undefined;
-    setNewOrder(prev => ({ ...prev, ...(urunOrani !== undefined ? { kdvOran: urunOrani } : {}), faturali: true }));
+    setNewOrder(prev => ({ ...prev, ...(urunOrani !== undefined ? { kdvOran: urunOrani } : {}) }));
+    setHata(null);
 
     const existingIndex = orderLineItems.findIndex(i => i.inventoryId === item.id);
     if (existingIndex >= 0) {
-      const updated = [...orderLineItems];
-      updated[existingIndex].quantity += 1;
-      setOrderLineItems(updated);
+      // Yeni nesneyle (eski `updated[i].quantity += 1` durum nesnesini YERİNDE değiştiriyordu; StrictMode'da çift artar).
+      setOrderLineItems(orderLineItems.map((k, i) => (i === existingIndex ? { ...k, quantity: miktarDuzelt(k.quantity + 1) } : k)));
     } else {
       setOrderLineItems([...orderLineItems, {
         id: crypto.randomUUID(),
@@ -116,7 +230,10 @@ export default function AddOrderModal({
         name: item.name,
         title: item.name,
         sku: item.sku,
-        price: item.price || (typeof item.prices === 'object' && item.prices ? (item.prices as Record<string, number>).Retail || 0 : 0),
+        // Fiyat: müşterinin kademesi → kartın düz fiyatı → (dövizliyse) kur. Bilinmiyorsa null: kutu BOŞ açılır, 0 yazılmaz
+        // (utils/siparisler/siparisKalemFiyati). Eski `price || prices.Retail || 0` kademeye ve para birimine bakmıyordu.
+        price: urunSiparisFiyati(item, kademe, kurlar).fiyat,
+        fiyatBirimi: 'kdvHaric',   // stok kartı fiyatı KDV HARİÇTİR (teklif formu ve Mikro ile aynı anlam)
         quantity: 1,
         ...(urunOrani !== undefined ? { vatRate: urunOrani } : {}),   // Firestore `undefined` alanı reddeder
       }]);
@@ -125,10 +242,12 @@ export default function AddOrderModal({
     setShowProductPicker(false);
   };
 
-  const handleUpdateLineItemPrice = (idx: number, newPrice: number) => {
-    const items = [...orderLineItems];
-    items[idx].price = newPrice;
-    setOrderLineItems(items);
+  const handleUpdateLineItemPrice = (idx: number, newPrice: number | null) => {
+    setHata(null);
+    // Yazılan sayı SEÇİLİ giriş birimine çapalanır (KDV dâhil modda yazılan 300, oran değişse de 300 KDV dâhil kalır).
+    // `fiyatModu` — `gosterimBirimi` DEĞİL: faturasızken (seçici gizli, KDV yok) yazılan fiyat da seçili birimi taşır; sipariş
+    // sonradan faturalıya çevrilince seçicide görünen birimle okunur (varsayılan KDV hariç → üstüne KDV eklenir).
+    setOrderLineItems(orderLineItems.map((k, i) => (i === idx ? { ...k, price: newPrice, fiyatBirimi: fiyatModu, fiyatElle: true } : k)));
   };
 
   const handleUpdateLineItemQty = (idx: number, newQty: number) => {
@@ -138,11 +257,15 @@ export default function AddOrderModal({
     if (miktar <= 0) {
       setOrderLineItems(orderLineItems.filter((_, i) => i !== idx));
     } else {
-      const items = [...orderLineItems];
-      items[idx].quantity = miktar;
-      setOrderLineItems(items);
+      setOrderLineItems(orderLineItems.map((k, i) => (i === idx ? { ...k, quantity: miktar } : k)));
     }
   };
+
+  const sorunMetni = (sorun: KalemSorunu): string => ({
+    kalemYok: tr ? 'Siparişe en az bir ürün ekleyin.' : 'Add at least one product to the order.',
+    fiyatEksik: tr ? 'Fiyatı girilmemiş kalem var — her kalemin birim fiyatını girin (0 kabul edilmez).' : 'Some items have no price — enter a unit price for every item (0 is not accepted).',
+    miktarGecersiz: tr ? 'Miktarı geçersiz kalem var.' : 'Some items have an invalid quantity.',
+  })[sorun];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -153,12 +276,39 @@ export default function AddOrderModal({
       belgeTipiRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
+    // Kayıt kapıları (eskiden hiçbiri yoktu: müşterisiz "Unknown Customer", kalemsiz ₺0 ve fiyatı 0 kalemli sipariş
+    // kaydedilip faturalıysa yevmiyeye ve Mikro'ya 0 TL'lik satır olarak gidebiliyordu).
+    const musteriAdi = (selectedLead?.name ?? newOrder.customerName ?? '').trim();
+    if (!musteriAdi) { setHata(tr ? 'Müşteri seçin ya da müşteri adını yazın.' : 'Select a customer or type the customer name.'); return; }
+    const sorun = kalemSorunu(orderLineItems);
+    if (sorun || tutarlar === null) { setHata(sorunMetni(sorun ?? 'fiyatEksik')); return; }
+    setHata(null);
     setIsSubmitting(true);
     try {
-      await onSubmit(newOrder, orderLineItems, computedTotal);
+      // Kayda giden kalem fiyatı HER ZAMAN KDV HARİÇ net birimdir (Mikro gövdesi, raporlar ve Mikro faturasından türeyen
+      // kalemle AYNI anlam); pencereye özel `fiyatElle` kayda girmez.
+      // `fiyatGirisi` siparişin "pencereden açıldı: kalem fiyatı net, tutarlar kalemlerden" İŞARETİDİR (düzenleme formu okur);
+      // değeri yalnız kopyanın hangi görünümle açılacağını söyler (para kuralı kalemin kendi çapasındadır). Faturasız siparişte
+      // KDV yoktur, alan yazılmaz.
+      // FATURALIDA kaleme çapa, yazılan KDV dâhil birim ve SATIR tutarları da yazılır (`kayitAlanlari` — düzenleme formu oran
+      // değişince AYNI işlevle yeniden yazar; fatura gövdesi satır KDV'sini kalemden alır: kayıt = belge). Kalemin KDV oranı =
+      // tutarların hesaplandığı SİPARİŞ oranı: Mikro sipariş gövdesi kalem oranını başlık oranından ÖNCE okur — kalemde ürün
+      // kartının oranı kalırsa, oranı seçiciden değiştirilmiş siparişte Cetpa toplamı ile Mikro siparişi ayrışırdı.
+      // FATURASIZDA KDV yoktur: yalnız fiyat yazılır, kalemin kart oranına dokunulmaz.
+      const kalemler: OrderLineItem[] = orderLineItems.map(k => {
+        const { fiyatElle: _elle, fiyatBirimi: _birim, ...yalin } = k;
+        return newOrder.faturali
+          ? { ...yalin, ...kayitAlanlari(k, hesapOrani), vatRate: hesapOrani }
+          : { ...yalin, price: kayitFiyati(k, hesapOrani) };
+      });
+      const { fiyatGirisi: _eskiGiris, ...siparis } = newOrder;
+      await onSubmit({ ...siparis, customerName: musteriAdi, ...(newOrder.faturali ? { fiyatGirisi: fiyatModu } : {}) }, kalemler, tutarlar);
       onClose(); // form, kapanış effect'inde (isOpen=false) sıfırlanır
     } catch (err) {
+      // Pencere AÇIK kalır ve nedeni gösterir (eskiden hata yutuluyor, pencere kapanıp form siliniyordu — kullanıcı
+      // siparişin kaydedildiğini sanıyordu).
       console.error(err);
+      setHata((tr ? 'Sipariş kaydedilemedi: ' : 'The order could not be saved: ') + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsSubmitting(false);
     }
@@ -202,17 +352,49 @@ export default function AddOrderModal({
                       : (currentLanguage === 'tr' ? 'Mikro\'ya kayıt GÖNDERİLMEZ — stok yalnızca yerel sistemde düşülür.' : 'NOT sent to Mikro — stock tracked locally only.')}
                   </p>
                 </div>
+                {/* TEK anahtar (eskiden aşağıda ikinci bir "Faturalı Satış" anahtarı vardı ve KDV oranını farklı yönetiyordu).
+                    Top `left-0.5` ile raya çapalanır: `left` yokken düğmenin ortasından başlayıp kaydırılınca rayın DIŞINA taşıyordu. */}
                 <button
                   type="button"
+                  role="switch"
+                  aria-checked={!!newOrder.faturali}
                   onClick={() => setNewOrder(prev => ({ ...prev, faturali: !prev.faturali }))}
                   className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${newOrder.faturali ? 'bg-emerald-500' : 'bg-gray-300'}`}
-                  aria-label="Resmi işlem"
+                  aria-label={tr ? 'Resmi (faturalı) işlem' : 'Official (invoiced) sale'}
                 >
-                  <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${newOrder.faturali ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  <span className={`absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${newOrder.faturali ? 'translate-x-5' : 'translate-x-0'}`} />
                 </button>
               </div>
 
               {/* Customer */}
+              {selectedLead && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.customer_name}</label>
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-[#1D2226] truncate">{selectedLead.name}</p>
+                      <p className="text-[10px] text-gray-400 truncate">
+                        {tr ? 'Fiyat kademesi' : 'Price tier'}: {fiyatKademesiEtiketi(kademe, tr)}
+                      </p>
+                    </div>
+                    {/* Eskiden müşteri bir kez seçilince değiştirilemiyordu: pencereyi kapatıp kalemleri kaybetmek gerekiyordu. */}
+                    <button type="button" onClick={() => {
+                      // Bırakılan müşterinin kayıtlı adresi kutuda kalmaz (yeni müşteri elle yazılırsa sipariş eski müşterinin
+                      // adresine gitmesin); kullanıcının kendi yazdığı adres korunur.
+                      const oto = otoAdresRef.current;
+                      otoAdresRef.current = '';
+                      setSelectedLead(null);
+                      setNewOrder(prev => {
+                        const { faturaTipi: _tip, ...kalan } = prev;
+                        return { ...kalan, customerName: '', shippingAddress: (prev.shippingAddress ?? '').trim() === oto ? '' : (prev.shippingAddress ?? '') };
+                      });
+                    }}
+                      className="text-xs font-bold text-brand hover:underline shrink-0">
+                      {tr ? 'Değiştir' : 'Change'}
+                    </button>
+                  </div>
+                </div>
+              )}
               {!selectedLead && (
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.customer_name}</label>
@@ -220,28 +402,21 @@ export default function AddOrderModal({
                     leads={leads}
                     value={newOrder.customerName || ''}
                     onChange={text => setNewOrder({ ...newOrder, customerName: text })}
-                    onSelect={lead => {
-                      const tip = musteriBelgeTipi(lead);   // kayıt bilinmiyorsa tip SEÇİLMEZ (bkz. yukarıdaki effect)
-                      const { faturaTipi: oncekiTip, ...kalan } = newOrder;
-                      const yeniTip = oncekiTip === 'ihracat' ? 'ihracat' : tip;   // elle seçilmiş ihracat ezilmez
-                      setNewOrder({
-                        ...kalan,
-                        customerName: lead.name,
-                        shippingAddress: lead.company || '',
-                        faturali: true,
-                        ...(yeniTip ? { faturaTipi: yeniTip } : {}),
-                      });
-                      setSelectedLead(lead);
-                    }}
+                    // Ad, adres ve belge tipi TEK yerden dolar: yukarıdaki müşteri effect'i (burada ikinci bir kopyası vardı ve
+                    // adres kuralı ondan ayrışıyordu).
+                    onSelect={lead => setSelectedLead(lead)}
                     placeholder={currentLanguage === 'tr' ? 'Müşteri ara veya yaz...' : 'Search or type customer...'}
                     maxResults={8}
-                    inputClassName="apple-input pl-9"
+                    inputClassName="apple-input pl-9 w-full"
                     dropdownMaxHeightClass="max-h-48"
                     renderSecondaryLine={lead => <>{lead.company} • {lead.email}</>}
                     emptyText={currentLanguage === 'tr' ? 'Henüz müşteri yok' : 'No customers yet'}
                     footer={
                       <button type="button"
-                        onMouseDown={e => { e.preventDefault(); onClose(); onAddLeadClick(); }}
+                        // Sipariş penceresi KAPANMAZ (eskiden kapanıyor, girilen kalemler siliniyor ve pencere yeniden
+                        // açılmıyordu): müşteri penceresi üstte açılır (z-110 > z-100); kayıtta App yeni müşteriyi seçer ve
+                        // yukarıdaki müşteri effect'i adı / adresi / belge tipini doldurur.
+                        onMouseDown={e => { e.preventDefault(); onAddLeadClick(); }}
                         className="w-full text-left px-4 py-2.5 text-xs font-bold text-brand hover:bg-brand/5 flex items-center gap-2">
                         <Plus className="w-3.5 h-3.5" />
                         {currentLanguage === 'tr' ? 'Yeni müşteri adayı ekle' : 'Add new lead'}
@@ -282,7 +457,8 @@ export default function AddOrderModal({
                   currentLanguage={currentLanguage}
                   title={oc(currentLanguage).urun_barkodu_tara}
                   onScan={(barcode) => {
-                  const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || (i as unknown as { barcode?: string }).barcode === barcode || i.name.toLowerCase().includes(barcode.toLowerCase()));
+                  const match = inventory.find(i => i.sku === barcode || i.sku.toLowerCase() === barcode.toLowerCase() || (i as unknown as { barcode?: string }).barcode === barcode)
+                    ?? inventory.find(i => eslesir(barcode, i.name));
                   if (match) handleAddLineItem(match);
                   else setProductSearch(barcode);
                   setShowProductPicker(true);
@@ -295,8 +471,10 @@ export default function AddOrderModal({
                     <div className="p-3 border-b border-gray-100 bg-gray-50">
                       <div className="flex items-center gap-2">
                         <Search className="w-4 h-4 text-gray-400 shrink-0" />
+                        {/* Enter formu GÖNDERMEZ: arama kutusunda Enter'a basmak yarım siparişi kaydediyordu. */}
                         <input autoFocus type="text" placeholder={currentT.search_products} value={productSearch}
                           onChange={e => setProductSearch(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
                           className="flex-1 bg-transparent outline-none text-sm" />
                       </div>
                     </div>
@@ -308,25 +486,92 @@ export default function AddOrderModal({
                           <button type="button" onClick={() => { onClose(); onGoToInventory(); }}
                             className="text-brand font-bold hover:underline">{currentT.go_sync_shopify}</button>
                         </div>
-                      ) : (
-                        inventory
-                          .filter(item => item.name.toLowerCase().includes(productSearch.toLowerCase()) || item.sku.toLowerCase().includes(productSearch.toLowerCase()))
-                          .map(item => (
-                            <button key={item.id} type="button" onClick={() => handleAddLineItem(item)}
-                              className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-0">
-                              <div>
-                                <p className="font-bold text-sm text-[#1D2226]">{item.name}</p>
-                                <p className="text-[10px] text-gray-400">{item.sku} • Stock: {item.stockLevel}</p>
-                              </div>
-                              <div className="text-right shrink-0 ml-4">
-                                <p className="font-bold text-sm text-brand">${(item.price || (typeof item.prices === 'object' && item.prices ? (item.prices as Record<string, number>).Retail || 0 : 0)).toFixed(2)}</p>
-                                {item.stockLevel <= item.lowStockThreshold && (
-                                  <span className="text-[9px] font-bold text-red-500 uppercase">Low Stock</span>
-                                )}
-                              </div>
-                            </button>
-                          ))
-                      )}
+                      ) : (() => {
+                        // Türkçe harfe duyarlı arama (`eslesir`: "sprey" → "SPREY", "siyah" → "SİYAH"; eski dil ayarsız
+                        // toLowerCase İ/ı'da eşleşmiyordu). Liste tavanlı: 2.000+ kartın hepsi düğme olarak çizilmez.
+                        const eslesen = inventory.filter(item => eslesir(productSearch, item.name, item.sku));
+                        return (
+                          <>
+                            {eslesen.slice(0, URUN_LISTE_TAVANI).map(item => {
+                              const f = urunSiparisFiyati(item, kademe, kurlar);
+                              const stokYok = typeof item.stockLevel === 'number' && item.stockLevel <= 0;
+                              const stokDusuk = !stokYok && item.stockLevel <= item.lowStockThreshold;
+                              return (
+                                <button key={item.id} type="button" onClick={() => handleAddLineItem(item)}
+                                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-0">
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-sm text-[#1D2226]">{item.name}</p>
+                                    <p className="text-[10px] text-gray-400">{item.sku} • {oc(currentLanguage).stok}: {item.stockLevel}</p>
+                                  </div>
+                                  <div className="text-right shrink-0 ml-4">
+                                    {f.fiyat !== null ? (
+                                      <>
+                                        {/* Kart fiyatı KDV hariçtir; KDV dâhil girişte ürünün (yoksa siparişin) oranıyla çevrilmiş hâli görünür. */}
+                                        <p className="font-bold text-sm text-brand">{paraYaz(gosterimBirimi === 'kdvDahil'
+                                          ? kurusaYuvarla(f.fiyat * (1 + (typeof item.vatRate === 'number' && Number.isFinite(item.vatRate) ? item.vatRate : kdvOranEtkin) / 100))
+                                          : f.fiyat)}</p>
+                                        {newOrder.faturali && (
+                                          <p className="text-[9px] text-gray-400 leading-none mt-0.5">{gosterimBirimi === 'kdvDahil' ? (tr ? 'KDV dâhil' : 'incl. VAT') : (tr ? '+ KDV' : '+ VAT')}</p>
+                                        )}
+                                      </>
+                                    ) : (
+                                      // Fiyat BİLİNMİYOR: "0,00" basılmaz — kalem fiyat kutusu boş açılır, kullanıcı girer.
+                                      <p className="font-bold text-[11px] text-amber-600">
+                                        {f.neden === 'kurYok' ? (tr ? 'Kur yok — fiyat çevrilemedi' : 'No rate — price not converted') : (tr ? 'Fiyat yok' : 'No price')}
+                                      </p>
+                                    )}
+                                    {(stokYok || stokDusuk) && (
+                                      <span className="text-[9px] font-bold text-red-500">
+                                        {stokYok ? (tr ? 'Stokta yok' : 'Out of stock') : (tr ? 'Düşük stok' : 'Low stock')}
+                                      </span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                            {eslesen.length === 0 && (
+                              <p className="p-4 text-center text-xs text-gray-400">{tr ? 'Eşleşen ürün yok.' : 'No matching products.'}</p>
+                            )}
+                            {eslesen.length > URUN_LISTE_TAVANI && (
+                              <p className="p-3 text-center text-[11px] text-gray-400">
+                                {tr ? `${eslesen.length} üründen ilk ${URUN_LISTE_TAVANI} tanesi gösteriliyor — daraltmak için arayın.` : `Showing the first ${URUN_LISTE_TAVANI} of ${eslesen.length} products — search to narrow down.`}
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {/* GİRİŞ BİRİMİ (yalnız faturalıda — faturasızda KDV yok). Değiştirmek siparişin tutarını değiştirmez: yalnız
+                    fiyat kutularının hangi birimde gösterildiğini ve YENİ yazılan fiyatın nasıl okunacağını belirler. */}
+                {newOrder.faturali && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-bold text-gray-700">{tr ? 'Birim fiyat girişi' : 'Unit price entry'}</p>
+                      <p className="text-[10px] text-gray-400 leading-tight">
+                        {fiyatModu === 'kdvDahil'
+                          ? (tr ? 'Yazdığınız fiyatın İÇİNDE KDV var; yazdığınız tutar korunur, KDV içinden ayrılır.' : 'The price you type INCLUDES VAT; the amount you type is kept and VAT is split out of it.')
+                          : (tr ? 'Yazdığınız fiyat KDV HARİÇ; KDV üstüne eklenir.' : 'The price you type EXCLUDES VAT; VAT is added on top.')}
+                      </p>
+                    </div>
+                    <div role="radiogroup" aria-label={tr ? 'Birim fiyat girişi' : 'Unit price entry'} className="flex shrink-0 rounded-lg border border-gray-200 bg-white p-0.5">
+                      {([['kdvHaric', tr ? 'KDV hariç' : 'Excl. VAT'], ['kdvDahil', tr ? 'KDV dâhil' : 'Incl. VAT']] as const).map(([deger, etiket]) => (
+                        <button key={deger} type="button" role="radio" aria-checked={fiyatModu === deger}
+                          // Okunabilen ham girdi eski birimde yazılmıştı — birim değişince kutu çevrilmiş değeri göstersin. Okunamayan
+                          // metin ("1.250") hiçbir birimde sayı değildir: ipucuyla birlikte KALIR (onBlur ile aynı kural). Birim
+                          // değişmediyse hiçbir şey silinmez.
+                          onClick={() => {
+                            if (deger === fiyatModu) return;
+                            setFiyatModu(deger);
+                            setFiyatHam(prev => Object.fromEntries(Object.entries(prev).filter(([, ham]) => ham.trim() !== '' && fiyatGirdisi(ham) === null)));
+                          }}
+                          className={cn('px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors',
+                            fiyatModu === deger ? 'bg-brand text-white shadow-sm' : 'text-gray-500 hover:text-brand')}>
+                          {etiket}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -336,26 +581,55 @@ export default function AddOrderModal({
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50 border-b border-gray-100">
                         <tr>
-                          <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Product</th>
-                          <th className="px-4 py-2 text-center text-[10px] font-bold text-gray-500 uppercase">Price</th>
-                          <th className="px-4 py-2 text-center text-[10px] font-bold text-gray-500 uppercase">Qty</th>
-                          <th className="px-4 py-2 text-right text-[10px] font-bold text-gray-500 uppercase">Total</th>
+                          <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500">{tr ? 'ÜRÜN' : 'PRODUCT'}</th>
+                          <th className="px-4 py-2 text-center text-[10px] font-bold text-gray-500">
+                            {tr ? 'BİRİM FİYAT (₺)' : 'UNIT PRICE (₺)'}
+                            {newOrder.faturali && <span className="block font-semibold text-gray-400 normal-case">{gosterimBirimi === 'kdvDahil' ? (tr ? 'KDV dâhil' : 'incl. VAT') : (tr ? 'KDV hariç' : 'excl. VAT')}</span>}
+                          </th>
+                          <th className="px-4 py-2 text-center text-[10px] font-bold text-gray-500">{tr ? 'MİKTAR' : 'QTY'}</th>
+                          <th className="px-4 py-2 text-right text-[10px] font-bold text-gray-500">{tr ? 'TUTAR' : 'TOTAL'}</th>
                           <th className="px-2 py-2"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
                         {orderLineItems.map((item, idx) => (
-                          <tr key={idx}>
+                          <tr key={item.id}>
                             <td className="px-4 py-2.5">
                               <p className="font-bold text-[#1D2226]">{item.title}</p>
                               <p className="text-[10px] text-gray-400">{item.sku}</p>
                             </td>
                             <td className="px-4 py-2.5">
                               <div className="flex items-center justify-center gap-1">
-                                <span className="text-gray-400 text-xs">$</span>
-                                <input type="number" step="0.01" value={item.price} onChange={e => handleUpdateLineItemPrice(idx, parseFloat(e.target.value) || 0)}
-                                  className="w-16 text-center font-bold text-sm bg-gray-50 border border-gray-100 rounded px-1 py-0.5 focus:ring-0" />
+                                <span className="text-gray-400 text-xs">₺</span>
+                                {/* Fiyat bilinmiyorsa kutu BOŞTUR (eski `parseFloat(...) || 0` boş kutuyu 0'a çeviriyordu). Ham metin ayrı
+                                    tutulur ("12," yazılırken silinmesin); geniş kutu: 5 haneli tutar sığsın. */}
+                                <input type="text" inputMode="decimal"
+                                  aria-label={tr ? 'Birim fiyat' : 'Unit price'}
+                                  placeholder={tr ? 'Fiyat girin' : 'Enter price'}
+                                  value={fiyatHam[item.id] ?? (() => { const g = gorunenFiyat(item, gosterimBirimi, hesapOrani); return g === null ? '' : String(g).replace('.', ','); })()}
+                                  onChange={e => {
+                                    const ham = e.target.value;
+                                    setFiyatHam(prev => ({ ...prev, [item.id]: ham }));
+                                    handleUpdateLineItemPrice(idx, fiyatGirdisi(ham));
+                                  }}
+                                  // Ham metin yalnız boşsa ya da OKUNABİLDİYSE silinir: okunamayan metin ("1.250") kutudan çıkınca
+                                  // (sekme / Kaydet'e tıklama) ipucuyla birlikte kalır — yoksa kullanıcı yazdığının neden yok olduğunu görmezdi.
+                                  onBlur={() => setFiyatHam(prev => {
+                                    const ham = prev[item.id];
+                                    if (ham !== undefined && ham.trim() !== '' && fiyatGirdisi(ham) === null) return prev;
+                                    const { [item.id]: _birak, ...kalan } = prev;
+                                    return kalan;
+                                  })}
+                                  onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
+                                  className={cn('w-24 text-center font-bold text-sm bg-gray-50 border rounded px-1 py-0.5 focus:ring-0',
+                                    item.price === null || item.price <= 0 ? 'border-amber-400' : 'border-gray-100')} />
                               </div>
+                              {/* Yazılan metin fiyat olarak OKUNAMADI ("1.250" belirsizdir): kutu sessizce sarı kalmaz, nedeni söylenir. */}
+                              {(fiyatHam[item.id] ?? '').trim() !== '' && item.price === null && (
+                                <p className="text-[10px] text-red-600 text-center mt-0.5">
+                                  {tr ? 'Okunamadı — 1250,50 biçiminde yazın' : 'Not readable — type it as 1250,50'}
+                                </p>
+                              )}
                             </td>
                             <td className="px-4 py-2.5">
                               <div className="flex items-center justify-center gap-1">
@@ -375,13 +649,15 @@ export default function AddOrderModal({
                                     if (duzgun > 0) handleUpdateLineItemQty(idx, duzgun);
                                   }}
                                   onBlur={() => setMiktarHam(prev => { const { [item.id]: _birak, ...kalan } = prev; return kalan; })}
-                                  className="w-10 text-center font-bold text-sm bg-transparent border-none focus:ring-0 p-0" />
+                                  onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
+                                  className="w-14 text-center font-bold text-sm bg-transparent border-none focus:ring-0 p-0" />
                                 <button type="button" onClick={() => handleUpdateLineItemQty(idx, item.quantity + 1)}
                                   className="w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center font-bold text-sm leading-none">+</button>
                               </div>
                             </td>
                             <td className="px-4 py-2.5 text-right font-bold text-[#1D2226]">
-                              ${(item.price * item.quantity).toFixed(2)}
+                              {/* Satır tutarı fiyat sütunuyla AYNI birimde (sütun, alt toplamla toplanır). */}
+                              {(() => { const t = satirTutarlari(item, hesapOrani); return t === null ? '—' : paraYaz(kurusaYuvarla(gosterimBirimi === 'kdvDahil' ? t.dahil : t.haric)); })()}
                             </td>
                             <td className="px-2 py-2.5">
                               <button type="button" onClick={() => setOrderLineItems(orderLineItems.filter((_, i) => i !== idx))}
@@ -394,8 +670,18 @@ export default function AddOrderModal({
                       </tbody>
                       <tfoot className="border-t border-gray-200 bg-gray-50">
                         <tr>
-                          <td colSpan={2} className="px-4 py-3 text-sm font-bold text-gray-500">{currentT.order_total}</td>
-                          <td className="px-4 py-3 text-right text-lg font-bold text-brand">${computedTotal.toFixed(2)}</td>
+                          {/* Alt toplam, TUTAR sütununun toplamıdır (aynı birim). Faturalıda hangi tutar olduğu yazılır; KDV ve genel
+                              toplam aşağıdaki «Fatura ve KDV» özetindedir. */}
+                          {/* Etiket üç sütunu kaplar: değer TUTAR sütununun altına düşer (eskiden `colSpan={2}` ile MİKTAR'ın altındaydı
+                              ve sağda boş bir hücre kalıyordu). */}
+                          <td colSpan={3} className="px-4 py-3 text-sm font-bold text-gray-500">
+                            {!newOrder.faturali ? currentT.order_total
+                              : gosterimBirimi === 'kdvDahil' ? (tr ? 'Toplam (KDV dâhil)' : 'Total (incl. VAT)')
+                              : (tr ? 'Ara toplam (KDV hariç)' : 'Subtotal (excl. VAT)')}
+                          </td>
+                          <td className="px-4 py-3 text-right text-lg font-bold text-brand">
+                            {paraYaz(tutarlar === null ? null : gosterimBirimi === 'kdvDahil' ? tutarlar.toplam : tutarlar.matrah)}
+                          </td>
                           <td></td>
                         </tr>
                       </tfoot>
@@ -444,25 +730,11 @@ export default function AddOrderModal({
                 )}
               </div>
 
-              {/* Fatura / KDV Seçimi */}
+              {/* Fatura / KDV Seçimi — yalnız FATURALI siparişte (anahtar yukarıda, tek). */}
+              {newOrder.faturali && (
               <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-bold text-gray-700">{currentLanguage === 'tr' ? 'Faturalı Satış' : 'Invoice Required'}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{currentLanguage === 'tr' ? 'Kapalı = faturasız sevk, KDV yok' : 'Off = shipped without invoice, no VAT'}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setNewOrder(prev => ({ ...prev, faturali: !prev.faturali, kdvOran: !prev.faturali ? 20 : 0 }))}
-                    className={cn(
-                      'relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none',
-                      newOrder.faturali ? 'bg-brand' : 'bg-gray-300'
-                    )}
-                  >
-                    <span className={cn('inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform', newOrder.faturali ? 'translate-x-6' : 'translate-x-1')} />
-                  </button>
-                </div>
-                {newOrder.faturali && (
+                <p className="text-xs font-bold text-gray-700">{tr ? 'Fatura ve KDV' : 'Invoice and VAT'}</p>
+                {(
                   <div className="space-y-3">
                     <div ref={belgeTipiRef}>
                       <label className="text-[10px] font-bold text-gray-500 uppercase mb-1.5 block">{oc(currentLanguage).fatura_turu}</label>
@@ -497,27 +769,39 @@ export default function AddOrderModal({
                         <label className="text-[10px] font-bold text-gray-500 uppercase">{currentLanguage === 'tr' ? 'KDV Oranı' : 'VAT Rate'}</label>
                         {/* Rozet yalnız oran GERÇEKTEN üründen geldiyse; KDV oranı bilinmeyen kalem varsa kullanıcı uyarılır
                             (eski kod bilinmeyen oranı %20 sayıp "üründen otomatik" diyordu). */}
-                        {orderLineItems.length > 0 && (orderLineItems.every(k => typeof k.vatRate === 'number') ? (
-                          <span className="text-[9px] font-bold text-brand bg-brand/10 px-1.5 py-0.5 rounded-full">
-                            ↑ {currentLanguage === 'tr' ? 'üründen otomatik' : 'auto from product'}
-                          </span>
-                        ) : (
+                        {/* "Üründen otomatik" YALNIZ oran gerçekten bu pencerede üründen geldiyse: kart oranı sipariş oranından farklıysa
+                            (elle değiştirildi — aşağıdaki uyarı bunu söyler) ya da pencere kopyayla açıldıysa (kalem oranı kaynak
+                            SİPARİŞİN oranıdır, ürün kartının değil) rozet çıkmaz. */}
+                        {orderLineItems.length > 0 && (!orderLineItems.every(k => typeof k.vatRate === 'number') ? (
                           <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full">
                             {currentLanguage === 'tr' ? 'Ürünün KDV oranı bilinmiyor — elle seçin' : 'Product VAT rate unknown — choose manually'}
                           </span>
-                        ))}
+                        ) : kartOraniFarkli.length === 0 && !tohum ? (
+                          <span className="text-[9px] font-bold text-brand bg-brand/10 px-1.5 py-0.5 rounded-full">
+                            ↑ {currentLanguage === 'tr' ? 'üründen otomatik' : 'auto from product'}
+                          </span>
+                        ) : null)}
                       </div>
                       <select
-                        value={newOrder.kdvOran ?? 20}
+                        value={kdvOranEtkin}
                         onChange={e => setNewOrder(prev => ({ ...prev, kdvOran: Number(e.target.value) }))}
                         className="apple-input w-full mb-2 text-sm font-bold text-gray-700"
                       >
                         {[0, 1, 8, 10, 18, 20].map(rate => (
                           <option key={rate} value={rate}>
-                            {'%' + rate + ' KDV' + (rate === 0 ? ' — İstisna/İhracat' : rate === 1 ? ' — Temel Gıda' : rate === 8 ? ' — İndirimli' : rate === 20 ? ' — Genel Oran' : '')}
+                            {'%' + rate + ' ' + oc(currentLanguage).kdv + (rate === 0 ? (tr ? ' — İstisna/İhracat' : ' — Exempt/Export') : rate === 1 ? (tr ? ' — Temel Gıda' : ' — Basic food') : rate === 8 ? (tr ? ' — İndirimli' : ' — Reduced') : rate === 20 ? (tr ? ' — Genel Oran' : ' — Standard') : '')}
                           </option>
                         ))}
                       </select>
+                      {/* Sipariş TEK KDV oranıyla hesaplanır ve kaydedilir. Kartındaki oran farklı olan ürün varsa (farklı oranlı iki
+                          ürün, ya da oran elle değiştirildi) kullanıcı kaydetmeden önce görsün — sessizce tek orana çekilmesin. */}
+                      {kartOraniFarkli.length > 0 && (
+                        <p role="note" className="text-[10px] text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mb-2 leading-snug">
+                          {tr
+                            ? `Sipariş tek KDV oranıyla (%${kdvOranEtkin}) hesaplanır. ${tohum ? 'Kalemde kayıtlı oranı' : 'Ürün kartındaki oranı'} farklı ${kartOraniFarkliKalemler.length} kalem var (${kartOraniFarkli.join(', ')}) — ${tohum ? 'kayıtta hepsi seçili orana çekilir; oranı doğrulayın.' : 'farklı oranlı ürünleri ayrı siparişe girin.'}`
+                            : `The order is calculated with a single VAT rate (%${kdvOranEtkin}). ${kartOraniFarkliKalemler.length} item(s) have a different ${tohum ? 'recorded rate' : 'rate on the product card'} (${kartOraniFarkli.join(', ')}) — ${tohum ? 'all items are saved with the selected rate; verify it.' : 'enter products with different rates as separate orders.'}`}
+                        </p>
+                      )}
                       <div className="flex gap-1.5">
                         {[0, 1, 8, 10, 18, 20].map(rate => (
                           <button
@@ -526,7 +810,7 @@ export default function AddOrderModal({
                             onClick={() => setNewOrder(prev => ({ ...prev, kdvOran: rate }))}
                             className={cn(
                               'flex-1 py-1 rounded-lg text-[10px] font-bold transition-colors',
-                              newOrder.kdvOran === rate ? 'bg-brand text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-500 hover:border-brand hover:text-brand'
+                              kdvOranEtkin === rate ? 'bg-brand text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-500 hover:border-brand hover:text-brand'
                             )}
                           >
                             %{rate}
@@ -536,23 +820,26 @@ export default function AddOrderModal({
                     </div>
                     {orderLineItems.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-gray-200 space-y-0.5 text-xs text-gray-500">
+                        {/* Üç satır da TEK hesaptan (`tutarlar`): matrah + KDV = toplam. Kayıt (handleAddOrder), yevmiye fişi ve
+                            Mikro'ya giden sipariş aynı değerleri kullanır. Toplam bilinmiyorsa (fiyatı girilmemiş kalem) '—'. */}
                         <div className="flex justify-between">
                           <span>{oc(currentLanguage).matrah_kdv_haric}</span>
-                          <span className="font-semibold">{paraYaz(computedTotal / (1 + (newOrder.kdvOran || 0) / 100))}</span>
+                          <span className="font-semibold">{paraYaz(tutarlar === null ? null : tutarlar.matrah)}</span>
                         </div>
                         <div className="flex justify-between text-brand">
-                          <span>KDV %{newOrder.kdvOran || 0}</span>
-                          <span className="font-semibold">{paraYaz(computedTotal - computedTotal / (1 + (newOrder.kdvOran || 0) / 100))}</span>
+                          <span>{oc(currentLanguage).kdv} %{kdvOranEtkin}</span>
+                          <span className="font-semibold">{paraYaz(tutarlar === null ? null : tutarlar.kdv)}</span>
                         </div>
                         <div className="flex justify-between font-bold text-gray-800 pt-0.5">
-                          <span>{oc(currentLanguage).toplam}</span>
-                          <span>{paraYaz(computedTotal)}</span>
+                          <span>{tr ? 'Toplam (KDV dâhil)' : 'Total (incl. VAT)'}</span>
+                          <span>{paraYaz(tutarlar === null ? null : tutarlar.toplam)}</span>
                         </div>
                       </div>
                     )}
                   </div>
                 )}
               </div>
+              )}
 
               {/* SEVK DEPOSU — tek kaynak bileşen (SevkDeposuSecici; sipariş düzenleme formu da aynısını kullanır).
                   Kaydedilince Mikro'ya yazılacak siparişte (faturalı + carisi seçili — handleAddOrder koşulu) ZORUNLU:
@@ -582,7 +869,7 @@ export default function AddOrderModal({
               {newOrder.faturali ? (
                 <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-green-600 bg-green-50 rounded-lg py-1.5">
                   <FileText className="w-3 h-3" />
-                  {currentLanguage === 'tr' ? `Faturalı • KDV %${newOrder.kdvOran || 0}` : `Invoiced • VAT %${newOrder.kdvOran || 0}`}
+                  {currentLanguage === 'tr' ? `Faturalı • KDV %${kdvOranEtkin}` : `Invoiced • VAT %${kdvOranEtkin}`}
                 </div>
               ) : (
                 <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-gray-400 bg-gray-50 rounded-lg py-1.5">
@@ -590,10 +877,11 @@ export default function AddOrderModal({
                   {currentLanguage === 'tr' ? 'Faturasız sevkiyat — KDV yok' : 'Shipped without invoice — no VAT'}
                 </div>
               )}
-              {orderLineItems.length > 0 && (
-                <p className="text-[11px] text-center text-gray-400 flex items-center justify-center gap-1">
-                  <RefreshCw className="w-3 h-3" />
-                  {currentT.create_draft_order_shopify}
+              {/* Faturalı sipariş Mikro'ya yalnız müşteri LİSTEDEN seçildiyse gider (cari kartı gerekir) — yazılan adla kayıtta
+                  yevmiye fişi oluşur ama Mikro'ya gönderim sessizce atlanıyordu; kullanıcı kaydetmeden önce bilsin. */}
+              {newOrder.faturali && !selectedLead && (
+                <p className="text-[11px] text-center text-amber-600">
+                  {tr ? 'Müşteri listeden seçilmedi — sipariş Mikro\'ya gönderilmez (yalnız Cetpa\'ya kaydedilir).' : 'No customer selected from the list — the order will not be sent to Mikro (saved in Cetpa only).'}
                 </p>
               )}
               {newOrder.faturali && !newOrder.faturaTipi && (
@@ -601,12 +889,13 @@ export default function AddOrderModal({
                   {currentLanguage === 'tr' ? 'Belge tipi seçilmedi — e-Fatura / e-Arşiv seçin.' : 'Document type not selected — choose e-Invoice / e-Archive.'}
                 </p>
               )}
+              {hata && <p role="alert" className="text-[11px] text-center font-bold text-red-600">{hata}</p>}
               <button type="submit" disabled={isSubmitting}
                 className="apple-button-primary w-full">
                 {isSubmitting ? (
                   <><RefreshCw className="w-4 h-4 animate-spin" /> {currentT.saving_and_pushing}</>
                 ) : (
-                  <>{currentT.create_order} {orderLineItems.length > 0 && `• $${computedTotal.toFixed(2)}`}</>
+                  <>{currentT.create_order} {tutarlar !== null && orderLineItems.length > 0 && `• ${paraYaz(tutarlar.toplam)}`}</>
                 )}
               </button>
             </div>

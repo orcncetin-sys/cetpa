@@ -20,6 +20,7 @@ import path from 'path';
 import fs from 'fs';
 import { opsJetonuGecerli } from '../opsJeton.js';
 import { auditSirSayimi, ayarOzeti } from '../sirTani.js';
+import { kartFiyatDurumu, stokFiyatOzeti } from '../stokFiyatTani.js';
 import { broadcastDocChange } from '../pgShim.js';
 import express from 'express';
 
@@ -154,6 +155,38 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
       });
     } catch (e) {
       console.error('[/api/ops/sir-tani]', e instanceof Error ? e.message : String(e));
+      res.status(500).json({ success: false, error: 'Ölçüm yapılamadı. Ayrıntı sunucu günlüğünde.' });
+    }
+  });
+
+  /**
+   * GET /api/ops/stok-fiyat-tani[?sku=<kod>] — stok kartlarında SATIŞ FİYATI kapsaması (2026-10-02). SALT OKUNUR; FİYAT DÖNDÜRMEZ,
+   * yalnız sayar (ops jetonu fiyat dökmez — bilerek). Neden: "Yeni Sipariş" penceresinde ürünler 0 fiyatla görünüyordu; bunun veri
+   * eksikliği mi (kartta fiyat yok) yoksa okuma hatası mı olduğu ölçülmeden karar verilemez.
+   *   • `kart`: toplam; perakende kademesi / herhangi bir kademe / tekil `price` alanı POZİTİF olan kart sayısı; hiç fiyatı olmayan;
+   *     stokta olup fiyatı olmayan; KDV oranı bilinen.
+   *   • `kademeler`: `prices` altında görülen kademe adları → kart sayısı (pencere 'Retail' arıyor — ad tutuyor mu).
+   *   • `paraBirimleri`, `kaynaklar`: `priceCurrency` ve `source` dağılımı.
+   *   • `fiyatListesiSatiri`: Mikro satış fiyat listesi aynasındaki satır sayısı (import hiç koştu mu).
+   *   • `?sku=`: o kartın fiyat alanlarının VAR / YOK durumu (değer yok).
+   */
+  app.get('/api/ops/stok-fiyat-tani', async (req: Request, res: Response) => {
+    if (!opsJetonuGecerli(req, res)) return;
+    const pool = C.getPgPool?.();
+    if (!pool) return res.status(503).json({ error: 'pg havuzu yok (lokal Firestore fallback)' });
+    try {
+      // Sayım JS'te (saf, testli: stokFiyatTani.ts) — canlıda ilk kez koşacak karmaşık bir SQL yerine düz okuma (birkaç bin kart).
+      const { rows } = await pool.query("SELECT data FROM docs WHERE coll = 'inventory'");
+      const kartlar = rows.map(r => (r.data ?? {}) as Record<string, unknown>);
+      const liste = await pool.query("SELECT count(*)::int AS n FROM docs WHERE coll = 'mikroFiyatListeleri'");
+      const sku = typeof req.query.sku === 'string' ? req.query.sku.slice(0, 80) : '';
+      const secilen = sku ? kartlar.filter(k => k.sku === sku).slice(0, 5).map(kartFiyatDurumu) : null;
+      res.json({
+        success: true, ...stokFiyatOzeti(kartlar), fiyatListesiSatiri: Number(liste.rows[0]?.n),
+        ...(secilen ? { sku: { bulunan: secilen.length, kartlar: secilen } } : {}),
+      });
+    } catch (e) {
+      console.error('[/api/ops/stok-fiyat-tani]', e instanceof Error ? e.message : String(e));
       res.status(500).json({ success: false, error: 'Ölçüm yapılamadı. Ayrıntı sunucu günlüğünde.' });
     }
   });

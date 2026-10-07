@@ -3508,7 +3508,11 @@ async function startServer() {
         adres:      order.shippingAddress ?? '',
       },
       satirlar: lines,
-      kdvDahil: true,
+      // Kalem `price`'ı pencereden açılan ve Mikro faturasından türeyen siparişte KDV HARİÇ net birimdir
+      // (utils/siparisler/siparisKalemFiyati). Eskiden `true`: Luca faturası KDV kadar eksik kesilirdi (3.600 yerine 3.000).
+      // Mağaza (webhook) siparişinde kalem fiyatının anlamı mağazanın vergi ayarına bağlıdır — o kaynak bu uçta ayrıca
+      // reddedilir (çevrim içi sipariş dalı).
+      kdvDahil: false,
     };
 
     try {

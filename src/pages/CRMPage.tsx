@@ -113,7 +113,6 @@ interface Props {
   trackView: (item: { type: 'order' | 'lead' | 'product'; id: string; label: string; tab: string }) => void;
   setIsEditingLead: React.Dispatch<React.SetStateAction<boolean>>;
   setEmailCompose: React.Dispatch<React.SetStateAction<{ open: boolean; to: string; name: string; subject: string; body: string }>>;
-  setNewOrder: React.Dispatch<React.SetStateAction<Partial<Order>>>;
   handleToggleOrderPaid: (order: Order) => void;
   openConfirm: (opts: { title: string; message: string; confirmLabel?: string; variant?: 'danger' | 'default'; onConfirm: () => void }) => void;
   toast: (msg: string, type?: string) => void;
@@ -147,7 +146,7 @@ export default function CRMPage({
   userRole, user, kpiCurrency, setKpiCurrency,
   appQuotations = [], activeTab, darkMode, warehouses = [], supportTickets = [], commissionRules = [], p549Iadeler,
   trackView, setIsEditingLead, setEmailCompose,
-  setNewOrder, handleToggleOrderPaid, openConfirm,
+  handleToggleOrderPaid, openConfirm,
   toast, setActiveTab, setIsAddingLead, setSelectedOrder, setIsAddingOrder,
   logAuditAction,
 }: Props) {
@@ -514,16 +513,6 @@ export default function CRMPage({
     }
   };
 
-  const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
-    const ord = orders.find(o => o.id === orderId);
-    if (ord && !yerelDegistirilebilir(ord)) { toast(yerelDegistirilemezMetni(currentLanguage), 'warning'); return; }
-    try {
-      await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: serverTimestamp() });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
-    }
-  };
-
   return (
     <>
       {!selectedLead && (
@@ -662,7 +651,7 @@ export default function CRMPage({
                                   {order.syncedAt ? tarihYaz(order.syncedAt) : 'Unknown Date'}
                                 </td>
                                 <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
-                                  {/* SALT-OKUNUR rozet (2026-09-19): buradaki <select> sayfa-yerel `handleUpdateOrderStatus`'a bağlıydı
+                                  {/* SALT-OKUNUR rozet (2026-09-19): buradaki <select> sayfa-yerel bir durum işleyicisine bağlıydı
                                       (yalnız `{status}` yazar — stok düşümü, stockApplied, deliveredAt ve e-İrsaliye teklifi YOK).
                                       Seçici onay anında `e.target.value` okuduğu için zaten HİÇ durum yazmıyordu; o hata
                                       düzeltilince bu baypas canlanacaktı. Durum Siparişler sayfasından değişir. */}
@@ -3243,18 +3232,9 @@ export default function CRMPage({
                         </button>
                       )}
                       {/* Phase 83: pre-fill order form from lead */}
-                      <button onClick={() => {
-                        setNewOrder(prev => ({
-                          ...prev,
-                          customerName: selectedLead.name,
-                          shippingAddress: selectedLead.company || '',
-                          customerType: selectedLead.customerType || 'B2B',
-                          faturali: selectedLead.customerType === 'B2B',
-                          faturaTipi: selectedLead.customerType === 'B2B' ? 'e-fatura' : 'e-arsiv',
-                          leadId: selectedLead.id,
-                        }));
-                        setIsAddingOrder(true);
-                      }} className="apple-button-primary">
+                      {/* Pencere müşteriyi `selectedLead`'den kendisi doldurur (ad, adres, belge tipi, fiyat kademesi); müşteri tipini kayıtta
+                          `handleAddOrder` yazar. */}
+                      <button onClick={() => setIsAddingOrder(true)} className="apple-button-primary">
                         <Plus className="w-4 h-4" /> {currentT.add_order}
                       </button>
                     </div>
@@ -3451,19 +3431,20 @@ export default function CRMPage({
                               <div>
                                 <p className="font-bold text-lg text-[#1D2226]">{formatCurrency(order.totalPrice, exchangeRates ?? undefined)}</p>
                                 <div className="flex items-center gap-1.5 mt-1 justify-end flex-wrap">
-                                  <select value={order.status} disabled={!yerelDegistirilebilir(order)} title={yerelDegistirilebilir(order) ? undefined : yerelDegistirilemezMetni(currentLanguage)} onChange={(e) => { e.stopPropagation(); handleUpdateOrderStatus(order.id, e.target.value as Order['status']); }}
-                                    className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full inline-block outline-none cursor-pointer appearance-none",
+                                  {/* SALT-OKUNUR rozet (2026-10-02): buradaki <select> sayfa-yerel bir işleyiciyle yalnız `{status}` yazıyordu —
+                                      stok düşümü, `deliveredAt` ve e-İrsaliye teklifi YOK. "Teslim edildi" böyle seçilen siparişin teslim
+                                      tarihi olmadığı için sevkiyat SLA'sında "ölçülemeyen"e düşüyordu. Durum Siparişler sayfasından değişir
+                                      (yukarıdaki sipariş tablosuyla aynı kalıp). */}
+                                  <span title={currentLanguage === 'tr' ? 'Durum Siparişler sayfasından değiştirilir (stok ve e-İrsaliye oradan yürür).' : 'Change the status from the Orders page (stock and e-waybill run from there).'}
+                                    className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full inline-block",
                                       order.status === 'Pending' ? "bg-amber-50 text-amber-600" :
                                         order.status === 'Processing' ? "bg-purple-50 text-purple-600" :
                                           order.status === 'Shipped' ? "bg-blue-50 text-blue-600" :
                                             order.status === 'Delivered' ? "bg-emerald-50 text-emerald-600" : "bg-gray-50 text-gray-500"
-                                    )} onClick={e => e.stopPropagation()}>
-                                    <option value="Pending">{currentT.pending}</option>
-                                    <option value="Processing">{currentT.processing}</option>
-                                    <option value="Shipped">{currentT.shipped}</option>
-                                    <option value="Delivered">{currentT.delivered}</option>
-                                    <option value="Cancelled">{currentT.cancelled}</option>
-                                  </select>
+                                    )}>
+                                    {order.status === 'Pending' ? currentT.pending : order.status === 'Processing' ? currentT.processing
+                                      : order.status === 'Shipped' ? currentT.shipped : order.status === 'Delivered' ? currentT.delivered : currentT.cancelled}
+                                  </span>
                                   {/* Phase 96: payment badge in lead's order list */}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleToggleOrderPaid(order); }}

@@ -16,6 +16,7 @@
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import type Stripe from 'stripe';
+import { iyzicoSepeti, iyzicoTutarMetni } from '../odeme/iyzicoSepet.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface PaymentRouteCtx {
@@ -91,21 +92,14 @@ export function paymentRoutes(app: Express, C: PaymentRouteCtx): void {
       return res.status(400).json({ success: false, error: 'orderId, amount, customerName, customerEmail gerekli.' });
     }
 
-    const amountStr = amount.toFixed(2);
+    const amountStr = iyzicoTutarMetni(amount);   // sepetle AYNI kuruş değeri (Σ sepet = price)
     const nameParts = customerName.trim().split(' ');
     const firstName = nameParts[0];
     const lastName  = nameParts.slice(1).join(' ') || 'Müşteri';
 
-    // Build basket items
-    const basket = lineItems.length > 0
-      ? lineItems.map((l, i) => ({
-          id: `item-${i}`,
-          name: l.name,
-          category1: 'B2B',
-          itemType: 'PHYSICAL',
-          price: (l.price * (l.qty ?? 1)).toFixed(2),
-        }))
-      : [{ id: orderId, name: 'Sipariş', category1: 'B2B', itemType: 'PHYSICAL', price: amountStr }];
+    // Sepet: kalem kırılımı YALNIZ tutarı kuruşu kuruşuna tutuyorsa; tutmuyorsa tek kalem (odeme/iyzicoSepet — kalem fiyatı
+    // KDV hariç, tutar KDV dâhil olduğundan faturalı siparişte kırılım tutmaz ve iyzico isteği reddederdi).
+    const basket = iyzicoSepeti(orderId, amount, lineItems);
 
     const body = {
       locale: 'tr',

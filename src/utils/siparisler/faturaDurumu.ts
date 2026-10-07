@@ -46,3 +46,28 @@ export function mikroyaFaturaGonderilebilir(o: FaturaDurumuGirdisi | null | unde
   if (o.source === 'mikro-fatura') return false;
   return !(typeof o.mikroFaturaNo === 'string' && o.mikroFaturaNo.trim() !== '');
 }
+
+// ── Bayat kalem: satır KDV'si hangi orana ait ────────────────────────────────────────────────────────────────────
+// Sipariş penceresi kaleme satır KDV'sini (`kdv`) ve — KDV dâhil girilen fiyatta — orana bağlı net birim fiyatı kalemin
+// `vatRate`'iyle yazar. Sipariş oranı (`kdvOran`) ondan FARKLIYSA kalem eski orana aittir (bayat). Üç durum, iki saf işlev:
+//   • kalem oranı = sipariş oranı        → satır KDV'si belgeye aynen gider (`kalemSatirKdv`);
+//   • kalem oranı BİLİNİYOR ve farklı    → belge KESİLMEZ (`bayatKalemVar`): yalnız KDV'yi düşürüp göndermek KDV dâhil çapada
+//                                           bayat net fiyatla yanlış toplamlı belge keserdi (yazılan 50,01 yerine 45,85);
+//   • kalemde oran YOK (pencere dışı kalem) → KDV'nin hangi orana ait olduğu bilinmez: gönderilmez, sunucu güncel orandan
+//                                           hesaplar; belge engellenmez (o kalemde net birim orana bağlı değildir).
+// App.tsx `handleMikroFatura` bu ikisini kullanır; yüklem satır içi dururken çit testi yalnız METNİ kilitleyebiliyordu
+// (kapıyı söndüren mutantlar yeşil kalıyordu — inceleme 2026-10-08).
+
+interface KdvliKalem { kdv?: unknown; vatRate?: unknown }
+const sonluSayi = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** Siparişte, satır KDV'si sipariş oranından FARKLI bir orana ait kalem var mı (→ fatura isteği gönderilmez). */
+export function bayatKalemVar(o: { kdvOran?: unknown; lineItems?: ReadonlyArray<KdvliKalem> | null } | null | undefined): boolean {
+  if (!o || !sonluSayi(o.kdvOran)) return false;      // sipariş oranı yoksa karışılmaz — sunucu 400 ile sebebini söyler
+  return (o.lineItems ?? []).some(l => sonluSayi(l.kdv) && sonluSayi(l.vatRate) && l.vatRate !== o.kdvOran);
+}
+
+/** Fatura isteğine konacak satır KDV'si: yalnız kalemin oranı sipariş oranıyla AYNIYSA; değilse `undefined` (alan gönderilmez). */
+export function kalemSatirKdv(l: KdvliKalem, kdvOran: unknown): number | undefined {
+  return sonluSayi(l.kdv) && sonluSayi(kdvOran) && l.vatRate === kdvOran ? l.kdv : undefined;
+}

@@ -155,7 +155,6 @@ import {
   type Supplier
 } from './types';
 import { scoreLead } from './services/geminiService';
-import { createShopifyDraftOrder } from './services/shopifyService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 // recharts importu KALDIRILDI (2026-08-31 performans ölçümü): 10 sembolün
@@ -210,6 +209,9 @@ import StockCountModal from './components/StockCountModal';
 import QuickShipmentModal from './components/QuickShipmentModal';
 import OverduePanel from './components/OverduePanel';
 import PaymentMethodModal from './components/PaymentMethodModal';
+import { odemeAlindiYamasi, type OdemeYontemi } from './utils/siparisler/odemeYontemi';
+import type { SiparisTutarlari } from './utils/siparisler/siparisKalemFiyati';
+import { sunucuHataMetni } from './utils/sunucuHatasi';
 import { translations, type Language } from './translations';
 import { optimizeRoute, sevkiyatiSuruyor } from './utils/logistics';
 import { itemCostTRY } from './utils/cost';
@@ -217,6 +219,7 @@ import { hedefYamasi, hedefleriOku } from './utils/pano/hedefButce';
 import { kisaTutar, paraYaz } from './utils/currency';
 import { irsaliyeIstegi, irsaliyeNedenMetni, irsaliyeYanitMesaji, irsaliyeSonucYamasi, type IrsaliyeYaniti } from './utils/siparisler/irsaliyeGonder';
 import { siparisBelgeTipi, belgeTipiCelisiyor, musteriBelgeTipi } from './utils/siparisler/belgeTipi';
+import { bayatKalemVar, kalemSatirKdv } from './utils/siparisler/faturaDurumu';
 import { useDataStore } from './store/dataStore';
 
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
@@ -1561,12 +1564,9 @@ function AppContent() {
   const [isAddingShipment, setIsAddingShipment] = useState(false);
   const [editingShipmentId, setEditingShipmentId] = useState<string | null>(null);
   const [shipmentInitialData, setShipmentInitialData] = useState<Partial<Shipment>>({ status: 'Pending' });
-  const [newOrder, setNewOrder] = useState<Partial<Order>>({
-    totalPrice: 0,
-    status: 'Pending',
-    shippingAddress: ''
-  });
-  const [orderLineItems, setOrderLineItems] = useState<OrderLineItem[]>([]);
+  /** "Siparişi kopyala" tohumu — sipariş penceresi açılırken bununla dolar. Pencere kendi taslağını kendisi tutar; burada
+   *  ayrı bir `newOrder` / `orderLineItems` kopyası YOK (eskiden vardı: pencere okumuyordu, üç ekran boşa yazıyordu). */
+  const [siparisTohumu, setSiparisTohumu] = useState<{ order: Partial<Order>; kalemler: OrderLineItem[] } | null>(null);
   const [isPushingToShopify, setIsPushingToShopify] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [showProductPicker, setShowProductPicker] = useState(false);
@@ -1589,7 +1589,6 @@ function AppContent() {
   // ── Phase 515-534 ────────────────────────────────────────────────────────────
   const [p528Dismissed, setP528Dismissed] = useState<Set<string>>(new Set()); // Phase 528 — smart alerts
   const [p532PayOrder, setP532PayOrder] = useState<Order|null>(null); // Phase 532 — payment method picker
-  const [p532Method, setP532Method] = useState<Order['paymentMethod']>('bank_transfer'); // Phase 532
   const [showOverduePanel, setShowOverduePanel] = useState(false); // Phase 538 — overdue payments panel
   const [shipmentsExpanded, setShipmentsExpanded] = useState(false); // Phase 539 — shipments KPI
   // ── Phase 543–545 ────────────────────────────────────────────────────────────
@@ -3049,7 +3048,7 @@ function AppContent() {
       ).catch(() => {});
       if (leadFromOrderRef.current) {
         const freshLead = { id: docRef.id, ...data, status: 'New' as const, score: scoreResult.score, assignedTo: user?.uid ?? 'guest', customerType: 'B2B' as const };
-        setNewOrder(prev => ({ ...prev, customerName: data.name, shippingAddress: data.company || '' }));
+        // Pencere müşteri bilgisini seçili müşteriden kendisi doldurur.
         setSelectedLead(freshLead as unknown as Lead);
         leadFromOrderRef.current = false;
       }
@@ -3063,50 +3062,46 @@ function AppContent() {
 
   // ── Generic sort helper ──────────────────────────────────────────────────
 
+  /** Kaydı süren siparişin kimliği — başarısız denemeden sonraki yeniden denemede AYNI doküman yazılsın diye. */
+  const bekleyenSiparisKimligiRef = useRef<string | null>(null);
   const handleAddOrder = async (
     newOrder: Partial<Order>,
     orderLineItems: OrderLineItem[],
-    computedTotal: number
+    tutarlar: SiparisTutarlari
   ) => {
-    const customerName = selectedLead ? selectedLead.name : newOrder.customerName || 'Unknown Customer';
-    const email = selectedLead ? selectedLead.email : undefined;
+    // Müşterisiz / kalemsiz sipariş KAYDEDİLMEZ (pencere de denetler; burası ikinci kapı). Eskiden 'Unknown Customer' adıyla,
+    // kalemsiz ve ₺0 tutarlı sipariş yazılıyor, faturalıysa 0 TL'lik yevmiye fişi oluşuyordu.
+    const customerName = (selectedLead ? selectedLead.name : newOrder.customerName ?? '').trim();
+    if (!customerName) throw new Error(currentLanguage === 'tr' ? 'Müşteri adı boş.' : 'Customer name is empty.');
+    if (orderLineItems.length === 0) throw new Error(currentLanguage === 'tr' ? 'Sipariş kalemi yok.' : 'The order has no items.');
 
-    // Pre-generate the Firestore doc ref so its ID can be reused as a stable order reference
-    const orderDocRef = doc(collection(db, 'orders'));
-    let shopifyOrderId = `SHP-${orderDocRef.id.slice(0, 8).toUpperCase()}`;
+    // Pre-generate the Firestore doc ref so its ID can be reused as a stable order reference.
+    // Kimlik, kayıt BAŞARILI olana kadar aynı kalır: yazım sunucuya ulaşıp yanıtı kaybolursa (bağlantı kopması, 502) pencere
+    // "kaydedilemedi" der ve kullanıcı yeniden dener — yeni kimlik üretilseydi aynı sipariş ikinci kez açılırdı.
+    const orderDocRef = bekleyenSiparisKimligiRef.current
+      ? doc(collection(db, 'orders'), bekleyenSiparisKimligiRef.current)
+      : doc(collection(db, 'orders'));
+    bekleyenSiparisKimligiRef.current = orderDocRef.id;
+    // Elle açılan siparişin görünen numarası. (Ad tarihsel: bu alan Shopify sipariş no'su için açılmıştı.)
+    // 2026-10-02: her sipariş kaydında Shopify'a TASLAK SİPARİŞ gönderimi KALDIRILDI — Cetpa'da elle açılan toptan sipariş
+    // çevrim içi mağazanın siparişi değildir; mağaza kapalı / bağlı değilken her kayıtta "Shopify taslağı oluşturulmadı"
+    // hatası basıyordu. Mağaza siparişleri ters yönde, webhook ile gelir (Online Siparişler).
+    const shopifyOrderId = `SHP-${orderDocRef.id.slice(0, 8).toUpperCase()}`;
 
-    try {
-      // Push to Shopify as draft order if we have line items
-      if (orderLineItems.length > 0) {
-        try {
-          const draft = await createShopifyDraftOrder({
-            customerName,
-            email,
-            shippingAddress: newOrder.shippingAddress,
-            lineItems: orderLineItems.map(l => ({
-              id: l.id,
-              name: l.title,
-              title: l.title,
-              price: l.price,
-              quantity: l.quantity,
-              sku: l.sku,
-              variantId: l.variantId,
-            })),
-            note: newOrder.notes,
-          } as unknown as Order);
-          shopifyOrderId = draft.shopifyDraftOrderId || shopifyOrderId;
-        } catch (shopifyErr) {
-          const shopifyNedeni = shopifyErr instanceof Error ? shopifyErr.message : String(shopifyErr);
-          console.warn('Shopify draft order failed, saving locally only:', shopifyNedeni);
-          // SESSİZ GEÇME: sipariş Cetpa'ya yine kaydedilir ama Shopify taslağı YOK — kullanıcı nedenini görsün.
-          toast(currentLanguage === 'tr' ? `Shopify taslağı oluşturulmadı: ${shopifyNedeni} — sipariş Cetpa'ya kaydediliyor.` : `Shopify draft not created: ${shopifyNedeni} — the order is saved in Cetpa.`, 'info');
-        }
+    {
+      // Tutarlar PENCEREDEN, tek hesaptan gelir (utils/siparisler/siparisKalemFiyati.siparisTutarlari): matrah + KDV = toplam.
+      // Eskiden burada `toplam = Σ fiyat × miktar` KDV DÂHİL sayılıp matrah ondan ayrıştırılıyordu — oysa aynı kalem fiyatı
+      // Mikro'ya KDV HARİÇ gidiyor (govdeSiparis `sip_b_fiyat`): 250 × 12 Cetpa'da 3.000, Mikro'da 3.600 oluyordu
+      // (kullanıcı 2026-10-03: «hesap hatası var»). Kalem `price`'ı artık HEP KDV hariç net birimdir.
+      const { matrah: kdvHaricTutar, kdv: kdvTutari, toplam: finalTotal } = tutarlar;
+      if (![kdvHaricTutar, kdvTutari, finalTotal].every(Number.isFinite) || finalTotal <= 0 || kdvTutari < 0) {
+        throw new Error(currentLanguage === 'tr' ? 'Sipariş tutarı hesaplanamadı.' : 'The order total could not be calculated.');
       }
-
-      const finalTotal = orderLineItems.length > 0 ? computedTotal : (newOrder.totalPrice || 0);
       const kdvOran = newOrder.faturali ? (newOrder.kdvOran ?? 20) : 0;
-      const kdvHaricTutar = newOrder.faturali ? finalTotal / (1 + kdvOran / 100) : finalTotal;
-      const kdvTutari = newOrder.faturali ? finalTotal - kdvHaricTutar : 0;
+      // Faturasız siparişte KDV YOKTUR — pencere oranı 0 geçer; tutarsız gövde (faturasız + KDV'li) kaydedilmez.
+      if (!newOrder.faturali && kdvTutari !== 0) {
+        throw new Error(currentLanguage === 'tr' ? 'Faturasız siparişte KDV olamaz.' : 'An order without invoice cannot carry VAT.');
+      }
 
       try {
         // Use setDoc with the pre-generated ref so the doc ID is deterministic
@@ -3116,6 +3111,10 @@ function AppContent() {
           shopifyOrderId,
           customerName,
           leadId: selectedLead ? selectedLead.id : null,
+          // Müşteri tipi SEÇİLİ MÜŞTERİDEN (rozetler ve segment raporları okur). Eskiden elle açılan siparişe hiç yazılmıyordu;
+          // kopyada müşteri değiştirilirse tohumdan gelen eski tip de kalırdı (`...newOrder`'dan SONRA: onu ezer).
+          // Müşterisiz (serbest adla) siparişte tip UYDURULMAZ.
+          ...(selectedLead?.customerType ? { customerType: selectedLead.customerType } : {}),
           totalPrice: finalTotal,
           lineItems: orderLineItems,
           faturali: newOrder.faturali ?? false,
@@ -3132,7 +3131,19 @@ function AppContent() {
           createdAt: serverTimestamp(),
           syncedAt: serverTimestamp()
         });
-        
+        bekleyenSiparisKimligiRef.current = null;   // yazıldı — sonraki sipariş yeni kimlik alır
+      } catch (error) {
+        // Sipariş YAZILAMADI: fırlat — pencere açık kalır ve nedeni gösterir. Eskiden hata burada yutuluyor, pencere kapanıp
+        // form siliniyordu (kullanıcı siparişin kaydedildiğini sanıyordu).
+        // DİKKAT: bu dosyadaki `handleFirestoreError` kendisi FIRLATIR (kimlik / e-posta içeren ham JSON ile) — burada o
+        // kullanılırsa aşağıdaki okunur neden hiç kurulmaz ve pencere ham JSON basar. Fırlatmayan günlükleyici kullanılır.
+        importedLogFirestoreError(error, OperationType.CREATE, 'orders', auth.currentUser?.uid);
+        throw new Error(sunucuHataMetni(error) ?? (currentLanguage === 'tr' ? 'sunucuya yazılamadı — bağlantıyı kontrol edip yeniden deneyin.' : 'could not write to the server — check the connection and try again.'));
+      }
+
+      // Buradan sonrası sipariş YAZILDIKTAN sonra koşar: hiçbir hata siparişi "kaydedilmedi" gibi göstermez (yeniden
+      // denemede mükerrer sipariş açılırdı) — her adım kendi hatasını kullanıcıya bildirir.
+      try {
         await createNotification(
           currentLanguage === 'tr' ? 'Yeni Sipariş' : 'New Order',
           currentLanguage === 'tr' ? `${customerName} için yeni sipariş oluşturuldu.` : `New order created for ${customerName}.`,
@@ -3211,12 +3222,9 @@ function AppContent() {
           }
         }
       } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, 'orders');
+        console.error('[handleAddOrder] sipariş sonrası adım başarısız:', error);
+        toast(currentLanguage === 'tr' ? 'Sipariş kaydedildi, ancak bildirim / muhasebe adımlarından biri tamamlanamadı.' : 'The order was saved, but a follow-up step (notification / accounting) failed.', 'error');
       }
-
-      // AddOrderModal handles closing its own state
-    } catch (error) {
-      console.error("Error adding order:", error);
     }
   };
 
@@ -3507,6 +3515,19 @@ function AppContent() {
           : 'Document type unknown: the customer’s e-Invoice registration could not be read. Edit the order and choose the type, or run the Mikro customer import.', 'error');
         return;
       }
+      // BAYAT KALEM → BELGE KESİLMEZ (inceleme 2026-10-08). Kalemin satır KDV'si ve — KDV dâhil girilen fiyatta — net birim
+      // fiyatı kalemin `vatRate`'iyle yazılır; sipariş oranı ondan farklıysa kalem eski orana aittir. Eski kapı yalnız satır
+      // KDV'sini düşürüp gönderiyordu: KDV dâhil çapada bayat net fiyat yeni oranla çarpılır, belge YANLIŞ toplamla kesilirdi
+      // (yazılan 50,01 yerine 45,85). Çare düzenleme formu: yeniden kaydetmek kalemleri güncel orana çeker (formKayit —
+      // kendi kendini onarma). Bugün hiçbir yazıcı bu durumu üretmiyor (düzenlemenin her yolu kalemleri yeniler); kapı
+      // ileride eklenecek bir yazıcıya karşı emniyettir. Sipariş oranı hiç yoksa karışılmaz — sunucu 400 ile sebebini söyler.
+      // Yüklem saf işlevde ve testli: utils/siparisler/faturaDurumu (`bayatKalemVar`, `kalemSatirKdv`).
+      if (bayatKalemVar(order)) {
+        toast(currentLanguage === 'tr'
+          ? 'Fatura kesilmedi: sipariş kalemleri siparişin KDV oranıyla uyuşmuyor (kalemler eski orandan kalmış). Siparişi düzenleme formunda açıp yeniden kaydedin, sonra faturayı kesin.'
+          : 'Invoice not issued: the order lines do not match the order VAT rate (lines are from an older rate). Open the order in the edit form, save it again, then issue the invoice.', 'error');
+        return;
+      }
       // ONAY (2026-09-19 kullanıcı kararı "onay alsın" — resmî belge): gönderilecek belge TİPİ açıkça söylenir. Siparişteki
       // tip müşterinin BİLİNEN e-Fatura kaydıyla çelişiyorsa (mevcut siparişlerdeki tip kullanıcı seçimi değil, kaldırılan
       // sezgilerle yazıldı) bu, onay metninde UYARI olarak öne çıkar — sessizce yanlış belge kesilmez.
@@ -3530,12 +3551,14 @@ function AppContent() {
             mikroCariKod: lead?.mikroCariKod || lead?.cariKod || lead?.taxId || order.customerName,
             customerName: order.customerName,
             // quantity/price: sunucu FaturaKaydetSchema bunları bekliyor (C15).
-            lineItems: (order.lineItems || []).map(l => ({
-              name: l.title || l.name || l.sku,
-              sku: l.sku,
-              quantity: l.quantity,
-              price: l.price,
-            })),
+            // kdv: sipariş penceresinin kaleme yazdığı SATIR KDV'si — sunucu onu belgeye aynen yazar (KDV dâhil girilen fiyatta
+            // yazılan toplam korunur; matrahtan yeniden hesaplansa 1 kuruş sapabilirdi). Kalemin oranı sipariş oranından
+            // farklıysa (bayat kalem) istek buraya HİÇ gelmez — yukarıdaki kapı durdurur; kalemde oran yoksa KDV gönderilmez
+            // (hangi orana ait olduğu bilinmez — sunucu güncel orandan hesaplar). Kural: faturaDurumu.kalemSatirKdv.
+            lineItems: (order.lineItems || []).map(l => {
+              const kdv = kalemSatirKdv(l, order.kdvOran);
+              return { name: l.title || l.name || l.sku, sku: l.sku, quantity: l.quantity, price: l.price, ...(kdv !== undefined ? { kdv } : {}) };
+            }),
             totalPrice: order.totalPrice,
             faturaTipi: belgeTipi,
             // Sunucu bunu Mikro gövdesinde ZORUNLU kılar (varsayılan yok):
@@ -3629,26 +3652,33 @@ function AppContent() {
     if (!order.paid) {
       // Phase 532: show payment method picker before marking as paid
       setP532PayOrder(order);
-      setP532Method('bank_transfer');
     } else {
       // Mark as unpaid directly (no method needed)
       updateDoc(doc(db, 'orders', order.id), { paid: false, paidAt: null, paymentMethod: null })
         .then(() => toast(currentLanguage === 'tr' ? 'Ödeme bekliyor olarak işaretlendi' : 'Marked as unpaid', 'info'))
-        .catch(err => handleFirestoreError(err, OperationType.UPDATE, `orders/${order.id}`));
+        // Fırlatmayan günlükleyici + bildirim (handleConfirmPayment ile aynı kalıp): `handleFirestoreError` catch'in içinde
+        // fırlatıyor, hata yakalanmamış reddine dönüşüp kullanıcıya hiçbir şey göstermiyordu.
+        .catch(err => {
+          importedLogFirestoreError(err, OperationType.UPDATE, `orders/${order.id}`, auth.currentUser?.uid);
+          toast(sunucuHataMetni(err) ?? (currentLanguage === 'tr' ? 'Ödeme durumu değiştirilemedi.' : 'Payment status could not be changed.'), 'error');
+        });
     }
   };
-  const handleConfirmPayment = async () => {
-    if (!p532PayOrder) return;
+  // Yöntem PENCEREDEN gelir (2026-10-02): eskiden işleyici parametre almıyor, kendi kopya durumunu (hep 'bank_transfer')
+  // yazıyordu — kullanıcı Nakit / Çek seçse de her ödeme "EFT/Havale" kaydediliyordu. Dönen değer: kayıt yazıldı mı
+  // (pencere yalnız `true`da kapanır; hata kullanıcıya gösterilir, sessizce yutulmaz).
+  const handleConfirmPayment = async (yontem: OdemeYontemi): Promise<boolean> => {
+    if (!p532PayOrder) return false;
     try {
-      await updateDoc(doc(db, 'orders', p532PayOrder.id), {
-        paid: true,
-        paidAt: serverTimestamp(),
-        paymentMethod: p532Method,
-      });
+      await updateDoc(doc(db, 'orders', p532PayOrder.id), odemeAlindiYamasi(yontem, serverTimestamp()));
       toast(currentLanguage === 'tr' ? '✓ Ödeme alındı' : '✓ Payment recorded', 'success');
       setP532PayOrder(null);
+      return true;
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `orders/${p532PayOrder.id}`);
+      // Fırlatmayan günlükleyici: `handleFirestoreError` fırlattığı için bildirim ve `return false` hiç koşmuyordu.
+      importedLogFirestoreError(error, OperationType.UPDATE, `orders/${p532PayOrder.id}`, auth.currentUser?.uid);
+      toast(sunucuHataMetni(error) ?? (currentLanguage === 'tr' ? 'Ödeme kaydedilemedi.' : 'Payment could not be saved.'), 'error');
+      return false;
     }
   };
 
@@ -6088,7 +6118,6 @@ function AppContent() {
                 trackView={trackView}
                 setIsEditingLead={setIsEditingLead}
                 setEmailCompose={setEmailCompose}
-                setNewOrder={setNewOrder}
                 handleToggleOrderPaid={handleToggleOrderPaid}
                 openConfirm={openConfirm}
                 toast={toast}
@@ -6140,10 +6169,7 @@ function AppContent() {
                 vehicles={vehicles}
                 locationStocks={locationStocks}
                 shipments={shipments}
-                newOrder={newOrder}
-                setNewOrder={setNewOrder}
-                orderLineItems={orderLineItems}
-                setOrderLineItems={setOrderLineItems}
+                setSiparisTohumu={setSiparisTohumu}
                 handleMikroFatura={handleMikroFatura}
                 handleEIrsaliye={handleEIrsaliye}
                 eIrsaliyeGonderiliyor={eIrsaliyeGonderiliyor}
@@ -6184,7 +6210,13 @@ function AppContent() {
       {/* ── Add Order Modal ── */}
       <AddOrderModal
         isOpen={isAddingOrder}
-        onClose={() => setIsAddingOrder(false)}
+        onClose={() => {
+          setIsAddingOrder(false);
+          setSiparisTohumu(null);                   // "Siparişi kopyala" tohumu tek kullanımlıktır — sonraki açılışa taşınmasın
+          bekleyenSiparisKimligiRef.current = null; // pencere kapandı: yarım kalan denemenin kimliği yeni siparişe taşınmasın
+        }}
+        kurlar={exchangeRates}
+        tohum={siparisTohumu}
         selectedLead={selectedLead}
         setSelectedLead={setSelectedLead}
         leads={leads}

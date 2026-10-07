@@ -29,6 +29,9 @@ export const FaturaKaydetSchema = z.object({
       price:    z.number().nonnegative(),
       // KESİRLİ miktar geçerli (2,5 ton / 0,75 m³ — 2026-09-19 kullanıcı kararı); eski `.int()` bunları 400'lüyordu.
       quantity: z.number().positive().finite(),
+      // Satır KDV tutarı (sipariş penceresinin kaleme yazdığı değer). zod bilinmeyen alanı SİLER — şemada yoksa gövdeye
+      // hiç ulaşmaz ve KDV matrahtan yeniden hesaplanır (KDV dâhil yazılan 50,01 belgede 50,02 olurdu).
+      kdv:      z.number().nonnegative().finite().optional(),
     })).min(1, 'En az bir satır gerekli.'),
     faturaTipi:   z.enum(['e-fatura', 'e-arsiv', 'ihracat']).optional(),
     kdvOran:      z.number().min(0).max(100).optional(),

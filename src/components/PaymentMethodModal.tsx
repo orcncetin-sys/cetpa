@@ -5,6 +5,7 @@ import type { Order } from '../types';
 import type { Language } from '../translations';
 import { paraYaz } from '../utils/currency';
 import { oc } from '../i18n/ortak';
+import type { OdemeYontemi } from '../utils/siparisler/odemeYontemi';
 
 export function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(' ');
@@ -14,7 +15,8 @@ interface PaymentMethodModalProps {
   order: Order | null;
   currentLanguage: Language;
   onClose: () => void;
-  onConfirm: (method: NonNullable<Order['paymentMethod']>) => void;
+  /** Seçilen yöntemle kaydı yazar; `true` = yazıldı (pencereyi çağıran kapatır), `false` = yazılamadı (pencere açık kalır). */
+  onConfirm: (method: OdemeYontemi) => Promise<boolean>;
 }
 
 export default function PaymentMethodModal({
@@ -23,7 +25,9 @@ export default function PaymentMethodModal({
   onClose,
   onConfirm
 }: PaymentMethodModalProps) {
-  const [method, setMethod] = useState<NonNullable<Order['paymentMethod']>>('cash');
+  // Varsayılan seçim YOK (2026-10-02): önceden seçili gelen yöntem, kullanıcı hiç bakmadan onaylayınca yanlış kayda dönüşür.
+  const [method, setMethod] = useState<OdemeYontemi | null>(null);
+  const [kaydediliyor, setKaydediliyor] = useState(false);
 
   if (!order) return null;
 
@@ -63,9 +67,11 @@ export default function PaymentMethodModal({
                 { key: 'credit_card',   icon: '💳', label: oc(currentLanguage).kredi_karti  },
                 { key: 'check',         icon: '📄', label: currentLanguage === 'tr' ? 'Çek'       : 'Cheque'         },
                 { key: 'other',         icon: '🔄', label: oc(currentLanguage).diger          },
-              ] as { key: NonNullable<Order['paymentMethod']>; icon: string; label: string }[]).map(opt => (
+              ] as { key: OdemeYontemi; icon: string; label: string }[]).map(opt => (
                 <button
+                  type="button"
                   key={opt.key}
+                  aria-pressed={method === opt.key}
                   onClick={() => setMethod(opt.key)}
                   className={cn(
                     "flex items-center gap-2.5 px-4 py-3 rounded-2xl border-2 text-sm font-semibold transition-all",
@@ -91,8 +97,14 @@ export default function PaymentMethodModal({
             </button>
             <button
               type="button"
-              onClick={() => onConfirm(method)}
-              className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 rounded-full transition-colors flex items-center justify-center gap-2 text-sm"
+              disabled={method === null || kaydediliyor}
+              title={method === null ? (currentLanguage === 'tr' ? 'Önce ödeme yöntemini seçin' : 'Choose a payment method first') : undefined}
+              onClick={async () => {
+                if (method === null || kaydediliyor) return;
+                setKaydediliyor(true);   // çift tıklama iki kayıt yazmasın
+                try { await onConfirm(method); } finally { setKaydediliyor(false); }
+              }}
+              className="flex-1 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2.5 rounded-full transition-colors flex items-center justify-center gap-2 text-sm"
             >
               <Check className="w-4 h-4" />
               {currentLanguage === 'tr' ? 'Ödemeyi Onayla' : 'Confirm Payment'}

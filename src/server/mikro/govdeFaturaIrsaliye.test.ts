@@ -19,7 +19,7 @@ import { describe, it, expect } from 'vitest';
 import {
   faturaGovdesi, irsaliyeGovdesi,
   type FaturaGirdisi, type IrsaliyeGirdisi,
-} from './govdeFaturaIrsaliye';
+ satirKdvTutari } from './govdeFaturaIrsaliye';
 import { MikroGovdeHatasi, mikroGovdeHatasiMi } from './govdeHatasi';
 
 // ── Fikstürler ───────────────────────────────────────────────────────────────
@@ -156,6 +156,46 @@ describe('faturaGovdesi — parite', () => {
 });
 
 // ── 2. VARSAYILAN YOK: fatura ────────────────────────────────────────────────
+describe('faturaGovdesi — satır KDV tutarı kalemden (KDV dâhil girilen fiyatta yazılan toplam korunur, 2026-10-07)', () => {
+  const kalemli = (kalemler: Array<Record<string, unknown>>, kdvOran = 20) => faturaGovdesi({ ...SIPARIS, kdvOran, lineItems: kalemler }, SECENEK).satirlar;
+
+  it('kalemde KDV YOKSA eski formül (parite): round(tutar × oran) / 100', () => {
+    expect(kalemli([{ sku: 'S1', name: 'A', price: 41.675, quantity: 1 }]).map(x => [x.sth_tutar, x.sth_vergi])).toEqual([[41.68, 8.34]]);
+    expect(satirKdvTutari(undefined, 41.68, 20, 1, 1)).toBe(8.34);
+    expect(satirKdvTutari(null, 41.68, 20, 1, 1)).toBe(8.34);
+  });
+  it('kalemde KDV VARSA o gönderilir: 50,01 KDV dâhil → matrah 41,68 + KDV 8,33 = belge 50,01 (yeniden hesaplansa 50,02 olurdu)', () => {
+    const satirlar = kalemli([{ sku: 'S1', name: 'A', price: 41.675, quantity: 1, kdv: 8.33 }]);
+    expect(satirlar.map(x => [x.sth_tutar, x.sth_vergi])).toEqual([[41.68, 8.33]]);
+    expect(satirlar[0].sth_tutar + satirlar[0].sth_vergi).toBeCloseTo(50.01, 10);
+  });
+  it('KDV hariç girilen kalemin kayıtlı KDV\'si formülle AYNIDIR — gövde değişmez', () => {
+    expect(kalemli([{ sku: 'S1', name: 'A', price: 250, quantity: 12, kdv: 600 }])[0].sth_vergi).toBe(600);
+    expect(kalemli([{ sku: 'S1', name: 'A', price: 250, quantity: 12 }])[0].sth_vergi).toBe(600);
+  });
+  it('kayıtlı KDV yalnız YUVARLAMA kadar sapabilir: sınırı aşan değer (bayat / bozulmuş kalem) belge kestirmez', () => {
+    expect(() => kalemli([{ sku: 'S1', name: 'A', price: 41.675, quantity: 1, kdv: 8.30 }])).toThrow(/KDV/);     // 4 kuruş: yuvarlama değil
+    expect(() => kalemli([{ sku: 'S1', name: 'A', price: 250, quantity: 12, kdv: 300 }])).toThrow(/KDV/);        // %10'un KDV'si %20'lik belgede
+    expect(() => kalemli([{ sku: 'S1', name: 'A', price: 250, quantity: 12, kdv: 0 }])).toThrow(/KDV/);
+    const hata = yakala(() => kalemli([{ sku: 'S1', name: 'A', price: 41.675, quantity: 1 }, { sku: 'S2', name: 'B', price: 41.675, quantity: 1, kdv: 9 }]));
+    expect(hata.message).toContain('2');                                                                          // hangi satır
+  });
+  it('okunamayan kayıtlı KDV (metin, NaN, negatif) sessizce formüle DÜŞMEZ, fırlatır', () => {
+    for (const kdv of ['8,33', NaN, -1, {}]) expect(() => kalemli([{ sku: 'S1', name: 'A', price: 41.675, quantity: 1, kdv }]), String(kdv)).toThrow(/KDV/);
+    // Sınırın İÇİNDE kalan negatif: `< 0` dalı olmasa sınır denetimini geçer, belgeye sth_vergi −0,01 yazılırdı.
+    expect(() => satirKdvTutari(-0.01, 0.01, 20, 1, 1)).toThrow(/okunamadı/);
+  });
+  it('sınır miktarla genişler (6 ondalıklı net birim × büyük miktar): 0,13 dâhil × 50.000 → KDV 1.083,35 kabul (hesap 1.083,33)', () => {
+    expect(kalemli([{ sku: 'S1', name: 'A', price: 0.108333, quantity: 50000, kdv: 1083.35 }])[0].sth_vergi).toBe(1083.35);
+    expect(() => kalemli([{ sku: 'S1', name: 'A', price: 0.108333, quantity: 1, kdv: 0.05 }])).toThrow(/KDV/);     // aynı fark küçük miktarda kabul edilmez
+  });
+  it('oran 0 (istisna): kayıtlı KDV 0 kabul; 0 dışı değer reddedilir', () => {
+    expect(satirKdvTutari(0, 100, 0, 1, 1)).toBe(0);
+    expect(() => satirKdvTutari(0.5, 100, 0, 1, 1)).toThrow(/KDV/);
+    expect(() => satirKdvTutari(0.01, 100, 0, 1, 1)).toThrow(/KDV/);   // oran 0'da yuvarlama payı yok: 1 kuruş bile KDV olamaz
+  });
+});
+
 describe('faturaGovdesi — Mikro defterine sahte değer yazmaz', () => {
   it('birim fiyat bilinmiyorsa 0 YAZMAZ, fırlatır (eski: price ?? 0)', () => {
     const e = yakala(() => faturaGovdesi(

@@ -69,6 +69,8 @@
 import { bilinenSayi } from '../para';
 import { formSayisi, girilenAlanYamasi, pozitifSayi } from '../muhasebe/irsaliyeCalisan';
 import type { BelgeTipi } from './belgeTipi';
+import type { OrderLineItem } from '../../types';
+import { oranDegisimi, kayitliTutarlar, fiyatBirimiMi } from './siparisKalemFiyati';
 
 /* ── KDV rozeti ───────────────────────────────────────────────────────────── */
 
@@ -233,6 +235,10 @@ export interface SiparisYamasi<D extends string = string> {
   kdvHaricTutar?: number | null;
   /** TÜRETİLEN — bkz. `kdvHaricTutar`. */
   kdvTutari?: number | null;
+  /** Yalnız pencereden açılmış kalemli siparişte, kalemler başlık KDV oranına göre bayatsa (oran değişti): kalemler kendi
+   *  çapalarıyla yeniden yazılır (oran, satır tutarları; KDV dâhil girilende net birim) — bkz.
+   *  `siparisKalemFiyati.oranDegisimi`. Başka hiçbir durumda kalemlere DOKUNULMAZ. */
+  lineItems?: OrderLineItem[];
   depoNo?: number;
   leadId?: string;
   faturaTipi?: BelgeTipi;
@@ -246,13 +252,20 @@ export interface SiparisOncekiHali {
   kdvTutari?: unknown;
   /** `true` faturalı, `false` faturasız, yoksa BİLİNMİYOR (eski/kanal siparişi). */
   faturali?: unknown;
+  /** Sipariş penceresinin İŞARETİ (`Order.fiyatGirisi`): varsa kalem `price`'ı KDV HARİÇ net birimdir ve tutarlar
+   *  kalemlerden türer. Yoksa (eski / kanal / başka yüzeyden gelen sipariş) kalemlerin anlamı GARANTİ DEĞİLDİR. */
+  fiyatGirisi?: unknown;
+  lineItems?: unknown;
 }
 
 /**
- * KDV türevleri — `App.tsx handleAddOrder`'daki oluşturma formülünün TEK kopyası:
+ * KDV türevleri — BAŞLIK tutarından (KDV dâhil toplam) ayrıştırma:
  *   `kdvHaricTutar = faturali ? tutar / (1 + oran/100) : tutar`
  *   `kdvTutari     = faturali ? tutar - kdvHaricTutar  : 0`
- * (Oluşturmadaki `kdvOran ?? 20` uydurması BURAYA TAŞINMADI: bilinmeyen oran %20 değildir.)
+ * Kalemlerinin anlamı garanti OLMAYAN siparişin (eski / kanal / kalemsiz) ve tutarı ELLE değiştirilen siparişin yoludur.
+ * Sipariş penceresinden açılmış kalemli siparişte türevler bundan DEĞİL kalemlerden gelir (`siparisKalemFiyati.oranDegisimi`
+ * — 2026-10-03: oluşturma artık bu formülü kullanmıyor; kalem fiyatı KDV hariç net birim, tutarlar `siparisTutarlari`).
+ * (Eski oluşturmadaki `kdvOran ?? 20` uydurması BURAYA TAŞINMADI: bilinmeyen oran %20 değildir.)
  *
  * Bunlar GİRİLEN değil TÜRETİLEN alandır: bir girdi bile bilinmiyorsa türev HESAPLANMAZ
  * (`null`). Fatura durumu bilinmiyorsa hangi formülün geçerli olduğu da bilinmez — `undefined`ı
@@ -331,14 +344,58 @@ export function siparisDuzenlemeYamasi<D extends string>(
 
   const etkinTutar = etkinSayi(temel, 'totalPrice', onceki?.totalPrice);
   const etkinOran  = etkinSayi(temel, 'kdvOran',    onceki?.kdvOran);
+  // PENCEREDEN AÇILMIŞ siparişin kalemleri (işaret: `fiyatGirisi`; kalemlerde çapa ve YAZILMIŞ satır tutarları var). Yalnız bu
+  // kalemlere dokunulur — eski / kanal / başka yüzeyden gelen siparişte kalemlerin anlamı garanti değildir.
+  const pencereKalemleri: OrderLineItem[] | null =
+    onceki?.faturali === true && fiyatBirimiMi(onceki.fiyatGirisi) && Array.isArray(onceki.lineItems)
+      && kayitliTutarlar(onceki.lineItems as OrderLineItem[]) !== null
+      ? (onceki.lineItems as OrderLineItem[]) : null;
+  // KALEM BAYAT MI: kalemin satır KDV'si kalemin `vatRate`'iyle yazılır; başlık oranı ondan farklıysa kalem eski orana aittir.
+  // Bayat kalırsa fatura gövdesi (`satirKdvTutari`) kayıtlı satır KDV'sini yeni oranla tutmadığı için siparişi REDDEDER —
+  // bu yüzden oranı değiştiren HER yol kalemleri de yeniler (inceleme 2026-10-08: başlık yolu kalemleri bayat bırakıyor,
+  // sipariş kalıcı olarak faturalanamıyordu).
+  const kalemleriYenile = (): OrderLineItem[] | undefined =>
+    pencereKalemleri !== null && etkinOran !== null && pencereKalemleri.some(k => k.vatRate !== etkinOran)
+      ? oranDegisimi(pencereKalemleri, etkinOran)?.kalemler
+      : undefined;
+
   if (ayniSayi(etkinTutar, oncekiSayi(onceki?.totalPrice)) && ayniSayi(etkinOran, oncekiSayi(onceki?.kdvOran))) {
-    return temel;   // girdiler değişmedi → bayatlık yok, türevlere dokunma
+    // Girdiler değişmedi → türevlere dokunma. Tek istisna: kalemler başlık oranına göre BAYATSA (önceki bir kayıttan kalma)
+    // aynı değerlerle yeniden kaydetmek onları onarır — fatura gövdesinin «düzenleyip yeniden kaydedin» çaresi çalışsın.
+    const onarilan = kalemleriYenile();
+    return onarilan ? { ...temel, lineItems: onarilan } : temel;
   }
+  // KALEM YOLU — pencereden açılmış kalemli sipariş + yalnız ORAN değişti → pencerenin kuralı, aynı işlevle (`oranDegisimi`):
+  // her kalem kendi çapasıyla yeniden hesaplanır — KDV hariç girilende MATRAH, KDV dâhil girilende TOPLAM sabit; başlık tutarı
+  // da kalemlerden yazılır. Eski yol toplamı sabit tutup matrahı ondan ayrıştırıyordu: 250 × 12 KDV hariç, %20 → %10 için
+  // Cetpa 3.600 / 3.272,73 derken kesilecek fatura 3.000 + 300 = 3.300 (inceleme 2026-10-03). Kalem yolu YALNIZ kayıtlı
+  // başlık tutarı gerçekten kalemlerden türemişse:
+  //   • tutar bu düzenlemede ELLE değiştiyse kullanıcının yazdığı toplam geçerlidir (başlık yolu);
+  //   • ÖNCEKİ bir düzenlemede elle yazıldıysa da öyle — kayıtlı toplam, kalemlere YAZILMIŞ satır tutarlarının toplamını
+  //     (`kayitliTutarlar`) tutmaz; yoksa pazarlıkla 3.500'e çekilmiş toplam sonraki "yalnız oran" düzenlemesinde uyarısız
+  //     3.300 olurdu. Karşılaştırma TOPLAM üzerinden (kuruşu kuruşuna): 1 kuruşluk elle düzeltme de yakalanır.
+  // BİLİNEN SINIR (inceleme 2026-10-08, bilinçli): "elle yazıldı" bilgisi ayrı bir işaret DEĞİL, bu eşitliktir. Elle yazılan
+  // toplam bir ara oranda kalem toplamına TAM eşit düşerse (250 × 12 → elle 3.300, sonra oran %10: Σ kalem = 3.300) sipariş o
+  // andan sonra kalemden türemiş sayılır ve sonraki oran değişikliği toplamı kalemlerden yazar (%20 → 3.600). Kayıp sessiz
+  // değildir: düzenleme formu kaydetmeden ÖNCE «3.600 olarak kaydedilir» notunu basar (`duzenlemeTutarOnizleme`); kesilecek
+  // belge de zaten kalemlerden kurulur. Ayrı işaret (kalıcı yeni alan) bu nadir tesadüf için eklenmedi — davranış testte kilitli.
+  const tutarElleDegisti = !ayniSayi(etkinTutar, oncekiSayi(onceki?.totalPrice));
+  if (pencereKalemleri !== null && etkinOran !== null && !tutarElleDegisti
+      && oncekiSayi(onceki?.totalPrice) === kayitliTutarlar(pencereKalemleri)?.toplam) {
+    const d = oranDegisimi(pencereKalemleri, etkinOran);
+    if (d !== null) {
+      return { ...temel, totalPrice: d.tutarlar.toplam, kdvHaricTutar: d.tutarlar.matrah, kdvTutari: d.tutarlar.kdv, lineItems: d.kalemler };
+    }
+  }
+  // BAŞLIK YOLU — toplam kullanıcının yazdığıdır; türevler ondan. Oran değiştiyse kalemler YİNE yenilenir (satır KDV'si ve
+  // kalem oranı yeni orandan — yukarıdaki bayatlık kuralı); başlık tutarına dokunulmaz.
   const turev = kdvTurevleri(etkinTutar, etkinOran, onceki?.faturali);
+  const yenilenen = kalemleriYenile();
   return {
     ...temel,
     ...girilenAlanYamasi('kdvHaricTutar', turev.kdvHaricTutar, onceki?.kdvHaricTutar),
     ...girilenAlanYamasi('kdvTutari',     turev.kdvTutari,     onceki?.kdvTutari),
+    ...(yenilenen ? { lineItems: yenilenen } : {}),
   };
 }
 

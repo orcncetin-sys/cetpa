@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { faturaGovdesi } from '../../server/mikro/govdeFaturaIrsaliye';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
@@ -214,7 +215,7 @@ describe('kdvOraniDogrula — sipariş düzenlemede KDV oranı (bilinmeyen 20 SA
   });
 });
 
-describe('kdvTurevleri — oluşturma formülünün (App.tsx handleAddOrder) TEK kopyası', () => {
+describe('kdvTurevleri — BAŞLIK tutarından ayrıştırma (kalemsiz / kanal siparişi ve elle değiştirilen tutar)', () => {
   it('PARİTE: faturalı siparişte net = tutar / (1 + oran/100), kdv = tutar − net', () => {
     expect(kdvTurevleri(12_000, 20, true)).toEqual({ kdvHaricTutar: 12_000 / 1.2, kdvTutari: 12_000 - 12_000 / 1.2 });
     expect(kdvTurevleri(12_000, 10, true)).toEqual({ kdvHaricTutar: 12_000 / 1.1, kdvTutari: 12_000 - 12_000 / 1.1 });
@@ -527,3 +528,112 @@ describe('siparisDuzenlemeYamasi — faturaTipi (belge tipi seçimi)', () => {
   });
 });
 
+describe('siparisDuzenlemeYamasi — pencereden açılmış kalemli siparişte KDV oranı değişince (2026-10-03 / 10-07)', () => {
+  const KALEM = { id: 'k1', sku: 'S1', name: 'A', quantity: 12, price: 250, vatRate: 20, fiyatBirimi: 'kdvHaric', netTutar: 3000, kdv: 600 };
+  const DAHIL_KALEM = { id: 'k1', sku: 'S1', name: 'A', quantity: 12, price: 208.333333, vatRate: 20, fiyatBirimi: 'kdvDahil', dahilFiyat: 250, netTutar: 2500, kdv: 500 };
+  const HARIC = { totalPrice: 3600, kdvOran: 20, kdvHaricTutar: 3000, kdvTutari: 600, faturali: true, fiyatGirisi: 'kdvHaric', lineItems: [KALEM] };
+  const DAHIL = { totalPrice: 3000, kdvOran: 20, kdvHaricTutar: 2500, kdvTutari: 500, faturali: true, fiyatGirisi: 'kdvDahil', lineItems: [DAHIL_KALEM] };
+
+  it('KDV HARİÇ girilmiş: %20 → %10 — MATRAH sabit, toplam ve KDV kalemlerden (eskiden toplam sabit kalıp matrah 3.272,73 oluyordu)', () => {
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '10' }, HARIC);
+    expect(yama).toMatchObject({ kdvOran: 10, totalPrice: 3300, kdvHaricTutar: 3000, kdvTutari: 300 });
+    expect(yama.lineItems).toEqual([{ ...KALEM, vatRate: 10, kdv: 300 }]);   // Mikro sipariş gövdesi kalem oranını önce okur
+  });
+  it('KDV DÂHİL girilmiş: %20 → %10 — YAZILAN TOPLAM sabit (3.000), net birim yazılan birimden yeniden türetilir', () => {
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '3000', kdvHam: '10' }, DAHIL);
+    expect(yama).toMatchObject({ kdvOran: 10, totalPrice: 3000, kdvHaricTutar: 2727.27, kdvTutari: 272.73 });
+    expect(yama.lineItems).toEqual([{ ...DAHIL_KALEM, price: 227.272727, netTutar: 2727.27, kdv: 272.73, vatRate: 10 }]);
+  });
+  it('işaret sipariş düzeyindedir ama KURAL kalemin çapasındadır: işaret "kdvDahil", kalem KDV hariç çapalı → matrah sabit', () => {
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '10' }, { ...HARIC, fiyatGirisi: 'kdvDahil' });
+    expect(yama).toMatchObject({ totalPrice: 3300, kdvHaricTutar: 3000, kdvTutari: 300 });
+  });
+  it('oran DEĞİŞMEDİYSE kalemlere ve türevlere dokunulmaz (yalnız adres düzeltmesi)', () => {
+    const yama = siparisDuzenlemeYamasi({ shippingAddress: 'Yeni adres', tutarHam: '3600', kdvHam: '20' }, HARIC);
+    expect(yama).toEqual({ shippingAddress: 'Yeni adres', totalPrice: 3600, kdvOran: 20 });   // girilen alanlar aynı değerle; türev / kalem YOK
+  });
+  it('tutar ELLE de değiştiyse kullanıcının yazdığı TOPLAM geçerlidir (türev başlıktan); kalemler yine yeni oranla yenilenir (bayat kalmaz)', () => {
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '3500', kdvHam: '10' }, HARIC);
+    expect(yama).toMatchObject({ totalPrice: 3500, kdvOran: 10, kdvHaricTutar: 3500 / 1.1 });
+    expect(yama.lineItems).toEqual([{ ...KALEM, vatRate: 10, kdv: 300 }]);       // satır KDV'si ve oranı yeni orandan; net birim aynı
+  });
+  it('ÖNCEKİ bir düzenlemede toplam ELLE yazılmışsa (kayıtlı toplam kalemlerin satır tutarlarını tutmuyor) yalnız-oran düzenlemesi onu EZMEZ', () => {
+    // 1. düzenleme: pazarlıkla 3.600 → 3.500, oran aynı (başlık yolu; kalem oranı değişmedi → kalemlere dokunulmaz).
+    const ilk = siparisDuzenlemeYamasi({ tutarHam: '3500', kdvHam: '20' }, HARIC);
+    expect(ilk).toMatchObject({ totalPrice: 3500 });
+    expect(ilk.lineItems).toBeUndefined();
+    // 2. düzenleme: yalnız oran. Kullanıcının 3.500'ü korunur (kalem yolu 3.300 yazardı); kalemler yeni oranla yenilenir.
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '3500', kdvHam: '10' }, { ...HARIC, ...ilk });
+    expect(yama).toMatchObject({ totalPrice: 3500, kdvOran: 10, kdvHaricTutar: 3500 / 1.1 });
+    expect(yama.lineItems).toEqual([{ ...KALEM, vatRate: 10, kdv: 300 }]);
+  });
+  // BİLİNEN SINIR (inceleme 2026-10-08, bilinçli — formKayit.ts yorumu): "elle yazıldı" bilgisi ayrı işaret değil, "kayıtlı
+  // toplam ≠ Σ kalem" eşitsizliğidir. Elle toplam bir ara oranda Σ kaleme TAM eşit düşerse sipariş kalemden türemiş sayılır.
+  it('elle toplam ara oranda Σ kaleme TAM eşitlenirse (3.300 = 3.000 × 1,10) sonraki oran değişikliği toplamı KALEMLERDEN yazar (3.600) — form bunu önceden gösterir', () => {
+    const bir = { ...HARIC, ...siparisDuzenlemeYamasi({ tutarHam: '3300', kdvHam: '20' }, HARIC) };          // pazarlık: 3.600 → 3.300
+    expect(bir).toMatchObject({ totalPrice: 3300, lineItems: [KALEM] });
+    const iki = { ...bir, ...siparisDuzenlemeYamasi({ tutarHam: '3300', kdvHam: '10' }, bir) };              // oran %10: elle toplam korunur
+    expect(iki).toMatchObject({ totalPrice: 3300, kdvOran: 10, lineItems: [{ ...KALEM, vatRate: 10, kdv: 300 }] });
+    const uc = siparisDuzenlemeYamasi({ tutarHam: '3300', kdvHam: '20' }, iki);                              // oran yeniden %20
+    expect(uc).toMatchObject({ totalPrice: 3600, kdvHaricTutar: 3000, kdvTutari: 600 });                     // kalem yolu — yazılan 3.300 DEĞİL
+    expect(uc.lineItems).toEqual([KALEM]);
+    expect(uc.totalPrice).not.toBe(3300);                                                                    // → duzenlemeTutarOnizleme notu basılır
+  });
+  it('tesadüf yoksa (elle 3.500) aynı üç adımda elle toplam korunur', () => {
+    const bir = { ...HARIC, ...siparisDuzenlemeYamasi({ tutarHam: '3500', kdvHam: '20' }, HARIC) };
+    const iki = { ...bir, ...siparisDuzenlemeYamasi({ tutarHam: '3500', kdvHam: '10' }, bir) };
+    const uc = siparisDuzenlemeYamasi({ tutarHam: '3500', kdvHam: '20' }, iki);
+    expect(uc.totalPrice).toBe(3500);
+    expect(uc.lineItems).toEqual([KALEM]);
+  });
+  it('1 KURUŞLUK elle düzeltme de korunur (karşılaştırma toplam üzerinden, kuruşu kuruşuna)', () => {
+    const ilk = siparisDuzenlemeYamasi({ tutarHam: '3600.01', kdvHam: '20' }, HARIC);
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '3600.01', kdvHam: '10' }, { ...HARIC, ...ilk });
+    expect(yama.totalPrice).toBe(3600.01);
+    expect(yama.lineItems).toEqual([{ ...KALEM, vatRate: 10, kdv: 300 }]);
+  });
+  it('BAŞLIK YOLUNDAN SONRA FATURA KESİLEBİLİR: kalemdeki satır KDV\'si güncel oranla — fatura gövdesi reddetmez (eskiden kalıcı ret)', () => {
+    for (const [onceki, form] of [[HARIC, { tutarHam: '3500', kdvHam: '10' }], [DAHIL, { tutarHam: '2900', kdvHam: '10' }]] as const) {
+      const yama = siparisDuzenlemeYamasi(form, onceki);
+      const kalemler = (yama.lineItems ?? []) as Array<{ sku: string; name: string; price: number; quantity: number; kdv: number; netTutar: number; vatRate: number }>;
+      expect(kalemler.length).toBe(1);
+      // İstemci satır KDV'sini gönderir; kalem oranı ≠ sipariş oranı ise isteği HİÇ göndermez (App.tsx handleMikroFatura kapısı).
+      expect(kalemler[0].vatRate).toBe(yama.kdvOran);
+      const satirlar = faturaGovdesi({ mikroCariKod: '120.01.001', faturaTipi: 'e-arsiv', kdvOran: yama.kdvOran, lineItems: kalemler.map(k => ({ sku: k.sku, name: k.name, price: k.price, quantity: k.quantity, kdv: k.kdv })) },
+        { vergiTablosu: new Map([[3, 10], [4, 20]]), jumpSurum: 17, simdi: new Date(2026, 9, 8) }).satirlar;
+      expect(satirlar.map(x => [x.sth_tutar, x.sth_vergi])).toEqual([[kalemler[0].netTutar, kalemler[0].kdv]]);
+    }
+  });
+  it('KENDİ KENDİNİ ONARIR: kalemler başlık oranına göre bayatsa (eski kayıt) aynı değerlerle yeniden kaydetmek onları yeniler', () => {
+    const bayat = { ...HARIC, kdvOran: 10, totalPrice: 3500, kdvHaricTutar: 3500 / 1.1, kdvTutari: 3500 - 3500 / 1.1 };   // kalem hâlâ %20 / kdv 600
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '3500', kdvHam: '10' }, bayat);
+    expect(yama).toEqual({ totalPrice: 3500, kdvOran: 10, lineItems: [{ ...KALEM, vatRate: 10, kdv: 300 }] });               // başlık türevlerine dokunulmaz
+    // Bayat değilse aynı değerlerle kayıt kalemlere dokunmaz.
+    expect(siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '20' }, HARIC).lineItems).toBeUndefined();
+  });
+  it('oran BOŞALTILIP kaydedildikten sonra yeniden girilirse kalem yolu çalışır: toplam hâlâ kalemlerin satır tutarlarından', () => {
+    const bosaltilmis = { ...DAHIL, kdvOran: null, kdvHaricTutar: null, kdvTutari: null };
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '3000', kdvHam: '10' }, bosaltilmis);
+    expect(yama).toMatchObject({ kdvOran: 10, totalPrice: 3000, kdvHaricTutar: 2727.27, kdvTutari: 272.73 });
+    expect(yama.lineItems).toEqual([{ ...DAHIL_KALEM, price: 227.272727, netTutar: 2727.27, kdv: 272.73, vatRate: 10 }]);
+  });
+  it('İŞARETSİZ sipariş (eski / kanal / başka yüzey — kalem anlamı garanti değil): eski yol, kalemlere dokunulmaz', () => {
+    const { fiyatGirisi: _isaret, ...isaretsiz } = HARIC;
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '10' }, isaretsiz);
+    expect(yama.lineItems).toBeUndefined();
+    expect(yama).toMatchObject({ totalPrice: 3600, kdvOran: 10, kdvHaricTutar: 3600 / 1.1 });   // toplam sabit, matrah ondan
+  });
+  it('satır tutarı YAZILMAMIŞ kalem (işaretli ama eski biçim), faturasız / fatura durumu bilinmeyen sipariş, fiyatı bilinmeyen kalem: eski yol', () => {
+    const { netTutar: _n, kdv: _k, ...tutarsiz } = KALEM;
+    expect(siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '10' }, { ...HARIC, lineItems: [tutarsiz] }).lineItems).toBeUndefined();
+    expect(siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '10' }, { ...HARIC, faturali: false }).lineItems).toBeUndefined();
+    expect(siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '10' }, { ...HARIC, faturali: undefined }).lineItems).toBeUndefined();
+    expect(siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '10' }, { ...HARIC, lineItems: [{ ...KALEM, price: null }] }).lineItems).toBeUndefined();
+    expect(siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '10' }, { ...HARIC, lineItems: [] }).lineItems).toBeUndefined();
+  });
+  it('oran kutusu BOŞALTILIRSA (bilinmiyor) kalemlere dokunulmaz; türevler açıkça null', () => {
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '' }, HARIC);
+    expect(yama.lineItems).toBeUndefined();
+    expect(yama).toMatchObject({ kdvOran: null, kdvHaricTutar: null, kdvTutari: null });
+  });
+});

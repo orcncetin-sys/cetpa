@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { siparisFaturaVar, faturaKesilebilir, mikroyaFaturaGonderilebilir } from './faturaDurumu';
+import { siparisFaturaVar, faturaKesilebilir, mikroyaFaturaGonderilebilir, bayatKalemVar, kalemSatirKdv } from './faturaDurumu';
 
 describe('siparisFaturaVar — "faturası VAR mı" (faturalı satış bayrağı DEĞİL)', () => {
   it('Mikro faturası satırı (MF-383 vakası): source mikro-fatura + faturali true + mikroFaturaNo → VAR', () => {
@@ -48,5 +48,54 @@ describe('mikroyaFaturaGonderilebilir — Mikro e-Fatura push düğmesi', () => 
     expect(mikroyaFaturaGonderilebilir({ hasInvoice: true })).toBe(true);
     expect(mikroyaFaturaGonderilebilir({ faturali: false })).toBe(false);
     expect(mikroyaFaturaGonderilebilir({})).toBe(true);
+  });
+});
+
+// ── Bayat kalem (2026-10-08) ─────────────────────────────────────────────────────────────────────────────────────
+// Satır KDV'si kalemin `vatRate`'iyle yazılır. Sipariş oranı ondan farklıysa kalem eski orana aittir: belge kesilmez.
+describe('bayatKalemVar — satır KDV\'si sipariş oranından FARKLI bir orana ait kalem varsa fatura isteği gönderilmez', () => {
+  const taze = { sku: 'A', price: 250, quantity: 12, netTutar: 3000, kdv: 600, vatRate: 20 };
+  const bayat = { ...taze, kdv: 300, vatRate: 10 };
+  it('bayat kalem (kalem %10, sipariş %20) → true; tek bayat kalem yeter', () => {
+    expect(bayatKalemVar({ kdvOran: 20, lineItems: [bayat] })).toBe(true);
+    expect(bayatKalemVar({ kdvOran: 20, lineItems: [taze, bayat] })).toBe(true);
+  });
+  it('taze sipariş (her kalem sipariş oranında) → false; oran 0 da geçerli bir orandır', () => {
+    expect(bayatKalemVar({ kdvOran: 20, lineItems: [taze, taze] })).toBe(false);
+    expect(bayatKalemVar({ kdvOran: 0, lineItems: [{ ...taze, kdv: 0, vatRate: 0 }] })).toBe(false);
+    expect(bayatKalemVar({ kdvOran: 0, lineItems: [taze] })).toBe(true);
+  });
+  it('sipariş oranı YOKSA karışmaz (sunucu 400 ile sebebini söyler): undefined / null / NaN / metin', () => {
+    for (const kdvOran of [undefined, null, NaN, '20']) expect(bayatKalemVar({ kdvOran, lineItems: [bayat] })).toBe(false);
+  });
+  it('satır KDV\'si olmayan kalem (eski / faturasız) ve oranı olmayan kalem (pencere dışı) ENGELLEMEZ', () => {
+    const kdvsiz = { sku: 'A', price: 250, quantity: 12, vatRate: 10 };
+    const oransiz = { sku: 'A', price: 250, quantity: 12, kdv: 600 };
+    expect(bayatKalemVar({ kdvOran: 20, lineItems: [kdvsiz] })).toBe(false);
+    expect(bayatKalemVar({ kdvOran: 20, lineItems: [oransiz] })).toBe(false);
+    expect(bayatKalemVar({ kdvOran: 20, lineItems: [{ kdv: NaN, vatRate: 10 }] })).toBe(false);
+  });
+  it('kalemsiz / boş sipariş → false', () => {
+    expect(bayatKalemVar({ kdvOran: 20 })).toBe(false);
+    expect(bayatKalemVar({ kdvOran: 20, lineItems: null })).toBe(false);
+    expect(bayatKalemVar({ kdvOran: 20, lineItems: [] })).toBe(false);
+    expect(bayatKalemVar(null)).toBe(false);
+    expect(bayatKalemVar(undefined)).toBe(false);
+  });
+});
+
+describe('kalemSatirKdv — fatura isteğine konacak satır KDV\'si yalnız kalem oranı = sipariş oranı iken', () => {
+  it('oranlar aynı → kalemin KDV\'si (0 dâhil); farklı → undefined; kalemde oran yok → undefined (hangi orana ait bilinmez)', () => {
+    expect(kalemSatirKdv({ kdv: 8.33, vatRate: 20 }, 20)).toBe(8.33);
+    expect(kalemSatirKdv({ kdv: 0, vatRate: 0 }, 0)).toBe(0);
+    expect(kalemSatirKdv({ kdv: 8.33, vatRate: 10 }, 20)).toBeUndefined();
+    expect(kalemSatirKdv({ kdv: 8.33 }, 20)).toBeUndefined();
+  });
+  it('KDV ya da sipariş oranı sayı değilse undefined — undefined === undefined eşleşmesi KDV göndertmez', () => {
+    expect(kalemSatirKdv({ kdv: 8.33 }, undefined)).toBeUndefined();
+    expect(kalemSatirKdv({ kdv: 8.33, vatRate: null }, null)).toBeUndefined();
+    expect(kalemSatirKdv({ vatRate: 20 }, 20)).toBeUndefined();
+    expect(kalemSatirKdv({ kdv: NaN, vatRate: 20 }, 20)).toBeUndefined();
+    expect(kalemSatirKdv({ kdv: '8.33', vatRate: 20 }, 20)).toBeUndefined();
   });
 });

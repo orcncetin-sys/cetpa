@@ -68,6 +68,9 @@ export interface GovdeKalemi {
   name?: unknown;
   quantity?: unknown;
   price?: unknown;
+  /** Satır KDV tutarı (kuruş) — sipariş penceresinin kaleme yazdığı değer (KDV dâhil girilen fiyatta "toplam − matrah").
+   *  Yalnız FATURA gövdesi okur; yoksa KDV matrahtan hesaplanır (eski davranış). Bkz. `satirKdvTutari`. */
+  kdv?: unknown;
 }
 
 export interface FaturaGirdisi {
@@ -270,6 +273,36 @@ function kalemMiktarTutar(kalem: GovdeKalemi, satirNo: number): { miktar: number
   return { miktar, tutar };
 }
 
+/**
+ * Fatura satırının KDV TUTARI (`sth_vergi`).
+ *   • Kalemde kayıtlı KDV YOKSA: `round(tutar × oran) / 100` — eski formülün aynısı (parite).
+ *   • VARSA o gönderilir: sipariş penceresinde KDV DÂHİL girilen fiyatta yazılan toplam korunur ve KDV "toplam − matrah"
+ *     olarak kaleme yazılır (kullanıcı kararı 2026-10-07); belge de aynı tutarla kesilsin diye yeniden hesaplanmaz
+ *     (50,01 dâhil, %20: matrah 41,68 + KDV 8,33 — matrahtan hesap 8,34 verir ve belge 50,02 olurdu).
+ *   • Kayıtlı KDV, matrahtan hesaplanan değerden yalnız YUVARLAMA kadar sapabilir. Sınır (türetilmiş): dâhil tutarın ve satır
+ *     matrahının kuruş yuvarlaması + net birimin 6 ondalığa yuvarlanması →
+ *       |kayıtlı − hesap| ≤ 0,01 + (1 + oran/100) × (0,005 + 5·10⁻⁷ × miktar)
+ *     (miktar 1'de 1 kuruş; yalnız çok büyük miktarda birkaç kuruş). Sınırı aşan değer yuvarlama DEĞİL tutarsızlıktır
+ *     (bayat / elle bozulmuş kalem): belge kesilmez — resmî belgeye doğrulanamayan vergi tutarı yazılmaz.
+ * ÖLÇÜLMEDİ: Mikro / GİB'in matrah × orandan 1 kuruş farklı satır KDV'sini kabul edip etmediği (Cetpa'dan henüz hiç fatura
+ * kesilmedi) — ilk gerçek faturada doğrulanacak.
+ */
+export function satirKdvTutari(kayitliKdv: unknown, tutar: number, kdvOran: number, miktar: number, satirNo: number): number {
+  const hesap = Math.round(tutar * kdvOran) / 100;
+  if (kayitliKdv === undefined || kayitliKdv === null) return hesap;
+  if (!bilinenSayi(kayitliKdv) || Number(kayitliKdv) < 0) {
+    throw new MikroGovdeHatasi('satır KDV tutarı', satirNo, 'kalemde kayıtlı KDV tutarı okunamadı');
+  }
+  const kdv = kurusaYuvarla(Number(kayitliKdv));
+  // Oran 0'da (istisna / ihracat) yuvarlama payı YOKTUR: KDV tam 0 olmalı.
+  const sinir = kdvOran === 0 ? 0 : 0.01 + (1 + kdvOran / 100) * (0.005 + 5e-7 * miktar);
+  if (Math.abs(kdv - hesap) > sinir + 1e-9) {
+    throw new MikroGovdeHatasi('satır KDV tutarı', satirNo,
+      `kalemde kayıtlı KDV (${kdv}) satır matrahı × %${kdvOran} (${hesap}) ile tutmuyor — siparişi düzenleme formundan yeniden kaydedin (kalemler güncel oranla yeniden yazılır)`);
+  }
+  return kdv;
+}
+
 // ── e-Fatura gövdesi ─────────────────────────────────────────────────────────
 /**
  * `FaturaKaydetV2` gövdesi. V17 gerçek formatı (MikroAPI.postman_collection_V17.json
@@ -309,8 +342,8 @@ export function faturaGovdesi(fatura: FaturaGirdisi, secenek: FaturaSecenekleri)
       sth_miktar:          miktar,
       sth_birim_pntr:      1,
       sth_tutar:           tutar,
-      // Kuruşa yuvarlama ESKİ FORMÜLÜN AYNISI: round(tutar × oran) / 100.
-      sth_vergi:           Math.round(tutar * kdvOran) / 100,
+      // Kalemde kayıtlı satır KDV'si varsa O (yazılan KDV dâhil toplam korunur); yoksa eski formül round(tutar × oran) / 100.
+      sth_vergi:           satirKdvTutari(kalem.kdv, tutar, kdvOran, miktar, i + 1),
       sth_vergi_pntr:      vergiPntr,
       sth_vergisiz_fl:     false,
       sth_aciklama:        metin(kalem.name),

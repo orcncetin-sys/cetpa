@@ -101,12 +101,19 @@ export interface OrderLineItem {
   price: number;
   /** Mikro faturasından türeyen kalemin satır tutarı (KDV DÂHİL — server/mikro/eslemeFatura SiparisSatiri). */
   total?: number | null;
-  /** Sürüm-2 Mikro kalemi (eslemeFatura MF_KALEM_SURUMU, 2026-09-25): KDV hariç; bilinmeyen null. */
+  /** Satır tutarları — KDV hariç; bilinmeyen null. Yazanlar: sürüm-2 Mikro kalemi (eslemeFatura MF_KALEM_SURUMU, 2026-09-25)
+   *  ve sipariş penceresi (faturalı sipariş: `netTutar` = satır matrahı, `kdv` = satır KDV'si — fatura gövdesi bu KDV'yi
+   *  gönderir; utils/siparisler/siparisKalemFiyati.kayitAlanlari). */
   brutTutar?: number | null;
   iskonto?: number | null;
   netTutar?: number | null;
   kdv?: number | null;
   masraf?: number | null;
+  /** Sipariş penceresinden açılan FATURALI siparişin kalemi (utils/siparisler/siparisKalemFiyati.kayitAlanlari): fiyatın
+   *  GİRİLDİĞİ birim. `price` her durumda KDV hariç net birimdir; çapa, oran değişince neyin sabit kalacağını belirler. */
+  fiyatBirimi?: 'kdvHaric' | 'kdvDahil';
+  /** `fiyatBirimi === 'kdvDahil'` iken kullanıcının YAZDIĞI KDV dâhil birim fiyat (yazılan toplam korunur). */
+  dahilFiyat?: number;
   /** lib/stokFiyat NetKaynagi — net tutarın nasıl belirlendiği. */
   netKaynagi?: string | null;
   birim?: string | null;
@@ -156,6 +163,10 @@ export interface Order {
   kdvOran?: number;
   kdvTutari?: number;
   kdvHaricTutar?: number;
+  /** Sipariş penceresinin İŞARETİ (2026-10-03): faturalı sipariş bu pencereden açıldı → kalemlerin `price`'ı KDV HARİÇ net
+   *  birimdir ve tutarlar kalemlerden türer (düzenleme formu oran değişince bunu kullanır). DEĞERİ yalnız görünüm notudur:
+   *  kayıt anında seçili giriş birimi — kopyası aynı görünümle açılır; tutar hesabını ETKİLEMEZ. Faturasız siparişte yoktur. */
+  fiyatGirisi?: 'kdvHaric' | 'kdvDahil';
   /**
    * Mikro `dep_no` — siparişin/sevkiyatın SEVK DEPOSU. `sip_depono` ve
    * `sth_giris/cikis_depo_no` bu değerden yazılır; sunucu bilinmiyorsa 400 döner
