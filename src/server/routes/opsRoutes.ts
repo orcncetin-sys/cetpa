@@ -21,8 +21,16 @@ import fs from 'fs';
 import { opsJetonuGecerli } from '../opsJeton.js';
 import { auditSirSayimi, ayarOzeti } from '../sirTani.js';
 import { kartFiyatDurumu, stokFiyatOzeti } from '../stokFiyatTani.js';
+import { geceOzeti, koleksiyonOlculeri, senkronSatiri } from '../acilisTani.js';
 import { broadcastDocChange } from '../pgShim.js';
 import express from 'express';
+
+/** /api/ops/acilis-tani: senkron günlüğü LİSTESİNİN satır sınırı (aşılırsa yanıtta `kesildi: true`) ve gün özetinin emniyet sınırı. */
+const SENKRON_LISTE_SINIRI = 400;
+const SENKRON_OZET_SINIRI = 5000;
+/** mikroMirror.ts: yalnız bu üç tablo her koşuda `guncelleme = now()` yazar (ON CONFLICT … DO UPDATE); diğer ayna tabloları
+ *  `ON CONFLICT … DO NOTHING` ile yazılır — damgaları son YENİ satırın zamanıdır, son senkronun değil. */
+const HER_KOSU_DAMGALI = new Set(['mikro_stoklar', 'mikro_stok_satis_fiyat_listeleri', 'mikro_cari_hesaplar']);
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface OpsRouteCtx {
@@ -187,6 +195,79 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
       });
     } catch (e) {
       console.error('[/api/ops/stok-fiyat-tani]', e instanceof Error ? e.message : String(e));
+      res.status(500).json({ success: false, error: 'Ölçüm yapılamadı. Ayrıntı sunucu günlüğünde.' });
+    }
+  });
+
+  /**
+   * GET /api/ops/acilis-tani — SALT OKUNUR ölçüm (2026-10-08; "site yüklenirken veri çekmekle uğraşıyor" + "veri geceleri
+   * güncellenmiyor"). İŞ VERİSİ DÖNDÜRMEZ — yalnız ad / sayı / bayt / zaman / bayrak (saf çekirdek: acilisTani.ts):
+   *   • `koleksiyonlar`: koleksiyon başına satır sayısı, JSON baytı ve SON YAZIM zamanı (docs.updated_at — her yazımda sunucu
+   *     damgalar), bayta göre büyükten küçüğe. Açılışta SSE `init` bunların abone olunanlarını TÜMÜYLE yollar.
+   *   • `aynalar`: Mikro ayna tablolarının satır sayısı ve `max(guncelleme)`. DİKKAT — damganın anlamı tabloya göre değişir
+   *     (`damga`): 'herKosu' tablolar (stok, fiyat listesi, cari kartı) her koşuda yeniden damgalanır (= son senkron);
+   *     'yalnizYeniSatir' tablolar `ON CONFLICT … DO NOTHING` ile yazılır (= son YENİ satır) — yeni satır gelmeyen gecede damga
+   *     eski kalır. "Koştu mu" sorusunun yanıtı o tablolarda bu alan DEĞİL, `senkron`'dur.
+   *   • `zamanlanmis`: gece işlerinin KAYITLI olup olmadığı (ortam değişkeninin DEĞERİ değil, karşılaştırma sonucu).
+   *   • `senkron.satirlar`: son 5 günün EN YENİ 400 syncLog satırı (işlem, hedef, başarı, süre, kayıt sayısı, hata SINIFI —
+   *     metin yok); `kesildi: true` ise liste eksik. `senkron.gunler`: zamanlanmış koşuların gün gün özeti — listeden DEĞİL,
+   *     yalnız sistem satırlarını okuyan AYRI sorgudan (pencere İstanbul gün başına hizalı: sınır günü kısmi sayılmaz; elle
+   *     yapılan işlemlerin çokluğu gece satırlarını pencereden düşüremez).
+   * Token: X-Ops-Token (scripts/ops-istek.sh).
+   */
+  app.get('/api/ops/acilis-tani', async (req: Request, res: Response) => {
+    if (!opsJetonuGecerli(req, res)) return;
+    const pool = C.getPgPool?.();
+    if (!pool) return res.status(503).json({ error: 'pg havuzu yok (lokal Firestore fallback)' });
+    try {
+      const boyut = await pool.query(
+        "SELECT coll, count(*)::int AS satir, COALESCE(sum(octet_length(data::text)), 0)::bigint AS bayt, max(updated_at) AS son FROM docs GROUP BY coll");
+      const gunluk = await pool.query(
+        `SELECT data, updated_at FROM docs WHERE coll = 'syncLog' AND updated_at > now() - interval '5 days' ORDER BY updated_at DESC LIMIT ${SENKRON_LISTE_SINIRI + 1}`);
+      // Gün özeti listenin sınırından BAĞIMSIZ: yalnız zamanlanmış (sistem) satırları, İstanbul gün BAŞINA hizalı 7 günlük pencere.
+      const sistem = await pool.query(
+        "SELECT data, updated_at FROM docs WHERE coll = 'syncLog' AND data->>'userId' = 'system' "
+        + "AND updated_at >= (date_trunc('day', now() AT TIME ZONE 'Europe/Istanbul') - interval '6 days') AT TIME ZONE 'Europe/Istanbul' "
+        + `ORDER BY updated_at DESC LIMIT ${SENKRON_OZET_SINIRI + 1}`);
+      // Ayna tabloları: adlar katalogdan (tahmin yok); `guncelleme` kolonu olmayan tablo (eşleşme tablosu) yalnız sayılır.
+      const tablolar = await pool.query(
+        "SELECT t.table_name AS ad, EXISTS (SELECT 1 FROM information_schema.columns c WHERE c.table_schema = t.table_schema AND c.table_name = t.table_name AND c.column_name = 'guncelleme') AS damgali "
+        + "FROM information_schema.tables t WHERE t.table_schema = current_schema() AND t.table_name LIKE 'mikro\\_%' ORDER BY 1");
+      const aynalar: Array<{ ad: string; satir: number | null; sonGuncelleme: string | null; damga: 'herKosu' | 'yalnizYeniSatir' | null }> = [];
+      for (const t of tablolar.rows) {
+        const ad = String(t.ad);
+        if (!/^mikro_[a-z0-9_]+$/.test(ad)) continue;             // katalogdan geldi ama yine de tanımlayıcı olarak doğrula
+        const r = await pool.query(`SELECT count(*)::int AS satir${t.damgali === true ? ', max(guncelleme) AS son' : ''} FROM ${ad}`);
+        const son = r.rows[0]?.son;
+        aynalar.push({
+          ad, satir: typeof r.rows[0]?.satir === 'number' ? r.rows[0].satir : null,
+          sonGuncelleme: son instanceof Date && Number.isFinite(son.getTime()) ? son.toISOString() : null,
+          damga: t.damgali === true ? (HER_KOSU_DAMGALI.has(ad) ? 'herKosu' : 'yalnizYeniSatir') : null,
+        });
+      }
+      const cevir = (r: Record<string, unknown>) => senkronSatiri((r.data ?? {}) as Record<string, unknown>,
+        r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at ?? ''));
+      const satirlar = gunluk.rows.slice(0, SENKRON_LISTE_SINIRI).map(cevir);
+      const sistemSatirlari = sistem.rows.slice(0, SENKRON_OZET_SINIRI).map(cevir);
+      res.json({
+        success: true,
+        uretim: new Date().toISOString(),
+        ...koleksiyonOlculeri(boyut.rows),
+        aynalar,
+        zamanlanmis: {
+          mikroCronKayitli: process.env.MIKRO_CRON_SYNC === 'true',
+          mikroSurum: MIKRO_JUMP_SURUM,
+          // crons.ts: 04:00 stok miktar/maliyet işi yalnız MIKRO_CRON_SYNC === 'true' bloğunda KAYDEDİLİR ve sürüm < 17 iken
+          // ilk satırda döner (GenelAmacliMaliyetListesiV2 V16'da yok) — ikisi birlikte sağlanmadıkça ÇALIŞMAZ.
+          geceStokMiktarIsiCalisir: process.env.MIKRO_CRON_SYNC === 'true' && MIKRO_JUMP_SURUM >= 17,
+        },
+        senkron: {
+          gunler: geceOzeti(sistemSatirlari), gunlerKesildi: sistem.rows.length > SENKRON_OZET_SINIRI,
+          satirlar, kesildi: gunluk.rows.length > SENKRON_LISTE_SINIRI,
+        },
+      });
+    } catch (e) {
+      console.error('[/api/ops/acilis-tani]', e instanceof Error ? e.message : String(e));
       res.status(500).json({ success: false, error: 'Ölçüm yapılamadı. Ayrıntı sunucu günlüğünde.' });
     }
   });
