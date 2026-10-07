@@ -11,7 +11,7 @@
  */
 import type { Express, Request, Response, RequestHandler } from 'express';
 import type { AdminDbLike, DocDaralt } from '../adminDbTypes.js';
-import { stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, birimSapmalari, netCozumleri, mikroTutarsizliklari } from '../../lib/stokFiyat.js';
+import { stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, birimSapmalari, netCozumleri, mikroTutarsizliklari, dogrulanamayanSatirlar } from '../../lib/stokFiyat.js';
 import { bilinenSayi } from '../../utils/para.js';
 import { cariBakiyeToplamlari } from '../../utils/muhasebe/finansalOranlar.js';
 import { zamanMs } from '../../utils/zaman.js';
@@ -133,6 +133,9 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
       // (KDV'siz iskontolu satır, başlığın doğrulamadığı imzalı satır…) BİLİNMİYOR → null — 0 DEĞİL.
       const tutarsizlikSayisi = new Map<string, number>();
       for (const s of tutarsizliklar) { const n = tutarsizlikSayisi.get(s.sku); tutarsizlikSayisi.set(s.sku, n === undefined ? 1 : n + 1); }
+      // "KDV'yle doğrulanamadı" satırları (2026-10-08 kullanıcı: "46 satır … hangileri, onu da böyle filtrele"): altbilgideki
+      // sayının SATIRLARI — AYNI `cozum`, aynı ad eşlemesi. Liste uzunluğu `netKaynaklari.dogrulanamadi` ile eşittir (lib testi).
+      const dogrulanamayanlar = dogrulanamayanSatirlar(movements, secenek, cozum).map(s => ({ ...s, ad: adMap.get(s.sku) ?? s.sku }));
       const rows = ozet.satirlar.map(r => {
         const n = sapmaSayisi.get(r.sku);
         const sayi = !sapma.degerlendirilen.has(r.sku) ? null : n === undefined ? 0 : n;
@@ -144,7 +147,7 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
         return { ...r, ad: adMap.get(r.sku) ?? r.sku, kalanStok: stokMap.get(r.sku) ?? null, sapmaSayisi: sayi, tutarsizlikSayisi: tSayi, tutarsizlikEnAz: tEnAz };
       });
       // iskontoKolonlari: aynada GERÇEKTEN bulunan sth_iskonto<N> kolonları — boşsa ekran "iskonto kolonu yok" der.
-      res.json({ success: true, rows, toplamSku: rows.length, iskontoKolonlari: ozet.iskontoKolonlari, netKaynaklari: ozet.netKaynaklari, sapmalar, tutarsizliklar });
+      res.json({ success: true, rows, toplamSku: rows.length, iskontoKolonlari: ozet.iskontoKolonlari, netKaynaklari: ozet.netKaynaklari, sapmalar, tutarsizliklar, dogrulanamayanlar });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
     }

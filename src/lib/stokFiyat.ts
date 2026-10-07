@@ -512,6 +512,8 @@ export interface StokFiyatDetaySatiri {
   fatura: FaturaAnahtari | null;
   /** YALNIZ kaynak 'mikroKaydiTutarsiz' iken: Mikro'daki ham satır tutarı (sth_tutar) — ekran "Mikro'da ₺X" der. */
   mikroTutar?: number;
+  /** YALNIZ kaynak 'dogrulanamadi' iken: neden KDV ile sağlanamadı ("KDV'yle doğrulanamadı" listesiyle AYNI sınıflama). */
+  neden?: DogrulanamamaNedeni;
 }
 
 /** Bir SKU'nun tüm alım/satım satırları (iptal hariç), yeniden eskiye. */
@@ -534,6 +536,7 @@ export function stokFiyatDetay(hareketler: readonly StokHareketi[], sku: string,
         evrakNo: [h.sth_evrakno_seri, h.sth_evrakno_sira].filter(v => v !== '' && v != null).join('-') || null,
         fatura: faturaAnahtari(h),
         ...(tamam && c.ok && s.kaynak === 'mikroKaydiTutarsiz' ? { mikroTutar: c.tutar } : {}),
+        ...(tamam && c.ok && s.kaynak === 'dogrulanamadi' ? { neden: dogrulanamamaNedeni(c) } : {}),
       };
     })
     .sort((a, b) => String(b.tarih ?? '').localeCompare(String(a.tarih ?? '')));
@@ -761,6 +764,73 @@ export function mikroTutarsizliklari(hareketler: readonly StokHareketi[], secene
     if (d.belirsiz > 0) belirsizUrunler.add(sku);
   }
   return { satirlar: satirlar.sort((a, b) => b.fazla - a.fazla), degerlendirilen, belirsizFaturalar, belirsizUrunler };
+}
+
+// ── KDV'yle doğrulanamayan satırlar ────────────────────────────────────────────────────────────────
+
+/** Satırın neti neden KDV ile sağlanamadı. */
+export type DogrulanamamaNedeni =
+  /** Satırın KDV'si 0 (KDV'siz / istisna belge, irsaliye…) — sağlayacak KDV yok. */
+  | 'kdvsiz'
+  /** Satırda KDV alanı yok ya da sayı değil — BİLİNMİYOR (0 değil). */
+  | 'kdvBilinmiyor'
+  /** KDV var, ama (tutar − Σiskonto) da tutarın kendisi de o tarihin geçerli oranlarından hiçbirine oturmuyor. */
+  | 'kdvOturmadi';
+export interface DogrulanamayanSatir {
+  sku: string;
+  /** YYYY-AA-GG; tarihsiz satırda null. */
+  tarih: string | null;
+  yon: 'alis' | 'satis';
+  miktar: number;
+  fatura: FaturaAnahtari | null;
+  evrakNo: string | null;
+  cariKod: unknown;
+  /** Mikro'daki ham satır tutarı (sth_tutar). */
+  mikroTutar: number;
+  /** Σ sth_iskonto — satırdaki iskonto alanları (düşüldü). */
+  iskonto: number;
+  /** Satırın KDV'si; bilinmiyorsa null (0 = gerçekten KDV'siz). */
+  kdv: number | null;
+  /** Ekranın kullandığı net: belgelenmiş Mikro davranışı (tutar − Σiskonto). */
+  net: number;
+  birimFiyat: number;
+  neden: DogrulanamamaNedeni;
+  /** KDV, iskontonun İKİ KEZ düşülmüş hâline (tutar − 2·Σiskonto) geçerli oranda oturuyor, Mikro'nun okumasına (tutar − Σiskonto)
+   *  hiçbir oranda oturmuyor — "Mikro'da düzeltilecek" kalıbının imzası, ama fatura başlığı doğrulayamadı. Net DEĞİŞMEZ
+   *  (hüküm yok); yalnız kullanıcı o Mikro kaydına baksın diye işaret. */
+  ciftOkumaOturuyor: boolean;
+}
+
+/** Çözümü 'dogrulanamadi' kalan satırın nedeni — liste ve İşlem Detayı AYNI sınıflamayı kullanır (tek yer). */
+const dogrulanamamaNedeni = (c: Extract<TutarCozumu, { ok: true }>): DogrulanamamaNedeni =>
+  !Number.isFinite(c.vergi) ? 'kdvBilinmiyor' : c.vergi > 0 ? 'kdvOturmadi' : 'kdvsiz';
+
+/**
+ * "KDV'yle doğrulanamadı" listesi (2026-10-08 kullanıcı isteği: "46 satır KDV ile doğrulanamadı olan hangileri, onu da böyle
+ * filtrele"). Ekranın altbilgisindeki sayının SATIRLARI: `stokFiyatOzeti`'nin `netKaynaklari.dogrulanamadi` sayacıyla AYNI
+ * küme, AYNI kural (iptal ve SKU'suz dışarıda; yalnız ortalamaya GİREN, miktarı ve tutarı bilinen satır) — liste uzunluğu
+ * altbilgideki sayıya eşittir (testte kilitli). Bu satırların neti belgelenmiş Mikro davranışıyla (tutar − Σiskonto) alınır;
+ * yanlış olduğu İDDİA EDİLMEZ, yalnız satırın kendi KDV'siyle sağlanamamıştır. Net tutarı büyükten küçüğe.
+ */
+export function dogrulanamayanSatirlar(hareketler: readonly StokHareketi[], secenek?: NetSecenegi, hazirCozum?: NetCozumleri): DogrulanamayanSatir[] {
+  const cozumler = hazirCozum ?? netleriCoz(hareketler, secenek);
+  const satirlar: DogrulanamayanSatir[] = [];
+  for (const h of hareketler) {
+    const sku = skuOku(h);
+    if (!sku || iptalMi(h)) continue;
+    const c = cozumler.get(h);
+    if (!c || !c.ok) continue;
+    const s = satirdan(h, c);
+    if (s.durum !== 'tamam' || s.kaynak !== 'dogrulanamadi') continue;
+    satirlar.push({
+      sku, tarih: tarihMetni(h.sth_tarih), yon: yonOku(h), miktar: s.miktar, fatura: faturaAnahtari(h),
+      evrakNo: [h.sth_evrakno_seri, h.sth_evrakno_sira].filter(v => v !== '' && v != null).join('-') || null,
+      cariKod: h.sth_cari_kodu ?? h.sth_cari_kod ?? null,
+      mikroTutar: c.tutar, iskonto: c.isk, kdv: Number.isFinite(c.vergi) ? c.vergi : null, net: s.net, birimFiyat: s.birimFiyat,
+      neden: dogrulanamamaNedeni(c), ciftOkumaOturuyor: c.ciftIskontoNeti !== null,
+    });
+  }
+  return satirlar.sort((a, b) => b.net - a.net);
 }
 
 // ── Fatura sağlaması ─────────────────────────────────────────────────────────────────────────────────

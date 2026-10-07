@@ -19,7 +19,7 @@ import ModuleHeader from './ModuleHeader';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
 import { SortHeader } from './accounting/shared';
 import { hareketFaturasi } from '../utils/faturaEsle';
-import { BIRIM_SAPMA_KATI, type FaturaAnahtari, type MikroTutarsizligi } from '../lib/stokFiyat';
+import { BIRIM_SAPMA_KATI, type FaturaAnahtari, type MikroTutarsizligi, type DogrulanamayanSatir, type DogrulanamamaNedeni } from '../lib/stokFiyat';
 import { yuzdeYaz } from '../utils/rapor/bicim';
 import { eslesir } from '../utils/arama';
 import { authFetch } from '../services/authFetch';
@@ -55,6 +55,8 @@ interface BirimSapmaSatiri {
 }
 /** Sunucu: lib/stokFiyat.MikroTutarsizligi + ürün adı — Mikro kaydı kendi içinde tutarsız satır (evrak 420, 2026-09-26). */
 type MikroTutarsizlikSatiri = MikroTutarsizligi & { ad: string };
+/** Sunucu: lib/stokFiyat.DogrulanamayanSatir + ürün adı — neti satırın kendi KDV'siyle sağlanamayan satır (2026-10-08). */
+type DogrulanamayanListeSatiri = DogrulanamayanSatir & { ad: string };
 /** Liste satırının cari kodu `unknown` gelir (Mikro alanı): yalnız metin/sayı kabul, gerisi null (uydurma yok). */
 const cariMetni = (v: unknown): string | null => typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : null;
 interface FiyatDetaySatiri {
@@ -68,6 +70,8 @@ interface FiyatDetaySatiri {
   fatura?: FaturaAnahtari | null;
   /** YALNIZ kaynak 'mikroKaydiTutarsiz' iken: Mikro'daki ham satır tutarı (sth_tutar). Eski sunucuda yok → ipucu tutar yazmaz. */
   mikroTutar?: number;
+  /** YALNIZ kaynak 'dogrulanamadi' iken: neden (lib/stokFiyat). Eski sunucuda yok → ipucu üç nedeni birlikte sayar. */
+  neden?: DogrulanamamaNedeni;
 }
 type FkSortKey = 'ad' | 'alisOrtFiyat' | 'alisMiktar' | 'satisOrtFiyat' | 'satisMiktar' | 'marjTL' | 'kalanStok';
 
@@ -96,6 +100,10 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
    *  Kullanıcı: "net tutar iskontolu halde göstermeli" — ekran iskontolu neti gösterir, liste Mikro'da düzeltilecekleri. */
   const [fkTutarsizliklar, setFkTutarsizliklar] = useState<MikroTutarsizlikSatiri[]>([]);
   const [fkTutarsizlikAcik, setFkTutarsizlikAcik] = useState(false);
+  /** "KDV'yle doğrulanamadı" listesi (2026-10-08 kullanıcı: "46 satır … hangileri, onu da böyle filtrele"): altbilgideki
+   *  sayının satırları. Eski sunucu yanıtında alan yok → boş liste, düğme görünmez. */
+  const [fkDogrulanamayanlar, setFkDogrulanamayanlar] = useState<DogrulanamayanListeSatiri[]>([]);
+  const [fkDogrulanamayanAcik, setFkDogrulanamayanAcik] = useState(false);
   // Sıralama (2026-08-13 kullanıcı bildirimi: tablo hiç sıralanmıyordu — kolon
   // başlıkları tıklanabilir değildi). AccountingModule'deki SortHeader deseni
   // ortak modülden geliyor; sıralama mantığı bu tek tabloya özel ve hafif.
@@ -123,7 +131,7 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
       .then(r => r.json())
       .then(json => {
         if (iptal) return;
-        if (json.success) { setFkRows(json.rows); setFkSapmalar(Array.isArray(json.sapmalar) ? json.sapmalar : []); setFkTutarsizliklar(Array.isArray(json.tutarsizliklar) ? json.tutarsizliklar : []); setFkIskontoKolonlari(Array.isArray(json.iskontoKolonlari) ? json.iskontoKolonlari : null); setFkNetKaynaklari(json.netKaynaklari && typeof json.netKaynaklari === 'object' ? json.netKaynaklari : {}); }
+        if (json.success) { setFkRows(json.rows); setFkSapmalar(Array.isArray(json.sapmalar) ? json.sapmalar : []); setFkTutarsizliklar(Array.isArray(json.tutarsizliklar) ? json.tutarsizliklar : []); setFkDogrulanamayanlar(Array.isArray(json.dogrulanamayanlar) ? json.dogrulanamayanlar : []); setFkIskontoKolonlari(Array.isArray(json.iskontoKolonlari) ? json.iskontoKolonlari : null); setFkNetKaynaklari(json.netKaynaklari && typeof json.netKaynaklari === 'object' ? json.netKaynaklari : {}); }
         else setFkError(json.error || (oc(currentLanguage).veri_alinamadi));
       })
       .catch(() => { if (!iptal) setFkError(oc(currentLanguage).veri_alinamadi); })
@@ -182,6 +190,11 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
   // Şüpheli satır listesi arama kutusuna uyar (ekrandaki "dayson" araması listeyi de daraltır).
   const sapmaFiltreli = fkSapmalar.filter(s => aramaEsler(s.sku, s.ad));
   const tutarsizFiltreli = fkTutarsizliklar.filter(t => aramaEsler(t.sku, t.ad));
+  const dogrulanamayanFiltreli = fkDogrulanamayanlar.filter(d => aramaEsler(d.sku, d.ad));
+  const nedenEtiketi = (n: DogrulanamamaNedeni): string =>
+    n === 'kdvsiz' ? (trFk ? "KDV'siz satır" : 'No VAT on line')
+      : n === 'kdvBilinmiyor' ? (trFk ? 'KDV alanı boş' : 'VAT field empty')
+      : (trFk ? 'KDV, satır tutarına geçerli bir oranla oturmuyor' : 'VAT fits the line amount at no valid rate');
   // Ürün rozeti: SÜZÜLMEMİŞ listeden sayılır (listede olan satır kesin bulgudur). Listede olmayan ürün için sayı YAZILMAZ —
   // "0" demek "değerlendirildi, temiz" iddiası olurdu (lib `degerlendirilen`); rozet yalnız > 0 iken basılır.
   const tutarsizSayisi = new Map<string, number>();
@@ -198,7 +211,7 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
         <Search size={14} className="text-gray-400" />
         <input value={fkSearch} onChange={e => setFkSearch(e.target.value)} placeholder={trFk ? 'SKU veya ürün adı ara...' : 'Search SKU or name...'} className="apple-input px-3 py-2 text-sm flex-1 max-w-xs" />
         {!fkLoading && <span className="text-xs text-gray-400">{filtered.length} {trFk ? 'ürün' : 'items'}</span>}
-        {!fkLoading && (sapmaFiltreli.length > 0 || tutarsizFiltreli.length > 0) && (
+        {!fkLoading && (sapmaFiltreli.length > 0 || tutarsizFiltreli.length > 0 || dogrulanamayanFiltreli.length > 0) && (
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {tutarsizFiltreli.length > 0 && (
               <button onClick={() => setFkTutarsizlikAcik(a => !a)} aria-expanded={fkTutarsizlikAcik}
@@ -212,6 +225,13 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
                 className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
                 title={trFk ? `Birim fiyatı ürünün kendi medyanından ${BIRIM_SAPMA_KATI} kat ve üzeri sapan satırlar — koli/adet karışıklığı olabilir` : `Lines whose unit price deviates ${BIRIM_SAPMA_KATI}× or more from the product median — possible box/unit mix-up`}>
                 ⚠ {trFk ? `Birim şüpheli satır: ${sapmaFiltreli.length}` : `Suspicious unit lines: ${sapmaFiltreli.length}`}
+              </button>
+            )}
+            {dogrulanamayanFiltreli.length > 0 && (
+              <button onClick={() => setFkDogrulanamayanAcik(a => !a)} aria-expanded={fkDogrulanamayanAcik}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
+                title={trFk ? "Neti satırın kendi KDV'siyle sağlanamayan satırlar (KDV'siz, KDV alanı boş ya da KDV satır tutarına oturmuyor) — net, Mikro'daki satır tutarından satır iskontoları düşülerek alındı" : 'Lines whose net could not be verified with the line VAT (no VAT, empty VAT field, or VAT does not fit the line amount) — net is the Mikro line amount minus line discounts'}>
+                ⚠ {trFk ? `KDV'yle doğrulanamadı: ${dogrulanamayanFiltreli.length}` : `Not verifiable via VAT: ${dogrulanamayanFiltreli.length}`}
               </button>
             )}
           </div>
@@ -303,6 +323,63 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
                         {!s.evrakNo ? <span className="text-gray-400">—</span>
                           : f ? <button onClick={() => setFkFatura(f)} className="text-brand hover:underline font-medium">{s.evrakNo}</button>
                           : <span className="text-gray-400" title={trFk ? 'Fatura değil (irsaliye/sayım)' : 'Not an invoice'}>{s.evrakNo}</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {fkDogrulanamayanAcik && dogrulanamayanFiltreli.length > 0 && (
+        <div className="apple-card overflow-hidden border border-amber-200">
+          <p className="px-4 pt-3 text-[11px] text-amber-700">
+            {trFk
+              ? "Bu satırların neti satırın kendi KDV'siyle sağlanamadı: satır KDV'siz (istisna belge, irsaliye), KDV alanı boş ya da KDV satır tutarına geçerli bir oranla oturmuyor. Net, Mikro'daki satır tutarından satırdaki iskontolar düşülerek alındı. Bu, netin yanlış olduğu anlamına gelmez; yalnız sağlaması yapılamadı (satıra yazılmamış fatura altı iskonto varsa görülemez). \"İskonto iki kez düşülünce oturuyor\" notu olan satırda Mikro kaydına bakın: iskonto satır tutarına bir kez daha eklenmiş olabilir. Ortalama alış/satış ve marj bu satırları İÇERİR."
+              : "The net of these lines could not be verified with the line's own VAT: no VAT on the line (exempt document, delivery note), empty VAT field, or VAT that does not fit the line amount at a valid rate. Net is the Mikro line amount minus the line discounts. This does not mean the net is wrong; it only could not be cross-checked (an invoice-level discount not written on the line would be invisible). Where the note says the VAT fits once the discount is deducted twice, check the Mikro record: the discount may have been added to the line amount once more. Averages and margin INCLUDE these lines."}
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[820px]">
+              <thead>
+                <tr className="bg-amber-50/60 border-b border-amber-100 text-[10px] font-bold text-gray-500 uppercase">
+                  <th className="text-left py-2 px-3">{oc(currentLanguage).urun}</th>
+                  <th className="text-left py-2 px-2">{oc(currentLanguage).tarih}</th>
+                  <th className="text-left py-2 px-2">{trFk ? 'Yön' : 'Dir.'}</th>
+                  <th className="text-left py-2 px-2">{trFk ? 'Evrak' : 'Doc'}</th>
+                  <th className="text-right py-2 px-2">{trFk ? 'Miktar' : 'Qty'}</th>
+                  <th className="text-right py-2 px-2" title={trFk ? "Mikro'daki satır tutarı (sth_tutar)" : 'Line amount in Mikro (sth_tutar)'}>{trFk ? 'Mikro tutarı' : 'Mikro amount'}</th>
+                  <th className="text-right py-2 px-2">{trFk ? 'İskonto' : 'Discount'}</th>
+                  <th className="text-right py-2 px-2">{oc(currentLanguage).kdv}</th>
+                  <th className="text-right py-2 px-2" title={trFk ? 'Ekranın kullandığı net: Mikro tutarı − satır iskontoları' : 'Net used on this screen: Mikro amount − line discounts'}>{trFk ? 'Kullanılan net' : 'Net used'}</th>
+                  <th className="text-left py-2 px-3">{trFk ? 'Neden' : 'Reason'}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {dogrulanamayanFiltreli.map((d, i) => {
+                  const f = d.evrakNo ? hareketFaturasi(mikroFaturalar, { evrakSira: d.fatura?.sira ?? d.evrakNo, cariKod: cariMetni(d.cariKod), tarih: d.tarih }, d.fatura) : null;
+                  return (
+                    <tr key={`${d.sku}|${d.evrakNo ?? ''}|${i}`} className="hover:bg-amber-50/40">
+                      <td className="py-2 px-3">
+                        <button onClick={() => fkAcDetay(d.sku)} className="text-left hover:underline" title={trFk ? 'Ürünün tüm hareketlerini aç' : 'Open all movements of the product'}>
+                          <span className="block font-semibold text-gray-800">{d.ad}</span><span className="block text-[10px] text-gray-400 font-mono">{d.sku}</span>
+                        </button>
+                      </td>
+                      <td className="py-2 px-2 text-gray-600">{d.tarih ?? '—'}</td>
+                      <td className="py-2 px-2"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${d.yon === 'alis' ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'}`}>{d.yon === 'alis' ? (trFk ? 'Alış' : 'Purchase') : (trFk ? 'Satış' : 'Sale')}</span></td>
+                      <td className="py-2 px-2">
+                        {!d.evrakNo ? <span className="text-gray-400">—</span>
+                          : f ? <button onClick={() => setFkFatura(f)} className="text-brand hover:underline font-medium">{d.evrakNo}</button>
+                          : <span className="text-gray-400" title={trFk ? 'Fatura değil (irsaliye/sayım)' : 'Not an invoice'}>{d.evrakNo}</span>}
+                      </td>
+                      <td className="py-2 px-2 text-right">{d.miktar.toLocaleString(trFk ? 'tr-TR' : 'en-US')}</td>
+                      <td className="py-2 px-2 text-right text-gray-500">{fmtF(d.mikroTutar)}</td>
+                      <td className="py-2 px-2 text-right text-gray-600">{fmtF(d.iskonto)}</td>
+                      <td className="py-2 px-2 text-right text-gray-600">{fmtF(d.kdv)}</td>
+                      <td className="py-2 px-2 text-right font-semibold text-gray-800">{fmtF(d.net)}</td>
+                      <td className="py-2 px-3 text-amber-700">
+                        {nedenEtiketi(d.neden)}
+                        {d.ciftOkumaOturuyor === true && <span className="block text-[10px] font-semibold text-amber-800">{trFk ? 'İskonto iki kez düşülünce oturuyor — Mikro kaydını kontrol edin' : 'Fits once the discount is deducted twice — check the Mikro record'}</span>}
                       </td>
                     </tr>
                   );
@@ -484,7 +561,9 @@ export default function FiyatKarsilastirmaPanel({ currentLanguage, userRole, fmt
                             : s.kaynak === 'faturaAltiKdvden' ? (trFk ? "Fatura altı iskonto — satırda yazılı değil; satırın KDV'sinden türetildi (fatura başlığıyla doğrulanamadı). Faturalar henüz çekilmediyse \"Faturaları Çek\" sonrası başlıkla kesinleşebilir." : 'Invoice-level discount — not on the line; derived from the line VAT (not verified against the invoice header). If invoices have not been pulled yet, pulling them may confirm it.')
                             : s.kaynak === 'mikroKaydiTutarsiz' ? (trFk ? "İskonto e-faturadaki gibi düşüldü — Mikro iskontoyu satır tutarına bir kez daha eklemiş (bkz. Net Tutar ⚠)" : 'Discount deducted as on the e-invoice — Mikro added it to the line amount once more (see Net Amount ⚠)')
                             : s.kaynak === 'tutarZatenNet' ? (trFk ? 'Mikro tutarı zaten iskontolu yazmış — tekrar düşülmedi' : 'Mikro amount already net — not deducted again')
-                            : s.kaynak === 'dogrulanamadi' ? (trFk ? "KDV'yle doğrulanamadı (KDV'siz satır) — satırdaki iskonto alanları düşüldü" : 'Not verifiable via VAT — line discount fields deducted') : undefined}>
+                            : s.kaynak === 'dogrulanamadi' ? (trFk
+                              ? `KDV'yle doğrulanamadı (${s.neden ? nedenEtiketi(s.neden) : "KDV'siz, KDV alanı boş ya da KDV satır tutarına oturmuyor"}) — satırdaki iskonto alanları düşüldü`
+                              : `Not verifiable via VAT (${s.neden ? nedenEtiketi(s.neden) : 'no VAT, empty VAT field, or VAT does not fit the line amount'}) — line discount fields deducted`) : undefined}>
                           {s.iskonto == null ? '—' : s.iskonto > 0 ? `−${fmtF(s.iskonto)}` : fmtF(0)}{(s.kaynak === 'faturaAltiKdvden' || s.kaynak === 'faturaAltiBasliktan') && <span className="text-[9px] text-amber-600"> ᶠ</span>}
                         </td>
                         <td className="py-2 px-2 text-right text-gray-600">

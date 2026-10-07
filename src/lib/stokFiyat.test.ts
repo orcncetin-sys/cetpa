@@ -8,7 +8,7 @@
  * miktarla ortalamaya sokup fiyatı aşağı çekiyordu (CLAUDE.md: sayısal alanda `|| 0` yasak).
  */
 import { describe, it, expect } from 'vitest';
-import { satirNet, stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, kalemleriCoz, birimFiyatOndaligi, faturaAnahtari, birimSapmalari, BIRIM_SAPMA_KATI, kalemSaglamasi, saglamaKur, mikroTutarsizliklari, netCozumleri, kdvOranaUymuyor } from './stokFiyat';
+import { satirNet, stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, kalemleriCoz, birimFiyatOndaligi, faturaAnahtari, birimSapmalari, BIRIM_SAPMA_KATI, kalemSaglamasi, saglamaKur, mikroTutarsizliklari, netCozumleri, kdvOranaUymuyor, dogrulanamayanSatirlar } from './stokFiyat';
 
 const alis = (p: Record<string, unknown>) => ({ sth_stok_kod: 'CIM-50', sth_tip: 0, sth_miktar: 10, sth_tutar: 1000, ...p });
 const satis = (p: Record<string, unknown>) => ({ sth_stok_kod: 'CIM-50', sth_tip: 1, sth_miktar: 4, sth_tutar: 600, ...p });
@@ -160,7 +160,7 @@ describe('stokFiyatDetay — SKU satırları: brüt, iskonto, net, net birim fiy
     expect(d).toHaveLength(2);
     expect(d[0]).toMatchObject({ tarih: '2026-09-01', yon: 'alis', miktar: 10, brutTutar: null, iskonto: null, tutar: null, birimFiyat: null, kaynak: null });
     // `sth_evraktip` yok → faturaya bağlanamaz (fatura: null); evrak numarası yine görünür.
-    expect(d[1]).toEqual({ tarih: '2026-08-01', yon: 'alis', miktar: 10, brutTutar: 1000, iskonto: 100, tutar: 900, birimFiyat: 90, kaynak: 'dogrulanamadi', cariKod: '320.01', evrakNo: 'A-377', fatura: null });
+    expect(d[1]).toEqual({ tarih: '2026-08-01', yon: 'alis', miktar: 10, brutTutar: 1000, iskonto: 100, tutar: 900, birimFiyat: 90, kaynak: 'dogrulanamadi', cariKod: '320.01', evrakNo: 'A-377', fatura: null, neden: 'kdvBilinmiyor' });
   });
 });
 
@@ -1009,5 +1009,79 @@ describe('Delta 2 (2026-09-28): imzasız satır = canlı davranış (bilinen sı
     const { c, s } = fatura([h], 1050);
     expect(c[0]).toMatchObject({ net: 1000, kaynak: 'iskontosuz' });
     expect(s).toMatchObject({ kdvUyumsuz: 0 });
+  });
+});
+
+// ── "KDV'yle doğrulanamadı" satırları (2026-10-08) ───────────────────────────────────────────────────────────────
+// Kullanıcı (Fiyat Karşılaştırma altbilgisi "46 satır KDV'yle doğrulanamadı"): "hangileri, onu da böyle filtrele".
+// Liste, altbilgideki sayacın (`stokFiyatOzeti().netKaynaklari.dogrulanamadi`) SATIRLARIDIR — sayı ile liste ayrışamaz.
+describe("dogrulanamayanSatirlar — \"KDV'yle doğrulanamadı\" listesi: altbilgideki sayının satırları", () => {
+  const taban = { sth_tip: 0, sth_evraktip: 3, sth_evrakno_seri: '', sth_tarih: '2026-08-31' };
+  // KDV'siz, iskontolu: net = 1.000 − 100 = 900
+  const KDVSIZ = { ...taban, sth_stok_kod: 'K1', sth_evrakno_sira: 801, sth_miktar: 10, sth_tutar: 1000, sth_iskonto1: 100, sth_vergi: 0, sth_cari_kodu: '320.01' };
+  // KDV alanı HİÇ yok: bilinmiyor (0 değil); net = 5.000
+  const BILINMEYEN = { ...taban, sth_stok_kod: 'K2', sth_evrakno_sira: 802, sth_miktar: 4, sth_tutar: 5000 };
+  // KDV var ama 2.000'in hiçbir geçerli oranına oturmuyor ve makul bir fatura altı matrahı da vermiyor (37 / %20 = 185)
+  const OTURMAYAN = { ...taban, sth_tip: 1, sth_stok_kod: 'K3', sth_evrakno_sira: 803, sth_miktar: 2, sth_tutar: 2000, sth_vergi: 37 };
+  // KDV'si oturan temiz satır — listede OLMAMALI
+  const TEMIZ = { ...taban, sth_stok_kod: 'K4', sth_evrakno_sira: 804, sth_miktar: 1, sth_tutar: 100, sth_vergi: 20, sth_vergi_pntr: 4 };
+  const HEPSI = [KDVSIZ, TEMIZ, OTURMAYAN, BILINMEYEN];
+
+  it('yalnız doğrulanamayan satırlar; net büyükten küçüğe; neden üç ayrı durum (KDV\'siz / bilinmiyor / oturmuyor)', () => {
+    const l = dogrulanamayanSatirlar(HEPSI);
+    expect(l.map(x => [x.sku, x.neden])).toEqual([['K2', 'kdvBilinmiyor'], ['K3', 'kdvOturmadi'], ['K1', 'kdvsiz']]);
+    expect(l[2]).toMatchObject({ sku: 'K1', tarih: '2026-08-31', yon: 'alis', miktar: 10, evrakNo: '801', cariKod: '320.01', mikroTutar: 1000, iskonto: 100, kdv: 0, net: 900, birimFiyat: 90 });
+    expect(l[0]).toMatchObject({ kdv: null, net: 5000, birimFiyat: 1250, iskonto: 0 });          // bilinmeyen KDV 0 DEĞİL, null
+    expect(l[1]).toMatchObject({ yon: 'satis', kdv: 37, net: 2000, mikroTutar: 2000 });
+  });
+
+  it('liste uzunluğu = altbilgideki sayaç (stokFiyatOzeti.netKaynaklari.dogrulanamadi) — ortalamaya GİRMEYEN satır listede de yok', () => {
+    const iptal = { ...KDVSIZ, sth_evrakno_sira: 811, sth_iptal: 1 };
+    const skusuz = { ...KDVSIZ, sth_evrakno_sira: 812, sth_stok_kod: '' };
+    const miktarsiz = { ...KDVSIZ, sth_evrakno_sira: 813, sth_miktar: 0 };
+    const miktarBilinmiyor = { ...KDVSIZ, sth_evrakno_sira: 814, sth_miktar: null };
+    const tutarsiz = { ...KDVSIZ, sth_evrakno_sira: 815, sth_tutar: null };
+    const iskontoFazla = { ...KDVSIZ, sth_evrakno_sira: 816, sth_iskonto1: 5000 };
+    const h = [...HEPSI, iptal, skusuz, miktarsiz, miktarBilinmiyor, tutarsiz, iskontoFazla];
+    const l = dogrulanamayanSatirlar(h);
+    expect(l).toHaveLength(3);
+    expect(stokFiyatOzeti(h).netKaynaklari.dogrulanamadi).toBe(3);
+    expect(l.map(x => x.evrakNo).sort()).toEqual(['801', '802', '803']);
+  });
+
+  it('serili evrak: evrakNo "SERİ-SIRA" biçiminde, fatura anahtarı seriyi taşır', () => {
+    const l = dogrulanamayanSatirlar([{ ...KDVSIZ, sth_evrakno_seri: 'A', sth_evrakno_sira: 77 }]);
+    expect(l).toHaveLength(1);
+    expect(l[0]).toMatchObject({ evrakNo: 'A-77', fatura: { seri: 'A', sira: '77', yon: 'gelen' } });
+  });
+  it('çift iskonto imzası: KDV (tutar − 2·Σiskonto)\'ya oturuyor ama başlık doğrulamadı → listede, İŞARETLİ; net DEĞİŞMEZ', () => {
+    // 1.500 / iskonto 600 / KDV 60 (%20): Mikro okuması 900 hiçbir orana oturmaz; 1.500 − 2×600 = 300 × %20 = 60 oturur.
+    const imzali = { ...taban, sth_stok_kod: 'K5', sth_evrakno_sira: 805, sth_miktar: 3, sth_tutar: 1500, sth_iskonto1: 600, sth_vergi: 60, sth_vergi_pntr: 4 };
+    const l = dogrulanamayanSatirlar([imzali, OTURMAYAN]);
+    expect(l.find(x => x.sku === 'K5')).toMatchObject({ neden: 'kdvOturmadi', ciftOkumaOturuyor: true, net: 900, mikroTutar: 1500, iskonto: 600, kdv: 60 });
+    expect(l.find(x => x.sku === 'K3')).toMatchObject({ neden: 'kdvOturmadi', ciftOkumaOturuyor: false });
+    expect(dogrulanamayanSatirlar([KDVSIZ])[0].ciftOkumaOturuyor).toBe(false);
+  });
+  it('İşlem Detayı satırı AYNI nedeni taşır (tek sınıflama) — yalnız doğrulanamayan satırda', () => {
+    const neden = (h: Record<string, unknown>) => stokFiyatDetay([h], String(h.sth_stok_kod))[0];
+    expect(neden(BILINMEYEN)).toMatchObject({ kaynak: 'dogrulanamadi', neden: 'kdvBilinmiyor' });
+    expect(neden(OTURMAYAN)).toMatchObject({ kaynak: 'dogrulanamadi', neden: 'kdvOturmadi' });
+    expect(neden(KDVSIZ)).toMatchObject({ kaynak: 'dogrulanamadi', neden: 'kdvsiz' });
+    expect('neden' in neden(TEMIZ)).toBe(false);
+    for (const h of HEPSI) expect(neden(h).neden).toBe(dogrulanamayanSatirlar([h])[0]?.neden);
+  });
+  it('fatura başlığı satırı DOĞRULADIYSA listeden düşer (başlık hakemdir) — sayaçla birlikte', () => {
+    // 801'in başlığı: meblağ 900 = tutar − iskonto → iskonto yok / satır iskontosu doğru; artık 'dogrulanamadi' değil.
+    const secenek = { faturaToplamlari: faturaToplamlari([{ cha_evrakno_seri: '', cha_evrakno_sira: 801, cha_tip: 1, cha_meblag: 900 }]) };
+    const l = dogrulanamayanSatirlar(HEPSI, secenek);
+    expect(l.map(x => x.sku)).toEqual(['K2', 'K3']);
+    expect(stokFiyatOzeti(HEPSI, secenek).netKaynaklari.dogrulanamadi).toBe(2);
+  });
+
+  it('hazır çözüm paylaşılır (sunucu hareketleri yeniden çözmez): sonuç aynı; hiç doğrulanamayan yoksa boş liste', () => {
+    const secenek = { faturaToplamlari: faturaToplamlari([{ cha_evrakno_seri: '', cha_evrakno_sira: 801, cha_tip: 1, cha_meblag: 900 }]) };
+    expect(dogrulanamayanSatirlar(HEPSI, undefined, netCozumleri(HEPSI, secenek))).toEqual(dogrulanamayanSatirlar(HEPSI, secenek));
+    expect(dogrulanamayanSatirlar([TEMIZ])).toEqual([]);
+    expect(stokFiyatOzeti([TEMIZ]).netKaynaklari.dogrulanamadi).toBeUndefined();
   });
 });

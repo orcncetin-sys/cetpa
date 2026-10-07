@@ -184,3 +184,28 @@ describe('GET /api/reports/stok-fiyat-karsilastirma/:sku/detay — `mikroTutar` 
     expect('mikroTutar' in r600).toBe(false);
   });
 });
+
+// 2026-10-08 kullanıcı (altbilgi "46 satır KDV'yle doğrulanamadı"): "hangileri, onu da böyle filtrele".
+describe("GET /api/reports/stok-fiyat-karsilastirma — \"KDV'yle doğrulanamadı\" satır listesi", () => {
+  it('yanıtta `dogrulanamayanlar`: altbilgideki sayaçla AYNI uzunlukta, envanter adıyla; başlığın doğruladığı satır listede yok', async () => {
+    const { govde } = await calistir('/api/reports/stok-fiyat-karsilastirma');
+    const l = govde.dogrulanamayanlar as Satir[];
+    expect(Array.isArray(l)).toBe(true);
+    const sayac = (govde.netKaynaklari as Record<string, number>).dogrulanamadi;
+    expect(l).toHaveLength(sayac === undefined ? 0 : sayac);
+    // KDVSIZ (evrak 14) başlığı B14 = 900 = tutar − iskonto → başlık DOĞRULADI: sayaçta da listede de yok.
+    expect(l.find(x => x.sku === 'KDVSIZ')).toBeUndefined();
+  });
+
+  it('başlığı olmayan KDV\'siz satır listelenir: neden, Mikro tutarı, iskonto, kullanılan net; ad envanterden (yoksa SKU)', async () => {
+    const eski = BASLIKLAR.splice(BASLIKLAR.indexOf(B14), 1);
+    try {
+      const { govde } = await calistir('/api/reports/stok-fiyat-karsilastirma');
+      const l = govde.dogrulanamayanlar as Satir[];
+      expect(l).toHaveLength((govde.netKaynaklari as Record<string, number>).dogrulanamadi);
+      expect(l.find(x => x.sku === 'KDVSIZ')).toMatchObject({
+        ad: "KDV'siz ürün", evrakNo: '14', yon: 'alis', miktar: 10, mikroTutar: 1000, iskonto: 100, kdv: 0, net: 900, birimFiyat: 90, neden: 'kdvsiz',
+      });
+    } finally { BASLIKLAR.push(...eski); }
+  });
+});

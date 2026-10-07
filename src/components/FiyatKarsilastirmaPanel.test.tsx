@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import FiyatKarsilastirmaPanel from './FiyatKarsilastirmaPanel';
+import type { MikroFatura } from '../hooks/useMikroFaturalar';
 
 const authFetch = vi.fn();
 vi.mock('../services/authFetch', () => ({ authFetch: (...a: unknown[]) => authFetch(...a) }));
@@ -45,8 +46,8 @@ function yonlendir() {
     return json({ success: false, error: `beklenmeyen istek ${url}` });
   });
 }
-const cizdir = () => render(
-  <FiyatKarsilastirmaPanel currentLanguage="tr" userRole="Admin" fmtKpi={v => `₺${v.toFixed(2)}`} mikroFaturalar={[]} />,
+const cizdir = (mikroFaturalar: MikroFatura[] = []) => render(
+  <FiyatKarsilastirmaPanel currentLanguage="tr" userRole="Admin" fmtKpi={v => `₺${v.toFixed(2)}`} mikroFaturalar={mikroFaturalar} />,
 );
 
 beforeEach(() => { authFetch.mockReset(); yonlendir(); });
@@ -300,5 +301,165 @@ describe('Fiyat Karşılaştırma — Mikro\'da düzeltilecek (iskonto brüte bi
     fireEvent.click(await screen.findByText(ruloSatir.ad));
     const uyari = await screen.findByTitle(/iskonto brüte bir kez daha eklenmiş — net satırın KDV'sinden/);
     expect(uyari.getAttribute('title')).not.toMatch(/₺|NaN|undefined/);
+  });
+});
+
+// ── "KDV'yle doğrulanamadı" süzgeci (2026-10-08) ─────────────────────────────────────────────────────────────────
+// Kullanıcı (altbilgi "46 satır KDV'yle doğrulanamadı" + iki amber düğmenin ekran görüntüsü): "hangileri, onu da böyle
+// filtrele". Sunucu satırları `dogrulanamayanlar` ile gönderir; üçüncü amber düğme listeyi açar.
+describe("Fiyat Karşılaştırma — KDV'yle doğrulanamadı süzgeci", () => {
+  const d = (sku: string, ad: string, evrakNo: string, net: number, neden: string, ek: Record<string, unknown> = {}) => ({
+    sku, ad, tarih: '2026-08-31', yon: 'alis', miktar: 10, fatura: { seri: '', sira: evrakNo, yon: 'gelen' }, evrakNo, cariKod: '320.07',
+    mikroTutar: net + 100, iskonto: 100, kdv: 0, net, birimFiyat: net / 10, neden, ciftOkumaOturuyor: false, ...ek,
+  });
+  const liste = [
+    d(SKU, satir.ad, '901', 5000, 'kdvBilinmiyor', { kdv: null }),
+    d('RULO1081', 'RULO ŞERİT 10x8', '902', 900, 'kdvsiz'),
+    d('RULO1081', 'RULO ŞERİT 10x8', '903', 300, 'kdvOturmadi', { kdv: 37, yon: 'satis', fatura: null, ciftOkumaOturuyor: true }),
+  ];
+  const ozetD = { ...ozet, sapmalar: [], dogrulanamayanlar: liste, netKaynaklari: { iskontosuz: 10, dogrulanamadi: 3 } };
+  const yonlendirD = (govde: unknown = ozetD) => authFetch.mockImplementation((url: string) => {
+    if (url === '/api/reports/stok-fiyat-karsilastirma') return json(govde);
+    if (url.endsWith('/detay')) return json(detay);
+    if (url === '/api/mikro/fatura/kalemler') return json({ success: true, kalemler: [] });
+    return json({ success: false, error: `beklenmeyen istek ${url}` });
+  });
+  const dugmeD = () => screen.findByRole('button', { name: /KDV'yle doğrulanamadı: 3/ });
+  const kartD = async () => {
+    fireEvent.click(await dugmeD());
+    const kart = (await screen.findByText(/neti satırın kendi KDV'siyle sağlanamadı/)).closest('.apple-card');
+    if (!(kart instanceof HTMLElement)) throw new Error('doğrulanamayan kartı yok');
+    return kart;
+  };
+
+  beforeEach(() => { yonlendirD(); });
+
+  it('düğme altbilgideki sayıyla aynı sayıyı taşır; kapalıyken liste yok, basınca açılır, yeniden basınca kapanır', async () => {
+    cizdir();
+    const dugme = await dugmeD();
+    expect(dugme.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText(/neti satırın kendi KDV'siyle sağlanamadı/)).toBeNull();
+    expect(screen.getByText(/3 satır KDV'yle doğrulanamadı/)).toBeTruthy();                 // altbilgi
+    fireEvent.click(dugme);
+    expect(await screen.findByText(/neti satırın kendi KDV'siyle sağlanamadı/)).toBeTruthy();
+    expect(dugme.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(dugme);
+    expect(screen.queryByText(/neti satırın kendi KDV'siyle sağlanamadı/)).toBeNull();
+  });
+
+  it('liste: her satır evrakı, Mikro tutarı, iskontosu, kullanılan neti ve NEDENİ ile; bilinmeyen KDV "—" (₺0 değil)', async () => {
+    cizdir();
+    const kart = await kartD();
+    const satirlar = within(kart).getAllByRole('row').slice(1);
+    expect(satirlar).toHaveLength(3);
+    expect(within(satirlar[0]).getByText('901')).toBeTruthy();
+    expect(within(satirlar[0]).getByText('KDV alanı boş')).toBeTruthy();
+    expect(within(satirlar[0]).getByText('₺5100.00')).toBeTruthy();                           // Mikro tutarı
+    expect(within(satirlar[0]).getByText('₺5000.00')).toBeTruthy();                           // kullanılan net
+    expect(within(satirlar[0]).getByText('—')).toBeTruthy();                                  // KDV bilinmiyor
+    expect(within(satirlar[0]).queryByText('₺0.00')).toBeNull();
+    expect(within(satirlar[0]).getByText('₺100.00')).toBeTruthy();                            // iskonto
+    expect(within(satirlar[0]).getByText('2026-08-31')).toBeTruthy();                         // tarih
+    expect(within(satirlar[0]).getByText('10')).toBeTruthy();                                 // miktar
+    expect(within(satirlar[1]).getByText("KDV'siz satır")).toBeTruthy();
+    expect(within(satirlar[1]).getByText('₺0.00')).toBeTruthy();                              // gerçek sıfır KDV
+    expect(within(satirlar[2]).getByText('KDV, satır tutarına geçerli bir oranla oturmuyor')).toBeTruthy();
+    // Çift iskonto imzası (başlık doğrulayamadı): net değişmez, ama satır Mikro kaydına bakılsın diye İŞARETLENİR — yalnız o satırda.
+    expect(within(satirlar[2]).getByText('İskonto iki kez düşülünce oturuyor — Mikro kaydını kontrol edin')).toBeTruthy();
+    expect(within(kart).getAllByText(/İskonto iki kez düşülünce oturuyor — Mikro/)).toHaveLength(1);
+    expect(within(satirlar[2]).getByText('Satış')).toBeTruthy();
+    expect(within(satirlar[2]).getByText('₺37.00')).toBeTruthy();
+  });
+
+  it('"iskonto iki kez düşülünce oturuyor" notu NEDENE değil işarete bağlı: aynı nedenli iki satırdan yalnız işaretli olanda', async () => {
+    yonlendirD({ ...ozetD, netKaynaklari: { dogrulanamadi: 2 }, dogrulanamayanlar: [
+      d('RULO1081', 'RULO ŞERİT 10x8', '911', 900, 'kdvOturmadi', { kdv: 60, ciftOkumaOturuyor: true }),
+      d('RULO1081', 'RULO ŞERİT 10x8', '912', 300, 'kdvOturmadi', { kdv: 37 }),
+    ] });
+    cizdir();
+    fireEvent.click(await screen.findByRole('button', { name: /KDV'yle doğrulanamadı: 2/ }));
+    const kart = (await screen.findByText(/neti satırın kendi KDV'siyle sağlanamadı/)).closest('.apple-card') as HTMLElement;
+    const satirlar = within(kart).getAllByRole('row').slice(1);
+    expect(within(satirlar[0]).getByText(/İskonto iki kez düşülünce oturuyor — Mikro/)).toBeTruthy();
+    expect(within(satirlar[1]).queryByText(/İskonto iki kez düşülünce oturuyor — Mikro/)).toBeNull();
+    expect(within(satirlar[1]).getByText('KDV, satır tutarına geçerli bir oranla oturmuyor')).toBeTruthy();
+  });
+
+  it('evrak: fatura anahtarlı satır düğmedir ve faturayı açar; fatura olmayan evrak düz metin', async () => {
+    cizdir();
+    const kart = await kartD();
+    fireEvent.click(within(kart).getByRole('button', { name: '901' }));
+    expect(authFetch.mock.calls.some(c => c[0] === '/api/mikro/fatura/kalemler')).toBe(true);
+    expect(within(kart).queryByRole('button', { name: '903' })).toBeNull();
+    expect(within(kart).getByText('903')).toBeTruthy();
+  });
+
+  it('evrak başlığı Cetpa\'da VARSA fatura BAŞLIKLI açılır (ölçüt: evrak sırası + cari + tarih); istek fatura anahtarıyla gider', async () => {
+    const baslik: MikroFatura = { id: 'f901', faturaNo: '901', cariKod: '320.07', tarih: '2026-08-31', oranKarma: false, ebelgeTuru: -1, subeNo: NaN,
+      tutar: 6120, kdv: 1020, matrah: 5100, oran: 20, yon: 'gelen' };
+    cizdir([baslik]);
+    const kart = await kartD();
+    fireEvent.click(within(kart).getByRole('button', { name: '901' }));
+    const istek = await vi.waitFor(() => {
+      const c = authFetch.mock.calls.find(x => x[0] === '/api/mikro/fatura/kalemler');
+      if (!c) throw new Error('kalemler isteği yok');
+      return c;
+    });
+    expect(JSON.parse((istek[1] as { body: string }).body)).toEqual({ seri: '', sira: '901', yon: 'gelen' });
+    // Başlıklı açıldı: "başlık yok" uyarısı YOK (istek fatura penceresi açılınca atılır — pencere çizilmiş demektir).
+    // Karşıtı (başlık listesi boşken uyarı VAR) yukarıdaki "evrak düğmesi fatura başlığı YOKKEN de açar" testlerinde.
+    expect(screen.queryByText(/Fatura başlığı Cetpa'da yok/)).toBeNull();
+  });
+
+  it('İşlem Detayı ipucu satırın KENDİ nedenini söyler (eskiden her satıra "KDV\'siz satır" diyordu); neden yoksa (eski sunucu) üçünü sayar', async () => {
+    const satirD = (neden?: string) => ({ tarih: '2026-08-31', yon: 'alis', miktar: 10, brutTutar: 5100, iskonto: 100, tutar: 5000, birimFiyat: 500,
+      kaynak: 'dogrulanamadi', cariKod: '320.07', evrakNo: neden ?? 'eski', fatura: null, ...(neden ? { neden } : {}) });
+    authFetch.mockImplementation((url: string) => {
+      if (url === '/api/reports/stok-fiyat-karsilastirma') return json(ozetD);
+      if (url.endsWith('/detay')) return json({ success: true, satirlar: [satirD('kdvBilinmiyor'), satirD('kdvOturmadi'), satirD()] });
+      return json({ success: false, error: `beklenmeyen istek ${url}` });
+    });
+    cizdir();
+    const kart = await kartD();
+    fireEvent.click(within(kart).getAllByRole('button', { name: /RULO ŞERİT 10x8/ })[0]);
+    await screen.findByText('kdvBilinmiyor');
+    const ipuclari = Array.from(document.querySelectorAll('td[title^="KDV\'yle doğrulanamadı"]')).map(t => t.getAttribute('title'));
+    expect(ipuclari).toEqual([
+      "KDV'yle doğrulanamadı (KDV alanı boş) — satırdaki iskonto alanları düşüldü",
+      "KDV'yle doğrulanamadı (KDV, satır tutarına geçerli bir oranla oturmuyor) — satırdaki iskonto alanları düşüldü",
+      "KDV'yle doğrulanamadı (KDV'siz, KDV alanı boş ya da KDV satır tutarına oturmuyor) — satırdaki iskonto alanları düşüldü",
+    ]);
+  });
+
+  it('ürün adına basınca ürünün İşlem Detayı açılır', async () => {
+    cizdir();
+    const kart = await kartD();
+    fireEvent.click(within(kart).getAllByRole('button', { name: /RULO ŞERİT 10x8/ })[0]);
+    expect(authFetch.mock.calls.some(c => c[0] === '/api/reports/stok-fiyat-karsilastirma/RULO1081/detay')).toBe(true);
+  });
+
+  it('arama listeyi ve düğmedeki sayıyı daraltır; eşleşme yoksa düğme görünmez', async () => {
+    cizdir();
+    await dugmeD();
+    fireEvent.change(screen.getByPlaceholderText(/SKU veya ürün adı ara/), { target: { value: 'rulo' } });
+    expect(screen.getByRole('button', { name: /KDV'yle doğrulanamadı: 2/ })).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(/SKU veya ürün adı ara/), { target: { value: 'çimento' } });
+    expect(screen.queryByRole('button', { name: /KDV'yle doğrulanamadı:/ })).toBeNull();
+  });
+
+  it('eski sunucu yanıtı (dogrulanamayanlar alanı yok): düğme yok, altbilgi sayısı durur, çökme yok', async () => {
+    yonlendirD({ ...ozet, sapmalar: [], netKaynaklari: { dogrulanamadi: 3 } });
+    cizdir();
+    await screen.findByText(satir.ad);
+    expect(screen.queryByRole('button', { name: /KDV'yle doğrulanamadı:/ })).toBeNull();
+    expect(screen.getByText(/3 satır KDV'yle doğrulanamadı/)).toBeTruthy();
+  });
+
+  it('üç amber düğme TEK sarmalayıcıda yan yana', async () => {
+    yonlendirD({ ...ozetD, sapmalar: ozet.sapmalar });
+    cizdir();
+    const a = await dugmeD();
+    const b = screen.getByRole('button', { name: /Birim şüpheli satır: 2/ });
+    expect(a.parentElement).toBe(b.parentElement);
   });
 });
