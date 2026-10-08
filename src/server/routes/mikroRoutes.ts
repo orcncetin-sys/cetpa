@@ -1568,8 +1568,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     //   2) ROL yok — B2B/Dealer rolu bile toplu import tetikleyebiliyordu.
     //      `opts.collection` hedef koleksiyondur, dolayisiyla yetki o
     //      koleksiyonun YAZMA kuralindan turetilir; ayri bir liste tutulmaz.
-    // Hiz siniri (mikroLimiter) BILEREK eklenmedi: import uzun surer ve
-    // kullanicinin "tum import'lari sirayla calistir" akisini kirardi.
+    // Hiz siniri (mikroLimiter) rota zincirine BILEREK eklenmedi; yine de '/api/mikro/import' ONEKIYLE uygulanir
+    // (server.ts) - bu yorum eskiden "uygulanmiyor" diyordu, yanlisti. "Tumunu Cek" 24 istek atar; kimlikli tavan
+    // (60 / 5 dk, kullanici basina) iki tam kosuyu kaldirir.
     app.post(opts.route, C.requireAuth, C.requireMfaVerified,
              C.requireCollectionAccess(opts.collection, 'write'),
              async (req: Request, res: Response) => {

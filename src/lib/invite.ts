@@ -43,6 +43,10 @@ export function clearPendingInvite(): void {
   try { sessionStorage.removeItem(ANAHTAR); } catch { /* yok say */ }
 }
 
+/** `/api/invites/redeem` İŞLEYİCİSİNİN davet hakkındaki kalıcı hükümleri: kod yok / başka e-posta / bulunamadı / kullanılmış / süresi dolmuş / rol geçersiz.
+ *  Aynı durum kodu zincirdeki başka bir kapıdan da gelebilir (403: askıya alınmış firma) — ayırt edici gövdedeki `success: false`'tur. */
+const KALICI_RET: ReadonlySet<number> = new Set([400, 403, 404, 409, 410, 422]);
+
 export type InviteRedeemResult =
   | { ok: true; role: string; companyId: string | null }
   | { ok: false; error: string };
@@ -71,8 +75,12 @@ export async function redeemPendingInvite(
       clearPendingInvite();
       return { ok: true, role: data.role, companyId: data.companyId ?? null };
     }
-    // 4xx = kalıcı ret; tekrar denemek anlamsız, token'ı at.
-    if (res.status >= 400 && res.status < 500) clearPendingInvite();
+    // Kalıcı ret = davet İŞLEYİCİSİNİN verdiği hüküm: durum kodu açık listede VE gövde `success: false` taşıyor (işleyicinin her
+    // reddi öyle yazar — çit: invite.test.ts). Tekrar denemek anlamsız, token'ı at. Bunun dışındaki her 4xx davet hakkında DEĞİLDİR
+    // ve geçicidir; uç daveti hiç okumadan dönmüştür: 429 hız sınırı (IP başına 20 / 15 dk; aynı ofisten art arda kabulde dolabilir),
+    // 401 kimlik kapısı (belirteç yenilenemedi / sunucu sertifikayı çekemedi), 403 askıya alınmış firma (`requireAuth`), vekilin
+    // kendi 403 / 404 sayfası. Onlarda token silinirse davet sessizce kaybolur, kullanıcı yeniden davet edilmek zorunda kalır.
+    if (KALICI_RET.has(res.status) && data.success === false) clearPendingInvite();
     return { ok: false, error: data.error || 'Davet uygulanamadı.' };
   } catch (e) {
     // Ağ hatası — token dursun, sonraki girişte yeniden denenir.

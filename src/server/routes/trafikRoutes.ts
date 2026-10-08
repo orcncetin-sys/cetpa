@@ -31,7 +31,7 @@
  *
  * Sayac, oturum acmamis ziyaretcileri de saymali (landing trafigi tam da bu).
  * Kotuye kullanim yuzeyi dar: yalniz sayi arttirir, hicbir sey okumaz/silmez.
- * Hiz limiti (dakikada 30/IP) + kova sinirlamasi kalan riski kapatir.
+ * Hiz limiti (dakikada 120/IP - server.ts hitLimiter) + kova sinirlamasi kalan riski kapatir.
  * IP yalniz hiz limitinin BELLEK ICI anahtaridir, diske yazilmaz.
  *
  * server.ts'ten cagrilir. Onceki rota gruplariyla AYNI desen: bagimliliklar
@@ -52,7 +52,8 @@ export interface TrafikRouteCtx {
   getAdminDb: () => AdminDbLike;
   requireAuth: unknown;
   requireSuperAdmin: unknown;
-  /** dakikada 30/IP - yalniz bu ucun kendi limiti (apiLimiter'a EK). */
+  /** dakikada 120/IP - bu ucun KENDI limiti. Genel apiLimiter'dan MUAF (istemciIp.API_SINIRINDAN_MUAF_YOLLAR): sayac
+   *  kimlik tasiyamaz, bir ofisin sayfa gecisleri ayni IP'nin diger kimliksiz isteklerini 429'a dusurmesin. */
   hitLimiter: unknown;
   pgServerTimestamp: () => unknown;
 }

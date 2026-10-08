@@ -163,6 +163,7 @@ else
       case "$CODE" in
         401|403) pass "route $METHOD $RPATH -> $CODE (korumalı + yüklü)" ;;
         404)     fail "route $METHOD $RPATH -> 404 (deploy'da YOK)" ;;
+        429)     fail "route $METHOD $RPATH -> 429 (hız sınırı: bu IP son 15 dk'da kimliksiz tavanı doldurdu — bekleyip yeniden çalıştırın; rota bozuk demek DEĞİL)" ;;
         000)     fail "route $METHOD $RPATH -> yanıt yok (2 denemede de zaman aşımı)" ;;
         *)       fail "route $METHOD $RPATH -> $CODE (401/403 bekleniyordu)" ;;
       esac
@@ -201,9 +202,47 @@ else
       rota kaydı ara katmanlardan ÖNCE yapılmış demektir. req.body undefined
       olacağı için bu grubun TÜM POST uçları kırıktır." ;;
       404)     fail "$BODY_PROBE -> 404: rota deploy'da YOK (grup hiç kaydolmamış olabilir)" ;;
+      429)     fail "$BODY_PROBE -> 429 (hız sınırı: bu IP kimliksiz tavanı doldurdu — bekleyip yeniden çalıştırın)" ;;
       *)       fail "gövde ayrıştırma sondası beklenmedik yanıt: $PCODE ($BODY_PROBE)" ;;
     esac
   done
+
+  # 5) HIZ SINIRI IP BAŞINA MI SAYIYOR? (2026-10-08'de canlıda ölçülen arıza)
+  #
+  # IIS / ARR X-Forwarded-For'a istemciyi 'IP:kapı' diye yazar. Kapı ayıklanmazsa
+  # her yeni TCP bağlantısı TAZE kova alır: üç ayrı bağlantıda ratelimit-remaining
+  # üçü de 299 çıkıyordu — bağlantıyı yenileyen istemci hiçbir sınıra takılmıyordu.
+  #
+  # AYIRT EDİCİ (kimlik gerektirmez): üç AYRI curl çağrısı (= üç ayrı bağlantı)
+  # aynı IP kovasını tüketmeli, yani kalan hak her çağrıda AZALMALI.
+  #   IP başına sayıyor      -> 3 değer kesin azalan (ör. 291 290 289)
+  #   bağlantı başına sayıyor -> 3 değer de aynı (299 299 299)
+  #   kova DOLU (429 / kalan 0) -> ölçülemedi: kova dolabildiğine göre sayım zaten
+  #                               bağlantı başına DEĞİL; 15 dk sonra yeniden çalıştırılır
+  RL=""; RLKOD=""
+  for _ in 1 2 3; do
+    H=$(curl -s -o /dev/null -D - --max-time 20 "$BASE_URL/api/health" 2>/dev/null | tr -d '\r')
+    R=$(printf '%s\n' "$H" | awk 'tolower($1)=="ratelimit-remaining:"{print $2}')
+    K=$(printf '%s\n' "$H" | awk '/^HTTP\//{k=$2} END{print k}')
+    RL="$RL ${R:-yok}"; RLKOD="$RLKOD ${K:-yok}"
+  done
+  set -- $RL
+  RLSAYI=0
+  printf '%s%s%s' "${1:-}" "${2:-}" "${3:-}" | grep -Eq '^[0-9]+$' && [ "$#" -eq 3 ] && RLSAYI=1
+  if [ "$RLSAYI" = 1 ] && [ "$1" -gt "$2" ] && [ "$2" -gt "$3" ]; then
+    pass "hız sınırı IP başına sayıyor (ayrı bağlantılarda kalan hak:$RL)"
+  elif printf '%s' "$RLKOD" | grep -q '429' || { [ "$RLSAYI" = 1 ] && [ "$3" -eq 0 ]; }; then
+    fail "hız sınırı sondası ÖLÇÜLEMEDİ: bu IP kimliksiz tavanı doldurdu (kalan hak:$RL · yanıt:$RLKOD) —
+      15 dk bekleyip yeniden çalıştırın. Kova dolabildiğine göre sayım bağlantı başına DEĞİL
+      (öyle olsa taze bağlantı dolu kova görmezdi); bu satır düzeltmenin bozulduğunu GÖSTERMEZ."
+  elif [ "$RLSAYI" != 1 ]; then
+    fail "hız sınırı sondası ÖLÇÜLEMEDİ: ratelimit-remaining başlığı okunamadı (kalan hak:$RL · yanıt:$RLKOD) —
+      /api/health genel sınırlayıcıdan geçmiyor ya da vekil başlığı düşürüyor; sayım hakkında HÜKÜM YOK."
+  else
+    fail "HIZ SINIRI IP BAŞINA SAYMIYOR: üç ayrı bağlantıda kalan hak:$RL (kesin azalan bekleniyordu).
+      Hepsi aynıysa kova bağlantı başına (istemci adresinden kapı ayıklanmıyor —
+      server.ts'te temizIstemciIp ara katmanı ve src/server/istemciIp.ts)."
+  fi
 fi
 
 echo

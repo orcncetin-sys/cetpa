@@ -69,6 +69,7 @@ import { generateSecret as totpSecret, generateURI as totpURI, verifySync as tot
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import Stripe from "stripe";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import { akisIstegiIsaretle, akisSorguBelirteci, apiSinirindanMuaf, ipSinirAnahtari, istekBasinaBirKez, kimligeGoreTavan, kullaniciSinirAnahtari, temizIstemciIp, yetkiBelirteci, type SinirBagimliliklari } from './src/server/istemciIp.js';
 import { z } from "zod";
 
 dotenv.config();
@@ -189,7 +190,9 @@ try {
  * Usage: app.post('/api/secret', requireAuth, handler)
  */
 async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const token = req.headers.authorization?.replace(/^Bearer\s+/, '');
+  // Ayıklama hız sınırı anahtarıyla AYNI işlevden (istemciIp.yetkiBelirteci): ayrışırlarsa sınırlayıcının tanımadığı ama bu kapının
+  // kabul ettiği yazım kimlikli kullanıcıya IP kovasını da açar (tavan ikiye katlanır).
+  const token = yetkiBelirteci(req.headers.authorization);
   if (!token) {
     // Halka açık formlara kimlik doğrulaması olmadan POST atılabilir (ör: demoRequests)
     if (req.method === 'POST' && req.path.startsWith('/api/db/')) {
@@ -664,6 +667,8 @@ async function initMfaTable(): Promise<void> {
 const MFA_COOKIE_SECRET = process.env.MFA_COOKIE_SECRET
   || createHash('sha256').update(process.env.FIREBASE_PRIVATE_KEY || 'cetpa-mfa-fallback').digest('hex');
 const MFA_COOKIE = '__cetpa_mfa';
+/** Oturum çerezinin adı — modül düzeyinde: hız sınırı anahtarı da (startServer, /api/db bloğundan ÖNCE) okur. */
+const SESSION_COOKIE = '__cetpa_session';
 const MFA_COOKIE_MAX_AGE = 5 * 24 * 60 * 60 * 1000; // 5 gün (session ile aynı)
 
 /** uid + exp için HMAC-imzalı token üretir. */
@@ -707,7 +712,10 @@ function verifySessionTokenUid(token: string | null): string | null {
   const [payload, sig] = token.split('.');
   if (!payload || !sig) return null;
   const expected = createHmac('sha256', SESSION_TOKEN_SECRET).update(payload).digest('base64url');
-  if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  // Uzunluk BAYTLA karşılaştırılır: `timingSafeEqual` bayt uzunluğu farkında FIRLATIR. Karakter sayısı aynı ama ASCII dışı
+  // karakter taşıyan imza (`oturum=<yük>.%C3%A9aaa…`) eskiden RangeError → akış ucundan 500 üretiyordu (çağıranlar try dışında okur).
+  const a = Buffer.from(sig), b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   try {
     const [tUid, tExp] = Buffer.from(payload, 'base64url').toString().split('|');
     return Number(tExp) > Date.now() ? tUid : null;
@@ -729,12 +737,13 @@ async function userHasMfa(uid: string): Promise<boolean> {
 }
 
 /** Çerez başlığından ada göre değer okur (modül düzeyi — startServer dışındaki
- *  middleware'ler de kullanabilsin). */
+ *  middleware'ler de kullanabilsin). Bozuk yüzde kaçışı (`oturum=%`) = çerez YOK: `decodeURIComponent` fırlatır ve
+ *  çağıranların çoğu (akış işleyicisi, MFA kapıları) bunu try DIŞINDA okur — fırlasaydı uçtan 500 çıkardı. */
 function parseCookie(header: string | undefined, name: string): string | null {
   if (!header) return null;
   for (const part of header.split(';')) {
     const [k, ...v] = part.trim().split('=');
-    if (k === name) return decodeURIComponent(v.join('='));
+    if (k === name) { try { return decodeURIComponent(v.join('=')); } catch { return null; } }
   }
   return null;
 }
@@ -1349,6 +1358,17 @@ async function startServer() {
   // Trust the first proxy (nginx/Cloudflare/IIS ARR) so express-rate-limit reads real IP
   app.set('trust proxy', 1);
 
+  // ── İstemci IP'si KAYNAĞINDA düzeltilir (2026-10-08) ────────────────────────
+  // IIS / ARR `X-Forwarded-For`'a istemciyi 'IP:kapı' diye yazar; `req.ip` o dizgeydi. Sonuçları: hız sınırı kovası BAĞLANTI
+  // başına sayıyordu (canlıda ölçüldü: üç ayrı bağlantıda kalan hak üçü de 299) ve `req.ip` okuyan her yer — ödeme sağlayıcısına
+  // giden alıcı IP alanı dâhil — 'IP:kapı' görüyordu. Kapı burada, HER şeyden önce ayıklanır; IP'ye çözülemeyen değer olduğu gibi
+  // kalır (uydurulmaz). 'trust proxy' ve IIS ayarı değişmez. Çekirdek ve testleri: src/server/istemciIp.ts.
+  app.use((req, _res, next) => {
+    const temiz = temizIstemciIp(req.ip);
+    if (temiz !== null && temiz !== req.ip) Object.defineProperty(req, 'ip', { value: temiz, configurable: true, enumerable: true });
+    next();
+  });
+
   // ── HTTP metod tünelleme (IIS WebDAV geçici çözümü) ─────────────────────────
   // Öndeki IIS reverse-proxy'nin WebDAV modülü PUT/PATCH/DELETE fiillerini
   // uygulamaya ulaşmadan 403 ile kesiyor (POST/GET geçiyor). İstemci
@@ -1378,17 +1398,35 @@ async function startServer() {
     next();
   });
 
-  // Kimliği doğrulanmış istekte kullanıcı (uid) bazlı, değilse IP bazlı anahtar.
-  // NAT arkasındaki çok kullanıcılı ofislerde IP-başına limitin tek kullanıcıyı
-  // boğmasını önler; saldırgan token başına da sınırlanır. Tüm rate limiter'lar
-  // bunu kullanmalı — ham req.ip (varsayılan anahtar üretici) IIS ARR reverse
-  // proxy arkasında "IP:port" birleşik string döndürüyor ve express-rate-limit
-  // v7 bunu ERR_ERL_INVALID_IP_ADDRESS ile reddediyor; ipKeyGenerator bunu
-  // güvenle normalize eder.
-  const userOrIpKey = (req: Request): string => {
-    const uid = (req as Request & { uid?: string }).uid;
-    return uid ? `u:${uid}` : ipKeyGenerator(req.ip ?? '');
+  // ── Hız sınırı ANAHTARLARI (2026-10-08) — çekirdek, gerekçe ve testler: src/server/istemciIp.ts ──────────────
+  // İKİ üretici var ve hangi sınırlayıcının hangisini kullandığı BİLİNÇLİ:
+  //  • `userOrIpKey`      — doğrulanmış kullanıcı → 'u:<uid>', değilse IP. Personelin olağan trafiği (/api, /api/db, Mikro):
+  //                         aynı ofisteki (tek dış IP) kullanıcılar birbirini kilitlemesin. Kimlik BURADA, anahtar üretilirken yerelde
+  //                         doğrulanır — `req.uid`'yi yalnız `requireAuth` yazar ve sınırlayıcıların çoğu ondan ÖNCE çalışır (eskiden
+  //                         o dal fiilen ölüydü; anahtar hep 'IP:kapı' idi).
+  //  • `yalnizIpAnahtari` — kullanıcıya ASLA yükselmez. Kimliksiz yüzeyi koruyanlar (herkese açık form, sipariş takibi, sayaç, davet,
+  //                         ödeme oturumu, webhook, sel koruması): hesap açmak serbest olduğu için doğrulanmış uid ucuz üretilir; kullanıcı anahtarı bu
+  //                         sınırlayıcılarda her yeni hesaba taze kova verirdi.
+  // Yeni sınırlayıcı yazarken ikisinden birini AÇIKÇA seç; varsayılan üreticiye bırakma (çit: hizSiniri.degismez.test.ts).
+  const sinirBagimliliklari: SinirBagimliliklari = {
+    belirtecDogrula: (belirtec) => getAuth().verifyIdToken(belirtec).then(d => d.uid),
+    cerezdenUid: (cerezBasligi) => verifySessionTokenUid(parseCookie(cerezBasligi, SESSION_COOKIE)),
   };
+  const userOrIpKey = (istek: Request): Promise<string> => kullaniciSinirAnahtari(istek, sinirBagimliliklari);
+  const yalnizIpAnahtari = (istek: Request): string => ipSinirAnahtari(istek);
+
+  // ── Sel koruması: IP başına kaba üst sınır, HER /api isteğinde, her şeyden ÖNCE ────────────────────────────
+  // Kullanıcı başına kovalar çok hesapla aşılabilir (her hesap ayrı kova) ve kullanıcı anahtarı üretilirken belirteç doğrulanır;
+  // bu sınır ikisinin de önünde durur: tek IP, kaç hesapla gelirse gelsin, dakikada en çok bu kadar /api isteği atar. Tavan olağan
+  // kullanımın çok üstünde (bir kullanıcının açılışı ~15 istek, süreğen kullanımı dakikada birkaç istek) — yüz kişilik ofis de sığar.
+  app.use('/api', rateLimit({
+    windowMs: 60 * 1000,
+    max: 6000,
+    standardHeaders: false,
+    legacyHeaders: false,
+    keyGenerator: yalnizIpAnahtari,
+    message: { error: 'Too many requests, please try again later.' },
+  }));
 
   // ── Güvenlik başlıkları (helmet) ──────────────────────────────────────────
   // CSP: React + inline runtime + Firebase Auth/Storage + SSE (self) + harici
@@ -1448,7 +1486,7 @@ async function startServer() {
       max: 10, // Max 10 submissions per IP
       standardHeaders: true,
       legacyHeaders: false,
-      keyGenerator: userOrIpKey,
+      keyGenerator: yalnizIpAnahtari,
       message: { error: 'Çok fazla form gönderdiniz. Lütfen daha sonra tekrar deneyin.' },
     });
     const conditionalPublicLimiter = (req: Request, res: Response, next: NextFunction) => {
@@ -1471,7 +1509,6 @@ async function startServer() {
     // httpOnly session cookie — SSE token'ını URL'den çıkarır (güvenlik #8).
     // POST /api/db/session {idToken} → Firebase session cookie (httpOnly+Secure+
     // SameSite) set eder; SSE bunu okur, token query'de taşınmaz.
-    const SESSION_COOKIE = '__cetpa_session';
     const SESSION_MAX_AGE = 5 * 24 * 60 * 60 * 1000; // 5 gün — parseCookie modül düzeyinde
     app.post('/api/db/session', dbLimiter, requireAuth, dbJson, (req: Request, res: Response) => {
       // requireAuth uid'yi zaten lokal verifyIdToken ile doğruladı — Firebase'e
@@ -1610,14 +1647,15 @@ async function startServer() {
     // yoktu. Alan-adı deseni, derin maskeleme ve "Admin düz / diğerleri maskeli" kuralı artık orada, testli.
     const redactForRole = rolIcinMaskele;
 
-    app.get('/api/db/stream', dbLimiter, async (req: Request, res: Response) => {
+    // `akisIstegiIsaretle` dbLimiter'dan ÖNCE: sınırlayıcı çerezi / `?token=`'ı yalnız işaretli istekte kimlik sayar (istemciIp.ts).
+    app.get('/api/db/stream', akisIstegiIsaretle, dbLimiter, async (req: Request, res: Response) => {
       // Önce httpOnly session cookie (tercih edilen), sonra geriye-uyumluluk
       // için query token. İkincisi rollout sonrası kaldırılabilir.
       // Kendi HMAC oturum token'ımızı LOKAL doğrula (Firebase ağ çağrısı yok).
       // Geriye-uyumluluk: çerez yoksa query idToken (yine lokal verifyIdToken).
       let streamUid = verifySessionTokenUid(parseCookie(req.headers.cookie, SESSION_COOKIE));
       if (!streamUid) {
-        try { const d = await getAuth().verifyIdToken(String(req.query.token || '')); streamUid = d.uid; } catch { /* düş */ }
+        try { const d = await getAuth().verifyIdToken(akisSorguBelirteci(req.query)); streamUid = d.uid; } catch { /* düş */ }
       }
       if (!streamUid) { res.status(401).json({ error: 'Invalid or expired session.' }); return; }
       // MFA açıksa stream de doğrulanmış oturum ister.
@@ -2187,12 +2225,15 @@ async function startServer() {
     });
   }
 
+  /** Genel /api — kullanıcı başına 600, kimliksizde IP başına 300 istek / 15 dk (iki tavanın gerekçesi: istemciIp.kimligeGoreTavan).
+   *  Kendi sınırlayıcısı olan yollar muaf (istemciIp.API_SINIRINDAN_MUAF_YOLLAR). */
   const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 300,
+    max: kimligeGoreTavan(sinirBagimliliklari, 300, 600),
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: userOrIpKey,
+    skip: apiSinirindanMuaf,
     message: { error: 'Too many requests, please try again later.' },
   });
 
@@ -2202,29 +2243,35 @@ async function startServer() {
     max: 20,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: userOrIpKey,
+    keyGenerator: yalnizIpAnahtari,
     message: { error: 'Too many authentication attempts, please try again later.' },
   });
 
-  /** Stripe / payment — very strict: 10 req / 10 min per kullanıcı (veya IP) */
+  /**
+   * Stripe / payment — very strict: 10 req / 10 min per IP.
+   * YALNIZ IP (kullanıcıya yükselmez): `/api/stripe/create-checkout` rol kapısı taşımıyor ve hesap açmak serbest — kullanıcı
+   * anahtarında her yeni hesap 10 ödeme oturumluk taze kova alırdı (tasarım kapısı 2026-10-08).
+   */
   const paymentLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
     max: 10,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: userOrIpKey,
+    keyGenerator: yalnizIpAnahtari,
     message: { error: 'Too many payment requests, please try again later.' },
   });
 
-  /** Mikro ERP senkron işlemleri — 30 req / 5 dk per kullanıcı (ağır API çağrıları) */
-  const mikroLimiter = rateLimit({
+  /** Mikro ERP senkron işlemleri — kullanıcı başına 60, kimliksizde IP başına 30 istek / 5 dk (ağır API çağrıları).
+   *  İSTEK BAŞINA BİR KEZ sayar: aynı örnek hem aşağıdaki önekle hem mikroRoutes'ta rota zincirinde bağlı; ikisi de aynı kovayı
+   *  artırınca tavan sessizce yarıya iniyordu (eskiden iki geçiş farklı anahtar ürettiği için görünmüyordu). */
+  const mikroLimiter = istekBasinaBirKez(rateLimit({
     windowMs: 5 * 60 * 1000,
-    max: 30,
+    max: kimligeGoreTavan(sinirBagimliliklari, 30, 60),
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: userOrIpKey,
     message: { error: 'Çok fazla Mikro senkron isteği, lütfen biraz bekleyin.' },
-  });
+  }));
 
 
 
@@ -2237,9 +2284,21 @@ async function startServer() {
     max: 40,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: userOrIpKey,
+    keyGenerator: yalnizIpAnahtari,
     message: { success: false, error: 'Çok fazla takip sorgusu, lütfen biraz bekleyin.' },
   });
+
+  /** İmzalı sağlayıcı webhook'ları — IP başına 1200 istek / dk. Genel /api sınırlayıcısından muaftırlar (toplu teslimat tek çıkış
+   *  IP'sinden gelir); imzasız sel bu sınırla durur, imza doğrulaması asıl kapıdır. */
+  const webhookLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 1200,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: yalnizIpAnahtari,
+    message: { error: 'Too many webhook deliveries.' },
+  });
+  app.use(['/api/shopify/webhook', '/api/stripe/webhook'], webhookLimiter);
 
   // Apply general limiter to every /api/… route
   app.use('/api', apiLimiter);
@@ -4009,9 +4068,12 @@ async function startServer() {
   trafikRoutes(app, {
     getAdminDb: adminDbZorunlu, requireAuth, requireSuperAdmin,
     hitLimiter: rateLimit({
-      windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false,
+      // IP başına 120 / dk (eskiden 30): kova artık gerçekten IP başına — bir ofisin bütün sayfa geçişleri tek kovada (sayaç kimlik
+      // taşıyamaz). 30, on kişilik ofiste dakikada üçer geçişle doluyordu; aşan istek yalnız sayım kaybıdır ama boşuna kaybetmeyelim.
+      windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false,
       // IP yalniz bellek ici limit anahtari - diske yazilmaz (KVKK notu
       // trafikRoutes.ts basliginda).
+      keyGenerator: yalnizIpAnahtari,
       message: { error: 'Too many hits' },
     }),
     pgServerTimestamp,
