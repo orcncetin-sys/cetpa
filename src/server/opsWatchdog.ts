@@ -17,6 +17,15 @@
 import { resendGonderici, resendSagligi } from './eposta.js';
 import type { AdminDbLike } from './adminDbTypes.js';
 import { zamanla, isGunu } from './zamanla.js';
+// Mağaza talep kontrolünün okudukları. İkisi de bu modülü (ve server.ts'i) içe
+// AKTARMAZ — döngü yok (ölçüldü 2026-10-08; çiti: opsWatchdog.magazaTalep.test.ts).
+import { smtpYapilandirmasi, smtpDogrula } from './smtpPosta.js';
+import { ortamdanKiraci } from './kiraciOrtami.js';
+import { magazaSayaclari } from './routes/magazaRoutes.js';
+import {
+  MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS, MAGAZA_BILDIRIM_HATA_SINIFLARI,
+  type MagazaBildirimHataSinifi,
+} from '../lib/magazaTalep.js';
 import fs from 'fs';
 import path from 'path';
 import tls from 'tls';
@@ -34,6 +43,12 @@ export interface OpsDeps {
   getCachedExchangeRates: () => { rates: Record<string, number>; source: string; updatedAt: string } | null;
   /** Gemini saglik sondasi. Rota katmani tarafindan atanir; null ise kontrol atlanir. */
   getAiHealthProbe: () => (() => Promise<{ ok: boolean; detail: string }>) | null;
+  /**
+   * Oturumsuz sunucu bağlamının kiracı çözümleyicisi (server.ts `serverTenantId`);
+   * boş dizge = çözülemedi. Mağaza talep ucu AYNI çözümleyiciyle yazar: boşsa uç
+   * 503 döner ve mağaza bunu görmez — bekçi buradan ölçer (`magaza_talep`).
+   */
+  serverTenantId: () => Promise<string>;
 }
 
 /** Kayit saklama sureleri. Hem bekci (asim var mi?) hem saklamaSuresiUygula
@@ -71,8 +86,257 @@ function opsToMs(v: unknown): number {
   return 0;
 }
 
+// ── Mağaza sipariş talebi kontrolü (`magaza_talep`) ───────────────────────────
+//
+// NEDEN VAR: `POST /api/magaza/siparis-talebi` KİMLİKSİZ bir uçtur ve mağaza
+// (www.cetpa.com.tr) yanıtı OKUMAZ. Uç 503'e düşerse ya da bildirim e-postası
+// gitmezse müşteri «talebiniz alındı» görür, içeride kimse bir şey görmez —
+// bu projenin en pahalı hata sınıfı (sessiz başarısızlık). Üç şey ölçülür,
+// TEK sonuç üretilir:
+//   (a) Yapılandırma — talep sayısından BAĞIMSIZ. SMTP anahtarı eksikse kırmızı
+//       (her sabah kırmızı görünmesi gürültü değil kurulum eksiğidir; `uyari_hatti`
+//       emsali). Tamsa bağlantı gerçekten denenir (posta GÖNDERİLMEZ).
+//   (b) Sayım — ölçüt `updated_at` DEĞİL `data->>'olusturma'`: bildirim sonucu
+//       yazılırken `updated_at` ilerler, eski talep «yeni» sayılırdı. Gitmeyen
+//       bildirim (gönderilemedi / yapılandırılmamış / takılı bekleyen) YALNIZ son
+//       7 günün talebindeyse kırmızıdır; daha eskisi ayrıntıda bilgi olarak sayılır.
+//       Süresiz sayımda tek eski satır kontrolü kalıcı kırmızıda tutuyordu (satırı
+//       kapatacak yol yok — «yeniden kuyruğa al» dilim 2) ve her sabahki aynı kırmızı
+//       YENİ arızayı ayırt edilemez kılıyordu. Yaşı okunamayan satır «eski» sayılmaz.
+//   (c) Kullanılabilirlik — kiracı çözülemiyorsa, çözülen kimlik hiçbir kiracıyla
+//       eşleşmiyorsa (hayalet kiracı) ya da pg havuzu yoksa uç yazamaz. Uç süreç
+//       başından beri 500 döndüyse de kırmızı (öbür uç sayaçları yalnız bilgidir).
+//
+// AYRINTIYA NE YAZILMAZ: kişisel veri, sır DEĞERİ, hata METNİ. Ayrıntı
+// `opsChecks`'e kaydedilir ve uyarı e-postasıyla gider. Eksik anahtarın yalnız
+// ADI, SMTP hatasının yalnız SINIFI, yakalanan hatanın yalnız KODU yazılır.
+
+/** `smtpDogrula()` için bekçinin KENDİ üst sınırı: doğrulayıcının iç süre sınırları
+ *  (bağlantı / karşılama / soket) art arda işleyebilir; bekçi koşusu ona takılmaz. */
+const SMTP_DOGRULAMA_SINIRI_MS = 10_000;
+const SURE_DOLDU = Symbol('süre doldu');
+const GUN_MS = 86_400_000;
+/**
+ * Gitmeyen bildirimin KIRMIZI sayıldığı pencere (talebin `olusturma`sına göre); daha eskisi yalnız bilgidir.
+ * Alt sınır teknik: bekçi günde bir koşar (24 saat) + kuyruğun yeniden deneme ufku (yaklaşık 2 saat) + kaçan bir koşu —
+ * daha kısa pencere arızayı HİÇ kırmızı göstermeden düşürebilir. 7 gün: inceleme turu kararı (2026-10-08).
+ * Pencere hiçbir satırı silmez / değiştirmez; talep sekmede «bildirim gönderilmedi» uyarısıyla görünmeye devam eder.
+ */
+const MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS = 7 * GUN_MS;
+/** `olusturma` bu sunucunun saatiyle yazılır; «şimdi»nin bu kadar ilerisi hâlâ geçerli zaman sayılır. */
+const SAAT_TOLERANSI_MS = 5 * 60_000;
+
+/**
+ * `olusturma` kırmızı penceresinden KANITLI eski mi ($5 = pencerenin başı): sunucunun yazdığı biçimde (`toISOString()`) VE
+ * $5'ten küçük. Eksik (NULL) ya da biçimsiz değer «eski» SAYILMAZ (`COALESCE(…, false)`) — yaşı okunamayan satır bilgiye
+ * düşmez, kırmızıda kalır. Biçim denetimi ŞART: yalnız metin karşılaştırmasında boş dizge ya da '0' / '2020-bozuk' gibi
+ * bir değer bayt sırasında eşikten «küçük» çıkar ve sessizce bilgiye düşerdi (ölçüldü 2026-10-08). Desende ters bölü YOK
+ * (`[.]`, `[0-9]`): şablon dizgesi ters bölüyü yutardı.
+ */
+const PENCEREDEN_ESKI_SQL = `COALESCE((data->>'olusturma') COLLATE "C" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$'
+              AND (data->>'olusturma') COLLATE "C" < $5, false)`;
+
+/**
+ * $1 koleksiyon · $2 «son 24 saat» eşiği · $3 bekleme eşiği · $4 üst sınır (şimdi + tolerans) ·
+ * $5 kırmızı penceresinin başı (şimdi − MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS).
+ *
+ * `olusturma` ISO-8601 UTC METİNDİR (`toISOString()`): aynı biçimdeki iki metnin
+ * bayt sırası zaman sırasıdır; `COLLATE "C"` veritabanının dil sıralamasını devreden
+ * çıkarır. Karşılaştırma BİLEREK metin: `::timestamptz` dönüşümü tek bozuk satırda
+ * bütün sorguyu düşürürdü.
+ *
+ * «Bekleyen» = TAZE olduğu KANITLANAMAYAN `bekliyor`. `olusturma`sı eksik ya da
+ * zaman olmayan satır bekleyen sayılır — bilinmeyen yaş sessizce «taze» sayılmaz.
+ *
+ * Kırmızıya giren üç sayım (`gonderilemedi`, `yapilandirilmamis`, `bekleyen`) pencereden KANITLI eski satırı saymaz;
+ * o satırlar `eski_gitmeyen` sütununda toplanır (ayrıntıda bilgi). Gitmeyen her satır bu dört sütundan EN ÇOK birine
+ * düşer (taze `bekliyor` hiçbirine). Yaşı okunamayan satır iki yönde de kanıtsızdır: ne «taze» ne «pencereden eski»
+ * sayılır, kırmızıda kalır.
+ */
+const MAGAZA_TALEP_SAYIM_SQL = `
+  SELECT count(*)::int AS toplam,
+         (count(*) FILTER (WHERE (data->>'olusturma') COLLATE "C" BETWEEN $2 AND $4))::int AS son24,
+         (count(*) FILTER (WHERE data->'bildirim'->>'durum' = 'gonderilemedi'
+            AND NOT ${PENCEREDEN_ESKI_SQL}))::int AS gonderilemedi,
+         (count(*) FILTER (WHERE data->'bildirim'->>'durum' = 'yapilandirilmamis'
+            AND NOT ${PENCEREDEN_ESKI_SQL}))::int AS yapilandirilmamis,
+         (count(*) FILTER (WHERE data->'bildirim'->>'durum' = 'bekliyor'
+            AND NOT COALESCE((data->>'olusturma') COLLATE "C" BETWEEN $3 AND $4, false)
+            AND NOT ${PENCEREDEN_ESKI_SQL}))::int AS bekleyen,
+         (count(*) FILTER (WHERE data->'bildirim'->>'durum' IN ('gonderilemedi', 'yapilandirilmamis', 'bekliyor')
+            AND ${PENCEREDEN_ESKI_SQL}))::int AS eski_gitmeyen
+    FROM docs WHERE coll = $1`;
+
+/**
+ * Hayalet kiracı sorgusu. Kiracı kimliği = `companyId`, o yoksa kullanıcının kendi
+ * kimliği (server.ts `getUserCompanyId` / `serverTenantId` ile AYNI formül). Davetle
+ * katılmış bir kullanıcının kimliği kiracı DEĞİLDİR; ortam değişkenine o yazılmışsa
+ * talepler kimsenin görmediği bir kiracıya düşer.
+ */
+const MAGAZA_KIRACI_ESLESME_SQL =
+  "SELECT count(*)::int AS n FROM docs WHERE coll = 'users' AND COALESCE(NULLIF(data->>'companyId', ''), id) = $1";
+
+/**
+ * Hata nesnesinden YALNIZ kod ya da tür adı — İLETİ DEĞİL.
+ * pg hata nesnesinin `message` / `detail` / `where` alanı JSON verisinden parça
+ * taşıyabilir (mağaza talebinde ad, telefon, adres). pg: SQLSTATE (`42P01`);
+ * Node: `ECONNREFUSED` vb. Desene uymayan değer yazılmaz.
+ */
+function hataKodu(e: unknown): string {
+  const guvenli = (v: unknown): string | null =>
+    typeof v === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(v) ? v : null;
+  if (typeof e !== 'object' || e === null) return 'bilinmeyen hata';
+  const h = e as { code?: unknown; name?: unknown };
+  return guvenli(h.code) ?? guvenli(h.name) ?? 'bilinmeyen hata';
+}
+
+/** Ortam değişkeni ADI biçiminde olmayan değer ayrıntıya girmez (`ANAHTAR=değer` gibi bir metin sızmasın). */
+function ortamAnahtarAdi(ad: unknown): string {
+  return typeof ad === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(ad) ? ad : '?';
+}
+
+/** Kapalı kümenin ayrıntıdaki karşılığı. Kümede OLMAYAN değer (ör. yanlışlıkla hata metni) «diğer» yazılır. */
+const SMTP_HATA_SINIFI_ETIKETI: Record<MagazaBildirimHataSinifi, string> = {
+  kimlik: 'kimlik doğrulama', tls: 'TLS / sertifika', baglanti: 'bağlantı', 'alici-reddi': 'alıcı reddi', diger: 'diğer',
+};
+function smtpSinifEtiketi(sinif: unknown): string {
+  const bilinen = MAGAZA_BILDIRIM_HATA_SINIFLARI.find(s => s === sinif);
+  return SMTP_HATA_SINIFI_ETIKETI[bilinen ?? 'diger'];
+}
+
+/** Sayım hücresi: eksi olmayan tam sayı; başka her şey BİLİNMİYOR (`null`) — sıfır DEĞİL. */
+function sayimHucresi(satir: unknown, ad: string): number | null {
+  if (typeof satir !== 'object' || satir === null) return null;
+  const v = (satir as Record<string, unknown>)[ad];
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
+}
+const sayiYaz = (n: number | null): string => (n === null ? '—' : String(n));
+
+/** `soz` süre içinde bitmezse `SURE_DOLDU`. Geç gelen ret yakalanmamış kalmaz (`race` dinliyor). */
+async function sureSinirli<T>(soz: Promise<T>, ms: number): Promise<T | typeof SURE_DOLDU> {
+  let zamanlayici: ReturnType<typeof setTimeout> | undefined;
+  const sinir = new Promise<typeof SURE_DOLDU>(coz => { zamanlayici = setTimeout(() => coz(SURE_DOLDU), ms); });
+  try { return await Promise.race([soz, sinir]); } finally { clearTimeout(zamanlayici); }
+}
+
+/** `magazaSayaclari()` anahtarları (sözleşme: routes/magazaRoutes.ts) ve ayrıntıdaki karşılıkları. */
+const MAGAZA_SAYAC_ETIKETLERI: ReadonlyArray<readonly [anahtar: string, etiket: string]> = [
+  ['eklenen', 'eklenen'], ['cakisan', 'çakışan'],
+  ['r400', '400'], ['r403', '403'], ['r404', '404'], ['r413', '413'], ['r415', '415'],
+  ['r429', '429'], ['r500', '500'], ['r503', '503'],
+];
+
+async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
+  const parcalar: Array<{ ok: boolean; metin: string }> = [];
+  const havuz = deps().getPgPool();
+
+  // (c) Kullanılabilirlik. Uç pg havuzu yokken `adminDb`'ye DÜŞMEZ, 503 döner.
+  if (!havuz) parcalar.push({ ok: false, metin: 'PG HAVUZU YOK — mağaza ucu 503 döner (talep yazılmaz); sayım yapılamadı' });
+  try {
+    const kimlik = await deps().serverTenantId();
+    if (typeof kimlik !== 'string' || kimlik === '') {
+      parcalar.push({ ok: false,
+        metin: 'KİRACI ÇÖZÜLEMİYOR — mağaza ucu 503 döner ve mağaza bunu görmez (sunucuda SERVER_TENANT_COMPANY_ID tanımlı mı?)' });
+    } else if (havuz) {
+      // Kimlik ayrıntıya YAZILMAZ; uçla aynı değer (kırpılmadan) sorgulanır.
+      const { rows } = await havuz.query(MAGAZA_KIRACI_ESLESME_SQL, [kimlik]);
+      const eslesen = sayimHucresi(rows[0], 'n');
+      if (eslesen === null) parcalar.push({ ok: false, metin: 'kiracı eşleşmesi OKUNAMADI' });
+      else if (eslesen === 0) {
+        parcalar.push({ ok: false,
+          // Hayalet yalnız ortam değişkeninden gelebilir: `users` taramasından çözülen kimlik tanım gereği eşleşir.
+          metin: 'HAYALET KİRACI — çözülen kiracı kimliği `users` içinde hiçbir kiracıyla eşleşmiyor; talepler kimsenin görmediği kiracıya yazılır (SERVER_TENANT_COMPANY_ID, o yoksa MIKRO_CRON_COMPANY_ID değerini kontrol et)' });
+      } else if (ortamdanKiraci() === '') {
+        // Kimlik ortam değişkeninden DEĞİL `users` taramasından geldi (tek kiracı). Bugün çalışır; kayıt açık olduğu için davetsiz
+        // ikinci bir hesap açıldığı an kiracı belirsizleşir ve uç 503 döner — o an değil, bugünden görünmeli (kurulum eksiği).
+        parcalar.push({ ok: false,
+          metin: 'KİRACI TARAMAYLA ÇÖZÜLÜYOR — SERVER_TENANT_COMPANY_ID tanımlı değil; ikinci bir hesap açıldığı an mağaza ucu 503 döner ve mağaza bunu görmez' });
+      } else parcalar.push({ ok: true, metin: 'kiracı çözüldü' });
+    }
+  } catch (e) {
+    parcalar.push({ ok: false, metin: `kiracı kontrol edilemedi (${hataKodu(e)})` });
+  }
+
+  // (a) Yapılandırma + günde bir bağlantı doğrulaması (bağlan + TLS + EHLO + AUTH).
+  try {
+    const yapi = smtpYapilandirmasi();
+    if (!yapi.tamam) {
+      const adlar = yapi.eksik.map(ortamAnahtarAdi).join(', ');
+      parcalar.push({ ok: false, metin: `SMTP yapılandırılmamış — eksik: ${adlar || 'anahtar adı bildirilmedi'}` });
+    } else {
+      const sonuc = await sureSinirli(smtpDogrula(), SMTP_DOGRULAMA_SINIRI_MS);
+      if (sonuc === SURE_DOLDU) {
+        parcalar.push({ ok: false,
+          metin: `SMTP doğrulaması BAŞARISIZ — hata sınıfı: ${SMTP_HATA_SINIFI_ETIKETI.baglanti} (${SMTP_DOGRULAMA_SINIRI_MS / 1000} sn içinde yanıt yok)` });
+      } else if (sonuc.ok === true) parcalar.push({ ok: true, metin: 'SMTP hazır (bağlantı ve kimlik doğrulandı)' });
+      else if ('yapilandirilmamis' in sonuc) parcalar.push({ ok: false, metin: 'SMTP yapılandırılmamış' });
+      else parcalar.push({ ok: false, metin: `SMTP doğrulaması BAŞARISIZ — hata sınıfı: ${smtpSinifEtiketi(sonuc.sinif)}` });
+    }
+  } catch (e) {
+    parcalar.push({ ok: false, metin: `SMTP kontrol edilemedi (${hataKodu(e)})` });
+  }
+
+  // (b) Sayım. Kırmızı penceresindeki (son 7 gün ya da yaşı okunamayan) üç gitmeyen sayısından biri > 0 ise kırmızı;
+  // pencereden eski gitmeyenler yalnız bilgi. Okunamayan sayı (bilgi sütunu dâhil) da kırmızıdır.
+  if (havuz) {
+    try {
+      const simdi = Date.now();
+      const { rows } = await havuz.query(MAGAZA_TALEP_SAYIM_SQL, [
+        MAGAZA_TALEP_KOLEKSIYONU,
+        new Date(simdi - GUN_MS).toISOString(),
+        new Date(simdi - MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS).toISOString(),
+        new Date(simdi + SAAT_TOLERANSI_MS).toISOString(),
+        new Date(simdi - MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS).toISOString(),
+      ]);
+      const satir: unknown = rows[0];
+      const toplam = sayimHucresi(satir, 'toplam');
+      const son24 = sayimHucresi(satir, 'son24');
+      const gonderilemedi = sayimHucresi(satir, 'gonderilemedi');
+      const yapilandirilmamis = sayimHucresi(satir, 'yapilandirilmamis');
+      const bekleyen = sayimHucresi(satir, 'bekleyen');
+      const eskiGitmeyen = sayimHucresi(satir, 'eski_gitmeyen');
+      const okunamadi = [toplam, son24, gonderilemedi, yapilandirilmamis, bekleyen, eskiGitmeyen].some(n => n === null);
+      // `eskiGitmeyen` BİLEREK bu dizide yok: pencereden eski satır kırmızı yapmaz.
+      const gitmeyen = [gonderilemedi, yapilandirilmamis, bekleyen].some(n => n !== null && n > 0);
+      parcalar.push({ ok: !okunamadi && !gitmeyen,
+        metin: `${sayiYaz(toplam)} talep, son 24 saatte ${sayiYaz(son24)}`
+          + ` — bildirim: gönderilemedi ${sayiYaz(gonderilemedi)}, yapılandırılmamış ${sayiYaz(yapilandirilmamis)}`
+          + `, ${MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS / 60_000} dk+ bekleyen ${sayiYaz(bekleyen)}`
+          + `, ${MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS / GUN_MS} günden eski gitmeyen ${sayiYaz(eskiGitmeyen)} (bilgi)`
+          + (okunamadi ? ' (SAYIM OKUNAMADI)' : '') });
+    } catch (e) {
+      parcalar.push({ ok: false, metin: `sayım yapılamadı (${hataKodu(e)})` });
+    }
+  }
+
+  // Uç sayaçları: süreç belleğinde, yeniden başlatmada sıfırlanır. 500 DIŞINDAKİLER yalnız bilgi
+  // (eşik yok — alarm eşiği kullanıcı kararı); okuyucu fırlatırsa kırmızı.
+  try {
+    const sayaclar: unknown = magazaSayaclari();
+    // 500'ün zararsız açıklaması yok: şemadan geçmiş talep yazılamadı (ya da zincir beklenmedik hata verdi) ve mağaza yanıtı
+    // okumadı. Kırmızı YAPIŞKANDIR: sayaç süreç yeniden başlayana kadar sıfırlanmaz. Okunamayan (`null`) 500 sayacı burada
+    // kırmızı yapmaz; aşağıdaki bilgi satırında «—» görünür.
+    const r500 = sayimHucresi(sayaclar, 'r500');
+    if (r500 !== null && r500 > 0) {
+      parcalar.push({ ok: false,
+        metin: `UÇ ${r500} KEZ 500 DÖNDÜ (süreç başından beri) — talep yazılamadı, mağaza bunu görmez; süreç günlüğünde «[magaza]» satırlarına bak` });
+    }
+    parcalar.push({ ok: true,
+      metin: 'uç sayaçları (süreç başından beri) — '
+        + MAGAZA_SAYAC_ETIKETLERI.map(([anahtar, etiket]) => `${etiket}: ${sayiYaz(sayimHucresi(sayaclar, anahtar))}`).join(', ') });
+  } catch (e) {
+    parcalar.push({ ok: false, metin: `uç sayaçları okunamadı (${hataKodu(e)})` });
+  }
+
+  // Bozuk parçalar başa: uyarı e-postasında satırın ilk okunan yeri neden olsun.
+  const sirali = [...parcalar.filter(p => !p.ok), ...parcalar.filter(p => p.ok)];
+  return { ok: parcalar.every(p => p.ok), detail: sirali.map(p => p.metin).join(' · ') };
+}
+
 export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; checks: OpsCheckResult[]; stockRatio: number | null }> {
   const checks: OpsCheckResult[] = [];
+  // Kontrol SAYISINI yoruma / metne ELLE YAZMA (her eklemede bayatlar), ölç:
+  //   grep -oE "add\('[a-z_]+'" src/server/opsWatchdog.ts | sort -u | wc -l
   const add = (key: string, ok: boolean, detail: string) => { checks.push({ key, ok, detail }); };
   const hoursAgo = (t: number) => (Date.now() - t) / 3_600_000;
 
@@ -411,7 +675,16 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
     }
   } catch (e) { add('pg_growth', false, e instanceof Error ? e.message : String(e)); }
 
-  // 15) UYARI HATTININ KENDİSİ. Diğer 14 kontrol bir arızayı bulur; bu kontrol
+  // Mağaza sipariş talebi: uç ayakta mı, bildirim gidiyor mu (bkz. magazaTalepKontrolu).
+  try {
+    const m = await magazaTalepKontrolu();
+    add('magaza_talep', m.ok, m.detail);
+  } catch (e) {
+    // Ham hata iletisi YAZILMAZ (pg iletisi veri parçası taşıyabilir) — yalnız kod.
+    add('magaza_talep', false, 'kontrol edilemedi: ' + hataKodu(e));
+  }
+
+  // UYARI HATTININ KENDİSİ. Diğer kontroller bir arızayı bulur; bu kontrol
   //     "bulduğunu HABER VEREBİLİYOR MUSUN?" sorusunu sorar. Bekçi postayı
   //     gönderemezse sonuç yalnızca aşağıdaki `console.warn`'dur — kimse görmez,
   //     yani izleme var sanılan yerde izleme YOKTUR. Bu kontrol de aynı e-postayla

@@ -1,5 +1,9 @@
 /**
- * eposta.ts — Giden e-posta yapılandırmasının TEK KAYNAĞI.
+ * eposta.ts — Resend yolunun tek kaynağı; SMTP yolu smtpPosta.ts.
+ *
+ * (Mağaza talebi bildirimi Resend ile DEĞİL, kendi posta sunucumuzdan SMTP ile
+ * gider — kullanıcı kararı K2, 2026-10-08. Davet, bekçi uyarısı ve rapor
+ * postaları Resend'de kalır. `escapeHtml` ve `isValidEmail` iki yolun ortağıdır.)
  *
  * NEDEN VAR (2026-08-25 denetimi, iki ayrı bulgu):
  *

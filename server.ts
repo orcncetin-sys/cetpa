@@ -71,6 +71,14 @@ import Stripe from "stripe";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { akisIstegiIsaretle, akisSorguBelirteci, apiSinirindanMuaf, ipSinirAnahtari, istekBasinaBirKez, kimligeGoreTavan, kullaniciSinirAnahtari, temizIstemciIp, yetkiBelirteci, type SinirBagimliliklari } from './src/server/istemciIp.js';
 import { z } from "zod";
+// Mağaza (www.cetpa.com.tr) sipariş talebi — dilim 1 (2026-10-08). `magazaRoutes.js` bekçiyle (opsWatchdog) AYNI yoldan içe
+// aktarılır: `magazaSayaclari()` modül düzeyi sayaç okur; farklı yoldan ikinci bir modül örneği oluşsa bekçi hep sıfır görürdü.
+import { magaza429, magazaZinciri } from "./src/server/routes/magazaRoutes.js";
+import {
+  MAGAZA_BILDIRIM_ISCI_SECENEKLERI, MAGAZA_BILDIRIM_KUYRUGU, magazaBildirimIscisi, magazaBildirimIsteyici, type MagazaBildirimDeps,
+} from "./src/server/kanal/magazaBildirim.js";
+import { smtpYapilandirmasi } from "./src/server/smtpPosta.js";
+import { ortamdanKiraci } from "./src/server/kiraciOrtami.js";
 
 dotenv.config();
 
@@ -378,6 +386,20 @@ const pgPool: pg.Pool | null = process.env.DATABASE_URL
 
 export let boss: PgBoss | null = null;
 
+// ── Mağaza talebi bildirimi (e-posta) — bağımlılıklar MODÜL DÜZEYİNDE ──────────────────────────────────────
+// İşçi `initDocsTable` içinde, yani modül yüklenirken (startServer'dan ÖNCE) kaydedilir; init'i startServer'a koymak işçiyi
+// bağımlılıksız bırakırdı (aşağıdaki «AYNA BAĞIMLILIĞI» notundaki arıza sınıfı). Getter: `pgPool` o an null olsa da sorun yok.
+// `appUrl` HAM ortam değeridir — yedek adrese düşen bir yardımcı VERİLMEZ: `https:` değilse / yoksa e-postaya bağlantı konmaz.
+const magazaBildirimDeps: MagazaBildirimDeps = {
+  getPgPool: () => pgPool,
+  broadcastDocChange,
+  appUrl: () => process.env.APP_URL,
+};
+/** `createQueue` + `work` BİTTİKTEN sonra kalkar. `boss` nesnesinin dolu olması «kuyruk hazır» demek DEĞİLDİR: olmayan kuyruğa
+ *  `send` iş oluşturmaz; bayrak inikken istek süreç içi gönderime düşer (bildirim sessizce kaybolmaz). */
+let magazaBildirimKuyruguHazir = false;
+const magazaBildirimIste = magazaBildirimIsteyici(() => (magazaBildirimKuyruguHazir ? boss : null), magazaBildirimDeps);
+
 
 // ── Webhook Processors ───────────────────────────────────────────────────
 
@@ -616,9 +638,10 @@ async function initDocsTable(): Promise<void> {
     // yaratmaz; olmayan kuyruğa işçi bağlamak sonsuz "Queue does not exist"
     // hata döngüsü üretir. Bu üç işçi 2026-07 boyunca tam olarak bunu yaptı.
     // createQueue idempotent — zaten varsa sorun çıkarmaz.
-    const kuyruklar = ['shopify-webhook', 'stripe-webhook', 'outbound-webhook'] as const;
+    const kuyruklar = ['shopify-webhook', 'stripe-webhook', 'outbound-webhook', MAGAZA_BILDIRIM_KUYRUGU] as const;
+    const olusanKuyruklar = new Set<string>();
     for (const q of kuyruklar) {
-      try { await boss.createQueue(q); }
+      try { await boss.createQueue(q); olusanKuyruklar.add(q); }
       catch (e) { console.warn(`pg-boss kuyruk oluşturulamadı (${q}):`, (e as Error).message); }
     }
 
@@ -631,7 +654,17 @@ async function initDocsTable(): Promise<void> {
     await boss.work('outbound-webhook', async (jobs: any) => {
       for (const job of jobs) await processOutboundWebhook(job.data);
     });
-    console.log('pg-boss ready ✓ (kuyruklar: ' + kuyruklar.join(', ') + ')');
+    // Mağaza talebi bildirimi: işçi YALNIZ kuyruğu oluşturulabildiyse bağlanır (olmayan kuyruğa işçi = sonsuz hata döngüsü; yukarıdaki
+    // not). `MAGAZA_BILDIRIM_ISCI_SECENEKLERI` (includeMetadata) ŞART: iş sayaçları gelmezse yeniden deneme sessizce kapanır.
+    // `batchSize` VERİLMEZ (varsayılan 1): bir iş yeniden deneme isterse pg-boss toplu işin tamamını başarısız sayardı.
+    // Bayrak en SONDA kalkar; işçi bağlanamazsa bildirim süreç içi yoldan gider (iniyor kalır).
+    if (olusanKuyruklar.has(MAGAZA_BILDIRIM_KUYRUGU)) {
+      try {
+        await boss.work(MAGAZA_BILDIRIM_KUYRUGU, MAGAZA_BILDIRIM_ISCI_SECENEKLERI, magazaBildirimIscisi(magazaBildirimDeps));
+        magazaBildirimKuyruguHazir = true;
+      } catch (e) { console.warn(`pg-boss işçi bağlanamadı (${MAGAZA_BILDIRIM_KUYRUGU}):`, (e as Error).message); }
+    }
+    console.log('pg-boss ready ✓ (kuyruklar: ' + [...olusanKuyruklar].join(', ') + ')');
   }
 }
 // AYNA BAGIMLILIGI MODUL DUZEYINDE BAGLANIR - startServer'da DEGIL.
@@ -935,7 +968,7 @@ const reqCompanyId = (req: Request): Promise<string> =>
 // Kullanıcı oturumu OLMAYAN sunucu bağlamı (webhook) için kiracı çözümleyici:
 // açık env → tek tenant → '' (çok-kiracıda belirsiz; etiketsiz bırakılır, uyarılır).
 async function serverTenantId(): Promise<string> {
-  const env = process.env.SERVER_TENANT_COMPANY_ID || process.env.MIKRO_CRON_COMPANY_ID;
+  const env = ortamdanKiraci();   // ad listesi tek yerde (bekçi de aynı okuyucuyu kullanır — kiraciOrtami.ts)
   if (env) return env;
   if (!adminDb) return '';
   try {
@@ -1317,6 +1350,10 @@ function validateEnv() {
     const val = process.env[key] ?? '';
     if (!val || PLACEHOLDERS.includes(val)) missing.push(`  ⚠️  ${key}: ${warn}`);
   }
+  // Mağaza talebi bildirimi (SMTP): eksik anahtar ADLARI tek satırda — bekçi ve işçiyle AYNI okuyucudan (smtpYapilandirmasi).
+  const smtp = smtpYapilandirmasi();
+  if (!smtp.tamam) missing.push(`  ⚠️  ${smtp.eksik.join(', ') || 'SMTP'}: mağaza talebi bildirim e-postası devre dışı (talep yine yazılır)`);
+  if (!ortamdanKiraci()) missing.push('  ⚠️  SERVER_TENANT_COMPANY_ID: mağaza sipariş talebi ucu kiracıyı taramayla çözer; ikinci hesap açılınca 503 döner');
   if (missing.length) {
     console.warn('\n╔══ ENV WARNINGS (eksik/placeholder değerler) ══╗');
     missing.forEach(m => console.warn(m));
@@ -1349,6 +1386,7 @@ async function startServer() {
     getMikroCreds,
     getCachedExchangeRates: () => cachedExchangeRates,
     getAiHealthProbe: () => aiHealthProbe,
+    serverTenantId,
   });
 
   const app = express();
@@ -2299,6 +2337,36 @@ async function startServer() {
     message: { error: 'Too many webhook deliveries.' },
   });
   app.use(['/api/shopify/webhook', '/api/stripe/webhook'], webhookLimiter);
+
+  // ── Mağaza (www.cetpa.com.tr) uçları — TEK zincir, kendi köken kapısı / sınırlayıcı / gövde ayrıştırıcı / hata yakalayıcısıyla ──
+  // NEDEN BURADA (rota modüllerinin olağan yerinde, dosyanın sonunda DEĞİL): zincir kimliksizdir ve her isteği KENDİSİ sonlandırır.
+  //  • Genel sınırlayıcıdan (`app.use('/api', apiLimiter)`) ÖNCE: köken kapısı önce çalışsın (izinsiz köken ve OPTIONS genel ve mağaza
+  //    kovalarına sayılmasın (sel koruması zincirden önce koşar ve onları da sayar)); genel sınırlayıcı zincirin İÇİNDE, köken kapısından sonra koşar (mağaza muaf DEĞİL).
+  //  • Genel gövde ayrıştırıcıdan (`app.use(express.json(…))`) ÖNCE: zincirin 64 KB sınırı ancak önce çalışırsa uygulanır; sonra
+  //    bağlanan ayrıştırıcı sınır koyamaz (ölçüldü). Ayrıştırma hatası da zincirin kendi yakalayıcısına düşer — genel yakalayıcı
+  //    hata iletisini (gövdenin ilk karakterleri) günlüğe basar ve 500 döndürürdü.
+  // Sınırlayıcılar BURADA kurulur (rota modülünde `rateLimit(` yok — çit: hizSiniri.degismez.test.ts); 429'u `magaza429` yazar
+  // (sayaç + sabit gövde). Talep ve durum AYRI kova, yalnız IP. Bu sel korumasıdır; iş sınırı (adet / günlük kota) YOKTUR (kullanıcı kararı).
+  const magazaTalepLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: yalnizIpAnahtari,
+    handler: magaza429,
+  });
+  const magazaDurumLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: yalnizIpAnahtari,
+    handler: magaza429,
+  });
+  app.use('/api/magaza', magazaZinciri({
+    apiLimiter, talepSinirlayici: magazaTalepLimiter, durumSinirlayici: magazaDurumLimiter,
+    getPgPool: () => pgPool, serverTenantId, broadcastDocChange, bildirimIste: magazaBildirimIste,
+  }));
 
   // Apply general limiter to every /api/… route
   app.use('/api', apiLimiter);

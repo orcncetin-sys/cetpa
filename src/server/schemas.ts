@@ -94,3 +94,41 @@ export const EmailSendSchema = z.object({
   from:    z.string().email().optional(),
   replyTo: z.string().email().optional(),
 });
+
+// Mağaza sipariş talebi şeması — KİMLİKSİZ uç `POST /api/magaza/siparis-talebi` (routes/magazaRoutes.ts).
+// Rota ortak `validate()` yardımcısını KULLANMAZ (400'de zod ayrıntısı döndürür); kendi `safeParse` + sabit 400.
+//  • Metinlerde `.max()` YOK: aşım ret değil KIRPMA (üst sınırı 64 KB gövde koyar; mağaza yanıtı okumuyor — ret
+//    sessiz kayıp olurdu). Temizlik, kırpma ve «temizlikten sonra boş mu / telefonda 10 rakam var mı» denetimi
+//    şemanın ardındaki saf eşleyicide: kanal/magazaTalep.ts `talepEsle` (bağlam ister — şema dönüşümü DEĞİL).
+//  • `adet` üst sınırı YOK (kullanıcı kararı K4 — «sınır koyma»); `.int()` güvenli tam sayı dışını zaten reddeder.
+//  • `birimFiyat` yok ya da null = «fiyat sorulacak»; varsayılan YOK, 0'a ÇEVRİLMEZ. Toplamlar da isteğe bağlı:
+//    gönderilmediyse eşleyici `null` yazar (0 DEĞİL).
+//  • `fiyatiSorulacakVar` şemada BİLEREK yok: zod bilinmeyen alanı SİLER — istemciden alınmaz, sunucuda kalemlerden türetilir.
+//  • `no` deseni src/lib/magazaTalep.ts `MAGAZA_TALEP_NO_DESENI` ile AYNI olmalı (bu dosya yalnız zod'a bağlı kalsın
+//    diye kopya; ayrışmayı kanal/magazaTalep.test.ts kilitler).
+export const MagazaSiparisTalebiSchema = z.object({
+  no:      z.string().regex(/^T\d{6}-[A-Z0-9]{4}$/),
+  tarih:   z.string().optional(),
+  musteri: z.object({
+    ad:      z.string(),
+    telefon: z.string(),
+    firma:   z.string().optional(),
+    eposta:  z.string().optional(),
+    il:      z.string().optional(),
+    adres:   z.string().optional(),
+    vergi:   z.string().optional(),
+  }),
+  not:     z.string().optional(),
+  kalemler: z.array(z.object({
+    ad:         z.string(),
+    adet:       z.number().int().positive(),
+    id:         z.string().optional(),
+    sku:        z.string().optional(),
+    marka:      z.string().optional(),
+    birimFiyat: z.number().nonnegative().nullable().optional(),
+    tedarik:    z.boolean().optional(),
+  })).min(1),
+  araToplam: z.number().nonnegative().optional(),
+  kdv:       z.number().nonnegative().optional(),
+  toplam:    z.number().nonnegative().optional(),
+});

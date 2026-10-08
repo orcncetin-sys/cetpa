@@ -1,0 +1,1282 @@
+// @vitest-environment node
+/**
+ * magazaRoutes.test.ts — mağaza zincirinin GERÇEK express ile davranışı + modülün kaynak çiti (dilim 1, 2026-10-08).
+ *
+ * DÜZENEK (şartname § 7): gerçek `express()`; üretimdeki AYNI `magazaZinciri(C)` `/api/magaza`'ya bağlanır; ARDINA
+ * server.ts'te zincirden sonra gelenlerin kopyası gelir — genel ayrıştırıcı (`verify` sayaçlı), eşleşmeyen /api 404'ü,
+ * genel hata yakalayıcı. Kopyasız düzenekte express'in yerleşik son işleyicisi bozuk JSON'a 400, büyük gövdeye 413
+ * verir: test yeşil kalır, canlı 500 döner ve gövde parçası günlüğe düşerdi. İstek gerçek soketten (`fetch`) gelir —
+ * `sahteApp` deseni bu uç için YETERSİZ (ara katman koşmaz).
+ *
+ * Her testin sonunda (afterEach) dört «zincirden kaçtı» sayacının 0 olduğu doğrulanır: zincir her isteği KENDİSİ
+ * sonlandırır. Düzeneğin sayaçlarının GERÇEKTEN saydığını «düzenek» bölümündeki kontrol testleri kanıtlar.
+ *
+ * Sınırlayıcılar üretimde server.ts'te kurulur (hız sınırı çiti rota modülünde sınırlayıcı kurulmasını yasaklar; test
+ * dosyalarını taramaz). Burada gerçek kitaplıkla, küçük tavanlı iki sınırlayıcı kurulur ve `handler: magaza429` verilir.
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import express, { type NextFunction, type Request, type RequestHandler, type Response } from 'express';
+import http from 'node:http';
+import { gzipSync } from 'node:zlib';
+import { join } from 'node:path';
+import rateLimit from 'express-rate-limit';
+import { kodSatirlari, oku, SRC_KOK } from '../../test/kaynakTarama';
+import { TabanAdresHatasi } from '../../lib/guvenliTaban';
+import { MAGAZA_TALEP_KIMLIK_DESENI } from '../../lib/magazaTalep';
+import { magazaTalepKimligi } from '../kanal/magazaTalep';
+import { MagazaSiparisTalebiSchema } from '../schemas';
+import {
+  MAGAZA_BELGE_SINIRI_BAYT, MAGAZA_GOVDE_SINIRI_BAYT, MAGAZA_VARSAYILAN_KOKEN,
+  magaza429, magazaIzinliKokenleriCoz, magazaSayaclari, magazaSayaclariniSifirla, magazaZinciri,
+  type MagazaPgHavuzu, type MagazaRouteCtx,
+} from './magazaRoutes';
+
+const IZINLI = 'https://www.cetpa.com.tr';
+const IZINSIZ = 'https://kotu.example';
+/** Gövdeye gömülen ayırt edici dizge: yanıtta ya da console çıktısında görünürse gövde sızmıştır. */
+const ISARET = 'QZX7-4471-KVW9';
+const SIFIR_SAYACLAR = { eklenen: 0, cakisan: 0, r400: 0, r403: 0, r404: 0, r413: 0, r415: 0, r429: 0, r500: 0, r503: 0 };
+const EKLEME_SQL = 'INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3::jsonb) ON CONFLICT (coll, id) DO NOTHING RETURNING id';
+const SAAT_0 = Date.parse('2026-10-08T09:15:30.123Z');
+const k = (...kodlar: number[]): string => String.fromCharCode(...kodlar);
+const bekle = (ms: number): Promise<void> => new Promise(coz => { setTimeout(coz, ms); });
+
+// ── console yakalama ──────────────────────────────────────────────────────────────────────────────────────────────
+/** Hata nesnesi basılırsa iletisi, yığını ve kendi alanları (`body`, `detail` …) da metne girer — sızıntı kaçmasın. */
+function ciktiMetni(deger: unknown): string {
+  if (deger instanceof Error) {
+    const alanlar = Object.fromEntries(Object.getOwnPropertyNames(deger).map(ad => [ad, String((deger as unknown as Record<string, unknown>)[ad])]));
+    return `${deger.name}: ${deger.message} ${JSON.stringify(alanlar)}`;
+  }
+  if (typeof deger === 'object' && deger !== null) { try { return JSON.stringify(deger); } catch { return String(deger); } }
+  return String(deger);
+}
+let konsol: string[] = [];
+const konsolMetni = (): string => konsol.join('\n');
+
+// ── düzenek ───────────────────────────────────────────────────────────────────────────────────────────────────────
+interface Ayar {
+  /** Kiracı çözümleyici; verilmezse `kiraci-1`. */
+  kiraci?: () => Promise<string>;
+  havuzYok?: boolean;
+  /** Verilirse her sorgu bununla reddeder. */
+  sorguHatasi?: unknown;
+  talepTavani?: number;
+  durumTavani?: number;
+  bildirimIste?: (talepId: string) => Promise<void>;
+  yayinHatasi?: unknown;
+  /** `null` = bağlama verilmez (ortam değişkeni yolu). */
+  kokenler?: readonly string[] | null;
+  apiLimiter?: RequestHandler;
+  /** Zincirden ÖNCE bağlanan ara katman. */
+  onceki?: RequestHandler;
+}
+interface Duzenek {
+  taban: string;
+  saat: { ms: number };
+  sorgular: Array<{ sql: string; params: unknown[] }>;
+  yayinlar: unknown[][];
+  bildirimler: string[];
+  olaylar: string[];
+  sayim: { kiraci: number; havuz: number; apiLimiter: number };
+  /** Zincirden KAÇAN istekler: hepsi 0 kalmalı (kontrol testleri hariç). */
+  kacan: { sonrakiAraKatman: number; genelAyristirici: number; genel404: number; genelYakalayici: number };
+  kontrolTesti: boolean;
+}
+const sunucular: http.Server[] = [];
+let sonDuzenek: Duzenek | undefined;
+
+/** Üretimde server.ts'te kurulan sınırlayıcının küçük tavanlı eşi. Anahtar bir test başlığından: IP okunmaz. */
+const sinirlayici = (tavan: number): RequestHandler => rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: tavan,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: istek => String(istek.headers['x-deney-anahtari'] ?? 'tek-istemci'),
+  handler: magaza429,
+});
+
+async function kur(a: Ayar = {}): Promise<Duzenek> {
+  const d: Duzenek = {
+    taban: '', saat: { ms: SAAT_0 }, sorgular: [], yayinlar: [], bildirimler: [], olaylar: [],
+    sayim: { kiraci: 0, havuz: 0, apiLimiter: 0 },
+    kacan: { sonrakiAraKatman: 0, genelAyristirici: 0, genel404: 0, genelYakalayici: 0 },
+    kontrolTesti: false,
+  };
+  const satirlar = new Set<string>();
+  const havuz: MagazaPgHavuzu = {
+    query: async (sql, params = []) => {
+      d.sorgular.push({ sql, params });
+      d.olaylar.push('sql');
+      if (a.sorguHatasi !== undefined) throw a.sorguHatasi;
+      const anahtar = `${String(params[0])}/${String(params[1])}`;
+      if (satirlar.has(anahtar)) return { rows: [] }; // ON CONFLICT … DO NOTHING: çakışmada satır dönmez
+      satirlar.add(anahtar);
+      return { rows: [{ id: params[1] }] };
+    },
+  };
+  const C: MagazaRouteCtx = {
+    apiLimiter: a.apiLimiter ?? ((_istek, _yanit, sonraki) => { d.sayim.apiLimiter += 1; sonraki(); }),
+    talepSinirlayici: sinirlayici(a.talepTavani ?? 1000),
+    durumSinirlayici: sinirlayici(a.durumTavani ?? 1000),
+    getPgPool: () => { d.sayim.havuz += 1; return a.havuzYok ? null : havuz; },
+    serverTenantId: () => { d.sayim.kiraci += 1; return a.kiraci ? a.kiraci() : Promise.resolve('kiraci-1'); },
+    broadcastDocChange: (...argumanlar) => {
+      d.yayinlar.push(argumanlar);
+      d.olaylar.push('yayin');
+      if (a.yayinHatasi !== undefined) throw a.yayinHatasi;
+    },
+    bildirimIste: (talepId) => {
+      d.bildirimler.push(talepId);
+      d.olaylar.push('bildirim');
+      return a.bildirimIste ? a.bildirimIste(talepId) : Promise.resolve();
+    },
+    ...(a.kokenler === null ? {} : { izinliKokenler: () => a.kokenler ?? [IZINLI] }),
+    simdi: () => new Date(d.saat.ms),
+  };
+
+  const app = express();
+  if (a.onceki) app.use(a.onceki);
+  // Üretimdeki AYNI zincir, server.ts'teki AYNI yere: genel sınırlayıcı bağlamasından ve genel ayrıştırıcıdan ÖNCE.
+  app.use('/api/magaza', magazaZinciri(C));
+
+  // ── buradan sonrası server.ts'in KOPYASI (yalnız sayaç satırları eklendi) ──
+  // `app.use('/api', apiLimiter)` yerine sayaç: zincirden çıkan istek buraya düşer.
+  app.use('/api', (_istek, _yanit, sonraki) => { d.kacan.sonrakiAraKatman += 1; sonraki(); });
+  // Capture raw body for Shopify webhook HMAC verification (must come before express.json)
+  app.use(express.json({
+    verify: (req: Request & { rawBody?: Buffer }, _res: Response, buf: Buffer) => {
+      d.kacan.genelAyristirici += 1;
+      req.rawBody = buf;
+    },
+  }));
+  // Olağan bir rota modülü ucunun yerine (kontrol testleri).
+  app.post('/api/kontrol', (req: Request, res: Response) => { res.json({ alindi: req.body !== undefined }); });
+  app.use((req, res) => {
+    // Eşleşmeyen /api/… isteği → SPA index.html DEĞİL, JSON 404 (HTML-as-JSON karışıklığı engeli).
+    if (req.path.startsWith('/api/')) {
+      d.kacan.genel404 += 1;
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    res.status(404).type('text/plain').send('Not found');
+  });
+  // Global Express hata yakalayıcı — yakalanmamış route hataları + body-parser hataları
+  // generic JSON 500 döner (stack/secret sızdırmaz; ham hata sunucu logunda).
+  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+    d.kacan.genelYakalayici += 1;
+    console.error('[express error]', err?.message || err);
+    if (res.headersSent) return;
+    // Ayardaki taban adres kuralı çiğnenmiş (guvenliTaban.ts): metin yalnız kuralı söyler, sır/adres yankılamaz → kullanıcıya açık.
+    if (err instanceof TabanAdresHatasi) { res.status(400).json({ success: false, error: err.message }); return; }
+    res.status(500).json({ error: 'Sunucu hatası.' });
+  });
+
+  const sunucu = http.createServer(app);
+  sunucular.push(sunucu);
+  await new Promise<void>(coz => { sunucu.listen(0, '127.0.0.1', () => coz()); });
+  const adres = sunucu.address();
+  if (!adres || typeof adres === 'string') throw new Error('test sunucusu dinlemiyor');
+  d.taban = `http://127.0.0.1:${adres.port}`;
+  sonDuzenek = d;
+  return d;
+}
+
+// ── istek ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+interface Istek {
+  method?: string;
+  /** `undefined` = izinli köken; `null` = Origin başlığı yok. */
+  koken?: string | null;
+  /** `undefined` = gövde varsa `application/json`; `null` = Content-Type başlığı yok. */
+  tur?: string | null;
+  /** JSON'a çevrilip gönderilir. */
+  govde?: unknown;
+  /** Olduğu gibi gönderilir (bozuk JSON, kaçışlı metin, sıkıştırılmış gövde). */
+  ham?: string | Uint8Array<ArrayBuffer>;
+  basliklar?: Record<string, string>;
+  /** Tam yol (zincirin dışına istek — kontrol testleri). */
+  tamYol?: boolean;
+}
+interface Yanit { kod: number; metin: string; json: unknown; baslik: (ad: string) => string | null }
+
+async function iste(d: Duzenek, yol: string, o: Istek = {}): Promise<Yanit> {
+  const basliklar: Record<string, string> = {};
+  const koken = o.koken === undefined ? IZINLI : o.koken;
+  if (koken !== null) basliklar.Origin = koken;
+  // Gövde HER ZAMAN bayt dizisi: `fetch` dizgeye kendiliğinden `text/plain` başlığı ekler.
+  let govde: Uint8Array<ArrayBuffer> | undefined;
+  if (o.ham !== undefined) govde = typeof o.ham === 'string' ? new TextEncoder().encode(o.ham) : o.ham;
+  else if (o.govde !== undefined) govde = new TextEncoder().encode(JSON.stringify(o.govde));
+  const tur = o.tur === undefined ? (govde ? 'application/json' : null) : o.tur;
+  if (tur !== null) basliklar['Content-Type'] = tur;
+  Object.assign(basliklar, o.basliklar);
+  const y = await fetch(`${d.taban}${o.tamYol ? '' : '/api/magaza'}${yol}`, { method: o.method ?? 'POST', headers: basliklar, body: govde });
+  const metin = await y.text();
+  let json: unknown;
+  try { json = JSON.parse(metin); } catch { json = undefined; }
+  return { kod: y.status, metin, json, baslik: ad => y.headers.get(ad) };
+}
+
+/** Mağazanın gönderdiği biçimde geçerli gövde; `ustune` ile alan ezilir. */
+function govde(ustune: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    no: 'T261008-5Y9P',
+    tarih: '2026-10-08T12:15:00.000+03:00',
+    musteri: { ad: 'Şükrü Ağaoğlu', firma: 'Iğdır Yapı', telefon: '+90 (532) 123 45 67', eposta: 'sukru@ornek.com.tr', il: 'İstanbul', adres: 'Çiçek Sk. No: 4\nKadıköy', vergi: '1234567890' },
+    not: 'Öğleden sonra arayın.',
+    kalemler: [
+      { id: 'u-1', sku: 'DYO-0001', ad: 'İç cephe boyası 15 L', marka: 'DYO', adet: 2, birimFiyat: 204.99, tedarik: false },
+      { id: 'u-2', sku: 'KRB-77', ad: 'Fayans yapıştırıcısı', marka: 'Karbosan', adet: 5, birimFiyat: null, tedarik: true },
+    ],
+    araToplam: 409.98, kdv: 82, toplam: 491.98, fiyatiSorulacakVar: true,
+    ...ustune,
+  };
+}
+const talep = (d: Duzenek, ustune: Record<string, unknown> = {}, o: Istek = {}): Promise<Yanit> =>
+  iste(d, '/siparis-talebi', { govde: govde(ustune), ...o });
+/** n'inci benzersiz talep no (aynı telefonla ayrı doküman). */
+const no = (n: number): string => `T261008-${String(n).padStart(4, '0')}`;
+/** Yazılan dokümanı SQL parametresinden çözer. */
+function yazilan(d: Duzenek, sira = 0): { id: string; json: string; belge: Record<string, unknown> & { musteri: Record<string, string>; kalemler: Array<Record<string, unknown>> } } {
+  const p = d.sorgular[sira]?.params;
+  if (!p || typeof p[1] !== 'string' || typeof p[2] !== 'string') throw new Error('beklenen ekleme sorgusu yok');
+  return { id: p[1], json: p[2], belge: JSON.parse(p[2]) };
+}
+
+beforeEach(() => {
+  magazaSayaclariniSifirla();
+  konsol = [];
+  sonDuzenek = undefined;
+  for (const ad of ['log', 'info', 'warn', 'error', 'debug', 'trace'] as const) {
+    vi.spyOn(console, ad).mockImplementation((...argumanlar: unknown[]) => { konsol.push(`${ad}: ${argumanlar.map(ciktiMetni).join(' ')}`); });
+  }
+});
+afterEach(async () => {
+  const cikti = konsolMetni();
+  const d = sonDuzenek;
+  vi.restoreAllMocks();
+  await Promise.all(sunucular.splice(0).map(s => new Promise<void>(coz => { s.closeAllConnections(); s.close(() => coz()); })));
+  // express-rate-limit doğrulama uyarısı (ERR_ERL_…) basılmamalı: test sınırlayıcısı yanlış kurulmuş demektir.
+  expect(cikti).not.toContain('ERR_ERL');
+  if (d && !d.kontrolTesti) {
+    // Zincir her isteği KENDİSİ sonlandırır: genel sınırlayıcıya / ayrıştırıcıya / 404'e / hata yakalayıcıya düşen istek YOK.
+    expect(d.kacan).toEqual({ sonrakiAraKatman: 0, genelAyristirici: 0, genel404: 0, genelYakalayici: 0 });
+    // Günlükte gövdeden parça YOK.
+    expect(cikti).not.toContain(ISARET);
+  }
+});
+
+describe('düzenek — sayaçlar GERÇEKTEN sayıyor (çit boş kümeyi sınamasın)', () => {
+  it('kontrol: zincirin DIŞINDA bozuk JSON genel yakalayıcıya düşer, 500 döner ve gövde parçası günlüğe basılır', async () => {
+    const d = await kur();
+    d.kontrolTesti = true;
+    const y = await iste(d, '/api/kontrol', { tamYol: true, ham: `{"ad": ${ISARET}` });
+    expect(y.kod).toBe(500);
+    expect(y.json).toEqual({ error: 'Sunucu hatası.' });
+    // `verify` ham gövdeyle, çözümlemeden ÖNCE çağrılır — bozuk gövdede de sayar.
+    expect(d.kacan).toEqual({ sonrakiAraKatman: 1, genelAyristirici: 1, genel404: 0, genelYakalayici: 1 });
+    // Mağaza zincirinin kendi yakalayıcısına NEDEN ihtiyaç duyduğunun ölçüsü: body-parser iletisi gövdeden parça taşır.
+    expect(konsolMetni()).toContain(ISARET.slice(0, 4));
+  });
+  it('kontrol: zincirin DIŞINDA geçerli JSON genel ayrıştırıcıdan geçer; bilinmeyen /api yolu genel 404\'e düşer', async () => {
+    const d = await kur();
+    d.kontrolTesti = true;
+    expect((await iste(d, '/api/kontrol', { tamYol: true, govde: { a: 1 } })).json).toEqual({ alindi: true });
+    expect((await iste(d, '/api/yok', { tamYol: true, govde: { a: 1 } })).json).toEqual({ error: 'Not found' });
+    expect(d.kacan).toEqual({ sonrakiAraKatman: 2, genelAyristirici: 2, genel404: 1, genelYakalayici: 0 });
+    expect(magazaSayaclari()).toEqual(SIFIR_SAYACLAR);
+  });
+  it('düzenekteki kopyalar server.ts\'teki asıllarıyla AYNI (server.ts değişirse düzenek de güncellenir)', () => {
+    const sunucu = kodSatirlari(join(SRC_KOK, '..', 'server.ts')).map(s => s.kod.trim()).filter(s => s !== '').join('\n');
+    expect(sunucu).toMatch(/app\.use\(express\.json\(\{\s*verify\b/);
+    expect(sunucu).toContain(["if (req.path.startsWith('/api/')) {", "res.status(404).json({ error: 'Not found' });", 'return;', '}'].join('\n'));
+    expect(sunucu).toContain([
+      'app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {',
+      "console.error('[express error]', err?.message || err);",
+      'if (res.headersSent) return;',
+      'if (err instanceof TabanAdresHatasi) { res.status(400).json({ success: false, error: err.message }); return; }',
+      "res.status(500).json({ error: 'Sunucu hatası.' });",
+      '});',
+    ].join('\n'));
+  });
+});
+
+describe('köken kapısı (CORS)', () => {
+  it('izinli köken: 201 + köken AYNEN yansır; Methods / Headers / Max-Age; Allow-Credentials YOK', async () => {
+    const d = await kur();
+    const y = await talep(d);
+    expect(y.kod).toBe(201);
+    expect(y.json).toEqual({ ok: true });
+    expect(y.baslik('access-control-allow-origin')).toBe(IZINLI);
+    expect(y.baslik('access-control-allow-methods')).toBe('POST');
+    expect(y.baslik('access-control-allow-headers')).toBe('Content-Type');
+    expect(y.baslik('access-control-max-age')).toBe('600');
+    expect(y.baslik('access-control-allow-credentials')).toBeNull();
+    expect(y.baslik('vary')).toMatch(/\bOrigin\b/);
+  });
+  it('izinsiz köken → 403 { ok: false }; köken başlığı YOK; sınırlayıcılara ve veritabanına ulaşmaz', async () => {
+    const d = await kur({ talepTavani: 1 });
+    for (let i = 0; i < 3; i++) {
+      const y = await talep(d, {}, { koken: IZINSIZ });
+      expect(y.kod).toBe(403);
+      expect(y.json).toEqual({ ok: false });
+      expect(y.baslik('access-control-allow-origin')).toBeNull();
+      expect(y.baslik('ratelimit-remaining')).toBeNull();
+      expect(y.baslik('vary')).toMatch(/\bOrigin\b/);
+    }
+    expect(d.sayim.apiLimiter).toBe(0);
+    expect(d.sorgular).toEqual([]);
+    expect(d.sayim.kiraci).toBe(0);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r403: 3 });
+    // Kova tüketilmedi: tavanı 1 olan sınırlayıcıdan ilk izinli istek hâlâ geçer.
+    expect((await talep(d)).kod).toBe(201);
+  });
+  it('kökensiz istek → 403 (OPTIONS dışındaki HER yöntemde)', async () => {
+    const d = await kur();
+    expect((await talep(d, {}, { koken: null })).kod).toBe(403);
+    for (const method of ['GET', 'PUT', 'PATCH', 'DELETE', 'HEAD']) {
+      expect((await iste(d, '/siparis-talebi', { method, koken: null })).kod, method).toBe(403);
+      expect((await iste(d, '/bilinmeyen', { method, koken: IZINSIZ })).kod, method).toBe(403);
+    }
+    expect((await iste(d, '/siparis-durumu', { govde: {}, koken: null })).kod).toBe(403);
+    expect(d.sorgular).toEqual([]);
+    expect(d.sayim.apiLimiter).toBe(0);
+  });
+  it('karşılaştırma BİREBİR: büyük harf, sondaki eğik çizgi, başka şema, başka kapı, uzatılmış ad, `null` → 403', async () => {
+    const d = await kur();
+    for (const koken of ['https://WWW.cetpa.com.tr', `${IZINLI}/`, 'http://www.cetpa.com.tr', `${IZINLI}:8443`, `${IZINLI}.kotu.example`, 'https://cetpa.com.tr', 'null', '*']) {
+      const y = await talep(d, {}, { koken });
+      expect(y.kod, koken).toBe(403);
+      expect(y.baslik('access-control-allow-origin'), koken).toBeNull();
+    }
+    expect(d.sorgular).toEqual([]);
+  });
+  it('OPTIONS → 204 ve BİTER: boş gövde; izinli kökende başlıklar var, izinsizde / kökensizde yok', async () => {
+    const d = await kur();
+    const izinli = await iste(d, '/siparis-talebi', { method: 'OPTIONS', basliklar: { 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' } });
+    expect(izinli.kod).toBe(204);
+    expect(izinli.metin).toBe('');
+    expect(izinli.baslik('access-control-allow-origin')).toBe(IZINLI);
+    expect(izinli.baslik('access-control-allow-methods')).toBe('POST');
+    expect(izinli.baslik('access-control-allow-headers')).toBe('Content-Type');
+    expect(izinli.baslik('access-control-max-age')).toBe('600');
+    expect(izinli.baslik('access-control-allow-credentials')).toBeNull();
+    expect(izinli.baslik('vary')).toMatch(/\bOrigin\b/);
+    for (const koken of [IZINSIZ, null]) {
+      const y = await iste(d, '/siparis-durumu', { method: 'OPTIONS', koken });
+      expect(y.kod).toBe(204);
+      expect(y.baslik('access-control-allow-origin')).toBeNull();
+    }
+    expect((await iste(d, '/bilinmeyen', { method: 'OPTIONS' })).kod).toBe(204);
+  });
+  it('OPTIONS hiçbir kovaya SAYILMAZ: genel sınırlayıcıya, mağaza sınırlayıcılarına, sayaçlara ulaşmaz', async () => {
+    const d = await kur({ talepTavani: 2, durumTavani: 1 });
+    for (let i = 0; i < 6; i++) {
+      const y = await iste(d, i % 2 === 0 ? '/siparis-talebi' : '/siparis-durumu', { method: 'OPTIONS' });
+      expect(y.kod).toBe(204);
+      expect(y.baslik('ratelimit-remaining')).toBeNull();
+    }
+    expect(d.sayim.apiLimiter).toBe(0);
+    expect(magazaSayaclari()).toEqual(SIFIR_SAYACLAR);
+    // Kovalar dokunulmamış: talepte iki, durumda bir hak duruyor.
+    expect((await talep(d, { no: no(1) })).baslik('ratelimit-remaining')).toBe('1');
+    expect((await talep(d, { no: no(2) })).kod).toBe(201);
+    expect((await talep(d, { no: no(3) })).kod).toBe(429);
+    expect((await iste(d, '/siparis-durumu', { govde: {} })).kod).toBe(503);
+    expect(d.sayim.apiLimiter).toBe(4);
+  });
+  it('birden çok izinli köken: İSTEYEN köken yansır (liste başı ya da `*` değil)', async () => {
+    const d = await kur({ kokenler: [IZINLI, 'https://onizleme.cetpa.com.tr'] });
+    expect((await talep(d, { no: no(1) }, { koken: 'https://onizleme.cetpa.com.tr' })).baslik('access-control-allow-origin')).toBe('https://onizleme.cetpa.com.tr');
+    expect((await talep(d, { no: no(2) })).baslik('access-control-allow-origin')).toBe(IZINLI);
+    expect((await talep(d, { no: no(3) }, { koken: IZINSIZ })).kod).toBe(403);
+  });
+  it('`Vary` EZİLMEZ, eklenir', async () => {
+    const d = await kur({ onceki: (_istek, yanit, sonraki) => { yanit.setHeader('Vary', 'Accept-Encoding'); sonraki(); } });
+    const vary = (await talep(d)).baslik('vary');
+    expect(vary).toMatch(/\bAccept-Encoding\b/);
+    expect(vary).toMatch(/\bOrigin\b/);
+  });
+  it('köken listesi bağlamla verilmezse `MAGAZA_IZINLI_KOKENLER` ortam değişkeninden okunur; yoksa varsayılan', async () => {
+    const yedek = process.env.MAGAZA_IZINLI_KOKENLER;
+    try {
+      delete process.env.MAGAZA_IZINLI_KOKENLER;
+      const d = await kur({ kokenler: null });
+      expect((await talep(d, { no: no(1) })).kod).toBe(201);
+      expect((await talep(d, { no: no(2) }, { koken: 'https://deneme.example' })).kod).toBe(403);
+      process.env.MAGAZA_IZINLI_KOKENLER = ' https://deneme.example/ , * ';
+      const y = await talep(d, { no: no(3) }, { koken: 'https://deneme.example' });
+      expect(y.kod).toBe(201);
+      expect(y.baslik('access-control-allow-origin')).toBe('https://deneme.example');
+      // Liste açıkça verildiyse varsayılan köken artık izinli DEĞİL.
+      expect((await talep(d, { no: no(4) })).kod).toBe(403);
+    } finally {
+      if (yedek === undefined) delete process.env.MAGAZA_IZINLI_KOKENLER; else process.env.MAGAZA_IZINLI_KOKENLER = yedek;
+    }
+  });
+  it('magazaIzinliKokenleriCoz: virgülle ayırır, kırpar, sondaki `/` atar; boş, `*` ve `null` yok sayılır; harf çevirmez', () => {
+    expect(MAGAZA_VARSAYILAN_KOKEN).toBe('https://www.cetpa.com.tr');
+    expect(magazaIzinliKokenleriCoz(undefined)).toEqual([MAGAZA_VARSAYILAN_KOKEN]);
+    expect(magazaIzinliKokenleriCoz('')).toEqual([MAGAZA_VARSAYILAN_KOKEN]);
+    expect(magazaIzinliKokenleriCoz(' , ,, ')).toEqual([MAGAZA_VARSAYILAN_KOKEN]);
+    expect(magazaIzinliKokenleriCoz('*')).toEqual([MAGAZA_VARSAYILAN_KOKEN]);
+    expect(magazaIzinliKokenleriCoz('null, *')).toEqual([MAGAZA_VARSAYILAN_KOKEN]);
+    expect(magazaIzinliKokenleriCoz(' https://a.example/ ,https://b.example//,, * ,https://C.example:8443')).toEqual(['https://a.example', 'https://b.example', 'https://C.example:8443']);
+  });
+});
+
+describe('415 — JSON olmayan POST ayrıştırıcıya hiç verilmez', () => {
+  it.each([
+    ['text/plain (gövde geçerli JSON olsa bile)', 'text/plain'],
+    ['text/plain;charset=UTF-8 (tarayıcının dizge gövdeye koyduğu)', 'text/plain;charset=UTF-8'],
+    ['form', 'application/x-www-form-urlencoded'],
+    ['multipart', 'multipart/form-data; boundary=x'],
+    ['JSON benzeri başka tür', 'application/vnd.api+json'],
+    ['Content-Type başlığı yok', null],
+  ])('%s → 415 { ok: false }; yazma yok', async (_ad, tur) => {
+    const d = await kur();
+    const y = await talep(d, { not: ISARET }, { tur });
+    expect(y.kod).toBe(415);
+    expect(y.json).toEqual({ ok: false });
+    expect(d.sorgular).toEqual([]);
+    expect(konsol).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r415: 1 });
+  });
+  it('gövdesiz ve türsüz POST → 415; durum ucu ve bilinmeyen yol da aynı denetimden geçer', async () => {
+    const d = await kur();
+    expect((await iste(d, '/siparis-talebi')).kod).toBe(415);
+    expect((await iste(d, '/siparis-durumu', { ham: '{}', tur: 'text/plain' })).kod).toBe(415);
+    expect((await iste(d, '/bilinmeyen', { ham: '{}', tur: 'text/plain' })).kod).toBe(415);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r415: 3 });
+  });
+  it('`application/json; charset=utf-8` kabul edilir', async () => {
+    const d = await kur();
+    expect((await talep(d, {}, { tur: 'application/json; charset=utf-8' })).kod).toBe(201);
+  });
+  it('desteklenmeyen karakter kümesi / gövde kodlaması → 415 (ayrıştırıcı hatası zincirin KENDİ yakalayıcısında)', async () => {
+    const d = await kur();
+    const kume = await talep(d, { not: ISARET }, { tur: 'application/json; charset=iso-8859-9' });
+    expect(kume.kod).toBe(415);
+    expect(kume.json).toEqual({ ok: false });
+    const kodlama = await talep(d, { not: ISARET }, { basliklar: { 'Content-Encoding': 'compress' } });
+    expect(kodlama.kod).toBe(415);
+    expect(kodlama.json).toEqual({ ok: false });
+    expect(d.sorgular).toEqual([]);
+    expect(konsol).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r415: 2 });
+  });
+});
+
+describe('400 — sabit gövde; zod ayrıntısı, hata iletisi, gövde parçası YOK', () => {
+  it.each([
+    ['yarım JSON', `{"no": "T261008-5Y9P", "musteri": {"ad": "${ISARET}`],
+    ['JSON olmayan metin', `${ISARET} bu JSON değil`],
+    ['çıplak dizge (katı kip)', `"${ISARET}"`],
+    ['çıplak null', 'null'],
+    ['sondaki virgül', `{"not": "${ISARET}",}`],
+  ])('bozuk JSON — %s → 400 { ok: false } (500 DEĞİL)', async (_ad, ham) => {
+    const d = await kur();
+    const y = await iste(d, '/siparis-talebi', { ham });
+    expect(y.kod).toBe(400);
+    expect(y.json).toEqual({ ok: false });
+    expect(y.metin).not.toContain(ISARET);
+    expect(d.sorgular).toEqual([]);
+    expect(konsol).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r400: 1 });
+  });
+  it.each([
+    ['boş nesne', {}],
+    ['dizi', [govde()]],
+    ['talep no desene uymuyor', govde({ no: `T261008-${ISARET}` })],
+    ['talep no yok', govde({ no: undefined })],
+    ['müşteri yok', govde({ musteri: undefined, not: ISARET })],
+    ['telefon sayı', govde({ musteri: { ad: ISARET, telefon: 5321234567 } })],
+    ['kalem yok', govde({ kalemler: [], not: ISARET })],
+    ['adet sıfır', govde({ kalemler: [{ ad: ISARET, adet: 0 }] })],
+    ['adet kesirli', govde({ kalemler: [{ ad: ISARET, adet: 1.5 }] })],
+    ['adet metin', govde({ kalemler: [{ ad: ISARET, adet: '2' }] })],
+    ['fiyat eksi', govde({ kalemler: [{ ad: ISARET, adet: 1, birimFiyat: -1 }] })],
+    ['toplam metin', govde({ toplam: ISARET })],
+    ['not nesne', govde({ not: { a: ISARET } })],
+  ])('şemaya uymayan gövde — %s → 400 { ok: false }; yanıtta yalnız sabit gövde', async (_ad, g) => {
+    const d = await kur();
+    const y = await iste(d, '/siparis-talebi', { govde: g });
+    expect(y.kod).toBe(400);
+    expect(y.metin).toBe('{"ok":false}');
+    expect(d.sorgular).toEqual([]);
+    expect(d.yayinlar).toEqual([]);
+    expect(d.bildirimler).toEqual([]);
+    expect(konsol).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r400: 1 });
+  });
+  it.each([
+    ['ad yalnız boşluk', { musteri: { ad: '   ', telefon: '0532 123 45 67' } }],
+    ['ad yalnız denetim karakteri', { musteri: { ad: k(0x00, 0x1B, 0x2028), telefon: '0532 123 45 67' } }],
+    ['telefonda 9 rakam', { musteri: { ad: ISARET, telefon: '532 123 45 6' } }],
+    ['kalem adı temizlikten sonra boş', { kalemler: [{ ad: 'boya', adet: 1 }, { ad: ` ${k(0x00)} `, adet: 1 }], not: ISARET }],
+  ])('şemadan geçen ama eşleyicinin reddettiği gövde — %s → 400; yazma yok', async (_ad, ustune) => {
+    const d = await kur();
+    const y = await talep(d, ustune);
+    expect(y.kod).toBe(400);
+    expect(y.metin).toBe('{"ok":false}');
+    expect(d.sorgular).toEqual([]);
+    expect(konsol).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r400: 1 });
+  });
+  it('JSON türünde BOŞ gövde → 400 (ayrıştırıcı boş nesne üretir; şema reddeder)', async () => {
+    const d = await kur();
+    expect((await iste(d, '/siparis-talebi', { tur: 'application/json' })).kod).toBe(400);
+    expect((await iste(d, '/siparis-talebi', { ham: '', tur: 'application/json' })).kod).toBe(400);
+    expect(d.sorgular).toEqual([]);
+  });
+  it('bozuk gövde kiracı çözümlemesini ve havuzu HİÇ tetiklemez', async () => {
+    const d = await kur();
+    await iste(d, '/siparis-talebi', { govde: {} });
+    await iste(d, '/siparis-talebi', { ham: '{' });
+    expect(d.sayim).toEqual({ kiraci: 0, havuz: 0, apiLimiter: 2 });
+  });
+});
+
+describe('413 — 64 KB gövde sınırı (genel ayrıştırıcıdan ÖNCE, zincirin kendi ayrıştırıcısında)', () => {
+  /** Tam olarak `bayt` uzunluğunda, GEÇERLİ talep gövdesi (dolgu `not` alanında). */
+  const tamBoyda = (bayt: number): string => {
+    const bos = JSON.stringify(govde({ not: '' }));
+    return JSON.stringify(govde({ not: 'a'.repeat(bayt - Buffer.byteLength(bos)) }));
+  };
+  it('70 KB geçerli gövde → 413 { ok: false } (201 DEĞİL); yazma yok', async () => {
+    const d = await kur();
+    const ham = tamBoyda(70 * 1024);
+    expect(Buffer.byteLength(ham)).toBe(70 * 1024);
+    const y = await iste(d, '/siparis-talebi', { ham });
+    expect(y.kod).toBe(413);
+    expect(y.json).toEqual({ ok: false });
+    expect(d.sorgular).toEqual([]);
+    expect(d.sayim.kiraci).toBe(0);
+    expect(konsol).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r413: 1 });
+  });
+  it('sınır TAM 64 KB: 65 536 bayt geçer (kırpılarak yazılır), 65 537 bayt 413', async () => {
+    const d = await kur();
+    const sigan = await iste(d, '/siparis-talebi', { ham: tamBoyda(65_536) });
+    expect(sigan.kod).toBe(201);
+    expect(yazilan(d).belge).toMatchObject({ kirpildi: true, not: 'a'.repeat(1000) });
+    const tasan = await iste(d, '/siparis-talebi', { ham: tamBoyda(65_537).replace('T261008-5Y9P', no(2)) });
+    expect(tasan.kod).toBe(413);
+    expect(d.sorgular).toHaveLength(1);
+  });
+  it('büyük gövde durum ucunda ve bilinmeyen yolda da 413 (aynı zincir)', async () => {
+    const d = await kur();
+    const ham = JSON.stringify({ dolgu: `${ISARET}${'x'.repeat(70 * 1024)}` });
+    expect((await iste(d, '/siparis-durumu', { ham })).kod).toBe(413);
+    expect((await iste(d, '/bilinmeyen', { ham })).kod).toBe(413);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r413: 2 });
+  });
+  it('sıkıştırılmış gövde: sınır AÇILMIŞ boyuta uygulanır (küçük paket, 200 KB içerik → 413)', async () => {
+    const d = await kur();
+    const paket = new Uint8Array(gzipSync(Buffer.from(JSON.stringify(govde({ not: 'a'.repeat(200_000) })))));
+    expect(paket.byteLength).toBeLessThan(2000);
+    const y = await iste(d, '/siparis-talebi', { ham: paket, basliklar: { 'Content-Encoding': 'gzip' } });
+    expect(y.kod).toBe(413);
+    expect(y.json).toEqual({ ok: false });
+    expect(d.sorgular).toEqual([]);
+  });
+});
+
+describe('413 — YAZILAN belge sınırı: gövde sınırının 2 katı (teknik koruma; iş sınırı DEĞİL)', () => {
+  const bayt = (metin: string): number => Buffer.byteLength(metin, 'utf8');
+  /** Şemanın kabul ettiği EN KISA kalem; eşleyici buna beş alan daha yazar (id, sku, marka, talepFiyat, tedarik). */
+  const ASGARI_KALEM = { ad: 'a', adet: 1 };
+  /** Aynı kalemin YAZILAN karşılığı (yedi alan). */
+  const ASGARI_KALEM_YAZILAN = { id: '', sku: '', ad: 'a', marka: '', adet: 1, talepFiyat: null, tedarik: false };
+  /** Zorunlu alanlar + `not`; kalemler dışarıdan. */
+  const asgariTalep = (talepNo: string, kalemler: unknown[], not = ''): Record<string, unknown> =>
+    ({ no: talepNo, musteri: { ad: 'a', telefon: '5321234567' }, not, kalemler });
+  const asgariGovde = (talepNo: string, kalemSayisi: number, not = ''): string =>
+    JSON.stringify(asgariTalep(talepNo, Array.from({ length: kalemSayisi }, () => ASGARI_KALEM), not));
+  /** `kalem`i yineleyerek 64 KB gövde sınırına SIĞAN en uzun gövde (kalan boşluk bir kalemden kısa). */
+  const sinirayaYakin = (kalem: Record<string, unknown>, govdeKur: (kalemler: unknown[]) => unknown): { ham: string; kalemSayisi: number } => {
+    const tek = bayt(JSON.stringify(govdeKur([kalem])));
+    const kalemBayt = bayt(JSON.stringify(kalem)) + 1; // + virgül
+    const kalemSayisi = 1 + Math.floor((65_536 - tek) / kalemBayt);
+    const ham = JSON.stringify(govdeKur(Array.from({ length: kalemSayisi }, () => kalem)));
+    expect(bayt(ham)).toBeLessThanOrEqual(65_536);
+    expect(bayt(ham)).toBeGreaterThan(65_536 - kalemBayt);
+    return { ham, kalemSayisi };
+  };
+
+  it('asgari kalemli (yalnız `ad` + `adet`), gövde sınırına yakın gövde → 413 { ok: false }; SQL çağrısı 0, yayın 0, bildirim 0', async () => {
+    const d = await kur();
+    const { ham, kalemSayisi } = sinirayaYakin(ASGARI_KALEM, kalemler => asgariTalep('T261008-5Y9P', kalemler));
+    // Ölçü: bu gövde yazılsaydı belge sınırın ÜSTÜNDE olurdu (ölçülen: 3.272 kalem, 65,5 KB gövde → 268,7 KB belge, ×4,1).
+    expect(kalemSayisi * (bayt(JSON.stringify(ASGARI_KALEM_YAZILAN)) + 1)).toBeGreaterThan(2 * 65_536);
+    const y = await iste(d, '/siparis-talebi', { ham });
+    expect(y.kod).toBe(413);
+    expect(y.metin).toBe('{"ok":false}');
+    expect(d.sorgular).toEqual([]);
+    expect(d.yayinlar).toEqual([]);
+    expect(d.bildirimler).toEqual([]);
+    // Gövde AYRIŞTIRICIDAN ve şemadan geçti (gövde 413'ünde kiracı hiç çözülmez): ret yazılacak belgenin boyundan.
+    expect(d.sayim.kiraci).toBe(1);
+    expect(konsol).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r413: 1 });
+  });
+
+  it.each([
+    ['gerçekçi kalem', { id: 'u-1', sku: 'DYO-0001', ad: 'İç cephe boyası 15 L', marka: 'DYO', adet: 2, birimFiyat: 204.99, tedarik: false }],
+    ['yedi alan da EN KISA değerle', { id: '', sku: '', ad: 'a', marka: '', adet: 1, birimFiyat: null, tedarik: false }],
+  ])('MAĞAZA biçimli (yedi alan da gövdede; %s), gövde sınırına yakın gövde → 201: tavan gerçek talebe ÇARPMAZ', async (_ad, kalem) => {
+    const d = await kur();
+    const { ham, kalemSayisi } = sinirayaYakin(kalem, kalemler => govde({ kalemler }));
+    const y = await iste(d, '/siparis-talebi', { ham });
+    expect(y.kod).toBe(201);
+    expect(y.metin).toBe('{"ok":true}');
+    expect(yazilan(d).belge.kalemler).toHaveLength(kalemSayisi);
+    // Mağaza biçiminde belge gövdeyle hemen hemen aynı boydadır (ölçülen çarpan ×1,003) — sınırın yarısında kalır.
+    const yazilanBayt = bayt(yazilan(d).json);
+    expect(yazilanBayt / bayt(ham)).toBeLessThan(1.05);
+    expect(yazilanBayt).toBeLessThan(MAGAZA_BELGE_SINIRI_BAYT);
+    expect(d.yayinlar).toHaveLength(1);
+    expect(d.bildirimler).toHaveLength(1);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, eklenen: 1 });
+  });
+
+  it('sınır TAM gövde sınırının 2 katı: 131 072 baytlık belge YAZILIR, 131 073 baytlık belge 413; ölçü UTF-8 BAYTTIR', async () => {
+    const d = await kur();
+    // Yoklama: tek kalemli belgenin boyu (sabit alanlar + bir kalem).
+    expect((await iste(d, '/siparis-talebi', { ham: asgariGovde(no(1), 1) })).kod).toBe(201);
+    expect(yazilan(d, 0).belge.kalemler).toEqual([ASGARI_KALEM_YAZILAN]);
+    const tekKalemli = bayt(yazilan(d, 0).json);
+    const kalemBayt = bayt(JSON.stringify(ASGARI_KALEM_YAZILAN)) + 1; // + virgül
+    // Sınıra bir kalemden az kalana dek kalem; kalan açık `not` ile kapatılır (ASCII: karakter = bayt; `not` sınırı 1000).
+    const kalemSayisi = Math.floor((131_072 - tekKalemli) / kalemBayt);
+    const dolgu = 131_072 - (tekKalemli + (kalemSayisi - 1) * kalemBayt);
+    expect(dolgu).toBeGreaterThanOrEqual(kalemBayt);
+    expect(dolgu).toBeLessThan(2 * kalemBayt);
+
+    const sigan = asgariGovde(no(2), kalemSayisi, 'n'.repeat(dolgu));
+    expect(bayt(sigan)).toBeLessThan(65_536); // gövde sınırı devrede DEĞİL
+    expect((await iste(d, '/siparis-talebi', { ham: sigan })).kod).toBe(201);
+    expect(bayt(yazilan(d, 1).json)).toBe(131_072);
+    expect(yazilan(d, 1).belge.kalemler).toHaveLength(kalemSayisi);
+
+    const tasan = await iste(d, '/siparis-talebi', { ham: asgariGovde(no(3), kalemSayisi, 'n'.repeat(dolgu + 1)) });
+    expect(tasan.kod).toBe(413);
+    expect(tasan.json).toEqual({ ok: false });
+
+    // Aynı KARAKTER sayısı (131 072 UTF-16 birimi), bir bayt fazlası: «ş» iki bayttır. Ölçü karakter olsaydı yazılırdı.
+    const turkce = asgariGovde(no(4), kalemSayisi, `${'n'.repeat(dolgu - 1)}ş`);
+    expect((await iste(d, '/siparis-talebi', { ham: turkce })).kod).toBe(413);
+
+    expect(d.sorgular).toHaveLength(2);
+    expect(d.yayinlar).toHaveLength(2);
+    expect(d.bildirimler).toHaveLength(2);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, eklenen: 2, r413: 2 });
+  });
+});
+
+describe('kayıt — tek ekleme, akış olayı ve bildirim yalnız satır GERÇEKTEN eklendiyse', () => {
+  it('geçerli talep: SQL birebir, kimlik formülü, doküman, yayın ve bildirim', async () => {
+    const d = await kur();
+    const y = await talep(d);
+    expect(y.kod).toBe(201);
+    expect(y.metin).toBe('{"ok":true}');
+    expect(d.sorgular).toHaveLength(1);
+    expect(d.sorgular[0].sql).toBe(EKLEME_SQL);
+    const { id, belge } = yazilan(d);
+    expect(d.sorgular[0].params).toEqual(['magazaTalepleri', id, expect.any(String)]);
+    expect(id).toMatch(MAGAZA_TALEP_KIMLIK_DESENI);
+    expect(id).toBe(magazaTalepKimligi('kiraci-1', 'T261008-5Y9P', '5321234567'));
+    expect(belge).toEqual({
+      companyId: 'kiraci-1',
+      talepNo: 'T261008-5Y9P',
+      durum: 'yeni',
+      olusturma: '2026-10-08T09:15:30.123Z',
+      istemciTarihi: '2026-10-08T09:15:00.000Z',
+      musteri: { ad: 'Şükrü Ağaoğlu', firma: 'Iğdır Yapı', telefon: '+90 (532) 123 45 67', eposta: 'sukru@ornek.com.tr', il: 'İstanbul', adres: 'Çiçek Sk. No: 4\nKadıköy', vergi: '1234567890' },
+      telefonSon10: '5321234567',
+      not: 'Öğleden sonra arayın.',
+      kalemler: [
+        { id: 'u-1', sku: 'DYO-0001', ad: 'İç cephe boyası 15 L', marka: 'DYO', adet: 2, talepFiyat: 204.99, tedarik: false },
+        { id: 'u-2', sku: 'KRB-77', ad: 'Fayans yapıştırıcısı', marka: 'Karbosan', adet: 5, talepFiyat: null, tedarik: true },
+      ],
+      talepEdilen: { araToplam: 409.98, kdv: 82, toplam: 491.98 },
+      fiyatiSorulacakVar: true,
+      bildirim: { durum: 'bekliyor', zaman: '2026-10-08T09:15:30.123Z' },
+    });
+    // Akış olayı: yazılan belgeyle AYNI içerik, kiracı kapsamı açıkça verilmiş.
+    expect(d.yayinlar).toEqual([['magazaTalepleri', 'set', id, belge, { cid: 'kiraci-1' }]]);
+    expect(d.bildirimler).toEqual([id]);
+    expect(d.olaylar).toEqual(['sql', 'yayin', 'bildirim']);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, eklenen: 1 });
+    expect(konsol).toEqual([]);
+  });
+  it('ÇAKIŞMA: aynı talep ikinci kez → tek ekleme, tek yayın, tek bildirim; yanıt BİREBİR aynı 201', async () => {
+    const d = await kur();
+    const ilk = await talep(d);
+    const ikinci = await talep(d, { not: 'ikinci gönderimde değişmiş not' });
+    const ucuncu = await talep(d, { musteri: { ad: 'Şükrü Ağaoğlu', telefon: '0 532 123 45 67' } });
+    for (const y of [ilk, ikinci, ucuncu]) {
+      expect(y.kod).toBe(201);
+      expect(y.metin).toBe('{"ok":true}');
+    }
+    // Üç deneme de AYNI kimlikle eklemeyi dener (çakışmayı veritabanı çözer); mevcut kayda dokunan başka sorgu YOK.
+    expect(d.sorgular.map(s => s.sql)).toEqual([EKLEME_SQL, EKLEME_SQL, EKLEME_SQL]);
+    expect(new Set(d.sorgular.map(s => s.params[1])).size).toBe(1);
+    expect(d.yayinlar).toHaveLength(1);
+    expect(d.bildirimler).toEqual([yazilan(d).id]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, eklenen: 1, cakisan: 2 });
+  });
+  it('başka telefon ya da başka talep no AYRI dokümandır', async () => {
+    const d = await kur();
+    await talep(d);
+    await talep(d, { musteri: { ad: 'Şükrü Ağaoğlu', telefon: '0532 123 45 68' } });
+    await talep(d, { no: no(7) });
+    expect(new Set(d.sorgular.map(s => s.params[1])).size).toBe(3);
+    expect(d.yayinlar).toHaveLength(3);
+    expect(d.bildirimler).toHaveLength(3);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, eklenen: 3 });
+  });
+  it('istemcinin gönderdiği kiracı / durum / bildirim / zaman / `fiyatiSorulacakVar` ALINMAZ', async () => {
+    const d = await kur();
+    await talep(d, {
+      companyId: 'baska-kiraci', durum: 'teyit', olusturma: '2000-01-01T00:00:00.000Z', bildirim: { durum: 'gitti' }, kirpildi: true,
+      telefonSon10: '0000000000', fiyatiSorulacakVar: true, kalemler: [{ ad: 'boya', adet: 1, birimFiyat: 10 }],
+    });
+    const { id, belge } = yazilan(d);
+    expect(belge).toMatchObject({ companyId: 'kiraci-1', durum: 'yeni', olusturma: '2026-10-08T09:15:30.123Z', telefonSon10: '5321234567', fiyatiSorulacakVar: false, bildirim: { durum: 'bekliyor' } });
+    expect('kirpildi' in belge).toBe(false);
+    expect(id).toBe(magazaTalepKimligi('kiraci-1', 'T261008-5Y9P', '5321234567'));
+    expect(d.yayinlar[0][4]).toEqual({ cid: 'kiraci-1' });
+  });
+  it('fiyat / toplam yoksa `null` yazılır (0 DEĞİL); isteğe bağlı metinler boş dizge', async () => {
+    const d = await kur();
+    const y = await iste(d, '/siparis-talebi', { govde: { no: 'T261008-AAAA', musteri: { ad: 'Ali', telefon: '05321234567' }, kalemler: [{ ad: 'boya', adet: 3 }, { ad: 'numune', adet: 1, birimFiyat: 0 }] } });
+    expect(y.kod).toBe(201);
+    const { belge, json } = yazilan(d);
+    expect(belge.kalemler).toEqual([
+      { id: '', sku: '', ad: 'boya', marka: '', adet: 3, talepFiyat: null, tedarik: false },
+      { id: '', sku: '', ad: 'numune', marka: '', adet: 1, talepFiyat: 0, tedarik: false },
+    ]);
+    expect(belge).toMatchObject({ talepEdilen: { araToplam: null, kdv: null, toplam: null }, fiyatiSorulacakVar: true, istemciTarihi: null, not: '' });
+    expect(belge.musteri).toEqual({ ad: 'Ali', firma: '', telefon: '05321234567', eposta: '', il: '', adres: '', vergi: '' });
+    expect(json).toContain('"talepFiyat":null');
+  });
+  it('kırpma: aşan alan REDDEDİLMEZ, kırpılır ve `kirpildi: true` yazılır', async () => {
+    const d = await kur();
+    const y = await talep(d, { not: 'ğ'.repeat(1500), musteri: { ad: 'ş'.repeat(250), telefon: `0532 123 45 67 ${'9'.repeat(60)}`, il: 'İ'.repeat(81) } });
+    expect(y.kod).toBe(201);
+    const { belge } = yazilan(d);
+    expect(belge.kirpildi).toBe(true);
+    expect(belge.not).toBe('ğ'.repeat(1000));
+    expect(belge.musteri.ad).toBe('ş'.repeat(200));
+    expect(belge.musteri.il).toBe('İ'.repeat(80));
+    expect(belge.musteri.telefon).toHaveLength(40);
+    // Kimliğin anahtarı KIRPMADAN ÖNCEKİ telefonun son 10 rakamı.
+    expect(belge.telefonSon10).toBe('9'.repeat(10));
+  });
+  it('U+0000, U+2028 / U+2029 ve bölünmüş vekil: temizlenip yazılır; jsonb\'yi düşürecek kaçış SQL parametresinde YOK', async () => {
+    const d = await kur();
+    // Özel karakterler tel üzerinde JSON KAÇIŞI olarak gider (ham NUL / eşsiz vekil UTF-8'e yazılamaz).
+    const ham = JSON.stringify(govde({
+      musteri: { ad: 'Ah@NUL@met@LS@Yılmaz@UST@', telefon: '0532@NUL@ 123 45 67', il: 'İz@NUL@mir@PS@Bornova', adres: 'Sokak 1@LS@Kat 2@NUL@\r\nDaire 3@ALT@' },
+      not: '@NUL@not@UST@ sonu',
+      kalemler: [{ ad: 'bo@NUL@ya@LS@15 L', sku: 'S@NUL@1', adet: 1 }],
+    })).replaceAll('@NUL@', '\\u0000').replaceAll('@LS@', '\\u2028').replaceAll('@PS@', '\\u2029').replaceAll('@UST@', '\\ud83d').replaceAll('@ALT@', '\\ude00');
+    const y = await iste(d, '/siparis-talebi', { ham });
+    expect(y.kod).toBe(201);
+    const { json, belge } = yazilan(d);
+    const yerTutucu = k(0xFFFD);
+    // Tek satırlık alan: satır ayırıcı BOŞLUK; çok satırlı alan (adres): `\n`.
+    expect(belge.musteri).toMatchObject({ ad: `Ahmet Yılmaz${yerTutucu}`, telefon: '0532 123 45 67', il: 'İzmir Bornova', adres: `Sokak 1\nKat 2\nDaire 3${yerTutucu}` });
+    expect(belge.not).toBe(`not${yerTutucu} sonu`);
+    expect(belge.kalemler[0]).toMatchObject({ ad: 'boya 15 L', sku: 'S1' });
+    expect(json).not.toMatch(/\\u0000/);
+    expect(json).not.toMatch(/\\ud[89a-f][0-9a-f]{2}/i);
+    expect(json.isWellFormed()).toBe(true);
+    expect([...json].some(c => c === k(0x2028) || c === k(0x2029) || c === k(0x00))).toBe(false);
+  });
+  it('bildirim YANITTAN ÖNCE beklenir', async () => {
+    let birak: () => void = () => {};
+    const kapi = new Promise<void>(coz => { birak = coz; });
+    const d = await kur({ bildirimIste: () => kapi });
+    let bitti = false;
+    const soz = talep(d).then(y => { bitti = true; return y; });
+    await vi.waitFor(() => { expect(d.bildirimler).toHaveLength(1); });
+    await bekle(40);
+    expect(bitti).toBe(false);
+    birak();
+    expect((await soz).kod).toBe(201);
+  });
+  it('bildirim isteği REDDEDERSE (sözleşme dışı) yanıt yine 201; yakalanmamış ret YOK; günlükte yalnız kod', async () => {
+    const yakalanmamis: unknown[] = [];
+    const dinleyici = (neden: unknown): void => { yakalanmamis.push(neden); };
+    process.on('unhandledRejection', dinleyici);
+    try {
+      const d = await kur({ bildirimIste: () => Promise.reject(Object.assign(new Error(`kuyruk ${ISARET}`), { code: 'EKUYRUK' })) });
+      const y = await talep(d);
+      expect(y.kod).toBe(201);
+      expect(y.json).toEqual({ ok: true });
+      await bekle(30);
+      expect(yakalanmamis).toEqual([]);
+      expect(konsol).toEqual(['error: [magaza] talep yazıldı, bildirim istenemedi: EKUYRUK']);
+      expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, eklenen: 1 });
+    } finally {
+      process.off('unhandledRejection', dinleyici);
+    }
+  });
+  it('bildirim isteği eşzamanlı FIRLATIRSA da yanıt 201', async () => {
+    const d = await kur({ bildirimIste: () => { throw new TypeError(`patladı ${ISARET}`); } });
+    expect((await talep(d)).kod).toBe(201);
+    expect(konsol).toEqual(['error: [magaza] talep yazıldı, bildirim istenemedi: TypeError']);
+  });
+  it('akış yayını fırlatırsa yanıt 201 kalır ve bildirim YİNE istenir', async () => {
+    const d = await kur({ yayinHatasi: new Error(`akış ${ISARET}`) });
+    expect((await talep(d)).kod).toBe(201);
+    expect(d.bildirimler).toHaveLength(1);
+    expect(konsol).toEqual(['error: [magaza] talep yazıldı, akış olayı yayınlanamadı: Error']);
+  });
+  it('veritabanı hatası → 500 { ok: false }; günlükte hata NESNESİ değil yalnız kod; yayın ve bildirim yok', async () => {
+    // pg hata nesnesinin `detail` / `where` alanı JSON verisinden parça taşır.
+    const pgHatasi = Object.assign(new Error(`invalid input syntax for type json: ${ISARET}`), { code: '22P02', detail: `Token "${ISARET}" is invalid.`, where: `JSON data, line 1: {"ad":"${ISARET}"` });
+    const d = await kur({ sorguHatasi: pgHatasi });
+    const y = await talep(d, { not: ISARET });
+    expect(y.kod).toBe(500);
+    expect(y.metin).toBe('{"ok":false}');
+    expect(d.yayinlar).toEqual([]);
+    expect(d.bildirimler).toEqual([]);
+    expect(konsol).toEqual(['error: [magaza] sipariş talebi işlenemedi: 22P02']);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r500: 1 });
+  });
+  it('kodu güvenli desene uymayan hata günlüğe `bilinmiyor` diye düşer (serbest metin kod yerine geçemez)', async () => {
+    const d = await kur({ sorguHatasi: { code: `kod ${ISARET} boşluklu`, type: `${ISARET}/x`, name: 'x'.repeat(41) } });
+    expect((await talep(d)).kod).toBe(500);
+    expect(konsol).toEqual(['error: [magaza] sipariş talebi işlenemedi: bilinmiyor']);
+  });
+});
+
+describe('kiracı ve havuz — çözülemezse 503 ve YAZMA YOK', () => {
+  it.each([
+    ['boş dizge', () => Promise.resolve('')],
+    ['yalnız boşluk', () => Promise.resolve('   ')],
+    ['çözümleyici reddediyor', () => Promise.reject(new Error(`users taraması ${ISARET}`))],
+  ])('kiracı yok (%s) → 503 { ok: false }; SQL çağrısı 0; yayın ve bildirim yok', async (_ad, kiraci) => {
+    const d = await kur({ kiraci });
+    const y = await talep(d, { not: ISARET });
+    expect(y.kod).toBe(503);
+    expect(y.metin).toBe('{"ok":false}');
+    expect(d.sorgular).toEqual([]);
+    expect(d.yayinlar).toEqual([]);
+    expect(d.bildirimler).toEqual([]);
+    expect(konsol).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r503: 1 });
+  });
+  it('havuz yok → 503; kiracı çözümlenmez bile', async () => {
+    const d = await kur({ havuzYok: true });
+    const y = await talep(d);
+    expect(y.kod).toBe(503);
+    expect(y.json).toEqual({ ok: false });
+    expect(d.sayim.kiraci).toBe(0);
+    expect(d.yayinlar).toEqual([]);
+    expect(d.bildirimler).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r503: 1 });
+  });
+  it('dolu sonuç 60 sn önbellekte: 59 999 ms\'de çözümleyici yeniden ÇAĞRILMAZ, 60 000 ms\'de çağrılır', async () => {
+    const d = await kur();
+    for (let i = 0; i < 3; i++) expect((await talep(d, { no: no(i) })).kod).toBe(201);
+    expect(d.sayim.kiraci).toBe(1);
+    d.saat.ms = SAAT_0 + 59_999;
+    await talep(d, { no: no(10) });
+    expect(d.sayim.kiraci).toBe(1);
+    d.saat.ms = SAAT_0 + 60_000;
+    await talep(d, { no: no(11) });
+    expect(d.sayim.kiraci).toBe(2);
+  });
+  it('yenilenen kiracı yeni dokümanın damgasına ve kimliğine girer', async () => {
+    let cid = 'kiraci-1';
+    const d = await kur({ kiraci: () => Promise.resolve(cid) });
+    await talep(d);
+    cid = 'kiraci-2';
+    d.saat.ms = SAAT_0 + 30_000;
+    await talep(d, { no: no(1) });
+    d.saat.ms = SAAT_0 + 60_000;
+    await talep(d, { no: no(2) });
+    expect(d.sorgular.map((_, i) => yazilan(d, i).belge.companyId)).toEqual(['kiraci-1', 'kiraci-1', 'kiraci-2']);
+    expect(yazilan(d, 2).id).toBe(magazaTalepKimligi('kiraci-2', no(2), '5321234567'));
+    expect(d.yayinlar[2][4]).toEqual({ cid: 'kiraci-2' });
+  });
+  it('boş sonuç EN ÇOK 10 sn önbellekte: 9 999 ms\'de hâlâ 503 (çağrı yok), 10 000 ms\'de yeniden çözülür ve uç açılır', async () => {
+    let cid = '';
+    const d = await kur({ kiraci: () => Promise.resolve(cid) });
+    expect((await talep(d)).kod).toBe(503);
+    expect(d.sayim.kiraci).toBe(1);
+    cid = 'kiraci-1';
+    d.saat.ms = SAAT_0 + 9_999;
+    expect((await talep(d)).kod).toBe(503);
+    expect(d.sayim.kiraci).toBe(1);
+    d.saat.ms = SAAT_0 + 10_000;
+    expect((await talep(d)).kod).toBe(201);
+    expect(d.sayim.kiraci).toBe(2);
+    expect(d.sorgular).toHaveLength(1);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, eklenen: 1, r503: 2 });
+  });
+  it('reddeden çözümleyici de boş sonuç gibi en çok 10 sn önbelleklenir', async () => {
+    let patlasin = true;
+    const d = await kur({ kiraci: () => (patlasin ? Promise.reject(new Error('geçici')) : Promise.resolve('kiraci-1')) });
+    expect((await talep(d)).kod).toBe(503);
+    patlasin = false;
+    d.saat.ms = SAAT_0 + 5_000;
+    expect((await talep(d)).kod).toBe(503);
+    expect(d.sayim.kiraci).toBe(1);
+    d.saat.ms = SAAT_0 + 10_000;
+    expect((await talep(d)).kod).toBe(201);
+  });
+  it('eşzamanlı istekler TEK çözümlemeyi paylaşır', async () => {
+    let birak: (cid: string) => void = () => {};
+    const kapi = new Promise<string>(coz => { birak = coz; });
+    const d = await kur({ kiraci: () => kapi });
+    const sozler = [1, 2, 3, 4].map(n => talep(d, { no: no(n) }));
+    await vi.waitFor(() => { expect(d.sayim.havuz).toBe(4); });
+    await bekle(20);
+    birak('kiraci-1');
+    expect((await Promise.all(sozler)).map(y => y.kod)).toEqual([201, 201, 201, 201]);
+    expect(d.sayim.kiraci).toBe(1);
+    expect(d.sorgular).toHaveLength(4);
+  });
+  it('önbellek zincire aittir: yeni zincir kiracıyı yeniden çözer', async () => {
+    const d1 = await kur();
+    await talep(d1);
+    const d2 = await kur();
+    await talep(d2);
+    expect([d1.sayim.kiraci, d2.sayim.kiraci]).toEqual([1, 1]);
+    // afterEach yalnız son düzeneğe bakar; ilkini burada doğrula.
+    expect(d1.kacan).toEqual({ sonrakiAraKatman: 0, genelAyristirici: 0, genel404: 0, genelYakalayici: 0 });
+  });
+});
+
+describe('yayın sonrası sonda değişmezi — scripts/verify-deploy.sh 6. adım, «talep yolu» sondası', () => {
+  // Betik yayından sonra BU gövdeyi (`curl -d`, birebir) izinli kökenle yollar ve yanıt koduna bakar:
+  //   400 = pg havuzu var ve kiracı çözülüyor · 503 = uç gerçek talepleri DÜŞÜRÜYOR (mağaza yanıtı okumaz — sessiz kayıp).
+  // Sonda şu sıraya dayanır: gövde şemaya UYAR, telefonunda 10 rakam YOKTUR; ret şemadan değil eşleyiciden
+  // (`talepEsle`), yani havuz ve kiracı denetiminden SONRA gelir. Kayıt yazmaz, e-posta göndermez.
+  // Şemaya ileride telefon alt sınırı eklenirse ret kiracıdan ÖNCEYE kayar: kiracı boşken de 400 döner ve sonda
+  // sessizce yanlış PASS verir. O gün bu testler kırılır — sonda gövdesi ile bu sabit BİRLİKTE güncellenir.
+  const SONDA_GOVDESI = '{"no":"T000000-AAAA","musteri":{"ad":"sonda","telefon":"0"},"kalemler":[{"ad":"sonda","adet":1}]}';
+
+  it('sonda gövdesi şemaya UYAR (ret şemadan gelmez)', () => {
+    expect(MagazaSiparisTalebiSchema.safeParse(JSON.parse(SONDA_GOVDESI)).success).toBe(true);
+  });
+  it('betikteki sonda gövdesi bu sabitle BİREBİR (ikisi ayrı dosyada; yalnız yorumla bağlı kalsaydı biri değişince öbürü bayatlardı)', () => {
+    const betik = oku(join(SRC_KOK, '..', 'scripts', 'verify-deploy.sh'));
+    expect(betik.split(`-d '${SONDA_GOVDESI}' "$MU/siparis-talebi"`).length - 1).toBe(1);
+  });
+  it.each<[string, Ayar]>([
+    ['kiracı çözülemiyor', { kiraci: () => Promise.resolve('') }],
+    ['pg havuzu yok', { havuzYok: true }],
+  ])('uç talepleri düşürürken (%s) sonda 503 alır — 400 DEĞİL; SQL çağrısı 0', async (_ad, ayar) => {
+    const d = await kur(ayar);
+    const y = await iste(d, '/siparis-talebi', { ham: SONDA_GOVDESI });
+    expect(y.kod).toBe(503);
+    expect(y.metin).toBe('{"ok":false}');
+    expect(d.sorgular).toEqual([]);
+    expect(d.yayinlar).toEqual([]);
+    expect(d.bildirimler).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r503: 1 });
+  });
+  it('havuz var ve kiracı çözülüyorken sonda 400 alır; SQL çağrısı 0, yayın 0, bildirim 0 (kayıt YAZILMAZ)', async () => {
+    const d = await kur();
+    const y = await iste(d, '/siparis-talebi', { ham: SONDA_GOVDESI });
+    expect(y.kod).toBe(400);
+    expect(y.metin).toBe('{"ok":false}');
+    // Ret havuz ve kiracı denetiminden SONRA: ikisi de birer kez soruldu.
+    expect(d.sayim).toMatchObject({ havuz: 1, kiraci: 1 });
+    expect(d.sorgular).toEqual([]);
+    expect(d.yayinlar).toEqual([]);
+    expect(d.bildirimler).toEqual([]);
+    expect(konsol).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r400: 1 });
+  });
+});
+
+describe('durum ucu — dilim 2\'ye kadar sabit 503', () => {
+  it('POST /siparis-durumu → 503 { ok: false, kod: "hazir-degil" } (404 DEĞİL); veritabanına dokunmaz', async () => {
+    const d = await kur();
+    const y = await iste(d, '/siparis-durumu', { govde: { no: 'T261008-5Y9P', telefon: '0532 123 45 67' } });
+    expect(y.kod).toBe(503);
+    expect(y.metin).toBe('{"ok":false,"kod":"hazir-degil"}');
+    expect(y.baslik('access-control-allow-origin')).toBe(IZINLI);
+    expect(d.sorgular).toEqual([]);
+    expect(d.sayim).toEqual({ kiraci: 0, havuz: 0, apiLimiter: 1 });
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r503: 1 });
+  });
+  it('aynı zincir: kökensiz 403, JSON olmayan 415, bozuk JSON 400', async () => {
+    const d = await kur();
+    expect((await iste(d, '/siparis-durumu', { govde: {}, koken: null })).kod).toBe(403);
+    expect((await iste(d, '/siparis-durumu', { ham: '{}', tur: 'text/plain' })).kod).toBe(415);
+    const bozuk = await iste(d, '/siparis-durumu', { ham: `{"no": ${ISARET}` });
+    expect(bozuk.kod).toBe(400);
+    expect(bozuk.json).toEqual({ ok: false });
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r400: 1, r403: 1, r415: 1 });
+  });
+});
+
+describe('zincir içi 404 — /api/magaza altındaki her başka yol', () => {
+  it('bilinmeyen alt yol → 404 { ok: false } (genel 404\'ün gövdesi DEĞİL); genel 404\'e düşmez', async () => {
+    const d = await kur();
+    for (const yol of ['/bilinmeyen', '/bayi/giris', '/', '/siparis-talebi/ek', '/siparis-talebix']) {
+      const y = await iste(d, yol, { govde: govde() });
+      expect(y.kod, yol).toBe(404);
+      expect(y.metin, yol).toBe('{"ok":false}');
+    }
+    expect(d.sorgular).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r404: 5 });
+  });
+  it('rota yolunda POST dışı yöntem → 404', async () => {
+    const d = await kur();
+    for (const method of ['GET', 'DELETE']) {
+      expect((await iste(d, '/siparis-talebi', { method })).kod, method).toBe(404);
+      expect((await iste(d, '/siparis-durumu', { method })).kod, method).toBe(404);
+    }
+    expect((await iste(d, '/siparis-talebi', { method: 'PUT', govde: govde() })).kod).toBe(404);
+    expect(d.sorgular).toEqual([]);
+  });
+});
+
+describe('sınırlayıcılar — bağlamla gelir; talep ve durum AYRI kova', () => {
+  it('talep kovası dolunca durum kovası etkilenmez (ve tersi); 429 gövdesi sabit, köken başlığı duruyor', async () => {
+    const d = await kur({ talepTavani: 2, durumTavani: 3 });
+    expect((await talep(d, { no: no(1) })).baslik('ratelimit-remaining')).toBe('1');
+    expect((await talep(d, { no: no(2) })).baslik('ratelimit-remaining')).toBe('0');
+    const dolu = await talep(d, { no: no(3) });
+    expect(dolu.kod).toBe(429);
+    expect(dolu.metin).toBe('{"ok":false}');
+    expect(dolu.baslik('access-control-allow-origin')).toBe(IZINLI);
+    // Durum kovası hiç tüketilmemiş.
+    const durumlar = [];
+    for (let i = 0; i < 4; i++) durumlar.push(await iste(d, '/siparis-durumu', { govde: {} }));
+    expect(durumlar.map(y => y.kod)).toEqual([503, 503, 503, 429]);
+    expect(durumlar[0].baslik('ratelimit-remaining')).toBe('2');
+    expect(durumlar[3].metin).toBe('{"ok":false}');
+    expect(d.sorgular).toHaveLength(2);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, eklenen: 2, r429: 2, r503: 3 });
+  });
+  it('her sınırlayıcı zincire BİR kez bağlı: tavan 3 ise tam 3 istek geçer', async () => {
+    const d = await kur({ talepTavani: 3, durumTavani: 3 });
+    const talepler = [];
+    for (let i = 0; i < 4; i++) talepler.push((await talep(d, { no: no(i) })).kod);
+    expect(talepler).toEqual([201, 201, 201, 429]);
+    const durumlar = [];
+    for (let i = 0; i < 4; i++) durumlar.push((await iste(d, '/siparis-durumu', { govde: {} })).kod);
+    expect(durumlar).toEqual([503, 503, 503, 429]);
+  });
+  it('sınırlayıcı 415 denetiminden ve ayrıştırıcıdan ÖNCE: reddedilen gövdeler de kovadan düşer', async () => {
+    const d = await kur({ talepTavani: 3 });
+    expect((await talep(d, {}, { tur: 'text/plain' })).kod).toBe(415);
+    expect((await iste(d, '/siparis-talebi', { ham: '{' })).kod).toBe(400);
+    expect((await iste(d, '/siparis-talebi', { ham: JSON.stringify({ dolgu: 'x'.repeat(70 * 1024) }) })).kod).toBe(413);
+    expect((await talep(d)).kod).toBe(429);
+    expect(d.sorgular).toEqual([]);
+  });
+  it('bilinmeyen alt yol mağaza kovalarına sayılmaz (yalnız genel sınırlayıcıya)', async () => {
+    const d = await kur({ talepTavani: 1, durumTavani: 1 });
+    for (let i = 0; i < 3; i++) expect((await iste(d, '/bilinmeyen', { govde: {} })).baslik('ratelimit-remaining')).toBeNull();
+    expect(d.sayim.apiLimiter).toBe(3);
+    expect((await talep(d)).kod).toBe(201);
+  });
+  it('genel sınırlayıcı mağaza sınırlayıcılarından ÖNCE: o reddederse mağaza kovası tüketilmez, yazma olmaz', async () => {
+    let kapali = true;
+    const d = await kur({ talepTavani: 1, apiLimiter: (_istek, yanit, sonraki) => { if (kapali) yanit.status(429).json({ error: 'genel' }); else sonraki(); } });
+    for (let i = 0; i < 3; i++) {
+      const y = await talep(d);
+      expect(y.json).toEqual({ error: 'genel' });
+      expect(y.baslik('ratelimit-remaining')).toBeNull();
+      // Köken kapısı genel sınırlayıcıdan ÖNCE: onun 429'u da köken başlığı taşır.
+      expect(y.baslik('access-control-allow-origin')).toBe(IZINLI);
+    }
+    kapali = false;
+    expect((await talep(d)).kod).toBe(201);
+    expect(d.sorgular).toHaveLength(1);
+  });
+  it('magaza429: r429 sayacını artırır, sabit 429 { ok: false } döndürür', () => {
+    const cagrilar: unknown[] = [];
+    const yanit = { status(kod: number) { cagrilar.push(kod); return yanit; }, json(g: unknown) { cagrilar.push(g); return yanit; } };
+    magaza429({} as Request, yanit as unknown as Response);
+    magaza429({} as Request, yanit as unknown as Response);
+    expect(cagrilar).toEqual([429, { ok: false }, 429, { ok: false }]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r429: 2 });
+  });
+});
+
+describe('zincir içi hata yakalayıcı — hata genel yakalayıcıya ÇIKMAZ', () => {
+  const firlatan = (hata: unknown): RequestHandler => (_istek, _yanit, sonraki) => { sonraki(hata); };
+  it('durum kodu taşımayan hata → 500 { ok: false }; günlükte yalnız sınıf adı / kod', async () => {
+    const d = await kur({ apiLimiter: firlatan(new RangeError(`depo ${ISARET}`)) });
+    const y = await talep(d);
+    expect(y.kod).toBe(500);
+    expect(y.metin).toBe('{"ok":false}');
+    expect(konsol).toEqual(['error: [magaza] zincir hatası: RangeError']);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r500: 1 });
+  });
+  it('eşzamanlı fırlatılan hata da zincirde kalır', async () => {
+    const d = await kur({ apiLimiter: () => { throw Object.assign(new Error(ISARET), { code: 'ESINIR' }); } });
+    expect((await talep(d)).kod).toBe(500);
+    expect(konsol).toEqual(['error: [magaza] zincir hatası: ESINIR']);
+  });
+  it.each([
+    [400, 'r400'], [403, 'r403'], [404, 'r404'], [413, 'r413'], [415, 'r415'], [429, 'r429'],
+  ])('`err.status` %i → aynı kod, sabit gövde, kendi sayacı; günlük YOK', async (durum, sayac) => {
+    const d = await kur({ apiLimiter: firlatan(Object.assign(new Error(ISARET), { status: durum, body: ISARET, type: 'entity.parse.failed' })) });
+    const y = await talep(d);
+    expect(y.kod).toBe(durum);
+    expect(y.metin).toBe('{"ok":false}');
+    expect(konsol).toEqual([]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, [sayac]: 1 });
+  });
+  it('kendi sayacı olmayan 4xx: kod AYNEN döner, «400» sayacına işlenir', async () => {
+    const d = await kur({ apiLimiter: firlatan(Object.assign(new Error('x'), { status: 422 })) });
+    expect((await talep(d)).kod).toBe(422);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r400: 1 });
+  });
+  it.each([
+    ['5xx', 503], ['2xx', 200], ['metin', '400'], ['kesirli', 400.5], ['NaN', Number.NaN], ['600', 600], ['399', 399],
+  ])('4xx olmayan `err.status` (%s) → 500', async (_ad, durum) => {
+    const d = await kur({ apiLimiter: firlatan(Object.assign(new Error('x'), { status: durum })) });
+    const y = await talep(d);
+    expect(y.kod).toBe(500);
+    expect(y.metin).toBe('{"ok":false}');
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r500: 1 });
+  });
+  it('Error olmayan değer fırlatılırsa da 500 ve sabit günlük', async () => {
+    const d = await kur({ apiLimiter: firlatan(`dizge ${ISARET}`) });
+    expect((await talep(d)).kod).toBe(500);
+    expect(konsol).toEqual(['error: [magaza] zincir hatası: bilinmiyor']);
+  });
+});
+
+describe('sayaçlar', () => {
+  it('anahtarlar SABİT ve sıfırdan başlar; dönen nesne kopyadır', () => {
+    expect(magazaSayaclari()).toEqual(SIFIR_SAYACLAR);
+    expect(Object.keys(magazaSayaclari())).toEqual(['eklenen', 'cakisan', 'r400', 'r403', 'r404', 'r413', 'r415', 'r429', 'r500', 'r503']);
+    const kopya = magazaSayaclari() as Record<string, number>;
+    kopya.eklenen = 99;
+    expect(magazaSayaclari().eklenen).toBe(0);
+  });
+  it('karışık trafik: her sonuç kendi sayacına; OPTIONS sayılmaz; zincirler sayaçları PAYLAŞIR (modül düzeyi)', async () => {
+    const d = await kur({ talepTavani: 6 });
+    await talep(d);                                              // eklenen
+    await talep(d);                                              // çakışan
+    await talep(d, {}, { koken: IZINSIZ });                      // 403
+    await talep(d, {}, { tur: 'text/plain' });                   // 415
+    await iste(d, '/siparis-talebi', { ham: '{' });              // 400
+    await iste(d, '/siparis-talebi', { govde: {} });             // 400
+    await iste(d, '/siparis-talebi', { ham: JSON.stringify({ dolgu: 'x'.repeat(70 * 1024) }) }); // 413
+    await talep(d, { no: no(1) });                               // 429 (kova: 6)
+    await iste(d, '/yok', { govde: {} });                        // 404
+    await iste(d, '/siparis-durumu', { govde: {} });             // 503
+    await iste(d, '/siparis-talebi', { method: 'OPTIONS' });     // sayılmaz
+    const d2 = await kur({ havuzYok: true });
+    await talep(d2);                                             // 503
+    expect(magazaSayaclari()).toEqual({ eklenen: 1, cakisan: 1, r400: 2, r403: 1, r404: 1, r413: 1, r415: 1, r429: 1, r500: 0, r503: 2 });
+    expect(d.kacan).toEqual({ sonrakiAraKatman: 0, genelAyristirici: 0, genel404: 0, genelYakalayici: 0 });
+    magazaSayaclariniSifirla();
+    expect(magazaSayaclari()).toEqual(SIFIR_SAYACLAR);
+  });
+});
+
+describe('kaynak çiti — magazaRoutes.ts', () => {
+  const YOL = join(SRC_KOK, 'server', 'routes', 'magazaRoutes.ts');
+  const satirlar = kodSatirlari(YOL).map(s => s.kod);
+  const kod = satirlar.join('\n');
+  it('kayıt sırası SABİT: köken → genel sınırlayıcı → mağaza sınırlayıcıları → 415 → 64 KB → rotalar → 404 → hata', () => {
+    const kayitlar = satirlar.map(s => s.trim()).filter(s => /^r\.\w+\(/.test(s));
+    expect(kayitlar).toEqual([
+      'r.use(kokenKapisi);',
+      'r.use(C.apiLimiter);',
+      "r.use('/siparis-talebi', C.talepSinirlayici);",
+      "r.use('/siparis-durumu', C.durumSinirlayici);",
+      'r.use(jsonDegilse415);',
+      'r.use(express.json({ limit: MAGAZA_GOVDE_SINIRI_BAYT }));',
+      "r.post('/siparis-talebi', siparisTalebi);",
+      "r.post('/siparis-durumu', siparisDurumu);",
+      'r.use(bulunamadi);',
+      'r.use(hataYakalayici);',
+    ]);
+    // Tek yönlendirici, tek ayrıştırıcı; `app.` üzerinden kayıt yok.
+    expect(kod.match(/\bRouter\(/g)).toHaveLength(1);
+    expect(kod.match(/express\.(json|urlencoded|text|raw)\(/g)).toEqual(['express.json(']);
+    expect(kod).not.toMatch(/\bapp\.\w+\(/);
+    // Hata yakalayıcı DÖRT parametreli (Express onu parametre sayısından tanır) ve `next(err)` çağırmaz.
+    expect(kod).toContain('const hataYakalayici = (err: unknown, req: Request, res: Response, _next: NextFunction): void => {');
+    expect(kod).not.toMatch(/\b_?next\(\s*(err|e|hata)\b/);
+  });
+  it('modül sınırlayıcı KURMAZ: `express-rate-limit` içe aktarımı ve `rateLimit(` çağrısı YOK', () => {
+    expect(oku(YOL)).not.toContain('express-rate-limit');
+    expect(kod).not.toMatch(/\brateLimit\s*\(/);
+    expect(kod.match(/C\.(talepSinirlayici|durumSinirlayici|apiLimiter)\b/g)).toEqual(['C.apiLimiter', 'C.talepSinirlayici', 'C.durumSinirlayici']);
+  });
+  it('içe aktarımlar: yalnız express, ortak sözleşme, saf eşleyici, şema (server.ts / pgShim / bekçi YOK — yaprak kalır)', () => {
+    expect(kod.match(/^import .*$/gm)).toEqual([
+      "import express, { Router } from 'express';",
+      "import type { NextFunction, Request, RequestHandler, Response } from 'express';",
+      "import { MAGAZA_TALEP_KOLEKSIYONU } from '../../lib/magazaTalep.js';",
+      "import { talepEsle } from '../kanal/magazaTalep.js';",
+      "import { MagazaSiparisTalebiSchema } from '../schemas.js';",
+    ]);
+    expect(kod).not.toMatch(/\brequire\(|\bimport\(/);
+  });
+  it('doğrulama: ortak `validate()` KULLANILMAZ; kendi `safeParse`; yanıt gövdeleri sabit üç biçim', () => {
+    expect(kod).not.toMatch(/\bvalidate\(/);
+    expect(kod.match(/\.safeParse\(/g)).toHaveLength(1);
+    const govdeler = [...kod.matchAll(/res\.status\([^)]*\)\.json\(([^)]*)\)/g)].map(m => m[1]);
+    expect([...new Set(govdeler)].sort()).toEqual(["{ ok: false }", "{ ok: false, kod: 'hazir-degil' }", "{ ok: true }"]);
+    // Başka yanıt yolu yok: her `.json(` ya yukarıdakilerden biri ya da ayrıştırıcı.
+    expect((kod.match(/\.json\(/g) ?? []).length).toBe(govdeler.length + 1);
+    expect(kod).not.toMatch(/res\.(send|write|sendFile|render|redirect)\(/);
+    expect(kod).not.toMatch(/\.(issues|errors|flatten|format)\b/);
+  });
+  it('günlük: her console çağrısı sabit metin + `hataKodu(…)`; hata nesnesinin iletisi / gövdesi / ayrıntısı OKUNMAZ', () => {
+    const konsolSatirlari = satirlar.map(s => s.trim()).filter(s => /\bconsole\./.test(s));
+    expect(konsolSatirlari.length).toBeGreaterThan(0);
+    for (const s of konsolSatirlari) expect(s).toMatch(/^console\.error\('\[magaza\] [^'$`]+:', hataKodu\((e|err)\)\);$/);
+    expect(kod).not.toMatch(/\.(message|stack|detail|where|cause)\b/);
+    expect(kod).not.toMatch(/\b(err|e|hata)\.body\b/);
+    expect(kod).not.toMatch(/JSON\.stringify\((e|err|hata|req)\b/);
+  });
+  it('yazma yolu: tek ham SQL, `adminDb` / `pgServerTimestamp` yok; ekleme sorgusu birebir', () => {
+    expect(kod).toContain(`const EKLEME_SQL = '${EKLEME_SQL}';`);
+    expect(kod.match(/\.query\(/g)).toHaveLength(1);
+    expect(kod).not.toMatch(/adminDb|pgServerTimestamp|UPDATE |DELETE /);
+    expect(kod).toContain("C.broadcastDocChange(MAGAZA_TALEP_KOLEKSIYONU, 'set', esleme.id, esleme.belge, { cid });");
+  });
+  it('boyut sınırları: gövde 64 KB; belge sınırı gövde sınırından TÜRETİLİR (ikinci bir sayı YOK) ve yazmadan ÖNCE denetlenir', () => {
+    expect(MAGAZA_GOVDE_SINIRI_BAYT).toBe(65_536);
+    expect(MAGAZA_BELGE_SINIRI_BAYT).toBe(131_072);
+    expect(kod).toContain('export const MAGAZA_GOVDE_SINIRI_BAYT = 64 * 1024;');
+    expect(kod).toContain('export const MAGAZA_BELGE_SINIRI_BAYT = 2 * MAGAZA_GOVDE_SINIRI_BAYT;');
+    // Sınır başka bir sayı / dizgeyle YAZILMAZ: gövde sınırı değişince belge sınırı kendiliğinden izler.
+    expect(kod.match(/\b64 \* 1024\b/g)).toHaveLength(1);
+    expect(kod).not.toMatch(/\d\s*kb\b|65_?536|131_?072|\b128\b/i);
+    expect(kod.match(/\bMAGAZA_GOVDE_SINIRI_BAYT\b/g)).toHaveLength(3); // tanım, türetme, ayrıştırıcı
+    expect(kod.match(/\bMAGAZA_BELGE_SINIRI_BAYT\b/g)).toHaveLength(2); // tanım, denetim
+    // Ölçülen metin yazılan metnin KENDİSİDİR (belge bir kez metne çevrilir) ve denetim eklemeden ÖNCE gelir.
+    expect(kod.match(/JSON\.stringify\(/g)).toHaveLength(1);
+    const denetim = kod.indexOf("if (Buffer.byteLength(yazilacak, 'utf8') > MAGAZA_BELGE_SINIRI_BAYT) { reddet(res, 413); return; }");
+    const ekleme = kod.indexOf('await havuz.query(EKLEME_SQL, [MAGAZA_TALEP_KOLEKSIYONU, esleme.id, yazilacak]);');
+    expect(denetim).toBeGreaterThan(-1);
+    expect(ekleme).toBeGreaterThan(denetim);
+  });
+  it('kiracı önbelleği süreleri: dolu 60 sn, boş 10 sn', () => {
+    expect(kod).toContain('const KIRACI_DOLU_MS = 60_000;');
+    expect(kod).toContain('const KIRACI_BOS_MS = 10_000;');
+  });
+  it('köken: `Allow-Credentials` ve joker köken yazılmaz', () => {
+    expect(kod).not.toMatch(/Allow-Credentials/i);
+    expect(kod).not.toMatch(/Access-Control-Allow-Origin',\s*'\*'/);
+    expect(kod).toContain("res.setHeader('Access-Control-Allow-Origin', koken);");
+  });
+  it('sayısal varsayılan ve harf dönüşümü yok; tip kaçağı yok', () => {
+    expect(kod).not.toMatch(/(\?\?|\|\|)\s*0\b/);
+    expect(kod).not.toMatch(/toUpperCase|toLowerCase|toLocaleUpperCase|toLocaleLowerCase|\.normalize\(/);
+    expect(kod).not.toMatch(/\bas any\b|@ts-ignore|@ts-expect-error/);
+    expect(kod).not.toMatch(/(^|[^A-Za-z.])isFinite\(/);
+  });
+});

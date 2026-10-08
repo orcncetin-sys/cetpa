@@ -114,6 +114,12 @@ export const TENANT_COLLECTIONS: readonly string[] = [
   // App.tsx:1128 onboarding'de yazar. Sinifsiz oldugu icin her kiraci
   // digerlerinin firma bilgisini okuyabiliyordu.
   'companies',
+  // Mağaza sipariş talepleri (2026-10-08, kullanıcı kararı K1): talep `orders`'a YAZILMAZ, ayrı koleksiyondur.
+  // Kimliksiz mağaza ucu (/api/magaza/siparis-talebi) ham SQL ile yazar ve `companyId`'yi SUNUCU damgalar;
+  // istemci yalnız OKUR (rbac.ts `SUNUCU_YAZAR_COLLECTIONS` — yazma / silme Yönetici dâhil herkese kapalı).
+  // Müşteri adı / telefonu / adresi taşır: sınıfsız kalsaydı her kiracıya açık olurdu. Kiracı yedeğine dâhildir.
+  // Listenin SONUNDA durur — `tenantErisim.test.ts` ilk elemanı örnek kiracı koleksiyonu olarak alıyor.
+  'magazaTalepleri',
 ];
 
 /** Kullanıcının kendi verisi — `userId` ile izole. */

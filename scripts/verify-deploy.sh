@@ -243,6 +243,81 @@ else
       Hepsi aynıysa kova bağlantı başına (istemci adresinden kapı ayıklanmıyor —
       server.ts'te temizIstemciIp ara katmanı ve src/server/istemciIp.ts)."
   fi
+
+  # 6) MAĞAZA UÇLARI (www.cetpa.com.tr → POST /api/magaza/*) — zincir doğru yerde mi?
+  #
+  # Mağaza yanıtı OKUMAZ: uç bozuksa talep sessizce kaybolur, kimse görmez. Zincir
+  # kimliksizdir, bu yüzden dışarıdan ölçülebilir. Beş ayırt edici (hiçbiri kayıt
+  # YAZMAZ, e-posta göndermez):
+  #   ön uçuş (izinli köken)   -> 204 + Access-Control-Allow-Origin
+  #                               (başlık yoksa tarayıcı POST'u HİÇ göndermez; IIS'in
+  #                               OPTIONS'ı kendisi yanıtlaması da böyle görünür)
+  #   kökensiz POST            -> 403 (köken kapısı çalışıyor)
+  #   izinli köken + bozuk JSON -> 400 (500 = zincirin hata yakalayıcısı devrede değil,
+  #                               gövde genel yakalayıcıya düşüyor; 401/404 = zincir bağlı değil)
+  #   durum ucu                -> 503 + "hazir-degil" (dilim 2'ye kadar; mağaza sayfası
+  #                               bu yanıtta «WhatsApp'tan sorun» der)
+  #   izinli köken + şemaya uyan ama telefonu 10 rakamsız gövde
+  #                            -> 400 (pg havuzu var ve kiracı çözülüyor; 503 = uç GERÇEK
+  #                               talepleri düşürüyor — öbür dört sonda bu durumda da geçer,
+  #                               çünkü hiçbiri kiracı çözümüne kadar ilerlemez)
+  # Sunucuda MAGAZA_IZINLI_KOKENLER farklıysa: MAGAZA_KOKEN=<köken> scripts/verify-deploy.sh post
+  MK="${MAGAZA_KOKEN:-https://www.cetpa.com.tr}"
+  MU="$BASE_URL/api/magaza"
+  OPT=$(curl -s -o /dev/null -D - --max-time 20 -X OPTIONS -H "Origin: $MK" \
+    -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type" \
+    "$MU/siparis-talebi" 2>/dev/null | tr -d '\r')
+  OPTKOD=$(printf '%s\n' "$OPT" | awk '/^HTTP\//{k=$2} END{print k}')
+  OPTACAO=$(printf '%s\n' "$OPT" | awk 'tolower($1)=="access-control-allow-origin:"{print $2}')
+  if [ "$OPTKOD" = "204" ] && [ "$OPTACAO" = "$MK" ]; then
+    pass "mağaza ön uçuşu: 204 + Access-Control-Allow-Origin ($MK)"
+  elif [ "$OPTKOD" = "429" ]; then
+    fail "mağaza ön uçuşu ÖLÇÜLEMEDİ: 429 (bu IP sel korumasına takıldı — bekleyip yeniden çalıştırın)"
+  else
+    fail "mağaza ön uçuşu: beklenen 204 + Access-Control-Allow-Origin: $MK — gelen kod '${OPTKOD:-yok}', başlık '${OPTACAO:-yok}'.
+      Başlık yoksa tarayıcı talebi HİÇ göndermez. Kod 200/404 ve başlık yoksa OPTIONS'ı IIS yanıtlıyor ya da
+      zincir bağlı değil (server.ts: app.use('/api/magaza', magazaZinciri(…)) genel sınırlayıcıdan ÖNCE olmalı)."
+  fi
+  M1=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST -H "Content-Type: application/json" -d '{}' "$MU/siparis-talebi" 2>/dev/null)
+  case "$M1" in
+    403) pass "mağaza köken kapısı: kökensiz POST -> 403" ;;
+    429) fail "mağaza köken kapısı ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)" ;;
+    *)   fail "mağaza köken kapısı: kökensiz POST beklenen 403, gelen $M1 (201/400 = köken kapısı çalışmıyor; 401/404 = zincir bağlı değil)" ;;
+  esac
+  M2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST -H "Origin: $MK" -H "Content-Type: application/json" -d '{' "$MU/siparis-talebi" 2>/dev/null)
+  case "$M2" in
+    400) pass "mağaza gövde ayrıştırma: bozuk JSON -> 400 (zincirin kendi ayrıştırıcısı ve hata yakalayıcısı)" ;;
+    403) fail "mağaza gövde sondası: 403 — '$MK' sunucuda izinli köken değil (MAGAZA_IZINLI_KOKENLER); MAGAZA_KOKEN ile doğru kökeni verin" ;;
+    429) fail "mağaza gövde sondası ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)" ;;
+    500) fail "mağaza gövde ayrıştırma: bozuk JSON -> 500. Zincir genel gövde ayrıştırıcıdan SONRA bağlanmış ya da zincirin hata
+      yakalayıcısı devrede değil; hata genel yakalayıcıya düşüyor (günlüğe gövde parçası yazar)." ;;
+    *)   fail "mağaza gövde sondası beklenmedik yanıt: $M2" ;;
+  esac
+  M3=$(curl -s --max-time 20 -w '\n%{http_code}' -X POST -H "Origin: $MK" -H "Content-Type: application/json" -d '{}' "$MU/siparis-durumu" 2>/dev/null)
+  M3KOD=$(printf '%s\n' "$M3" | tail -n 1)
+  if [ "$M3KOD" = "503" ] && printf '%s' "$M3" | grep -q 'hazir-degil'; then
+    pass "mağaza durum ucu: 503 hazir-degil (dilim 2'ye kadar beklenen)"
+  elif [ "$M3KOD" = "429" ]; then
+    fail "mağaza durum ucu ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)"
+  else
+    fail "mağaza durum ucu: beklenen 503 + hazir-degil, gelen $M3KOD (404 mağaza sayfasında «talep bulunamadı» diye görünür)"
+  fi
+  # Talep yolu: şemaya uyan ama telefonu 10 rakamsız gövde. Ret kiracı çözümünden SONRA gelir (talepEsle), INSERT'ten ÖNCE:
+  #   400 = pg havuzu var ve kiracı çözülüyor · 503 = uç gerçek talepleri düşürüyor. Kayıt YAZMAZ, e-posta göndermez.
+  # SINIRI: yalnız «havuz nesnesi var + kiracı çözülüyor»u kanıtlar; INSERT'in çalıştığını (docs tablosu, yetki) kanıtlamaz.
+  # Şemaya telefon alt sınırı eklenirse bu sonda kiracıdan ÖNCE 400 alır ve yanlış PASS'e döner — aynı gövdenin kiracı boşken
+  # 503, doluyken 400 döndüğünü src/server/routes/magazaRoutes.test.ts kilitler.
+  M4=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST -H "Origin: $MK" -H "Content-Type: application/json" \
+    -d '{"no":"T000000-AAAA","musteri":{"ad":"sonda","telefon":"0"},"kalemler":[{"ad":"sonda","adet":1}]}' "$MU/siparis-talebi" 2>/dev/null)
+  case "$M4" in
+    400) pass "mağaza talep yolu: pg havuzu var, kiracı çözülüyor (10 rakamsız telefon -> 400; kayıt yazılmadı)" ;;
+    503) fail "MAĞAZA UCU TALEPLERİ DÜŞÜRÜYOR: şemaya uyan gövde -> 503. Kiracı çözülemiyor (SERVER_TENANT_COMPANY_ID tanımlı mı?)
+      ya da pg havuzu yok (DATABASE_URL). Mağaza yanıtı okumadığı için müşteri «talebiniz alındı» görür." ;;
+    201) fail "mağaza talep sondası 201 döndü: 10 rakamsız telefon KABUL EDİLDİ — sonda kayıt yazmış olabilir (talepEsle denetimi değişmiş)" ;;
+    403) fail "mağaza talep sondası: 403 — '$MK' sunucuda izinli köken değil (MAGAZA_IZINLI_KOKENLER); MAGAZA_KOKEN ile doğru kökeni verin" ;;
+    429) fail "mağaza talep sondası ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)" ;;
+    *)   fail "mağaza talep sondası beklenmedik yanıt: $M4" ;;
+  esac
 fi
 
 echo

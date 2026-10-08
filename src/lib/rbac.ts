@@ -34,6 +34,21 @@ export const ADMIN_ONLY_COLLECTIONS = new Set(['users', 'settings', 'invites', '
 export const APPEND_ONLY_COLLECTIONS = new Set(['auditLog', 'syncLog', 'clientErrors']);
 /** Public write: Halka açık formlar (kimlik doğrulaması olmadan yazılabilir). */
 export const PUBLIC_WRITE_COLLECTIONS = new Set(['demoRequests', 'partnerApplications']);
+/**
+ * Sunucu-yazar: istemci YALNIZ okur; yazma ve silme Yönetici (Admin) DÂHİL herkese kapalıdır.
+ *
+ * NEDEN AYRI SINIF (ölçüldü 2026-10-08): `COLLECTION_PERMISSIONS`'ta `write: []` tek başına istemci yazımını
+ * KAPATMAZ — `isAllowed` Yönetici'ye her kuraldan ÖNCE `true` döner, silme de kural tablosuna bakmadan
+ * Yönetici + Müdür'e açıktır. Bu sınıf o kısa yoldan ÖNCE denetlenir; böylece /api/db POST / PUT / PATCH /
+ * DELETE / increment / cas (hepsi `denied()` → `isAllowed`) 403 döner.
+ *
+ * `magazaTalepleri`: mağazanın kimliksiz ucu (/api/magaza/siparis-talebi) ham SQL ile yazar, o yüzden
+ * etkilenmez. Talep müşterinin BEYANIDIR; ekrandan düzenlenebilseydi «müşteri ne istedi» kaydı bozulurdu
+ * (teyit / ret dilim 2'de kendi sunucu ucuyla gelir). OKUMA kuralı `COLLECTION_PERMISSIONS`'tadır.
+ *
+ * `SERVER_ONLY_COLLECTIONS`'tan (collections.ts) FARKI: o sınıf okumaya da kapalıdır (/api/db ve akış).
+ */
+export const SUNUCU_YAZAR_COLLECTIONS = new Set(['magazaTalepleri']);
 
 /**
  * Rol bazlı ince ayarlı yetkilendirme (firestore.rules'dan taşınmıştır).
@@ -60,6 +75,10 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   warranties: { read: ['Admin', 'Manager', 'Sales', 'Logistics', 'Quality', 'Accounting'], write: ['Admin', 'Manager', 'Sales', 'Logistics', 'Quality'] },
 
   // Satış (Sales)
+  // Mağaza sipariş talepleri (kullanıcı kararı K3, 2026-10-08): yalnız Yönetici, Müdür ve Satış GÖRÜR; başka iç rol
+  // ve hiçbir dış rol (B2B, Dealer) göremez — talep müşterinin adını / telefonunu / adresini taşır.
+  // `write: []` BİLEREK boş ama tek başına YETMEZ (Yönetici kısa yolu): yazma / silme kapısı `SUNUCU_YAZAR_COLLECTIONS`.
+  magazaTalepleri: { read: ['Admin', 'Manager', 'Sales'], write: [] },
   leads: { read: ['Admin', 'Manager', 'Sales', 'Accounting', 'Purchasing'], write: ['Admin', 'Manager', 'Sales'] },
   customers: { read: ['Admin', 'Manager', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
   orders: { read: ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'Purchasing', 'B2B', 'Dealer'], write: ['Admin', 'Manager', 'Sales', 'Logistics', 'B2B', 'Dealer'] },
@@ -329,6 +348,9 @@ export function isAllowed(role: AppRole | null, coll: string, op: DbOp): boolean
   if (PUBLIC_WRITE_COLLECTIONS.has(coll) && op === 'write') return true;
 
   if (!role) return false;
+  // Sunucu-yazar koleksiyon: okuma dışındaki HER işlem kapalı. Yönetici kısa yolundan ÖNCE durmak ZORUNDA —
+  // altına inerse Yönetici yazar / siler, Müdür siler (bkz. SUNUCU_YAZAR_COLLECTIONS).
+  if (SUNUCU_YAZAR_COLLECTIONS.has(coll) && op !== 'read') return false;
   if (role === 'Admin') return true; // Admin her şeye yetkili
 
 

@@ -23,6 +23,7 @@ const KEY_LABEL: Record<string, { tr: string; en: string }> = {
   stock_ratio: { tr: 'Stok oranı', en: 'Stock ratio' },
   retry_queue: { tr: 'Retry kuyruğu', en: 'Retry queue' },
   exchange_rates: { tr: 'Döviz kuru', en: 'FX rates' },
+  magaza_talep: { tr: 'Mağaza talep bildirimi', en: 'Store request notification' },
 };
 
 interface Props {

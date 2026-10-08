@@ -38,6 +38,8 @@ describe('her sınırlayıcı anahtar üreticisini AÇIKÇA seçer — doğru ol
     trackLimiter: 'yalnizIpAnahtari',
     webhookLimiter: 'yalnizIpAnahtari',
     hitLimiter: 'yalnizIpAnahtari',
+    magazaTalepLimiter: 'yalnizIpAnahtari',   // kimliksiz mağaza uçları (www.cetpa.com.tr): sipariş talebi
+    magazaDurumLimiter: 'yalnizIpAnahtari',   //   … ve durum sorgusu; AYRI kova
   };
   it('server.ts\'teki rateLimit çağrıları tabloyla BİREBİR (yeni sınırlayıcı eklenince bu tablo bilinçli güncellenir)', () => {
     const olculen = Object.fromEntries(sinirlayicilar().map(s => [s.ad, s.govde.match(/keyGenerator: (\w+)/)?.[1] ?? '(YOK — varsayılan üretici)']));

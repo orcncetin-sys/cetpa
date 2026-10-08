@@ -71,8 +71,20 @@ import SevkDeposuSecici from '../components/SevkDeposuSecici';
 import { formSayisi, girilenAlanYamasi } from '../utils/muhasebe/irsaliyeCalisan';
 import { oc } from '../i18n/ortak';
 import { op } from '../i18n/orders';
+import { isAllowed, APP_ROLES } from '../lib/rbac';
+import { MAGAZA_TALEP_KOLEKSIYONU } from '../lib/magazaTalep';
+import { useAppStore } from '../store/appStore';
+import { useMagazaTalepleri, useMagazaYeniSayaci, magazaSonGorulenAnahtari, magazaIlkKaynakSekmesi } from '../hooks/useMagazaTalepleri';
+import MagazaTalepleri, { MagazaYeniRozeti } from '../components/siparis/MagazaTalepleri';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
+
+/** 'magaza' kaynak sekmesinde sipariş listesi — sabit boş dizi (her çizimde yeni dizi üretip bağımlı hesapları tetiklemesin). */
+const MAGAZA_SEKMESINDE_SIPARIS_YOK: Order[] = [];
+
+/** Kaynak sekmesi düğmelerinin (Cetpa / Mikro / Mağaza) ORTAK sınıf dizgisi — üçüncü düğme eklenirken üçüncü kopya yazılmadı. */
+const kaynakSekmesiSinifi = (secili: boolean): string =>
+  clsx("px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2", secili ? "bg-white text-brand shadow-sm" : "text-gray-500 hover:text-gray-700");
 
 const SortIcon = ({ col, config }: { col: string; config: { key: string; dir: 'asc' | 'desc' } }) => (
   <span className="inline-flex flex-col ml-0.5 opacity-40">
@@ -345,8 +357,28 @@ export default function OrdersPage({
   const [shipmentSort, setShipmentSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   const [dragIndex, setDragIndex] = useState<number|null>(null);
 
+  // ── KAYNAK SEKMESİ + MAĞAZA TALEPLERİ (dilim 1, 2026-10-08) — üçüncü kaynak; kullanıcı kararları K1 (ayrı koleksiyon) ve K3 (görenler) ──
+  // Yetki kapısı elle yazılmış rol listesi DEĞİL, rbac'ın okuma kuralı (tek kaynak: Yönetici, Müdür, Satış). `userRole` bu
+  // sayfaya düz metin gelir; `APP_ROLES` içinde yoksa `null` olur ve `isAllowed` rolsüz kullanıcıya hiçbir şey vermez.
+  const magazaYetkili = isAllowed(APP_ROLES.find(r => r === userRole) ?? null, MAGAZA_TALEP_KOLEKSIYONU, 'read');
+  // Abonelik YALNIZ burada ve yalnız yetkili rolde açılır (bileşen kendi aboneliğini açmaz): yetkisiz abonelikte sunucu ne hata
+  // ne boş init gönderir — geri çağrı hiç tetiklenmez ve akışın yeni abonelik eklemesi 60 sn ertelenir (hooks/useMagazaTalepleri).
+  const magaza = useMagazaTalepleri(magazaYetkili);
+  // Adresle açılış: İLK çizimde `?kaynak=magaza` VE rol yetkiliyse sekme 'magaza'; değilse 'cetpa' (yol `/orders` kalır).
+  const [seciliKaynak, setOrderSourceTab] = useState<'cetpa' | 'mikro' | 'magaza'>(() => magazaIlkKaynakSekmesi(window.location.search, magazaYetkili));
+  // Yetki sonradan düşerse (rol değişti) 'magaza' seçili KALMAZ: düğmesi çizilmeyen, aboneliği kapalı bir sekme «talep yok» gösterirdi.
+  const orderSourceTab: 'cetpa' | 'mikro' | 'magaza' = seciliKaynak === 'magaza' && !magazaYetkili ? 'cetpa' : seciliKaynak;
+  // «Yeni» sayacı. Anahtar kiracı + kullanıcı başınadır; kiracı kimliği bu sayfaya prop olarak GELMEZ — App.tsx çözdüğü değeri
+  // oturum açılırken depoya yazar (`storeSetCompanyId`). Liste EKRANDAYKEN gelen talep görülmüş sayılır: sekmenin seçili olması
+  // yetmez (Lojistik sekmesi / sipariş detayı açıkken liste görülmez).
+  const magazaKiraciId = useAppStore(s => s.companyId);
+  const magazaYeniSayisi = useMagazaYeniSayaci(
+    magaza.talepler,
+    magazaSonGorulenAnahtari(magazaKiraciId, user?.uid),
+    activeTab === 'orders' && !selectedOrder && orderSourceTab === 'magaza',
+  );
+
   // ── MİKRO ENTEGRASYONU ──
-  const [orderSourceTab, setOrderSourceTab] = useState<'cetpa' | 'mikro'>('cetpa');
   const mikroSiparisler = useMikroSiparisler(true);
   // Eşleme KOPYASI KALDIRILDI (2026-09-19 delta bulgusu): burada elle yazılan
   // `totalPrice: ms.tutar` alanı HER ZAMAN yazılıyordu ve hook o alanı `Number(sip_tutar || 0)`
@@ -368,7 +400,9 @@ export default function OrdersPage({
     lineItems: [],
   })) as unknown as Order[];
   
-  const activeOrders = orderSourceTab === 'cetpa' ? orders : mappedMikroSiparisler;
+  // Üç kaynak AÇIKÇA ayrılır: eski ikili seçimde (`=== 'cetpa' ? orders : mikro`) üçüncü değer sessizce Mikro listesine düşerdi.
+  // Mağaza talebi sipariş DEĞİLDİR (K1): 'magaza'da sipariş listesi boştur — KPI, CSV, toplam hiçbir şeye girmez.
+  const activeOrders: Order[] = orderSourceTab === 'cetpa' ? orders : orderSourceTab === 'mikro' ? mappedMikroSiparisler : MAGAZA_SEKMESINDE_SIPARIS_YOK;
 
   // Faz 3 4/n: ödenmemiş (alacak) özetinin TEK hesabı — Phase 522 KPI şeridi ile Phase 521
   // yaşlandırması artık AYNI kümeyi görüyor. Eskiden iki ayrı süzgeç vardı: KPI tarihi
@@ -702,6 +736,9 @@ export default function OrdersPage({
     <>
       {activeTab === 'orders' && !selectedOrder && (
         <motion.div key="orders-list" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
+              {/* 'magaza' kaynak sekmesinde SİPARİŞ gövdesi hiç çizilmez (AI ipucu, arama / CSV / para birimi, KPI, tablo, paneller):
+                  mağaza talebi sipariş değildir. Bu blokta üç kapı var — burası, başlık düğmeleri ve sekme çubuğundan sonraki gövde. */}
+              {orderSourceTab !== 'magaza' && (
               <AIInlineNudge
                 context="orders"
                 currentLanguage={currentLanguage}
@@ -713,12 +750,14 @@ export default function OrdersPage({
                 }}
                 onAction={() => {}}
               />
+              )}
               <ModuleHeader
                 title={currentT.all_orders}
                 subtitle={currentT.manage_orders}
                 icon={Package}
                 actionButton={
                   <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                    {orderSourceTab !== 'magaza' && <>
                     <KpiCurrencyToggle kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency} />
                     <div className="relative w-full sm:w-auto">
                       <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -755,6 +794,7 @@ export default function OrdersPage({
                         ? `CSV (${activeOrders.filter(o => o.status === orderStatusFilter).length})`
                         : 'CSV'}
                     </button>
+                    </>}
                     <button onClick={() => { setSelectedLead(null); setIsAddingOrder(true); }}
                       className="apple-button-primary">
                       <Plus className="w-4 h-4" /> {currentT.new_order}
@@ -764,21 +804,43 @@ export default function OrdersPage({
               />
               <div className="flex gap-2 mb-4 bg-gray-100/50 p-1 rounded-xl w-fit">
                 <button
+                  type="button"
+                  aria-pressed={orderSourceTab === 'cetpa'}
                   onClick={() => setOrderSourceTab('cetpa')}
-                  className={clsx("px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2", orderSourceTab === 'cetpa' ? "bg-white text-brand shadow-sm" : "text-gray-500 hover:text-gray-700")}
+                  className={kaynakSekmesiSinifi(orderSourceTab === 'cetpa')}
                 >
                   <Package className="w-4 h-4" />
                   {op(currentLanguage).cetpa_siparisleri}
                 </button>
                 <button
+                  type="button"
+                  aria-pressed={orderSourceTab === 'mikro'}
                   onClick={() => setOrderSourceTab('mikro')}
-                  className={clsx("px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2", orderSourceTab === 'mikro' ? "bg-white text-brand shadow-sm" : "text-gray-500 hover:text-gray-700")}
+                  className={kaynakSekmesiSinifi(orderSourceTab === 'mikro')}
                 >
                   <RefreshCw className="w-4 h-4" />
                   {op(currentLanguage).mikro_siparisleri}
                 </button>
+                {/* Üçüncü kaynak: mağaza talepleri — düğme YALNIZ okuma yetkisi olan role çizilir (K3). */}
+                {magazaYetkili && (
+                  <button
+                    type="button"
+                    aria-pressed={orderSourceTab === 'magaza'}
+                    onClick={() => setOrderSourceTab('magaza')}
+                    className={kaynakSekmesiSinifi(orderSourceTab === 'magaza')}
+                  >
+                    <Globe className="w-4 h-4" />
+                    {/* Açık boşluk: rozetin `aria-label`'ı düğmenin erişilebilir adına etikete YAPIŞMADAN katılsın («Mağaza Talepleri 3 yeni talep»). */}
+                    {op(currentLanguage).magaza_talepleri}{' '}
+                    <MagazaYeniRozeti sayi={magazaYeniSayisi} currentLanguage={currentLanguage} />
+                  </button>
+                )}
               </div>
 
+              {orderSourceTab === 'magaza' && (
+                <MagazaTalepleri talepler={magaza.talepler} yukleniyor={magaza.yukleniyor} hata={magaza.hata} currentLanguage={currentLanguage} />
+              )}
+              {orderSourceTab !== 'magaza' && <>
               {/* ── Phase 522: Order Fulfillment Rate KPI strip ── */}
               {activeOrders.length >= 3 && (() => {
                 const total522 = activeOrders.filter(o => o.status !== 'Cancelled').length;
@@ -2040,7 +2102,7 @@ export default function OrdersPage({
             );
           })()}
 
-
+              </>}
         </motion.div>
       )}
       {selectedOrder && (
