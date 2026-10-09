@@ -16,10 +16,17 @@
  *  - `mikroyaFaturaGonderilebilir`: Mikro'da faturası yok ve satır Mikro faturası değil;
  *    Cetpa-iç faturanın (`hasInvoice`) olması Mikro'ya e-Fatura göndermeyi ENGELLEMEZ
  *    (yerel kayıt → Mikro e-Fatura akışı meşru). `faturali === false` yine kapatır.
+ *    ÇEVRİM İÇİ MAĞAZA siparişi (`source === MAGAZA_KAYNAGI`) de KAPALI (2026-10-07): eşleyici kalemde `price`
+ *    yazmaz ve sipariş cariye bağlı gelmez — gönderim her yoldan sunucu şemasında 400 ile bitiyor, düğme ise
+ *    kullanıcıyı «belge tipini seç» + resmî belge onayına yürütüp ölü uca çıkarıyordu. Mağaza siparişine fatura
+ *    yolu yazıldığında (kaleme `price` + cari eşlemesi) bu dal onunla BİRLİKTE açılır.
+ *    `faturaKesilebilir` bu kuralın DIŞINDA: o düğme yalnız Muhasebe sekmesine götürür, çıkmaz üretmez.
  *
  * Parite: eşleşen bilinen girdilerde (native sipariş, hasInvoice yok, faturali undefined/true)
  * eski davranışla BİREBİR; tek fark Mikro faturası olan satırlarda düğmenin KAPANMASI.
  */
+import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi';
+
 export interface FaturaDurumuGirdisi {
   source?: string;
   hasInvoice?: boolean;
@@ -44,6 +51,7 @@ export function mikroyaFaturaGonderilebilir(o: FaturaDurumuGirdisi | null | unde
   if (!o) return false;
   if (o.faturali === false) return false;
   if (o.source === 'mikro-fatura') return false;
+  if (o.source === MAGAZA_KAYNAGI) return false;
   return !(typeof o.mikroFaturaNo === 'string' && o.mikroFaturaNo.trim() !== '');
 }
 

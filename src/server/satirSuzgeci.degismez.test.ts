@@ -62,7 +62,7 @@ describe('/api/db kaçakları kapalı', () => {
   it('koşullu yazma (cas) gövdesi damgadan geçer; atomik artırma sahiplik alanına dokunamaz', () => {
     tek(SERVER, /^\s*: await injectTenant\(req, coll, set as Record<string, unknown>, rows\[0\]\.data as Record<string, unknown>\);$/);
     tek(SERVER, /if \(SAHIPLIK_ALANLARI\.has\(field\)\) return res\.status\(400\)/);
-    tek(SERVER, /const SAHIPLIK_ALANLARI = new Set<string>\(\['companyId', 'userId', \.\.\.DIS_ROL_SATIR_ALANI\.values\(\)\]\);/);
+    tek(SERVER, /const SAHIPLIK_ALANLARI = new Set<string>\(\['companyId', 'userId', \.\.\.DIS_ROL_SATIR_ALANI\.values\(\), \.\.\.\[\.\.\.DIS_ROL_YAZAMAZ\.values\(\)\]\.flat\(\)\]\);/);
   });
   it('PUT ve PATCH: dış rol, sunucunun ürettiği biçimde (`__`) kimlikle yeni kayıt açamaz', () => {
     // Kapı "var VE görünür" ile sorulur ve sahiplik yanıtından ÖNCE gelir: "yok" ile "var ama görünmez" aynı yanıtı alır.
@@ -152,7 +152,10 @@ describe('sunucuda `orders` okuyan / yazan yerlerin SAYISI sabit', () => {
   // Yeni bir okuyucu / yazıcı eklenince bu test kırılır: uç ya `requireStaff` ile kapılanır ya da satırı `siparisGorebilir`'den
   // geçirir, sonra sayı bilinçli güncellenir. (2026-10-02 ölçümü.)
   const BEKLENEN: Record<string, number> = {
-    'server.ts': 9,
+    // 9 → 5 (2026-10-08): eski Shopify webhook yazıcıları server.ts'ten çıktı; yenisi kanal/shopifyWebhook.ts'te TEK yazıcı
+    // (imzası doğrulanmış sunucu içi yol; doküman başka kiracıya aitse YAZMAZ — kullanıcıya satır okutmaz).
+    'server.ts': 5,
+    'src/server/kanal/shopifyWebhook.ts': 1,
     'src/server/routes/kanalRoutes.ts': 4,
     'src/server/routes/mikroRoutes.ts': 14,
     'src/server/routes/opsRoutes.ts': 1,

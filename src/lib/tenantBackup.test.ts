@@ -58,3 +58,21 @@ describe('yedekPlani', () => {
     expect(a.plan.dbDosyaAdi).not.toBe(b.plan.dbDosyaAdi);
   });
 });
+
+describe('KIRACI_SORGUSU — sunucuya özel koleksiyonlar yedeğe girmez (2026-10-02)', () => {
+  it('SERVER_ONLY koleksiyonların HEPSİ dışlanır; tek parametre kiracı kimliğidir', async () => {
+    const { KIRACI_SORGUSU } = await import('./tenantBackup');
+    const { SERVER_ONLY_COLLECTIONS } = await import('./collections');
+    // `shopifyBaglantilari` webhook imza sırrını taşır ve companyId etiketlidir — yedeğe SIRSIZ girer (tuz korunur, sır atılır).
+    const { SIRSIZ_YEDEKLENEN, SIR_ALANI } = await import('./tenantBackup');
+    expect(SERVER_ONLY_COLLECTIONS).toContain('shopifyBaglantilari');
+    expect(SIRSIZ_YEDEKLENEN).toBe('shopifyBaglantilari');
+    expect(SIR_ALANI).toBe('webhookSecret');
+    const disinda = KIRACI_SORGUSU.slice(KIRACI_SORGUSU.indexOf('NOT IN ('));
+    for (const ad of SERVER_ONLY_COLLECTIONS.filter(a => a !== SIRSIZ_YEDEKLENEN)) expect(disinda).toContain(`'${ad}'`);
+    expect(disinda).not.toContain(`'${SIRSIZ_YEDEKLENEN}'`);
+    expect(KIRACI_SORGUSU).toContain(`CASE WHEN coll = '${SIRSIZ_YEDEKLENEN}' THEN data - '${SIR_ALANI}' ELSE data END AS data`);
+    expect(KIRACI_SORGUSU).toMatch(/data->>'companyId' = \$1 AND coll NOT IN \(/);
+    expect(KIRACI_SORGUSU).not.toContain('$2');
+  });
+});

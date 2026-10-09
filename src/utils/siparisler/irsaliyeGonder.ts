@@ -70,6 +70,7 @@
  * (src/server/schemas.ts `IrsaliyeKaydetSchema` + `irsaliyeGovdesi`).
  */
 import { bilinenSayi } from '../para';
+import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi';
 import type { ArayuzDili } from '../zaman';
 
 // ── Girdi tipleri ────────────────────────────────────────────────────────────
@@ -98,6 +99,8 @@ export interface IrsaliyeSiparisi {
   depoNo?: unknown;
   /** `false` = faturasız sevkiyat: Mikro'ya YAZILMAZ. Alan yoksa eski davranış (gönderilir). */
   faturali?: unknown;
+  /** `orders.source`; `MAGAZA_KAYNAGI` ise e-İrsaliye yolu yok (kalem birim fiyatı mağazadan gelmez). */
+  source?: unknown;
 }
 
 /**
@@ -147,7 +150,7 @@ export interface IrsaliyeIstekGovdesi {
  * `leadId: null` ile açılmış siparişlerde kullanıcıyı UYGULANAMAZ bir adıma yönlendiriyordu
  * (2026-09-19 kapanış bulgusu).
  */
-export type IrsaliyeEngeli = 'faturasiz' | 'musteriBagliDegil' | 'cariYok' | 'kalemYok' | 'depoYok' | 'kdvYok';
+export type IrsaliyeEngeli = 'faturasiz' | 'magazaSiparisi' | 'musteriBagliDegil' | 'cariYok' | 'kalemYok' | 'depoYok' | 'kdvYok';
 
 export interface IrsaliyeIstegiSonucu {
   gonderilebilir: boolean;
@@ -219,6 +222,10 @@ export function irsaliyeIstegi(
   //    sunucu savunma katmanı). Alanı olmayan eski/kanal siparişi eskisi gibi gönderilir.
   if (siparis.faturali === false) return { gonderilebilir: false, neden: 'faturasiz' };
 
+  // 1b. ÇEVRİM İÇİ MAĞAZA siparişi: eşleyici kalemde `price` yazmaz ve kalemler mağaza kilidiyle düzenlenemez →
+  //     `kalemYok` ipucu uygulanamaz bir adıma yönlendirirdi (fatura yolundaki `MAGAZA_KAYNAGI` kapısıyla aynı; 2026-10-09).
+  if (siparis.source === MAGAZA_KAYNAGI) return { gonderilebilir: false, neden: 'magazaSiparisi' };
+
   // 2a. Sipariş bir müşteri KAYDINA bağlı mı? `handleAddOrder` cari seçilmeden de sipariş
   //     açabiliyor (`leadId: selectedLead ? selectedLead.id : null`), o siparişte
   //     `leads.find(...)` undefined döner. Bu, CRM'de cari eşleştirerek ÇÖZÜLEMEZ — sipariş
@@ -289,6 +296,9 @@ export function irsaliyeNedenMetni(neden: IrsaliyeEngeli, dil: ArayuzDili): stri
     case 'faturasiz':
       return tr ? 'Faturasız sevkiyat Mikro\'ya e-İrsaliye olarak yazılmaz.'
                 : 'A non-invoiced shipment is not written to Mikro as an e-waybill.';
+    case 'magazaSiparisi':
+      return tr ? 'Çevrim içi mağaza siparişine e-İrsaliye yolu henüz yok (kalem birim fiyatı mağazadan gelmez).'
+                : 'No e-waybill path for online store orders yet (unit prices do not arrive from the store).';
     case 'musteriBagliDegil':
       return tr ? 'Sipariş bir müşteri kaydına bağlı değil — siparişi düzenleyip müşteriyi seçin.'
                 : 'This order is not linked to a customer record — edit the order and select the customer.';

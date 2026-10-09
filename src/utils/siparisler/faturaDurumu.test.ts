@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { siparisFaturaVar, faturaKesilebilir, mikroyaFaturaGonderilebilir, bayatKalemVar, kalemSatirKdv } from './faturaDurumu';
+import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi';
 
 describe('siparisFaturaVar — "faturası VAR mı" (faturalı satış bayrağı DEĞİL)', () => {
   it('Mikro faturası satırı (MF-383 vakası): source mikro-fatura + faturali true + mikroFaturaNo → VAR', () => {
@@ -48,6 +49,22 @@ describe('mikroyaFaturaGonderilebilir — Mikro e-Fatura push düğmesi', () => 
     expect(mikroyaFaturaGonderilebilir({ hasInvoice: true })).toBe(true);
     expect(mikroyaFaturaGonderilebilir({ faturali: false })).toBe(false);
     expect(mikroyaFaturaGonderilebilir({})).toBe(true);
+  });
+  it('çevrim içi mağaza siparişinde KAPALI: kalemde `price` yok, cari bağlı değil — gönderim hiçbir yoldan başarılı olamaz', () => {
+    expect(MAGAZA_KAYNAGI).toBe('shopify_webhook');
+    expect(mikroyaFaturaGonderilebilir({ source: MAGAZA_KAYNAGI })).toBe(false);
+    // Eşleyici `faturali` YAZMAZ; biri sonradan true yazsa bile kapı kaynağa bakar (kalemde hâlâ `price` yok).
+    expect(mikroyaFaturaGonderilebilir({ source: MAGAZA_KAYNAGI, faturali: true })).toBe(false);
+    expect(mikroyaFaturaGonderilebilir({ source: MAGAZA_KAYNAGI, hasInvoice: true })).toBe(false);
+  });
+  it('mağaza kapısı yalnız O kaynağı kapatır: kaynaksız (elle girilen "SHP-…" dâhil), pazaryeri ve Mikro siparişi eskisi gibi AÇIK', () => {
+    expect(mikroyaFaturaGonderilebilir({ source: undefined })).toBe(true);
+    expect(mikroyaFaturaGonderilebilir({ source: 'Trendyol' })).toBe(true);
+    expect(mikroyaFaturaGonderilebilir({ source: 'mikro-siparis' })).toBe(true);
+  });
+  it('`faturaKesilebilir` mağaza siparişinde DEĞİŞMEDİ (düğme yalnız Muhasebe sekmesine götürür; kapatmak "faturasız satış" anlamına çekerdi)', () => {
+    expect(faturaKesilebilir({ source: MAGAZA_KAYNAGI })).toBe(true);
+    expect(siparisFaturaVar({ source: MAGAZA_KAYNAGI })).toBe(false);
   });
 });
 

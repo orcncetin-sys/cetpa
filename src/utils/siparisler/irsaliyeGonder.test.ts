@@ -1,3 +1,4 @@
+import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi';
 import { describe, it, expect } from 'vitest';
 import { irsaliyeIstegi, irsaliyeYanitMesaji, irsaliyeNedenMetni, irsaliyeSonucYamasi } from './irsaliyeGonder';
 
@@ -230,7 +231,7 @@ describe('irsaliyeIstegi — neden önceliği kararlıdır', () => {
 
 describe('irsaliyeNedenMetni — devre dışı düğmenin ipucu / otomatik akışın uyarısı', () => {
   it('her neden için tr ve en metni var, boş değil ve birbirinden farklı', () => {
-    const nedenler = ['faturasiz', 'depoYok', 'kdvYok', 'musteriBagliDegil', 'cariYok', 'kalemYok'] as const;
+    const nedenler = ['faturasiz', 'magazaSiparisi', 'depoYok', 'kdvYok', 'musteriBagliDegil', 'cariYok', 'kalemYok'] as const;
     for (const dil of ['tr', 'en'] as const) {
       const metinler = nedenler.map(n => irsaliyeNedenMetni(n, dil));
       expect(metinler.every(m => m.trim().length > 0)).toBe(true);
@@ -403,3 +404,16 @@ describe('irsaliyeNedenMetni — ipucu VAR OLMAYAN bir kurala yönlendirmez', ()
   });
 });
 
+describe('irsaliyeIstegi — çevrim içi mağaza siparişine e-İrsaliye yolu YOK (fatura yoluyla aynı kapı; 2026-10-09)', () => {
+  it('kalem / depo / KDV / cari tam olsa da `magazaSiparisi` ile durur; neden metni iki dilde', () => {
+    const s = irsaliyeIstegi(
+      { id: 'o1', source: MAGAZA_KAYNAGI, customerName: 'x', lineItems: [{ sku: 'A', quantity: 1, price: 10 }], kdvOran: 20, depoNo: 2 },
+      { mikroCariKod: 'C1' },
+    );
+    expect(s).toEqual({ gonderilebilir: false, neden: 'magazaSiparisi' });
+    expect(irsaliyeNedenMetni('magazaSiparisi', 'tr')).toMatch(/mağaza siparişine e-İrsaliye yolu henüz yok/);
+    expect(irsaliyeNedenMetni('magazaSiparisi', 'en')).toMatch(/online store orders/);
+    // Faturasız kapısı önce gelir (eski davranış korunur)
+    expect(irsaliyeIstegi({ id: 'o2', source: MAGAZA_KAYNAGI, faturali: false }, null).neden).toBe('faturasiz');
+  });
+});

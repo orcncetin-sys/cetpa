@@ -8,6 +8,8 @@ import { yerelDegistirilebilir, sevkiyatEngeli, sevkiyatEngeliMetni, yerelDegist
 import { mikroSiparisiSil } from '../services/mikroSiparisSil';
 import { useMikroSiparisKalemleri } from '../hooks/useMikroSiparisKalemleri';
 import MikroSiparisKalemleri from '../components/siparis/MikroSiparisKalemleri';
+import OnlineSiparisBilgisi, { OnlineRozeti } from '../components/siparis/OnlineSiparisBilgisi';
+import { magazaSiparisiMi } from '../utils/siparisler/magazaSiparisi';
 import { kalemleriMikrodanOkunacak, mikroFaturaKalemleriGetir, mikroKalemTablosu, kayitliKalemTablosu, kayitliMikroKalemleri } from '../services/mikroFaturaKalemleri';
 import { kalemTutari, kalemBirimFiyati, kdvDahilKalemVar } from '../utils/pano/stokSevkiyat';
 import { authFetch } from '../services/authFetch';
@@ -71,6 +73,7 @@ import SevkDeposuSecici from '../components/SevkDeposuSecici';
 import { formSayisi, girilenAlanYamasi } from '../utils/muhasebe/irsaliyeCalisan';
 import { oc } from '../i18n/ortak';
 import { op } from '../i18n/orders';
+import { osc } from '../i18n/onlineSiparis';
 import { isAllowed, APP_ROLES } from '../lib/rbac';
 import { MAGAZA_TALEP_KOLEKSIYONU } from '../lib/magazaTalep';
 import { useAppStore } from '../store/appStore';
@@ -100,6 +103,9 @@ const SortIcon = ({ col, config }: { col: string; config: { key: string; dir: 'a
 // marj %100 çıkıyordu (2026-09-19 hakem bulgusu). Doğru kapı: `kartMaliyetiTL` (bilinmiyorsa null).
 
 type TimelineEntry = { action: string; actor: string; ts: number; note?: string };
+
+/** Düzenleme formunda salt okunur (mağaza kilidi) girdinin görünümü — yazılamadığı bakınca anlaşılsın. */
+const KILITLI_GIRDI = 'bg-gray-50 text-gray-500 cursor-not-allowed';
 
 const ORDER_STATUS_STEPS = [
   { key: 'Pending',    labelTR: 'Sipariş Alındı',  labelEN: 'Received',   icon: Clock        },
@@ -321,6 +327,16 @@ export default function OrdersPage({
   const [editingTutarHam, setEditingTutarHam] = useState('');
   /** KDV oranı kutusunun HAM metni — aynı sebeple ayrı: '' = bilinmiyor, `?? 20` uydurulmaz. */
   const [editingKdvHam, setEditingKdvHam] = useState('');
+  /**
+   * Düzenleme formunun MAĞAZA KİLİDİ (2026-10-07). Çevrim içi mağaza siparişinde müşteri adı, teslimat adresi ve tutar
+   * MAĞAZANINDIR: webhook eşleyicisi (server/kanal/shopifyEsleme) her sipariş olayında bu alanları yeniden yazar.
+   * Form onları yazılabilir sunuyordu — düzeltme bir sonraki olayda (ödeme alındı, kargo çıktı) uyarısız geri eziliyor,
+   * depo eski adrese sevk edebiliyordu. Kilitliyken üç girdi salt okunurdur ve kayıt yamasına GİRMEZ; Cetpa'ya ait
+   * alanlar (depo, belge tipi, KDV oranı, cari BAĞI) açık kalır. Çit: lib/onlineSiparisKaydi.degismez.test.ts.
+   */
+  const magazaKilidi = magazaSiparisiMi(selectedOrder);
+  /** Kilitli formda cari seçicinin ARAMA metni — `customerName`e bağlanmaz (o alan mağazanın, salt okunur). */
+  const [magazaCariArama, setMagazaCariArama] = useState('');
   /** Düzenlenen siparişin RESMÎ BELGESİ kesilmiş mi (e-İrsaliye / fatura). Kesilmişse cari bağı, TUTAR ve KDV oranı kilitlenir:
    *  belge o değerlerle kesildi; yerelde değiştirmek Cetpa kaydını belgeden ayırır (2026-10-07 — oran değişikliği artık
    *  toplamı ve kalemleri de yeniden yazıyor). Ad ve adres düzenlenebilir kalır. */
@@ -329,7 +345,8 @@ export default function OrdersPage({
    *  değişince tutar kalemlerden yeniden hesaplanır) — kullanıcı kaydetmeden önce görsün. Kayıtla AYNI işlev. */
   const duzenlemeTutarOnizleme = (() => {
     if (!isEditingOrder || !selectedOrder) return null;
-    const yama = siparisDuzenlemeYamasi({ tutarHam: editingTutarHam, kdvHam: editingKdvHam }, selectedOrder);
+    // Girdiler KAYITLA AYNI: mağaza siparişinde tutar formdan değil kayıttan (kilitli — kayıt da öyle verir).
+    const yama = siparisDuzenlemeYamasi({ tutarHam: magazaKilidi ? sayiGirdisi(selectedOrder.totalPrice) : editingTutarHam, kdvHam: editingKdvHam }, selectedOrder);
     const yazilan = formSayisi(editingTutarHam);
     if (!yama.lineItems || typeof yama.totalPrice !== 'number' || typeof yama.kdvHaricTutar !== 'number' || typeof yama.kdvTutari !== 'number') return null;
     return yama.totalPrice === yazilan ? null : { toplam: yama.totalPrice, matrah: yama.kdvHaricTutar, kdv: yama.kdvTutari };
@@ -1452,6 +1469,8 @@ export default function OrdersPage({
                                 <span className="cursor-pointer" onClick={() => { setSelectedOrder(order); trackView({ type: 'order', id: order.id, label: `${gorunenSiparisNo(order)} — ${order.customerName}`, tab: 'orders' }); }}>
                                   {gorunenSiparisNo(order)}
                                 </span>
+                                {/* Çevrim içi mağaza siparişi rozeti (mağaza siparişi değilse bileşen null döner). */}
+                                <OnlineRozeti siparis={order} dil={currentLanguage} />
                                 {order.lineItems && order.lineItems.length > 0 && (
                                   <button
                                     onClick={e => { e.stopPropagation(); setExpandedOrderId(expandedOrderId === order.id ? null : order.id); }}
@@ -1564,6 +1583,10 @@ export default function OrdersPage({
                                     title={currentLanguage === 'tr' ? `Mikro satış faturasından türetildi (${order.mikroEvrak ? order.mikroEvrak.seri + order.mikroEvrak.sira : ''})` : 'Derived from Mikro sales invoice'}>
                                     {op(currentLanguage).mikro_fatura}
                                   </span>
+                                ) : magazaSiparisiMi(order) ? (
+                                  // Çevrim içi mağaza siparişinde fatura durumu Cetpa'da İZLENMİYOR (sunucu `faturali` yazmaz) —
+                                  // "FATURASIZ" rozeti "faturasız satış" demek olurdu (yanlış beyan). Rozet yok; "Online" rozeti yukarıda.
+                                  null
                                 ) : order.faturali ? (
                                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${order.faturaTipi==='ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi==='e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
                                     {order.faturaTipi ? faturaTipiEtiketi(order.faturaTipi, currentLanguage) : 'e-FATURA'} • {kdvEtiketi(order.kdvOran)}
@@ -1766,7 +1789,7 @@ export default function OrdersPage({
                   <div key={order.id} className="apple-card p-4 space-y-3" onClick={() => setSelectedOrder(order)}>
                     <div className="flex justify-between items-start">
                       <div>
-                        <p className="font-bold text-sm text-[#1D2226]">{gorunenSiparisNo(order)}</p>
+                        <p className="font-bold text-sm text-[#1D2226] flex items-center gap-1.5">{gorunenSiparisNo(order)}<OnlineRozeti siparis={order} dil={currentLanguage} /></p>
                         <p className="text-xs text-gray-500">{order.customerName}</p>
                       </div>
                       <span className={cn("text-[10px] font-bold uppercase px-2 py-1 rounded-full",
@@ -2403,7 +2426,10 @@ export default function OrdersPage({
                         <Truck className="w-4 h-4" />
                         {oc(currentLanguage).sevkiyat}
                       </button>
-                      {/* Copy public tracking link */}
+                      {/* Copy public tracking link — ÇEVRİM İÇİ MAĞAZA siparişinde ÇİZİLMEZ (2026-10-07): sunucu `/api/track`
+                          o siparişe bilerek 404 döner (takip bağlantısını mağaza kendi yollar); düğme «kopyalandı» deyip
+                          müşteriye ölü bağlantı gönderiyordu. Kapı, teslim iletisindekiyle (App.tsx) AYNI işlev. */}
+                      {!magazaSiparisiMi(selectedOrder) && (
                       <button
                         onClick={() => {
                           const url = `${window.location.origin}/?track=${selectedOrder.id}`;
@@ -2417,11 +2443,15 @@ export default function OrdersPage({
                         <Link className="w-4 h-4" />
                         {op(currentLanguage).takip_linki}
                       </button>
+                      )}
                       {/* Phase 57: Copy Order Summary (WhatsApp-ready) */}
                       <button
                         onClick={() => {
                           const o = selectedOrder;
-                          const trackUrl = `${window.location.origin}/?track=${o.id}`;
+                          // Mağaza siparişinde takip satırı YAZILMAZ (yukarıdaki düğmeyle aynı gerekçe: bağlantı 404 verir).
+                          // Özetin kalanı (no, durum, tutar, kargo takip no) mağaza siparişinde de doğrudur — düğme kalır.
+                          // Şablonda satır sonları satırın BAŞINDA: düşen satırın ardında boş satır kalmasın.
+                          const takipUrl = magazaSiparisiMi(o) ? null : `${window.location.origin}/?track=${o.id}`;
                           // Tutar ya da kur bilinmiyorsa mesaj HİÇ üretilmez: ne '—' ne de "₺0" müşteriye giden
                           // metne akar. Eski `||0` tutarı bilinmeyen siparişi "₺0" diye müşteriye yazıyordu.
                           const _waAmt = mesajTutari(o, kpiCurrency, exchangeRates);
@@ -2432,8 +2462,8 @@ export default function OrdersPage({
                             return;
                           }
                           const summary = currentLanguage === 'tr'
-                            ? `📦 *Sipariş Özeti*\nSipariş No: ${gorunenSiparisNo(o)}\nMüşteri: ${o.customerName}\nDurum: ${o.status}\nTutar: ${_waAmt}\n${o.trackingNumber ? `Kargo Takip: ${o.trackingNumber}\n` : ''}Takip Linki: ${trackUrl}`
-                            : `📦 *Order Summary*\nOrder: ${gorunenSiparisNo(o)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}\n${o.trackingNumber ? `Tracking: ${o.trackingNumber}\n` : ''}Link: ${trackUrl}`;
+                            ? `📦 *Sipariş Özeti*\nSipariş No: ${gorunenSiparisNo(o)}\nMüşteri: ${o.customerName}\nDurum: ${o.status}\nTutar: ${_waAmt}${o.trackingNumber ? `\nKargo Takip: ${o.trackingNumber}` : ''}${takipUrl ? `\nTakip Linki: ${takipUrl}` : ''}`
+                            : `📦 *Order Summary*\nOrder: ${gorunenSiparisNo(o)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}${o.trackingNumber ? `\nTracking: ${o.trackingNumber}` : ''}${takipUrl ? `\nLink: ${takipUrl}` : ''}`;
                           navigator.clipboard.writeText(summary).then(() =>
                             toast(op(currentLanguage).siparis_ozeti_kopyalandi, 'success')
                           ).catch(() => toast(oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'));
@@ -2596,7 +2626,7 @@ export default function OrdersPage({
                           (utils/siparisler/siparisIslemleri.yerelDegistirilebilir). Etiketler dil sözlüğünden ("Edit"/"Delete"
                           sabit İngilizceydi). */}
                       <button
-                        onClick={() => { if (!yerelDegistirilebilir(selectedOrder)) return; setEditingOrderData(selectedOrder); setEditingTutarHam(sayiGirdisi(selectedOrder.totalPrice)); setEditingKdvHam(sayiGirdisi(selectedOrder.kdvOran)); setIsEditingOrder(true); }}
+                        onClick={() => { if (!yerelDegistirilebilir(selectedOrder)) return; setEditingOrderData(selectedOrder); setEditingTutarHam(sayiGirdisi(selectedOrder.totalPrice)); setEditingKdvHam(sayiGirdisi(selectedOrder.kdvOran)); setMagazaCariArama(''); setIsEditingOrder(true); }}
                         disabled={!yerelDegistirilebilir(selectedOrder)}
                         title={yerelDegistirilebilir(selectedOrder) ? undefined : yerelDegistirilemezMetni(currentLanguage)}
                         className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
@@ -2710,6 +2740,9 @@ export default function OrdersPage({
                       })()}
                     </div>
                   </div>
+                  {/* Çevrim içi mağaza siparişi: mağazadaki ödeme / kargo durumu, e-posta, telefon, ödeme yöntemi, müşteri notu.
+                      Mağaza siparişi değilse bileşen null döner — diğer siparişlerin detayı değişmez. */}
+                  <OnlineSiparisBilgisi siparis={selectedOrder} dil={currentLanguage} />
                   {/* Phase 40: Order Quick Note */}
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                     <div className="flex items-center justify-between mb-3">
@@ -4182,6 +4215,9 @@ export default function OrdersPage({
                 <button onClick={() => setIsEditingOrder(false)} className="p-2.5 -m-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
               </div>
               <div className="p-5 space-y-3 flex-1 overflow-y-auto">
+                {magazaKilidi && (
+                  <p role="note" className="rounded-xl bg-amber-50 text-amber-800 px-3 py-2 text-xs">{osc(currentLanguage).magaza_alanlari_kilitli}</p>
+                )}
                 {/* MÜŞTERİ — serbest metin DEĞİL, cari kaydına BAĞLAYAN seçici.
                     2026-09-19 kapanış bulgusu: `handleAddOrder` müşteri adı elle yazılınca
                     `leadId: null` yazıyor; o siparişte `leads.find(...)` undefined döner ve
@@ -4191,23 +4227,64 @@ export default function OrdersPage({
                     bağ yalnız listeden seçilerek kurulur.
                     Belge kesildikten SONRA cari BAĞI değiştirilemez (kesilen e-İrsaliye/e-Fatura
                     başka bir cariye taşınamaz); ad düzenlenebilir kalır — yazım hatası düzeltmek
-                    eski davranıştı ve kısıtlanması bu bulgunun kapsamı dışı. */}
+                    eski davranıştı ve kısıtlanması bu bulgunun kapsamı dışı.
+                    ÇEVRİM İÇİ MAĞAZA siparişi (`magazaKilidi`): AD salt okunur, cari BAĞI ayrı seçiciyle kurulur —
+                    seçici yalnız `leadId` yazar, arama metni `customerName`e dokunmaz. */}
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).musteri}</label>
                   {(() => {
                     const belgeKesildi = duzenlenenBelgeKesildi;
                     const bagliCari = editingOrderData.leadId ? leads.find(l => l.id === editingOrderData.leadId) : undefined;
+                    const belgeNotu = (
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        {currentLanguage === 'tr'
+                          ? `Resmî belge kesilmiş — cari bağı değiştirilemez${bagliCari ? ` (${bagliCari.name})` : ''}.`
+                          : `An official document was issued — the linked account cannot be changed${bagliCari ? ` (${bagliCari.name})` : ''}.`}
+                      </p>
+                    );
+                    const cariNotu = (
+                      <p className={cn('text-[10px] mt-1', bagliCari ? 'text-gray-400' : 'text-amber-600')}>
+                        {!bagliCari
+                          ? (magazaSiparisiMi(editingOrderData)
+                              ? (currentLanguage === 'tr'
+                                  ? 'Müşteri kaydına bağlı değil — cari eşlemesi için listeden seçin (mağaza siparişine e-İrsaliye yolu henüz yok).'
+                                  : 'Not linked to a customer record — pick from the list for account matching (no e-waybill path for store orders yet).')
+                              : currentLanguage === 'tr'
+                                ? 'Müşteri kaydına bağlı değil — e-İrsaliye kesilemez. Listeden seçin.'
+                                : 'Not linked to a customer record — no e-waybill can be issued. Pick from the list.')
+                          : `${op(currentLanguage).cari}: ${bagliCari.name} · ${
+                              bagliCari.mikroCariKod || bagliCari.cariKod
+                                || (op(currentLanguage).mikro_cari_kodu_yok)}`}
+                      </p>
+                    );
+                    if (magazaKilidi) {
+                      return (
+                        <>
+                          <input type="text" readOnly className={cn('apple-input w-full text-sm', KILITLI_GIRDI)} value={(editingOrderData.customerName as string) ?? ''} />
+                          {belgeKesildi ? belgeNotu : (
+                            <div className="mt-2">
+                              <CustomerCombobox
+                                leads={leads}
+                                value={magazaCariArama}
+                                onChange={setMagazaCariArama}
+                                onSelect={lead => { setEditingOrderData(d => ({ ...d, leadId: lead.id })); setMagazaCariArama(lead.name); }}
+                                inputClassName="apple-input w-full text-sm pl-9"
+                                placeholder={osc(currentLanguage).cari_kaydina_bagla}
+                                renderSecondaryLine={l => l.mikroCariKod || l.cariKod || (op(currentLanguage).mikro_cari_kodu_yok)}
+                              />
+                              {cariNotu}
+                            </div>
+                          )}
+                        </>
+                      );
+                    }
                     if (belgeKesildi) {
                       // Ad DÜZENLENEBİLİR kalır (eski davranış — yazım hatası düzeltilebilmeli);
                       // kilitlenen yalnız CARİ BAĞIDIR: kesilmiş resmî belge başka bir cariye taşınamaz.
                       return (
                         <>
                           <input type="text" className="apple-input w-full text-sm" value={(editingOrderData.customerName as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, customerName: e.target.value }))} />
-                          <p className="text-[10px] text-gray-400 mt-1">
-                            {currentLanguage === 'tr'
-                              ? `Resmî belge kesilmiş — cari bağı değiştirilemez${bagliCari ? ` (${bagliCari.name})` : ''}.`
-                              : `An official document was issued — the linked account cannot be changed${bagliCari ? ` (${bagliCari.name})` : ''}.`}
-                          </p>
+                          {belgeNotu}
                         </>
                       );
                     }
@@ -4222,28 +4299,19 @@ export default function OrdersPage({
                           placeholder={op(currentLanguage).musteri_adi_listeden_secin}
                           renderSecondaryLine={l => l.mikroCariKod || l.cariKod || (op(currentLanguage).mikro_cari_kodu_yok)}
                         />
-                        <p className={cn('text-[10px] mt-1', bagliCari ? 'text-gray-400' : 'text-amber-600')}>
-                          {!bagliCari
-                            ? (currentLanguage === 'tr'
-                                ? 'Müşteri kaydına bağlı değil — e-İrsaliye kesilemez. Listeden seçin.'
-                                : 'Not linked to a customer record — no e-waybill can be issued. Pick from the list.')
-                            : `${op(currentLanguage).cari}: ${bagliCari.name} · ${
-                                bagliCari.mikroCariKod || bagliCari.cariKod
-                                  || (op(currentLanguage).mikro_cari_kodu_yok)}`}
-                        </p>
+                        {cariNotu}
                       </>
                     );
                   })()}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).teslimat_adresi}</label>
-                  <input type="text" className="apple-input w-full text-sm" value={(editingOrderData.shippingAddress as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, shippingAddress: e.target.value }))} />
+                  <input type="text" readOnly={magazaKilidi} className={cn('apple-input w-full text-sm', magazaKilidi && KILITLI_GIRDI)} value={(editingOrderData.shippingAddress as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, shippingAddress: e.target.value }))} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">{op(currentLanguage).tutar}</label>
-                    <input type="number" className="apple-input w-full text-sm disabled:opacity-60 disabled:cursor-not-allowed" placeholder={oc(currentLanguage).bilinmiyor}
-                      disabled={duzenlenenBelgeKesildi} value={editingTutarHam} onChange={e => setEditingTutarHam(e.target.value)} />
+                    <input type="number" readOnly={magazaKilidi} className={cn('apple-input w-full text-sm disabled:opacity-60 disabled:cursor-not-allowed', magazaKilidi && KILITLI_GIRDI)} placeholder={oc(currentLanguage).bilinmiyor} disabled={duzenlenenBelgeKesildi} value={editingTutarHam} onChange={e => setEditingTutarHam(e.target.value)} />
                   </div>
                   {/* DURUM alanı BURADAN KALDIRILDI (2026-09-19): bu pencere durumu yamayla doğrudan yazıyordu —
                       `handleUpdateOrderStatus`'tan GEÇMEDİĞİ için 'Kargoda' yapılınca stok DÜŞMÜYOR, `stockApplied`
@@ -4325,11 +4393,16 @@ export default function OrdersPage({
                       return;
                     }
                     const duzenlenenId = selectedOrder.id;
+                    // MAĞAZA KİLİDİ kayıtta da geçerli — salt okunur girdi tek başına yetmez (durum başka yoldan dolmuş
+                    // olabilir). Ad ve adres yamaya VERİLMEZ. Tutar BOŞ GEÇİLMEZ: `girilenAlanYamasi` boş kutu +
+                    // bilinen önceki değeri «kullanıcı sildi» sayıp `totalPrice: null` yazar; bu yüzden kayıttaki
+                    // değer verilir (türevler yeniden hesaplanmasın), ardından alan yamadan DÜŞÜRÜLÜR — aynı değeri
+                    // geri yazmak da form açıkken gelen mağaza olayının tutarını ezerdi.
                     // Açık tip argümanı: `status` artık bu formdan yazılmıyor, çıkarım `string`e düşerdi.
-                    const yama = siparisDuzenlemeYamasi<Order['status']>({
-                      customerName: editingOrderData.customerName,
-                      shippingAddress: editingOrderData.shippingAddress,
-                      tutarHam: editingTutarHam,
+                    const hamYama = siparisDuzenlemeYamasi<Order['status']>({
+                      customerName: magazaKilidi ? undefined : editingOrderData.customerName,
+                      shippingAddress: magazaKilidi ? undefined : editingOrderData.shippingAddress,
+                      tutarHam: magazaKilidi ? sayiGirdisi(selectedOrder.totalPrice) : editingTutarHam,
                       kdvHam: editingKdvHam,
                       depoNo: editingOrderData.depoNo,
                       // Yalnız GERÇEKTEN değiştiyse yaz (leadId ile aynı gerekçe).
@@ -4338,6 +4411,8 @@ export default function OrdersPage({
                       // gereksizce geri yazar (PATCH-merge'de eşzamanlı değişikliği ezme riski).
                       leadId: editingOrderData.leadId === selectedOrder.leadId ? undefined : editingOrderData.leadId,
                     }, selectedOrder);
+                    const { totalPrice: _magazaTutari, ...tutarsizYama } = hamYama;
+                    const yama: typeof hamYama = magazaKilidi ? tutarsizYama : hamYama;
                     if (!yazilabilirSiparis(duzenlenenId)) return;
                     try {
                       await updateDoc(doc(db, 'orders', duzenlenenId), { ...yama, updatedAt: serverTimestamp() });

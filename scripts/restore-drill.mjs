@@ -32,6 +32,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { KIRACI_SORGUSU } from '../src/lib/tenantBackup.js';
 
 dotenv.config({ quiet: true });
 const execFileAsync = promisify(execFile);
@@ -106,8 +107,11 @@ try {
   else if (toplam) tamam('tum satirlar gecerli JSON');
 
   // ── 4) Canli veritabaniyla tie-out ────────────────────────────────────────
+  // Canlı sayım yedeğin KENDİ sorgusundan türetilir (backup-tenants.mjs aynı KIRACI_SORGUSU ile yazar): yedeğe hiç girmeyen
+  // sunucuya özel koleksiyonlar (ör. `shopifyBaglantilari` — companyId etiketli, imza sırrı taşır) sayılırsa mağaza bağlandığı
+  // andan itibaren her tatbikat «EKSIK» der. Süzgeci burada elle yinelemek iki listeyi ayrıştırırdı; alt sorgu ayrışamaz.
   const { rows: [{ n: canli }] } = await pool.query(
-    "SELECT count(*)::int AS n FROM docs WHERE data->>'companyId' = $1", [companyId]);
+    `SELECT count(*)::int AS n FROM (${KIRACI_SORGUSU}) AS yedege_giren`, [companyId]);
   const fark = canli - toplam;
   if (fark === 0) tamam(`canli veriyle BIREBIR ayni: ${canli} satir`);
   else if (fark > 0) sorun(`EKSIK: canlida ${canli}, yedekte ${toplam} (${fark} satir yedekte YOK)`);

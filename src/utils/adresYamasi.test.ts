@@ -31,10 +31,11 @@ describe('ayar formları yardımcıyı ve kimlikli çağrıyı KULLANIR (kaynak 
     expect(say('components/ERPHubPanel.tsx', /if \(!r\.ok\) throw new Error/)).toBe(1);
     expect(say('components/ERPHubPanel.tsx', /setKayitHatasi\(sunucuHataMetni\(err\)/)).toBe(1);
   });
-  it('SettingsPage: iyzico taban adresi Yönetici dışındaki role salt okunur; boş yamada istek ve denetim kaydı yok', () => {
+  it('SettingsPage: iyzico taban adresi Yönetici dışındaki role salt okunur; AdminPage: boş yamada istek ve denetim kaydı yok', () => {
     expect(say('pages/SettingsPage.tsx', /readOnly=\{f\.key === 'baseUrl' && !adresDuzenler\}/)).toBe(1);
-    for (const sayfa of ['pages/SettingsPage.tsx', 'pages/AdminPage.tsx']) {
-      expect(say(sayfa, /if \(!Object\.keys\(yama\)\.length\) \{ toast\(.*'info'\); return; \}/), sayfa).toBe(1);
-    }
+    expect(say('pages/AdminPage.tsx', /if \(!Object\.keys\(yama\)\.length\) \{ toast\(.*'info'\); return; \}/)).toBe(1);
+    // SettingsPage'in «Ayarları Kaydet» düğmesi kalktı (o sayfada companySettings'i değiştiren alan kalmadı) — geri gelirse
+    // nesneyi bütün ezen eski kayıt da geri gelmesin.
+    expect(say('pages/SettingsPage.tsx', /setDoc\(doc\(db, 'settings', 'app'\)/)).toBe(0);
   });
 });

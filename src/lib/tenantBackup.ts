@@ -17,6 +17,8 @@
  * Bu dosya SADECE karar mantığını taşır (hangi kiracı, hangi koleksiyon,
  * hangi dosya adı, hangi uyarı) — I/O yok, böylece testlenebilir.
  */
+import { SERVER_ONLY_COLLECTIONS } from './collections.js';
+
 
 export interface YedekAyari {
   companyId: string;
@@ -80,8 +82,27 @@ export function yedekPlani(
  * koymak diğerinin verisini sızdırmak olabilir. Bunlar operatör tarafında
  * ayrıca ele alınır — çağıran taraf sayısını raporlar.
  */
+/** Sırsız yedeklenen tek sunucuya özel koleksiyon ve atılan sır alanı — gerekçe `sunucuyaOzelListesi` üstünde. */
+export const SIRSIZ_YEDEKLENEN = 'shopifyBaglantilari';
+export const SIR_ALANI = 'webhookSecret';
 export const KIRACI_SORGUSU =
-  "SELECT coll, id, data FROM docs WHERE data->>'companyId' = $1 ORDER BY coll, id";
+  `SELECT coll, id, CASE WHEN coll = '${SIRSIZ_YEDEKLENEN}' THEN data - '${SIR_ALANI}' ELSE data END AS data ` +
+  `FROM docs WHERE data->>'companyId' = $1 AND coll NOT IN (${sunucuyaOzelListesi()}) ORDER BY coll, id`;
+
+/**
+ * SUNUCUYA ÖZEL koleksiyonlar kiracı yedeğine GİRMEZ (2026-10-02): webhook imza sırrı taşıyan doküman `companyId`
+ * etiketlidir — yedeğe girseydi sır düz metin dosyaya (ve uzak hedefe) yazılırdı. TEK İSTİSNA (2026-10-09, etkileşim
+ * incelemesi): `shopifyBaglantilari` SIRSIZ girer (`data - 'webhookSecret'`) — aynı doküman sipariş kimliği TUZUNU taşır;
+ * yedekten dönüp bağlantıyı yeniden kurmak yeni tuz üretirdi ve açık siparişlerin sonraki olayları ikinci kopya olarak
+ * yazılırdı. `shopifyRoutes` yeniden kurulumda yarım kayıttaki tuzu zaten alır («Bağlantıyı kaldır» yolu). Liste koddaki
+ * sabitten üretilir (kullanıcı girdisi değil); yine de yalnız tanımlayıcı biçimindeki adlar SQL'e girer.
+ */
+function sunucuyaOzelListesi(): string {
+  const adlar = SERVER_ONLY_COLLECTIONS.filter(a => /^[A-Za-z][A-Za-z0-9_]*$/.test(a));
+  if (adlar.length !== SERVER_ONLY_COLLECTIONS.length) throw new Error('SERVER_ONLY_COLLECTIONS içinde tanımlayıcı olmayan ad var');
+  if (!adlar.includes(SIRSIZ_YEDEKLENEN)) throw new Error(`${SIRSIZ_YEDEKLENEN} SERVER_ONLY_COLLECTIONS içinde değil`);
+  return adlar.filter(a => a !== SIRSIZ_YEDEKLENEN).map(a => `'${a}'`).join(', ');
+}
 
 /** Etiketsiz satır sayısı — operatörün görmesi gereken boşluk. */
 export const ETIKETSIZ_SAYIM_SORGUSU =

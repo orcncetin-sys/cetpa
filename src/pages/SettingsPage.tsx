@@ -4,7 +4,7 @@ import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import {
   Activity, Bell, CreditCard, Globe, Link, Lock, Mail,
-  MessageSquare, RefreshCw, Shield, ShoppingBag, Users, X,
+  MessageSquare, RefreshCw, Shield, Users, X,
 } from 'lucide-react';
 import { db, auth } from '../firebase';
 import {
@@ -21,11 +21,10 @@ import ERPHubPanel from '../components/ERPHubPanel';
 import IntegrationHealthPanel from '../components/IntegrationHealthPanel';
 import SkuMappingPanel from '../components/SkuMappingPanel';
 import MarketplacePanel from '../components/MarketplacePanel';
+import ShopifyBaglantiKarti from '../components/ShopifyBaglantiKarti';
 import type { WebhookConfig } from '../types';
 import type { UserSubscription, SubscriptionPlan, BillingCycle } from '../types/subscription';
 import { oc } from '../i18n/ortak';
-import { noktaYolluYama } from '../utils/noktaYolluYama';
-import { sunucuHataMetni } from '../utils/sunucuHatasi';
 
 type ClassValue = string | null | undefined | boolean | ClassValue[];
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
@@ -61,19 +60,16 @@ export default function SettingsPage({
   currentLanguage, userRole, user, isOwnerAdmin,
   exchangeRates, setExchangeRates,
   userSubscription, paymentHistory = [],
-  companySettings = {}, setCompanySettings,
   geminiApiKeySetting, setGeminiApiKeySetting,
   notifPrefs = {}, toggleNotifPref,
   auditLogs = [], webhookConfigs = [],
-  toast, logAuditAction,
+  toast,
   handleSelectPlan, handleCancelSubscription, setShowPricingPage,
 }: Props) {
   // Entegrasyon bağlantı adresini sunucu yalnız Yönetici'den kabul eder (server.ts ayarYazimiEngeli) — kutular buna göre açılır.
   const adresDuzenler = userRole === 'Admin' || isOwnerAdmin;
   const [savingGeminiKey, setSavingGeminiKey] = useState(false);
   const [testingGeminiKey, setTestingGeminiKey] = useState(false);
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [settingsSaved, setSettingsSaved] = useState(false);
   const [p641Entity, setP641Entity] = useState<'all' | 'orders' | 'inventory' | 'leads' | 'muhasebe'>('all');
   const [webhookDraft, setWebhookDraft] = useState({ url: '', events: [] as string[] });
   const [webhookTestLoading, setWebhookTestLoading] = useState<string | null>(null);
@@ -133,55 +129,9 @@ export default function SettingsPage({
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Shopify */}
-          <div className="apple-card p-5 flex flex-col gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-green-50 rounded-xl flex items-center justify-center">
-                <ShoppingBag className="w-4.5 h-4.5 text-green-600" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-sm">Shopify</h3>
-                <p className="text-[11px] text-[#86868B]">{oc(currentLanguage).e_ticaret_entegrasyonu}</p>
-              </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${companySettings?.shopify_access_token ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-                {companySettings?.shopify_access_token ? (oc(currentLanguage).bagli) : (oc(currentLanguage).bagli_degil)}
-              </span>
-            </div>
-            {[
-              { key: 'shopify_store_url',    label: currentLanguage === 'tr' ? 'Mağaza URL' : 'Store URL',    placeholder: 'mystore.myshopify.com', secret: false },
-              { key: 'shopify_access_token', label: 'Access Token', placeholder: 'shpat_...', secret: true },
-              { key: 'shopify_api_key',      label: 'API Key',      placeholder: 'API Key',   secret: false },
-              { key: 'shopify_api_secret',   label: 'API Secret',   placeholder: 'API Secret', secret: true },
-            ].map(f => (
-              <div key={f.key} className="space-y-0.5">
-                <label className="text-[10px] font-bold text-gray-400 uppercase">{f.label}</label>
-                <input
-                  type={f.secret ? 'password' : 'text'}
-                  defaultValue={(companySettings?.[f.key] as string) || ''}
-                  placeholder={f.placeholder}
-                  onChange={e => setCompanySettings((prev: Record<string, unknown>) => ({ ...prev, [f.key]: e.target.value }))}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-green-400 focus:ring-2 focus:ring-green-400/10 transition-all font-mono"
-                />
-              </div>
-            ))}
-            <button
-              onClick={async () => {
-                const token = (companySettings?.shopify_access_token as string) || '';
-                if (!token) { toast(currentLanguage === 'tr' ? 'Önce Access Token girin.' : 'Enter Access Token first.', 'error'); return; }
-                toast(currentLanguage === 'tr' ? 'Shopify senkronizasyonu başlatıldı…' : 'Starting Shopify sync…', 'info');
-                try {
-                  const r = await authFetch('/api/shopify/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accessToken: token, storeUrl: companySettings?.shopify_store_url || '' }) });
-                  const d = await r.json();
-                  if (d.error) throw new Error(d.error);
-                  toast(`${currentLanguage === 'tr' ? 'Senkronize edildi' : 'Synced'} — ${d.products?.length ?? 0} ${currentLanguage === 'tr' ? 'ürün' : 'products'}, ${d.orders?.length ?? 0} ${oc(currentLanguage).siparis}`, 'success');
-                } catch (e) { toast(e instanceof Error ? e.message : 'Sync hatası', 'error'); }
-              }}
-              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold transition-colors"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              {currentLanguage === 'tr' ? 'Senkronize Et' : 'Sync Now'}
-            </button>
-          </div>
+          {/* Shopify — bağlantı kartı. Sır yalnız sunucuda durur (/api/shopify/baglanti); bu sayfa artık
+              `companySettings`'e hiçbir `shopify_*` anahtarı yazmaz. */}
+          <ShopifyBaglantiKarti currentLanguage={currentLanguage} userRole={userRole} superYonetici={isOwnerAdmin} />
 
           {/* TCMB Döviz */}
           <div className="apple-card p-5 flex flex-col gap-4">
@@ -516,41 +466,9 @@ export default function SettingsPage({
         </p>
       </div>
 
-      {/* Ayarları kaydet */}
-      <button
-        disabled={savingSettings || settingsSaved}
-        onClick={async () => {
-          setSavingSettings(true);
-          setSettingsSaved(false);
-          try {
-            // Yalnız dokunulan alanlar, nokta-yollu yama olarak (noktaYolluYama.ts): nesneyi bütün göndermek kayıtlı diğer alanları siliyordu.
-            const yama = noktaYolluYama('companySettings', companySettings);
-            // Dokunulan alan yoksa istek gitmez — 'kaydedildi' demek ve denetim kaydı düşmek gerçekleşmemiş bir değişikliği bildirirdi.
-            if (!Object.keys(yama).length) { toast(currentLanguage === 'tr' ? 'Değişiklik yok' : 'No changes', 'info'); return; }
-            await setDoc(doc(db, 'settings', 'app'), yama, { merge: true });
-            logAuditAction('Ayar Değişikliği', 'Şirket ayarları kaydedildi');
-            setSettingsSaved(true);
-            toast(oc(currentLanguage).ayarlar_kaydedildi, 'success');
-            setTimeout(() => setSettingsSaved(false), 2500);
-          } catch (error) {
-            console.error('[Settings save error]', error);
-            handleFirestoreError(error, OperationType.WRITE, 'settings/app');
-            toast(sunucuHataMetni(error) ?? (currentLanguage === 'tr' ? 'Hata oluştu! Konsolu kontrol edin.' : 'Error occurred! Check console.'), 'error');
-          } finally {
-            setSavingSettings(false);
-          }
-        }}
-        className={`w-full rounded-full py-3 text-sm font-semibold transition-all ${
-          settingsSaved ? 'bg-green-500 text-white' : 'apple-button-primary'
-        } disabled:opacity-60 disabled:cursor-not-allowed`}
-      >
-        {savingSettings
-          ? (oc(currentLanguage).kaydediliyor_2)
-          : settingsSaved
-            ? (oc(currentLanguage).kaydedildi)
-            : (currentLanguage === 'tr' ? 'Ayarları Kaydet' : 'Save Settings')
-        }
-      </button>
+      {/* «Ayarları Kaydet» düğmesi KALDIRILDI (2026-10-02): yalnız `companySettings`'i kaydediyordu ve bu sayfada o durumu
+          değiştiren son alanlar (eski Shopify kartı) kalktı — düğme her basışta «Değişiklik yok» diyordu. Bu sayfadaki kartlar
+          kendi kaydını yapar; şirket ayarları (imza, IBAN…) Yönetim sayfasında kaydedilir. */}
 
       {/* Firebase / General */}
       <div className="apple-card p-6 space-y-4">

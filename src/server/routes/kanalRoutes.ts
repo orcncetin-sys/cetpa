@@ -21,7 +21,6 @@
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike } from '../adminDbTypes.js';
 // Node yerlesigi — server.ts'e bagimlilik degil (dongu yok).
-import { createHmac, timingSafeEqual } from 'crypto';
 
 /** Amazon SP-API kimlik bilgileri (rakip fiyat aramasi icin). */
 type AmazonCreds = { clientId: string; clientSecret: string; refreshToken: string; marketplaceId: string; region: string };
@@ -39,7 +38,6 @@ export interface KanalRouteCtx {
   reqCompanyId: (req: Request) => Promise<string>;
   writeAuditLog: (...a: any[]) => Promise<unknown>;
   pgServerTimestamp: () => any;
-  processShopifyWebhook: (topic: string, body: any) => Promise<void>;
   getTrendyolCreds: () => Promise<any>;
   getHepsiburadaCreds: () => Promise<any>;
   getAmazonCreds: () => Promise<any>;
@@ -69,9 +67,10 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
     let storeDomain = body.storeUrl || process.env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_URL || process.env.VITE_SHOPIFY_STORE_DOMAIN || "cetpa.myshopify.com";
 
     if (!accessToken) {
-      // Env anahtar adlarını client'a sızdırma (yalnız sunucu logunda).
+      // Env anahtar adlarını client'a sızdırma (yalnız sunucu logunda). İleti Ayarlar'a YÖNLENDİRMEZ: erişim belirteci alanı
+      // arayüzden kalktı (2026-10-02), belirteç yalnız sunucu ortamından okunur — kullanıcı olmayan bir alanı aramasın.
       console.warn('[shopify/sync] SHOPIFY_ACCESS_TOKEN tanımlı değil.');
-      return res.status(400).json({ error: 'Shopify Access Token eksik. Ayarlardan SHOPIFY_ACCESS_TOKEN girin.' });
+      return res.status(400).json({ error: 'Shopify ürün/sipariş senkronu bu sunucuda yapılandırılmamış (erişim belirteci sunucu ortamında tanımlı değil).' });
     }
 
     // Clean up domain if it has https://
@@ -220,37 +219,7 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
     }
   });
 
-  // ── Shopify Webhook Handler ──────────────────────────────────────────────
-  app.post("/api/shopify/webhook", async (req: Request & { rawBody?: Buffer }, res: Response) => {
-    // ── HMAC doğrulaması (fail-closed) ───────────────────────────────────
-    // Secret tanımsızsa webhook doğrulanamaz → işlenmez (önce atlanıp sahte
-    // sipariş enjekte edilebiliyordu).
-    const webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET;
-    const shopifyHmac   = req.headers['x-shopify-hmac-sha256'] as string | undefined;
-    if (!webhookSecret) { res.status(503).send('Webhook not configured'); return; }
-    if (!shopifyHmac || !req.rawBody) { res.status(401).send('Missing signature'); return; }
-    {
-      // P1-2: imza karşılaştırması sabit-zamanlı olmalı (timing yan-kanalı).
-      const computed = createHmac('sha256', webhookSecret).update(req.rawBody).digest('base64');
-      const a = Buffer.from(computed, 'utf8');
-      const b = Buffer.from(shopifyHmac, 'utf8');
-      if (a.length !== b.length || !timingSafeEqual(a, b)) { res.status(401).send('Invalid signature'); return; }
-    }
-
-    const topic = req.headers['x-shopify-topic'] as string;
-    const body  = req.body;
-
-    res.status(200).send("ok");
-
-    if (C.getBoss()) {
-      // P6: aynı sipariş+topic için tekilleştirme anahtarı — Shopify aynı webhook'u
-      // yeniden teslim ederse (retry) eşzamanlı iki iş oluşmaz, tek sipariş yazılır.
-      const orderKey = `${topic}:${body?.order_number || body?.id || 'x'}`.slice(0, 200);
-      await C.getBoss().send('shopify-webhook', { topic, body }, { singletonKey: orderKey });
-    } else {
-      await C.processShopifyWebhook(topic, body).catch(() => {});
-    }
-  });
+  // Shopify webhook ucu routes/shopifyRoutes.ts'e taşındı (2026-10-02): kiracı mağaza alan adından, sır kiracı bağlantısından.
 
   // ── trendyol (2 rota) ────────────────────────────────────────────────
   /** GET /api/trendyol/status */

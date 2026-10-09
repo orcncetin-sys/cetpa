@@ -16,6 +16,7 @@
  */
 import { mikroTurevi } from '../pano/mikroBirlesim';
 import { isAllowed, type AppRole } from '../../lib/rbac';
+import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi';
 
 export interface IslemSiparisi {
   id: string;
@@ -77,7 +78,16 @@ export type SilmeYolu = 'yerel' | 'mikroSunucu' | 'yok';
  */
 export function silmeYolu(o: IslemSiparisi): SilmeYolu {
   if (o.source === 'mikro-fatura') return 'mikroSunucu';
+  // Çevrim içi mağaza siparişi Cetpa'dan silinmez: webhook bir sonraki olayda (orders/updated bile) dokümanı mezarsız
+  // YENİDEN kurar; silme sessizce geri gelir. İptal Shopify'da yapılır, iptal olayı buraya yansır (etkileşim incelemesi 2026-10-09).
+  if (o.source === MAGAZA_KAYNAGI) return 'yok';
   return yerelDegistirilebilir(o) ? 'yerel' : 'yok';
+}
+
+export function magazaSilinemezMetni(dil: string): string {
+  return dil === 'tr'
+    ? "Mağaza siparişi Cetpa'dan silinmez — Shopify'da iptal edin, iptal olayı buraya yansır."
+    : 'Store order cannot be deleted here — cancel it in Shopify; the cancellation event is reflected here.';
 }
 
 export function mikroSilOnayMetni(dil: string): string {
@@ -114,6 +124,7 @@ export function silmeYetkisiYokMetni(dil: string): string {
  * düşüyor ve detay paneli kapanıyordu — kullanıcı silindi sanıyordu (delta inceleme 2026-09-25).
  */
 export function silmeEngelMetni(o: IslemSiparisi, rol: string | null | undefined, dil: string): string | null {
+  if (o.source === MAGAZA_KAYNAGI) return magazaSilinemezMetni(dil);
   if (silmeYolu(o) === 'yok') return silinemezMetni(dil);
   if (!isAllowed((rol ?? null) as AppRole | null, 'orders', 'delete')) return silmeYetkisiYokMetni(dil);
   return null;

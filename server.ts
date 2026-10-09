@@ -45,10 +45,14 @@ import {
   USER_SCOPED_COLLECTIONS as USER_SCOPED_COLLECTION_LIST,
   SERVER_ONLY_COLLECTIONS as SERVER_ONLY_COLLECTION_LIST,
   DIS_ROL_SATIR_ALANI,
+  DIS_ROL_YAZAMAZ,
 } from "./src/lib/collections.js";
 import { kiraciWhere, kiraciDamgala, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, siparisGorebilir, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
 import { rolIcinMaskele, maskeyiGeriYukle, farkDegeriMaskele, ayarAdresAlaniDegisti } from './src/lib/sirMaske.js';
 import { izinliTaban, genelHttpsTaban, genelAdresMi, TabanAdresHatasi, LUCA_TABAN, IYZICO_TABAN } from './src/lib/guvenliTaban.js';
+import { shopifyRoutes, shopifyIsiIsle } from './src/server/routes/shopifyRoutes.js';
+import { BAGLANTI_KOLEKSIYONU, baglantiKaydi } from './src/server/kanal/shopifyBaglanti.js';
+import { MAGAZA_KAYNAGI } from './src/server/kanal/shopifyEsleme.js';
 import pg from "pg";
 // vite is imported dynamically below — only in development, never in production
 import path from "path";
@@ -404,86 +408,9 @@ const magazaBildirimIste = magazaBildirimIsteyici(() => (magazaBildirimKuyruguHa
 
 // ── Webhook Processors ───────────────────────────────────────────────────
 
-async function processShopifyWebhook(topic: string, body: any) {
-  if (!adminDb) return;
-  try {
-    if (topic === 'orders/create' || topic === 'orders/updated') {
-      const shopifyOrderId = `#${body.order_number || body.id}`;
-      const snap = await adminDb.collection('orders').where('shopifyOrderId', '==', shopifyOrderId).limit(1).get();
-      const orderData = {
-        shopifyOrderId,
-        customerName: body.billing_address?.name || body.customer?.first_name + ' ' + body.customer?.last_name || 'Unknown',
-        totalPrice: parseFloat(body.total_price || '0'),
-        status: body.financial_status === 'paid' ? 'Processing' : 'Pending',
-        shippingAddress: body.shipping_address?.address1 || '',
-        updatedAt: pgServerTimestamp(),
-        shopifyRaw: {
-          fulfillmentStatus: body.fulfillment_status,
-          financialStatus: body.financial_status,
-          cancelReason: body.cancel_reason || null,
-        },
-      };
-
-      if (!snap.empty) {
-        await snap.docs[0].ref.update(orderData);
-        console.log(`Updated Cetpa order for Shopify ${shopifyOrderId}`);
-      } else if (topic === 'orders/create') {
-        const cid = await serverTenantId(); // webhook: kullanıcı yok → sunucu-tarafı çözümleyici
-        // FAIL-CLOSED (2026-08-25 denetimi): eskiden belirsizse ETİKETSİZ
-        // yazılıyordu. Sunucunun her yerindeki kural "lenient"tir — etiketsiz
-        // doküman HER kiracıya görünür (tenantWhere `OR NOT (data ? 'companyId')`,
-        // rowVisible `return !dc || dc === streamCid`). Yani çok-kiracıda
-        // Shopify'dan gelen her sipariş TÜM firmaların ekranında belirirdi.
-        // Yanlış kiracıya yazmak da, herkese yazmak da kabul edilemez → hiç
-        // yazma, GÜRÜLTÜLÜ başarısız ol.
-        //
-        // Burası bir pg-boss İŞ işleyicisidir (HTTP yanıtı yok, istek çoktan
-        // ack'lendi) → doğru sinyal `throw`: iş başarısız olarak işaretlenir ve
-        // pg-boss yeniden dener. Operatör env'i düzeltince sipariş KAYBOLMADAN
-        // akar; kuyruk bu arada olayı tutar.
-        // Tek-kiracıda serverTenantId() zaten o kiracıyı bulur (cids.size === 1),
-        // yani bu dal ancak 2. müşteri eklenip env unutulduğunda çalışır.
-        if (!cid) {
-          throw new Error('[shopify/webhook] kiracı belirlenemedi — sipariş YAZILMADI. ' +
-            "Çok-kiracılı kurulumda SERVER_TENANT_COMPANY_ID (veya MIKRO_CRON_COMPANY_ID) .env'e yazılmalı.");
-        }
-        await adminDb.collection('orders').add({
-          ...orderData,
-          companyId: cid,
-          lineItems: (body.line_items || []).map((li: any) => ({
-            title: li.title,
-            quantity: li.quantity,
-            price: parseFloat(String(li.price || '0')),
-            sku: li.sku || '',
-          })),
-          createdAt: pgServerTimestamp(),
-          source: 'shopify_webhook',
-        });
-        console.log(`Created Cetpa order from Shopify webhook ${shopifyOrderId}`);
-      }
-    }
-    if (topic === 'orders/cancelled') {
-      const shopifyOrderId = `#${body.order_number || body.id}`;
-      const snap = await adminDb.collection('orders').where('shopifyOrderId', '==', shopifyOrderId).limit(1).get();
-      if (!snap.empty) {
-        await snap.docs[0].ref.update({ status: 'Cancelled', updatedAt: pgServerTimestamp() });
-        console.log(`Cancelled Cetpa order for Shopify ${shopifyOrderId}`);
-      }
-    }
-    if (topic === 'orders/fulfillments_create' || topic === 'fulfillments/create') {
-      const shopifyOrderId = `#${body.order_number || body.order_id}`;
-      const trackingNumber = body.tracking_number || body.tracking_numbers?.[0] || null;
-      const snap = await adminDb.collection('orders').where('shopifyOrderId', '==', shopifyOrderId).limit(1).get();
-      if (!snap.empty) {
-        await snap.docs[0].ref.update({ status: 'Shipped', ...(trackingNumber && { trackingNumber }), updatedAt: pgServerTimestamp() });
-        console.log(`Fulfilled Cetpa order ${shopifyOrderId}, tracking: ${trackingNumber}`);
-      }
-    }
-  } catch (err) {
-    console.error('Webhook Firestore write error:', err);
-    throw err;
-  }
-}
+// Shopify olayı: eski `processShopifyWebhook` buradaydı (kiracısız arama, sahte sıfır tutar, kayıt yokken düşen güncelleme,
+// hiçbir siparişle eşleşmeyen kargo olayı — ölçüldü 2026-10-02). Yerine: src/server/kanal/shopifyEsleme.ts (saf eşleme) +
+// shopifyWebhook.ts (işleyici) + routes/shopifyRoutes.ts (bağlantı uçları, webhook, kuyruk işi `shopifyIsiIsle`).
 
 /** Price config mirroring src/types/subscription.ts — kept in sync manually */
 const STRIPE_PLAN_PRICES: Record<string, { monthly: number; yearly: number; name: string }> = {
@@ -647,7 +574,8 @@ async function initDocsTable(): Promise<void> {
     }
 
     await boss.work('shopify-webhook', async (jobs: any) => {
-      for (const job of jobs) await processShopifyWebhook(job.data.topic, job.data.body);
+      // İş `{ topic, body, cid, shopDomain, baglantiSurumu }` taşır; sır / tuz bağlantıdan yeniden okunur (routes/shopifyRoutes.ts). Fırlatırsa pg-boss yeniden dener.
+      for (const job of jobs) await shopifyIsiIsle({ getAdminDb: adminDbZorunlu, pgServerTimestamp }, job.data);
     });
     await boss.work('stripe-webhook', async (jobs: any) => {
       for (const job of jobs) await processStripeWebhook(job.data.event);
@@ -1956,7 +1884,9 @@ async function startServer() {
     // ince sarmalayıcılar; `cid` TEMBEL getter: USER_SCOPED/sınıfsız koleksiyonlarda
     // getUserCompanyId hiç çağrılmaz (eski davranış korunur).
     /** Sahiplik / kapsam alanları — atomik artırma bunlara dokunamaz. */
-    const SAHIPLIK_ALANLARI = new Set<string>(['companyId', 'userId', ...DIS_ROL_SATIR_ALANI.values()]);
+    // + DIS_ROL_YAZAMAZ alanları (2026-10-09): pazar yeri eşleştirme kimlikleri sayıya çevrilemez — dış rol `/increment` ile
+    //   damgadan geçmeden bu alanlara sayı yazabiliyordu (eşleşmeyi geçemezdi: pgShim `===`, metin ≠ sayı; yine de kapalı).
+    const SAHIPLIK_ALANLARI = new Set<string>(['companyId', 'userId', ...DIS_ROL_SATIR_ALANI.values(), ...[...DIS_ROL_YAZAMAZ.values()].flat()]);
     const reqKimlik = (req: Request): KiraciKimligi => {
       const uid = (req as Request & { uid?: string }).uid || '';
       // `rol` TEMBEL: yalnız satır süzgeçli koleksiyonda (orders — collections.DIS_ROL_SATIR_ALANI) sorulur; `denied()` rolü zaten
@@ -2442,11 +2372,12 @@ async function startServer() {
     '/api/mikro/pull', '/api/mikro/cari-hareket', '/api/mikro/evrak'], mikroLimiter);
 
   // Capture raw body for Shopify webhook HMAC verification (must come before express.json)
-  app.use(express.json({
-    verify: (req: Request & { rawBody?: Buffer }, _res: Response, buf: Buffer) => {
-      req.rawBody = buf;
-    },
-  }));
+  const hamGovdeYakala = (req: Request & { rawBody?: Buffer }, _res: Response, buf: Buffer) => { req.rawBody = buf; };
+  // Shopify webhook gövdesi: çok kalemli sipariş varsayılan 100 KB sınırını aşar (413 → Shopify sekiz denemeden sonra webhook'u
+  // siler). Bu yol için sınır ayrıca yükseltilir; gövdesi ayrıştırılmış isteği aşağıdaki genel ayrıştırıcı yeniden okumaz.
+  // Sınırlayıcı (`webhookLimiter`, yukarıda bağlı) gövde ayrıştırıcıdan ÖNCE: sınırı aşan istek 5 MB'lık gövdeyi hiç okutmasın.
+  app.use('/api/shopify/webhook', express.json({ limit: '5mb', verify: hamGovdeYakala }));
+  app.use(express.json({ verify: hamGovdeYakala }));
 
   // ... (keep existing routes)
   
@@ -2946,13 +2877,22 @@ async function startServer() {
   /** GET /api/integrations/health — tüm entegrasyonların anahtar/yapılandırma durumu.
    *  Yalnızca boolean durum döner, anahtar değerleri asla dönmez.
    */
-  app.get('/api/integrations/health', requireAuth, async (_req: Request, res: Response) => {
+  app.get('/api/integrations/health', requireAuth, async (req: Request, res: Response) => {
     const has = (...keys: string[]) => keys.every(k => !!process.env[k]);
+    // Mağaza sipariş bildirimi ortam değişkeniyle değil, çağıranın KİRACI bağlantısıyla kurulur (Ayarlar → Entegrasyonlar).
+    const magazaBagli = await (async () => {
+      try {
+        if (!adminDb) return false;
+        const snap = await adminDb.collection(BAGLANTI_KOLEKSIYONU).doc(await reqCompanyId(req)).get();
+        return baglantiKaydi(snap.exists ? snap.data() : undefined) !== null;
+      } catch { return false; }
+    })();
     res.json({
       integrations: [
         { id: 'mikro',       name: 'Mikro ERP (JumpBulut)', configured: has('MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD', 'MIKRO_API_KEY', 'MIKRO_ALIAS'), requiredKeys: ['MIKRO_IDM_EMAIL', 'MIKRO_IDM_PASSWORD', 'MIKRO_API_KEY', 'MIKRO_ALIAS'], affects: 'Stok/cari/sipariş senkronizasyonu' },
         { id: 'parasut',     name: 'Paraşüt', configured: has('PARASUT_CLIENT_ID', 'PARASUT_CLIENT_SECRET', 'PARASUT_USERNAME', 'PARASUT_PASSWORD', 'PARASUT_COMPANY_ID'), requiredKeys: ['PARASUT_CLIENT_ID', 'PARASUT_CLIENT_SECRET', 'PARASUT_USERNAME', 'PARASUT_PASSWORD', 'PARASUT_COMPANY_ID'], affects: 'Cari/ürün (fiyat dahil)/fatura senkronizasyonu' },
         { id: 'shopify',     name: 'Shopify',               configured: has('SHOPIFY_ACCESS_TOKEN'),                 requiredKeys: ['SHOPIFY_ACCESS_TOKEN'],                 affects: 'Ürün/sipariş sync + SKU otomatik eşleştirme' },
+        { id: 'shopify-webhook', name: 'Shopify sipariş bildirimi', configured: magazaBagli, requiredKeys: ['Ayarlar → Entegrasyonlar → Shopify bağlantısı'], affects: 'Online siparişlerin Cetpa\'ya düşmesi (Online Siparişler ekranı)' },
         { id: 'resend',      name: 'E-posta (Resend)',      configured: has('RESEND_API_KEY') && (await resendSagligi()).ok,                       requiredKeys: ['RESEND_API_KEY'],                       affects: 'Sipariş onayı, davet ve bildirim e-postaları' },
         { id: 'stripe',      name: 'Stripe',                configured: has('STRIPE_SECRET_KEY'),                    requiredKeys: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'], affects: 'Abonelik ve online ödeme' },
         { id: 'iyzico',      name: 'İyzico',                configured: has('IYZICO_API_KEY', 'IYZICO_SECRET_KEY'),  requiredKeys: ['IYZICO_API_KEY', 'IYZICO_SECRET_KEY'],  affects: 'Ödeme linki oluşturma' },
@@ -3542,6 +3482,9 @@ async function startServer() {
       const snap = await adminDb.collection('orders').doc(orderId).get();
       if (!snap.exists) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
       const o = snap.data() as Record<string, unknown>;
+      // Çevrim içi mağaza siparişi bu KİMLİKSİZ uçtan gösterilmez: takip bağlantısını Shopify kendi yollar; doküman kimliği
+      // tahmin edilemez kurulsa da (shopifyEsleme) uç hiç yanıt vermez — 'bulunamadı' ile aynı yanıt, varlık sızmaz.
+      if (o.source === MAGAZA_KAYNAGI) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
       // Return only safe fields — no email, payment info, or internal refs.
       // Kimlik doğrulaması YOK: tek sır sipariş id'sinin kendisi (genDocId, 20
       // karakter × 62'lik alfabe ≈ 119 bit — sayımla bulunamaz). Ama bağlantı
@@ -3691,6 +3634,9 @@ async function startServer() {
         return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
       }
     }
+    // Çevrim içi mağaza siparişi LUCA'ya fatura olarak GİTMEZ: kalemde `price` yok (tutar `total`da — shopifyEsleme), `kdvOran`
+    // ve vergi no da yok → aşağıdaki varsayılanlarla ₺0 birim fiyatlı resmî kayıt + `hasInvoice: true` yazılırdı.
+    if (order.source === MAGAZA_KAYNAGI) return res.status(400).json({ success: false, error: "Mağaza siparişi LUCA'ya fatura olarak aktarılamaz." });
 
     const lines = ((order.lineItems as Record<string, unknown>[] | undefined) ?? []).map((l, i) => ({
       siraNo:       i + 1,
@@ -4232,7 +4178,15 @@ async function startServer() {
   kanalRoutes(app, {
     getAdminDb: adminDbZorunlu, getBoss: () => boss,
     requireAuth, requireMfaVerified, requireStaff, reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp,
-    processShopifyWebhook, getTrendyolCreds, getHepsiburadaCreds, getAmazonCreds,
+    getTrendyolCreds, getHepsiburadaCreds, getAmazonCreds,
+  });
+
+  // Çevrim içi mağaza (Shopify) bağlantısı + webhook. Gövde ayrıştırıcısı ve ham gövde yakalama YUKARIDA kayıtlı olmalı
+  // (bu çağrı ondan SONRA — `app.use` yalnız kendinden sonra kaydedilen rotalara uygulanır).
+  shopifyRoutes(app, {
+    getAdminDb: adminDbZorunlu, getBoss: () => boss,
+    requireAuth, requireMfaVerified, requireStaff, requireCollectionAccess,
+    getUserRole, isSuperAdmin, reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp,
   });
 
   paymentRoutes(app, {

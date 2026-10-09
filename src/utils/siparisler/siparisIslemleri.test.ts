@@ -1,5 +1,7 @@
 /** siparisIslemleri — 2026-09-25 kullanıcı bildirimleri (MF-383): teslim edilmişe sevkiyat, Mikro kaydını düzenleme/silme. */
 import { describe, it, expect } from 'vitest';
+import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi';
+import { magazaSilinemezMetni } from './siparisIslemleri';
 import { yerelDegistirilebilir, sevkiyatEngeli, sevkiyatEngeliMetni, silmeYolu, mikroSilOnayMetni, mikroSilindiMetni, silinemezMetni, siparisNotMetni, silmeEngelMetni, silmeHataMetni } from './siparisIslemleri';
 
 const native = { id: 'o1', status: 'Pending' };
@@ -96,5 +98,20 @@ describe('sevkiyatEngeli — "teslim edilen bir şeye tekrar sevkiyat oluşturul
     expect(sevkiyatEngeliMetni('teslimEdildi', 'tr')).toMatch(/teslim edilmiş/);
     expect(sevkiyatEngeliMetni('sevkiyatAcik', 'en')).toMatch(/already has/);
     expect(sevkiyatEngeliMetni('sevkiyatTeslim', 'tr')).toMatch(/teslim edilmiş/);
+  });
+});
+
+describe('silmeYolu / silmeEngelMetni — çevrim içi mağaza siparişi Cetpa\'dan SİLİNMEZ (webhook bir sonraki olayda geri kurar; 2026-10-09)', () => {
+  const magaza = { id: 'm1', source: MAGAZA_KAYNAGI };
+  it('mağaza siparişi: yol «yok»; engel metni Yönetici için de Shopify iptaline yönlendirir', () => {
+    expect(silmeYolu(magaza)).toBe('yok');
+    expect(silmeEngelMetni(magaza, 'Admin', 'tr')).toMatch(/Shopify'da iptal/);
+    expect(silmeEngelMetni(magaza, 'Admin', 'en')).toMatch(/cancel it in Shopify/);
+    expect(magazaSilinemezMetni('tr')).not.toBe(silinemezMetni('tr'));
+  });
+  it('eski elle girilmiş `source: shopify` kaydı ve yerel sipariş eskisi gibi silinir; Mikro faturası sunucu yolu', () => {
+    expect(silmeYolu({ id: 'n', source: 'shopify' })).toBe('yerel');
+    expect(silmeYolu({ id: 'n' })).toBe('yerel');
+    expect(silmeYolu({ id: 'f', source: 'mikro-fatura' })).toBe('mikroSunucu');
   });
 });

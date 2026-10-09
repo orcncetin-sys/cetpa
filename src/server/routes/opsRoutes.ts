@@ -350,6 +350,7 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
   const MODULE_REGISTRY: { id: string; label: string; file: string; group: string }[] = [
     { id: 'crm', label: 'CRM (Satış Hunisi)', file: 'src/pages/CRMPage.tsx', group: 'Satış' },
     { id: 'orders', label: 'Sipariş & Lojistik', file: 'src/pages/OrdersPage.tsx', group: 'Satış' },
+    { id: 'online-siparisler', label: 'Online Siparişler', file: 'src/pages/OnlineSiparislerPage.tsx', group: 'Satış' },
     { id: 'inventory', label: 'Envanter', file: 'src/pages/InventoryPage.tsx', group: 'Stok' },
     { id: 'muhasebe', label: 'Muhasebe (ana)', file: 'src/pages/MuhasebePage.tsx', group: 'Muhasebe' },
     { id: 'satinalma', label: 'Satın Alma', file: 'src/pages/SatinAlmaPage.tsx', group: 'Satın Alma' },

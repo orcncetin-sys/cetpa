@@ -97,3 +97,71 @@ export function oncelikEtiketi(oncelik: string | undefined | null, dil: string):
   const eslesme = ONCELIK[ham as Oncelik];
   return eslesme ? (dil === 'tr' ? eslesme.tr : eslesme.en) : ham;
 }
+
+/**
+ * ── ÇEVRİM İÇİ MAĞAZA (Shopify) DURUMLARI (2026-10-02, Online Siparişler ekranı) ──
+ * Sunucu, mağazanın iki ham durumunu `orders.shopifyRaw` içine OLDUĞU GİBİ yazar:
+ * `financialStatus` (Shopify `financial_status`) ve `fulfillmentStatus` (`fulfillment_status`).
+ * İkisi de İngilizce, alt çizgili sabittir ('partially_paid') — büyütmek ya da alt çizgiyi
+ * boşluğa çevirmek çeviri DEĞİLDİR; eşleme şart (yukarıdaki slug dersiyle aynı).
+ *
+ * Bilinmeyen değer HAM hâliyle, büyütülmeden döner: Shopify yeni bir durum eklerse boş rozet
+ * ya da uydurma etiket yerine görünür bilinmezlik (CLAUDE.md "sahte kesinlik gösterme").
+ * `Record<Birlik, …>` yerine `hasOwnProperty` ile bakılır: 'constructor' / 'toString' gibi
+ * prototip anahtarları eşleşme SAYILMAZ (dış sistemden gelen metin).
+ */
+type Cift = { tr: string; en: string };
+
+/** Shopify `financial_status` birliği. */
+type OdemeDurumu = 'pending' | 'authorized' | 'partially_paid' | 'paid' | 'partially_refunded' | 'refunded' | 'voided';
+
+const ODEME_DURUMU: Record<OdemeDurumu, Cift> = {
+  pending:            { tr: 'Ödeme bekliyor',     en: 'Payment pending' },
+  authorized:         { tr: 'Provizyon alındı',   en: 'Authorized' },
+  partially_paid:     { tr: 'Kısmen ödendi',      en: 'Partially paid' },
+  paid:               { tr: 'Ödendi',             en: 'Paid' },
+  partially_refunded: { tr: 'Kısmen iade edildi', en: 'Partially refunded' },
+  refunded:           { tr: 'İade edildi',        en: 'Refunded' },
+  voided:             { tr: 'Geçersiz kılındı',   en: 'Voided' },
+};
+
+/**
+ * Shopify `fulfillment_status` birliği. Shopify "hiç gönderilmedi"yi `null` ile söyler;
+ * 'unfulfilled' aynı anlamın metin hâlidir (API süzgeçlerinde geçer) — ikisi tek etikete iner.
+ */
+type KargoDurumu = 'unfulfilled' | 'partial' | 'fulfilled' | 'restocked';
+
+const KARGO_DURUMU: Record<KargoDurumu, Cift> = {
+  unfulfilled: { tr: 'Hazırlanmadı',      en: 'Unfulfilled' },
+  partial:     { tr: 'Kısmen gönderildi', en: 'Partially fulfilled' },
+  fulfilled:   { tr: 'Gönderildi',        en: 'Fulfilled' },
+  restocked:   { tr: 'Stoğa geri alındı', en: 'Restocked' },
+};
+
+const ciftSec = <K extends string>(sozluk: Record<K, Cift>, ham: string, dil: string): string | null =>
+  Object.prototype.hasOwnProperty.call(sozluk, ham) ? (dil === 'tr' ? sozluk[ham as K].tr : sozluk[ham as K].en) : null;
+
+/**
+ * Ödeme durumunun (Shopify `financial_status`) ekran etiketi.
+ * null / undefined / boş → '—' (durum bilinmiyor); bilinmeyen değer HAM, büyütülmeden.
+ */
+export function odemeDurumuEtiketi(deger: string | undefined | null, dil: string): string {
+  const ham = typeof deger === 'string' ? deger.trim() : '';
+  if (!ham) return '—';
+  return ciftSec(ODEME_DURUMU, ham, dil) ?? ham;
+}
+
+/**
+ * Kargo / gönderim durumunun (Shopify `fulfillment_status`) ekran etiketi.
+ *
+ * `null` BİLİNEN bir değerdir: Shopify gönderilmemiş siparişte bu alanı `null` yollar →
+ * 'Hazırlanmadı'. `undefined` (alan hiç yazılmamış) ve boş metin ise BİLİNMİYOR → '—'.
+ * İkisini aynı saymak her yeni siparişin kargo rozetini '—' yapardı; tersini yapmak da alanı
+ * hiç gelmemiş kayda "hazırlanmadı" dedirtirdi. Bilinmeyen değer HAM, büyütülmeden.
+ */
+export function kargoDurumuEtiketi(deger: string | undefined | null, dil: string): string {
+  if (deger === null) return dil === 'tr' ? KARGO_DURUMU.unfulfilled.tr : KARGO_DURUMU.unfulfilled.en;
+  const ham = typeof deger === 'string' ? deger.trim() : '';
+  if (!ham) return '—';
+  return ciftSec(KARGO_DURUMU, ham, dil) ?? ham;
+}

@@ -7,7 +7,7 @@
  * Türkçe casing 'HİGH' üretirdi → çeviri. Bilinmeyen değer HAM döner (sahte kesinlik yok).
  */
 import { describe, it, expect } from 'vitest';
-import { siparisDurumEtiketi, sevkiyatDurumEtiketi, faturaTipiEtiketi, oncelikEtiketi } from './durumEtiketi';
+import { siparisDurumEtiketi, sevkiyatDurumEtiketi, faturaTipiEtiketi, oncelikEtiketi, odemeDurumuEtiketi, kargoDurumuEtiketi } from './durumEtiketi';
 
 describe('siparisDurumEtiketi / sevkiyatDurumEtiketi', () => {
   it("TR: beş sipariş durumu Türkçe (İ/ı doğru: 'Teslim Edildi', 'İptal Edildi', 'Hazırlanıyor')", () => {
@@ -56,4 +56,62 @@ describe('oncelikEtiketi — İngilizce enum çevrilir, Türkçe casing uygulanm
     expect(oncelikEtiketi('low', 'tr')).toBe('DÜŞÜK');
   });
   it('bilinmeyen → ham', () => { expect(oncelikEtiketi('urgent', 'tr')).toBe('urgent'); });
+});
+
+// ── Çevrim içi mağaza (Shopify) durumları — Online Siparişler ekranı (2026-10-02) ──────────
+describe('odemeDurumuEtiketi — Shopify financial_status', () => {
+  it('TR: yedi durumun yedisi de Türkçe (ö/ı/İ tam)', () => {
+    expect(odemeDurumuEtiketi('pending', 'tr')).toBe('Ödeme bekliyor');
+    expect(odemeDurumuEtiketi('authorized', 'tr')).toBe('Provizyon alındı');
+    expect(odemeDurumuEtiketi('partially_paid', 'tr')).toBe('Kısmen ödendi');
+    expect(odemeDurumuEtiketi('paid', 'tr')).toBe('Ödendi');
+    expect(odemeDurumuEtiketi('partially_refunded', 'tr')).toBe('Kısmen iade edildi');
+    expect(odemeDurumuEtiketi('refunded', 'tr')).toBe('İade edildi');
+    expect(odemeDurumuEtiketi('voided', 'tr')).toBe('Geçersiz kılındı');
+  });
+  it('EN: çeviri (ham slug DEĞİL — alt çizgi ekrana sızmaz)', () => {
+    expect(odemeDurumuEtiketi('partially_paid', 'en')).toBe('Partially paid');
+    expect(odemeDurumuEtiketi('paid', 'en')).toBe('Paid');
+    expect(odemeDurumuEtiketi('pending', 'en')).toBe('Payment pending');
+  });
+  it('bilinmeyen değer HAM döner — büyütülmez, çevrilmiş gibi yapılmaz', () => {
+    expect(odemeDurumuEtiketi('chargeback_pending', 'tr')).toBe('chargeback_pending');
+    expect(odemeDurumuEtiketi('chargeback_pending', 'en')).toBe('chargeback_pending');
+    expect(odemeDurumuEtiketi('Paid', 'tr')).toBe('Paid');   // büyük/küçük harf farkı: birlik dışı → ham
+  });
+  it("null / undefined / boş → '—' (bilinmiyor; 'Ödeme bekliyor' UYDURULMAZ)", () => {
+    expect(odemeDurumuEtiketi(null, 'tr')).toBe('—');
+    expect(odemeDurumuEtiketi(undefined, 'tr')).toBe('—');
+    expect(odemeDurumuEtiketi('', 'en')).toBe('—');
+    expect(odemeDurumuEtiketi('   ', 'tr')).toBe('—');
+  });
+  it('prototip anahtarı eşleşme sayılmaz (dış sistem metni: "constructor" → ham)', () => {
+    expect(odemeDurumuEtiketi('constructor', 'tr')).toBe('constructor');
+    expect(odemeDurumuEtiketi('toString', 'en')).toBe('toString');
+  });
+});
+
+describe('kargoDurumuEtiketi — Shopify fulfillment_status', () => {
+  it("null BİLİNEN değerdir: Shopify gönderilmemiş siparişi null ile söyler → 'Hazırlanmadı'", () => {
+    expect(kargoDurumuEtiketi(null, 'tr')).toBe('Hazırlanmadı');
+    expect(kargoDurumuEtiketi(null, 'en')).toBe('Unfulfilled');
+    expect(kargoDurumuEtiketi('unfulfilled', 'tr')).toBe('Hazırlanmadı');
+  });
+  it('TR / EN: partial, fulfilled, restocked', () => {
+    expect(kargoDurumuEtiketi('partial', 'tr')).toBe('Kısmen gönderildi');
+    expect(kargoDurumuEtiketi('fulfilled', 'tr')).toBe('Gönderildi');
+    expect(kargoDurumuEtiketi('restocked', 'tr')).toBe('Stoğa geri alındı');
+    expect(kargoDurumuEtiketi('partial', 'en')).toBe('Partially fulfilled');
+    expect(kargoDurumuEtiketi('fulfilled', 'en')).toBe('Fulfilled');
+    expect(kargoDurumuEtiketi('restocked', 'en')).toBe('Restocked');
+  });
+  it("undefined / boş → '—' (alan hiç yazılmamış: 'Hazırlanmadı' DENMEZ)", () => {
+    expect(kargoDurumuEtiketi(undefined, 'tr')).toBe('—');
+    expect(kargoDurumuEtiketi('', 'tr')).toBe('—');
+    expect(kargoDurumuEtiketi('  ', 'en')).toBe('—');
+  });
+  it('bilinmeyen değer HAM döner, büyütülmez', () => {
+    expect(kargoDurumuEtiketi('in_progress', 'tr')).toBe('in_progress');
+    expect(kargoDurumuEtiketi('hasOwnProperty', 'tr')).toBe('hasOwnProperty');
+  });
 });

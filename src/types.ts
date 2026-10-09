@@ -124,17 +124,48 @@ export interface OrderLineItem {
   variantId?: string;
 }
 
+/**
+ * Çevrim içi mağazanın (Shopify) HAM durumları — sunucu webhook eşleyicisi `orders.shopifyRaw`a olduğu gibi yazar.
+ * Hepsi `null` olabilir (Shopify alanı boş yollar: gönderilmemiş siparişte `fulfillmentStatus` null'dur).
+ * Ekran etiketi: utils/durumEtiketi `odemeDurumuEtiketi` / `kargoDurumuEtiketi` — ham değer ekrana basılmaz.
+ */
+export interface ShopifyHamDurum {
+  /** Shopify `financial_status`: pending | authorized | partially_paid | paid | partially_refunded | refunded | voided. */
+  financialStatus?: string | null;
+  /** Shopify `fulfillment_status`: null (gönderilmedi) | partial | fulfilled | restocked. */
+  fulfillmentStatus?: string | null;
+  cancelReason?: string | null;
+  cancelledAt?: string | null;
+  /** Ödeme geçidinin adı (serbest metin; Shopify `payment_gateway_names`). */
+  odemeYontemi?: string | null;
+  /** Siparişin toplam vergisi (siparişin KENDİ para biriminde). */
+  vergi?: number | null;
+  /** Mağaza fiyatları vergi dâhil mi (`taxes_included`). */
+  vergiDahil?: boolean | null;
+}
+
 export interface Order {
   id: string;
+  /**
+   * Görünen sipariş no. Çevrim içi mağaza siparişinde Shopify'ın adı ("#1001"); AMA elle girilen sipariş de bu alanı
+   * yazar ("SHP-…") — mağaza siparişini ayırt etmek için KULLANILMAZ; ayırt edici `source === 'shopify_webhook'`
+   * (utils/siparisler/magazaSiparisi `magazaSiparisiMi`).
+   */
   shopifyOrderId?: string;
   /** Cetpa-native sipariş no (ör. SAS-.., MF-<seri><sira>). Shopify siparişinde yok. */
   orderNumber?: string;
   /** Fatura tarihi (YYYY-MM-DD) — faturadan türetilen siparişlerde dolu. */
   orderDate?: string;
-  /** 'mikro-fatura' = satış faturasından türetildi (POST /api/mikro/import/faturadan-siparis). */
+  /** 'mikro-fatura' = satış faturasından türetildi (POST /api/mikro/import/faturadan-siparis).
+   *  'shopify_webhook' = çevrim içi mağaza siparişi (POST /api/shopify/webhook). */
   source?: string;
   mikroEvrak?: { seri: string; sira: string };
   customerName: string;
+  /**
+   * TL tutar. Tip zorunlu diyor ama çalışma anında YOK olabilir: TRY dışı çevrim içi mağaza siparişinde sunucu bu alanı
+   * YAZMAZ (tutar `dovizTutar` + `paraBirimi`ndedir; kullanıcı kararı «kur yoksa uydurma yok»). Toplarken
+   * `toplaBilinen` / `siparisTutari` kullanın — `?? 0` sahte sıfırdır.
+   */
   totalPrice: number;
   status: 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled';
   trackingNumber?: string;
@@ -199,6 +230,27 @@ export interface Order {
   paid?: boolean;
   paidAt?: unknown;
   paymentMethod?: 'cash' | 'bank_transfer' | 'credit_card' | 'check' | 'other';
+  // ── Çevrim içi mağaza siparişi (2026-10-02; yalnız `source === 'shopify_webhook'` kayıtlarında dolu) ──────────
+  // Yazıcısı sunucudaki webhook eşleyicisidir (server/kanal/shopifyEsleme); istemci bu alanları YALNIZ okur.
+  // Bu siparişlerde `faturali` / `kdvOran` / `kdvTutari` / `kdvHaricTutar` YAZILMAZ: undefined = "fatura durumu
+  // Cetpa'da izlenmiyor" (false = "faturasız satış" demek olurdu ve fatura / e-İrsaliye yollarını kapatırdı).
+  // Kalemlerde `price` YOKTUR, `quantity` / `total` / `kdv` / `netTutar` null olabilir (okunamayan alan 0 yazılmaz).
+  /** Shopify'ın değişmez sayısal sipariş kimliği (`body.id`). Görünen no `shopifyOrderId`dir. */
+  shopifyId?: number | string;
+  /** Shopify `updated_at` (ISO) — bayat olay karşılaştırması sunucuda; ekranda gösterilmez. */
+  shopifyGuncelleme?: string;
+  customerPhone?: string;
+  /** Teslimat adresinin ili / şehri (liste sütunu için; tam adres `shippingAddress` tek satır metindir). */
+  teslimatSehri?: string;
+  /** Müşterinin siparişe yazdığı not (Shopify `note`). İç not `notes`tan AYRIDIR, düzenlenmez. */
+  musteriNotu?: string;
+  /** Siparişin para birimi (ISO kodu, ör. 'TRY'). */
+  paraBirimi?: string;
+  /** TRY DIŞI siparişin tutarı, `paraBirimi` cinsinden. Doluysa `totalPrice` YOKTUR (kur çevrilmez). */
+  dovizTutar?: number;
+  kargoUcreti?: number;
+  iskontoToplami?: number;
+  shopifyRaw?: ShopifyHamDurum;
 }
 
 export type InventoryMovementCategory =

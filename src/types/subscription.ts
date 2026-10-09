@@ -58,7 +58,8 @@ export const PLANS: PlanConfig[] = [
       { tr: 'Sipariş Yönetimi', en: 'Order Management' },
       { tr: 'E-posta Desteği', en: 'Email Support' },
     ],
-    modulesAllowed: ['dashboard', 'crm', 'inventory', 'orders'],
+    // 'online-siparisler' = Siparişler'in çevrim içi mağaza görünümü; `orders` hangi plandaysa o plandadır (2026-10-02).
+    modulesAllowed: ['dashboard', 'crm', 'inventory', 'orders', 'online-siparisler'],
   },
   {
     id: 'professional',
@@ -82,7 +83,7 @@ export const PLANS: PlanConfig[] = [
       { tr: 'Öncelikli Destek', en: 'Priority Support' },
     ],
     modulesAllowed: [
-      'dashboard', 'crm', 'inventory', 'orders',
+      'dashboard', 'crm', 'inventory', 'orders', 'online-siparisler',
       'muhasebe', 'lojistik', 'satin-alma', 'b2b',
       'reports', 'integrations', 'finance', 'analytics',
       // sub-tabs
@@ -114,7 +115,7 @@ export const PLANS: PlanConfig[] = [
       { tr: '7/24 Destek', en: '24/7 Support' },
     ],
     modulesAllowed: [
-      'dashboard', 'crm', 'inventory', 'orders',
+      'dashboard', 'crm', 'inventory', 'orders', 'online-siparisler',
       'muhasebe', 'lojistik', 'satin-alma', 'b2b',
       'reports', 'integrations', 'finance', 'analytics',
       'production', 'kalite', 'ik', 'hukuk', 'proje',
@@ -149,7 +150,7 @@ export const PLANS: PlanConfig[] = [
       { tr: 'Özel Eğitim & Onboarding', en: 'Custom Training & Onboarding' },
     ],
     modulesAllowed: [
-      'dashboard', 'crm', 'inventory', 'orders',
+      'dashboard', 'crm', 'inventory', 'orders', 'online-siparisler',
       'muhasebe', 'lojistik', 'satin-alma', 'b2b',
       'reports', 'integrations', 'finance', 'analytics',
       'production', 'kalite', 'ik', 'hukuk', 'proje',

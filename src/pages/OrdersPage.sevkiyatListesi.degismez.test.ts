@@ -97,13 +97,14 @@ describe('OrdersPage — sipariş düzenleme: belge kilidi ve tutar önizlemesi'
     expect(kodY).toContain('Resmî belge kesilmiş — tutar ve KDV oranı değiştirilemez.');
   });
   it('önizleme KAYITLA AYNI işlevden ve aynı girdilerden; yalnız yazılacak tutar formdakinden farklıysa gösterilir', () => {
-    expect(kodY).toContain('const yama = siparisDuzenlemeYamasi({ tutarHam: editingTutarHam, kdvHam: editingKdvHam }, selectedOrder);');
+    expect(kodY).toContain('const yama = siparisDuzenlemeYamasi({ tutarHam: magazaKilidi ? sayiGirdisi(selectedOrder.totalPrice) : editingTutarHam, kdvHam: editingKdvHam }, selectedOrder);');
     expect(kodY).toMatch(/return yama\.totalPrice === yazilan \? null : \{ toplam: yama\.totalPrice, matrah: yama\.kdvHaricTutar, kdv: yama\.kdvTutari \};/);
     expect(kodY).toMatch(/\{duzenlemeTutarOnizleme !== null && \(\s+<p role="status"/);
     // KAYIT tarafı da aynı girdileri ve aynı `onceki`'yi verir (önizleme kaydedilmeyecek bir tutarı «kaydedilir» diye göstermesin).
     const i = kodY.indexOf("siparisDuzenlemeYamasi<Order['status']>({");
     expect(i).toBeGreaterThan(-1);
     const kayit = kodY.slice(i, kodY.indexOf('updateDoc(', i));
-    expect(kayit).toMatch(/tutarHam: editingTutarHam,\s+kdvHam: editingKdvHam,[\s\S]*\}, selectedOrder\);/);
+    // Mağaza siparişinde tutar kilitlidir: kayıt da önizleme de formdaki metni değil kayıtlı tutarı verir (aynı ifade).
+    expect(kayit).toMatch(/tutarHam: magazaKilidi \? sayiGirdisi\(selectedOrder\.totalPrice\) : editingTutarHam,\s+kdvHam: editingKdvHam,[\s\S]*\}, selectedOrder\);/);
   });
 });

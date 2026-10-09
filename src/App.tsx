@@ -15,6 +15,7 @@ const UretimPage              = React.lazy(() => import('./pages/UretimPage'));
 const ProjePage               = React.lazy(() => import('./pages/ProjePage'));
 const KalitePage              = React.lazy(() => import('./pages/KalitePage'));
 const OrdersPage              = React.lazy(() => import('./pages/OrdersPage'));
+const OnlineSiparislerPage    = React.lazy(() => import('./pages/OnlineSiparislerPage'));
 const MuhasebePage            = React.lazy(() => import('./pages/MuhasebePage'));
 const SatinAlmaPage           = React.lazy(() => import('./pages/SatinAlmaPage'));
 const IKPage                  = React.lazy(() => import('./pages/IKPage'));
@@ -220,6 +221,8 @@ import { kisaTutar, paraYaz } from './utils/currency';
 import { irsaliyeIstegi, irsaliyeNedenMetni, irsaliyeYanitMesaji, irsaliyeSonucYamasi, type IrsaliyeYaniti } from './utils/siparisler/irsaliyeGonder';
 import { siparisBelgeTipi, belgeTipiCelisiyor, musteriBelgeTipi } from './utils/siparisler/belgeTipi';
 import { bayatKalemVar, kalemSatirKdv } from './utils/siparisler/faturaDurumu';
+import { magazaSiparisiMi } from './utils/siparisler/magazaSiparisi';
+import { gorunenSiparisNo } from './utils/siparis';
 import { useDataStore } from './store/dataStore';
 
 // ── Lazy imports (loaded on first tab visit — keeps initial bundle ~40% lighter) ─
@@ -292,6 +295,9 @@ const TAB_PERMISSIONS: Record<string, { full: UserRole[]; readonly: UserRole[] }
   dashboard:     { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales, UserRole.Logistics, UserRole.Accounting, UserRole.HR, UserRole.Purchasing, UserRole.B2B, UserRole.Dealer], readonly: [] },
   crm:           { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales], readonly: [UserRole.Accounting, UserRole.Purchasing] },
   orders:        { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales], readonly: [UserRole.Accounting, UserRole.Purchasing] },
+  // Online Siparişler: `orders` ile AYNI roller (şartname online-siparis §4). Bu satır ŞART — kayıtsız sekme `canAccess`te
+  // "bilinmeyen sekme: izin ver" dalına düşer ve B2B / Dealer dâhil HERKESE açılır. Değişmez: onlineSiparisKaydi.degismez.test.ts.
+  'online-siparisler': { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales], readonly: [UserRole.Accounting, UserRole.Purchasing] },
   inventory:     { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics, UserRole.Purchasing], readonly: [UserRole.Accounting, UserRole.Sales] },
   lojistik:      { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics, UserRole.Purchasing], readonly: [UserRole.Accounting, UserRole.Sales] },
   muhasebe:      { full: [UserRole.Admin, UserRole.Accounting], readonly: [UserRole.Manager] },
@@ -508,6 +514,7 @@ import UnauthorizedView from './components/UnauthorizedView';
 import ReadOnlyBanner from './components/ReadOnlyBanner';
 import { basHarf } from './utils/buyukHarf';
 import { oc } from './i18n/ortak';
+import { osc } from './i18n/onlineSiparis';
 import { SATIN_ALMA_MENU } from './lib/satinAlmaMenu';
 
 // ── Eski hash yönlendirmesi GÖÇÜ — Router mount olmadan ÖNCE ─────────────────
@@ -3399,11 +3406,13 @@ function AppContent() {
       // o işin parçası: yerel kopya `updatedAt`/`deliveredAt`, App sürümü `timeline` yazıyor).
 
       // Auto-send email + WhatsApp on Shipped / Delivered (fire-and-forget)
-      if (status === 'Shipped' || status === 'Delivered') {
-        const ord  = orders.find(o => o.id === orderId);
+      // Çevrim içi mağaza siparişinde ÇALIŞMAZ (şartname online-siparis v2 E3): kargo / teslim bildirimini müşteriye Shopify kendisi yollar — buradan da gönderilirse müşteri aynı olay için iki ileti alır (webhook `customerEmail` / `customerPhone` yazdığı için bu dal kendiliğinden tetiklenirdi).
+      const iletiSiparisi = orders.find(o => o.id === orderId);
+      if ((status === 'Shipped' || status === 'Delivered') && !magazaSiparisiMi(iletiSiparisi)) {
+        const ord  = iletiSiparisi;
         const lead = ord ? leads.find(l => l.id === ord.leadId) : null;
-        const toEmail = lead?.email || (ord as (Order & { customerEmail?: string }) | undefined)?.customerEmail;
-        const toPhone = lead?.phone || (ord as (Order & { customerPhone?: string }) | undefined)?.customerPhone;
+        const toEmail = lead?.email || ord?.customerEmail;
+        const toPhone = lead?.phone || ord?.customerPhone;
 
         if (toEmail && ord) {
           authFetch('/api/email/order-notification', {
@@ -4206,6 +4215,7 @@ function AppContent() {
     bakim: oc(currentLanguage).bakim_onarim, sube: oc(currentLanguage).subeler,
     servis: currentLanguage === 'tr' ? 'Servis' : 'After-Sales Service', iade: oc(currentLanguage).iade_degisim,
     orders: oc(currentLanguage).siparisler, mesai: oc(currentLanguage).mesai_devam,
+    'online-siparisler': osc(currentLanguage).online_siparisler,
     selfservis: currentLanguage === 'tr' ? 'Self-Servis Portalı' : 'Self-Service Portal',
     cpq: currentLanguage === 'tr' ? 'CPQ Teklif' : 'CPQ Quote', dunning: currentLanguage === 'tr' ? 'Tahsilat Takip' : 'Dunning',
     finance: currentLanguage === 'tr' ? 'Finans Paneli' : 'Finance Panel', gelirtanima: currentLanguage === 'tr' ? 'IFRS 15 Gelir Tanıma' : 'IFRS 15 Rev. Rec.',
@@ -4495,7 +4505,7 @@ function AppContent() {
                   ...(userRole === 'Admin' || isOwnerAdmin ? [{ id: 'admin', label: currentT.admin, icon: Shield }] : []),
                   ...(userRole === 'Admin' || userRole === 'Manager' || isOwnerAdmin ? [{ id: 'settings', label: oc(currentLanguage).ayarlar, icon: Settings }] : [])
                 ] as { id: string; label: string; icon: React.ElementType }[]).filter(tab => canAccess(tab.id)).map(tab => {
-                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm', mesai:'ik', selfservis:'ik', territory:'crm', cpq:'crm', performans:'ik', dunning:'muhasebe', mrp:'inventory', holding:'muhasebe', muhtasar:'ik', mobilewms:'lojistik', gelirtanima:'muhasebe' };
+                  const navChildOf: Record<string,string> = { lotseri:'production', bakim:'production', ihracat:'lojistik', ebelge:'muhasebe', vergi:'muhasebe', sube:'crm', servis:'crm', iade:'crm', orders:'crm', 'online-siparisler':'crm', mesai:'ik', selfservis:'ik', territory:'crm', cpq:'crm', performans:'ik', dunning:'muhasebe', mrp:'inventory', holding:'muhasebe', muhtasar:'ik', mobilewms:'lojistik', gelirtanima:'muhasebe' };
                   const isActive = activeTab === tab.id || navChildOf[activeTab] === tab.id;
                   const isLocked = !isGuestMode && userSubscription && !canAccessBySubscription(tab.id);
                   // Phase 30 — tab count badges
@@ -4637,11 +4647,12 @@ function AppContent() {
             { id: 'dashboard', label: oc(tr).panel, icon: LayoutDashboard },
             {
               id: 'crm', label: oc(tr).crm_satis, icon: Users,
-              childIds: ['sube', 'servis', 'iade', 'orders', 'territory', 'cpq'],
+              childIds: ['sube', 'servis', 'iade', 'orders', 'online-siparisler', 'territory', 'cpq'],
               children: [
                 { label: oc(tr).musteri_adaylari,       subId: 'leads',       action: () => { setActiveTab('crm'); setCrmTab('leads'); } },
                 { label: oc(tr).musteriler,          subId: 'musteriler',  action: () => { setActiveTab('crm'); setCrmTab('musteriler'); } },
                 { label: oc(tr).siparisler,             subId: 'orders',      action: () => setActiveTab('orders') },
+                { label: osc(tr).online_siparisler,     subId: 'online-siparisler', action: () => setActiveTab('online-siparisler') },
                 { label: oc(tr).iade_degisim, subId: 'iade',        action: () => setActiveTab('iade') }, // Phase 549
                 { label: tr ? 'Pipeline' : 'Pipeline',             subId: 'pipeline',    action: () => { setActiveTab('crm'); setCrmTab('pipeline'); } },
                 { label: oc(tr).kampanyalar,         subId: 'kampanya',    action: () => { setActiveTab('crm'); setCrmTab('kampanya'); } },
@@ -6192,6 +6203,31 @@ function AppContent() {
                 setSelectedLead={setSelectedLead}
                 setIsAddingOrder={setIsAddingOrder}
                 logAuditAction={logAuditAction}
+              />
+            </React.Suspense>
+          )}
+
+          {/* ── Online Siparişler — çevrim içi mağaza (Shopify webhook) siparişleri (2026-10-02) ──
+              Ayrı abonelik YOK: App'in dinlediği `orders` prop olarak gider, sayfa `magazaSiparisiMi` ile süzer.
+              Sipariş detayı OrdersPage'in `selectedOrder` görünümünde yaşar → satır tıklanınca seç + 'orders'
+              sekmesine geç (Global Arama `onSelectOrder` ve Lojistik sevkiyat listesiyle AYNI yol). İzin tablosunda
+              iki sekmenin rolleri aynıdır; bu ekranı gören herkes detayı da açabilir.
+              `ayarlaraGit` yalnız bağlantıyı DÜZENLEYEBİLEN role verilir (Yönetici ya da süper-admin — kartın
+              `duzenleyebilir` kuralı ve sunucudaki `yalnizYonetici` ile AYNI koşul). Eski kapı `canAccess('settings')`ti:
+              Manager'a «Bağlantıyı kur» düğmesi çiziliyor, Ayarlar'da ise kart ona salt okunur açılıyordu (çıkmaz);
+              rolü Admin olmayan süper-admin ise düğmeyi hiç göremiyordu. Ayarlar sekmesinin çizim kapısı bu iki
+              durumu da kabul eder → düğme hiçbir zaman Pano'ya atmaz. */}
+          {activeTab === 'online-siparisler' && canAccess('online-siparisler') && (
+            <React.Suspense fallback={<div className="flex justify-center py-20"><div className="animate-spin w-8 h-8 border-4 border-brand border-t-transparent rounded-full" /></div>}>
+              <OnlineSiparislerPage
+                orders={orders}
+                currentLanguage={currentLanguage}
+                onSiparisAc={order => {
+                  setSelectedOrder(order);
+                  setActiveTab('orders');
+                  trackView({ type: 'order', id: order.id, label: `${gorunenSiparisNo(order)} — ${order.customerName}`, tab: 'orders' });
+                }}
+                ayarlaraGit={(userRole === 'Admin' || isOwnerAdmin) ? () => setActiveTab('settings') : undefined}
               />
             </React.Suspense>
           )}

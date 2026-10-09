@@ -32,4 +32,7 @@ export const TOP_LEVEL_TABS = new Set([
   // eski /analytics yolu App.tsx'teki goc IIFE'siyle /reports'a yonlendiriliyor.
   'kurumsal', 'mobilewms', 'mrp', 'iade', 'mesai',
   'selfservis', 'territory', 'cpq', 'muhtasar', 'lotseri', 'fiyat-istihbarat',
+  // Çevrim içi mağaza (Shopify) siparişleri — 2026-10-02. Kimlik TİRELİ: değişmez testinin taraması
+  // (`activeTab === '([a-z][a-z0-9-]*)'`) alt çizgili kimliği görmez.
+  'online-siparisler',
 ]);
