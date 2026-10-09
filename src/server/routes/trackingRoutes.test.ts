@@ -74,11 +74,10 @@ describe('trackingRoutes — anahtar yokken uydurma veri YOK', () => {
  * tarar: biri ileride "demo için" yeniden sahte olay üreticisi eklerse, davranış
  * testleri yeni fonksiyonu görmeyebilir — bu görür.
  */
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { kodSatirlari } from '../../test/kaynakTarama';
 describe('trackingRoutes kaynağı — uydurma veri üreticisi geri gelemez', () => {
-  const kaynak = readFileSync(resolve(__dirname, 'trackingRoutes.ts'), 'utf8')
-    .split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');   // yorumlar hariç
+  const kaynak = kodSatirlari(resolve(__dirname, 'trackingRoutes.ts')).map(s => s.kod).join('\n');   // yorumlar hariç (ortak süzgeç)
   it("kodda `mock: true` yok", () => expect(kaynak).not.toMatch(/mock:\s*true/));
   it('kodda sahte şehir/hub sabiti yok', () =>
     expect(kaynak).not.toMatch(/Frankfurt|Leipzig Hub|Louisville|Memphis|Ankara Dağıtım Merkezi|Sender City/));

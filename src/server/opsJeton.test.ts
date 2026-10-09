@@ -7,6 +7,7 @@ import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import type { Request, Response } from 'express';
 import { opsJetonuGecerli } from './opsJeton';
+import { yorumsuz } from '../test/degismezTarayici';
 
 const JETON = 'gizli-jeton-abc';
 const yedek = process.env.OPS_SUMMARY_TOKEN;
@@ -43,8 +44,8 @@ describe('opsJetonuGecerli', () => {
 });
 
 // DEĞİŞMEZ: kapı beş uçta elle kopyalanmış ve kopyalar ayrışmıştı (dördü ?token= kabul ediyordu). Artık tek kaynak.
-// Yorumlar süzülerek aranır — belge metnindeki "X-Ops-Token" / "?token=" sahte eşleşme vermesin.
-const yorumsuz = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+// Yorumlar süzülerek aranır — belge metnindeki "X-Ops-Token" / "?token=" sahte eşleşme vermesin. Süzgeç ORTAK
+// modüldendir (`src/test/degismezTarayici`); bu dosyadaki yerel düzenli ifade kopyası 2026-10-08'de kalktı.
 function tsDosyalari(kok: string): string[] {
   return readdirSync(kok).flatMap(ad => {
     const yol = join(kok, ad);
@@ -54,7 +55,7 @@ function tsDosyalari(kok: string): string[] {
 }
 
 describe('değişmez: ops jeton kapısı tek kaynak', () => {
-  const kaynaklar = tsDosyalari(join(__dirname)).map(yol => ({ yol, kod: yorumsuz(readFileSync(yol, 'utf8')) }));
+  const kaynaklar = tsDosyalari(join(__dirname)).map(yol => ({ yol, kod: yorumsuz(yol, readFileSync(yol, 'utf8')).join('\n') }));
 
   it('x-ops-token başlığını YALNIZ opsJeton.ts okur', () => {
     const okuyan = kaynaklar.filter(k => /['"`]x-ops-token['"`]/i.test(k.kod)).map(k => k.yol.split('/src/server/')[1]);

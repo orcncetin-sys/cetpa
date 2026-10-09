@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { faturaGovdesi } from '../../server/mikro/govdeFaturaIrsaliye';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { yorumsuz } from '../../test/degismezTarayici';
 import {
   kdvEtiketi,
   sayiGirdisi,
@@ -413,19 +414,14 @@ describe('siparisDuzenlemeYamasi — totalPrice GİRİLEN alan (girilenAlanYamas
 // (`toContain('SevkDeposuSecici')` vb.) ve bunları IMPORT SATIRI da sağlıyordu. Mutasyonla
 // ölçüldü: JSX bloğu ve `setIsEditingOrder(true)` açıcısı silinince suite YEŞİL kalıyordu —
 // yani test tam anlatmak istediği arızayı (form yazıldı ama bağlanmadı) kaçırıyordu. Artık:
-//   • yorumlar süzülür (yorumdaki örnek kod iddiayı sağlayamaz),
+//   • yorumlar süzülür (yorumdaki örnek kod iddiayı sağlayamaz) — ORTAK süzgeçle (`src/test/degismezTarayici`);
+//     bu dosyadaki yerel düzenli ifade kopyası 2026-10-08'de kalktı,
 //   • iddialar JSX kalıbına bağlanır (`<SevkDeposuSecici`, `value={editingKdvHam}`),
 //   • iddialar MODAL DİLİMİNDE koşar (import satırı dilimin dışında kalır),
 //   • formun AÇILABİLİRLİĞİ ayrıca kilitlenir (`setIsEditingOrder(true)`).
-/** Kaynaktan yorumları süzer: yorumdaki örnek kod bir değişmezi sağlamamalı. */
-function yorumsuz(kaynak: string): string {
-  return kaynak
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')        // blok yorum (JSX üstündeki gerekçe blokları)
-    .replace(/^[ \t]*\/\/.*$/gm, '');         // satır başındaki // yorum
-}
-
 describe('DEĞİŞMEZ: sipariş düzenleme formu, e-İrsaliye ipucunun işaret ettiği alanları içerir', () => {
-  const ordersPage = yorumsuz(readFileSync(join(__dirname, '..', '..', 'pages', 'OrdersPage.tsx'), 'utf-8'));
+  const ordersPageYolu = join(__dirname, '..', '..', 'pages', 'OrdersPage.tsx');
+  const ordersPage = yorumsuz(ordersPageYolu, readFileSync(ordersPageYolu, 'utf-8')).join('\n');
 
   /** Düzenleme modalının gövdesi: `{isEditingOrder && (` … `siparisDuzenlemeYamasi(` arası. */
   const modalDilimi = (() => {

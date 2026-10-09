@@ -1535,7 +1535,7 @@ describe('süreç içi yolun reddi genel unhandledRejection işleyicisine DÜŞM
 // ─────────────────────────────────────────────────────────────────────────────
 describe('ÇİT: kaynak taraması (yorumlar süzülür)', () => {
   const HAM = readFileSync(join(__dirname, 'magazaBildirim.ts'), 'utf-8');
-  const SATIRLAR = yorumsuz(HAM);
+  const SATIRLAR = yorumsuz('magazaBildirim.ts', HAM);
   const KOD = SATIRLAR.join('\n');
   const suclular = (desen: RegExp): string[] => SATIRLAR.map((satir, i) => (desen.test(satir) ? `magazaBildirim.ts:${i + 1}: ${satir.trim()}` : '')).filter(Boolean);
 

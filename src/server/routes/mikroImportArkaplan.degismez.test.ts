@@ -25,17 +25,20 @@
  * Test bir ÖLÇÜDÜR, onarım aracı DEĞİL: kırmızıysa kaçırılmış site demektir — izin listesine girdi
  * ekleyerek ya da deseni gevşeterek yeşile çevirme, kaçıran grubun dosyasını düzelt.
  *
- * Yorum satırları sayılmaz: `yorumsuz` `src/test/degismezTarayici.ts`'ten (K-L; üçüncü kopya YASAK —
- * "assertion kendi yorumuna takıldı ×5" dersi). Test/spec/düzenek dosyaları taranmaz. Dosya-okuyan
- * yardımcılar `src/test/kaynakTarama.ts`'te (degismez.md "YAZDIĞIN DOSYALAR"; bugün tek tüketicisi bu
- * dosya — K-H: diğer değişmez testlerin oraya taşınması AYRI commit).
+ * Yorum satırları sayılmaz: süzgeç `src/test/degismezTarayici.ts`'ten (K-L; kopya YASAK — "assertion kendi
+ * yorumuna takıldı ×5" dersi). Süzgecin iki girişi var: `yorumsuz(ad, içerik)` TAM DOSYA içindir
+ * (ayrıştırılamayan girdide fırlatır), `yorumsuzParca(ad, içerik)` FİKSTÜR içindir (kod parçası; ayrıştırma
+ * tanısına bakmaz). Bu dosyanın satır tarayan yardımcıları SÜZÜLMÜŞ SATIR DİZİSİ alır, süzmeyi çağıran yapar:
+ * dosya katı girişle (`kodSatirlari(yol)` / `yorumsuz(yol, oku(yol))`), fikstür hoşgörülü girişle. Dosya
+ * içeriği hoşgörülü girişe VERİLMEZ. Test/spec/düzenek dosyaları taranmaz. Dosya-okuyan yardımcılar
+ * `src/test/kaynakTarama.ts`'te (degismez.md "YAZDIĞIN DOSYALAR"). Süzgeç 2026-10-08'de TypeScript
+ * ayrıştırıcısına dayanacak biçimde yeniden yazıldı (tarihçe: §0d).
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, writeFileSync, unlinkSync, mkdtempSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync } from 'fs';
 import { join } from 'path';
-import ts from 'typescript';
-import { yorumsuz, sertIhlalleri, ihlalYaz } from '../../test/degismezTarayici';
+import { yorumsuz, yorumsuzParca, sertIhlalleri, ihlalYaz } from '../../test/degismezTarayici';
+import { kahinSatirlari } from '../../test/yorumKahini';
 import { SRC_KOK as SRC, gorece, oku, kaynakDosyalari, kodSatirlari, suclular as bul, type Suclu as Bulgu } from '../../test/kaynakTarama';
 
 const ROTA   = join(SRC, 'server', 'routes', 'mikroRoutes.ts');
@@ -52,7 +55,7 @@ const SERVIS_DIZIN = join(SRC, 'services');
  *  `collection('jobs')` ya da çıplak iptal eşitliği yeşil kalırdı. Bugün üç desende de 0 geçiş. */
 const SERVER_TS    = join(SRC, '..', 'server.ts');
 
-// Tarama KÜMELERİ — § testleri ve §0d çiti AYNI kümeleri kullanır (çit ayrı liste tutarsa kayar).
+// Tarama KÜMELERİ — aynı kümeyi birden çok § tarar (sunucu: §3, §5 · tüm src: §7); liste TEK yerde durur.
 const SUNUCU_KUMESI = () => [...kaynakDosyalari(SUNUCU_DIZIN), SERVER_TS];
 const SRC_KUMESI    = () => [...kaynakDosyalari(SRC), SERVER_TS];
 
@@ -62,8 +65,14 @@ const yaz = (b: Bulgu) => `${b.site} ${b.kod.trim().slice(0, 140)}`;
 const say = (yol: string, desen: RegExp) => kodSatirlari(yol).filter(x => desen.test(x.kod)).length;
 
 // ---------------------------------------------------------------------------
-// §0 · Saf tarayıcılar — girdi metindir, fikstürle sınanır (aşağıda)
+// §0 · Saf tarayıcılar — girdi SÜZÜLMÜŞ SATIR DİZİSİDİR, fikstürle sınanır (aşağıda)
 // ---------------------------------------------------------------------------
+//
+// Süzmeyi ÇAĞIRAN yapar; yardımcı süzgeç çağırmaz, dosya adı da taşımaz. Aynı yardımcı hem gerçek dosyayla
+// (katı giriş — ayrıştırılamayan dosyada fırlatır) hem fikstürle (hoşgörülü giriş: `yorumsuzParca('fikstur.ts', …)`;
+// JSX içeren fikstür `.tsx` adıyla) çağrılır. İçeriği yardımcı süzseydi ikisinden birini seçmek zorunda kalırdı:
+// katı giriş kod PARÇASI olan fikstürde fırlatır, hoşgörülü giriş dosyadaki sözdizimi hatasını / yanlış uzantıyı
+// sessiz kör bölgeye çevirir.
 
 const DESEN = {
   sqlCagri:        /\bawait\s+mikroSqlImportCalistir\(/,
@@ -131,9 +140,9 @@ function kapsamAcik(metin: string, ac: string, kapa: string): boolean {
  * ne `arkaPlanIsiBaslat` görünür — "bilinmeyen → izinli" sayılmaz. Kapsamı KAPANMIŞ işaret atlanır (hakem 3,
  * 2026-09-25): `await arkaPlanIsiBaslat(…);` satırının ALTINA, rota gövdesine yazılan doğrudan await eskiden
  * 'arkaPlanIsiBaslat' işaretini alıp izinli sayılıyordu.
+ * `satirlar` süzülmüş kod satırlarıdır (yorum atılmış, satır numarası korunmuş).
  */
-function sqlImportCagrilari(icerik: string): SqlCagri[] {
-  const satirlar = yorumsuz(icerik);
+function sqlImportCagrilari(satirlar: string[]): SqlCagri[] {
   const out: SqlCagri[] = [];
   satirlar.forEach((kod, i) => {
     const cagri = DESEN.sqlCagri.exec(kod);
@@ -164,153 +173,155 @@ interface SqlGecis { satir: number; cagri: number; awaitsiz: number }
  * `void …`, `const p = …`) §1'in işaret yürüyüşüne HİÇ girmez ve IIFE de değildir (§2 görmez) — oysa kilitsiz,
  * jobs dokümanı ve companyId'si olmayan elle yazılmış bir arka plan işi kurar (hakem 3, 2026-09-25).
  */
-function sqlCagriGecisleri(icerik: string): SqlGecis[] {
-  return yorumsuz(icerik).flatMap((kod, i) => {
+function sqlCagriGecisleri(satirlar: string[]): SqlGecis[] {
+  return satirlar.flatMap((kod, i) => {
     const cagri = adet(kod, DESEN.sqlAd) - adet(kod, DESEN.sqlTanim);
     return cagri > 0 ? [{ satir: i + 1, cagri, awaitsiz: cagri - adet(kod, DESEN.sqlCagri) }] : [];
   });
 }
 
 const kacis = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-/** Adlı import KOD satırı (tek/çok satırlı): `import { …ad… } from '<yol>'`. Yorumda geçmesi yetmez. */
-function adliImportVar(icerik: string, ad: string, yol: string): boolean {
+/** Adlı import KOD satırı (tek/çok satırlı): `import { …ad… } from '<yol>'`. Yorumda geçmesi yetmez
+ *  (`satirlar` süzülmüş kod satırlarıdır). */
+function adliImportVar(satirlar: string[], ad: string, yol: string): boolean {
   const desen = new RegExp(`\\bimport\\s*\\{[^}]*\\b${kacis(ad)}\\b[^}]*\\}\\s*from\\s*['"]${kacis(yol)}['"]`);
-  return desen.test(yorumsuz(icerik).join('\n'));
+  return desen.test(satirlar.join('\n'));
 }
 
 describe('§0 · tarayıcı kendini sınar (mutasyon-ayırt-edici fikstürler)', () => {
-  const sayFikstur = (metin: string, desen: RegExp) => yorumsuz(metin).filter(k => desen.test(k)).length;
+  // Fikstürler kod PARÇASIDIR; birçoğu (SQL parçası, açık blok, tek özellik satırı) kendi başına geçerli
+  // TypeScript değildir ve katı girişte (`yorumsuz`) fırlatır. Hepsi çağrıldığı yerde hoşgörülü girişle süzülür.
+  const sayFikstur = (satirlar: string[], desen: RegExp) => satirlar.filter(k => desen.test(k)).length;
 
   it('IIFE: satır başı `(async () => {` / `void (…)` / `(async function` ✓; çağrı argümanı olan async ok ✗', () => {
-    expect(sayFikstur('    (async () => {', DESEN.iife)).toBe(1);
-    expect(sayFikstur('    void (async () => {', DESEN.iife)).toBe(1);
-    expect(sayFikstur('  (async function () {', DESEN.iife)).toBe(1);
-    expect(sayFikstur('  C.setAiHealthProbe(async () => {', DESEN.iife)).toBe(0);
-    expect(sayFikstur('  const f = vi.fn(async () => {});', DESEN.iife)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', '    (async () => {'), DESEN.iife)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', '    void (async () => {'), DESEN.iife)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', '  (async function () {'), DESEN.iife)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', '  C.setAiHealthProbe(async () => {'), DESEN.iife)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', '  const f = vi.fn(async () => {});'), DESEN.iife)).toBe(0);
   });
 
   it('iptal çıplak: `cha_iptal = 0` / `sth_iptal=0` ✓; ISNULL biçimleri ve `<> 0` ✗', () => {
-    expect(sayFikstur("ekKosul: 'cha_iptal = 0',", DESEN.iptalCiplak)).toBe(1);
-    expect(sayFikstur('WHERE sth_iptal=0 AND', DESEN.iptalCiplak)).toBe(1);
-    expect(sayFikstur("ekKosul: 'ISNULL(cha_iptal, 0) = 0',", DESEN.iptalCiplak)).toBe(0);
-    expect(sayFikstur('ISNULL(sth_iptal,0)=0', DESEN.iptalCiplak)).toBe(0);
-    expect(sayFikstur('WHERE ISNULL(cha_iptal, 0) <> 0', DESEN.iptalCiplak)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', "ekKosul: 'cha_iptal = 0',"), DESEN.iptalCiplak)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'WHERE sth_iptal=0 AND'), DESEN.iptalCiplak)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', "ekKosul: 'ISNULL(cha_iptal, 0) = 0',"), DESEN.iptalCiplak)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'ISNULL(sth_iptal,0)=0'), DESEN.iptalCiplak)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'WHERE ISNULL(cha_iptal, 0) <> 0'), DESEN.iptalCiplak)).toBe(0);
   });
 
   it('§3 bayatlama (gevşek ISNULL): boşluklu/boşluksuz ✓; `<> 0` ✗; yorumdaki anma sayılmaz', () => {
-    expect(sayFikstur('ISNULL(sth_iptal,0)=0', DESEN.iptalIsnull)).toBe(1);
-    expect(sayFikstur('ISNULL(cha_iptal, 0) = 0', DESEN.iptalIsnull)).toBe(1);
-    expect(sayFikstur('ISNULL(cha_iptal, 0) <> 0', DESEN.iptalIsnull)).toBe(0);
-    expect(sayFikstur('// ISNULL(cha_iptal,0)=0 ZORUNLU', DESEN.iptalIsnull)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'ISNULL(sth_iptal,0)=0'), DESEN.iptalIsnull)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'ISNULL(cha_iptal, 0) = 0'), DESEN.iptalIsnull)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'ISNULL(cha_iptal, 0) <> 0'), DESEN.iptalIsnull)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', '// ISNULL(cha_iptal,0)=0 ZORUNLU'), DESEN.iptalIsnull)).toBe(0);
   });
 
   it('iptal DİNAMİK (hakem 1): `${iptalCol} = 0` / `${iptalCol}=0` ✓; ISNULL sarmalı ve `<> 0` ✗; bayatlama deseni tersini sayar', () => {
-    expect(sayFikstur('kosul.push(`${iptalCol} = 0`);', DESEN.iptalDinamikCiplak)).toBe(1);
-    expect(sayFikstur('kosul.push(`${iptalCol}=0`);', DESEN.iptalDinamikCiplak)).toBe(1);
-    expect(sayFikstur('kosul.push(`ISNULL(${iptalCol}, 0) = 0`);', DESEN.iptalDinamikCiplak)).toBe(0);
-    expect(sayFikstur('WHERE ISNULL(${iptalKol}, 0) <> 0', DESEN.iptalDinamikCiplak)).toBe(0);
-    expect(sayFikstur('kosul.push(`ISNULL(${iptalCol}, 0) = 0`);', DESEN.iptalDinamikIsnull)).toBe(1);
-    expect(sayFikstur('WHERE ISNULL(${iptalKol}, 0) <> 0', DESEN.iptalDinamikIsnull)).toBe(0);
-    expect(sayFikstur('kosul.push(`${iptalCol} = 0`);', DESEN.iptalDinamikIsnull)).toBe(0);
-    expect(sayFikstur('// kosul.push(`ISNULL(${iptalCol}, 0) = 0`);', DESEN.iptalDinamikIsnull)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`${iptalCol} = 0`);'), DESEN.iptalDinamikCiplak)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`${iptalCol}=0`);'), DESEN.iptalDinamikCiplak)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`ISNULL(${iptalCol}, 0) = 0`);'), DESEN.iptalDinamikCiplak)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'WHERE ISNULL(${iptalKol}, 0) <> 0'), DESEN.iptalDinamikCiplak)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`ISNULL(${iptalCol}, 0) = 0`);'), DESEN.iptalDinamikIsnull)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'WHERE ISNULL(${iptalKol}, 0) <> 0'), DESEN.iptalDinamikIsnull)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`${iptalCol} = 0`);'), DESEN.iptalDinamikIsnull)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', '// kosul.push(`ISNULL(${iptalCol}, 0) = 0`);'), DESEN.iptalDinamikIsnull)).toBe(0);
     // Sabit-ad deseni dinamik biçimi GÖRMEZ, sabit-ad bayatlama sayımı da saymaz — iki desen ayrı durmak ZORUNDA.
-    expect(sayFikstur('kosul.push(`${iptalCol} = 0`);', DESEN.iptalCiplak)).toBe(0);
-    expect(sayFikstur('kosul.push(`ISNULL(${iptalCol}, 0) = 0`);', DESEN.iptalIsnull)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`${iptalCol} = 0`);'), DESEN.iptalCiplak)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`ISNULL(${iptalCol}, 0) = 0`);'), DESEN.iptalIsnull)).toBe(0);
     // Noktalı erişim (inceleme bulgusu 2026-09-25): seçenek nesnesinden gelen kolon adı.
-    expect(sayFikstur('kosul.push(`${opts.iptalCol} = 0`);', DESEN.iptalDinamikCiplak)).toBe(1);
-    expect(sayFikstur('kosul.push(`${this.iptalKol}=0`);', DESEN.iptalDinamikCiplak)).toBe(1);
-    expect(sayFikstur('kosul.push(`ISNULL(${opts.iptalCol}, 0) = 0`);', DESEN.iptalDinamikCiplak)).toBe(0);
-    expect(sayFikstur('kosul.push(`ISNULL(${opts.iptalCol}, 0) = 0`);', DESEN.iptalDinamikIsnull)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`${opts.iptalCol} = 0`);'), DESEN.iptalDinamikCiplak)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`${this.iptalKol}=0`);'), DESEN.iptalDinamikCiplak)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`ISNULL(${opts.iptalCol}, 0) = 0`);'), DESEN.iptalDinamikCiplak)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'kosul.push(`ISNULL(${opts.iptalCol}, 0) = 0`);'), DESEN.iptalDinamikIsnull)).toBe(1);
   });
 
   it('H2 guidsizSatir: `?? 0` / `|| 0` / düz `: 0` ✓; `?? null`, çıplak alan ve `let … = 0` sayacı ✗', () => {
-    expect(sayFikstur('guidsizSatir: s.guidsizSatir ?? 0,', DESEN.guidsizSifir)).toBe(1);
-    expect(sayFikstur('res.json({ guidsizSatir: sonuc.guidsizSatir || 0 });', DESEN.guidsizSifir)).toBe(1);
-    expect(sayFikstur('return { jobAlanlari: { tablo: opts.tablo, guidsizSatir: 0 } };', DESEN.guidsizSifir)).toBe(1);
-    expect(sayFikstur('guidsizSatir: s.guidsizSatir ?? null,', DESEN.guidsizSifir)).toBe(0);
-    expect(sayFikstur('guidsizSatir: s.guidsizSatir,   // başarıda HER ZAMAN sayılır', DESEN.guidsizSifir)).toBe(0);
-    expect(sayFikstur('    let guidsizSatir = 0;', DESEN.guidsizSifir)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'guidsizSatir: s.guidsizSatir ?? 0,'), DESEN.guidsizSifir)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'res.json({ guidsizSatir: sonuc.guidsizSatir || 0 });'), DESEN.guidsizSifir)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'return { jobAlanlari: { tablo: opts.tablo, guidsizSatir: 0 } };'), DESEN.guidsizSifir)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'guidsizSatir: s.guidsizSatir ?? null,'), DESEN.guidsizSifir)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'guidsizSatir: s.guidsizSatir,   // başarıda HER ZAMAN sayılır'), DESEN.guidsizSifir)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', '    let guidsizSatir = 0;'), DESEN.guidsizSifir)).toBe(0);
   });
 
   it('body: `body: undefined` / `body !== undefined ?` ✓; `JSON.stringify(body ?? {})` ✗', () => {
-    expect(sayFikstur('      body: undefined,', DESEN.bodyUndefined)).toBe(1);
-    expect(sayFikstur('body: body !== undefined ? JSON.stringify(body) : undefined,', DESEN.bodyUndefined)).toBe(1);
-    expect(sayFikstur('body: JSON.stringify(body ?? {}),', DESEN.bodyUndefined)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', '      body: undefined,'), DESEN.bodyUndefined)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'body: body !== undefined ? JSON.stringify(body) : undefined,'), DESEN.bodyUndefined)).toBe(1);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'body: JSON.stringify(body ?? {}),'), DESEN.bodyUndefined)).toBe(0);
   });
 
   it('§1 işaret yürüyüşü: rota gövdesi İHLAL; kapanış/cron izinli; yorum sayılmaz; işaret YOKSA İHLAL (hakem 1)', () => {
-    const sinifla = (satirlar: string[]) => sqlImportCagrilari(satirlar.join('\n'));
-    expect(sinifla(['app.post(x, async (req,res) => {', '  const s = await mikroSqlImportCalistir(a);']))
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', ['app.post(x, async (req,res) => {', '  const s = await mikroSqlImportCalistir(a);'].join('\n'))))
       .toEqual([{ satir: 2, isaret: 'app.route', izinli: false }]);
-    expect(sinifla(['app.post(x, async (req,res) => {', '  await arkaPlanIsiBaslat(dep, { calistir: async () => {', '    const s = await mikroSqlImportCalistir(a);']))
-      .toEqual([{ satir: 3, isaret: 'arkaPlanIsiBaslat', izinli: true }]);
-    expect(sinifla(['for (const opts of SQL_IMPORT_TANIMLARI) {', '  const r = await mikroSqlImportCalistir(opts);']))
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', [
+      'app.post(x, async (req,res) => {', '  await arkaPlanIsiBaslat(dep, { calistir: async () => {', '    const s = await mikroSqlImportCalistir(a);',
+    ].join('\n')))).toEqual([{ satir: 3, isaret: 'arkaPlanIsiBaslat', izinli: true }]);
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', ['for (const opts of SQL_IMPORT_TANIMLARI) {', '  const r = await mikroSqlImportCalistir(opts);'].join('\n'))))
       .toEqual([{ satir: 2, isaret: 'cron', izinli: true }]);
-    expect(sinifla(['// const s = await mikroSqlImportCalistir(a);'])).toEqual([]);
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', '// const s = await mikroSqlImportCalistir(a);'))).toEqual([]);
     // Kapanış ayrı bir yardımcıya çıkarılmış: ne `app.post` ne `arkaPlanIsiBaslat` — "(yok)" → İHLAL.
     // ("bilinmeyen → izinli" mutasyonu burada kırılır.)
-    expect(sinifla(['async function sqlImportKapanisi(opts) {', '  const s = await mikroSqlImportCalistir(opts);']))
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', ['async function sqlImportKapanisi(opts) {', '  const s = await mikroSqlImportCalistir(opts);'].join('\n'))))
       .toEqual([{ satir: 2, isaret: '(yok)', izinli: false }]);
     // İKİ çağrı, farklı sınıflar: her biri KENDİ en yakın işaretini alır (rota, sonra cron).
-    expect(sinifla([
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', [
       'app.post(x, async (req,res) => {', '  const s = await mikroSqlImportCalistir(a);', '});',
       'for (const opts of SQL_IMPORT_TANIMLARI) {', '  const r = await mikroSqlImportCalistir(opts);',
-    ]).map(c => `${c.satir}:${c.isaret}`)).toEqual(['2:app.route', '5:cron']);
+    ].join('\n'))).map(c => `${c.satir}:${c.isaret}`)).toEqual(['2:app.route', '5:cron']);
   });
 
   it('§1 kapsam (hakem 3): KAPANMIŞ işaret atlanır — kapanış dışına taşınan çağrı ve biten döngü sonrası çağrı İHLAL; tek satırlık kapanış izinli', () => {
-    const sinifla = (satirlar: string[]) => sqlImportCagrilari(satirlar.join('\n'));
     // `arkaPlanIsiBaslat(…)` aynı satırda kapandı; altındaki doğrudan await rota gövdesindedir.
-    expect(sinifla([
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', [
       'app.post(x, async (req,res) => {',
       '  const r = await arkaPlanIsiBaslat(dep, { calistir: async () => ({ ozet: "" }) });',
       '  const s = await mikroSqlImportCalistir(a);',
-    ])).toEqual([{ satir: 3, isaret: 'app.route', izinli: false }]);
+    ].join('\n')))).toEqual([{ satir: 3, isaret: 'app.route', izinli: false }]);
     // Çok satırlı kapanış `});` ile bitti; çağrı ondan SONRA.
-    expect(sinifla([
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', [
       'app.post(x, async (req,res) => {',
       '  const r = await arkaPlanIsiBaslat(dep, {', '    calistir: async () => ({ ozet: "" }),', '  });',
       '  const s = await mikroSqlImportCalistir(a);',
-    ])).toEqual([{ satir: 5, isaret: 'app.route', izinli: false }]);
+    ].join('\n')))).toEqual([{ satir: 5, isaret: 'app.route', izinli: false }]);
     // Cron döngüsü kapandı; çağrı döngünün DIŞINDA.
-    expect(sinifla([
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', [
       'app.post(x, async (req,res) => {',
       '  for (const o of SQL_IMPORT_TANIMLARI) { await y(o); }',
       '  const s = await mikroSqlImportCalistir(a);',
-    ])).toEqual([{ satir: 3, isaret: 'app.route', izinli: false }]);
+    ].join('\n')))).toEqual([{ satir: 3, isaret: 'app.route', izinli: false }]);
     // Hiçbir kapsamı açık işaret yok → (yok).
-    expect(sinifla(['for (const o of SQL_IMPORT_TANIMLARI) {', '}', 'const s = await mikroSqlImportCalistir(a);']))
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', ['for (const o of SQL_IMPORT_TANIMLARI) {', '}', 'const s = await mikroSqlImportCalistir(a);'].join('\n'))))
       .toEqual([{ satir: 3, isaret: '(yok)', izinli: false }]);
     // Aynı satırda açık kapanış: çağrı ÖNCESİ metin de yürünür.
-    expect(sinifla(['  await arkaPlanIsiBaslat(dep, { calistir: async () => ({ s: await mikroSqlImportCalistir(a) }) });']))
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', '  await arkaPlanIsiBaslat(dep, { calistir: async () => ({ s: await mikroSqlImportCalistir(a) }) });')))
       .toEqual([{ satir: 1, isaret: 'arkaPlanIsiBaslat', izinli: true }]);
     // Kapanış içindeki iç içe parantez/süslü (SQL şablonu, nesne) kapsamı KAPATMAZ.
-    expect(sinifla([
+    expect(sqlImportCagrilari(yorumsuzParca('fikstur.ts', [
       '  await arkaPlanIsiBaslat(dep, {', '    senkronKaydi: { operation: `SQL:${t}`, entityType: c },',
       '    calistir: async (ilerle) => {', '      const s = await mikroSqlImportCalistir(o, a => ilerle({ ...a }));',
-    ])).toEqual([{ satir: 4, isaret: 'arkaPlanIsiBaslat', izinli: true }]);
+    ].join('\n')))).toEqual([{ satir: 4, isaret: 'arkaPlanIsiBaslat', izinli: true }]);
   });
 
   it('§1b ateşle-unut (hakem 3): tanım hariç her geçiş sayılır; `await`\'siz (`.catch`, `void`, `const p =`) ayrı; yorum sayılmaz', () => {
-    const g = (satirlar: string[]) => sqlCagriGecisleri(satirlar.join('\n'));
-    expect(g(['  async function mikroSqlImportCalistir(', '    opts: SqlImportOpts,'])).toEqual([]);
-    expect(g(['  const r = await mikroSqlImportCalistir(opts);'])).toEqual([{ satir: 1, cagri: 1, awaitsiz: 0 }]);
-    expect(g(['  mikroSqlImportCalistir(opts, companyId, ilk, son, actor).catch(() => {});']))
+    expect(sqlCagriGecisleri(yorumsuzParca('fikstur.ts', ['  async function mikroSqlImportCalistir(', '    opts: SqlImportOpts,'].join('\n')))).toEqual([]);
+    expect(sqlCagriGecisleri(yorumsuzParca('fikstur.ts', '  const r = await mikroSqlImportCalistir(opts);'))).toEqual([{ satir: 1, cagri: 1, awaitsiz: 0 }]);
+    expect(sqlCagriGecisleri(yorumsuzParca('fikstur.ts', '  mikroSqlImportCalistir(opts, companyId, ilk, son, actor).catch(() => {});')))
       .toEqual([{ satir: 1, cagri: 1, awaitsiz: 1 }]);
-    expect(g(['  void mikroSqlImportCalistir(opts);'])).toEqual([{ satir: 1, cagri: 1, awaitsiz: 1 }]);
-    expect(g(['  const p = mikroSqlImportCalistir(a); await mikroSqlImportCalistir(b);'])).toEqual([{ satir: 1, cagri: 2, awaitsiz: 1 }]);
-    expect(g(['  // mikroSqlImportCalistir(opts).catch(() => {});'])).toEqual([]);
+    expect(sqlCagriGecisleri(yorumsuzParca('fikstur.ts', '  void mikroSqlImportCalistir(opts);'))).toEqual([{ satir: 1, cagri: 1, awaitsiz: 1 }]);
+    expect(sqlCagriGecisleri(yorumsuzParca('fikstur.ts', '  const p = mikroSqlImportCalistir(a); await mikroSqlImportCalistir(b);')))
+      .toEqual([{ satir: 1, cagri: 2, awaitsiz: 1 }]);
+    expect(sqlCagriGecisleri(yorumsuzParca('fikstur.ts', '  // mikroSqlImportCalistir(opts).catch(() => {});'))).toEqual([]);
   });
 
-  it('yorum süzgeci (rapor6a §0 vaka 2-4, `degismezTarayici.yorumsuz`): satır başı/sonu/blok/JSX sayılmaz; blok sonrası satır kaymaz; URL `//` yutmaz', () => {
+  it('yorum süzgeci (`degismezTarayici.yorumsuzParca` — fikstür girişi): satır başı/sonu/blok/JSX sayılmaz; blok sonrası satır kaymaz; URL `//` yutmaz', () => {
     const d = DESEN.iptalCiplak;
-    expect(sayFikstur("// eski: ekKosul: 'cha_iptal = 0',", d)).toBe(0);
-    expect(sayFikstur('const a = b; // eski cha_iptal = 0', d)).toBe(0);
-    expect(sayFikstur(['/**', " * eski koşul: 'cha_iptal = 0'", ' */'].join('\n'), d)).toBe(0);
-    expect(sayFikstur('        {/* cha_iptal = 0 */}', d)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', "// eski: ekKosul: 'cha_iptal = 0',"), d)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', 'const a = b; // eski cha_iptal = 0'), d)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', ['/**', " * eski koşul: 'cha_iptal = 0'", ' */'].join('\n')), d)).toBe(0);
+    expect(sayFikstur(yorumsuzParca('fikstur.tsx', '        {/* cha_iptal = 0 */}'), d)).toBe(0);
     const fikstur = ['/* satır 1', '   satır 2', '   satır 3 */', "const k = 'sth_iptal = 0';"].join('\n');
-    expect(yorumsuz(fikstur).flatMap((k, i) => (d.test(k) ? [i + 1] : []))).toEqual([4]);
-    expect(sayFikstur("const u = 'https://x.test'; const k = 'sth_iptal = 0';", d)).toBe(1);
+    expect(yorumsuzParca('fikstur.ts', fikstur).flatMap((k, i) => (d.test(k) ? [i + 1] : []))).toEqual([4]);
+    expect(sayFikstur(yorumsuzParca('fikstur.ts', "const u = 'https://x.test'; const k = 'sth_iptal = 0';"), d)).toBe(1);
   });
 
   it("jobs: `collection('jobs')` tek/çift tırnak ✓, başka koleksiyon ✗; `.set({ … companyId })` tek/çok satırlı ✓, merge'li bitiş ✗", () => {
@@ -324,11 +335,11 @@ describe('§0 · tarayıcı kendini sınar (mutasyon-ayırt-edici fikstürler)',
 
   it('adlı import: tek/çok satırlı ✓; yalnız yorumda ✗; başka yoldan ✗; komşu ad ✗', () => {
     const YOL = '../mikro/arkaPlanIsi.js';
-    expect(adliImportVar("import { arkaPlanIsiBaslat, bakimKilidiMesaji } from '../mikro/arkaPlanIsi.js';", 'arkaPlanIsiBaslat', YOL)).toBe(true);
-    expect(adliImportVar("import {\n  arkaPlanIsiBaslat,\n  type BaslatSonucu,\n} from '../mikro/arkaPlanIsi.js';", 'arkaPlanIsiBaslat', YOL)).toBe(true);
-    expect(adliImportVar("// import { arkaPlanIsiBaslat } from '../mikro/arkaPlanIsi.js';", 'arkaPlanIsiBaslat', YOL)).toBe(false);
-    expect(adliImportVar("import { arkaPlanIsiBaslat } from './arkaPlanIsi.js';", 'arkaPlanIsiBaslat', YOL)).toBe(false);
-    expect(adliImportVar("import { arkaPlanIsiBekle } from '../mikro/arkaPlanIsi.js';", 'arkaPlanIsiBaslat', YOL)).toBe(false);
+    expect(adliImportVar(yorumsuzParca('fikstur.ts', "import { arkaPlanIsiBaslat, bakimKilidiMesaji } from '../mikro/arkaPlanIsi.js';"), 'arkaPlanIsiBaslat', YOL)).toBe(true);
+    expect(adliImportVar(yorumsuzParca('fikstur.ts', "import {\n  arkaPlanIsiBaslat,\n  type BaslatSonucu,\n} from '../mikro/arkaPlanIsi.js';"), 'arkaPlanIsiBaslat', YOL)).toBe(true);
+    expect(adliImportVar(yorumsuzParca('fikstur.ts', "// import { arkaPlanIsiBaslat } from '../mikro/arkaPlanIsi.js';"), 'arkaPlanIsiBaslat', YOL)).toBe(false);
+    expect(adliImportVar(yorumsuzParca('fikstur.ts', "import { arkaPlanIsiBaslat } from './arkaPlanIsi.js';"), 'arkaPlanIsiBaslat', YOL)).toBe(false);
+    expect(adliImportVar(yorumsuzParca('fikstur.ts', "import { arkaPlanIsiBekle } from '../mikro/arkaPlanIsi.js';"), 'arkaPlanIsiBaslat', YOL)).toBe(false);
   });
 });
 
@@ -378,7 +389,7 @@ describe('bayatlama koruması: taranan dosyalar var ve yorumsuz DOLU', () => {
   for (const [yol, esik] of ESIK) {
     it(`${gorece(yol)} · dolu satır > ${esik}`, () => {
       expect(existsSync(yol), gorece(yol)).toBe(true);
-      const dolu = yorumsuz(oku(yol)).filter(s => s.trim() !== '').length;
+      const dolu = kodSatirlari(yol).filter(x => x.kod.trim() !== '').length;
       expect(dolu).toBeGreaterThan(esik);
     });
   }
@@ -390,54 +401,6 @@ describe('bayatlama koruması: taranan dosyalar var ve yorumsuz DOLU', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// §0d · yorum süzgecinin kör noktası çitlenir (inceleme bulgusu 2026-09-25, CONFIRMED)
-// ---------------------------------------------------------------------------
-//
-// `yorumsuz` (6a gövdesiyle BİREBİR kilitli — değiştirilmez) metni belirteçlere ayırmaz: `//` yorumu İÇİNDEKİ
-// bir blok açıcıyı ya da metin içindeki (URL joker alt alanı, dosya türü joker) açıcıyı gerçek blok yorum
-// sanar ve sonraki kapatıcıya kadar KODU siler. Ölçüm: eslemeFatura.ts'te 18 kod satırı (sipariş dokümanının
-// alanları) böyle görünmüyordu; kök server.ts'te CSP listesi (14 satır) bugün de görünmüyor. Yorumlar yeniden
-// yazıldı; CSP metni üretim kodu olduğu için DEĞİŞTİRİLMEDİ — onun yerine (b) çiti her taramayı korur.
-//
-// KÂHİN: TypeScript ayrıştırıcısı. Belirteç (token) aralıklarının dışında kalan boşluk-dışı her karakter
-// yorumdur; metin/şablon/JSX metni belirteç olduğu için içlerindeki açıcılar yorum SAYILMAZ. JSDoc düğümleri
-// atlanır (belirteç değil, yorumdur). Yalnız bu çitte kullanılır — tarama yine `yorumsuz` ile yapılır.
-const kahinOnbellek = new Map<string, string[]>();
-function kahinSatirlari(yol: string): string[] {
-  const onceki = kahinOnbellek.get(yol);
-  if (onceki) return onceki;
-  const metin = oku(yol);
-  const sf = ts.createSourceFile(yol, metin, ts.ScriptTarget.Latest, false, yol.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-  const kod = new Uint8Array(metin.length);
-  const gez = (n: ts.Node): void => {
-    if (n.kind >= ts.SyntaxKind.FirstJSDocNode && n.kind <= ts.SyntaxKind.LastJSDocNode) return;
-    if ((n.kind >= ts.SyntaxKind.FirstToken && n.kind <= ts.SyntaxKind.LastToken) || n.kind === ts.SyntaxKind.JsxText) {
-      kod.fill(1, n.getStart(sf), n.getEnd());
-      return;
-    }
-    n.getChildren(sf).forEach(gez);
-  };
-  gez(sf);
-  const karakterler = metin.split('');
-  for (let i = 0; i < karakterler.length; i++) {
-    if (!kod[i] && !/\s/.test(karakterler[i])) karakterler[i] = ' ';
-  }
-  const satirlar = karakterler.join('').split('\n');
-  kahinOnbellek.set(yol, satirlar);
-  return satirlar;
-}
-/** Satır başına geçiş SAYISI karşılaştırması (delta hakem 2026-09-25): site kümesi yetmez — §1b/§6 geçişleri tek
- *  tek sayar, görünür bir çağrıyla aynı satırda yutulan ikinci çağrı küme karşılaştırmasından kaçıyordu. */
-const kahinKacan = (dosyalar: string[], desen: RegExp): string[] =>
-  dosyalar.flatMap(yol => {
-    const yz = yorumsuz(oku(yol));
-    return kahinSatirlari(yol).flatMap((kod, i) => {
-      const k = adet(kod, desen), y = adet(yz[i] ?? '', desen);
-      return k > y ? [`${gorece(yol)}:${i + 1} (kâhin ${k}, yorumsuz ${y})`] : [];
-    });
-  });
-
 // Delta hakem 2026-09-25: açılış taraması süreç başlangıcını AÇIKÇA almalı (varsayılana bırakılan hesap
 // canlıda koşan tek yoldu ve korunmuyordu). server.ts'teki çağrı bu alanı geçmeyi bırakırsa kırmızı.
 describe('§0e · server.ts açılış taraması süreç başlangıcını açıkça geçirir', () => {
@@ -446,8 +409,33 @@ describe('§0e · server.ts açılış taraması süreç başlangıcını açık
   });
 });
 
-describe('§0d · ÇİT: yorum süzgeci kod satırı YUTMAZ (kâhin: TypeScript ayrıştırıcısı)', () => {
-  it('kâhin kendini sınar: `//` yorumundaki ve metindeki blok açıcı yorum DEĞİL; gerçek yorumlar silinir', () => {
+// ---------------------------------------------------------------------------
+// §0d · yorum süzgeci ile kâhin aynı fikstürde AYNI sonucu verir (eski kör bölgenin fikstürü)
+// ---------------------------------------------------------------------------
+//
+// Tarihçe. 2026-09-25 incelemesi (CONFIRMED): o günkü süzgeç iki düzenli ifadeydi; metni belirteçlere ayırmadığı
+// için `//` yorumu ya da metin (URL joker alt alanı, dosya türü jokeri) içindeki blok açıcıyı gerçek yorum sanıp
+// sonraki kapatıcıya kadar KODU, `\/\/` taşıyan düzenli ifade değişmezinden sonra da satırın kalanını siliyordu
+// (o günkü ölçüm: eslemeFatura.ts'te 18, kök server.ts CSP listesinde 14 kod satırı görünmüyordu). Süzgeç
+// düzeltilmedi; bu bölüm onu bir TypeScript kâhiniyle çitledi ((a) satır satır eşitlik, (b) geçiş sayımı).
+//
+// 2026-10-08: süzgeç TypeScript ayrıştırıcısına dayanacak biçimde yeniden yazıldı (`src/test/degismezTarayici.ts`),
+// kâhin `src/test/yorumKahini.ts`'e taşındı, (a) ve (b) SİLİNDİ — süzgeç ≡ kâhin eşitliğini bütün kaynaklarda depo
+// çiti ölçer (`src/test/degismezTarayici.test.ts`). Burada o arızanın FİKSTÜRÜ kaldı: eskiden arızayı beklenti
+// olarak sabitliyordu (kâhin [2, 4, 7, 8], süzgeç [8]); şimdi süzgecin de kâhinle aynı ve DOĞRU sonucu verdiğini
+// kilitler. Süzgeç eski gövdeye dönerse burada kırmızı.
+
+/** Satır başına geçiş SAYISI karşılaştırması (delta hakem 2026-09-25): site kümesi yetmez — görünür bir çağrıyla aynı
+ *  satırda yutulan ikinci çağrı küme karşılaştırmasından kaçar. Girdi iki satır dizisidir (kâhin, süzgeç); kâhinin
+ *  süzgeçten FAZLA saydığı satırları döndürür. */
+const kahinKacan = (kahin: string[], suzulmus: string[], desen: RegExp): string[] =>
+  kahin.flatMap((kod, i) => {
+    const k = adet(kod, desen), y = adet(suzulmus[i] ?? '', desen);
+    return k > y ? [`${i + 1} (kâhin ${k}, yorumsuz ${y})`] : [];
+  });
+
+describe('§0d · yorum süzgeci ≡ kâhin: eski kör bölgenin fikstüründe ikisi AYNI ve DOĞRU', () => {
+  it('`//` yorumundaki, metindeki ve düzenli ifadedeki açıcı yorum DEĞİL; gerçek yorumlar silinir — süzgeçte de kâhinde de', () => {
     const fikstur = [
       "// AÇIK: components/reports/" + "* (rapor sayfaları)",
       "const a = collection('jobs');",
@@ -458,63 +446,29 @@ describe('§0d · ÇİT: yorum süzgeci kod satırı YUTMAZ (kâhin: TypeScript 
       "const d = /https?:\\/\\//; collection('jobs');",
       "collection('jobs'); const r = /x\\/\\//; collection('jobs');",
     ].join('\n');
-    // src DIŞINA yazılır: src'yi tarayan eşzamanlı testler geçici dosyayı üretim kaynağı sanmasın.
-    const gecici = join(mkdtempSync(join(tmpdir(), 'kahin-')), 'fikstur.ts');
-    writeFileSync(gecici, fikstur);
-    try {
-      const k = kahinSatirlari(gecici);
-      expect(k.map((x, i) => (/collection\('jobs'\)/.test(x) ? i + 1 : 0)).filter(Boolean)).toEqual([2, 4, 7, 8]);
-      expect(k[2]).toContain('googleapis');                        // metin KORUNUR
-      // Aynı fikstürde `yorumsuz` 2. ve 4. satırı YUTAR — çitin yakalayacağı kör nokta budur.
-      const y = yorumsuz(fikstur);
-      expect(y.map((x, i) => (/collection\('jobs'\)/.test(x) ? i + 1 : 0)).filter(Boolean)).toEqual([8]);   // 8: görünür ilk çağrı
-      // Satır başına SAYIM (b): aynı satırda görünür çağrı + yutulan ikinci çağrı küme karşılaştırmasından kaçardı
-      // (delta hakem 2026-09-25: fikstür karşılaştırıcıyı hiç çağırmıyordu). 8. satırda yorumsuz 1, kâhin 2 sayar:
-      // site kümesi iki tarafta da aynı (satır 8 var) — yalnız SAYI karşılaştırması yakalar.
-      expect(adet(k[6], /collection\('jobs'\)/)).toBe(1);
-      expect(adet(y[6], /collection\('jobs'\)/)).toBe(0);
-      expect(adet(k[7], /collection\('jobs'\)/)).toBe(2);
-      expect(adet(y[7], /collection\('jobs'\)/)).toBe(1);
-      expect(kahinKacan([gecici], /collection\('jobs'\)/).map(x => x.replace(/^.*:(\d+) /, '$1 '))).toEqual(['2 (kâhin 1, yorumsuz 0)', '4 (kâhin 1, yorumsuz 0)', '7 (kâhin 1, yorumsuz 0)', '8 (kâhin 2, yorumsuz 1)']);
-    } finally {
-      unlinkSync(gecici);
-    }
-  });
-
-  // (a) Bu işin SAHİBİ olduğu dosyalar: `yorumsuz` her satırda kâhinle AYNI kodu verir (boşluk hariç) — satırın
-  // tamamı da, bir kısmı da yutulmaz (`\/\/` içeren regex literali satır sonunu yutuyordu: kanalRoutes). Bu dosyalar
-  // üzerindeki HER tarama (H2, §6 TAM 5, §7 kopya literal ve `say(...)` sayımları dahil) böylece korunur.
-  // Kırmızıysa yorumda/metinde/regex'te açıcı ya da çift eğik çizgi var — yeniden yaz (izin listesi YOK).
-  it('(a) src/server/** + src/services/** + panel/kanca/kart/ekstre: `yorumsuz` ≡ kâhin (satır satır)', () => {
-    const dosyalar = [...kaynakDosyalari(SUNUCU_DIZIN), ...kaynakDosyalari(SERVIS_DIZIN), PANEL, KANCA, KART, EKSTRE];
+    const jobs = /collection\('jobs'\)/;
+    const k = kahinSatirlari('fikstur.ts', fikstur);
+    // Fikstür kendi başına geçerli bir dosyadır → KATI giriş (§ taramalarının `kodSatirlari` üzerinden kullandığı giriş).
+    const y = yorumsuz('fikstur.ts', fikstur);
+    expect(k.map((x, i) => (jobs.test(x) ? i + 1 : 0)).filter(Boolean)).toEqual([2, 4, 7, 8]);
+    expect(y.map((x, i) => (jobs.test(x) ? i + 1 : 0)).filter(Boolean)).toEqual([2, 4, 7, 8]);   // eski süzgeç: [8]
+    expect(k[2]).toContain('googleapis');                        // metin KORUNUR
+    expect(y[2]).toContain('googleapis');                        // eski süzgeç 1–4. satırları tek blok yorum sanıyordu
+    // Satır başına SAYIM: 7. satırda çağrı düzenli ifade değişmezinden SONRA; 8. satırda biri önce, biri sonra. Eski
+    // süzgeç 7'de 0, 8'de 1 sayıyordu — 8'de site kümesi aynı kalır (satır görünür), farkı yalnız SAYI gösterir.
+    expect(adet(k[6], jobs)).toBe(1);
+    expect(adet(y[6], jobs)).toBe(1);
+    expect(adet(k[7], jobs)).toBe(2);
+    expect(adet(y[7], jobs)).toBe(2);
+    expect(kahinKacan(k, y, jobs)).toEqual([]);
+    // Karşılaştırıcının dişi (delta hakem 2026-09-25: fikstür karşılaştırıcıyı hiç çalıştırmıyordu): süzgeç çıktısından
+    // 8. satırın İKİNCİ çağrısı eksilirse — eski arızanın biçimi — karşılaştırıcı onu yakalar.
+    const eksik = y.map((x, i) => (i === 7 ? x.slice(0, x.lastIndexOf('collection')) : x));
+    expect(kahinKacan(k, eksik, jobs)).toEqual(['8 (kâhin 2, yorumsuz 1)']);
+    // Tam eşitlik (depo çitinin ölçüsü): kâhin yorumu boşluğa çevirir, süzgeç siler — boşluk hariç satır satır aynı.
     const bosluksuz = (x: string) => x.replace(/\s+/g, '');
-    const yutulan = dosyalar.flatMap(yol => {
-      const yz = yorumsuz(oku(yol));
-      return kahinSatirlari(yol).flatMap((kod, i) =>
-        bosluksuz(kod) !== bosluksuz(yz[i] ?? '') ? [`${gorece(yol)}:${i + 1} kâhin=${kod.trim().slice(0, 70)} | yorumsuz=${(yz[i] ?? '').trim().slice(0, 70)}`] : []);
-    });
-    expect(yutulan).toEqual([]);
+    expect(y.map(bosluksuz)).toEqual(k.map(bosluksuz));
   });
-
-  // (b) (a)'nın DIŞINDA kalan dosyaları (kök server.ts, src'nin geri kalanı) içeren taramalar: her satırda kâhinin
-  // saydığı geçişi `yorumsuz` da sayıyor. server.ts'in CSP bölgesi gibi bilinen kör bölgeler kalsa da hiçbir desen
-  // oradan kaçamaz. Tablo § testleriyle AYNI kümeleri kullanır; yalnız sahip olunan dosyaları tarayan maddeler (a)'da.
-  it('(b) server.ts / tüm src içeren taramalarda kâhinin sayıp `yorumsuz`un kaçırdığı geçiş = 0', () => {
-    const TARAMALAR: Array<[string, () => string[], RegExp]> = [
-      ['§1 sqlAd',             SUNUCU_KUMESI,                        DESEN.sqlAd],
-      ['§2 iife',              () => kaynakDosyalari(ROTA_DIZIN),    DESEN.iife],
-      ['§3 iptalCiplak',       SUNUCU_KUMESI,                        DESEN.iptalCiplak],
-      ['§3 iptalIsnull',       SUNUCU_KUMESI,                        DESEN.iptalIsnull],
-      ['§3 iptalDinamikCiplak', SUNUCU_KUMESI,                       DESEN.iptalDinamikCiplak],
-      ['§3 iptalDinamikIsnull', SUNUCU_KUMESI,                       DESEN.iptalDinamikIsnull],
-      ['§4 bodyUndefined',     () => kaynakDosyalari(SERVIS_DIZIN),  DESEN.bodyUndefined],
-      ['§5 jobsKoleksiyonu',   SUNUCU_KUMESI,                        DESEN.jobsKoleksiyonu],
-      ['§7 jobs metni',        SRC_KUMESI,                           /['"]jobs['"]/],
-      ['§7 eski import API',   SRC_KUMESI,                           /\b(?:importStokFromMikro|importCariFromMikro|MikroImportResult)\b/],
-    ];
-    const kacan = TARAMALAR.flatMap(([ad, kume, desen]) => kahinKacan(kume(), desen).map(site => `${ad}: ${site}`));
-    expect(kacan).toEqual([]);
-  }, 60_000);   // tüm src'yi TypeScript ile bir kez ayrıştırır (önbellekli)
 });
 
 // ---------------------------------------------------------------------------
@@ -522,8 +476,8 @@ describe('§0d · ÇİT: yorum süzgeci kod satırı YUTMAZ (kâhin: TypeScript 
 // ---------------------------------------------------------------------------
 
 describe('§1 · DEĞİŞMEZ: `await mikroSqlImportCalistir(` yalnız cron döngüsü / `arkaPlanIsiBaslat` kapanışı', () => {
-  const cagrilar = sqlImportCagrilari(oku(ROTA));
   const satirlar = kodSatirlari(ROTA);
+  const cagrilar = sqlImportCagrilari(satirlar.map(x => x.kod));
 
   it('rota gövdesinde doğrudan await YOK (502 sınıfı: iş HTTP isteği içinde biter)', () => {
     const ihlal = cagrilar
@@ -536,7 +490,7 @@ describe('§1 · DEĞİŞMEZ: `await mikroSqlImportCalistir(` yalnız cron döng
     expect(cagrilar.filter(c => c.izinli).map(c => c.isaret).sort()).toEqual(['arkaPlanIsiBaslat', 'cron', 'cron']);
   });
 
-  const gecisler = sqlCagriGecisleri(oku(ROTA));
+  const gecisler = sqlCagriGecisleri(satirlar.map(x => x.kod));
 
   it('ateşle-unut YOK (hakem 3): tanım hariç her `mikroSqlImportCalistir(` geçişi `await`li — `.catch(() => {})` kilitsiz, jobs\'suz arka plan işi kurardı', () => {
     expect(gecisler.filter(g => g.awaitsiz > 0).map(g => `${gorece(ROTA)}:${g.satir} ${satirlar[g.satir - 1].kod.trim().slice(0, 140)}`))
@@ -622,7 +576,7 @@ describe("§5 · DEĞİŞMEZ: `collection('jobs')` yalnız `mikro/arkaPlanIsi.ts
   });
 
   it('yardımcıda `.set({ … companyId … })` var — 2. kiracıya sızmasın (SSE süzgeci etiketsizi herkese akıtır)', () => {
-    expect(DESEN.setCompanyId.test(yorumsuz(oku(HELPER)).join('\n'))).toBe(true);
+    expect(DESEN.setCompanyId.test(yorumsuz(HELPER, oku(HELPER)).join('\n'))).toBe(true);
   });
 });
 
@@ -649,7 +603,7 @@ describe('§6 · DEĞİŞMEZ: `yaziciyiIstegeBagla(` mikroRoutes.ts TAM 6 (senkr
 // ---------------------------------------------------------------------------
 
 describe('§7 · DEĞİŞMEZ: yardımcı, sözlük, kart ve kanca GERÇEKTEN bağlı', () => {
-  const rota = oku(ROTA);
+  const rota = yorumsuz(ROTA, oku(ROTA));
 
   it("mikroRoutes.ts: `arkaPlanIsiBaslat` '../mikro/arkaPlanIsi.js'ten adlı import + ≥ 4 çağrı (stok, cari, stok-miktar, fabrika)", () => {
     expect(adliImportVar(rota, 'arkaPlanIsiBaslat', '../mikro/arkaPlanIsi.js')).toBe(true);
@@ -689,7 +643,7 @@ describe('§7 · DEĞİŞMEZ: yardımcı, sözlük, kart ve kanca GERÇEKTEN ba�
     const dosya = (b: Bulgu) => b.site.replace(/:\d+$/, '');
     expect(hitler.filter(b => !IZINLI_JOBS.includes(dosya(b))).map(yaz)).toEqual([]);
     expect([...new Set(hitler.map(dosya))].sort()).toEqual(IZINLI_JOBS);
-  });
+  }, 60_000);   // tüm src'yi süzer (TypeScript ayrıştırıcısı; dosya başına bir kez, önbellekli)
 
   it('ArkaPlanIsiKarti.tsx: `useArkaPlanIsi(` ≥ 1 — kart→kanca zinciri (kanca sabit `{ is: null }` ile değiştirilirse kart ölü)', () => {
     expect(say(KART, /\buseArkaPlanIsi\(/)).toBeGreaterThanOrEqual(1);
@@ -697,7 +651,7 @@ describe('§7 · DEĞİŞMEZ: yardımcı, sözlük, kart ve kanca GERÇEKTEN ba�
 
   it('src genelinde (test hariç) eski import API 0 — istemci §A sildi, tüketicisi kalmadı', () => {
     expect(bul(SRC_KUMESI(), /\b(?:importStokFromMikro|importCariFromMikro|MikroImportResult)\b/).map(yaz)).toEqual([]);
-  });
+  }, 60_000);   // tüm src'yi süzer — tek başına koşarsa (`-t`) önbellek soğuktur
 });
 
 // ---------------------------------------------------------------------------

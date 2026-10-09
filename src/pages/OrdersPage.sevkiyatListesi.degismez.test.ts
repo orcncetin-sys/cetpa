@@ -86,7 +86,7 @@ describe('OrdersPage — "Siparişi kopyala" tohumu', () => {
 /** Sipariş düzenleme formu (2026-10-07): belgesi kesilmiş siparişte tutar / KDV kilitli; kaydedilecek tutar önizlenir. */
 describe('OrdersPage — sipariş düzenleme: belge kilidi ve tutar önizlemesi', () => {
   // YORUMSUZ kaynak: ham metinde arayan çit, blok JSX yorumuna alınsa da yeşil kalırdı.
-  const kodY = yorumsuz(kod).join('\n');
+  const kodY = yorumsuz('OrdersPage.tsx', kod).join('\n');
   it('belge kesildi TEK tanım (bileşen düzeyinde); cari bağı kilidi de onu okur', () => {
     expect((kodY.match(/selectedOrder\.irsaliyeGonderildi === true \|\| !!selectedOrder\.irsaliyeNo \|\| !!selectedOrder\.mikroFaturaNo\)/g) ?? [])).toHaveLength(1);
     expect(kodY).toContain('const belgeKesildi = duzenlenenBelgeKesildi;');

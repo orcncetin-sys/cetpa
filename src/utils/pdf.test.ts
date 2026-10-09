@@ -13,8 +13,9 @@
  */
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { jsPDF } from 'jspdf';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { kodSatirlari } from '../test/kaynakTarama';
 
 /**
  * jsPDF'te `text`/`save` PROTOTİPTE DEĞİL, örnek üzerinde tanımlı; exportOrderPDF örneği
@@ -130,6 +131,8 @@ describe('sertleştirme — inceleme önerileri', () => {
    * jspdf-autotable 5 plugin'i yalnız `window.jsPDF` globaline uygular; Vite'ın ESM jspdf'i
    * global yazmaz → plugin-yöntemi tarayıcıda tanımsız. pdf.ts:142 bu yüzden 2026-04-16'dan
    * beri canlıda çöküyordu; tip cast'i (`(doc as …).autoTable`) grep'ten de kaçırmıştı.
+   * Yorumlar ortak süzgeçle atılır (`src/test/kaynakTarama`); satırlar birleştirilir, çünkü
+   * desen alt satıra inen zinciri de (`doc` + yeni satır + `.autoTable(`) yakalar.
    */
   it("src'de plugin-yöntemi `.autoTable(` çağrısı yok — yalnız fonksiyonel `autoTable(doc, …)`", () => {
     const kok = resolve(__dirname, '..');
@@ -138,13 +141,13 @@ describe('sertleştirme — inceleme önerileri', () => {
     gez(kok);
     const ihlal: string[] = [];
     for (const f of dosyalar) {
-      const kod = readFileSync(f, 'utf8').split('\n').map(l => l.replace(/\/\/.*$/, '')).filter(l => !/^\s*(\*|\/\*)/.test(l)).join('\n');
+      const kod = kodSatirlari(f).map(s => s.kod).join('\n');
       const m = kod.match(/[A-Za-z0-9_)\]]\s*\.autoTable\s*\(/g);
       if (m) ihlal.push(`${f.replace(kok, 'src')} (${m.length})`);
     }
     expect(ihlal, 'plugin-yöntemi autoTable çağrısı — ESM\'de tanımsız, canlıda çöker').toEqual([]);
     expect(dosyalar.length).toBeGreaterThan(200);   // tarama gerçekten oldu
-  });
+  }, 60_000);   // src'nin tamamı tek testte ayrıştırılır
 });
 
 describe('sahte kesinlik — Faz 1 4/n (para.ts bağlandı)', () => {

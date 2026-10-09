@@ -47,8 +47,9 @@ describe('her sınırlayıcı anahtar üreticisini AÇIKÇA seçer — doğru ol
     expect((kod.match(/rateLimit\(\{/g) ?? []).length).toBe(Object.keys(BEKLENEN).length);
   });
   it('tarayıcının GÖREMEDİĞİ sınırlayıcı yok: ham metindeki `rateLimit({` sayısı çitin gördüğüyle aynı', () => {
-    // Yorum süzgeci dize içindeki `/*`'ı (ör. CSP'deki 'https://*.googleapis.com') blok yorum açılışı sayar ve ilk `*/`'a kadar
-    // satırları boşaltır (2026-10-08 hakemi: server.ts'te ~25 satırlık kör bölge). O bölgeye yazılan sınırlayıcı tabloya girmezdi.
+    // Yorum süzgeci eskiden dize içindeki `/*`'ı (ör. CSP'deki 'https://*.googleapis.com') blok yorum açılışı sayıp ilk `*/`'a
+    // kadar satırları boşaltıyordu; süzgeç 2026-10-08'de düzeltildi (o gün kör bölge 15 satırdı). Bu sayım süzgeçten bağımsız
+    // ikinci ölçüdür: süzgeç bir gün yine kör kalırsa o bölgeye yazılan sınırlayıcı tabloya girmeden geçemesin.
     expect((oku(SERVER).match(/rateLimit\(\{/g) ?? []).length).toBe(Object.keys(BEKLENEN).length);
   });
   it('rota modüllerinde sınırlayıcı KURULMAZ (hepsi server.ts\'te, bu çitin gördüğü yerde)', () => {

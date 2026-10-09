@@ -4,14 +4,15 @@
  * Neden var: PLAN-v2 §5 "SERT (alt fazın kendi dosyalarında = 0)" der; 6a bu ölçüyü YALNIZ kendi üç
  * dosyası için yazdı. 6b'nin üç dosyası (GenelBloklar1 · GenelBloklar3 · UrunlerRapor) için aynı ölçüyü
  * kimse yazmazsa 6b kapanışı ölçüsüz kalır (6a'daki "sahipsiz iş" boşluğunun aynısı). Bu dosya:
- *   §0c geçici kopya çiti: `rapor6a.degismez.test.ts`'in SATIR İÇİ tarayıcısı paylaşılan modülle AYNI mı
+ *   §0c kopya çiti: `rapor6a.degismez.test.ts` kendi süzgeç / desen KOPYASINI taşımıyor (modülden içe aktarıyor)
  *   §1  üç 6b dosyasında SERT 1–3 kod satırı = 0 (izin listesi mekanizması var, hedef BOŞ)
  *   §1b izin listesi disiplini (6a ile birebir; alt sınır 6c — 6b kendi satırını kendine devredemez)
  *   §2  K9: `* 0.6` uydurma maliyet üç dosyada = 0 (izin listesi YOK — kullanıcı kararı devredilemez)
  *
  * Tarayıcı `src/test/degismezTarayici.ts`'ten İÇE AKTARILIR: 6a'daki satır içi gövdeden çıkarıldı, kopya
- * yazılmadı (kök neden 2026-09-04). `rapor6a.degismez.test.ts` DÜZENLENMEDİ — 6a'nın dosyası; satır içi
- * kopyası orada geçici olarak yaşar, §0c ayrışmayı çitler, kalıcı çözüm orkestratörün (en geç 6m).
+ * yazılmadı (kök neden 2026-09-04). `rapor6a.degismez.test.ts` 2026-10-08'de aynı modüle BAĞLANDI: satır içi
+ * kopyası ve onu çitleyen §0c parite testleri kalktı; §0c artık yalnız kopyanın geri gelmediğini çitler.
+ * Dosya içeriği süzgecin KATI girişine verilir (`yorumsuz(ad, içerik)` — `ad` gerçek uzantıyla, türü seçer).
  *
  * Ölçülen taban (HEAD 5b4d2d5, bağlama ÖNCESİ, yorum süzgeçli): GB1 S1 10 · S2 13 · S3 2 (`:244` `|| 1`,
  * `:452` `* 0.6`) — GB3 S1 13 · S2 7 · S3 1 (`:387` `|| 1`; `:213` TEK satırda S1+S2) — UrunlerRapor S1 1
@@ -47,45 +48,31 @@ const UC_DOSYA = [
 ] as const;
 
 const oku = (goreli: string) => readFileSync(join(SRC, goreli), 'utf-8');
+// Dosyanın yorumsuz kod satırları — süzgecin KATI girişi. Ad ile içerik AYNI yoldan gelir (yer değiştirme /
+// yanlış uzantı olamaz); `sertIhlalleri(d, oku(d))` de aynı girişi kullanır.
+const yorumsuzDosya = (goreli: string): string[] => yorumsuz(goreli, oku(goreli));
 
 // ---------------------------------------------------------------------------
-// §0c · geçici kopya çiti (ÖN KOŞUL 2'nin bedeli)
+// §0c · kopya çiti: 6a tarayıcıyı modülden alır
 // ---------------------------------------------------------------------------
 
-// 6a'nın dosyası DÜZENLENMEDİ; tarayıcı orada satır içi kopya olarak yaşamaya devam ediyor. İki kopya
-// sessizce ayrışmasın diye 6a'nın METNİ okunur (yalnız okunur) ve `SERT` bloğundaki desen metinleri +
-// `yorumsuz` gövdesi paylaşılan modülünküyle karşılaştırılır. §0b modülü PLAN-v2 §5 listesine kilitlediği
-// için zincir kapalıdır: 6a metni ≡ modül ≡ PLAN-v2 §5. Orkestratör 6a'yı modüle bağladığında bu bölüm
-// gereksizleşir ve SİLİNİR (6m maddesi).
-describe('§0c · rapor6a.degismez.test.ts satır içi tarayıcı = paylaşılan modül (geçici kopya çiti)', () => {
-  const altiA = readFileSync(join(__dirname, 'rapor6a.degismez.test.ts'), 'utf-8');
-  const modul = readFileSync(join(SRC, 'test', 'degismezTarayici.ts'), 'utf-8');
-
-  // `/…/` sabitleri: kaçışlı çift ya da `\` ve `/` dışı karakter; kapanıştan sonra `,` veya `]` gelir.
-  const desenMetinleri = (satir: string) => [...satir.matchAll(/\/((?:\\.|[^\\\/])+)\/(?=\s*[,\]])/g)].map(e => e[1]);
-
-  it('6a satır içi `const SERT = {` bloğu hâlâ orada (bağlandıysa bu bölüm SİLİNİR)', () => {
-    expect(altiA.includes('const SERT = {')).toBe(true);
-    expect(altiA.includes('} as const;')).toBe(true);
-  });
-
-  for (const s of SINIFLAR) {
-    it(`6a ${s} desen metinleri modülle birebir`, () => {
-      const blok = altiA.slice(altiA.indexOf('const SERT = {'), altiA.indexOf('} as const;'));
-      const satirlar = blok.split('\n').filter(l => new RegExp(`^\\s*${s}:`).test(l));
-      expect(satirlar, `6a SERT bloğunda ${s} satırı`).toHaveLength(1);
-      expect(desenMetinleri(satirlar.join('\n'))).toEqual(SERT_DESENLERI[s].map(d => d.source));
-    });
-  }
-
-  it('6a `yorumsuz` gövdesi modüldekiyle birebir (boşluk düzeni hariç)', () => {
-    const govde = (metin: string, kaynak: string) => {
-      const bas = metin.indexOf('function yorumsuz(');
-      expect(bas, `${kaynak} · yorumsuz tanımı`).toBeGreaterThanOrEqual(0);
-      const son = metin.indexOf('\n}', bas);
-      return metin.slice(bas, son + 2).replace(/\s+/g, ' ');
-    };
-    expect(govde(altiA, 'rapor6a')).toBe(govde(modul, 'degismezTarayici'));
+// 6a bu tarayıcıyı 2026-10-08'e kadar SATIR İÇİ kopya olarak taşıyordu; bu bölüm o güne dek iki kopyanın
+// METNİNİ karşılaştıran beş parite testiydi (desen metinleri + `yorumsuz` gövdesi). 6a modüle bağlanınca
+// parite anlamsızlaştı ve SİLİNDİ. Kalan tek iddia: kopya GERİ GELMEZ. Kopyanın bedeli ölçüldü: süzgecin dize içi
+// kör bölgesi 2026-09-25'te bulundu ama gövde «6a ile birebir kilitli» sayıldığı için 2026-10-08'e dek düzeltilmedi.
+// 6a'nın KODU taranır (yorumları değil: başlığı kopyayı adıyla anıyor).
+describe('§0c · rapor6a.degismez.test.ts kendi süzgeç / desen KOPYASINI taşımaz', () => {
+  it('yerel `yorumsuz` / `sertIhlalleri` / `SERT` tanımı ve desen metni YOK; tarayıcı modülden içe aktarılıyor', () => {
+    const satirlar = yorumsuzDosya('components/reports/rapor6a.degismez.test.ts');
+    const yerelTanim = /\b(?:function|const|let|var)\s+(?:yorumsuz|yorumsuzParca|sertIhlalleri|SERT|SERT_DESENLERI)\b/;
+    // Desen başka bir adla kopyalanmış olabilir: modüldeki her desenin METNİ de aranır.
+    const desenMetinleri = SINIFLAR.flatMap(s => SERT_DESENLERI[s].map(d => d.source));
+    const kopya = satirlar
+      .map((kod, i) => `rapor6a.degismez.test.ts:${i + 1} ${kod.trim()}`)
+      .filter(s => yerelTanim.test(s) || desenMetinleri.some(m => s.includes(m)));
+    expect(kopya).toEqual([]);
+    const iceAktarim = satirlar.join('\n').match(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*\/test\/degismezTarayici['"]/);
+    expect((iceAktarim?.[1] ?? '').split(',').map(a => a.trim())).toEqual(expect.arrayContaining(['yorumsuz', 'sertIhlalleri']));
   });
 });
 
@@ -113,7 +100,7 @@ describe('§1 · DEĞİŞMEZ: 6b üçlüsünde SERT 1–3 = 0', () => {
     // Eşik 100'de KALIR (ölçüm: 700 / 606 / 177 dolu satır — UrunlerRapor'un payı dar, yükseltilmez).
     for (const d of UC_DOSYA) {
       expect(existsSync(join(SRC, d)), d).toBe(true);
-      const dolu = yorumsuz(oku(d)).filter(s => s.trim() !== '').length;
+      const dolu = yorumsuzDosya(d).filter(s => s.trim() !== '').length;
       expect(dolu, `${d} · yorumsuz sonrası dolu satır`).toBeGreaterThan(100);
     }
   });
@@ -174,7 +161,7 @@ const K9_DESENI = /\*\s*0\.6\b/;
 
 describe('§2 · K9: `* 0.6` uydurma maliyet üç dosyada = 0', () => {
   it('`* 0.6` kod satırı yok (yorum anması sayılmaz; izin listesi YOK)', () => {
-    const siteler = UC_DOSYA.flatMap(d => yorumsuz(oku(d))
+    const siteler = UC_DOSYA.flatMap(d => yorumsuzDosya(d)
       .map((kod, i): Ihlal => ({ dosya: d, satir: i + 1, sinif: 'S3', kod }))
       .filter(s => K9_DESENI.test(s.kod)));
     expect(siteler.map(ihlalYaz)).toEqual([]);
@@ -187,8 +174,8 @@ describe('§2 · K9: `* 0.6` uydurma maliyet üç dosyada = 0', () => {
 
 // ── §3 · 6b push-öncesi inceleme (2026-09-25) — bileşen içi kurallar, render testi olmadığı için kaynakta çitlenir ──
 describe('§3 · inceleme 2026-09-25: kapı/küme kuralları geri kaymasın', () => {
-  const gb1 = yorumsuz(oku('components/reports/genel/GenelBloklar1.tsx')).join('\n');
-  const gb3 = yorumsuz(oku('components/reports/genel/GenelBloklar3.tsx')).join('\n');
+  const gb1 = yorumsuzDosya('components/reports/genel/GenelBloklar1.tsx').join('\n');
+  const gb3 = yorumsuzDosya('components/reports/genel/GenelBloklar3.tsx').join('\n');
   it('GB1 aylık kovalar ay dönümünde yeniden kurulur (ay anahtarı memo bağımlılığında)', () => {
     expect(gb1).toMatch(/const aylar6 = useMemo\([^;]*\[orders, dil, buAy\]\)/);
     expect(gb1).toMatch(/const aylar12 = useMemo\([^;]*\[orders, dil, buAy\]\)/);

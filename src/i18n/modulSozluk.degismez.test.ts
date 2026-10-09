@@ -3,13 +3,15 @@
  *
  * ortak.degismez.test.ts ORTAK sözlüğü tüm kaynakta denetler; bu test her ÜRETİLMİŞ modül sözlüğünü
  * (src/i18n/<modul>.ts, başlığında "— <dosya> modülünün") yalnız KENDİ dosyasında denetler: kodmod
- * (scripts/modul-sozluk-kodmod.py) tekrar koşulduğunda 0 değişiklik vermeli. Yorum satırları sayılmaz —
- * kodmod da onlara dokunmaz. Yeni bir modül kapatıldığında (AccountingModule, OrdersPage…) buraya
- * ekleme gerekmez: sözlük dosyası başlığından kendini tanıtır.
+ * (scripts/modul-sozluk-kodmod.py) tekrar koşulduğunda 0 değişiklik vermeli. Yorumlar sayılmaz (ortak süzgeç:
+ * `src/test/kaynakTarama`) — kodmod da yorum satırlarına dokunmaz, ama yorumu SATIR ÖNEKİYLE tanır (`//`, `*`, `/*`):
+ * JSX metninde `*` ile başlayan KOD satırını o atlar, bu test görür. Yeni bir modül kapatıldığında
+ * (AccountingModule, OrdersPage…) buraya ekleme gerekmez: sözlük dosyası başlığından kendini tanıtır.
  */
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { kodSatirlari } from '../test/kaynakTarama';
 
 const I18N = __dirname;
 const KOK = join(__dirname, '..', '..');
@@ -44,14 +46,12 @@ describe('DEĞİŞMEZ: modül sözlüğündeki ifade modülde satır içinde yaz
   it('sözlükle birebir eşleşen satır içi çift KALMADI (yorumlar hariç)', () => {
     const suclular: string[] = [];
     for (const m of moduller) {
-      readFileSync(join(KOK, m.dosya), 'utf-8').split('\n').forEach((satir, i) => {
-        if (/^\s*(\*|\/\*|\/\/)/.test(satir)) return;
-        const kod = satir.replace(/\/\/.*$/, '');
+      for (const { n, kod } of kodSatirlari(join(KOK, m.dosya))) {
         for (const e of kod.matchAll(DESEN)) {
-          if (m.cift.has(`${ac(e[2])}\u0000${ac(e[4])}`)) suclular.push(`${m.dosya}:${i + 1} ${e[2]}/${e[4]}`);
+          if (m.cift.has(`${ac(e[2])}\u0000${ac(e[4])}`)) suclular.push(`${m.dosya}:${n} ${e[2]}/${e[4]}`);
         }
-      });
+      }
     }
     expect(suclular).toEqual([]);
-  });
+  }, 60_000);   // modül dosyaları büyüktür; ilk tarama hepsini ayrıştırır
 });

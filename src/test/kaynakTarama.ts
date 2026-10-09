@@ -1,18 +1,17 @@
 // kaynakTarama.ts — değişmez testlerinin DOSYA OKUYAN yardımcıları (2026-09-25, mikro-import-arkaplan).
 //
-// Neden var: aynı satır tarayıcısı 6 değişmez testinde satır içi kopyalanmıştı (tekKaynak, zaman,
-// currency, pdfTheme, pano/baglanti, rapor6a); `mikroImportArkaplan.degismez.test.ts` 7. kopyayı
-// yazmıştı (hakem 2026-09-25, bulgu 6 — degismez.md "YAZDIĞIN DOSYALAR" bu dosyayı istiyordu).
-// Sonraki değişmez testini yazan paylaşılan yardımcıyı burada bulur, 8. kopyayı yazmaz.
+// Neden var: aynı satır tarayıcısı değişmez testlerinde satır içi kopyalanmıştı; sonraki değişmez testini
+// yazan paylaşılan yardımcıyı burada bulur, yeni kopya yazmaz.
 //
-// Tüketici BUGÜN tek: `src/server/routes/mikroImportArkaplan.degismez.test.ts`. Öteki 6 testin buraya
-// taşınması AYRI commit (K-H) — gövdeleri birebir değil (tekKaynak/zaman/currency/pdfTheme satırı
-// yalnız başındaki `*`/`/*`/`//` ile yorum sayar: `*`'sız blok-yorum satırını KOD sayar, `https://`
-// sonrasını keser), yani taşıma o testlerin bulduğu siteleri değiştirebilir; ayrı ölçüm ister.
+// 2026-10-08: satır önekiyle yorum sayan 12 yerel tarayıcı (tekKaynak, zaman, currency, pdfTheme, pano/baglanti,
+// modulSozluk, ortak, isimAnahtari, onayDegismez, pdf.test, zamanla, trackingRoutes.test) buradaki `kodSatirlari`'na
+// bağlandı. Eski yerel süzgeçler dize / şablon / düzenli ifade içindeki çift eğik çizgiden sonraki KODU kesiyor
+// (o gün 94 kod satırı görünmüyordu), ters yönde blok yorumun yıldızsız satırlarını kod sayıyordu.
 //
-// Sınır: YALNIZ dosya okur/listeler; desen bilgisi TAŞIMAZ. Yorum süzgeci burada TANIMLANMAZ —
-// `yorumsuz` `./degismezTarayici`'ten içe aktarılır (6b'nin dosyası; üçüncü kopya YASAK — kapı:3, K-L).
-// Uygulama kodu bu dosyayı import ETMEZ; vitest yalnız `.test`/`.spec` topladığı için test sayılmaz.
+// Sınır: YALNIZ dosya okur / listeler; desen bilgisi TAŞIMAZ. Yorum süzgeci burada TANIMLANMAZ —
+// `yorumsuz` `./degismezTarayici`'ten içe aktarılır (TEK kaynak; yeni kopya YASAK). `kodSatirlari(yol)` dosya
+// adını süzgece kendisi geçirir (ad ayrıştırma türünü seçer) ve KATI girişi kullanır: ayrıştırılamayan dosya fırlatır.
+// Uygulama kodu bu dosyayı import ETMEZ; vitest yalnız `.test` / `.spec` topladığı için test sayılmaz.
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
 import { yorumsuz } from './degismezTarayici';
@@ -42,7 +41,7 @@ export function kaynakDosyalari(dizin: string): string[] {
 export interface KodSatiri { n: number; kod: string }
 
 /** Yorumsuz kod satırları; 1 tabanlı satır numarası KORUNUR (blok yorum boş satıra iner). */
-export const kodSatirlari = (yol: string): KodSatiri[] => yorumsuz(oku(yol)).map((kod, i) => ({ n: i + 1, kod }));
+export const kodSatirlari = (yol: string): KodSatiri[] => yorumsuz(yol, oku(yol)).map((kod, i) => ({ n: i + 1, kod }));
 
 export interface Suclu { site: string; kod: string }
 

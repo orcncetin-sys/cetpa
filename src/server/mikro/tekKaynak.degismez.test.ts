@@ -12,21 +12,20 @@
  *     e-posta/telefon/VKN saat başı `''` ile siliniyordu.
  *   • `crons.ts` stok eşlemesi `|| sku` / `|| 'ADET'` ile elle düzeltilmiş ad/birimi eziyordu.
  *
- * Yorum satırları sayılmaz (kod-hariç süzgeç) — düzeltmenin GEREKÇESİ yorumda eski
- * kalıbı alıntılayabilmeli, yoksa taşınan bilgi silinir.
+ * Yorumlar sayılmaz (kod-hariç süzgeç) — düzeltmenin GEREKÇESİ yorumda eski
+ * kalıbı alıntılayabilmeli, yoksa taşınan bilgi silinir. Süzgeç ortaktır
+ * (`src/test/kaynakTarama` → `degismezTarayici.yorumsuz`); satır önekine bakan yerel
+ * kopya 2026-10-08'de kalktı (adres dizesindeki çift eğik çizgiden sonraki KODU kesiyor,
+ * yıldızla başlamayan blok yorum satırını kod sayıyordu).
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { kodSatirlari } from '../../test/kaynakTarama';
 
 const KOK = join(__dirname, '..', '..');            // → src/
 const oku = (gore: string) => join(KOK, gore);
 
-/** Kod satırları: tam yorum satırı ve satır sonu `// …` çıkarılır. */
-function kodSatirlari(p: string): Array<{ n: number; kod: string }> {
-  return readFileSync(p, 'utf-8').split('\n')
-    .map((s, i) => ({ n: i + 1, kod: /^\s*(\*|\/\*|\/\/)/.test(s) ? '' : s.replace(/\/\/.*$/, '') }));
-}
 const suclu = (dosyalar: string[], desen: RegExp): string[] => {
   const out: string[] = [];
   for (const p of dosyalar) for (const { n, kod } of kodSatirlari(p)) if (desen.test(kod)) out.push(`${p.split('/src/')[1]}:${n}`);

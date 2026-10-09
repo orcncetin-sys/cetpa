@@ -224,8 +224,7 @@ function smtpAyarlari(ortam: NodeJS.ProcessEnv, kendiAdresleri: readonly string[
     // http://localhost yapar, geliştirme makinesinde APP_URL yoktur — ikisi de aynı makinedeki posta sunucusuna
     // kimliksiz teslim yapıp deneme taleplerini gerçek iletisim@ kutusuna gönderirdi (inceleme 2026-10-09).
     // Kimlikli kip bilinçli yapılandırmadır, bu kurala tabi değil. Hazırlıkta yeşil görünüm için MAGAZA_BILDIRIM=kapali.
-    // `\/{2}`: satır tabanlı yorum süzgeci (degismezTarayici) regex içindeki `//`'i yorum sanıyor.
-    if (!/^https:\/{2}/i.test(oku('APP_URL'))) eksik.push('APP_URL');
+    if (!/^https:\/\//i.test(oku('APP_URL'))) eksik.push('APP_URL');
   }
   // Yazılmış ama e-posta biçiminde olmayan alıcı da «eksik»tir (gönderim zaten reddedilirdi).
   if (!isValidEmail(alici)) eksik.push('MAGAZA_BILDIRIM_ALICI');

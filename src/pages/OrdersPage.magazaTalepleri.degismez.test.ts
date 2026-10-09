@@ -22,7 +22,7 @@ import { SRC_KOK, kaynakDosyalari, gorece } from '../test/kaynakTarama';
 
 const YOL = join(__dirname, 'OrdersPage.tsx');
 const ham = readFileSync(YOL, 'utf-8');
-const kod = yorumsuz(ham).join('\n');
+const kod = yorumsuz(gorece(YOL), ham).join('\n');
 const adet = (metin: string, parca: string): number => metin.split(parca).length - 1;
 
 describe('OrdersPage — mağaza talepleri: yetki kapısı, abonelik, sekme durumu (kaynak dilimi)', () => {
@@ -60,7 +60,7 @@ describe('OrdersPage — mağaza talepleri: yetki kapısı, abonelik, sekme duru
     expect(adet(kod, "const [seciliKaynak, setOrderSourceTab] = useState<'cetpa' | 'mikro' | 'magaza'>(() => magazaIlkKaynakSekmesi(window.location.search, magazaYetkili));")).toBe(1);
     expect(kod).not.toMatch(/useState<'cetpa' \| 'mikro'>/);
     // `?kaynak=magaza` kuralının kendisi kancanın dosyasında, saf işlevde (davranış testi: hooks/useMagazaTalepleri.test.ts).
-    const kanca = yorumsuz(readFileSync(join(SRC_KOK, 'hooks', 'useMagazaTalepleri.ts'), 'utf-8')).join('\n');
+    const kanca = yorumsuz('src/hooks/useMagazaTalepleri.ts', readFileSync(join(SRC_KOK, 'hooks', 'useMagazaTalepleri.ts'), 'utf-8')).join('\n');
     expect(kanca).toContain("return yetkili && new URLSearchParams(arama).get('kaynak') === 'magaza' ? 'magaza' : 'cetpa';");
   });
 
@@ -261,27 +261,27 @@ describe('OrdersPage — sipariş listesi bloğu: «magaza»da sipariş gövdesi
 describe('mağaza talepleri — abonelik TEK yerde (App.tsx\'e dinleyici eklenmez, tembel listeye girmez)', () => {
   const uretim = kaynakDosyalari(SRC_KOK);
   const iceren = (desen: RegExp): string[] =>
-    uretim.filter(yol => desen.test(yorumsuz(readFileSync(yol, 'utf-8')).join('\n'))).map(gorece).sort();
+    uretim.filter(yol => desen.test(yorumsuz(gorece(yol), readFileSync(yol, 'utf-8')).join('\n'))).map(gorece).sort();
 
   it('kancayı çağıran TEK üretim dosyası OrdersPage', () => {
     expect(uretim.length).toBeGreaterThan(200);   // tarama gerçekten kaynak ağacını geziyor
     expect(iceren(/useMagazaTalepleri\(/)).toEqual(['src/hooks/useMagazaTalepleri.ts', 'src/pages/OrdersPage.tsx']);
-  });
+  }, 60_000);
 
   it('koleksiyona istemciden abone olan TEK dosya kancanın kendisi', () => {
     expect(iceren(/collection\(db, (MAGAZA_TALEP_KOLEKSIYONU|'magazaTalepleri')\)/)).toEqual(['src/hooks/useMagazaTalepleri.ts']);
-  });
+  }, 60_000);
 
   it('App.tsx ve tembel koleksiyon listesi koleksiyonu ANMAZ', () => {
     for (const yol of [join(SRC_KOK, 'App.tsx'), join(SRC_KOK, 'lib', 'lazyCollections.ts')]) {
-      const k = yorumsuz(readFileSync(yol, 'utf-8')).join('\n');
+      const k = yorumsuz(gorece(yol), readFileSync(yol, 'utf-8')).join('\n');
       expect(k.length).toBeGreaterThan(500);
       expect(k, gorece(yol)).not.toMatch(/magazaTalepleri|MAGAZA_TALEP_KOLEKSIYONU|useMagazaTalepleri/);
     }
   });
 
   it('etiket iki dilde sözlükte: «Mağaza Talepleri» / «Store Requests»', () => {
-    const sozluk = yorumsuz(readFileSync(join(SRC_KOK, 'i18n', 'orders.ts'), 'utf-8')).join('\n');
+    const sozluk = yorumsuz('src/i18n/orders.ts', readFileSync(join(SRC_KOK, 'i18n', 'orders.ts'), 'utf-8')).join('\n');
     expect(adet(sozluk, "magaza_talepleri: 'Mağaza Talepleri',")).toBe(1);
     expect(adet(sozluk, "magaza_talepleri: 'Store Requests',")).toBe(1);
     expect(sozluk.indexOf("magaza_talepleri: 'Mağaza Talepleri',")).toBeLessThan(sozluk.indexOf("magaza_talepleri: 'Store Requests',"));

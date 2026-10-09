@@ -9,8 +9,9 @@
  * 2. `onayAcikMi()`: kendiliğinden açılan onaylar (await zincirinin sonunda) başka bir onayın yerine geçmemeli.
  */
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { kodSatirlari } from '../test/kaynakTarama';
 import { confirmAction, onayAcikMi, _registerConfirmListener, _resolveConfirm } from './confirm';
 
 const KOK = resolve(__dirname, '..');
@@ -23,16 +24,15 @@ function tsxDosyalari(dizin: string): string[] {
 }
 
 describe('DEĞİŞMEZ: onConfirm gövdesi olay nesnesinden değer OKUMAZ', () => {
-  it('src altında `onConfirm: … e.target.value` kalıbı yok (yorum satırları hariç)', () => {
+  it('src altında `onConfirm: … e.target.value` kalıbı yok (yorumlar hariç)', () => {
     const suclular: string[] = [];
     for (const dosya of tsxDosyalari(KOK)) {
-      readFileSync(dosya, 'utf8').split('\n').forEach((satir, i) => {
-        if (/^\s*(\/\/|\*|\{\/\*)/.test(satir)) return;                         // yorum: kuralı ANLATAN satırlar serbest
-        if (/onConfirm\s*:/.test(satir) && /\be(v|vent)?\.target\.value\b/.test(satir)) suclular.push(`${dosya.replace(KOK + '/', '')}:${i + 1}`);
-      });
+      for (const { n, kod } of kodSatirlari(dosya)) {                             // yorumsuz: kuralı ANLATAN satırlar serbest
+        if (/onConfirm\s*:/.test(kod) && /\be(v|vent)?\.target\.value\b/.test(kod)) suclular.push(`${dosya.replace(KOK + '/', '')}:${n}`);
+      }
     }
     expect(suclular).toEqual([]);
-  });
+  }, 60_000);   // src altındaki bütün .tsx (testler dâhil) tek testte ayrıştırılır
 });
 
 describe('onayAcikMi — açık onay penceresi var mı', () => {

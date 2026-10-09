@@ -139,7 +139,7 @@ const OKUMA_YOLLARI = ['get /api/db/:coll', 'get /api/db/:coll/:id'];
 
 /** /api/db ↔ `isAllowed` bağlantısının İHLALLERİ; boş dizi = bağlantı sağlam. */
 function apiDbIhlalleri(sunucuMetni: string): string[] {
-  const satirlar = yorumsuz(sunucuMetni).map(kod => kod.trimEnd());
+  const satirlar = yorumsuz('server.ts', sunucuMetni).map(kod => kod.trimEnd());
   const ROTA = /^\s*app\.(get|post|put|patch|delete)\('(\/api\/db\/:coll[^']*)'/;
   const HERHANGI_ROTA = /^\s*app\.(get|post|put|patch|delete|use|all)\(/;
   /** Rota satırından bir SONRAKİ `app.<yöntem>(` satırına kadarki gövde. */
@@ -258,7 +258,7 @@ describe('/api/db → isAllowed bağlantısı (server.ts kaynak çiti)', () => {
 // ── Kural tablosu (derinlemesine savunma) ───────────────────────────────────────────────────────────────────────────
 describe('rbac.ts — magazaTalepleri kuralının kendisi', () => {
   // Yorumlar süzülür; yorumdan kalan boş satırlar da atılır (aradaki açıklama satırları sırayı gizlemesin).
-  const kaynak = yorumsuz(oku(join(SRC_KOK, 'lib', 'rbac.ts'))).map(k => k.trimEnd()).filter(k => k !== '').join('\n');
+  const kaynak = yorumsuz('src/lib/rbac.ts', oku(join(SRC_KOK, 'lib', 'rbac.ts'))).map(k => k.trimEnd()).filter(k => k !== '').join('\n');
 
   it('kural tablosunda yazma listesi BOŞ: sınıf kapısı bir gün kalksa bile kural kimseye yazma vermez', () => {
     // Davranış testi bunu GÖREMEZ (kapı yazmayı kural tablosuna bakmadan kapatır) — o yüzden kaynakta kilitli.

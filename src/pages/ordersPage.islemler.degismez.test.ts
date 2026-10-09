@@ -8,8 +8,10 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { yorumsuz } from '../test/degismezTarayici';
 
-const kod = yorumsuz(readFileSync(join(__dirname, 'OrdersPage.tsx'), 'utf-8')).join('\n');
-const crm = yorumsuz(readFileSync(join(__dirname, 'CRMPage.tsx'), 'utf-8')).join('\n');
+// Sayfanın yorumsuz kodu — süzgecin KATI girişi; ad gerçek uzantısıyla verilir (`.tsx` → TSX olarak ayrışır).
+const sayfaKodu = (ad: string): string => yorumsuz(ad, readFileSync(join(__dirname, ad), 'utf-8')).join('\n');
+const kod = sayfaKodu('OrdersPage.tsx');
+const crm = sayfaKodu('CRMPage.tsx');
 
 describe('Siparişler — işlem düğmeleri', () => {
   it('"Edit" / "Delete" sabit İngilizce etiket YOK (dil sözlüğünden)', () => {

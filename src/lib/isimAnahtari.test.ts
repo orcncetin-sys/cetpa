@@ -2,8 +2,9 @@
  * isimAnahtari.test.ts — Türkçe isim eşleştirme anahtarı + "kopya kalmadı" değişmezi (4/n, 2026-09-05).
  */
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'fs';
+import { readdirSync, statSync } from 'fs';
 import { join } from 'path';
+import { kodSatirlari } from '../test/kaynakTarama';
 import { isimAnahtari, firmaAnahtari } from './isimAnahtari';
 
 describe('isimAnahtari', () => {
@@ -21,7 +22,7 @@ describe('isimAnahtari', () => {
 });
 
 describe('firmaAnahtari — company önce, name yalnız company boşsa', () => {
-  it("elle lead {name:'Ahmet Yılmaz', company:'Beta İnşaat'} → 'beta i̇nşaat' değil 'beta inşaat'; Mikro {name=company='BETA İNŞAAT'} ile eşleşir; şahıs carisi 'AHMET YILMAZ' ile EŞLEŞMEZ", () => {
+  it("elle lead {name:'Ahmet Yılmaz', company:'Beta İnşaat'} → 'beta i\u0307nşaat' değil 'beta inşaat'; Mikro {name=company='BETA İNŞAAT'} ile eşleşir; şahıs carisi 'AHMET YILMAZ' ile EŞLEŞMEZ", () => {
     expect(firmaAnahtari({ name: 'Ahmet Yılmaz', company: 'Beta İnşaat' })).toBe('beta inşaat');
     expect(firmaAnahtari({ name: 'BETA İNŞAAT', company: 'BETA İNŞAAT' })).toBe('beta inşaat');
     expect(firmaAnahtari({ name: 'AHMET YILMAZ', company: 'AHMET YILMAZ' })).not.toBe(firmaAnahtari({ name: 'Ahmet Yılmaz', company: 'Beta İnşaat' }));
@@ -38,12 +39,10 @@ describe('DEĞİŞMEZ: sunucu tarafında isim anahtarı elle üretilmiyor', () =
     expect(dosyalar.length).toBeGreaterThan(5);
     const suclular: string[] = [];
     for (const p of dosyalar) {
-      readFileSync(p, 'utf-8').split('\n').forEach((satir, i) => {
-        const kod = satir.replace(/\/\/.*$/, '');
-        if (/^\s*\*/.test(satir)) return;
-        if (/nameKey\s*=.*\.to(Locale)?LowerCase\(/.test(kod)) suclular.push(`${p.split('/src/')[1]}:${i + 1}`);
-      });
+      for (const { n, kod } of kodSatirlari(p)) {
+        if (/nameKey\s*=.*\.to(Locale)?LowerCase\(/.test(kod)) suclular.push(`${p.split('/src/')[1]}:${n}`);
+      }
     }
     expect(suclular).toEqual([]);
-  });
+  }, 60_000);   // src/server'ın tamamı tek testte ayrıştırılır
 });

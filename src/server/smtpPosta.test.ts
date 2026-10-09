@@ -547,7 +547,7 @@ describe('smtpDogrula — toplam süre sınırı', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('ÇİT: sertifika doğrulaması kapatılmaz (kaynak taraması, yorumlar süzülür)', () => {
   const HAM = readFileSync(join(__dirname, 'smtpPosta.ts'), 'utf-8');
-  const KOD = yorumsuz(HAM).join('\n');
+  const KOD = yorumsuz('smtpPosta.ts', HAM).join('\n');
   // `rejectUnauthorized` yalnız AÇIKÇA `true` ile yazılabilir; başka her biçim (false, değişken, kısa yazım) ihlaldir.
   const DOGRULAMA_KAPATAN = /rejectUnauthorized(?!\s*:\s*true\b)/;
   const YASAK: Array<[string, RegExp]> = [
@@ -564,7 +564,7 @@ describe('ÇİT: sertifika doğrulaması kapatılmaz (kaynak taraması, yorumlar
   });
 
   it.each(YASAK)('%s — kodda YOK', (_ad, desen) => {
-    const suclular = yorumsuz(HAM).map((satir, i) => (desen.test(satir) ? `smtpPosta.ts:${i + 1}: ${satir.trim()}` : '')).filter(Boolean);
+    const suclular = yorumsuz('smtpPosta.ts', HAM).map((satir, i) => (desen.test(satir) ? `smtpPosta.ts:${i + 1}: ${satir.trim()}` : '')).filter(Boolean);
     expect(suclular, suclular.join('\n')).toEqual([]);
   });
 
@@ -573,7 +573,7 @@ describe('ÇİT: sertifika doğrulaması kapatılmaz (kaynak taraması, yorumlar
   });
 
   it('`ignoreTLS` YALNIZ yerel kipin seçenek işlevinde, tek kez; kimlikli kipin seçeneklerinde ve başka hiçbir yerde yok', () => {
-    const satirlar = yorumsuz(HAM);
+    const satirlar = yorumsuz('smtpPosta.ts', HAM);
     const gecenler = satirlar.map((satir, i) => (/ignoreTLS/.test(satir) ? i : -1)).filter((i) => i >= 0);
     expect(gecenler).toHaveLength(1);
     const yerelBas = satirlar.findIndex((s) => /^function yerelSecenekleri\(/.test(s));

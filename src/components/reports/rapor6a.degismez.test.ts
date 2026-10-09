@@ -14,108 +14,27 @@
  *
  * Hafıza dersi ("assertion kendi yorumuna takıldı ×5"): üç dosyada desenleri ANAN yorumlar VAR
  * ve kalacak (ölçüm 2026-09-20: 11 anma — useReportsData 57/143/193/353/401, RaporlarPage
- * 353/772/904, GenelOzet 273/342/575). Süzgeç satır başına bakmakla yetinmez; §0 onu sınar.
+ * 353/772/904, GenelOzet 273/342/575). Süzgeç satır başına bakmakla yetinmez; onu
+ * `src/test/degismezTarayici.test.ts` §0 sınar.
+ *
+ * TARAYICI PAYLAŞILAN MODÜLDEN (2026-10-08): yorum süzgeci, SERT 1–3 desenleri ve `sertIhlalleri`
+ * `src/test/degismezTarayici.ts`'ten İÇE AKTARILIR. Bu dosya onları SATIR İÇİ taşıyordu; 6b tarayıcıyı
+ * modüle çıkarınca (2026-09-24) burada kopya kalmış, `rapor6b` §0c parite testleriyle çitlenmişti.
+ * Kopya ve §0 "tarayıcı kendini sınar" vakaları (1–7) kalktı: aynı yedi vaka o gün
+ * `degismezTarayici.test.ts` §0'a taşınmıştı. Kopyanın geri gelmediğini `rapor6b` §0c çitler.
+ * SERT 4 (`.total === 'number'`, `.stock`, `itemCostTRY(`) bu teste GİRMEZ — 6d/6h'nin işi.
+ *
+ * Süzgecin İKİ girişi var: dosya içeriği KATI girişe verilir (`yorumsuz(ad, içerik)`, `sertIhlalleri`
+ * — ayrıştırılamayan dosyada fırlatır), fikstür `yorumsuzParca`'ya. `ad` ayrıştırma türünü seçer
+ * (`.tsx` → TSX): dosya gerçek uzantısıyla adlandırılır.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
 import { join } from 'path';
+import { SINIFLAR, sertIhlalleri, ihlalYaz, yorumsuz, yorumsuzParca, type Ihlal } from '../../test/degismezTarayici';
 
 const SRC = join(__dirname, '..', '..');                 // src/components/reports → src
 const RAPOR_DIZIN = join(SRC, 'utils', 'rapor');
-
-// ---------------------------------------------------------------------------
-// §0 · Saf tarayıcılar
-// ---------------------------------------------------------------------------
-
-// yorumsuz(): yorumları atar, SATIR NUMARASINI korur — blok yorumu ve JSX süslü-yorumu
-// boş satırlara iner, satır sonu `// …` kesilir, `https://` KESİLMEZ (öncesinde `:` var).
-// (Bilerek JSDoc değil: içine yorum kapatıcı yazılamayacağı için açıklama sakatlanırdı.)
-function yorumsuz(icerik: string): string[] {
-  return icerik
-    .replace(/\/\*[\s\S]*?\*\//g, blok => blok.replace(/[^\n]/g, ''))
-    .split('\n')
-    .map(satir => satir.replace(/(^|[^:])\/\/.*$/, '$1'));
-}
-
-// Desenler PLAN-v2 §5 SERT 1–3 ile BİREBİR (kopya; "iyileştirme" yok).
-// SERT 4 (`.total === 'number'`, `.stock`, `itemCostTRY(`) bu teste GİRMEZ — 6d/6h'nin işi.
-const SERT = {
-  S1: [/(\|\||\?\?)\s*0\b/],
-  S2: [/Math\.max\([^;]*,\s*1\)/, /Math\.max\(\s*[234]\s*,/, /Math\.max\([^;]*,\s*[234]\)/],
-  S3: [/(\?\?|\|\|)\s*(1|5|999)\b/, /\*\s*0\.6\b/, /Number\(e\.target\.value\)/],
-} as const;
-type Sinif = keyof typeof SERT;
-const SINIFLAR: Sinif[] = ['S1', 'S2', 'S3'];
-
-interface Ihlal { dosya: string; satir: number; sinif: Sinif; kod: string }
-
-function sertIhlalleri(dosya: string, icerik: string): Ihlal[] {
-  const bulgular: Ihlal[] = [];
-  yorumsuz(icerik).forEach((kod, i) => {
-    for (const sinif of SINIFLAR) {
-      if (SERT[sinif].some(desen => desen.test(kod))) bulgular.push({ dosya, satir: i + 1, sinif, kod });
-    }
-  });
-  return bulgular;
-}
-
-const yaz = (i: Ihlal) => `${i.dosya}:${i.satir} ${i.kod.trim().slice(0, 140)}`;
-
-describe('§0 · tarayıcı kendini sınar (mutasyon-ayırt-edici fikstürler)', () => {
-  const sinif = (metin: string, s: Sinif) => sertIhlalleri('f.ts', metin).filter(i => i.sinif === s).length;
-
-  it('1 · kodda `|| 0` / `?? 0` / şablon içi `?? 0` → S1', () => {
-    expect(sinif('const v = o.totalPrice || 0;', 'S1')).toBe(1);
-    expect(sinif('const v = x ?? 0;', 'S1')).toBe(1);
-    expect(sinif('const s = `${pct ?? 0}%`;', 'S1')).toBe(1);
-  });
-
-  it('2 · yorumdaki anma SAYILMAZ (satır başı, satır sonu, blok, JSX)', () => {
-    expect(sinif('// eski hesap: const v = o.totalPrice || 0;', 'S1')).toBe(0);
-    expect(sinif('const a = b; // eski || 0', 'S1')).toBe(0);
-    expect(sinif(['/**', ' * eski payda: toplam ?? 1 idi', ' */'].join('\n'), 'S3')).toBe(0);
-    expect(sinif('        {/* || 0 */}', 'S1')).toBe(0);
-  });
-
-  it('3 · blok yorumdan SONRAKİ ihlalin satır numarası kaymaz', () => {
-    const fikstur = ['/* satır 1', '   satır 2', '   satır 3 */', 'const x = y || 0;'].join('\n');
-    const bulgular = sertIhlalleri('f.ts', fikstur);
-    expect(bulgular.map(i => `${i.satir}:${i.sinif}`)).toEqual(['4:S1']);
-  });
-
-  it('4 · URL içindeki `//` kodu yutmaz', () => {
-    expect(sinif("const u = 'https://x.test' || 0;", 'S1')).toBe(1);
-  });
-
-  it('5 · S3 kelime sınırı: `?? 5`/`|| 1`/`?? 999`/`* 0.6`/`Number(e.target.value)` yakalanır, komşuları değil', () => {
-    expect(sinif('const t = i.lowStockThreshold ?? 5;', 'S3')).toBe(1);
-    expect(sinif('const p = payda || 1;', 'S3')).toBe(1);
-    expect(sinif('const k = gun ?? 999;', 'S3')).toBe(1);
-    expect(sinif('const c = li.price * 0.6;', 'S3')).toBe(1);
-    expect(sinif('onChange={e => setX(Number(e.target.value))}', 'S3')).toBe(1);
-    expect(sinif('const a = x || 10;', 'S3')).toBe(0);
-    expect(sinif('const b = x ?? 15;', 'S3')).toBe(0);
-    expect(sinif('const c = li.price * 0.65;', 'S3')).toBe(0);
-  });
-
-  it('6 · S2 yalnız hayalet çubuk tabanını yakalar', () => {
-    expect(sinif('const o = Math.max(...xs, 1);', 'S2')).toBe(1);
-    expect(sinif('const o = Math.max(2, p);', 'S2')).toBe(1);
-    expect(sinif('const o = Math.max(h, 2);', 'S2')).toBe(1);
-    expect(sinif('const o = Math.max(a, b);', 'S2')).toBe(0);
-    expect(sinif('const o = Math.min(h, 100);', 'S2')).toBe(0);
-  });
-
-  it('7 · meşru başlatıcılar/karşılaştırmalar TAKILMAZ', () => {
-    for (const metin of [
-      'const acc = { count: 0, rev: 0 };',
-      'const t = xs.reduce((s, x) => s + x, 0);',
-      'const [n, setN] = useState(0);',
-      'if (i === 0) return null;',
-      'const bicim = { ondalik: kesirli ? 1 : 0 };',
-    ]) expect(sertIhlalleri('f.ts', metin), metin).toEqual([]);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // §1 · DEĞİŞMEZ: 6a'nın üç dosyasında SERT 1–3 kod satırı = 0
@@ -145,14 +64,14 @@ describe('§1 · DEĞİŞMEZ: 6a üçlüsünde SERT 1–3 = 0', () => {
     for (const d of UC_DOSYA) {
       const yol = join(SRC, d);
       expect(existsSync(yol), d).toBe(true);
-      const dolu = yorumsuz(readFileSync(yol, 'utf-8')).filter(s => s.trim() !== '').length;
+      const dolu = yorumsuz(d, readFileSync(yol, 'utf-8')).filter(s => s.trim() !== '').length;
       expect(dolu, `${d} · yorumsuz sonrası dolu satır`).toBeGreaterThan(100);
     }
   });
 
   for (const sinif of SINIFLAR) {
     it(`${sinif} ihlali yok`, () => {
-      expect(ihlaller.filter(i => i.sinif === sinif && !izinli(i)).map(yaz)).toEqual([]);
+      expect(ihlaller.filter(i => i.sinif === sinif && !izinli(i)).map(ihlalYaz)).toEqual([]);
     });
   }
 });
@@ -170,7 +89,7 @@ describe('§1b · izin listesi disiplini (liste boşken de kural yaşar)', () =>
   it('bayat izin YOK: her girdi hâlâ TEK bir ihlalle eşleşir', () => {
     for (const z of IZIN_LISTESI) {
       const eslesen = ihlaller.filter(i => i.dosya === z.dosya && i.kod.includes(z.parca));
-      expect(eslesen.map(yaz), `${z.dosya} · ${z.parca}`).toHaveLength(1);
+      expect(eslesen.map(ihlalYaz), `${z.dosya} · ${z.parca}`).toHaveLength(1);
     }
   });
 
@@ -193,8 +112,10 @@ function kaynakDosyalari(dizin: string): string[] {
 
 // `export type` / `export interface` MUAF: derlemede silinir (ölü ÇALIŞAN kod olamaz) ve
 // dönüş tipi olarak adıyla içe aktarılmadan da tüketilir — zorunlu tutmak sahte kırmızı üretir.
-function disaAcilanDegerler(icerik: string): string[] {
-  const metin = yorumsuz(icerik).join('\n');
+// Girdi SÜZÜLMÜŞ satırlardır; süzme çağırandadır, çünkü giriş türünü yalnız çağıran bilir
+// (rapor modülü → `yorumsuz`, §2b fikstürü → `yorumsuzParca`).
+function disaAcilanDegerler(satirlar: readonly string[]): string[] {
+  const metin = satirlar.join('\n');
   const adlar: string[] = [];
   for (const e of metin.matchAll(/^export\s+(?:async\s+)?(?:function\*?|const|let|class|enum)\s+([A-Za-z_$][\w$]*)/gm)) {
     adlar.push(e[1]);
@@ -259,8 +180,8 @@ for (const yol of existsSync(SRC) ? kaynakDosyalari(SRC) : []) {
 const raporExportlari = raporModulleri.map(ad => ({
   ad,
   slug: ad.replace(/\.ts$/, ''),
-  icerik: readFileSync(join(RAPOR_DIZIN, ad), 'utf-8'),
-})).map(m => ({ ...m, adlar: disaAcilanDegerler(m.icerik) }));
+  satirlar: yorumsuz(`utils/rapor/${ad}`, readFileSync(join(RAPOR_DIZIN, ad), 'utf-8')),   // yorumsuz kod (katı giriş)
+})).map(m => ({ ...m, adlar: disaAcilanDegerler(m.satirlar) }));
 
 describe('§2 · `utils/rapor/*` export → ÜRETİM tüketicisi', () => {
   it('dalga 1 modülleri üretildi (K4 `musteri` dahil)', () => {
@@ -270,7 +191,7 @@ describe('§2 · `utils/rapor/*` export → ÜRETİM tüketicisi', () => {
   it('yasak dışa aktarım biçimi YOK (varil / default / yapı bozumlu)', () => {
     const suclular: string[] = [];
     for (const m of raporExportlari) {
-      const metin = yorumsuz(m.icerik).join('\n');
+      const metin = m.satirlar.join('\n');
       if (/^export\s+default\b/m.test(metin)) suclular.push(`rapor/${m.ad}: export default`);
       if (/^export\s+\*\s+from\b/m.test(metin)) suclular.push(`rapor/${m.ad}: export * from`);
       if (/^export\s*\{[^}]*\}\s*from\b/m.test(metin)) suclular.push(`rapor/${m.ad}: export { … } from`);
@@ -322,7 +243,10 @@ describe('§2 · `utils/rapor/*` export → ÜRETİM tüketicisi', () => {
 });
 
 describe('§2b · export/import çözümleyicileri kendini sınar', () => {
-  it('dışa açılan DEĞERLER bulunur, `type`/`interface` MUAF', () => {
+  it('dışa açılan DEĞERLER bulunur, `type`/`interface` MUAF, yorumdaki `export` SAYILMAZ', () => {
+    // Son üç satır (blok yorum içinde satır başı `export`) süzgeç çağrısını sabitler: çözümleyici artık
+    // kendisi süzmüyor; süzmeyi unutan çağıran yorumdaki örneği dışa açılmış sayardı (mutasyon:
+    // `yorumsuzParca` yerine ham satırlar → `blokta` listeye girer, kırmızı).
     const fikstur = [
       'export function a() {}',
       'export async function b() {}',
@@ -331,8 +255,11 @@ describe('§2b · export/import çözümleyicileri kendini sınar', () => {
       'export { d, e as f };',
       'export type T = string;',
       'export interface I { x: number }',
+      '/*',
+      'export function blokta() {}',
+      '*/',
     ].join('\n');
-    expect(disaAcilanDegerler(fikstur)).toEqual(['a', 'b', 'C', 'd', 'f']);
+    expect(disaAcilanDegerler(yorumsuzParca('fikstur.ts', fikstur))).toEqual(['a', 'b', 'C', 'd', 'f']);
   });
 
   it('çok satırlı içe aktarım çözülür, `type` atılır, `e as g` → e', () => {

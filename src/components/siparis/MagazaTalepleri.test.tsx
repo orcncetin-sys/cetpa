@@ -489,7 +489,7 @@ describe('MagazaYeniRozeti — sekme düğmesindeki «yeni» sayacı', () => {
 
 // ── Kaynak çiti (yorumlar süzülür) ──────────────────────────────────────────────────────────────────────────────────
 describe('MagazaTalepleri.tsx — kaynak çiti', () => {
-  const kod = yorumsuz(readFileSync(join(__dirname, 'MagazaTalepleri.tsx'), 'utf-8')).join('\n');
+  const kod = yorumsuz('MagazaTalepleri.tsx', readFileSync(join(__dirname, 'MagazaTalepleri.tsx'), 'utf-8')).join('\n');
 
   it('kaynak okunuyor (çit boş metne bakmasın)', () => { expect(kod.length).toBeGreaterThan(5000); });
 

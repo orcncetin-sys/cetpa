@@ -3,11 +3,12 @@
  *
  * Kaynak-tarayan test: `currentLanguage === 'tr' ? 'İptal' : 'Cancel'` gibi, iki dili de sözlükle birebir
  * eşleşen satır içi çift ekran kodunda kalmamalı — `oc(currentLanguage).iptal` kullanılır. Yalnız sözlükte
- * OLAN çiftler denetlenir; tek geçen ifadeler serbesttir. Yorumlar sayılmaz.
+ * OLAN çiftler denetlenir; tek geçen ifadeler serbesttir. Yorumlar sayılmaz (ortak süzgeç: `src/test/kaynakTarama`).
  */
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'fs';
+import { readdirSync, statSync } from 'fs';
 import { join } from 'path';
+import { kodSatirlari } from '../test/kaynakTarama';
 import { ORTAK } from './ortak';
 
 const KOK = join(__dirname, '..');
@@ -28,14 +29,12 @@ describe('DEĞİŞMEZ: ortak sözlükteki ifade satır içinde yazılmaz', () =>
   it('sözlükle birebir eşleşen satır içi çift KALMADI', () => {
     const suclular: string[] = [];
     for (const p of dosyalar) {
-      readFileSync(p, 'utf-8').split('\n').forEach((satir, i) => {
-        if (/^\s*(\*|\/\*|\/\/)/.test(satir)) return;
-        const kod = satir.replace(/\/\/.*$/, '');
+      for (const { n, kod } of kodSatirlari(p)) {
         for (const m of kod.matchAll(DESEN)) {
-          if (cift.has(`${m[2].replace(/\\'/g, "'")} ${m[4].replace(/\\'/g, "'")}`)) suclular.push(`${p.split('/src/')[1]}:${i + 1} ${m[2]}/${m[4]}`);
+          if (cift.has(`${m[2].replace(/\\'/g, "'")} ${m[4].replace(/\\'/g, "'")}`)) suclular.push(`${p.split('/src/')[1]}:${n} ${m[2]}/${m[4]}`);
         }
-      });
+      }
     }
     expect(suclular).toEqual([]);
-  });
+  }, 60_000);   // server ve i18n dışındaki bütün kaynak tek testte ayrıştırılır
 });
