@@ -38,12 +38,14 @@ vi.mock('nodemailer', async (asliniGetir) => {
 });
 
 import { createTransport } from 'nodemailer';
-import { smtpYapilandirmasi, smtpHataSinifi, smtpGonder, smtpDogrula, SMTP_DOGRULAMA_SINIRI_MS } from './smtpPosta';
+import { smtpYapilandirmasi, smtpHataSinifi, smtpGonder, smtpDogrula, SMTP_DOGRULAMA_SINIRI_MS, MAGAZA_BILDIRIM_VARSAYILAN_ALICI, yerelAdresMi, kendiIpv4Adresleri, hamSmtpOturumu, teslimSondasi, adaySec, yerelAdaylar } from './smtpPosta';
 import { MAGAZA_BILDIRIM_HATA_SINIFLARI } from '../lib/magazaTalep';
 
 const uretici = vi.mocked(createTransport);
 
-const ANAHTARLAR = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'MAGAZA_BILDIRIM_ALICI'] as const;
+const ANAHTARLAR = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'MAGAZA_BILDIRIM_ALICI', 'MAGAZA_BILDIRIM'] as const;
+/** Yerel kipin ön koşulu: üretim adresi. Testler yerel kipi varsayılan olarak bu adresle kurar. */
+const URETIM_ADRESI = 'https://app.cetpa.com.tr';
 const TAM = {
   SMTP_HOST: 'posta.ornek.test',
   SMTP_USER: 'bildirim@ornek.test',
@@ -53,8 +55,9 @@ const TAM = {
 const ILETI = { konu: 'Yeni mağaza talebi: T261008-5Y9P', html: '<p>gövde</p>', metin: 'gövde' };
 
 /** Süreç ortamını kur: listelenmeyen SMTP anahtarı TANIMSIZ olur (geliştirici makinesindeki değer sızmasın). */
-function ortamKur(degerler: Partial<Record<typeof ANAHTARLAR[number], string>>): void {
+function ortamKur(degerler: Partial<Record<typeof ANAHTARLAR[number] | 'APP_URL', string>>): void {
   for (const ad of ANAHTARLAR) vi.stubEnv(ad, degerler[ad]);
+  vi.stubEnv('APP_URL', 'APP_URL' in degerler ? degerler.APP_URL : URETIM_ADRESI);
 }
 
 interface SahteTasiyici {
@@ -88,64 +91,142 @@ afterEach(() => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe('smtpYapilandirmasi — tek kaynak, yalnız anahtar ADI', () => {
-  it('hiçbir anahtar yokken dört zorunlu ad eksik; SMTP_PORT ve SMTP_FROM zorunlu DEĞİL', () => {
-    expect(smtpYapilandirmasi({})).toEqual({ tamam: false, eksik: ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'MAGAZA_BILDIRIM_ALICI'] });
+  // Kendi adresleri testte SABİT verilir (gerçek arayüzler okunmasın): `KENDI` makinenin adresi sayılır.
+  const KENDI = ['10.20.30.40'];
+  const yap = (ortam: Record<string, string | undefined>) => smtpYapilandirmasi({ APP_URL: URETIM_ADRESI, ...ortam }, KENDI);
+
+  it('hiçbir anahtar yokken YEREL kip: tamam, eksik yok (aynı makinedeki posta sunucusuna kimliksiz teslim)', () => {
+    expect(yap({})).toEqual({ tamam: true, eksik: [], kip: 'yerel' });
   });
 
-  it('dört zorunlu anahtar varken tamam (kapı ve gönderici verilmeden)', () => {
-    expect(smtpYapilandirmasi({ ...TAM })).toEqual({ tamam: true, eksik: [] });
+  it('kullanıcı + parola (+ sunucu) varken KİMLİKLİ kip: tamam (kapı, gönderici ve alıcı verilmeden)', () => {
+    expect(yap({ ...TAM })).toEqual({ tamam: true, eksik: [], kip: 'kimlikli' });
+    expect(yap({ ...TAM, MAGAZA_BILDIRIM_ALICI: undefined })).toEqual({ tamam: true, eksik: [], kip: 'kimlikli' });
   });
 
-  it.each(['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'MAGAZA_BILDIRIM_ALICI'] as const)('%s tek başına eksikse yalnız o ad döner', (ad) => {
+  it.each(['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'] as const)('kimlikli kipte %s tek başına eksikse yalnız o ad döner', (ad) => {
     const ortam: Record<string, string | undefined> = { ...TAM };
     delete ortam[ad];
-    expect(smtpYapilandirmasi(ortam)).toEqual({ tamam: false, eksik: [ad] });
-    expect(smtpYapilandirmasi({ ...TAM, [ad]: '' })).toEqual({ tamam: false, eksik: [ad] });
+    expect(yap(ortam)).toEqual({ tamam: false, eksik: [ad], kip: 'kimlikli' });
+    expect(yap({ ...TAM, [ad]: '' })).toEqual({ tamam: false, eksik: [ad], kip: 'kimlikli' });
   });
 
-  it('yalnız boşluktan oluşan sunucu / kullanıcı / alıcı eksik sayılır', () => {
-    expect(smtpYapilandirmasi({ ...TAM, SMTP_HOST: '   ', SMTP_USER: '\t', MAGAZA_BILDIRIM_ALICI: ' ' }).eksik)
-      .toEqual(['SMTP_HOST', 'SMTP_USER', 'MAGAZA_BILDIRIM_ALICI']);
+  it('kimliğin yalnız YARISI yazılmışsa yerel kipe düşülmez: YALNIZ boş kalan kimlik anahtarı bildirilir (sunucu değil)', () => {
+    expect(yap({ SMTP_USER: 'bildirim@ornek.test' })).toEqual({ tamam: false, eksik: ['SMTP_PASS'], kip: 'kimlikli' });
+    expect(yap({ SMTP_PASS: 'p' })).toEqual({ tamam: false, eksik: ['SMTP_USER'], kip: 'kimlikli' });
+    expect(yap({ SMTP_HOST: '127.0.0.1', SMTP_PASS: 'p' })).toEqual({ tamam: false, eksik: ['SMTP_USER'], kip: 'kimlikli' });
+  });
+
+  it('yerel kip YALNIZ üretim adresiyle (APP_URL https): yoksa / http ise eksik APP_URL — hazırlık ve geliştirme gerçek kutuya posta atmasın; kimlikli ve kapalı kip etkilenmez', () => {
+    for (const adres of [undefined, '', 'http://localhost:5601', 'app.cetpa.com.tr', 'ftp://x.test', 'https:/x.test']) {
+      expect(yap({ APP_URL: adres }), String(adres)).toEqual({ tamam: false, eksik: ['APP_URL'], kip: 'yerel' });
+      expect(yap({ APP_URL: adres, ...TAM }), String(adres)).toEqual({ tamam: true, eksik: [], kip: 'kimlikli' });
+      expect(yap({ APP_URL: adres, MAGAZA_BILDIRIM: 'kapali' }), String(adres)).toEqual({ tamam: false, eksik: [], kip: 'kapali' });
+    }
+    expect(yap({ APP_URL: 'HTTPS://app.cetpa.com.tr/' })).toEqual({ tamam: true, eksik: [], kip: 'yerel' });
+    expect(yap({ APP_URL: ' https://x.test ' })).toEqual({ tamam: true, eksik: [], kip: 'yerel' });   // kırpılır
+    expect(yap({ APP_URL: 'http://x', SMTP_HOST: 'uzak.test', SMTP_PORT: '465' })).toEqual({ tamam: false, eksik: ['SMTP_USER', 'SMTP_PASS', 'SMTP_PORT', 'APP_URL'], kip: 'yerel' });
+  });
+
+  it('yalnız boşluktan oluşan parola kip kararında «yazılmamış» sayılır (USER ile simetrik); kimlikli kipte parola DEĞERİ kırpılmaz', () => {
+    expect(yap({ SMTP_PASS: '  ' })).toEqual({ tamam: true, eksik: [], kip: 'yerel' });
+    expect(yap({ ...TAM, SMTP_PASS: '  ' })).toEqual({ tamam: true, eksik: [], kip: 'kimlikli' });
+  });
+
+  it('KAPALI kip: MAGAZA_BILDIRIM=kapali → tamam yanlış, eksik yok; büyük / küçük harf ve boşluk fark etmez; başka değer kipi değiştirmez', () => {
+    for (const d of ['kapali', 'KAPALI', ' Kapali ']) expect(yap({ MAGAZA_BILDIRIM: d, ...TAM }), d).toEqual({ tamam: false, eksik: [], kip: 'kapali' });
+    expect(yap({ MAGAZA_BILDIRIM: 'acik' })).toEqual({ tamam: true, eksik: [], kip: 'yerel' });
+    expect(yap({ MAGAZA_BILDIRIM: '' })).toEqual({ tamam: true, eksik: [], kip: 'yerel' });
+  });
+
+  it('yerel kipte 465 ve 587 KABUL EDİLMEZ (örtük TLS / kimlik isteyen kapı): eksik SMTP_PORT; kimlikli kipte ikisi de geçerli', () => {
+    for (const kapi of ['465', '587']) {
+      expect(yap({ SMTP_PORT: kapi }), kapi).toEqual({ tamam: false, eksik: ['SMTP_PORT'], kip: 'yerel' });
+      expect(yap({ ...TAM, SMTP_PORT: kapi }), kapi).toEqual({ tamam: true, eksik: [], kip: 'kimlikli' });
+    }
+  });
+
+  it('yerel kipte SMTP_HOST yalnız YEREL adres olabilir: uzak sunucu kimlik ister (USER + PASS eksik)', () => {
+    expect(yap({ SMTP_HOST: 'posta.ornek.test' })).toEqual({ tamam: false, eksik: ['SMTP_USER', 'SMTP_PASS'], kip: 'yerel' });
+    expect(yap({ SMTP_HOST: 'mail.cetpa.com.tr' })).toEqual({ tamam: false, eksik: ['SMTP_USER', 'SMTP_PASS'], kip: 'yerel' });
+    for (const yerel of ['127.0.0.1', 'localhost', 'LOCALHOST', '::1', '[::1]', '10.20.30.40', ' 127.0.0.1 ']) {
+      expect(yap({ SMTP_HOST: yerel }), yerel).toEqual({ tamam: true, eksik: [], kip: 'yerel' });
+    }
+  });
+
+  it('yerelAdresMi: geri döngü adları / adresleri ve kendi adresleri; başka her şey uzak', () => {
+    for (const a of ['127.0.0.1', '127.0.0.2', '127.255.0.9', 'localhost', 'LocalHost', '::1', '[::1]', '::ffff:127.0.0.1', '10.20.30.40']) expect(yerelAdresMi(a, KENDI), a).toBe(true);
+    for (const a of ['10.20.30.41', 'mail.cetpa.com.tr', '', 'localhost.ornek.test', '0.0.0.0', '128.0.0.1', '1127.0.0.1']) expect(yerelAdresMi(a, KENDI), a).toBe(false);
+  });
+
+  it('kendiIpv4Adresleri: iç olmayan IPv4 adresleri (Node 18+ dizge aile, eski sayı aile); geri döngü ve IPv6 girmez', () => {
+    const arayuzler = {
+      lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }, { address: '::1', family: 'IPv6', internal: true }],
+      en0: [{ address: '10.20.30.40', family: 'IPv4', internal: false }, { address: 'fe80::1', family: 'IPv6', internal: false }],
+      eski: [{ address: '192.168.1.5', family: 4, internal: false }],
+      bos: undefined,
+    } as unknown as ReturnType<typeof import('node:os').networkInterfaces>;
+    expect(kendiIpv4Adresleri(arayuzler)).toEqual(['10.20.30.40', '192.168.1.5']);
+    expect(Array.isArray(kendiIpv4Adresleri())).toBe(true);   // gerçek arayüzler: en azından fırlatmaz
+  });
+
+  it('yalnız boşluktan oluşan değer boş sayılır: yarım kimlikte yalnız kullanıcı eksik; boş alıcı varsayılana düşer', () => {
+    expect(yap({ ...TAM, SMTP_HOST: '   ', SMTP_USER: '\t', MAGAZA_BILDIRIM_ALICI: ' ' })).toEqual({ tamam: false, eksik: ['SMTP_USER'], kip: 'kimlikli' });
+    expect(yap({ ...TAM, SMTP_HOST: '   ' })).toEqual({ tamam: false, eksik: ['SMTP_HOST'], kip: 'kimlikli' });
   });
 
   it.each(['iletisim', 'iletisim@cetpa', 'ilet isim@cetpa.com.tr', 'a@b.com,c@d.com', '@cetpa.com.tr'])(
-    'alıcı geçerli e-posta değilse («%s») eksik sayılır', (alici) => {
-      expect(smtpYapilandirmasi({ ...TAM, MAGAZA_BILDIRIM_ALICI: alici })).toEqual({ tamam: false, eksik: ['MAGAZA_BILDIRIM_ALICI'] });
+    'alıcı geçerli e-posta değilse («%s») eksik sayılır (iki kipte de)', (alici) => {
+      expect(yap({ ...TAM, MAGAZA_BILDIRIM_ALICI: alici })).toEqual({ tamam: false, eksik: ['MAGAZA_BILDIRIM_ALICI'], kip: 'kimlikli' });
+      expect(yap({ MAGAZA_BILDIRIM_ALICI: alici })).toEqual({ tamam: false, eksik: ['MAGAZA_BILDIRIM_ALICI'], kip: 'yerel' });
     });
 
-  it.each([undefined, '', '   ', '465', '587', ' 587 ', '25', '1', '65535'])('kapı «%s» kabul edilir', (kapi) => {
-    expect(smtpYapilandirmasi({ ...TAM, SMTP_PORT: kapi })).toEqual({ tamam: true, eksik: [] });
+  it('varsayılan alıcı iletisim@cetpa.com.tr (kullanıcı kararı 2026-10-09)', () => {
+    expect(MAGAZA_BILDIRIM_VARSAYILAN_ALICI).toBe('iletisim@cetpa.com.tr');
+  });
+
+  it.each([undefined, '', '   ', '465', '587', ' 587 ', '25', '1', '65535'])('kapı «%s» kabul edilir (yerel kipte 465 / 587 hariç)', (kapi) => {
+    expect(yap({ ...TAM, SMTP_PORT: kapi })).toEqual({ tamam: true, eksik: [], kip: 'kimlikli' });
+    const yerelYasak = ['465', '587'].includes((kapi ?? '').trim());
+    expect(yap({ SMTP_PORT: kapi })).toEqual(yerelYasak ? { tamam: false, eksik: ['SMTP_PORT'], kip: 'yerel' } : { tamam: true, eksik: [], kip: 'yerel' });
   });
 
   it.each(['0', '65536', '999999', '465.0', '4e2', '-1', '+587', 'abc', '587abc', '0x1D1', '5 87'])(
-    'kapı «%s» bozuk → «eksik» (sessizce 465\'e dönülmez)', (kapi) => {
-      expect(smtpYapilandirmasi({ ...TAM, SMTP_PORT: kapi })).toEqual({ tamam: false, eksik: ['SMTP_PORT'] });
+    'kapı «%s» bozuk → «eksik» (sessizce varsayılana dönülmez; iki kipte de)', (kapi) => {
+      expect(yap({ ...TAM, SMTP_PORT: kapi })).toEqual({ tamam: false, eksik: ['SMTP_PORT'], kip: 'kimlikli' });
+      expect(yap({ SMTP_PORT: kapi })).toEqual({ tamam: false, eksik: ['SMTP_PORT'], kip: 'yerel' });
     });
 
   it('dönen değer yalnız AD taşır — parola, kullanıcı, sunucu, bozuk kapı / alıcı DEĞERİ sızmaz', () => {
-    const sonuc = smtpYapilandirmasi({ SMTP_HOST: 'gizli-sunucu.test', SMTP_USER: 'gizli-kullanici', SMTP_PASS: 'gizli-parola', SMTP_PORT: 'gizli-kapi', SMTP_FROM: 'gizli-gonderici', MAGAZA_BILDIRIM_ALICI: 'gizli-alici' });
-    expect(sonuc).toEqual({ tamam: false, eksik: ['SMTP_PORT', 'MAGAZA_BILDIRIM_ALICI'] });
+    const sonuc = yap({ SMTP_HOST: 'gizli-sunucu.test', SMTP_USER: 'gizli-kullanici', SMTP_PASS: 'gizli-parola', SMTP_PORT: 'gizli-kapi', SMTP_FROM: 'gizli-gonderici', MAGAZA_BILDIRIM_ALICI: 'gizli-alici' });
+    expect(sonuc).toEqual({ tamam: false, eksik: ['SMTP_PORT', 'MAGAZA_BILDIRIM_ALICI'], kip: 'kimlikli' });
     expect(JSON.stringify(sonuc)).not.toMatch(/gizli/);
     for (const ad of sonuc.eksik) expect(ANAHTARLAR).toContain(ad);
+    const yerel = yap({ SMTP_HOST: 'gizli-uzak.test', SMTP_PORT: 'gizli-kapi' });
+    expect(yerel).toEqual({ tamam: false, eksik: ['SMTP_USER', 'SMTP_PASS', 'SMTP_PORT'], kip: 'yerel' });
+    expect(JSON.stringify(yerel)).not.toMatch(/gizli/);
   });
 
-  it('parametresiz çağrı süreç ortamını okur', () => {
-    expect(smtpYapilandirmasi().tamam).toBe(false);
+  it('parametresiz çağrı süreç ortamını ve gerçek arayüzleri okur', () => {
+    expect(smtpYapilandirmasi()).toEqual({ tamam: true, eksik: [], kip: 'yerel' });
     ortamKur({ ...TAM });
-    expect(smtpYapilandirmasi()).toEqual({ tamam: true, eksik: [] });
+    expect(smtpYapilandirmasi()).toEqual({ tamam: true, eksik: [], kip: 'kimlikli' });
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe('yapılandırma eksikken bağlantı DENENMEZ', () => {
   const EKSIK_DURUMLAR: Array<[string, Partial<Record<typeof ANAHTARLAR[number], string>>]> = [
-    ['hiçbir anahtar yok', {}],
-    ['sunucu yok', { ...TAM, SMTP_HOST: '' }],
-    ['kullanıcı yok', { ...TAM, SMTP_USER: '' }],
-    ['parola yok', { ...TAM, SMTP_PASS: '' }],
-    ['alıcı yok', { ...TAM, MAGAZA_BILDIRIM_ALICI: '' }],
-    ['alıcı e-posta değil', { ...TAM, MAGAZA_BILDIRIM_ALICI: 'iletisim' }],
-    ['kapı bozuk', { ...TAM, SMTP_PORT: '587abc' }],
+    ['sunucu yok (kimlikli)', { ...TAM, SMTP_HOST: '' }],
+    ['kullanıcı yok (parola var)', { ...TAM, SMTP_USER: '' }],
+    ['parola yok (kullanıcı var)', { ...TAM, SMTP_PASS: '' }],
+    ['yalnız kullanıcı', { SMTP_USER: 'bildirim@ornek.test' }],
+    ['yalnız parola', { SMTP_PASS: 'p' }],
+    ['uzak sunucu, kimlik yok (yerel kip uzak adres almaz)', { SMTP_HOST: 'posta.ornek.test' }],
+    ['alıcı e-posta değil (kimlikli)', { ...TAM, MAGAZA_BILDIRIM_ALICI: 'iletisim' }],
+    ['alıcı e-posta değil (yerel)', { MAGAZA_BILDIRIM_ALICI: 'iletisim' }],
+    ['kapı bozuk (kimlikli)', { ...TAM, SMTP_PORT: '587abc' }],
+    ['kapı bozuk (yerel)', { SMTP_PORT: '587abc' }],
     ['kapı aralık dışı', { ...TAM, SMTP_PORT: '70000' }],
   ];
 
@@ -346,7 +427,10 @@ describe('smtpHataSinifi — kapalı küme (ölçülen hata biçimleri)', () => 
     ['kimlik bilgisi verilmedi (forceAuth)', hata('Authentication info was not provided', { code: 'ENOAUTH' }), 'kimlik'],
     // alıcı / zarf reddi — KALICI: 5xx ya da yanıt kodsuz
     ['alıcı reddi 550', hata("Can't send mail - all recipients were rejected: 550 5.1.1 kutu yok", { code: 'EENVELOPE', command: 'RCPT TO', responseCode: 550, rejected: ['x@ornek.test'] }), 'alici-reddi'],
-    ['gönderen reddi 550', hata('Mail command failed: 550 5.7.1', { code: 'EENVELOPE', command: 'MAIL FROM', responseCode: 550 }), 'alici-reddi'],
+    // gönderen reddi — KALICI: MAIL FROM'a 5xx (MailEnable 551 «requires authentication before sending mail from a locally hosted domain»)
+    ['gönderen reddi 550', hata('Mail command failed: 550 5.7.1', { code: 'EENVELOPE', command: 'MAIL FROM', responseCode: 550 }), 'gonderen-reddi'],
+    ['gönderen reddi 551 (MailEnable Address spoofing)', hata('Mail command failed: 551 This mail server requires authentication before sending mail from a locally hosted domain', { code: 'EENVELOPE', command: 'MAIL FROM', responseCode: 551 }), 'gonderen-reddi'],
+    ['MAIL FROM yanıt kodsuz (yapılandırma) → alıcı / zarf reddi kalır', hata('Mail command failed', { code: 'EENVELOPE', command: 'MAIL FROM' }), 'alici-reddi'],
     ['kaynaktan: alıcı tanımsız (yanıt kodu YOK — yapılandırma hatası, kalıcı)', hata("Can't send mail - no recipients defined", { code: 'EENVELOPE', command: 'API' }), 'alici-reddi'],
     ['kodsuz ama RCPT TO\'ya 5xx', hata('550 kutu yok', { command: 'RCPT TO', responseCode: 550 }), 'alici-reddi'],
     // GEÇİCİ (4xx) yanıt — kalıcı sınıfa GİRMEZ: `diger` olur, kuyruk yeniden dener
@@ -359,7 +443,7 @@ describe('smtpHataSinifi — kapalı küme (ölçülen hata biçimleri)', () => 
     // SINIR satırları (sentetik: aralığın uçlarını sınar, sunucudan ölçülmedi)
     ['sınır: zarf reddi 400 → diger', hata('Mail command failed: 400', { code: 'EENVELOPE', command: 'MAIL FROM', responseCode: 400 }), 'diger'],
     ['sınır: zarf reddi 499 → diger', hata('Mail command failed: 499', { code: 'EENVELOPE', command: 'MAIL FROM', responseCode: 499 }), 'diger'],
-    ['sınır: zarf reddi 500 → alici-reddi', hata('Mail command failed: 500', { code: 'EENVELOPE', command: 'MAIL FROM', responseCode: 500 }), 'alici-reddi'],
+    ['sınır: zarf reddi 500 (MAIL FROM) → gonderen-reddi', hata('Mail command failed: 500', { code: 'EENVELOPE', command: 'MAIL FROM', responseCode: 500 }), 'gonderen-reddi'],
     ['sınır: zarf reddi 399 → alici-reddi (4xx değil)', hata('Mail command failed: 399', { code: 'EENVELOPE', command: 'MAIL FROM', responseCode: 399 }), 'alici-reddi'],
     ['sınır: kimlik 499 → diger', hata('Invalid login: 499', { code: 'EAUTH', command: 'AUTH LOGIN', responseCode: 499 }), 'diger'],
     ['sınır: kimlik 500 → kimlik', hata('Invalid login: 500', { code: 'EAUTH', command: 'AUTH LOGIN', responseCode: 500 }), 'kimlik'],
@@ -400,7 +484,7 @@ describe('smtpHataSinifi — kapalı küme (ölçülen hata biçimleri)', () => 
     expect(smtpHataSinifi(girdi)).toBe(beklenen);
   });
 
-  it('her sonuç sözleşmedeki kapalı kümeden; beş sınıfın beşi de üretilebiliyor', () => {
+  it('her sonuç sözleşmedeki kapalı kümeden; altı sınıfın altısı da üretilebiliyor', () => {
     const gorulen = new Set(DURUMLAR.map(([, girdi]) => smtpHataSinifi(girdi)));
     for (const sinif of gorulen) expect(MAGAZA_BILDIRIM_HATA_SINIFLARI).toContain(sinif);
     expect([...gorulen].sort()).toEqual([...MAGAZA_BILDIRIM_HATA_SINIFLARI].sort());
@@ -470,7 +554,6 @@ describe('ÇİT: sertifika doğrulaması kapatılmaz (kaynak taraması, yorumlar
     ['rejectUnauthorized (true dışında)', DOGRULAMA_KAPATAN],
     ['NODE_TLS_REJECT_UNAUTHORIZED', /NODE_TLS_REJECT_UNAUTHORIZED/],
     ['checkServerIdentity (ad doğrulamasını değiştirir)', /checkServerIdentity/],
-    ['ignoreTLS', /ignoreTLS/],
     ['opportunisticTLS (düz metne düşüş)', /opportunisticTLS/],
   ];
 
@@ -487,6 +570,22 @@ describe('ÇİT: sertifika doğrulaması kapatılmaz (kaynak taraması, yorumlar
 
   it('doğrulama AÇIKÇA açık yazılmış (süreç geneli kapatma ortam değişkenini ezer)', () => {
     expect(KOD.match(/rejectUnauthorized\s*:\s*true\b/g)).toHaveLength(1);
+  });
+
+  it('`ignoreTLS` YALNIZ yerel kipin seçenek işlevinde, tek kez; kimlikli kipin seçeneklerinde ve başka hiçbir yerde yok', () => {
+    const satirlar = yorumsuz(HAM);
+    const gecenler = satirlar.map((satir, i) => (/ignoreTLS/.test(satir) ? i : -1)).filter((i) => i >= 0);
+    expect(gecenler).toHaveLength(1);
+    const yerelBas = satirlar.findIndex((s) => /^function yerelSecenekleri\(/.test(s));
+    const yerelSon = satirlar.findIndex((s, i) => i > yerelBas && /^\}/.test(s));
+    expect(yerelBas).toBeGreaterThan(0);
+    expect(gecenler[0]).toBeGreaterThan(yerelBas);
+    expect(gecenler[0]).toBeLessThan(yerelSon);
+    expect(satirlar[gecenler[0]].trim()).toBe('ignoreTLS: true,');
+    // Yerel seçenek işlevinde kimlik bilgisi ve TLS ayarı YOK (kimlik bilgisi düz oturumda taşınamaz).
+    const yerelGovde = satirlar.slice(yerelBas, yerelSon + 1).join('\n');
+    expect(yerelGovde).not.toMatch(/auth|tls:|requireTLS|rejectUnauthorized/);
+    expect(yerelGovde).toMatch(/secure: false/);
   });
 
   it('çit kendi yorumuna takılmıyor: yasak adlar modülün AÇIKLAMASINDA geçiyor, kodunda değil', () => {
@@ -527,7 +626,12 @@ describe('ÇİT: dağıtım ortam şablonu (deploy/windows/env.example)', () => 
   });
 
   it('eksik sayılabilen her anahtar şablonda var (tek kaynak: smtpYapilandirmasi)', () => {
-    const eksikOlabilen = new Set([...smtpYapilandirmasi({}).eksik, ...smtpYapilandirmasi({ ...TAM, SMTP_PORT: 'bozuk' }).eksik]);
+    const KENDI: string[] = [];
+    const eksikOlabilen = new Set([
+      ...smtpYapilandirmasi({ SMTP_USER: 'u' }, KENDI).eksik, ...smtpYapilandirmasi({ SMTP_PASS: 'p' }, KENDI).eksik,
+      ...smtpYapilandirmasi({ SMTP_USER: 'u', SMTP_PASS: 'p' }, KENDI).eksik,
+      ...smtpYapilandirmasi({ ...TAM, SMTP_PORT: 'bozuk', MAGAZA_BILDIRIM_ALICI: 'bozuk' }, KENDI).eksik,
+    ]);
     expect([...eksikOlabilen].sort()).toEqual(['MAGAZA_BILDIRIM_ALICI', 'SMTP_HOST', 'SMTP_PASS', 'SMTP_PORT', 'SMTP_USER']);
     for (const ad of eksikOlabilen) expect(SATIRLAR, ad).toContain(`${ad}=`);
   });
@@ -549,7 +653,8 @@ interface SahteSunucu {
   kapat: () => Promise<void>;
 }
 
-function sahteSmtpSunucusu(o: { starttls?: { key: string; cert: string } } = {}): Promise<SahteSunucu> {
+/** `mailYaniti(satir)`: MAIL FROM satırına verilecek yanıt (varsayılan `250 OK`); `rcptYaniti`: RCPT TO yanıtı. */
+function sahteSmtpSunucusu(o: { starttls?: { key: string; cert: string }; mailYaniti?: (satir: string) => string; rcptYaniti?: string } = {}): Promise<SahteSunucu> {
   const gordu: string[] = [];
   const soketler = new Set<net.Socket>();
 
@@ -579,7 +684,9 @@ function sahteSmtpSunucusu(o: { starttls?: { key: string; cert: string } } = {})
           return;
         }
         else if (komut === 'AUTH') { asama = 'kullanici'; yaz('334 VXNlcm5hbWU6'); }
-        else if (komut === 'MAIL' || komut === 'RCPT' || komut === 'RSET') yaz('250 OK');
+        else if (komut === 'MAIL') yaz(o.mailYaniti ? o.mailYaniti(satir) : '250 OK');
+        else if (komut === 'RCPT') yaz(o.rcptYaniti ?? '250 OK');
+        else if (komut === 'RSET') yaz('250 OK');
         else if (komut === 'DATA') { asama = 'veri'; yaz('354 devam'); }
         else if (komut === 'QUIT') { yaz('221 hosca kal'); sok.end(); }
         else yaz('500 bilinmeyen komut');
@@ -690,5 +797,238 @@ describe('GERÇEK soket — yerel sahte SMTP sunucusu, gerçek nodemailer', () =
     } finally {
       uyari.mockRestore();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('YEREL kip — seçenekler (sahte taşıyıcı)', () => {
+  const KENDI = ['10.20.30.40'];
+  const yerelGonder = (ortam: Partial<Record<typeof ANAHTARLAR[number], string>> = {}) => { ortamKur(ortam); return smtpGonder(ILETI, { kendiAdresleri: KENDI }); };
+
+  it('hiçbir anahtar yokken: tek aday OLSAYDI sonda yok; birden çok adayda sonda — burada SMTP_HOST verilince tek aday, 127.0.0.1:25, kimliksiz, TLS yok', async () => {
+    const t = sahteTasiyici();
+    expect(await yerelGonder({ SMTP_HOST: '127.0.0.1' })).toEqual({ ok: true });
+    expect(uretici).toHaveBeenCalledTimes(1);
+    const s = secenekler();
+    expect(s).toEqual({
+      host: '127.0.0.1', port: 25, secure: false, ignoreTLS: true,
+      connectionTimeout: 3_000, greetingTimeout: 5_000, socketTimeout: 15_000, dnsTimeout: 10_000,
+      disableFileAccess: true, disableUrlAccess: true,
+    });
+    for (const yok of ['auth', 'tls', 'requireTLS', 'opportunisticTLS', 'logger', 'debug'] as const) expect(s[yok], yok).toBeUndefined();
+    // Gönderen ve alıcı varsayılanı iletisim@cetpa.com.tr; alıcı nesne biçiminde.
+    expect(t.sendMail.mock.calls[0][0]).toMatchObject({ from: MAGAZA_BILDIRIM_VARSAYILAN_ALICI, to: { name: '', address: MAGAZA_BILDIRIM_VARSAYILAN_ALICI } });
+    expect(t.sendMail.mock.calls[0][0].envelope).toBeUndefined();
+  });
+
+  it.each(['localhost', 'LOCALHOST', '::1', '[::1]', '127.0.0.9', '::ffff:127.0.0.1'])('geri döngü yazımı «%s» 127.0.0.1 literaline iner (DNS sorgusu ve ::1 yok)', async (host) => {
+    sahteTasiyici();
+    expect(await yerelGonder({ SMTP_HOST: host })).toEqual({ ok: true });
+    expect(secenekler().host).toBe('127.0.0.1');
+  });
+
+  it('kendi adresi SMTP_HOST olarak verilince aynen kullanılır; SMTP_FROM verilmişse gönderen odur; kapı verilmişse o', async () => {
+    const t = sahteTasiyici();
+    expect(await yerelGonder({ SMTP_HOST: '10.20.30.40', SMTP_PORT: '2525', SMTP_FROM: 'CETPA Mağaza <magaza@cetpa.com.tr>', MAGAZA_BILDIRIM_ALICI: 'satis@cetpa.com.tr' })).toEqual({ ok: true });
+    expect(secenekler()).toMatchObject({ host: '10.20.30.40', port: 2525, secure: false, ignoreTLS: true });
+    expect(t.sendMail.mock.calls[0][0]).toMatchObject({ from: 'CETPA Mağaza <magaza@cetpa.com.tr>', to: { name: '', address: 'satis@cetpa.com.tr' } });
+  });
+
+  it('uzak sunucu + kimliksiz ve kapalı kip: taşıyıcı ÜRETİLMEZ', async () => {
+    expect(await yerelGonder({ SMTP_HOST: 'posta.ornek.test' })).toEqual({ ok: false, yapilandirilmamis: true });
+    expect(await yerelGonder({ MAGAZA_BILDIRIM: 'kapali' })).toEqual({ ok: false, yapilandirilmamis: true });
+    expect(await smtpDogrula({ kendiAdresleri: KENDI })).toEqual({ ok: false, yapilandirilmamis: true });
+    expect(uretici).not.toHaveBeenCalled();
+  });
+
+  it('MAIL FROM reddi (gonderen-reddi) → aynı adaya BİR KEZ boş zarf göndereniyle yeniden; başlık From değişmez; ikinci de reddederse sınıf gonderen-reddi', async () => {
+    const uyari = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const ret = () => { throw hata('Mail command failed: 551 requires authentication', { code: 'EENVELOPE', command: 'MAIL FROM', responseCode: 551 }); };
+      let sayac = 0;
+      const t1 = sahteTasiyici({ sendMail: async () => { sayac += 1; if (sayac === 1) ret(); return {}; } });
+      expect(await yerelGonder({ SMTP_HOST: '127.0.0.1' })).toEqual({ ok: true });
+      expect(t1.sendMail).toHaveBeenCalledTimes(2);
+      expect(t1.sendMail.mock.calls[0][0].envelope).toBeUndefined();
+      expect(t1.sendMail.mock.calls[1][0]).toMatchObject({ from: MAGAZA_BILDIRIM_VARSAYILAN_ALICI, envelope: { from: '', to: [MAGAZA_BILDIRIM_VARSAYILAN_ALICI] } });
+      expect(uretici).toHaveBeenCalledTimes(1);   // aynı aday, aynı taşıyıcı
+      expect(uyari).toHaveBeenCalledTimes(1);
+      expect(String(uyari.mock.calls[0][0])).not.toMatch(/551|cetpa/);
+      // İkinci deneme de reddedilirse: sınıf gonderen-reddi, üçüncü deneme YOK.
+      uretici.mockReset();
+      const t2 = sahteTasiyici({ sendMail: async () => ret() });
+      expect(await yerelGonder({ SMTP_HOST: '127.0.0.1' })).toEqual({ ok: false, sinif: 'gonderen-reddi' });
+      expect(t2.sendMail).toHaveBeenCalledTimes(2);
+    } finally {
+      uyari.mockRestore();
+    }
+  });
+
+  it('kimlikli kipte MAIL FROM reddi için boş zarf denemesi YOK (tek sendMail, gonderen-reddi)', async () => {
+    ortamKur({ ...TAM });
+    const t = sahteTasiyici({ sendMail: async () => { throw hata('551 Sender address is not valid for your login', { code: 'EENVELOPE', command: 'MAIL FROM', responseCode: 551 }); } });
+    expect(await smtpGonder(ILETI)).toEqual({ ok: false, sinif: 'gonderen-reddi' });
+    expect(t.sendMail).toHaveBeenCalledTimes(1);
+  });
+
+  it('başka her gönderim hatasında (alıcı reddi, bağlantı) yeniden deneme ve ikinci aday YOK', async () => {
+    const t = sahteTasiyici({ sendMail: async () => { throw hata('550 kutu yok', { code: 'EENVELOPE', command: 'RCPT TO', responseCode: 550 }); } });
+    expect(await yerelGonder({ SMTP_HOST: '127.0.0.1' })).toEqual({ ok: false, sinif: 'alici-reddi' });
+    expect(t.sendMail).toHaveBeenCalledTimes(1);
+    expect(uretici).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('aday seçimi — sonda posta göndermez, ulaşılabilen ilk aday; gönderim hatası aday değiştirmez', () => {
+  it('adaySec: ilk 220 veren aday; hiçbiri vermezse null; en çok 3 aday denenir', async () => {
+    const denenen: string[] = [];
+    const sonda = async (host: string): Promise<{ ulasildi: boolean; yanitlar: number[] }> => { denenen.push(host); return { ulasildi: host === 'c', yanitlar: [] }; };
+    expect(await adaySec(['a', 'b', 'c', 'd'], 25, sonda)).toBe('c');
+    expect(denenen).toEqual(['a', 'b', 'c']);
+    denenen.length = 0;
+    expect(await adaySec(['a', 'b', 'x', 'c'], 25, sonda)).toBeNull();
+    expect(denenen).toEqual(['a', 'b', 'x']);
+  });
+
+  it('yerelAdaylar: 127.0.0.1 önce, herkese açık adres özel ağdan ÖNCE (kararlı), geri döngü tekrar etmez, en çok 3', () => {
+    expect(yerelAdaylar(['172.20.0.1', '172.21.0.1', '78.111.111.185', '10.0.0.5'])).toEqual(['127.0.0.1', '78.111.111.185', '172.20.0.1']);
+    expect(yerelAdaylar(['10.0.0.5', '192.168.1.9', '172.16.0.1'])).toEqual(['127.0.0.1', '10.0.0.5', '192.168.1.9']);
+    expect(yerelAdaylar(['127.0.0.1', '127.0.0.2', '203.0.113.7'])).toEqual(['127.0.0.1', '203.0.113.7']);
+    expect(yerelAdaylar([])).toEqual(['127.0.0.1']);
+  });
+
+  it('aday sırası: 127.0.0.1, sonra herkese açık adres, sonra özel ağ (sanal bağdaştırıcılar 3 sınırı yüzünden dış adresi düşürmesin)', async () => {
+    const denenen: string[] = [];
+    const sonda = async (host: string): Promise<{ ulasildi: boolean; yanitlar: number[] }> => { denenen.push(host); return { ulasildi: false, yanitlar: [] }; };
+    // Sıralama kararlıdır: özel adresler kendi aralarındaki arayüz sırasını korur.
+    ortamKur({ SMTP_PORT: '2525' });
+    expect(await smtpGonder(ILETI, { kendiAdresleri: ['172.20.0.1', '172.21.0.1', '78.111.111.185', '10.0.0.5'] })).toEqual({ ok: false, sinif: 'baglanti' });
+    void sonda;
+    expect(uretici).not.toHaveBeenCalled();
+    expect(await adaySec(['172.20.0.1', '78.111.111.185'], 25, sonda)).toBeNull();
+    expect(denenen).toEqual(['172.20.0.1', '78.111.111.185']);
+  }, 20_000);
+
+  it('SMTP_HOST boşken adaylar 127.0.0.1 + kendi adresleri (en çok 3; geri döngü tekrar etmez); sonda 127.0.0.1\'e gider', async () => {
+    const kapali = await sahteSmtpSunucusu();
+    const kapi = kapali.kapi;
+    await kapali.kapat();
+    // Hiçbir aday dinlemiyor: sonda üçünü dener, taşıyıcı hiç üretilmez, sınıf baglanti.
+    ortamKur({ SMTP_PORT: String(kapi) });
+    const bas = Date.now();
+    expect(await smtpGonder(ILETI, { kendiAdresleri: ['127.0.0.1', '10.20.30.40', '10.20.30.41', '10.20.30.42'] })).toEqual({ ok: false, sinif: 'baglanti' });
+    expect(uretici).not.toHaveBeenCalled();
+    // 3 aday × en çok 3 sn bağlantı sınırı (dördüncü aday hiç denenmez): toplam 9 sn'nin altında.
+    expect(Date.now() - bas).toBeLessThan(9_500);
+  }, 20_000);
+});
+
+describe('ham sonda — gerçek soket, sahte sunucu', () => {
+  let sunucu: SahteSunucu | null = null;
+  afterEach(async () => { await sunucu?.kapat(); sunucu = null; });
+
+  it('karşılama + komutlar + QUIT; DATA yok; çok satırlı EHLO yanıtının son satırı sayılır', async () => {
+    sunucu = await sahteSmtpSunucusu();
+    const sonuc = await hamSmtpOturumu('127.0.0.1', sunucu.kapi, ['EHLO deney', 'MAIL FROM:<a@b.test>', 'RCPT TO:<c@d.test>', 'RSET']);
+    expect(sonuc).toEqual({ ulasildi: true, yanitlar: [250, 250, 250, 250] });
+    expect(sunucu.gordu.filter((k) => k !== 'QUIT')).toEqual(['EHLO', 'MAIL', 'RCPT', 'RSET']);
+    expect(sunucu.gordu).not.toContain('DATA');
+  });
+
+  it('dinleyen yoksa ulaşılamadı (yanıt yok); ilk olumsuz yanıtta durur', async () => {
+    const gecici = await sahteSmtpSunucusu();
+    const kapi = gecici.kapi;
+    await gecici.kapat();
+    expect(await hamSmtpOturumu('127.0.0.1', kapi, ['EHLO deney'])).toEqual({ ulasildi: false, yanitlar: [] });
+    sunucu = await sahteSmtpSunucusu({ mailYaniti: () => '551 This mail server requires authentication before sending mail from a locally hosted domain' });
+    expect(await hamSmtpOturumu('127.0.0.1', sunucu.kapi, ['EHLO deney', 'MAIL FROM:<a@b.test>', 'RCPT TO:<c@d.test>'])).toEqual({ ulasildi: true, yanitlar: [250, 551] });
+    expect(sunucu.gordu).not.toContain('RCPT');
+  });
+
+  it('teslimSondasi: kabul → ok; MAIL FROM 5xx → gonderen-reddi; RCPT 5xx → alici-reddi; 4xx → diger; dinleyen yok → baglanti; gönderen «Ad <adres>» biçiminden ayıklanır', async () => {
+    sunucu = await sahteSmtpSunucusu();
+    expect(await teslimSondasi('127.0.0.1', sunucu.kapi, 'CETPA <iletisim@cetpa.com.tr>', 'iletisim@cetpa.com.tr')).toEqual({ ok: true });
+    expect(sunucu.gordu.filter((k) => k !== 'QUIT')).toEqual(['EHLO', 'MAIL', 'RCPT', 'RSET']);
+    await sunucu.kapat();
+    // Adlı gönderene 551 ama `<>` kabul: gönderimle AYNI geri dönüş → ok (ikinci oturumda `MAIL FROM:<>`, DATA yok).
+    sunucu = await sahteSmtpSunucusu({ mailYaniti: (satir) => (satir.includes('<iletisim@cetpa.com.tr>') ? '551 requires authentication' : '250 OK') });
+    expect(await teslimSondasi('127.0.0.1', sunucu.kapi, 'iletisim@cetpa.com.tr', 'iletisim@cetpa.com.tr')).toEqual({ ok: true });
+    expect(sunucu.gordu.filter((k) => k !== 'QUIT')).toEqual(['EHLO', 'MAIL', 'EHLO', 'MAIL', 'RCPT', 'RSET']);
+    expect(sunucu.gordu).not.toContain('DATA');
+    await sunucu.kapat();
+    // Her iki zarf da reddedilirse gonderen-reddi (tam iki oturum, RCPT hiç gitmez).
+    sunucu = await sahteSmtpSunucusu({ mailYaniti: () => '551 requires authentication' });
+    expect(await teslimSondasi('127.0.0.1', sunucu.kapi, 'iletisim@cetpa.com.tr', 'iletisim@cetpa.com.tr')).toEqual({ ok: false, sinif: 'gonderen-reddi' });
+    expect(sunucu.gordu.filter((k) => k !== 'QUIT')).toEqual(['EHLO', 'MAIL', 'EHLO', 'MAIL']);
+    await sunucu.kapat();
+    sunucu = await sahteSmtpSunucusu({ rcptYaniti: '550 mailbox unavailable or not local' });
+    expect(await teslimSondasi('127.0.0.1', sunucu.kapi, 'a@cetpa.com.tr', 'yok@cetpa.com.tr')).toEqual({ ok: false, sinif: 'alici-reddi' });
+    await sunucu.kapat();
+    sunucu = await sahteSmtpSunucusu({ rcptYaniti: '450 mailbox busy' });
+    expect(await teslimSondasi('127.0.0.1', sunucu.kapi, 'a@cetpa.com.tr', 'b@cetpa.com.tr')).toEqual({ ok: false, sinif: 'diger' });
+    const kapi = sunucu.kapi;
+    await sunucu.kapat();
+    sunucu = null;
+    expect(await teslimSondasi('127.0.0.1', kapi, 'a@cetpa.com.tr', 'b@cetpa.com.tr')).toEqual({ ok: false, sinif: 'baglanti' });
+  });
+});
+
+describe('GERÇEK soket — YEREL kip, gerçek nodemailer', () => {
+  let sunucu: SahteSunucu | null = null;
+  afterEach(async () => { await sunucu?.kapat(); sunucu = null; });
+  const komutlar = (s: SahteSunucu): string[] => s.gordu.filter((k) => k !== 'QUIT' && k !== 'RSET');
+
+  it('kimliksiz, düz metin teslim: sunucu AUTH LOGIN duyursa da AUTH yok; EHLO MAIL RCPT DATA', async () => {
+    sunucu = await sahteSmtpSunucusu();
+    ortamKur({ SMTP_HOST: '127.0.0.1', SMTP_PORT: String(sunucu.kapi) });
+    expect(await smtpGonder(ILETI)).toEqual({ ok: true });
+    expect(komutlar(sunucu)).toEqual(['EHLO', 'MAIL', 'RCPT', 'DATA']);
+  });
+
+  it.skipIf(!SERTIFIKA)('sunucu STARTTLS duyursa da yerel kip YÜKSELTMEZ (ignoreTLS): sertifika 127.0.0.1 adına değil, oturum düz kalır', async () => {
+    if (!SERTIFIKA) return;
+    sunucu = await sahteSmtpSunucusu({ starttls: SERTIFIKA });
+    ortamKur({ SMTP_HOST: '127.0.0.1', SMTP_PORT: String(sunucu.kapi) });
+    expect(await smtpGonder(ILETI)).toEqual({ ok: true });
+    expect(komutlar(sunucu)).toEqual(['EHLO', 'MAIL', 'RCPT', 'DATA']);
+  });
+
+  it('smtpDogrula yerel kipte teslim sondasıdır: posta göndermez, MAIL FROM / RCPT TO reddini görür', async () => {
+    sunucu = await sahteSmtpSunucusu();
+    ortamKur({ SMTP_HOST: '127.0.0.1', SMTP_PORT: String(sunucu.kapi) });
+    expect(await smtpDogrula()).toEqual({ ok: true });
+    expect(komutlar(sunucu)).toEqual(['EHLO', 'MAIL', 'RCPT']);
+    expect(uretici).not.toHaveBeenCalled();   // nodemailer `verify` değil, ham sonda
+    await sunucu.kapat();
+    sunucu = await sahteSmtpSunucusu({ mailYaniti: () => '551 requires authentication' });
+    ortamKur({ SMTP_HOST: '127.0.0.1', SMTP_PORT: String(sunucu.kapi) });
+    expect(await smtpDogrula()).toEqual({ ok: false, sinif: 'gonderen-reddi' });
+    await sunucu.kapat();
+    // Gönderim ile sonda aynı hükmü verir: `<>` kabul ediliyorsa ikisi de başarılı.
+    sunucu = await sahteSmtpSunucusu({ mailYaniti: (satir) => (/<>/.test(satir) ? '250 OK' : '551 requires authentication') });
+    ortamKur({ SMTP_HOST: '127.0.0.1', SMTP_PORT: String(sunucu.kapi) });
+    expect(await smtpDogrula()).toEqual({ ok: true });
+  });
+
+  it('MAIL FROM 551 → boş zarf göndereniyle ikinci oturum; sunucu TEK gövde görür; başlık From aynı', async () => {
+    const uyari = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      sunucu = await sahteSmtpSunucusu({ mailYaniti: (satir) => (/<>/.test(satir) ? '250 OK' : '551 requires authentication') });
+      ortamKur({ SMTP_HOST: '127.0.0.1', SMTP_PORT: String(sunucu.kapi) });
+      expect(await smtpGonder(ILETI)).toEqual({ ok: true });
+      expect(komutlar(sunucu)).toEqual(['EHLO', 'MAIL', 'EHLO', 'MAIL', 'RCPT', 'DATA']);
+      expect(komutlar(sunucu).filter((k) => k === 'DATA')).toHaveLength(1);
+    } finally {
+      uyari.mockRestore();
+    }
+  });
+
+  it('dinleyen yoksa baglanti (tek adayda sonda yok, gönderim doğrudan dener)', async () => {
+    const gecici = await sahteSmtpSunucusu();
+    const kapi = gecici.kapi;
+    await gecici.kapat();
+    ortamKur({ SMTP_HOST: '127.0.0.1', SMTP_PORT: String(kapi) });
+    expect(await smtpGonder(ILETI)).toEqual({ ok: false, sinif: 'baglanti' });
+    expect(await smtpDogrula()).toEqual({ ok: false, sinif: 'baglanti' });
   });
 });

@@ -92,6 +92,11 @@ describe('bildirim: kuyruk + işçi', () => {
     expect(kod).toMatch(/const kuyruklar = \[[^\]]*MAGAZA_BILDIRIM_KUYRUGU\] as const;/);
     expect(kod).toMatch(/if \(olusanKuyruklar\.has\(MAGAZA_BILDIRIM_KUYRUGU\)\) \{\s+try \{\s+await boss\.work\(MAGAZA_BILDIRIM_KUYRUGU, MAGAZA_BILDIRIM_ISCI_SECENEKLERI, magazaBildirimIscisi\(magazaBildirimDeps\)\);\s+magazaBildirimKuyruguHazir = true;\s+\} catch/);
     expect(satirNo(/magazaBildirimKuyruguHazir = true/)).toHaveLength(1);
+    // K6 (2026-10-09): kaçan bildirimler YALNIZ işçi bağlandıysa, if-bloğundan SONRA, açılışı beklemeden ve fırlatmadan kuyruğa alınır.
+    const kacan = tek(/^\s*if \(magazaBildirimKuyruguHazir\) void magazaBildirimKacanlariKuyrukla\(magazaBildirimDeps, \(\) => boss\)\.catch\(\(\) => undefined\);$/);
+    expect(kacan).toBeGreaterThan(tek(/magazaBildirimKuyruguHazir = true;/));
+    expect(kacan).toBeLessThan(tek(/console\.log\('pg-boss ready/));
+    expect(satirNo(/magazaBildirimKacanlariKuyrukla\(/)).toEqual([kacan]);
     // `batchSize` yasağı YALNIZ mağaza işçisinin satırına bakar (gerekçe ona özgü: toplu işte bir yeniden deneme hepsini başarısız
     // sayar). Başka bir işçinin seçeneği ya da ilgisiz bir `batchSize` değişkeni bu çitin konusu değil.
     expect(satirlar[tek(/boss\.work\(MAGAZA_BILDIRIM_KUYRUGU/) - 1].kod).not.toMatch(/batchSize/);

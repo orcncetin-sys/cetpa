@@ -23,6 +23,8 @@ import { auditSirSayimi, ayarOzeti } from '../sirTani.js';
 import { kartFiyatDurumu, stokFiyatOzeti } from '../stokFiyatTani.js';
 import { geceOzeti, koleksiyonOlculeri, senkronSatiri } from '../acilisTani.js';
 import { broadcastDocChange } from '../pgShim.js';
+import { smtpYapilandirmasi } from '../smtpPosta.js';
+import { magazaBildirimSayimi, MAGAZA_BILDIRIM_SAYIM_PENCERESI_GUN } from '../kanal/magazaBildirimSayim.js';
 import express from 'express';
 
 /** /api/ops/acilis-tani: senkron günlüğü LİSTESİNİN satır sınırı (aşılırsa yanıtta `kesildi: true`) ve gün özetinin emniyet sınırı. */
@@ -298,10 +300,21 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
         // Mikro isteği KENDİ zaman aşımıyla kesilir (yalnız beklenen söz bırakılırsa istek global 30 sn yamasına kadar açık kalırdı).
         mikroSorgu: (await getMikroCreds()) ? (sql: string) => mikroSql(sql, { zamanAsimiMs: 8000 }) : null,
       });
+      // Mağaza bildirimi (K7, 2026-10-09): kip + eksik anahtar ADLARI + son 7 günün sayımı — kapalı kümelerden, kişisel veri yok.
+      // Kendi try'ında: havuz yoksa / sorgu düşerse `sayim: null`, özetin geneli 500'e DÜŞMEZ.
+      let magazaBildirim: { kip: string | null; eksik: string[]; pencereGun: number; sayim: unknown; hata?: 'okunamadi' } =
+        { kip: null, eksik: [], pencereGun: MAGAZA_BILDIRIM_SAYIM_PENCERESI_GUN, sayim: null };
+      try {
+        const y = smtpYapilandirmasi();
+        magazaBildirim = { kip: y.kip, eksik: y.eksik, pencereGun: MAGAZA_BILDIRIM_SAYIM_PENCERESI_GUN, sayim: pool ? await magazaBildirimSayimi(pool, Date.now()) : null };
+      } catch {
+        magazaBildirim.hata = 'okunamadi';
+      }
       res.json({
         generatedAt: new Date().toISOString(),
         uptimeSeconds: Math.round(process.uptime()),
         env: process.env.NODE_ENV || 'development',
+        magazaBildirim,
         watchdog: {
           date: latest?.date ?? null,
           ok: latest?.ok ?? null,

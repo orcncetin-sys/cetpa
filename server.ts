@@ -75,7 +75,7 @@ import { z } from "zod";
 // aktarılır: `magazaSayaclari()` modül düzeyi sayaç okur; farklı yoldan ikinci bir modül örneği oluşsa bekçi hep sıfır görürdü.
 import { magaza429, magazaZinciri } from "./src/server/routes/magazaRoutes.js";
 import {
-  MAGAZA_BILDIRIM_ISCI_SECENEKLERI, MAGAZA_BILDIRIM_KUYRUGU, magazaBildirimIscisi, magazaBildirimIsteyici, type MagazaBildirimDeps,
+  MAGAZA_BILDIRIM_ISCI_SECENEKLERI, MAGAZA_BILDIRIM_KUYRUGU, magazaBildirimIscisi, magazaBildirimIsteyici, magazaBildirimKacanlariKuyrukla, type MagazaBildirimDeps,
 } from "./src/server/kanal/magazaBildirim.js";
 import { smtpYapilandirmasi } from "./src/server/smtpPosta.js";
 import { ortamdanKiraci } from "./src/server/kiraciOrtami.js";
@@ -664,6 +664,9 @@ async function initDocsTable(): Promise<void> {
         magazaBildirimKuyruguHazir = true;
       } catch (e) { console.warn(`pg-boss işçi bağlanamadı (${MAGAZA_BILDIRIM_KUYRUGU}):`, (e as Error).message); }
     }
+    // Kaçan bildirimler (SMTP yokken «yapılandırılmamış» kalanlar, yetim «bekliyor»): yalnız işçi bağlandıysa, teslim sondası
+    // geçerse, tek SQL ile sahiplenip kuyruğa alır; açılışı beklemez, fırlatmaz, kendi günlüğünü yazar (K6, 2026-10-09).
+    if (magazaBildirimKuyruguHazir) void magazaBildirimKacanlariKuyrukla(magazaBildirimDeps, () => boss).catch(() => undefined);
     console.log('pg-boss ready ✓ (kuyruklar: ' + [...olusanKuyruklar].join(', ') + ')');
   }
 }
@@ -1352,7 +1355,12 @@ function validateEnv() {
   }
   // Mağaza talebi bildirimi (SMTP): eksik anahtar ADLARI tek satırda — bekçi ve işçiyle AYNI okuyucudan (smtpYapilandirmasi).
   const smtp = smtpYapilandirmasi();
-  if (!smtp.tamam) missing.push(`  ⚠️  ${smtp.eksik.join(', ') || 'SMTP'}: mağaza talebi bildirim e-postası devre dışı (talep yine yazılır)`);
+  if (!smtp.tamam) missing.push(smtp.kip === 'kapali'
+    ? '  ℹ️  MAGAZA_BILDIRIM=kapali: mağaza talebi bildirimi kapalı (hazırlık / geliştirme)'
+    : `  ⚠️  ${smtp.eksik.join(', ') || 'SMTP'}: mağaza talebi bildirim e-postası devre dışı (talep yine yazılır) — ${smtp.kip === 'yerel' ? 'yerel kipte APP_URL https olmalı, SMTP_HOST yalnız bu makine, kapı 465 / 587 olamaz; hazırlık / geliştirmede MAGAZA_BILDIRIM=kapali' : 'yarım kimlik: ikisini de doldurun ya da ikisini de silin (yerel kip)'}`);
+  // Kip her açılışta görünür (yerel kip varsayılan olduğu için sessizlik «yapılandırılmadı» sanılmasın); sır değeri yok.
+  else if (smtp.kip === 'yerel') console.log('mağaza bildirimi: yerel kip — bu makinenin posta sunucusuna (127.0.0.1:25) kimliksiz teslim; alıcı/gönderen iletisim@cetpa.com.tr; hazırlık / geliştirmede MAGAZA_BILDIRIM=kapali yazın');
+  else console.log('mağaza bildirimi: kimlikli kip (SMTP_HOST + SMTP_USER + SMTP_PASS)');
   if (!ortamdanKiraci()) missing.push('  ⚠️  SERVER_TENANT_COMPANY_ID: mağaza sipariş talebi ucu kiracıyı taramayla çözer; ikinci hesap açılınca 503 döner');
   if (missing.length) {
     console.warn('\n╔══ ENV WARNINGS (eksik/placeholder değerler) ══╗');

@@ -176,3 +176,10 @@ Görev Zamanlayıcı, Windows Update ve PG gösterimi OS dilimine bağlı kalır
 | setup.ps1, deploy.ps1, setup-iis-proxy.ps1, web.config, ci-windows.yml | PowerShell'de scriptleri çalıştırma |
 | CI swap (geçiş anında) | RDP login, .env, Plesk paneli (subdomain+LE), DNS, pg_dump/restore |
 | Her adımın çıktısını doğrulama | Secret girişi, parola belirleme |
+
+## [12] Mağaza talebi bildirimi — hazırlık ve geliştirme ortamı (2026-10-09)
+
+- Bildirim varsayılan olarak YEREL kipte gider: kimlik bilgisi olmadan, bu makinedeki posta sunucusuna (127.0.0.1:25), alıcı ve gönderen `iletisim@cetpa.com.tr`. Ortam anahtarı gerekmez.
+- Hazırlık (staging) hizmeti üretimin `.env`'ini kopyalar ve AYNI makinede koşar; deneme talepleri gerçek kutuya gitmesin diye hazırlığın `.env` dosyasına ELLE `MAGAZA_BILDIRIM=kapali` satırı eklenir (`setup-staging.ps1` yalnız dosya yokken yazar; var olan dosyaya işlemez). Geliştirme makinesinde de aynı satır.
+- Posta sunucusu kimliksiz yerel teslimi reddederse bekçi `magaza_talep` ayrıntısı nedeni ve yolu yazar: «gönderen reddi» = MailEnable SMTP → Security → Address spoofing («Authorized connections» + Privileged IPs'te 127.0.0.1); «alıcı reddi» = cetpa.com.tr posta hizmeti / `iletisim@` kutusu. Geri dönüş: `.env`'e `SMTP_HOST=mail.cetpa.com.tr`, `SMTP_USER`, `SMTP_PASS` (kimlikli kip; `SMTP_FROM` boş).
+- Yeniden başlatmada gitmemiş bildirimler (yapılandırılmamış / 3 saatten eski bekliyor) teslim sondası geçerse kendiliğinden kuyruğa alınır; kanıt `scripts/ops-istek.sh /api/ops/summary` → `magazaBildirim.sayim`.

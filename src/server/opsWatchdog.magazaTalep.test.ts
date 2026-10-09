@@ -127,7 +127,7 @@ beforeEach(() => {
   durum.havuzHatasi = null;
   durum.kiraci = 'kiraci-1';
   durum.kiraciHatasi = null;
-  vi.mocked(smtpYapilandirmasi).mockReset().mockReturnValue({ tamam: true, eksik: [] });
+  vi.mocked(smtpYapilandirmasi).mockReset().mockReturnValue({ tamam: true, eksik: [], kip: 'kimlikli' });
   vi.mocked(smtpDogrula).mockReset().mockResolvedValue({ ok: true });
   vi.mocked(magazaSayaclari).mockReset().mockReturnValue(TAM_SAYACLAR);
   vi.mocked(ortamdanKiraci).mockReset().mockReturnValue('kiraci-1');
@@ -196,7 +196,7 @@ describe('magaza_talep — hepsi temiz', () => {
 describe('magaza_talep — (a) yapılandırma', () => {
   it('eksik anahtar → KIRMIZI, yalnız anahtar ADI; bağlantı DENENMEZ; talep sayısından bağımsız (0 talepte de)', async () => {
     durum.havuz = sahteHavuz({ sayim: { toplam: 0, son24: 0, gonderilemedi: 0, yapilandirilmamis: 0, bekleyen: 0, eski_gitmeyen: 0 } });
-    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: ['SMTP_USER', 'SMTP_PASS'] });
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: ['SMTP_USER', 'SMTP_PASS'], kip: 'kimlikli' });
     const m = await kos();
     expect(m.ok).toBe(false);
     expect(m.detail).toContain('SMTP yapılandırılmamış — eksik: SMTP_USER, SMTP_PASS');
@@ -206,7 +206,7 @@ describe('magaza_talep — (a) yapılandırma', () => {
   });
 
   it('eksik deyip anahtar adı vermeyen yapılandırma okuyucu → yine KIRMIZI; bağlantı denenmez', async () => {
-    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: [] });
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: [], kip: 'kimlikli' });
     const m = await kos();
     expect(m.ok).toBe(false);
     expect(m.detail).toContain('SMTP yapılandırılmamış — eksik: anahtar adı bildirilmedi');
@@ -214,7 +214,7 @@ describe('magaza_talep — (a) yapılandırma', () => {
   });
 
   it('anahtar ADI biçiminde olmayan değer ayrıntıya GİRMEZ (değer sızmaz)', async () => {
-    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: ['SMTP_PASS=cok-gizli-parola', 'smtp_user', 'SMTP_HOST'] });
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: ['SMTP_PASS=cok-gizli-parola', 'smtp_user', 'SMTP_HOST'], kip: 'kimlikli' });
     const m = await kos();
     expect(m.ok).toBe(false);
     expect(m.detail).toContain('eksik: ?, ?, SMTP_HOST');
@@ -223,7 +223,7 @@ describe('magaza_talep — (a) yapılandırma', () => {
   });
 
   const ETIKET: Record<MagazaBildirimHataSinifi, string> = {
-    kimlik: 'kimlik doğrulama', tls: 'TLS / sertifika', baglanti: 'bağlantı', 'alici-reddi': 'alıcı reddi', diger: 'diğer',
+    kimlik: 'kimlik doğrulama', tls: 'TLS / sertifika', baglanti: 'bağlantı', 'gonderen-reddi': 'gönderen reddi (MAIL FROM)', 'alici-reddi': 'alıcı reddi', diger: 'diğer',
   };
   it.each(MAGAZA_BILDIRIM_HATA_SINIFLARI.map(sinif => [sinif, ETIKET[sinif]] as const))(
     'doğrulama başarısız (%s) → KIRMIZI + hata sınıfı «%s»', async (sinif, etiket) => {
@@ -299,7 +299,7 @@ describe('magaza_talep — (a) yapılandırma', () => {
     expect(m.detail).toContain('SMTP kontrol edilemedi (TypeError)');
     expect(m.detail).not.toContain('AHMET');
 
-    vi.mocked(smtpYapilandirmasi).mockReset().mockReturnValue({ tamam: true, eksik: [] });
+    vi.mocked(smtpYapilandirmasi).mockReset().mockReturnValue({ tamam: true, eksik: [], kip: 'kimlikli' });
     vi.mocked(smtpDogrula).mockRejectedValue(Object.assign(new Error(`connect ${GIZLI}`), { code: 'ECONNREFUSED' }));
     m = await kos();
     expect(m.ok).toBe(false);
@@ -574,10 +574,11 @@ describe('gerçek modüllerle sözleşme (taslakken atlanır)', () => {
     expect(yazilan).toHaveLength(Object.keys(sayaclar).length);          // gerçekteki her anahtar bekçide yazılıyor
   });
 
-  it('gerçek smtpYapilandirmasi({}): eksik anahtar adlarının hepsi ayrıntıya ADIYLA yazılır («?» olmaz)', async ({ skip }) => {
+  it('gerçek smtpYapilandirmasi (yarım kimlik): eksik anahtar adlarının hepsi ayrıntıya ADIYLA yazılır («?» olmaz)', async ({ skip }) => {
     const gercek = await vi.importActual<typeof import('./smtpPosta')>('./smtpPosta.js');
     skip(taslakMi(() => gercek.smtpYapilandirmasi({})), 'smtpYapilandirmasi() henüz taslak');
-    const yapi = gercek.smtpYapilandirmasi({});                          // boş ortam: gerçek ortam değişkeni OKUNMAZ
+    // Boş ortam artık YEREL kip (tamam); eksik üretmek için yarım kimlik. Gerçek ortam değişkeni OKUNMAZ, kendi adresleri sabit.
+    const yapi = gercek.smtpYapilandirmasi({ SMTP_USER: 'u' }, []);
     expect(yapi.tamam).toBe(false);
     expect(yapi.eksik.length).toBeGreaterThan(0);
     vi.mocked(smtpYapilandirmasi).mockReturnValue(yapi);
@@ -639,5 +640,72 @@ describe('bekçi kaynak çitleri', () => {
       expect(ulasilan.has(bekci), `${modul} → opsWatchdog.ts`).toBe(false);
       expect(ulasilan.has(sunucu), `${modul} → server.ts`).toBe(false);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('magaza_talep — SMTP kipleri (2026-10-09)', () => {
+  it('kapalı kip (MAGAZA_BILDIRIM=kapali): YEŞİL, doğrulama çağrılmaz, metin kapalı der', async () => {
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: [], kip: 'kapali' });
+    const m = await kos();
+    expect(m.ok).toBe(true);
+    expect(m.detail).toContain('bildirim KAPALI (MAGAZA_BILDIRIM=kapali)');
+    expect(m.detail).not.toContain('SMTP yapılandırılmamış');
+    expect(smtpDogrula).not.toHaveBeenCalled();
+  });
+
+  it('kapalı kipte `yapilandirilmamis` sayımı KIRMIZI YAPMAZ (bilgi); yerel / kimlikli kipte aynı sayım kırmızı; gonderilemedi kapalıyken de kırmızı', async () => {
+    durum.havuz = sahteHavuz({ sayim: { ...TEMIZ_SAYIM, yapilandirilmamis: 3 } });
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: [], kip: 'kapali' });
+    const kapali = await kos();
+    expect(kapali.ok).toBe(true);
+    expect(kapali.detail).toContain('yapılandırılmamış 3 (kapalı kip, bilgi)');
+    for (const kip of ['yerel', 'kimlikli'] as const) {
+      vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: true, eksik: [], kip });
+      const m = await kos();
+      expect(m.ok, kip).toBe(false);
+      expect(m.detail).not.toContain('(kapalı kip, bilgi)');
+    }
+    durum.havuz = sahteHavuz({ sayim: { ...TEMIZ_SAYIM, gonderilemedi: 1 } });
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: [], kip: 'kapali' });
+    expect((await kos()).ok).toBe(false);
+  });
+
+  it('yerel kip hazır: metin teslim sondasını anar (kimlik doğrulandı DEMEZ)', async () => {
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: true, eksik: [], kip: 'yerel' });
+    vi.mocked(smtpDogrula).mockResolvedValue({ ok: true });
+    const m = await kos();
+    expect(m.detail).toContain('SMTP hazır — yerel kip');
+    expect(m.detail).toContain('teslim sondası geçti');
+    expect(m.detail).not.toContain('kimlik doğrulandı');
+  });
+
+  it.each([
+    ['gonderen-reddi', 'Address spoofing'],
+    ['alici-reddi', 'posta KUTUSU'],
+    ['baglanti', '25 numaralı kapıda'],
+  ] as const)('yerel kipte ret (%s): kırmızı + neden ve yol ipucu (%s); sır / adres değeri yok', async (sinif, ipucu) => {
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: true, eksik: [], kip: 'yerel' });
+    vi.mocked(smtpDogrula).mockResolvedValue({ ok: false, sinif });
+    const m = await kos();
+    expect(m.ok).toBe(false);
+    expect(m.detail).toContain('SMTP doğrulaması BAŞARISIZ');
+    expect(m.detail).toContain(ipucu);
+    expect(m.detail).not.toMatch(/SMTP_PASS=|@gmail/);
+  });
+
+  it('kimlikli kipte aynı ret ipucu YAZILMAZ (yol MailEnable yerel teslimi için)', async () => {
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: true, eksik: [], kip: 'kimlikli' });
+    vi.mocked(smtpDogrula).mockResolvedValue({ ok: false, sinif: 'gonderen-reddi' });
+    const m = await kos();
+    expect(m.detail).toContain('gönderen reddi (MAIL FROM)');
+    expect(m.detail).not.toContain('Address spoofing');
+  });
+
+  it('eksik anahtar metni kipe göre yol gösterir', async () => {
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: ['SMTP_USER', 'SMTP_PASS'], kip: 'yerel' });
+    expect((await kos()).detail).toContain('yerel kip: APP_URL https olmalı, SMTP_HOST yalnız bu makine olabilir');
+    vi.mocked(smtpYapilandirmasi).mockReturnValue({ tamam: false, eksik: ['SMTP_PASS'], kip: 'kimlikli' });
+    expect((await kos()).detail).toContain('yarım kimlik: ikisini de doldurun ya da ikisini de silin');
   });
 });

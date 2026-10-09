@@ -125,6 +125,9 @@ if (-not (Test-Path $stagingEnv)) {
   $lines += "APP_URL=http://localhost:$StagingPort"
   # Backups from staging would overwrite real backups - disable outright.
   $lines += 'RCLONE_REMOTE='
+  # Magaza talebi bildirimi hazirlikta KAPALI: deneme talepleri gercek iletisim@ kutusuna gitmesin
+  # (varsayilan yerel kip ayni makinedeki posta sunucusunu kullanir). Mevcut .env'e ELLE ekle.
+  $lines += 'MAGAZA_BILDIRIM=kapali'
   # .env UTF-8 (BOM'suz) YAZILIR - ASCII DEGIL (2026-08-24 hatasi).
   # `Set-Content -Encoding ASCII` ASCII disi her karakteri '?' yapar. .env icinde
   # Turkce metin bulunan degerler (sirket adi, e-posta sablonu, adres) sessizce

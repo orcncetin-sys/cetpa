@@ -197,8 +197,22 @@ function ortamAnahtarAdi(ad: unknown): string {
 
 /** Kapalı kümenin ayrıntıdaki karşılığı. Kümede OLMAYAN değer (ör. yanlışlıkla hata metni) «diğer» yazılır. */
 const SMTP_HATA_SINIFI_ETIKETI: Record<MagazaBildirimHataSinifi, string> = {
-  kimlik: 'kimlik doğrulama', tls: 'TLS / sertifika', baglanti: 'bağlantı', 'alici-reddi': 'alıcı reddi', diger: 'diğer',
+  kimlik: 'kimlik doğrulama', tls: 'TLS / sertifika', baglanti: 'bağlantı', 'gonderen-reddi': 'gönderen reddi (MAIL FROM)', 'alici-reddi': 'alıcı reddi', diger: 'diğer',
 };
+/**
+ * Yerel kipte (bu makinenin posta sunucusuna kimliksiz teslim) reddin EN OLASI nedeni ve operatörün yolu. Sır / değer yok.
+ * Kaynak: MailEnable belgeleri ve KB me020032 (şartname kapısı 2026-10-09).
+ */
+const YEREL_RET_IPUCU: Partial<Record<MagazaBildirimHataSinifi, string>> = {
+  'gonderen-reddi': ' — posta sunucusu kimliksiz yerel göndereni reddetti (MailEnable SMTP → Security → Address spoofing: «Authorized connections» + Privileged IPs listesinde 127.0.0.1); ya da kimlikli kipe geçin: SMTP_HOST=mail.cetpa.com.tr, SMTP_USER, SMTP_PASS (SMTP_FROM boş)',
+  'alici-reddi': ' — alıcı reddedildi: cetpa.com.tr posta sunucusunda yerel alan mı (Plesk → Domains → Mail açık) ve iletisim@ posta KUTUSU var mı (yönlendirme değil)',
+  baglanti: ' — bu makinede 25 numaralı kapıda SMTP dinlemiyor (posta hizmeti kapalı ya da yalnız dış adrese bağlı)',
+};
+function yerelRetIpucu(sinif: unknown): string {
+  const bilinen = (MAGAZA_BILDIRIM_HATA_SINIFLARI as readonly string[]).includes(String(sinif)) ? (sinif as MagazaBildirimHataSinifi) : null;
+  return (bilinen && YEREL_RET_IPUCU[bilinen]) ?? '';
+}
+
 function smtpSinifEtiketi(sinif: unknown): string {
   const bilinen = MAGAZA_BILDIRIM_HATA_SINIFLARI.find(s => s === sinif);
   return SMTP_HATA_SINIFI_ETIKETI[bilinen ?? 'diger'];
@@ -258,19 +272,29 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
   }
 
   // (a) Yapılandırma + günde bir bağlantı doğrulaması (bağlan + TLS + EHLO + AUTH).
+  // Kip (b) sayımında da okunur: kapalı kipte her talep `yapilandirilmamis` yazılır, o sayım kırmızı yapmaz (bilgi).
+  let kip: string | null = null;
   try {
     const yapi = smtpYapilandirmasi();
-    if (!yapi.tamam) {
+    kip = yapi.kip;
+    if (yapi.kip === 'kapali') {
+      // Bilerek kapalı (hazırlık / geliştirme): her sabah kırmızı gürültü olmasın; talep yine yazılır, bildirim gitmez.
+      parcalar.push({ ok: true, metin: 'bildirim KAPALI (MAGAZA_BILDIRIM=kapali)' });
+    } else if (!yapi.tamam) {
       const adlar = yapi.eksik.map(ortamAnahtarAdi).join(', ');
-      parcalar.push({ ok: false, metin: `SMTP yapılandırılmamış — eksik: ${adlar || 'anahtar adı bildirilmedi'}` });
+      parcalar.push({ ok: false, metin: `SMTP yapılandırılmamış — eksik: ${adlar || 'anahtar adı bildirilmedi'}${yapi.kip === 'yerel' ? ' (yerel kip: APP_URL https olmalı, SMTP_HOST yalnız bu makine olabilir, kapı 465 / 587 olamaz; hazırlık / geliştirmede MAGAZA_BILDIRIM=kapali)' : ' (yarım kimlik: ikisini de doldurun ya da ikisini de silin — yerel kip)'}` });
     } else {
+      // Yerel kipte doğrulama posta göndermeyen TESLİM sondasıdır (EHLO + MAIL FROM + RCPT TO): «bağlandı ama kabul
+      // etmiyor» (MailEnable Address spoofing 551 / alan yerel değil 503 / kutu yok 550) burada görünür.
+      const yerel = yapi.kip === 'yerel';
       const sonuc = await sureSinirli(smtpDogrula(), SMTP_DOGRULAMA_SINIRI_MS);
       if (sonuc === SURE_DOLDU) {
         parcalar.push({ ok: false,
           metin: `SMTP doğrulaması BAŞARISIZ — hata sınıfı: ${SMTP_HATA_SINIFI_ETIKETI.baglanti} (${SMTP_DOGRULAMA_SINIRI_MS / 1000} sn içinde yanıt yok)` });
-      } else if (sonuc.ok === true) parcalar.push({ ok: true, metin: 'SMTP hazır (bağlantı ve kimlik doğrulandı)' });
-      else if ('yapilandirilmamis' in sonuc) parcalar.push({ ok: false, metin: 'SMTP yapılandırılmamış' });
-      else parcalar.push({ ok: false, metin: `SMTP doğrulaması BAŞARISIZ — hata sınıfı: ${smtpSinifEtiketi(sonuc.sinif)}` });
+      } else if (sonuc.ok === true) {
+        parcalar.push({ ok: true, metin: yerel ? 'SMTP hazır — yerel kip (bu makinenin posta sunucusu, kimliksiz): teslim sondası geçti (MAIL FROM + RCPT TO kabul edildi)' : 'SMTP hazır (bağlantı ve kimlik doğrulandı)' });
+      } else if ('yapilandirilmamis' in sonuc) parcalar.push({ ok: false, metin: 'SMTP yapılandırılmamış' });
+      else parcalar.push({ ok: false, metin: `SMTP doğrulaması BAŞARISIZ — hata sınıfı: ${smtpSinifEtiketi(sonuc.sinif)}${yerel ? yerelRetIpucu(sonuc.sinif) : ''}` });
     }
   } catch (e) {
     parcalar.push({ ok: false, metin: `SMTP kontrol edilemedi (${hataKodu(e)})` });
@@ -296,11 +320,13 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
       const bekleyen = sayimHucresi(satir, 'bekleyen');
       const eskiGitmeyen = sayimHucresi(satir, 'eski_gitmeyen');
       const okunamadi = [toplam, son24, gonderilemedi, yapilandirilmamis, bekleyen, eskiGitmeyen].some(n => n === null);
-      // `eskiGitmeyen` BİLEREK bu dizide yok: pencereden eski satır kırmızı yapmaz.
-      const gitmeyen = [gonderilemedi, yapilandirilmamis, bekleyen].some(n => n !== null && n > 0);
+      // `eskiGitmeyen` BİLEREK bu dizide yok: pencereden eski satır kırmızı yapmaz. Kapalı kipte `yapilandirilmamis`
+      // beklenen durumdur (bilgi); `gonderilemedi` / `bekleyen` kapalıyken de kırmızı (yazılıyorsa gerçek arıza).
+      const kapali = kip === 'kapali';
+      const gitmeyen = [gonderilemedi, kapali ? 0 : yapilandirilmamis, bekleyen].some(n => n !== null && n > 0);
       parcalar.push({ ok: !okunamadi && !gitmeyen,
         metin: `${sayiYaz(toplam)} talep, son 24 saatte ${sayiYaz(son24)}`
-          + ` — bildirim: gönderilemedi ${sayiYaz(gonderilemedi)}, yapılandırılmamış ${sayiYaz(yapilandirilmamis)}`
+          + ` — bildirim: gönderilemedi ${sayiYaz(gonderilemedi)}, yapılandırılmamış ${sayiYaz(yapilandirilmamis)}${kapali ? ' (kapalı kip, bilgi)' : ''}`
           + `, ${MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS / 60_000} dk+ bekleyen ${sayiYaz(bekleyen)}`
           + `, ${MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS / GUN_MS} günden eski gitmeyen ${sayiYaz(eskiGitmeyen)} (bilgi)`
           + (okunamadi ? ' (SAYIM OKUNAMADI)' : '') });

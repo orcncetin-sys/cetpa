@@ -48,6 +48,8 @@ import { tarihSaatYaz } from '../../utils/zaman.js';
 import type { MagazaPgHavuzu } from '../routes/magazaRoutes.js';
 import { escapeHtml } from '../eposta.js';
 import { smtpGonder, smtpHataSinifi } from '../smtpPosta.js';
+import { smtpDogrula, smtpYapilandirmasi } from '../smtpPosta.js';
+import type { SmtpSonucu } from '../smtpPosta.js';
 
 export const MAGAZA_BILDIRIM_KUYRUGU = 'magaza-talep-bildirimi';
 
@@ -299,7 +301,7 @@ function guvenliIcerik(belge: unknown, D: MagazaBildirimDeps): { konu: string; h
  * Yeniden denemenin çözmeyeceği sınıflar: ilk başarısızlıkta `gonderilemedi` yazılır, kuyruk işi yeniden denenmez.
  * İki sınıf da yalnız 5xx ya da yanıt kodsuz hatayı taşır; aynı komutların 4xx (geçici) reddi `diger`dir (`smtpHataSinifi`).
  */
-export const KALICI_HATA_SINIFLARI: ReadonlySet<MagazaBildirimHataSinifi> = new Set<MagazaBildirimHataSinifi>(['kimlik', 'alici-reddi']);
+export const KALICI_HATA_SINIFLARI: ReadonlySet<MagazaBildirimHataSinifi> = new Set<MagazaBildirimHataSinifi>(['kimlik', 'gonderen-reddi', 'alici-reddi']);
 
 /** Sınıf dokümana yazılmadan önce kapalı kümeye indirgenir (gönderici bozulsa da serbest metin yazılmaz). */
 function kapaliKumeden(sinif: unknown): MagazaBildirimHataSinifi {
@@ -517,6 +519,18 @@ export function magazaBildirimIscisiKur(
   };
 }
 
+type BildirimKuyrugu = { send: (ad: string, veri: object, secenek?: object) => Promise<unknown> };
+
+/**
+ * Kuyruğa TEK giriş noktası (isteyici ve kaçanlar): iş verisi YALNIZ `{ talepId }`. pg-boss `send` iş
+ * oluşturulmadıysa `null` çözer (fırlatmaz) — o da «kuyruğa girmedi»dir. `standard` politikada `send` null'u
+ * pratikte üretmez; politika `exclusive`e çekilirse null = «zaten kuyrukta» olur ve isteyici süreç içi yola
+ * DÜŞMEMELİ — o gün bu yorum okunacak.
+ */
+async function kuyrugaEkle(k: BildirimKuyrugu, talepId: string): Promise<boolean> {
+  return (await k.send(MAGAZA_BILDIRIM_KUYRUGU, { talepId }, MAGAZA_BILDIRIM_IS_SECENEKLERI)) != null;
+}
+
 /**
  * `magazaBildirimIsteyici`'nin gövdesi; süreç içi işlev verilir (test: reddeden
  * işlev genel `unhandledRejection` işleyicisine düşmez). Üretim kodu
@@ -533,8 +547,7 @@ export function magazaBildirimIsteyiciKur(
       let kuyrukta = false;
       try {
         const k = kuyruk();
-        // pg-boss `send` iş oluşturulmadıysa `null` çözer (fırlatmaz) — o da «kuyruğa girmedi»dir.
-        if (k) kuyrukta = (await k.send(MAGAZA_BILDIRIM_KUYRUGU, { talepId }, MAGAZA_BILDIRIM_IS_SECENEKLERI)) != null;
+        if (k) kuyrukta = await kuyrugaEkle(k, talepId);
       } catch {
         console.warn('[magaza-bildirim] bildirim kuyruğa eklenemedi — süreç içi gönderime geçildi');
       }
@@ -555,4 +568,100 @@ export function magazaBildirimIsteyici(
   D: MagazaBildirimDeps,
 ): (talepId: string) => Promise<void> {
   return magazaBildirimIsteyiciKur(kuyruk, D, magazaBildirimIsle);
+}
+
+// ── Kaçan bildirimleri yeniden kuyruğa alma (K6, 2026-10-09) ─────────────────────────────────────────────────────────
+/**
+ * Açılışta, kuyruk işçisi bağlandıktan sonra çağrılır. Hedef: SMTP yapılandırması yokken (yerel kip gelmeden önce)
+ * `yapilandirilmamis` kalmış talepler ve kuyruk ufkunu (8 deneme, en çok ≈ 2 sa 22 dk) aşmış yetim `bekliyor` kayıtlar
+ * kendiliğinden yeniden gönderilsin.
+ *
+ * KURALLAR (şartname kapısı 2026-10-09):
+ *  • Kuyruk hazır değilse HİÇ koşmaz — süreç içi yola DÜŞMEZ: 50 talep aynı anda giderse her geçici hata kalıcı
+ *    `gonderilemedi` olurdu (ölçüm: 50 eşzamanlı gönderimde sunucu 5 bağlantı sınırıyla 30'unu kesti).
+ *  • Önce teslim sondası (`smtpDogrula`; yerel kipte MAIL FROM + RCPT TO kabulü): sonda geçmezse 50 talep × kalıcı ret
+ *    üretmek yerine hiç başlamaz, nedeni günlükler.
+ *  • TEK SQL ile sahiplenir (durumu `bekliyor`a çeker, `RETURNING`) ve SONRA kuyruğa alır: ikinci açılış aynı satırı
+ *    bulamaz → aynı talep için çift iş yok (pg-boss `standard` politikada `singletonKey` etkisizdir). UPDATE ile `send`
+ *    arasında süreç ölürse satır `deneme`SİZ `bekliyor` kalır; 3 saat sonra yetim kuralıyla yeniden alınır.
+ *  • `yapilandirilmamis` için yaş penceresi YOK (hiç denenmemiş talepte çift posta riski yok); sel koruması LIMIT.
+ *  • `gitti` ASLA ezilmez (durum süzgeci). Sahiplenme yazımı kiracı etiketiyle yayınlanır (ekran kırmızıdan çıkar; ara
+ *    «bekleme aşıldı» sarısı bilerek kabul edilir).
+ *  • Günlüğe yalnız SAYI yazılır (talep no / kişisel veri yok). Asla fırlatmaz.
+ */
+export const MAGAZA_KACAN_SINIRI = 50;
+/** Kuyruk ufku (30 + 60 + … + 3600 sn + 9 × 120 sn ≈ 2 sa 22 dk) aşıldıysa ve kuyruk yolunda hiç deneme yazılmamışsa
+ *  (`deneme` yok) `bekliyor` yetimdir. `deneme` yazılmış `bekliyor` ALINMAZ: onun pg-boss işi PG'de durur, süreç ölse de
+ *  açılışta kaldığı yerden sürer (12.26: `active` kalan iş `failJobsByTimeout` ile `retry`) — ikinci iş eklemek aynı talep
+ *  için iki yeniden deneme zinciri ve `deneme` sayacının ezilmesi demekti (inceleme 2026-10-09). Bilinen kör nokta: SON
+ *  denemede sonuç yazımı düşerse doküman `bekliyor` + `deneme` kalır; bekçi / ekran «bekleme aşıldı» ile gösterir. */
+export const MAGAZA_KACAN_YETIM_ESIGI_MS = 3 * 60 * 60 * 1000;
+export const MAGAZA_KACAN_SAHIPLEN_SQL = `WITH aday AS (
+  SELECT id FROM docs
+   WHERE coll = $1
+     AND ( data->'bildirim'->>'durum' = 'yapilandirilmamis'
+        OR ( data->'bildirim'->>'durum' = 'bekliyor'
+             AND NOT (data->'bildirim' ? 'deneme')
+             AND COALESCE((data->'bildirim'->>'zaman') COLLATE "C" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$'
+                      AND (data->'bildirim'->>'zaman') COLLATE "C" < $3, false) ) )
+   ORDER BY (data->>'olusturma') COLLATE "C" DESC
+   LIMIT ${MAGAZA_KACAN_SINIRI}
+   FOR UPDATE SKIP LOCKED )
+UPDATE docs d
+   SET data = jsonb_set(d.data, '{bildirim}', jsonb_build_object('durum', 'bekliyor', 'zaman', $2::text)), updated_at = now()
+  FROM aday WHERE d.coll = $1 AND d.id = aday.id
+RETURNING d.id, d.data`;
+
+export interface MagazaKacanSonucu {
+  alinan: number;
+  kuyrukta: number;
+  neden?: 'kuyruk-hazir-degil' | 'yapilandirma' | 'teslim-sondasi' | 'havuz-yok' | 'sorgu';
+}
+
+export async function magazaBildirimKacanlariKuyrukla(
+  D: MagazaBildirimDeps,
+  kuyruk: () => BildirimKuyrugu | null,
+  dogrula: () => Promise<SmtpSonucu | { ok: false; yapilandirilmamis: true }> = smtpDogrula,
+  yapilandirma: () => { tamam: boolean } = smtpYapilandirmasi,
+  simdi: () => number = Date.now,
+): Promise<MagazaKacanSonucu> {
+  const gunluk = (ileti: string): void => console.warn('[magaza-bildirim] kaçanlar: ' + ileti);
+  try {
+    const k = kuyruk();
+    if (!k) { gunluk('kuyruğa alınmadı — kuyruk hazır değil'); return { alinan: 0, kuyrukta: 0, neden: 'kuyruk-hazir-degil' }; }
+    if (!yapilandirma().tamam) { gunluk('kuyruğa alınmadı — SMTP yapılandırması tamam değil'); return { alinan: 0, kuyrukta: 0, neden: 'yapilandirma' }; }
+    const sonda = await dogrula();
+    if (!sonda.ok) {
+      gunluk(`kuyruğa alınmadı — teslim sondası geçmedi (${'sinif' in sonda ? `sınıf: ${sonda.sinif}` : 'yapılandırılmamış'})`);
+      return { alinan: 0, kuyrukta: 0, neden: 'teslim-sondasi' };
+    }
+    const havuz = D.getPgPool();
+    if (!havuz) { gunluk('kuyruğa alınmadı — pg havuzu yok'); return { alinan: 0, kuyrukta: 0, neden: 'havuz-yok' }; }
+    const an = simdi();
+    let satirlar: unknown[];
+    try {
+      const { rows } = await havuz.query(MAGAZA_KACAN_SAHIPLEN_SQL, [MAGAZA_TALEP_KOLEKSIYONU, new Date(an).toISOString(), new Date(an - MAGAZA_KACAN_YETIM_ESIGI_MS).toISOString()]);
+      satirlar = Array.isArray(rows) ? rows : [];
+    } catch (hata) {
+      gunluk(`sorgu başarısız (kod: ${hataKodu(hata)})`);
+      return { alinan: 0, kuyrukta: 0, neden: 'sorgu' };
+    }
+    let kuyrukta = 0;
+    for (const satir of satirlar) {
+      const id = nesneMi(satir) ? satir.id : undefined;
+      const veri = nesneMi(satir) ? satir.data : undefined;
+      if (typeof id !== 'string' || !MAGAZA_TALEP_KIMLIK_DESENI.test(id)) continue;
+      const cid = nesneMi(veri) ? veri.companyId : undefined;
+      if (typeof cid === 'string' && cid !== '') {
+        try { D.broadcastDocChange(MAGAZA_TALEP_KOLEKSIYONU, 'set', id, veri, { cid }); } catch { /* yayın hatası sonucu değiştirmez */ }
+      }
+      try {
+        if (await kuyrugaEkle(k, id)) kuyrukta += 1;
+      } catch { /* sayıyla raporlanır; satır `bekliyor` kalır, 3 saat sonra yeniden alınır */ }
+    }
+    if (satirlar.length > 0) gunluk(`${satirlar.length} talep sahiplenildi, ${kuyrukta} kuyruğa alındı${satirlar.length - kuyrukta > 0 ? `, kuyruğa alınamadı: ${satirlar.length - kuyrukta}` : ''}`);
+    return { alinan: satirlar.length, kuyrukta };
+  } catch {
+    return { alinan: 0, kuyrukta: 0, neden: 'sorgu' };
+  }
 }

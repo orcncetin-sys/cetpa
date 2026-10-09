@@ -143,6 +143,7 @@ const HATA_SINIFI_ETIKETI: Record<MagazaBildirimHataSinifi, Record<Dil, string>>
   kimlik: { tr: 'kimlik doğrulama', en: 'authentication' },
   tls: { tr: 'TLS / sertifika', en: 'TLS / certificate' },
   baglanti: { tr: 'bağlantı', en: 'connection' },
+  'gonderen-reddi': { tr: 'gönderen reddi', en: 'sender rejected' },
   'alici-reddi': { tr: 'alıcı reddi', en: 'recipient rejected' },
   diger: { tr: 'diğer', en: 'other' },
 };
@@ -169,8 +170,8 @@ function bildirimAciklamasi(t: MagazaTalepSatiri, g: BildirimGorunumu, dil: Dil)
   }
   if (g.neden === 'yapilandirilmamis') {
     return tr
-      ? 'E-posta bildirimi yapılandırılmamış (sunucuda SMTP ayarı eksik). Bu talep için e-posta gitmedi.'
-      : 'E-mail notification is not configured (SMTP settings missing on the server). No e-mail went out for this request.';
+      ? 'E-posta bildirimi yapılandırılmamış (sunucuda SMTP ayarı eksik). Bu talep için e-posta gitmedi; sunucu yeniden başlatıldığında ayar tamamsa kendiliğinden yeniden denenir.'
+      : 'E-mail notification is not configured (SMTP settings missing on the server). No e-mail went out for this request; it is retried automatically on server restart once settings are complete.';
   }
   if (g.neden === 'bekleme-asildi') {
     return tr

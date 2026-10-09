@@ -32,7 +32,7 @@ export const MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS = 10 * 60_000;
 export type MagazaBildirimDurumu = 'bekliyor' | 'gitti' | 'gonderilemedi' | 'yapilandirilmamis';
 
 /** KAPALI küme: dokümana, günlüğe, yanıta hata METNİ değil yalnız bu sınıf yazılır. */
-export const MAGAZA_BILDIRIM_HATA_SINIFLARI = ['kimlik', 'tls', 'baglanti', 'alici-reddi', 'diger'] as const;
+export const MAGAZA_BILDIRIM_HATA_SINIFLARI = ['kimlik', 'tls', 'baglanti', 'gonderen-reddi', 'alici-reddi', 'diger'] as const;
 export type MagazaBildirimHataSinifi = typeof MAGAZA_BILDIRIM_HATA_SINIFLARI[number];
 
 export interface MagazaBildirim {

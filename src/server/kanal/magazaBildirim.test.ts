@@ -46,6 +46,7 @@ import type { SmtpSonucu } from '../smtpPosta';
 import {
   MAGAZA_BILDIRIM_IS_SECENEKLERI, MAGAZA_BILDIRIM_ISCI_SECENEKLERI, MAGAZA_BILDIRIM_KALEM_SINIRI, MAGAZA_BILDIRIM_KUYRUGU,
   KALICI_HATA_SINIFLARI, MAGAZA_BILDIRIM_YENIDEN_DENE_ILETISI,
+  magazaBildirimKacanlariKuyrukla, MAGAZA_KACAN_SAHIPLEN_SQL, MAGAZA_KACAN_SINIRI, MAGAZA_KACAN_YETIM_ESIGI_MS,
   magazaBildirimIcerigi, magazaBildirimIsle, magazaBildirimIscisi, magazaBildirimIscisiKur, magazaBildirimIsteyici, magazaBildirimIsteyiciKur,
 } from './magazaBildirim';
 import type { MagazaBildirimDeps, MagazaBildirimSonucu } from './magazaBildirim';
@@ -939,7 +940,7 @@ describe('magazaBildirimIsle — başarısız gönderim', () => {
     expect(d.bildirim(KIMLIK)).toEqual({ durum: 'bekliyor', deneme: 1, hataSinifi: sinif, zaman: SIMDI });
   });
   it('kalıcı sınıf kümesi tam olarak kimlik + alıcı reddi', () => {
-    expect([...KALICI_HATA_SINIFLARI].sort()).toEqual(['alici-reddi', 'kimlik']);
+    expect([...KALICI_HATA_SINIFLARI].sort()).toEqual(['alici-reddi', 'gonderen-reddi', 'kimlik']);
   });
 });
 
@@ -1110,8 +1111,9 @@ describe('uçtan uca — GERÇEK smtpGonder (yalnız taşıyıcı sahte): iki mo
     return t;
   }
 
-  it('ortamda SMTP anahtarı yokken: `yapilandirilmamis`; taşıyıcı ÜRETİLMEZ (bağlantı denenmez); işçi yeniden denemez', async () => {
+  it('bildirim KAPALIYKEN (MAGAZA_BILDIRIM=kapali; boş ortam artık YEREL kiptir): `yapilandirilmamis`; taşıyıcı ÜRETİLMEZ (bağlantı denenmez); işçi yeniden denemez', async () => {
     await gercekGonderici({});
+    vi.stubEnv('MAGAZA_BILDIRIM', 'kapali');
     const d = duzenek();
     await expect(magazaBildirimIscisi(d.D)([{ data: { talepId: KIMLIK }, retryCount: 0, retryLimit: 8 }])).resolves.toBeUndefined();
     expect(uretici).not.toHaveBeenCalled();
@@ -1600,5 +1602,111 @@ describe('ÇİT: kaynak taraması (yorumlar süzülür)', () => {
   it('denetim karakteri deseni kaynakta kaçışla yazılı (ham karakter yok)', () => {
     const hamDenetim = [...HAM].filter((c) => { const k = c.charCodeAt(0); return (k < 0x20 && c !== '\n') || (k >= 0x7f && k <= 0x9f) || k === 0x2028 || k === 0x2029 || k === 0x307; });
     expect(hamDenetim).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('magazaBildirimKacanlariKuyrukla — açılışta kaçan bildirimler (K6, 2026-10-09)', () => {
+  const AN = Date.UTC(2026, 9, 9, 9, 0, 0);
+  const KIMLIK_C = 'mt-0123456789abcdef0123456789abcdef';
+  type Satir = { id: string; data: Record<string, unknown> };
+  function kacanDuzenegi(satirlar: Satir[] | Error = [], o: { send?: (...a: unknown[]) => Promise<unknown> } = {}) {
+    const sorgular: Array<{ sql: string; params: unknown[] }> = [];
+    const havuz = { query: vi.fn(async (sql: string, params: unknown[]) => { sorgular.push({ sql, params }); if (satirlar instanceof Error) throw satirlar; return { rows: satirlar }; }) };
+    const yayin = vi.fn();
+    const D = { getPgPool: () => havuz, broadcastDocChange: yayin } as unknown as MagazaBildirimDeps;
+    const send = vi.fn(o.send ?? (async () => 'is'));
+    const dogrula = vi.fn(async () => ({ ok: true }) as const);
+    const yapilandirma = vi.fn(() => ({ tamam: true }));
+    const gunluk = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const kos = (kuyruk: (() => { send: typeof send } | null) = () => ({ send })) =>
+      magazaBildirimKacanlariKuyrukla(D, kuyruk, dogrula, yapilandirma, () => AN);
+    return { sorgular, havuz, yayin, send, dogrula, yapilandirma, gunluk, kos };
+  }
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('kuyruk hazır değilse HİÇ koşmaz: sorgu yok, sonda yok, süreç içi yola düşmez; tek satır günlük', async () => {
+    const d = kacanDuzenegi([{ id: KIMLIK, data: { companyId: 'c1' } }]);
+    await expect(d.kos(() => null)).resolves.toEqual({ alinan: 0, kuyrukta: 0, neden: 'kuyruk-hazir-degil' });
+    expect(d.havuz.query).not.toHaveBeenCalled();
+    expect(d.dogrula).not.toHaveBeenCalled();
+    expect(gonder).not.toHaveBeenCalled();
+    expect(d.gunluk).toHaveBeenCalledTimes(1);
+  });
+
+  it('yapılandırma tamam değilse koşmaz; teslim sondası geçmezse koşmaz (sınıf günlükte, talep yok)', async () => {
+    const d = kacanDuzenegi([{ id: KIMLIK, data: { companyId: 'c1' } }]);
+    d.yapilandirma.mockReturnValue({ tamam: false });
+    await expect(d.kos()).resolves.toEqual({ alinan: 0, kuyrukta: 0, neden: 'yapilandirma' });
+    expect(d.dogrula).not.toHaveBeenCalled();
+    d.yapilandirma.mockReturnValue({ tamam: true });
+    d.dogrula.mockResolvedValue({ ok: false, sinif: 'gonderen-reddi' } as never);
+    await expect(d.kos()).resolves.toEqual({ alinan: 0, kuyrukta: 0, neden: 'teslim-sondasi' });
+    expect(d.havuz.query).not.toHaveBeenCalled();
+    expect(String(d.gunluk.mock.calls.at(-1)?.[0])).toContain('gonderen-reddi');
+    expect(String(d.gunluk.mock.calls.at(-1)?.[0])).not.toContain(KIMLIK);
+  });
+
+  it('tek SQL ile sahiplenir (koleksiyon, şimdi, şimdi − 3 sa), kiracılı satırı yayınlar, her satırı iş seçenekleriyle kuyruğa alır; günlükte yalnız sayı', async () => {
+    const d = kacanDuzenegi([
+      { id: KIMLIK, data: { companyId: 'c1', talepNo: 'T261008-CZZF', musteri: { ad: 'Zeynep' }, bildirim: { durum: 'bekliyor', zaman: new Date(AN).toISOString() } } },
+      { id: KIMLIK_B, data: { bildirim: { durum: 'bekliyor' } } },   // kiracı etiketi yok → YAYINLANMAZ ama kuyruğa alınır
+    ]);
+    await expect(d.kos()).resolves.toEqual({ alinan: 2, kuyrukta: 2 });
+    expect(d.sorgular).toEqual([{ sql: MAGAZA_KACAN_SAHIPLEN_SQL, params: ['magazaTalepleri', new Date(AN).toISOString(), new Date(AN - MAGAZA_KACAN_YETIM_ESIGI_MS).toISOString()] }]);
+    expect(d.yayin).toHaveBeenCalledTimes(1);
+    expect(d.yayin).toHaveBeenCalledWith('magazaTalepleri', 'set', KIMLIK, expect.objectContaining({ companyId: 'c1' }), { cid: 'c1' });
+    expect(d.send.mock.calls).toEqual([
+      ['magaza-talep-bildirimi', { talepId: KIMLIK }, MAGAZA_BILDIRIM_IS_SECENEKLERI],
+      ['magaza-talep-bildirimi', { talepId: KIMLIK_B }, MAGAZA_BILDIRIM_IS_SECENEKLERI],
+    ]);
+    const satirlar = d.gunluk.mock.calls.map(c => String(c[0]));
+    expect(satirlar).toEqual(['[magaza-bildirim] kaçanlar: 2 talep sahiplenildi, 2 kuyruğa alındı']);
+    expect(satirlar.join('\n')).not.toMatch(/Zeynep|T261008|mt-/);
+    expect(gonder).not.toHaveBeenCalled();   // süreç içi gönderim YOK
+  });
+
+  it('send fırlatır ya da null döner → sayılmaz, süreç içi yola düşülmez, «kuyruğa alınamadı: N»; bozuk kimlikli satır atlanır', async () => {
+    let n = 0;
+    const d = kacanDuzenegi(
+      [{ id: KIMLIK, data: { companyId: 'c1' } }, { id: KIMLIK_B, data: { companyId: 'c1' } }, { id: KIMLIK_C, data: { companyId: 'c1' } }, { id: 'bozuk', data: { companyId: 'c1' } }],
+      { send: async () => { n += 1; if (n === 1) throw new Error('kuyruk kapalı'); return n === 2 ? null : 'is'; } },
+    );
+    await expect(d.kos()).resolves.toEqual({ alinan: 4, kuyrukta: 1 });
+    expect(d.send).toHaveBeenCalledTimes(3);
+    expect(String(d.gunluk.mock.calls.at(-1)?.[0])).toBe('[magaza-bildirim] kaçanlar: 4 talep sahiplenildi, 1 kuyruğa alındı, kuyruğa alınamadı: 3');
+    expect(gonder).not.toHaveBeenCalled();
+  });
+
+  it('havuz yoksa / sorgu fırlatırsa / satır yoksa: fırlatmaz, neden döner, hata METNİ günlüğe girmez', async () => {
+    const d1 = kacanDuzenegi([]);
+    (d1 as unknown as { D: MagazaBildirimDeps }).D;
+    await expect(magazaBildirimKacanlariKuyrukla({ getPgPool: () => null, broadcastDocChange: vi.fn() } as unknown as MagazaBildirimDeps, () => ({ send: d1.send }), d1.dogrula, d1.yapilandirma, () => AN))
+      .resolves.toEqual({ alinan: 0, kuyrukta: 0, neden: 'havuz-yok' });
+    const d2 = kacanDuzenegi(Object.assign(new Error(`relation docs: ${KIMLIK} Zeynep`), { code: '42P01' }));
+    await expect(d2.kos()).resolves.toEqual({ alinan: 0, kuyrukta: 0, neden: 'sorgu' });
+    expect(String(d2.gunluk.mock.calls.at(-1)?.[0])).toBe('[magaza-bildirim] kaçanlar: sorgu başarısız (kod: 42P01)');
+    const d3 = kacanDuzenegi([]);
+    d3.gunluk.mockClear();   // aynı console casusu (vi.spyOn aynı yönteme ikinci kez sarmaz)
+    await expect(d3.kos()).resolves.toEqual({ alinan: 0, kuyrukta: 0 });
+    expect(d3.send).not.toHaveBeenCalled();
+    expect(d3.gunluk).not.toHaveBeenCalled();   // alınan yoksa gürültü yok
+  });
+
+  it('SQL çiti: yalnız yapılandırılmamış ve 3 saatten eski bekliyor; en yeni önce; LIMIT 50; SKIP LOCKED; bildirim alanı jsonb_set ile bekliyor; gitti HİÇ seçilmez', () => {
+    expect(MAGAZA_KACAN_SINIRI).toBe(50);
+    expect(MAGAZA_KACAN_YETIM_ESIGI_MS).toBe(3 * 60 * 60 * 1000);
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain("data->'bildirim'->>'durum' = 'yapilandirilmamis'");
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain("data->'bildirim'->>'durum' = 'bekliyor'");
+    // `deneme` yazılmış bekliyor canlı kuyruk işidir (PG'de durur, süreç ölse de sürer): yetim sayılmaz, ikinci iş açılmaz.
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain("AND NOT (data->'bildirim' ? 'deneme')");
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain("(data->'bildirim'->>'zaman') COLLATE \"C\" < $3");
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain("ORDER BY (data->>'olusturma') COLLATE \"C\" DESC");
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain('LIMIT 50');
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain('FOR UPDATE SKIP LOCKED');
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain("jsonb_set(d.data, '{bildirim}', jsonb_build_object('durum', 'bekliyor', 'zaman', $2::text))");
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain('RETURNING d.id, d.data');
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).not.toContain("'gitti'");
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).not.toContain("'gonderilemedi'");
   });
 });
