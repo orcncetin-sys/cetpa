@@ -278,6 +278,7 @@ import { useKonumYayini } from './hooks/useKonumYayini';
 import { birlesikAraclar } from './utils/filo';
 import { publicPageKey, type PublicPageKey } from './lib/publicPaths';
 import { TOP_LEVEL_TABS } from './lib/topLevelTabs';
+import { cikisIstegiGonder } from './lib/oturumCikisi';
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -2605,6 +2606,13 @@ function AppContent() {
       storeSetUser(null);
       return;
     }
+    // Sunucu çıkışı (çerez silme + yenileme belirteci iptali) `signOut`tan ÖNCE ve BEKLENEREK gider; kimlik
+    // sarmalayıcısına uğramaz: eskiden `signOut`tan sonra `authedFetch` ile atılıyordu, kullanıcı yokken sarmalayıcı
+    // fırlatıyor ve istek HİÇ gitmiyordu (oturum çerezi silinmiyor, yenileme belirteçleri iptal edilmiyordu;
+    // 2026-10-09). Önce beklenmesinin nedeni: iptal uid bazlı ve küreseldir; yanıt gecikirken kullanıcı aynı hesapla
+    // yeniden girseydi yeni oturumun belirteci de iptal olurdu. Modülde 5 sn süre sınırı var, asla fırlatmaz.
+    const sunucuCikisi = await cikisIstegiGonder();
+    if (!sunucuCikisi) console.warn('[handleLogout] sunucu çıkışı başarısız — oturum çerezi silinmemiş / yenileme belirteçleri iptal edilmemiş olabilir');
     try {
       await signOut(auth); // await: oturum kapanışı tamamlanmadan state temizlenmesin
     } catch (e) { console.error('[handleLogout]', e); }
@@ -2614,7 +2622,6 @@ function AppContent() {
     storeSetCompanyId(null);
     resetStream(); // SSE bağlantısı + bellekteki kiracı verisini temizle
     resetLazyCollections(); // tembel koleksiyon kapıları da başa alınsın
-    try { await authedFetch('/api/db/session/logout', { method: 'POST' }); } catch { /* ignore */ }
   };
 
   // --- Data Fetching ---
