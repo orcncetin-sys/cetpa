@@ -27,7 +27,7 @@ scripts/verify-deploy.sh post
 ```
 
 Kontroller:
-- CI run'ı `gh run watch --exit-status` ile beklenir
+- Gönderilen commit'in **kendi** yayın işi (`ci.yml`, main'e push, uzak main'in ucu) `gh run watch --exit-status` ile beklenir. Depodaki en son işe bakılmaz: aynı gönderimde Dependabot ve CodeQL işleri de koşar (2026-10-08'de Dependabot işi «geçti» diye yazılmıştı). Yalnız bu adım: `scripts/verify-deploy.sh ci`
 - Canlı `/api/health`: `status=ok` + `postgres=true` (artık `docs` tablosundan **gerçek okuma** — `SELECT 1` ping'i değil) + `uptime < 600` (taze restart kanıtı; uptime resetlenmediyse **eski kod çalışıyordur**)
 - Bu push'ta eklenen `requireAuth`'lu route'lara auth'suz istek → 401/403 beklenir; **404 = route deploy'a girmemiş**
 

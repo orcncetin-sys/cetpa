@@ -3,9 +3,11 @@
 #
 #   scripts/verify-deploy.sh pre             # push ÖNCESİ: tsc + boot + ps1 ASCII
 #   scripts/verify-deploy.sh post [range]    # push SONRASI: CI + canlı sağlık + yeni route 401
+#   scripts/verify-deploy.sh ci              # yalnız yayın işi (post'un 1. adımı): gönderilen commit'in CI & Deploy işini bekler
 #
-# range verilmezse origin/main@{1}...origin/main kullanılır (bu makineden yapılan
-# son push'un tam aralığı — çok-commit'li push'larda da doğrudur).
+# range verilmezse <origin/main'in bu makinede bilinen ÖNCEKİ ucu>...origin/main kullanılır
+# (fetch'ten ÖNCE SHA'ya çözülür; araya başka push girdiyse o commit'ler de aralığa girer, zararsız).
+# Çözülemezse (taze klon) rota denetimi KOŞMAZ ve FAIL verir; aralığı elle ver.
 set -u
 BASE_URL="${BASE_URL:-https://app.cetpa.com.tr}"
 PHASE="${1:-post}"
@@ -15,7 +17,79 @@ fail() { printf 'FAIL  %s\n' "$1"; FAIL=1; }
 
 cd "$(dirname "$0")/.." || exit 1
 
-if [ "$PHASE" = pre ]; then
+# ── CI denetimi: doğrulanan commit'in KENDİ yayın işi ────────────────────────
+# 2026-10-08'e kadar `gh run list --limit 1` ile depodaki EN SON işe bakılıyordu. O gün aynı gönderimin
+# ardından koşan «Dependabot Updates» işi (success) «PASS CI run …» diye yazıldı; yayın işi kırık olsa da
+# bu satır yeşil kalırdı (aynı gönderimde CodeQL işi de koşar). Artık iş dört süzgeçle seçilir:
+#   iş akışı DOSYASI (ad değil: ad değişebilir) + main dalı + PUSH olayı + hedef commit.
+# Hedef commit UZAK main'in ucudur: yerel origin/main bayatsa eski commit'in eski (yeşil) işi bulunurdu. Ayrıca bu
+# çalışma ağacının HEAD'i uzak main'de olmalı (eşit ya da atası): gönderim reddedildiyse / yapılmadıysa uzak main bir
+# ÖNCEKİ gönderimdir ve onun çoktan bitmiş yeşil işi «PASS» diye yazılırdı (2026-10-08 incelemesi).
+# İş kaydı gönderimden birkaç saniye SONRA oluşur; bulunana kadar yoklanır (varsayılan 18 × 5 sn = en çok 90 sn).
+# Koşu yeşil olsa da yayın ADIMI atlanmış olabilir: VDS_SSH_KEY yoksa ci.yml yayın adımlarını `if:` ile atlar ve iş yine
+# success biter; bu yüzden PASS'ten önce adımın sonucu okunur (adım / iş adları ci.yml ile birebir, testte çitli).
+CI_DOSYASI="ci.yml"
+CI_YAYIN_ISI="Deploy to Windows VDS"
+CI_YAYIN_ADIMI="Deploy (SSH → PowerShell)"
+CI_ARAMA_DENEME="${CI_ARAMA_DENEME:-18}"
+CI_ARAMA_ARALIK="${CI_ARAMA_ARALIK:-5}"
+# $1 = kip (ci | post). Aralığa dayalı kontroller yalnız `post`ta koşar: bayat yerel ref orada FAIL, `ci`de bilgi.
+ci_denetimi() {
+  local kip="$1" uzak yerel hedef kisa is deneme bas yayin
+  # Önce taze ref: karşılaştırma ve `merge-base` fetch'ten SONRA yapılsın (başarısızsa yerel bilgiyle sürer).
+  git fetch -q origin main 2>/dev/null || true
+  uzak=$(git ls-remote origin refs/heads/main 2>/dev/null | cut -f1)
+  yerel=$(git rev-parse --verify -q origin/main 2>/dev/null)
+  hedef="${uzak:-$yerel}"
+  if [ -z "$hedef" ]; then
+    fail "CI: hedef commit çözülemedi (git ls-remote origin ve yerel origin/main ikisi de boş)"
+    return
+  fi
+  kisa="${hedef:0:7}"
+  if [ -z "$uzak" ]; then
+    # Hedef DOĞRULANAMADI: yerel ref bayatsa eski commit'in eski yeşil işi izlenir; bu yüzden bilgi değil FAIL.
+    fail "CI: uzak main okunamadı (git ls-remote origin); hedef doğrulanamadı, yerel origin/main ($kisa) kullanıldı"
+  elif [ -n "$yerel" ] && [ "$uzak" != "$yerel" ]; then
+    if [ "$kip" = post ]; then
+      fail "yerel origin/main (${yerel:0:7}) uzak main ($kisa) ile aynı değil — git fetch origin, sonra yeniden koş"
+    else
+      echo "  --  CI: yerel origin/main (${yerel:0:7}) uzak main ($kisa) gerisinde; bu kip yalnız uzak ucu kullanır"
+    fi
+  fi
+  bas=$(git rev-parse --verify -q HEAD 2>/dev/null)
+  if [ -n "$bas" ] && ! git merge-base --is-ancestor "$bas" "$hedef" 2>/dev/null; then
+    fail "HEAD (${bas:0:7}) uzak main'de ($kisa) YOK — gönderim ulaştı mı? (reddedildiyse uzak main önceki gönderimdir)"
+  fi
+  is=""
+  deneme=0
+  while [ "$deneme" -lt "$CI_ARAMA_DENEME" ]; do
+    # gh'nin KENDİSİ çalışmadıysa (oturum yok, ağ, iş akışı dosyası bulunamadı) boş liste sayılmaz: beklemeden düşer.
+    if ! is=$(gh run list --workflow "$CI_DOSYASI" --branch main --event push --commit "$hedef" --limit 1 --json databaseId -q '.[0].databaseId // empty' 2>/dev/null); then
+      fail "CI: gh çalışmadı ($CI_DOSYASI, $kisa) — gh auth status ile incele"
+      return
+    fi
+    [ -n "$is" ] && break
+    deneme=$((deneme + 1))
+    if [ "$deneme" -lt "$CI_ARAMA_DENEME" ]; then sleep "$CI_ARAMA_ARALIK"; fi
+  done
+  if [ -z "$is" ]; then
+    fail "CI: $kisa için $CI_DOSYASI işi bulunamadı — gönderim main'e ulaştı mı? (gh run list --workflow $CI_DOSYASI --commit $hedef)"
+  elif gh run watch "$is" --exit-status >/dev/null 2>&1; then
+    yayin=$(gh run view "$is" --json jobs -q ".jobs[] | select(.name == \"$CI_YAYIN_ISI\") | .steps[] | select(.name == \"$CI_YAYIN_ADIMI\") | .conclusion" 2>/dev/null)
+    if [ "$yayin" = success ]; then
+      pass "CI & Deploy işi $is ($kisa): yayın adımı koştu"
+    else
+      fail "CI & Deploy işi $is ($kisa) yeşil ama yayın adımı KOŞMADI (adım sonucu: ${yayin:-okunamadı}) — sunucuya kod gitmedi"
+    fi
+  else
+    fail "CI & Deploy işi $is ($kisa) başarısız ya da izlenemedi — gh run view $is ile incele"
+  fi
+}
+
+if [ "$PHASE" = ci ]; then
+  ci_denetimi ci
+
+elif [ "$PHASE" = pre ]; then
   # IZLENMEYEN (yeni) DOSYALAR DA DAHIL — 2026-08-24'te bulundu.
   # Eskiden yalnizca `git diff` kullaniliyordu; heniiz `git add` edilmemis YENI
   # bir .ps1 dosyasi listeye HIC girmiyor ve ASCII kapisi sessizce atlaniyordu
@@ -81,15 +155,21 @@ $NONASCII"; fi
   fi
 
 else
-  RANGE="${2:-origin/main@{1}...origin/main}"
-
-  # 1) CI çalışmasını bekle
-  RUN_ID=$(gh run list --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
-  if [ -n "${RUN_ID:-}" ] && gh run watch "$RUN_ID" --exit-status >/dev/null 2>&1; then
-    pass "CI run $RUN_ID"
+  # Eski yazım `${2:-origin/main@{1}...origin/main}`: bash ilk `}`de kapatıyordu, aralık `origin/main@{1...origin/main}`
+  # oluyordu (tek revizyon + reflog TARİH seçicisi; çalışma ağacına karşı fark) ve açık aralık verilince sonuna
+  # `...origin/main}` yapışıyordu (git 128 → rota denetimi sessizce PASS). 2026-10-08 incelemesi.
+  # Varsayılanın SOL ucu fetch'ten ÖNCE SHA'ya çözülür: `ci_denetimi` içindeki fetch, araya yabancı push girdiyse
+  # origin/main'i taşır ve reflog'a satır yazar; o zaman `origin/main@{1}` bu makinenin push'u olur ve bu push'un kendi
+  # commit'leri aralık dışı kalırdı (2026-10-09 ölçümü). Çözülemezse (taze klon) aralık boş → rota denetimi FAIL.
+  if [ -n "${2:-}" ]; then
+    RANGE="$2"
   else
-    fail "CI run ${RUN_ID:-bulunamadı} — gh run view ${RUN_ID:-} ile incele"
+    ONCEKI=$(git rev-parse -q --verify 'origin/main@{1}' 2>/dev/null) || ONCEKI=""
+    RANGE="${ONCEKI:+$ONCEKI...origin/main}"
   fi
+
+  # 1) CI çalışmasını bekle — gönderilen commit'in KENDİ yayın işi (yukarıda `ci_denetimi`; taze fetch orada)
+  ci_denetimi post
 
   # 2) Canlı sağlık: status ok + postgres (docs tablosundan gerçek okuma) + taze restart.
   #    Yeşil CI tek başına kanıt değil — uptime resetlenmediyse eski kod çalışıyordur.
@@ -131,11 +211,24 @@ else
 
   # 3) Bu push'ta EKLENEN requireAuth'lu route'lar auth'suz 401/403 dönmeli.
   #    404 = route deploy'a hiç girmemiş demektir.
-  git fetch -q origin main 2>/dev/null
-  ROUTES=$(git diff "$RANGE" -- server.ts 2>/dev/null | grep '^+' \
-    | grep -oE "app\.(get|post|put|delete|patch)\('/api/[^']+'[^)]*requireAuth" \
-    | sed -E "s/app\.([a-z]+)\('([^']+)'.*/\1 \2/" | sort -u)
-  if [ -z "$ROUTES" ]; then
+  #    Boş fark ile git HATASI aynı şey değil: aralık yazımı bozuksa denetim koşmamıştır, PASS yazılmaz.
+  ROUTE_DENETIMI=1
+  if [ -z "$RANGE" ]; then
+    fail "yeni korumalı route denetimi KOŞMADI: reflog'da origin/main@{1} yok (taze klon?) — aralığı elle ver: post '<önce>...origin/main'"
+    ROUTE_DENETIMI=0
+    ROUTES=""
+  elif ! ROUTE_FARKI=$(git diff "$RANGE" -- server.ts 2>/dev/null); then
+    fail "yeni korumalı route denetimi KOŞMADI: git diff '$RANGE' başarısız (aralık yazımı?)"
+    ROUTE_DENETIMI=0
+    ROUTES=""
+  else
+    ROUTES=$(printf '%s\n' "$ROUTE_FARKI" | grep '^+' \
+      | grep -oE "app\.(get|post|put|delete|patch)\('/api/[^']+'[^)]*requireAuth" \
+      | sed -E "s/app\.([a-z]+)\('([^']+)'.*/\1 \2/" | sort -u)
+  fi
+  if [ "$ROUTE_DENETIMI" = 0 ]; then
+    :
+  elif [ -z "$ROUTES" ]; then
     pass "yeni korumalı route yok (range: $RANGE)"
   else
     while read -r METHOD RPATH; do
