@@ -23,6 +23,7 @@ import type {
   Quotation, PriceList, QuotationItem,
 } from '../types';
 import { cn } from '../lib/utils';
+import { STAFF_ROLES } from '../lib/rbac';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { paraYaz, tlYaz } from '../utils/currency';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../utils/firebase';
@@ -68,6 +69,8 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
 }) => {
   // Fiyat listesi yönetimi yalnız personel (Admin/Manager/Sales). Dış roller (B2B/Dealer) fiyatları salt-okur — rbac.ts ile hizalı.
   const canManagePrices = userRole === 'Admin' || userRole === 'Manager' || userRole === 'Sales';
+  /** Sunucudaki `requireStaff` ile AYNI liste (lib/rbac) — kopya rol listesi yok. */
+  const icRol = (STAFF_ROLES as readonly string[]).includes(userRole);
   const [b2bTab, setB2bTab] = useState<'quotations' | 'dealers' | 'pricelists' | 'komisyon'>('quotations');
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
@@ -592,6 +595,8 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
               </>)}
             </div>
 
+            {/* Yalnız İÇ rol: POST /api/shopify/sync personel kapılı (requireStaff) — dış rolde bu düğme her tıklamada 403 verirdi. */}
+            {icRol && (
             <div className="apple-card p-6">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-9 h-9 bg-green-50 rounded-xl flex items-center justify-center flex-shrink-0"><ShoppingBag className="w-5 h-5 text-green-600" /></div>
@@ -604,6 +609,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
                 {shopifySyncing ? 'Senkronize ediliyor...' : 'Shopify Senkronize Et'}
               </button>
             </div>
+            )}
           </div>
         </div>
       )}

@@ -81,7 +81,7 @@ async function calistir(yol: string, params: Record<string, string> = {}) {
   const app = sahteApp();
   const C: ReportsRouteCtx = {
     getAdminDb: () => ({}) as ReturnType<ReportsRouteCtx['getAdminDb']>,
-    requireAuth: gecir,
+    requireAuth: gecir, requireStaff: gecir,
     getUserCompanyId: async () => 'cid-1',
     loadCompanyDocs: async (coll: string) =>
       coll === 'inventoryMovements' ? HAREKETLER : coll === 'inventory' ? ENVANTER : coll === 'mikroFaturalar' ? BASLIKLAR : [],

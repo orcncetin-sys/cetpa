@@ -1,0 +1,173 @@
+/**
+ * DEĞİŞMEZ — dış rol SATIR SÜZGECİ server.ts'e bağlı ve `orders`'a ulaşan uçlar kapılı (2026-10-02).
+ *
+ * Kural ve davranış testleri saf modülde (lib/tenantErisim + test). Bağlantının kendisi server.ts kapanışında — içe
+ * aktarılamıyor. Bu dosya şunları çitler:
+ *   • süzgecin ÜÇ yolda da bağlı olması (REST kimliği, akış init'i, akış olayı) — yalnız biri bağlanırsa başkasının siparişi
+ *     ilk değişiklikte canlı olarak düşer;
+ *   • /api/db dışındaki, siparişe dokunan uçların personel kapısı (dış rol süzgeci o uçlardan aşmasın);
+ *   • sunucuda `orders`'ı okuyan / yazan YENİ bir yer eklenince testin kırılması (ya `requireStaff` ya `siparisGorebilir`).
+ */
+import { describe, it, expect } from 'vitest';
+import { join } from 'path';
+import { SRC_KOK as SRC, kaynakDosyalari, kodSatirlari, gorece } from '../test/kaynakTarama';
+
+const SERVER = join(SRC, '..', 'server.ts');
+const satirlar = (yol: string, desen: RegExp) => kodSatirlari(yol).filter(({ kod }) => desen.test(kod.trimEnd()));
+const say = (yol: string, desen: RegExp) => satirlar(yol, desen).length;
+const tek = (yol: string, desen: RegExp): number => { const s = satirlar(yol, desen); expect(s, String(desen)).toHaveLength(1); return s[0].n; };
+/** `n` numaralı satırın HEMEN altındaki satırlar sırayla bu desenlere uyar — araya satır giremez, satır düşemez, sıra değişemez. */
+const ardindan = (yol: string, n: number, desenler: RegExp[]) => {
+  const kod = kodSatirlari(yol);
+  desenler.forEach((desen, i) => expect(kod[n + i].kod.trimEnd(), `${gorece(yol)}:${n + i + 1}`).toMatch(desen));
+};
+const UID_SATIRI = /^\s*const uid = \(req as Request & \{ uid\?: string \}\)\.uid \|\| '';$/;
+
+describe('satır süzgeci üç yolda da bağlı', () => {
+  it('REST: istek kimliği ROL taşır (kiraciWhere / kiraciDamgala / dokumanSahibiMi bundan okur)', () => {
+    tek(SERVER, /return \{ uid, cid: \(\) => getUserCompanyId\(uid\), superAdmin: isSuperAdmin\(req\), rol: \(\) => getUserRole\(uid\) \};/);
+    // Üç ince sarmalayıcı saf işleve O kimlikle devreder: biri yerinde zayıflatılırsa (ör. yalnız kiracı karşılaştıran bir denetim)
+    // çağrı yerlerindeki çitler bunu görmez.
+    tek(SERVER, /^\s*const tenantWhere = \(req: Request, coll: string\) => kiraciWhere\(coll, reqKimlik\(req\)\);$/);
+    tek(SERVER, /^\s*const injectTenant = \(req: Request, coll: string, data: Record<string, unknown>, onceki\?: Record<string, unknown>\) => kiraciDamgala\(coll, data, reqKimlik\(req\), onceki\);$/);
+    // PUT / PATCH / cas mevcut belgeyi damgaya verir: dış rolün yazamadığı alanlar (DIS_ROL_YAZAMAZ) silinmez, öncekinden korunur.
+    expect(satirlar(SERVER, /^\s*data = await injectTenant\(req, coll, data, before\);/)).toHaveLength(2);
+    const sahip = tek(SERVER, /^\s*const ownsDoc = \(req: Request, coll: string, docData: Record<string, unknown> \| undefined, docId\?: string\) =>$/);
+    ardindan(SERVER, sahip, [/^\s*dokumanSahibiMi\(coll, docData, reqKimlik\(req\), docId\);$/]);
+  });
+  it('akış init\'i: kovalar role göre; satır kovası SQL\'e ve parametrelere girer; süzgeçli koleksiyon her bağlantıda yeniden gönderilir', () => {
+    tek(SERVER, /const akisKimlik = \{ uid: streamUid, cid: streamCid, rol: streamRole \};/);
+    tek(SERVER, /const kova = akisKovalari\(izinliColls, streamRole\);/);
+    tek(SERVER, /kova\.satir\.map\(\(_, i\) => `\\n\s+OR \(coll = \$\$\{9 \+ 2 \* i\} AND data->>'companyId' = \$4 AND data->>\$\$\{10 \+ 2 \* i\} = \$5\)`\)\.join\(''\)/);
+    tek(SERVER, /\.\.\.kova\.satir\.flatMap\(x => \[x\.coll, x\.alan\]\)\],/);
+    tek(SERVER, /const initColls = \[\.\.\.new Set\(\[\.\.\.istenenInit, \.\.\.satirliColls\]\)\];/);
+  });
+  it('akış olayı: satır süzgeci yayından ÖNCE; görünmeyen satır gönderilmez', () => {
+    // Karar saf işlevde (tenantErisim.akisOlayKarari — davranışı tenantErisim.test'te). Burada BAĞLANTI çitlenir: karar bu
+    // bağlantının kimliği ve kümesiyle alınır, 'gonder' dışındaki her sonuçta yayından ÖNCE dönülür, 'sil'de yalnız KİMLİK gider.
+    const karar = tek(SERVER, /^\s*const satirKarari = akisOlayKarari\(ev, akisKimlik, gonderilenSatirlar\);$/);
+    const sil = tek(SERVER, /^\s*if \(satirKarari === 'sil' && !res\.writableEnded\) res\.write\(`event: change\\ndata: \$\{JSON\.stringify\(\{ coll: ev\.coll, type: 'delete', id: ev\.id \}\)\}\\n\\n`\);$/);
+    const don = tek(SERVER, /^\s*if \(satirKarari !== 'gonder'\) return;$/);
+    const yayin = tek(SERVER, /^\s*yayinla\(ev\);$/);
+    expect(karar).toBeLessThan(sil); expect(sil).toBeLessThan(don); expect(don).toBeLessThan(yayin);
+    expect(don - karar).toBe(2);                                    // araya koşulsuz bir yayın / erken dönüş giremez
+    // Küme init'te doldurulur (init'te gönderilen satır sonradan görünmez olursa 'sil' üretilebilsin) ve süzgeçli koleksiyon
+    // her bağlantıda yeniden gönderilir.
+    tek(SERVER, /if \(satirAlani\(r\.coll, streamRole\) !== null\) gonderilenSatirlar\.add\(`\$\{r\.coll\}\/\$\{r\.id\}`\);/);
+    tek(SERVER, /const satirliColls = colls\.filter\(c => satirAlani\(c, streamRole\) !== null\);/);
+  });
+});
+
+describe('/api/db kaçakları kapalı', () => {
+  it('koşullu yazma (cas) gövdesi damgadan geçer; atomik artırma sahiplik alanına dokunamaz', () => {
+    tek(SERVER, /^\s*: await injectTenant\(req, coll, set as Record<string, unknown>, rows\[0\]\.data as Record<string, unknown>\);$/);
+    tek(SERVER, /if \(SAHIPLIK_ALANLARI\.has\(field\)\) return res\.status\(400\)/);
+    tek(SERVER, /const SAHIPLIK_ALANLARI = new Set<string>\(\['companyId', 'userId', \.\.\.DIS_ROL_SATIR_ALANI\.values\(\)\]\);/);
+  });
+  it('PUT ve PATCH: dış rol, sunucunun ürettiği biçimde (`__`) kimlikle yeni kayıt açamaz', () => {
+    // Kapı "var VE görünür" ile sorulur ve sahiplik yanıtından ÖNCE gelir: "yok" ile "var ama görünmez" aynı yanıtı alır.
+    const GORUNUR = /^\s*const gorunur = rows\.length > 0 && await ownsDoc\(req, coll, before, realId\);$/;
+    const KAPI = /^\s*if \(await ayrilmisKimlikEngeli\(req, res, coll, realId, gorunur\)\) return;$/;
+    // Satır SONUNA kadar çapalı: `return;` düşerse 403 gider ama yazma sürer (birleştirme + damga + INSERT … ON CONFLICT).
+    const SAHIPLIK_403 = /^\s*if \(rows\.length && !gorunur\) \{ res\.status\(403\)\.json\(\{ error: 'Bu kayıt başka bir firmaya ait\.' \}\); return; \}$/;
+    expect(say(SERVER, GORUNUR)).toBe(2);
+    expect(say(SERVER, SAHIPLIK_403)).toBe(2);
+    const kapilar = satirlar(SERVER, KAPI);
+    expect(kapilar).toHaveLength(2);
+    const kod = kodSatirlari(SERVER);
+    for (const { n } of kapilar) {
+      expect(kod[n - 2].kod.trimEnd()).toMatch(GORUNUR);              // hemen üstünde
+      ardindan(SERVER, n, [SAHIPLIK_403]);                            // sahiplik yanıtı hemen altında, dönüşüyle birlikte
+    }
+    // Sarmalayıcının TAMAMI çitli: ön eleme ve karar saf işlevde (tenantErisim.ayrilmisKimlikAdayi / ayrilmisKimlikMi — davranışları
+    // tenantErisim.test'te), rol yalnız aday ise sorulur, 403'ten sonra `true` döner (yoksa 403 gider ama yazma sürer).
+    const imza = tek(SERVER, /^\s*const ayrilmisKimlikEngeli = async \(req: Request, res: Response, coll: string, id: string, gorunur: boolean\): Promise<boolean> => \{$/);
+    ardindan(SERVER, imza, [
+      /^\s*if \(!ayrilmisKimlikAdayi\(coll, id, gorunur\)\) return false;$/,
+      UID_SATIRI,
+      /^\s*if \(!ayrilmisKimlikMi\(coll, id, await getUserRole\(uid\), gorunur\)\) return false;$/,
+      /^\s*res\.status\(403\)\.json\(\{ error: 'Bu kimlikle kayıt açılamaz\.' \}\);$/,
+      /^\s*return true;$/,
+      /^\s*\};$/,
+    ]);
+  });
+  it('atomik artırma ve koşullu yazma: görünmeyen sipariş dış role "yok" ile AYNI yanıtı verir (varlık sızmaz)', () => {
+    const donusler = satirlar(SERVER, /^\s*return sahipsizYanit\(req, res, coll\);$/);
+    expect(donusler).toHaveLength(2);
+    const kod = kodSatirlari(SERVER);
+    for (const { n } of donusler) {
+      // Yanıtın HANGİ koşulda verildiği: sahiplik denetimi BAŞARISIZSA (`!` düşerse sahip 404 alır, yabancı geçer); hemen üstünde
+      // "yok" yanıtı — görünmeyen satırın 404'ü onunla AYNI gövdeyi taşır.
+      expect(kod[n - 3].kod.trimEnd()).toMatch(/^\s*if \(!rows\.length\) return res\.status\(404\)\.json\(\{ error: 'Not found\.' \}\);$/);
+      expect(kod[n - 2].kod.trimEnd()).toMatch(/^\s*if \(sahiplikDenetimli\(coll\) && !\(await ownsDoc\(req, coll, rows\[0\]\.data as Record<string, unknown>, id\)\)\) \{$/);
+      ardindan(SERVER, n, [/^\s*\}$/]);
+    }
+    // Yanıtın kendisi: 404 mü 403 mü kararı saf işlevde (tenantErisim.sahipsizDurumKodu — davranışı tenantErisim.test'te).
+    const imza = tek(SERVER, /^\s*const sahipsizYanit = async \(req: Request, res: Response, coll: string\): Promise<void> => \{$/);
+    ardindan(SERVER, imza, [
+      UID_SATIRI,
+      /^\s*if \(sahipsizDurumKodu\(coll, await getUserRole\(uid\)\) === 404\) \{ res\.status\(404\)\.json\(\{ error: 'Not found\.' \}\); return; \}$/,
+      /^\s*res\.status\(403\)\.json\(\{ error: 'Bu kayıt başka bir firmaya ait\.' \}\);$/,
+      /^\s*\};$/,
+    ]);
+  });
+});
+
+describe('siparişe dokunan özel uçlar personel kapılı', () => {
+  const R = (ad: string) => join(SRC, 'server', 'routes', ad);
+  const UCLAR: Array<[string, RegExp]> = [
+    [SERVER, /app\.get\('\/api\/aging', requireAuth, requireStaff,/],
+    [SERVER, /app\.post\('\/api\/luca\/sync\/fatura', requireAuth, requireMfaVerified, requireStaff,/],
+    [SERVER, /app\.post\('\/api\/whatsapp\/order-notification', requireAuth, requireMfaVerified, requireStaff,/],
+    [SERVER, /app\.post\('\/api\/whatsapp\/send', requireAuth, requireMfaVerified, requireStaff,/],
+    [R('reportsRoutes.ts'), /app\.get\('\/api\/reports\/summary', C\.requireAuth, C\.requireStaff,/],
+    // Alış maliyeti + tüm müşterilere satış hareketleri (Mikro) — dış role kapalı.
+    [R('reportsRoutes.ts'), /app\.get\('\/api\/reports\/stok-fiyat-karsilastirma', C\.requireAuth, C\.requireStaff,/],
+    [R('reportsRoutes.ts'), /app\.get\('\/api\/reports\/stok-fiyat-karsilastirma\/:sku\/detay', C\.requireAuth, C\.requireStaff,/],
+    [R('erpRoutes.ts'), /app\.post\('\/api\/parasut\/fatura', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
+    [R('mikroRoutes.ts'), /app\.post\('\/api\/mikro\/siparis\/kaydet', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
+    [R('mikroRoutes.ts'), /app\.post\('\/api\/mikro\/fatura\/kaydet', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
+    [R('mikroRoutes.ts'), /app\.post\('\/api\/mikro\/fatura\/kalemler', C\.requireAuth, C\.requireStaff,/],
+    [R('mikroRoutes.ts'), /app\.post\('\/api\/mikro\/import\/faturadan-siparis', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
+    [R('kanalRoutes.ts'), /app\.post\("\/api\/shopify\/sync", C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
+    [R('kanalRoutes.ts'), /app\.post\('\/api\/trendyol\/sync', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
+    [R('kanalRoutes.ts'), /app\.post\('\/api\/hepsiburada\/sync', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
+    [R('epostaRoutes.ts'), /app\.post\('\/api\/email\/order-notification', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
+    [R('paymentRoutes.ts'), /app\.post\('\/api\/iyzico\/payment-link', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
+  ];
+  it('her uç satırında requireStaff var', () => {
+    const eksik = UCLAR.filter(([yol, desen]) => say(yol, desen) !== 1).map(([yol, desen]) => `${gorece(yol)} ${desen}`);
+    expect(eksik).toEqual([]);
+  });
+  it('istemciden gelen sipariş kimliği sahiplikten geçer (Luca: siparisGorebilir; iyzico: kiracı denetimi dış çağrıdan ÖNCE)', () => {
+    tek(SERVER, /if \(!siparisGorebilir\(await getUserRole\(uid\), \{ uid, cid: await reqCompanyId\(req\) \}, order\)\) \{/);
+    const P = R('paymentRoutes.ts');
+    const kapi = tek(P, /if \(dc === null \|\| \(dc !== '' && dc !== await C\.reqCompanyId\(req\)\)\) \{/);
+    const disCagri = tek(P, /const r = await fetch\(`\$\{creds\.baseUrl\}\/payment\/initialize\/checkout`, \{/);
+    expect(kapi).toBeLessThan(disCagri);
+  });
+});
+
+describe('sunucuda `orders` okuyan / yazan yerlerin SAYISI sabit', () => {
+  // Yeni bir okuyucu / yazıcı eklenince bu test kırılır: uç ya `requireStaff` ile kapılanır ya da satırı `siparisGorebilir`'den
+  // geçirir, sonra sayı bilinçli güncellenir. (2026-10-02 ölçümü.)
+  const BEKLENEN: Record<string, number> = {
+    'server.ts': 9,
+    'src/server/routes/kanalRoutes.ts': 4,
+    'src/server/routes/mikroRoutes.ts': 14,
+    'src/server/routes/opsRoutes.ts': 1,
+    'src/server/routes/paymentRoutes.ts': 2,
+    'src/server/routes/reportsRoutes.ts': 1,
+    'src/server/crons.ts': 1,
+  };
+  it('dosya başına sayım', () => {
+    const desen = /collection\('orders'\)|loadCompanyDocs\('orders'|tenantSnap\('orders'|coll = 'orders'/g;
+    const olculen: Record<string, number> = {};
+    for (const yol of [SERVER, ...kaynakDosyalari(join(SRC, 'server'))]) {
+      if (/\.test\.ts$|testDuzenegi/.test(yol)) continue;
+      const n = kodSatirlari(yol).reduce((t, { kod }) => t + (kod.match(desen)?.length ?? 0), 0);
+      if (n > 0) olculen[gorece(yol)] = n;
+    }
+    expect(olculen).toEqual(BEKLENEN);
+  });
+});

@@ -21,6 +21,8 @@ import { siparisIptalMi } from '../../utils/siparis.js';
 export interface ReportsRouteCtx {
   getAdminDb: () => AdminDbLike;
   requireAuth: any;
+  /** Yalnız iç personel (server.ts requireStaff). */
+  requireStaff: any;
   getUserCompanyId: (uid: string) => Promise<string>;
   /** Kiraci filtresini SQL'e iten yardimci - tum-koleksiyon taramasi yapmaz. */
   loadCompanyDocs: (coll: string, cid: string, daralt?: DocDaralt) => Promise<Array<Record<string, unknown>>>;
@@ -31,7 +33,8 @@ export interface ReportsRouteCtx {
 export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
   // ── Reports Summary API ────────────────────────────────────────────────────
   // GET /api/reports/summary — aggregated KPIs for the last 30 days vs prior 30 days
-  app.get('/api/reports/summary', C.requireAuth, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (kiracının sipariş sayısı ve CİROSU).
+  app.get('/api/reports/summary', C.requireAuth, C.requireStaff, async (req: Request, res: Response) => {
     if (!C.getAdminDb()) return res.status(503).json({ error: 'Firebase Admin unavailable.' });
     try {
       const now       = new Date();
@@ -87,7 +90,10 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
   // düşülmüyor, iskontolu alımda ortalama alış fiyatı olduğundan yüksek çıkıyordu; ayrıca `|| 0` tutarı
   // bilinmeyen satırı ₺0 tutar + gerçek miktarla ortalamaya sokuyordu. Native (Cetpa) hareketlerde fiyat
   // alanı hiç yok (InventoryMovement tipi) — yalnız Mikro satırları (sth_stok_kod dolu) hesaba katılır.
-  app.get('/api/reports/stok-fiyat-karsilastirma', C.requireAuth, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-07): uç Mikro alım / satım hareketlerinden ALIŞ maliyetini ve bütün müşterilere yapılan satışı döndürür;
+  // yalnız requireAuth'tu — dış rol (B2B / Bayi) sipariş satır süzgecini ve alış fiyatı gizliliğini bu uçtan aşabiliyordu.
+  // (Hangi İÇ rollerin göreceği ayrı karar: Satın Alma → Fiyat Karşılaştırma şartnamesi.)
+  app.get('/api/reports/stok-fiyat-karsilastirma', C.requireAuth, C.requireStaff, async (req: Request, res: Response) => {
     try {
       const cid = await C.getUserCompanyId((req as Request & { uid?: string }).uid || '');
       // mikroFaturalar: fatura BAŞLIKLARI (cha_meblag) — satırdan ayırt edilemeyen iskonto durumlarında hakem (lib/stokFiyat).
@@ -176,7 +182,7 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
 
   // GET /api/reports/stok-fiyat-karsilastirma/:sku/detay — bir SKU'nun tüm alım/satım satırları
   // (brüt, iskonto, NET tutar ve net birim fiyat — src/lib/stokFiyat.ts stokFiyatDetay)
-  app.get('/api/reports/stok-fiyat-karsilastirma/:sku/detay', C.requireAuth, async (req: Request, res: Response) => {
+  app.get('/api/reports/stok-fiyat-karsilastirma/:sku/detay', C.requireAuth, C.requireStaff, async (req: Request, res: Response) => {
     try {
       const sku = String(req.params['sku'] || '').trim();
       if (!sku) return res.status(400).json({ success: false, error: 'sku gerekli.' });

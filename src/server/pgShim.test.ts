@@ -76,3 +76,31 @@ describe('silme olayı kiracı/kullanıcı ETİKETİ taşır, içerik taşımaz'
     expect(olaylar[1]).toMatchObject({ type: 'set', cid: 'B', data: { name: 'Açık' } });
   });
 });
+
+// 2026-10-02 — dış rol satır süzgeci: akış, sipariş olayını `satirSahibi` etiketine göre süzer (server.ts onChange).
+describe('broadcastDocChange — satır sahibi etiketi (orders.assignedTo)', () => {
+  const dinle = (is: () => void) => {
+    const olaylar: Array<Record<string, unknown>> = [];
+    const d = (e: Record<string, unknown>) => olaylar.push(e);
+    dbEvents.on('change', d);
+    try { is(); } finally { dbEvents.off('change', d); }
+    return olaylar;
+  };
+  it('set ve delete olayında etiket taşınır; silmede içerik yine iliştirilmez', () => {
+    const o = dinle(() => {
+      broadcastDocChange('orders', 'set', 'o1', { companyId: 'A', assignedTo: 'u1', customerName: 'Şirin Yapı' });
+      broadcastDocChange('orders', 'delete', 'o1', { companyId: 'A', assignedTo: 'u1', customerName: 'Şirin Yapı' });
+    });
+    expect(o[0]).toMatchObject({ coll: 'orders', type: 'set', id: 'o1', cid: 'A', satirSahibi: 'u1' });
+    expect(o[1]).toMatchObject({ coll: 'orders', type: 'delete', id: 'o1', cid: 'A', satirSahibi: 'u1' });
+    expect(o[1]).not.toHaveProperty('data');
+  });
+  it('sahiplik alanı olmayan sipariş (Mikro faturası, mağaza) etiketsizdir → dış role gitmez; süzgeçsiz koleksiyonda etiket yok', () => {
+    const o = dinle(() => {
+      broadcastDocChange('orders', 'set', 'mf1', { companyId: 'A', source: 'mikro-fatura' });
+      broadcastDocChange('orders', 'set', 'o2', { companyId: 'A', assignedTo: null });
+      broadcastDocChange('leads', 'set', 'l1', { companyId: 'A', assignedTo: 'u1' });
+    });
+    for (const e of o) expect(e).not.toHaveProperty('satirSahibi');
+  });
+});

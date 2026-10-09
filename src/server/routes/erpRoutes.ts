@@ -201,7 +201,9 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
     } catch (e) { res.status(500).json({ success: false, error: (e as Error).message }); }
   });
 
-  app.post('/api/parasut/fatura', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02): sipariş gövdesi İSTEMCİDEN gelir — dış rol (B2B / Bayi) bu uçla firmanın Paraşüt hesabında
+  // keyfi müşteri / tutarla satış faturası açabiliyordu (Mikro ve Luca fatura uçlarıyla aynı kapı).
+  app.post('/api/parasut/fatura', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     const creds = await C.getParasutCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const { order } = req.body as { order: Record<string, unknown> };

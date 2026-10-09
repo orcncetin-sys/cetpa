@@ -70,7 +70,8 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
 
   // POST /api/email/order-notification
   // Body: { orderId, status, customerEmail } — sends branded status email
-  app.post('/api/email/order-notification', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (firmanın alan adından keyfi alıcıya ileti).
+  app.post('/api/email/order-notification', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     const { orderId, status, customerEmail, customerName, orderNo, lang = 'tr' } =
       req.body as { orderId: string; status: string; customerEmail: string; customerName: string; orderNo?: string; lang?: string };
     if (!customerEmail) return res.status(400).json({ success: false, error: 'customerEmail gerekli.' });

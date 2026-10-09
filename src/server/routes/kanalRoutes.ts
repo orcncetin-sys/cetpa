@@ -62,7 +62,8 @@ export function kendiSiparisi<T extends SiparisBelgesi>(snap: { docs: T[] }, com
 export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
   // ── shopify (3 rota) ─────────────────────────────────────────────────
   // Manual Sync Trigger
-  app.post("/api/shopify/sync", C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (mağazanın son 50 siparişi HAM hâliyle: müşteri e-postası, telefonu, adresi).
+  app.post("/api/shopify/sync", C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     const body = req.body || {};
     const accessToken = body.accessToken || process.env.SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || process.env.VITE_SHOPIFY_ACCESS_TOKEN;
     let storeDomain = body.storeUrl || process.env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_URL || process.env.VITE_SHOPIFY_STORE_DOMAIN || "cetpa.myshopify.com";
@@ -272,7 +273,7 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
   });
 
   /** POST /api/trendyol/sync — pull recent orders → Firebase */
-  app.post('/api/trendyol/sync', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  app.post('/api/trendyol/sync', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     const creds = await C.getTrendyolCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const t0 = Date.now();
@@ -343,7 +344,7 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
   });
 
   /** POST /api/hepsiburada/sync — pull recent orders → Firebase */
-  app.post('/api/hepsiburada/sync', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  app.post('/api/hepsiburada/sync', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     const creds = await C.getHepsiburadaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const t0 = Date.now();

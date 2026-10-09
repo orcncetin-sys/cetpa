@@ -548,7 +548,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   });
 
   /** POST /api/mikro/siparis/kaydet — push order → Mikro SiparisKaydetV2 */
-  app.post('/api/mikro/siparis/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (Mikro'ya satış siparişi + kiracıdaki herhangi bir siparişe damga).
+  app.post('/api/mikro/siparis/kaydet', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { order, firebaseId } = req.body as { order: Record<string, unknown>; firebaseId: string };
@@ -1875,7 +1876,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  Kolon adları çalışma anında şemadan süzülür (mikroKolonlar) — elle yazılan
    *  yanlış bir ad tüm sorguyu öldürmesin (cha_vergi/cha_ettn arıza sınıfı).
    */
-  app.post('/api/mikro/fatura/kalemler', C.requireAuth, C.mikroLimiter, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (sıra numarasıyla herhangi bir faturanın kalemleri).
+  app.post('/api/mikro/fatura/kalemler', C.requireAuth, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const sira = String(req.body?.sira ?? '').trim();
@@ -4496,7 +4498,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     }
   });
 
-  app.post('/api/mikro/import/faturadan-siparis', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu.
+  app.post('/api/mikro/import/faturadan-siparis', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     const t0 = Date.now();
     try {
@@ -5129,7 +5132,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   // Body: { order: Record<string, unknown>, firebaseId: string }
   //   order must have: mikroCariKod, lineItems[], totalPrice, faturaTipi ('e-fatura'|'e-arsiv'|'ihracat')
   // On success writes back: mikroFaturaNo, ettn, mikroFaturaDate to orders/{firebaseId}
-  app.post('/api/mikro/fatura/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (RESMÎ BELGE — e-Fatura / e-Arşiv kesimi; kardeş irsaliye rotasında rol kapısı vardı, bunda yoktu).
+  app.post('/api/mikro/fatura/kaydet', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const parsed = C.validate(FaturaKaydetSchema, req.body, res);
     if (!parsed) return;

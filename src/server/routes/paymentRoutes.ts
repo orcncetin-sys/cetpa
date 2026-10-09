@@ -71,7 +71,10 @@ export function paymentRoutes(app: Express, C: PaymentRouteCtx): void {
   // Body: { orderId, amount, currency?, customerName, customerEmail, customerPhone?,
   //         shippingAddress?, taxId?, lineItems?, callbackUrl? }
   // On success: stores paymentPageUrl + iyzicoToken on orders/{orderId}
-  app.post('/api/iyzico/payment-link', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff + sipariş sahipliği (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu ve `orderId` hiç denetlenmiyordu —
+  // dış rol dâhil herkes başka kullanıcının (ve başka KİRACININ) siparişine ödeme bağlantısı iliştirip `companyId`'sini
+  // değiştirebiliyor, olmayan kimlikle yetim sipariş dokümanı yaratabiliyordu.
+  app.post('/api/iyzico/payment-link', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     const creds = await C.getIyzicoCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
 
@@ -90,6 +93,14 @@ export function paymentRoutes(app: Express, C: PaymentRouteCtx): void {
 
     if (!orderId || !amount || !customerName || !customerEmail) {
       return res.status(400).json({ success: false, error: 'orderId, amount, customerName, customerEmail gerekli.' });
+    }
+    // Sipariş VAR ve çağıranın kiracısının olmalı — dış sisteme (iyzico) gitmeden ÖNCE. Etiketsiz eski kayıt kendi sayılır.
+    {
+      const snap = await C.getAdminDb().collection('orders').doc(String(orderId)).get();
+      const dc = snap.exists ? String((snap.data() as { companyId?: unknown } | undefined)?.companyId ?? '') : null;
+      if (dc === null || (dc !== '' && dc !== await C.reqCompanyId(req))) {
+        return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+      }
     }
 
     const amountStr = iyzicoTutarMetni(amount);   // sepetle AYNI kuruş değeri (Σ sepet = price)

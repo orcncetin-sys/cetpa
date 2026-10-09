@@ -10,17 +10,105 @@
  * `cid()` GETTER'dır (tembel): USER_SCOPED ve sınıfsız koleksiyonlarda kiracı sorgusu HİÇ
  * yapılmaz — eski davranış korunur (getUserCompanyId 60 sn önbellekli ama ilk çağrı DB'ye gider).
  */
-import { TENANT_COLLECTIONS as TENANT_LIST, USER_SCOPED_COLLECTIONS as USER_SCOPED_LIST, SERVER_ONLY_COLLECTIONS as SERVER_ONLY_LIST } from './collections';
+import { TENANT_COLLECTIONS as TENANT_LIST, USER_SCOPED_COLLECTIONS as USER_SCOPED_LIST, SERVER_ONLY_COLLECTIONS as SERVER_ONLY_LIST, DIS_ROL_SATIR_ALANI, DIS_ROL_YAZAMAZ } from './collections';
+import { STAFF_ROLES, type AppRole } from './rbac';
 
 const TENANT = new Set<string>(TENANT_LIST);
 const USER_SCOPED = new Set<string>(USER_SCOPED_LIST);
 const SERVER_ONLY = new Set<string>(SERVER_ONLY_LIST);
+
+const STAFF = new Set<AppRole>(STAFF_ROLES);
 
 export interface KiraciKimligi {
   uid: string;
   /** İsteği yapan kullanıcının kiracı id'si — tembel, yalnız gerektiğinde çözülür. */
   cid: () => Promise<string>;
   superAdmin: boolean;
+  /** Kullanıcının rolü — TEMBEL ve ZORUNLU: yalnız satır süzgeçli koleksiyonda (DIS_ROL_SATIR_ALANI) sorulur. İsteğe bağlı
+   *  olsaydı unutulan çağrı yeri sessizce süzgeçsiz kalırdı. */
+  rol: () => Promise<AppRole | null>;
+}
+
+/**
+ * Bu koleksiyonda bu role SATIR süzgeci uygulanır mı? Uygulanırsa sahiplik alanının adı, yoksa null.
+ * İç rol (STAFF_ROLES) → null. Dış rol VE rolü çözülemeyen (null) kullanıcı → alan (kapalı başarısızlık).
+ * Süper-admin ayrıcalığı YOK (kiraciWhere ile aynı ilke — onun yolu /api/superadmin/*).
+ */
+export function satirAlani(coll: string, rol: AppRole | null | undefined): string | null {
+  const alan = DIS_ROL_SATIR_ALANI.get(coll);
+  if (!alan) return null;
+  return rol && STAFF.has(rol) ? null : alan;
+}
+
+/**
+ * Satır bu kullanıcıya görünür mü? Süzgeç yoksa (iç rol / süzgeçsiz koleksiyon) evet. Süzgeç varsa KATI: kiracı etiketi kendi
+ * kiracısı VE sahiplik alanı kendi uid'i olmalı — etiketsiz / sahipsiz satır dış role görünmez (iç roldeki "etiketsiz eski
+ * kayıt görünür" esnekliği burada sızıntı olurdu: Mikro faturasından, pazar yerinden, çevrim içi mağazadan gelen siparişlerin
+ * sahiplik alanı yoktur).
+ */
+export function satirGorunur(coll: string, rol: AppRole | null | undefined, k: { uid: string; cid: string }, data: Record<string, unknown> | undefined): boolean {
+  const alan = satirAlani(coll, rol);
+  if (!alan) return true;
+  return !!k.uid && !!data && data.companyId === k.cid && data[alan] === k.uid;
+}
+
+/**
+ * AYRILMIŞ KİMLİK: `__` içeren kimlikleri sunucu üretir (`mikrofat__<cid>__<seri>-<sıra>`, `shopify__<özet>`) ve tahmin
+ * edilebilir olanları vardır. Satır süzgeçli koleksiyonda DIŞ ROL, kendisine GÖRÜNEN bir kaydı olmayan böyle bir kimliğe
+ * yazamaz: önceden açarsa (kimlik kapma) sunucunun sonradan aynı kimliğe yazdığı sipariş — damgalanan sahiplik alanı
+ * yüzünden — ona görünür olurdu. `gorunur` = kayıt VAR ve bu kullanıcıya görünür; "yok" ile "var ama görünmez" aynı sonucu
+ * verir (yanıt farkı tahmin edilebilir kimliklerin VARLIĞINI sızdırırdı).
+ */
+export function ayrilmisKimlikMi(coll: string, id: string, rol: AppRole | null | undefined, gorunur: boolean): boolean {
+  return ayrilmisKimlikAdayi(coll, id, gorunur) && satirAlani(coll, rol) !== null;
+}
+
+/**
+ * `ayrilmisKimlikMi`'nin ROL SORMADAN bilinen kısmı (ucuz ön eleme): aday değilse hiçbir rolde engel yoktur, rol sorgusuna gerek
+ * kalmaz. Kararın kendisi DEĞİL: adayı engele çeviren, rolün dış ya da çözülemez olmasıdır.
+ * Eskiden bu üç koşul server.ts sarmalayıcısında KOPYA olarak duruyordu ve saf işlevden önce dönüyordu: tek işaret hatası
+ * kapıyı sessizce devre dışı bırakıyor, testler yeşil kalıyordu.
+ */
+export function ayrilmisKimlikAdayi(coll: string, id: string, gorunur: boolean): boolean {
+  return !gorunur && id.includes('__') && DIS_ROL_SATIR_ALANI.has(coll);
+}
+
+/**
+ * Sahiplik denetimi BAŞARISIZ olunca dönülecek durum kodu. Satır süzgeçli koleksiyonda dış role (ve rolü çözülemeyene) "yok" ile
+ * AYNI yanıt: 404 — varlık sızmaz (tek GET ve Luca ucu da öyle). İç rolde ve süzgeçsiz koleksiyonda bugünkü 403.
+ */
+export function sahipsizDurumKodu(coll: string, rol: AppRole | null | undefined): 404 | 403 {
+  return satirAlani(coll, rol) !== null ? 404 : 403;
+}
+
+/**
+ * Canlı akışta TEK olayın kararı (dış rol satır süzgeci). `gonderilen` = bu bağlantıya daha önce gönderilmiş satırların
+ * anahtarları (`coll/id`) — işlev onu GÜNCELLER.
+ *   • 'gonder' — süzgeç yok (iç rol / süzgeçsiz koleksiyon) ya da satır kullanıcının kendi satırı;
+ *   • 'sil'    — satır artık görünmüyor ama bu bağlantıya daha önce gönderilmişti (yeniden atama): istemci önbelleğinden
+ *                düşsün diye yalnız kimliğiyle `delete` gider — doküman gövdesi GİTMEZ;
+ *   • 'yut'    — başkasının / etiketsiz / yabancı kiracının satırı: hiçbir şey gönderilmez.
+ * Eskiden her sipariş değişikliği dokümanın TAMAMIYLA kiracıdaki dış rollü herkese canlı gidiyordu.
+ */
+export function akisOlayKarari(
+  ev: { coll: string; id?: string; type?: string; cid?: string | null; satirSahibi?: string | null },
+  k: { uid: string; cid: string; rol: AppRole | null },
+  gonderilen: Set<string>,
+): 'gonder' | 'sil' | 'yut' {
+  if (satirAlani(ev.coll, k.rol) === null) return 'gonder';
+  const anahtar = `${ev.coll}/${ev.id}`;
+  const kendi = !!ev.id && !!k.uid && ev.cid === k.cid && ev.satirSahibi === k.uid;
+  if (!kendi) return gonderilen.delete(anahtar) ? 'sil' : 'yut';
+  if (ev.type === 'delete') gonderilen.delete(anahtar); else gonderilen.add(anahtar);
+  return 'gonder';
+}
+
+/** `/api/db` DIŞINDAKİ uçlar için: bu kullanıcı bu SİPARİŞİ görebilir mi (kiracı + dış rolde satır). */
+export function siparisGorebilir(rol: AppRole | null | undefined, k: { uid: string; cid: string }, siparis: Record<string, unknown> | undefined): boolean {
+  if (!siparis) return false;
+  const dc = (siparis.companyId as string) || null;
+  if (dc !== null && dc !== k.cid) return false;
+  return satirGorunur('orders', rol, k, siparis);
 }
 
 /**
@@ -35,6 +123,10 @@ export interface KiraciKimligi {
  */
 export async function kiraciWhere(coll: string, k: KiraciKimligi): Promise<{ sql: string; params: unknown[] }> {
   if (TENANT.has(coll)) {
+    // Dış rol + satır süzgeçli koleksiyon: KATI — kendi kiracısı ve sahiplik alanı = uid (etiketsiz satır görünmez).
+    // Alan adı PARAMETREDİR (koddaki sabit haritadan; enjeksiyon yüzeyi yok). İç rolde çıktı birebir eskisi.
+    const alan = DIS_ROL_SATIR_ALANI.has(coll) ? satirAlani(coll, await k.rol()) : null;
+    if (alan) return { sql: " AND data->>'companyId' = $2 AND data->>$3 = $4", params: [await k.cid(), alan, k.uid] };
     return { sql: " AND (data->>'companyId' = $2 OR NOT (data ? 'companyId'))", params: [await k.cid()] };
   }
   if (USER_SCOPED.has(coll)) {
@@ -89,6 +181,20 @@ export function ayarSatirlari<T extends { id: string }>(satirlar: readonly T[], 
   return [...global.filter(r => !kendi.has(r.id)), ...kendi.values()];
 }
 
+/** DIS_ROL_YAZAMAZ'daki alanları yamadan düşürür (yalnız dış rol için çağrılır; saf, testli). */
+export function disRolAlanlariniDusur(coll: string, data: Record<string, unknown>): Record<string, unknown> {
+  const yasak = DIS_ROL_YAZAMAZ.get(coll);
+  if (!yasak || yasak.length === 0) return data;
+  return Object.fromEntries(Object.entries(data).filter(([ad]) => !yasak.includes(ad)));
+}
+
+/** Önceki kayıttaki DIS_ROL_YAZAMAZ alanları — dış rolün yazımında aynen geri konur (PATCH / PUT-merge «yazamaz», «siler» değil). */
+export function yasakAlanlariKoru(coll: string, onceki: Record<string, unknown> | undefined): Record<string, unknown> {
+  const yasak = DIS_ROL_YAZAMAZ.get(coll);
+  if (!onceki || !yasak || yasak.length === 0) return {};
+  return Object.fromEntries(yasak.filter(ad => ad in onceki).map(ad => [ad, onceki[ad]]));
+}
+
 /**
  * Yazmada companyId/userId enjekte et (istemci değerini geçersiz kıl).
  *
@@ -98,8 +204,17 @@ export function ayarSatirlari<T extends { id: string }>(satirlar: readonly T[], 
  * companyId'sini her zaman eziyorsa, userId de öyle ezilir. Kod tabanındaki tüm meşru
  * yazmalar zaten kendi uid'sini gönderiyor (App.tsx createNotification vb.).
  */
-export async function kiraciDamgala(coll: string, data: Record<string, unknown>, k: KiraciKimligi): Promise<Record<string, unknown>> {
-  if (TENANT.has(coll)) return { ...data, companyId: await k.cid() };
+export async function kiraciDamgala(coll: string, data: Record<string, unknown>, k: KiraciKimligi, onceki?: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (TENANT.has(coll)) {
+    // Dış rol satır süzgeçli koleksiyona yazarken sahiplik alanı KOŞULSUZ kendi uid'idir: başkası adına ya da sahipsiz kayıt
+    // açamaz, kendi kaydını başkasına devredemez (userId damgasıyla aynı desen). İç rolde alana dokunulmaz (yeniden atama serbest).
+    const alan = DIS_ROL_SATIR_ALANI.has(coll) ? satirAlani(coll, await k.rol()) : null;
+    // Dış rol sunucunun eşleştirme alanlarını (DIS_ROL_YAZAMAZ) yazamaz: pazar yeri senkronu o alanla eşleşip `merge: true` ile
+    // üstüne yazdığından, önceden yazılmış alan gerçek siparişi dış rolün kaydına çekerdi. Sessizce düşer; kayıtta önceden
+    // varsa (`onceki`: PUT / PATCH / cas yolları mevcut belgeyi verir) önceki değer korunur. İç rolde dokunulmaz.
+    const temiz = alan ? { ...disRolAlanlariniDusur(coll, data), ...yasakAlanlariKoru(coll, onceki) } : data;
+    return { ...temiz, companyId: await k.cid(), ...(alan ? { [alan]: k.uid } : {}) };
+  }
   if (USER_SCOPED.has(coll)) return { ...data, userId: k.uid };
   return data;
 }
@@ -148,7 +263,10 @@ export async function dokumanSahibiMi(
   }
   if (TENANT.has(coll)) {
     const dc = (docData.companyId as string) || null;
-    return dc === null || dc === await k.cid();
+    if (dc !== null && dc !== await k.cid()) return false;
+    // Dış rol: mevcut kayıt yalnız KENDİSİNİNSE (etiketsiz / başkasının → hayır). Okuma, yazma, artırma, koşullu yazma hepsi bu kapıdan.
+    if (DIS_ROL_SATIR_ALANI.has(coll)) return satirGorunur(coll, await k.rol(), { uid: k.uid, cid: await k.cid() }, docData);
+    return true;
   }
   if (USER_SCOPED.has(coll)) {
     const du = (docData.userId as string) || null;
@@ -171,25 +289,36 @@ export function akisSatiriGorunur(
   coll: string,
   id: string | undefined,
   data: Record<string, unknown> | undefined,
-  k: { uid: string; cid: string },
+  k: { uid: string; cid: string; rol: AppRole | null },
 ): boolean {
   if (!data) return true;
   if (coll === 'users') return (!!id && id === k.uid) || ((data.companyId as string) || null) === k.cid;
   if (coll === 'settings') { const sahip = ayarSahibi(id); return sahip === null || sahip === k.cid; }   // kimlikten — `data.companyId` DEĞİL (bkz. ayarSahibi)
-  if (TENANT.has(coll)) { const dc = (data.companyId as string) || null; return dc === null || dc === k.cid; }
+  if (TENANT.has(coll)) {
+    const dc = (data.companyId as string) || null;
+    return (dc === null || dc === k.cid) && satirGorunur(coll, k.rol, k, data);   // dış rolde satır süzgeci (katı)
+  }
   if (USER_SCOPED.has(coll)) { const du = (data.userId as string) || null; return du === null || du === k.uid; }
   return true;
 }
 
 /** SSE init sorgusunun koleksiyon kovaları: `users` KENDİ kovasında (companyId = kiracı VEYA id = uid); `settings` KENDİ kovasında
  *  (global + yalnız çağıranın `<cid>__*` ayarları — eskiden filtresiz `diger`e düşüyor, her kiracının ayarı diskten okunuyordu);
+ *  `satir`: dış rolde satır süzgeçli koleksiyonlar (yalnız kendi kiracısı VE sahiplik alanı = uid) — `tenant` kovasından AYRIK;
  *  sunucuya özel koleksiyonlar hiçbir kovaya girmez (diske gitmez). */
-export function akisKovalari(colls: readonly string[]): { tenant: string[]; user: string[]; users: string[]; ayar: string[]; diger: string[] } {
+export function akisKovalari(colls: readonly string[], rol: AppRole | null): {
+  tenant: string[]; user: string[]; users: string[]; ayar: string[]; diger: string[];
+  /** Dış rol satır kovası: koleksiyon + sahiplik alanı. */
+  satir: Array<{ coll: string; alan: string }>;
+} {
+  const satir = colls.flatMap(c => { const alan = TENANT.has(c) ? satirAlani(c, rol) : null; return alan ? [{ coll: c, alan }] : []; });
+  const satirli = new Set(satir.map(x => x.coll));
   return {
-    tenant: colls.filter(c => TENANT.has(c)),
+    tenant: colls.filter(c => TENANT.has(c) && !satirli.has(c)),
     user:   colls.filter(c => USER_SCOPED.has(c)),
     users:  colls.filter(c => c === 'users'),
     ayar:   colls.filter(c => c === 'settings'),
     diger:  colls.filter(c => !TENANT.has(c) && !USER_SCOPED.has(c) && c !== 'users' && c !== 'settings' && !SERVER_ONLY.has(c)),
+    satir,
   };
 }

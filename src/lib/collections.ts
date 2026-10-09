@@ -123,6 +123,32 @@ export const TENANT_COLLECTIONS: readonly string[] = [
 ];
 
 /** Kullanıcının kendi verisi — `userId` ile izole. */
+/**
+ * DIŞ ROL SATIR SÜZGECİ (2026-10-02): koleksiyon → "kaydın sahibi kullanıcı" alanı. Bu koleksiyonlarda dış roller (B2B, Bayi —
+ * rbac.EXTERNAL_ROLES; rolü çözülemeyen kullanıcı da) YALNIZ bu alanı kendi uid'ine eşit olan satırı görür / değiştirir; alanı
+ * olmayan (etiketsiz) satır dış role GÖRÜNMEZ. İç roller etkilenmez. Kural tek yerde: lib/tenantErisim (`satirAlani`).
+ *
+ * NEDEN: `orders` dış rollere okuma + yazma açıktı ve sunucuda yalnız KİRACI süzgeci vardı. Bayi kısıtı istemci sorgusundaydı
+ * (`where('assignedTo','==',uid)`) — o sorgu sunucuya hiç gitmez, tarayıcı önbelleğinde uygulanır: dış rollü kullanıcı
+ * kiracının BÜTÜN siparişlerini (müşteri adı, adres, tutar, e-posta, telefon) alıyor ve değiştirebiliyordu.
+ * Her anahtar TENANT koleksiyonu olmalı (collections.test).
+ */
+export const DIS_ROL_SATIR_ALANI: ReadonlyMap<string, string> = new Map([
+  ['orders', 'assignedTo'],
+]);
+
+/**
+ * DIŞ ROLÜN YAZAMADIĞI ALANLAR (2026-10-09, etkileşim incelemesi): satır süzgeçli koleksiyonda SUNUCUNUN eşleştirme için
+ * kullandığı alanlar. Pazar yeri senkronu (`kanalRoutes` Trendyol / Hepsiburada; Shopify webhook işleyicisi server.ts) gelen
+ * siparişi `where(<alan>,'==',…)` ile bulup `merge: true` / `update` ile ÜSTÜNE yazar; dış rol bu alanı kendi (assignedTo damgalı) kaydına önceden yazarsa gerçek siparişin
+ * müşteri verisi onun kaydına akar. `__` kimlik kapısı bu yolu görmez (eşleşme kimlikle değil alanla). Yazımda bu alanlar
+ * dış rol için SESSİZCE düşer (bayi ekranı bunları zaten göndermez; 400 ile ret istemciye alan adlarını öğretirdi); kayıtta
+ * ÖNCEDEN varsa önceki değer korunur (PATCH / PUT-merge «yazamaz» demek, «siler» değil). İç rol etkilenmez. Her anahtar DIS_ROL_SATIR_ALANI'nda olmalı (tenantErisim.test). Kural tek yerde: lib/tenantErisim (`kiraciDamgala`).
+ */
+export const DIS_ROL_YAZAMAZ: ReadonlyMap<string, readonly string[]> = new Map([
+  ['orders', ['trendyolOrderNo', 'hepsiburadaOrderId', 'shopifyOrderId']],
+]);
+
 export const USER_SCOPED_COLLECTIONS: readonly string[] = [
   'notifications', 'userPrefs', 'userOnboarding', 'aiConsents',
 ];

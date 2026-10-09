@@ -44,8 +44,9 @@ import {
   TENANT_COLLECTIONS as TENANT_COLLECTION_LIST,
   USER_SCOPED_COLLECTIONS as USER_SCOPED_COLLECTION_LIST,
   SERVER_ONLY_COLLECTIONS as SERVER_ONLY_COLLECTION_LIST,
+  DIS_ROL_SATIR_ALANI,
 } from "./src/lib/collections.js";
-import { kiraciWhere, kiraciDamgala, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, type KiraciKimligi } from './src/lib/tenantErisim.js';
+import { kiraciWhere, kiraciDamgala, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, siparisGorebilir, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
 import { rolIcinMaskele, maskeyiGeriYukle, farkDegeriMaskele, ayarAdresAlaniDegisti } from './src/lib/sirMaske.js';
 import { izinliTaban, genelHttpsTaban, genelAdresMi, TabanAdresHatasi, LUCA_TABAN, IYZICO_TABAN } from './src/lib/guvenliTaban.js';
 import pg from "pg";
@@ -1728,7 +1729,7 @@ async function startServer() {
       // dinleyecek) — bunu "hepsini gönder"e çevirmek hatayı geri getirir.
       // '*' = hepsi (istemci ilk bağlantıda bunu gönderir; koleksiyon listesini
       // sorgu dizesinde İKİ KEZ taşımamak için — IIS maxQueryString sınırı).
-      const initColls = req.query.init === undefined || req.query.init === '*'
+      const istenenInit = req.query.init === undefined || req.query.init === '*'
         ? colls
         : colls.filter(c => String(req.query.init).split(',').includes(c));
       res.writeHead(200, {
@@ -1751,7 +1752,16 @@ async function startServer() {
       // Görünürlük kuralı `akisSatiriGorunur` (src/lib/tenantErisim.ts) — GET yoluyla AYNI modül.
       // 4/n incelemesi (2026-09-05): buradaki kopyada `users` dalı yoktu → kiracı A'nın Admin'i
       // `?init=users` ile tüm kiracıların kullanıcı kayıtlarını alıyordu. Kopya kaldırıldı.
-      const akisKimlik = { uid: streamUid, cid: streamCid };
+      const akisKimlik = { uid: streamUid, cid: streamCid, rol: streamRole };
+      // DIŞ ROL SATIR SÜZGECİ (2026-10-02 — collections.DIS_ROL_SATIR_ALANI): dış rol `orders`'ta yalnız kendi satırını alır.
+      // Bu koleksiyonların init'i istemci önbelleğinde olsa da HER bağlantıda yeniden gönderilir: (1) önbellekte süzgeç
+      // öncesinden kalan yabancı satır temizlensin, (2) aşağıdaki `gonderilenSatirlar` kümesi eksiksiz kurulsun.
+      const satirliColls = colls.filter(c => satirAlani(c, streamRole) !== null);
+      const initColls = [...new Set([...istenenInit, ...satirliColls])];
+      /** Bu akışa GÖNDERİLMİŞ satır süzgeçli doküman anahtarları (`coll/id`). Satır sahibi değişip görünmez olunca (personel
+       *  siparişi başkasına atadı) istemci önbelleğinden düşsün diye yapay `delete` gönderilir — yalnız daha önce gönderilmişse:
+       *  görmediği kaydın kimliği dış role sızmaz. */
+      const gonderilenSatirlar = new Set<string>();
       const rowVisible = (coll: string, id: string | undefined, data: Record<string, unknown> | undefined): boolean => {
         if (SERVER_ONLY_COLLECTIONS.has(coll)) return false; // sunucuya özel — stream'e asla çıkmaz
         if (!isAllowed(streamRole, coll, 'read')) return false; // rol yetmiyorsa hiç gösterme
@@ -1773,7 +1783,7 @@ async function startServer() {
         // Kovalar `akisKovalari` (tenantErisim.ts): SERVER_ONLY hiç sorgulanmaz (initColls'ta
         // KALIR ki istemci boş init eventi alıp beklemede kalmasın); `users` KENDİ kovasında —
         // eskiden filtresiz `otherColls`a düşüyordu (4/n incelemesi, kiracılar-arası PII).
-        const kova = akisKovalari(izinliColls);
+        const kova = akisKovalari(izinliColls, streamRole);
         const { rows } = izinliColls.length
           ? await docsDb.query(
               `SELECT coll, id, data FROM docs WHERE
@@ -1781,8 +1791,13 @@ async function startServer() {
               OR (coll = ANY($2) AND (data->>'userId'    = $5 OR NOT (data ? 'userId')))
               OR (coll = ANY($6) AND (data->>'companyId' = $4 OR id = $5))
               OR (coll = ANY($7) AND (position('__' in id) = 0 OR left(id, length($8)) = $8))
-              OR (coll = ANY($3))`,
-              [kova.tenant, kova.user, kova.diger, streamCid, streamUid, kova.users, kova.ayar, `${streamCid}${AYAR_AYRACI}`],
+              OR (coll = ANY($3))${
+                // Dış rol satır kovası: KATI — kendi kiracısı VE sahiplik alanı = uid (etiketsiz satır gelmez). Koleksiyon ve
+                // alan adı parametredir ($9+); kova boşsa (iç rol) sorgu birebir eskisi.
+                kova.satir.map((_, i) => `\n              OR (coll = $${9 + 2 * i} AND data->>'companyId' = $4 AND data->>$${10 + 2 * i} = $5)`).join('')
+              }`,
+              [kova.tenant, kova.user, kova.diger, streamCid, streamUid, kova.users, kova.ayar, `${streamCid}${AYAR_AYRACI}`,
+                ...kova.satir.flatMap(x => [x.coll, x.alan])],
             )
           : { rows: [] as Array<{ coll: string; id: string; data: unknown }> };
         const byColl: Record<string, Array<{ id: string; data: unknown }>> = {};
@@ -1792,7 +1807,10 @@ async function startServer() {
         // REST tek-doküman GET'iyle AYNI öncelik (2026-10-02).
         const gorunur = rows.filter(r => rowVisible(r.coll, String(r.id), r.data as Record<string, unknown>));
         const ayarlar = ayarSatirlari(gorunur.filter(r => r.coll === 'settings').map(r => ({ ...r, id: String(r.id) })), streamCid);
-        for (const r of [...gorunur.filter(r => r.coll !== 'settings'), ...ayarlar]) byColl[r.coll].push({ id: r.id, data: redactForRole(streamRole, r.coll, r.data) });
+        for (const r of [...gorunur.filter(r => r.coll !== 'settings'), ...ayarlar]) {
+          byColl[r.coll].push({ id: r.id, data: redactForRole(streamRole, r.coll, r.data) });
+          if (satirAlani(r.coll, streamRole) !== null) gonderilenSatirlar.add(`${r.coll}/${r.id}`);
+        }
         for (const c of initColls) {
           const docs = byColl[c];
           // Sessiz kırpma YOK: tavana çarpınca logla ve istemciye bildir.
@@ -1814,7 +1832,7 @@ async function startServer() {
       // ediyordu (2026-10-02). Kendi `users` dokümanında rol/kiracı değişince akış kapatılır; istemci yeniden bağlanır.
       let heartbeat: ReturnType<typeof setInterval> | undefined;
       const kapat = () => { if (heartbeat) clearInterval(heartbeat); dbEvents.off('change', onChange); res.end(); };
-      const onChange = (ev: { coll: string; id?: string; cid?: string; uid?: string; type?: string; data?: unknown }) => {
+      const onChange = (ev: { coll: string; id?: string; cid?: string; uid?: string; satirSahibi?: string; type?: string; data?: unknown }) => {
         // Karşılaştırma `getUserRole` / `getUserCompanyId` ile AYNI kuralla (boş → null / uid): ham değer karşılaştırılırsa boş rol
         // alanı her profil güncellemesinde akışı kapatır, istemci sürekli yeniden bağlanırdı. Olay veri taşımıyorsa karar verilmez.
         if (ev.coll === 'users' && ev.id === streamUid && (ev.type === 'delete' || ev.data !== undefined)) {
@@ -1829,6 +1847,13 @@ async function startServer() {
         if (SERVER_ONLY_COLLECTIONS.has(ev.coll)) return; // sunucuya özel — yayınlanmaz
         // Başka kiracının/kullanıcının değişimini bu bağlantıya gönderme.
         if (TENANT_COLLECTIONS.has(ev.coll) && ev.cid && ev.cid !== streamCid) return;
+        // Dış rol satır süzgeci: olay etiketi (`satirSahibi`, pgShim.broadcastDocChange) kendi uid'i ve kiracısı değilse gönderilmez
+        // — eskiden her sipariş değişikliği dokümanın TAMAMIYLA kiracıdaki dış rollü herkese canlı gidiyordu. Daha önce bu akışa
+        // gönderilmiş satır görünmez olduysa (yeniden atama) yalnız kimliğiyle `delete` gider.
+        // Karar saf işlevde (lib/tenantErisim.akisOlayKarari — davranışı orada testli); burada yalnız uygulanır.
+        const satirKarari = akisOlayKarari(ev, akisKimlik, gonderilenSatirlar);
+        if (satirKarari === 'sil' && !res.writableEnded) res.write(`event: change\ndata: ${JSON.stringify({ coll: ev.coll, type: 'delete', id: ev.id })}\n\n`);
+        if (satirKarari !== 'gonder') return;
         if (USER_SCOPED_COLLECTIONS.has(ev.coll) && ev.uid && ev.uid !== streamUid) return;
         // settings: kiracı olayın `cid`'inden (REST yazımı açık kapsam verir; sunucu yazımında doküman KİMLİĞİNDEN — pgShim
         // broadcastDocChange); `data.companyId`'den DEĞİL. Sunucunun ham kimlikle (`<cid>__anahtar`) yayınladığı olay da kimlikten
@@ -1930,12 +1955,35 @@ async function startServer() {
     // olduğu, etiketsiz users dokümanı kuralı). Buradakiler yalnız isteğin kimliğini çözen
     // ince sarmalayıcılar; `cid` TEMBEL getter: USER_SCOPED/sınıfsız koleksiyonlarda
     // getUserCompanyId hiç çağrılmaz (eski davranış korunur).
+    /** Sahiplik / kapsam alanları — atomik artırma bunlara dokunamaz. */
+    const SAHIPLIK_ALANLARI = new Set<string>(['companyId', 'userId', ...DIS_ROL_SATIR_ALANI.values()]);
     const reqKimlik = (req: Request): KiraciKimligi => {
       const uid = (req as Request & { uid?: string }).uid || '';
-      return { uid, cid: () => getUserCompanyId(uid), superAdmin: isSuperAdmin(req) };
+      // `rol` TEMBEL: yalnız satır süzgeçli koleksiyonda (orders — collections.DIS_ROL_SATIR_ALANI) sorulur; `denied()` rolü zaten
+      // okuduğu için önbellek sıcaktır.
+      return { uid, cid: () => getUserCompanyId(uid), superAdmin: isSuperAdmin(req), rol: () => getUserRole(uid) };
+    };
+    // AYRILMIŞ KİMLİK (2026-10-02): `__` içeren kimlikleri sunucu üretir (`mikrofat__<cid>__<seri>-<sıra>`, `shopify__<özet>`) ve
+    // tahmin edilebilir olanları vardır. Satır süzgeçli koleksiyonda DIŞ ROL henüz var olmayan böyle bir kimliği önceden açarsa
+    // (kimlik kapma), sunucunun sonradan AYNI kimliğe yazdığı sipariş — damgalanan `assignedTo` yüzünden — ona görünür olurdu.
+    // Karar VE ön eleme saf işlevde (lib/tenantErisim.ayrilmisKimlikMi / ayrilmisKimlikAdayi — testli). `gorunur` = kayıt var VE bu
+    // kullanıcıya görünür: "yok" ile "var ama görünmez" AYNI yanıtı alır (ileti farkı tahmin edilebilir kimliklerin varlığını sızdırırdı).
+    const ayrilmisKimlikEngeli = async (req: Request, res: Response, coll: string, id: string, gorunur: boolean): Promise<boolean> => {
+      if (!ayrilmisKimlikAdayi(coll, id, gorunur)) return false;   // ucuz ön eleme: rol yalnız aday ise sorulur
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (!ayrilmisKimlikMi(coll, id, await getUserRole(uid), gorunur)) return false;
+      res.status(403).json({ error: 'Bu kimlikle kayıt açılamaz.' });
+      return true;
+    };
+    /** Sahiplik denetimi başarısız: satır süzgeçli koleksiyonda dış role "yok" ile AYNI yanıt (404 — varlık sızmaz; tek GET
+     *  ve Luca ucu da öyle), diğer durumlarda bugünkü 403. Hangisi: lib/tenantErisim.sahipsizDurumKodu (saf, testli). */
+    const sahipsizYanit = async (req: Request, res: Response, coll: string): Promise<void> => {
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (sahipsizDurumKodu(coll, await getUserRole(uid)) === 404) { res.status(404).json({ error: 'Not found.' }); return; }
+      res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' });
     };
     const tenantWhere = (req: Request, coll: string) => kiraciWhere(coll, reqKimlik(req));
-    const injectTenant = (req: Request, coll: string, data: Record<string, unknown>) => kiraciDamgala(coll, data, reqKimlik(req));
+    const injectTenant = (req: Request, coll: string, data: Record<string, unknown>, onceki?: Record<string, unknown>) => kiraciDamgala(coll, data, reqKimlik(req), onceki);
     const ownsDoc = (req: Request, coll: string, docData: Record<string, unknown> | undefined, docId?: string) =>
       dokumanSahibiMi(coll, docData, reqKimlik(req), docId);
     // settings/{key} → firma-bazlı gerçek id. perCompany ise GET'te legacy global'e fallback edilir.
@@ -2094,13 +2142,15 @@ async function startServer() {
           let { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
           if (!rows.length && perCompany) ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id])); // merge tabanı: legacy global
           before = (rows[0]?.data as Record<string, unknown>) ?? {};
-          if (rows.length && !(await ownsDoc(req, coll, before, realId))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+          const gorunur = rows.length > 0 && await ownsDoc(req, coll, before, realId);
+          if (await ayrilmisKimlikEngeli(req, res, coll, realId, gorunur)) return;   // sahiplik yanıtından ÖNCE (varlık sızmasın)
+          if (rows.length && !gorunur) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
           // P4-2: maskeli (***REDACTED***) gelen gizli alan gerçek sırrı EZMEZ ve SİLMEZ — önceki değer geri konur (derin).
           incoming = maskeyiGeriYukle(coll, ham, before);
           if (await ayarYazimiEngeli(req, res, coll, incoming, before)) return;
           data = req.query.merge === '1' ? mergeDocData(before, incoming) : incoming;
         }
-        data = await injectTenant(req, coll, data); // companyId/userId enjekte
+        data = await injectTenant(req, coll, data, before); // companyId/userId enjekte; dış rolün yazamadığı alanlar öncekinden korunur
         if (perCompany) data = { ...data, companyId: cid }; // firma-bazlı ayar damgası (sahiplik KİMLİKTEN okunur — bkz. tenantErisim.ayarSahibi)
         if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before, isSuperAdmin(req)); // companyId/role/status escalation engeli
         await docsDb.query(
@@ -2135,12 +2185,14 @@ async function startServer() {
         let { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
         if (!rows.length && perCompany) ({ rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id])); // merge tabanı: legacy global
         const before = (rows[0]?.data as Record<string, unknown>) ?? {};
-        if (rows.length && !(await ownsDoc(req, coll, before, realId))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+        const gorunur = rows.length > 0 && await ownsDoc(req, coll, before, realId);
+        if (await ayrilmisKimlikEngeli(req, res, coll, realId, gorunur)) return;   // sahiplik yanıtından ÖNCE (varlık sızmasın)
+        if (rows.length && !gorunur) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
         // P4-2: maskeli gelen gizli alan gerçek sırrı EZMEZ ve SİLMEZ — önceki değer geri konur (derin; lib/sirMaske).
         const patch = maskeyiGeriYukle(coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>, before);
         if (await ayarYazimiEngeli(req, res, coll, patch, before)) return;
         let data = mergeDocData(before, patch);
-        data = await injectTenant(req, coll, data); // companyId/userId enjekte
+        data = await injectTenant(req, coll, data, before); // companyId/userId enjekte; dış rolün yazamadığı alanlar öncekinden korunur
         if (perCompany) data = { ...data, companyId: cid }; // firma-bazlı ayar damgası (sahiplik KİMLİKTEN okunur)
         if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before, isSuperAdmin(req)); // companyId/role/status escalation engeli
         await docsDb.query(
@@ -2198,13 +2250,16 @@ async function startServer() {
       if (typeof field !== 'string' || !/^[A-Za-z0-9_]{1,40}$/.test(field) || typeof delta !== 'number' || !Number.isFinite(delta)) {
         return res.status(400).json({ error: 'field (alfasayısal) ve delta (sayı) gerekli.' });
       }
+      // SAHİPLİK ALANLARI artırılamaz (2026-10-02): `companyId` / `userId` / satır sahibi alanı sayıya çevrilirse doküman
+      // sahipsizleşir ya da başka bir kapsamın "etiketsiz" kaydı gibi görünür.
+      if (SAHIPLIK_ALANLARI.has(field)) return res.status(400).json({ error: 'Bu alan artırılamaz.' });
       if (await denied(req, res, coll, 'write', id)) return;
       try {
         // Sahiplik kontrolü
         const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
         if (!rows.length) return res.status(404).json({ error: 'Not found.' });
         if (sahiplikDenetimli(coll) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>, id))) {
-          return res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' });
+          return sahipsizYanit(req, res, coll);
         }
         const floor = typeof min === 'number' && Number.isFinite(min) ? min : -1e18;
         const upd = await docsDb.query(
@@ -2241,7 +2296,7 @@ async function startServer() {
         const { rows } = await docsDb.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
         if (!rows.length) return res.status(404).json({ error: 'Not found.' });
         if (sahiplikDenetimli(coll) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>, id))) {
-          return res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' });
+          return sahipsizYanit(req, res, coll);
         }
         // KİRACI SINIRI (2026-08-25 denetimi): CAS'in `set` gövdesi POST/PUT/PATCH
         // gibi keyfi alan yazar, ama o üçünün aksine `pinProtectedUserFields`ten
@@ -2251,6 +2306,9 @@ async function startServer() {
         //   PATCH /api/db/users/<kendi-uid>/cas  { field:'x', expect:.., set:{companyId:'<kurban>'} }
         // ile kendini başka kiracıya taşıyabiliyordu (getUserCompanyId bu alanı
         // okur). Diğer üç yazma yolundaki kapının aynısı buraya da kondu.
+        // 2026-10-02: `users` dışındaki koleksiyonlarda `set` gövdesi HİÇBİR damgadan geçmiyordu — `orders` yazma yetkisi olan
+        // herhangi bir rol `set: { companyId: '<başka kiracı>' }` ile siparişi başka kiracıya taşıyabiliyor, dış rol
+        // `assignedTo`'yu değiştirebiliyordu. PUT / PATCH ile AYNI damga (`injectTenant` → tenantErisim.kiraciDamgala).
         const setYazilacak = coll === 'users'
           ? await pinProtectedUserFields(
               (req as Request & { uid?: string }).uid || '',
@@ -2258,7 +2316,7 @@ async function startServer() {
               rows[0].data as Record<string, unknown>,
               isSuperAdmin(req),
             )
-          : (set as Record<string, unknown>);
+          : await injectTenant(req, coll, set as Record<string, unknown>, rows[0].data as Record<string, unknown>);
         const upd = await docsDb.query(
           `UPDATE docs SET data = data || $4::jsonb, updated_at = now()
            WHERE coll = $1 AND id = $2 AND data->>$3 = $5 RETURNING data`,
@@ -3237,7 +3295,8 @@ async function startServer() {
   // Credentials: WHATSAPP_API_KEY (360dialog) or TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWATSAPP_FROM
 
   /** POST /api/whatsapp/send — send a text or template message */
-  app.post('/api/whatsapp/send', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (firmanın WhatsApp hattından keyfi kişiye ileti).
+  app.post('/api/whatsapp/send', requireAuth, requireMfaVerified, requireStaff, async (req: Request, res: Response) => {
     const { to, message, templateName, templateParams } = req.body as {
       to: string; message?: string; templateName?: string; templateParams?: string[];
     };
@@ -3321,7 +3380,8 @@ async function startServer() {
   // Pure Firebase aggregation — no Mikro needed
 
   /** GET /api/aging — AR aging buckets for all customers (or ?customerId=X for one) */
-  app.get('/api/aging', requireAuth, requireCollectionAccess('orders', 'read'), async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (kiracının açık siparişleri satır satır: müşteri, tutar, yaş).
+  app.get('/api/aging', requireAuth, requireStaff, requireCollectionAccess('orders', 'read'), async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ error: 'Firebase Admin not initialised' });
     try {
       const customerId = req.query.customerId as string | undefined;
@@ -3611,7 +3671,8 @@ async function startServer() {
 
   // POST /api/luca/sync/fatura
   // Body: { orderId } — reads order from Firestore, pushes to Luca as sales invoice
-  app.post('/api/luca/sync/fatura', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu.
+  app.post('/api/luca/sync/fatura', requireAuth, requireMfaVerified, requireStaff, async (req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
@@ -3622,6 +3683,14 @@ async function startServer() {
     const orderDoc = await adminDb.collection('orders').doc(orderId).get();
     if (!orderDoc.exists) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
     const order = orderDoc.data() as Record<string, unknown>;
+    // KİRACI SAHİPLİĞİ (2026-10-02): `orderId` istemciden gelir ve eskiden hiç denetlenmiyordu — başka kiracının siparişi
+    // Luca'ya fatura olarak gönderilip üstüne çağıranın `companyId`'si damgalanabiliyordu. 'Yok' ile aynı yanıt (varlık sızmaz).
+    {
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (!siparisGorebilir(await getUserRole(uid), { uid, cid: await reqCompanyId(req) }, order)) {
+        return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+      }
+    }
 
     const lines = ((order.lineItems as Record<string, unknown>[] | undefined) ?? []).map((l, i) => ({
       siraNo:       i + 1,
@@ -3859,7 +3928,8 @@ async function startServer() {
   // POST /api/whatsapp/order-notification
   // Body: { orderId, status, phone, customerName, orderNo, lang }
   // Fire-and-forget safe — always 200 even if WA not configured
-  app.post('/api/whatsapp/order-notification', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu.
+  app.post('/api/whatsapp/order-notification', requireAuth, requireMfaVerified, requireStaff, async (req: Request, res: Response) => {
     const creds = await getWACreds();
     if (!creds) return res.json({ success: false, notConfigured: true });
 
@@ -4185,7 +4255,7 @@ async function startServer() {
   });
 
   reportsRoutes(app, {
-    getAdminDb: adminDbZorunlu, requireAuth, getUserCompanyId, loadCompanyDocs, requireCollectionAccess,
+    getAdminDb: adminDbZorunlu, requireAuth, requireStaff, getUserCompanyId, loadCompanyDocs, requireCollectionAccess,
   });
 
   // KONUM: digerleriyle AYNI nokta - express.json + apiLimiter'dan SONRA.

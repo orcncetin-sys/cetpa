@@ -20,6 +20,7 @@ import { EventEmitter } from 'events';
 import pg from 'pg';
 import { FieldValue } from 'firebase-admin/firestore';
 import { ayarSahibi } from '../lib/tenantErisim.js';
+import { DIS_ROL_SATIR_ALANI } from '../lib/collections.js';
 
 export interface PgShimDeps {
   /** `pgServerTimestamp` PG modunda mi Firestore modunda mi oldugunu bilmeli. */
@@ -103,10 +104,15 @@ export function broadcastDocChange(coll: string, type: 'set' | 'delete', id: str
   const cid = kapsam ? kapsam.cid ?? undefined
     : coll === 'settings' ? ayarSahibi(id) ?? undefined
     : (d.companyId as string | undefined);
+  // Dış rol satır süzgeci (collections.DIS_ROL_SATIR_ALANI): akış, olayı sahiplik alanına göre süzer. Etiket silmede de
+  // taşınır (içerik yine iliştirilmez).
+  const satirAlan = DIS_ROL_SATIR_ALANI.get(coll);
+  const satirSahibi = satirAlan && typeof d[satirAlan] === 'string' ? d[satirAlan] as string : undefined;
   dbEvents.emit('change', {
     coll, type, id,
     cid,
     uid: d.userId as string | undefined,
+    ...(satirSahibi !== undefined ? { satirSahibi } : {}),
     ...(data !== undefined && type !== 'delete' ? { data } : {}),
   });
 }
