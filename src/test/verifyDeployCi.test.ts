@@ -52,6 +52,8 @@ interface Senaryo {
   headAtasi?: boolean;
   /** `gh run view <id> --json jobs -q …` ile okunan yayın ADIMI sonucu; null = okunamadı (boş çıktı). */
   yayinAdimi?: string | null;
+  /** Yayın adımının `startedAt`i (ISO); undefined = sabit örnek, null = okunamadı (boş çıktı). `post` uptime kuralı bunu kullanır. */
+  yayinBaslangic?: string | null;
 }
 
 const SAHTE_GH = `#!/usr/bin/env node
@@ -87,6 +89,11 @@ if (a[0] === 'run' && a[1] === 'view') {
   const q = al('-q', '--jq') || '';
   // Gerçek gh: jq süzgeci iş ADI ve adım ADI ile seçer; sahte, süzgeçte iki adın geçtiğini ister (ad değişirse boş döner).
   const adlarUyuyor = q.includes('Deploy to Windows VDS') && q.includes('Deploy (SSH → PowerShell)');
+  if (q.includes('.startedAt')) {
+    const bas = S.yayinBaslangic === undefined ? '2026-10-09T11:46:00Z' : S.yayinBaslangic;
+    if (adlarUyuyor && bas !== null) console.log(bas);
+    process.exit(0);
+  }
   const sonuc = S.yayinAdimi === undefined ? 'success' : S.yayinAdimi;
   if (adlarUyuyor && sonuc !== null) console.log(sonuc);
   process.exit(0);
@@ -167,6 +174,14 @@ const FAIL_700 = 'FAIL  CI & Deploy işi 700 (aaaaaaa) başarısız ya da izlene
 
 // Betik bash ister; Windows'ta (yayın sunucusu) test koşulmaz — CI derleme işi ubuntu'da koşturur.
 describe.skipIf(process.platform === 'win32')('verify-deploy.sh ci — doğrulanan commit\'in KENDİ yayın işi', () => {
+  it('yayın adımı başarılıysa adımın `startedAt`i de okunur (post uptime kuralı için); adım koşmadıysa / iş kırıksa okunmaz', () => {
+    const baslangicSorgusu = (k: Kosu) => k.cagrilar.filter(c => c[0] === 'gh' && c[1] === 'run' && c[2] === 'view' && c.some(a => a.includes('.startedAt')));
+    const tamam = kos({ isler: [is(700)] });
+    expect(baslangicSorgusu(tamam)).toHaveLength(1);
+    expect(baslangicSorgusu(tamam)[0][3]).toBe('700');   // yayın işinin kimliği
+    expect(baslangicSorgusu(kos({ isler: [is(700)], yayinAdimi: 'skipped' }))).toHaveLength(0);
+    expect(baslangicSorgusu(kos({ isler: [is(700, { sonuc: 'failure' })] }))).toHaveLength(0);
+  });
   it('2026-10-08 arızası: en yeni iş Dependabot (success), yayın işi BAŞARISIZ → FAIL (eskiden PASS yazıyordu)', () => {
     const k = kos({ isler: [DEPENDABOT, CODEQL, is(700, { sonuc: 'failure' })] });
     expect(k.satirlar).toEqual([FAIL_700]);
@@ -391,5 +406,53 @@ describe('verify-deploy.sh — `post` kipi aynı denetimi kullanır (kaynak çit
   it('yayın iş akışı hâlâ main\'e push ile tetikleniyor (süzgeçlerin dayandığı varsayım)', () => {
     const ci = readFileSync(join(KOK, '.github', 'workflows', 'ci.yml'), 'utf8');
     expect(ci).toMatch(/^on:\n {2}push:\n(?: {4}#.*\n)* {4}branches: \[main, /m);
+  });
+});
+
+// ── uptime kuralı: süreç yayın adımı başladıktan SONRA başlamış olmalı (sabit 600 sn değil) ──────────────────────────────────
+// 2026-10-09 sahte alarmı: `gh run watch` iş akışının tamamını (hazırlık yayını dâhil) bekledi, health sondası yayından 844 s
+// sonra koştu; kod canlıdaydı ama «uptime 844s — deploy restart etmemiş olabilir» FAIL yazıldı.
+describe.skipIf(process.platform === 'win32')('verify-deploy.sh — uptime kuralı (saf işlev, betikten çıkarılıp koşturulur)', () => {
+  const betik = readFileSync(BETIK, 'utf8');
+  const bas = betik.indexOf('uptime_kurali() {');
+  const son = betik.indexOf('\n}\n', bas);
+  expect(bas).toBeGreaterThan(0);
+  const islev = betik.slice(bas, son + 3);
+  const kural = (up: number, simdi: number, baslangic: string): string => {
+    const dizin = mkdtempSync(join(tmpdir(), 'vd-uk-'));
+    gecici.push(dizin);
+    writeFileSync(join(dizin, 'uk.sh'), islev);
+    const r = spawnSync('bash', ['-c', `source "${join(dizin, 'uk.sh')}"; uptime_kurali "$1" "$2" "$3"`, 'x', String(up), String(simdi), baslangic], { encoding: 'utf8', timeout: 10_000 });
+    return (r.stdout ?? '').trim();
+  };
+  const SIMDI = 1_775_000_000;
+  const iso = (epoch: number): string => new Date(epoch * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  it('başlangıç biliniyorsa: uptime ≤ geçen + 60 → pass; üstü → fail (2026-10-09 örneği 844 s / 900 s → PASS)', () => {
+    const bas900 = iso(SIMDI - 900);
+    expect(kural(844, SIMDI, bas900)).toBe('pass|taze restart (uptime 844s; yayın adımı 900s önce başladı)');
+    expect(kural(960, SIMDI, bas900)).toMatch(/^pass\|/);
+    expect(kural(961, SIMDI, bas900)).toBe('fail|uptime 961s, yayın adımından beri geçen 900s — deploy restart etmemiş');
+    expect(kural(5000, SIMDI, bas900)).toMatch(/^fail\|/);
+    expect(kural(5, SIMDI, iso(SIMDI - 20))).toMatch(/^pass\|/);
+  });
+  it('başlangıç yoksa ya da okunamıyorsa 600 sn kuralı (eski davranış) ve ileti bunu söyler', () => {
+    expect(kural(300, SIMDI, '')).toBe('pass|taze restart (uptime 300s; yayın adımı zamanı okunamadı, 600 sn kuralı)');
+    expect(kural(844, SIMDI, '')).toMatch(/^fail\|uptime 844s .*600 sn kuralı/);
+    expect(kural(300, SIMDI, 'bozuk-tarih')).toMatch(/^pass\|.*600 sn kuralı/);
+    expect(kural(844, SIMDI, 'bozuk-tarih')).toMatch(/^fail\|.*600 sn kuralı/);
+  });
+  it('kaynak çiti: `post` uptime satırı kuralı `CI_YAYIN_BASLANGIC` ile çağırır; 600 sabiti yalnız işlevin içinde; başlangıç `ci_denetimi` başarı dalında okunur', () => {
+    const satirlar = betik.split('\n');
+    const no = (desen: RegExp): number[] => satirlar.flatMap((l, i) => (desen.test(l) ? [i + 1] : []));
+    expect(no(/^\s*K=\$\(uptime_kurali "\$\{UP:-999999\}" "\$\(date \+%s\)" "\$CI_YAYIN_BASLANGIC"\)$/)).toHaveLength(1);
+    expect(no(/-lt 600/)).toHaveLength(1);
+    expect(no(/-lt 600/)[0]).toBeGreaterThan(no(/^uptime_kurali\(\) \{$/)[0]);
+    const oku = no(/^\s*CI_YAYIN_BASLANGIC=\$\(gh run view "\$is" --json jobs -q ".*\.startedAt" 2>\/dev\/null\) \|\| CI_YAYIN_BASLANGIC=""$/);
+    expect(oku).toHaveLength(1);
+    const basari = no(/^\s*if \[ "\$yayin" = success \]; then$/);
+    expect(basari).toHaveLength(1);
+    expect(oku[0]).toBeGreaterThan(basari[0]);
+    expect(no(/^CI_YAYIN_BASLANGIC=""$/)).toHaveLength(1);   // küresel tanım
   });
 });

@@ -31,9 +31,30 @@ cd "$(dirname "$0")/.." || exit 1
 CI_DOSYASI="ci.yml"
 CI_YAYIN_ISI="Deploy to Windows VDS"
 CI_YAYIN_ADIMI="Deploy (SSH → PowerShell)"
+# Yayın adımının BAŞLANGICI (ISO, gh'den; `ci_denetimi` doldurur). `post`un uptime kuralı buna göre ölçer: süreç yayın
+# adımı başladıktan SONRA başlamış olmalı. Sabit 600 sn kuralı 2026-10-09'da sahte alarm verdi — `gh run watch` iş akışının
+# TAMAMINI (hazırlık yayını dâhil) beklediği için health sondası yayından ~14 dk sonra koşmuştu (uptime 844 s, kod canlıdaydı).
+CI_YAYIN_BASLANGIC=""
 CI_ARAMA_DENEME="${CI_ARAMA_DENEME:-18}"
 CI_ARAMA_ARALIK="${CI_ARAMA_ARALIK:-5}"
 # $1 = kip (ci | post). Aralığa dayalı kontroller yalnız `post`ta koşar: bayat yerel ref orada FAIL, `ci`de bilgi.
+# uptime_kurali <uptime sn> <şimdi epoch> <yayın adımı başlangıcı ISO ya da boş> → "pass|ileti" / "fail|ileti" (saf; test eder)
+# Başlangıç biliniyorsa: uptime ≤ (şimdi − başlangıç) + 60 → süreç yayın adımı içinde / sonrasında başlamış. Bilinmiyorsa 600 sn.
+uptime_kurali() {
+  local up="$1" simdi="$2" bas="$3" bas_epoch=""
+  if [ -n "$bas" ]; then
+    bas_epoch=$(python3 -c 'import sys,datetime; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00")).timestamp()))' "$bas" 2>/dev/null) || bas_epoch=""
+  fi
+  if [ -n "$bas_epoch" ]; then
+    local gecen=$((simdi - bas_epoch))
+    if [ "$up" -le $((gecen + 60)) ]; then echo "pass|taze restart (uptime ${up}s; yayın adımı ${gecen}s önce başladı)"
+    else echo "fail|uptime ${up}s, yayın adımından beri geçen ${gecen}s — deploy restart etmemiş"; fi
+  else
+    if [ "$up" -lt 600 ]; then echo "pass|taze restart (uptime ${up}s; yayın adımı zamanı okunamadı, 600 sn kuralı)"
+    else echo "fail|uptime ${up}s — deploy restart etmemiş olabilir (yayın adımı zamanı okunamadı, 600 sn kuralı)"; fi
+  fi
+}
+
 ci_denetimi() {
   local kip="$1" uzak yerel hedef kisa is deneme bas yayin
   # Önce taze ref: karşılaştırma ve `merge-base` fetch'ten SONRA yapılsın (başarısızsa yerel bilgiyle sürer).
@@ -78,6 +99,7 @@ ci_denetimi() {
     yayin=$(gh run view "$is" --json jobs -q ".jobs[] | select(.name == \"$CI_YAYIN_ISI\") | .steps[] | select(.name == \"$CI_YAYIN_ADIMI\") | .conclusion" 2>/dev/null)
     if [ "$yayin" = success ]; then
       pass "CI & Deploy işi $is ($kisa): yayın adımı koştu"
+      CI_YAYIN_BASLANGIC=$(gh run view "$is" --json jobs -q ".jobs[] | select(.name == \"$CI_YAYIN_ISI\") | .steps[] | select(.name == \"$CI_YAYIN_ADIMI\") | .startedAt" 2>/dev/null) || CI_YAYIN_BASLANGIC=""
     else
       fail "CI & Deploy işi $is ($kisa) yeşil ama yayın adımı KOŞMADI (adım sonucu: ${yayin:-okunamadı}) — sunucuya kod gitmedi"
     fi
@@ -179,7 +201,8 @@ else
     read -r UP STATUS PG <<<"$PARSED"
     [ "${STATUS:-}" = ok ] && pass "health status=ok" || fail "health status=${STATUS:-?}"
     [ "${PG:-}" = True ] && pass "postgres canlı okuma (docs)" || fail "postgres=${PG:-?} — docs tablosu okunamıyor"
-    if [ "${UP:-999999}" -lt 600 ]; then pass "taze restart (uptime ${UP}s)"; else fail "uptime ${UP}s — deploy restart etmemiş olabilir"; fi
+    K=$(uptime_kurali "${UP:-999999}" "$(date +%s)" "$CI_YAYIN_BASLANGIC")
+    case "${K%%|*}" in pass) pass "${K#*|}" ;; *) fail "${K#*|}" ;; esac
   else
     fail "health erişilemedi: $BASE_URL/api/health"
   fi
