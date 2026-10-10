@@ -19,6 +19,7 @@ import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
 import { bilinenSayi } from '../utils/para';
 import { baslikMatrahi } from '../lib/faturaMatrahi';
+import { belgeNoOku } from '../hooks/useMikroFaturalar';
 import { tarihYaz, zamanDate } from '../utils/zaman';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';
 import { type Order } from '../types';
@@ -499,6 +500,9 @@ export default function CariEkstrePanel({
                       setSelectedInvoice({
                         id: row.id,
                         faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
+                        // Mikro `cha_belge_no` (cari-hareket importunun seçim listesinde) — tablonun «Belge No» SÜTUNU değil:
+                        // o sütun açıklamayı / evrak numarasını gösterir. Boş ya da alan yok → undefined → pencerede '—'.
+                        belgeNo: belgeNoOku(x),
                         musteri: customerName ?? '—',
                         cariKod: cariKod ?? '—',
                         tarih: row.createdAt,

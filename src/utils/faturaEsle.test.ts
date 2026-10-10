@@ -52,3 +52,32 @@ describe('hareketFaturasi', () => {
     expect(hareketFaturasi(iki, { evrakSira: '116', cariKod: '120.01', tarih: '2025-12-30' }, { seri: '', sira: '116', yon: 'giden' })?.baslikYok).toBe(true);
   });
 });
+
+// ── Belge no (2026-10-10: fatura detay penceresinin «Belge No» satırı) ───────────────────────────────────────────────
+// `MikroFaturaDetayVerisi.belgeNo` ZORUNLU anahtardır (derleyici çiti): iki dal da alanı AÇIKÇA yazar. Başlıklı dal başlığın
+// (mikroFaturalar — `cha_belge_no`) değerini taşır; başlıksız dalda kaynak yok (stok hareketi belge no taşımıyor) → undefined.
+describe('hareketFaturasi — belgeNo iki dalda da taşınır', () => {
+  const olcut = { evrakSira: '116', cariKod: '120.01', tarih: '2025-12-30' };
+  const anahtar = { seri: '', sira: '116', yon: 'giden' as const };
+
+  it('başlıklı dal: başlığın belgeNo\'su aynen geçer', () => {
+    const f = hareketFaturasi([baslik({ belgeNo: 'SZN2026000001284' })], olcut, anahtar);
+    expect(f?.baslikYok).toBeUndefined();
+    expect(f?.belgeNo).toBe('SZN2026000001284');
+  });
+
+  it('başlıklı dal, başlıkta belge no yok (eski doküman / Mikro\'da boş): anahtar VAR, değer undefined', () => {
+    const f = hareketFaturasi([baslik({})], olcut, anahtar);
+    expect(f).not.toBeNull();
+    expect(Object.keys(f ?? {})).toContain('belgeNo');
+    expect(f?.belgeNo).toBeUndefined();
+  });
+
+  it('başlıksız dal: anahtar VAR, değer undefined — başka faturanın belge no\'su SIZMAZ', () => {
+    // Listede aynı sıra numaralı ama YÖNÜ ters bir başlık var (alış ve satış aynı evrak numarasını kullanabiliyor): kullanılmaz.
+    const f = hareketFaturasi([baslik({ yon: 'gelen', belgeNo: 'TEDARIKCI-9' })], olcut, anahtar);
+    expect(f?.baslikYok).toBe(true);
+    expect(Object.keys(f ?? {})).toContain('belgeNo');
+    expect(f?.belgeNo).toBeUndefined();
+  });
+});

@@ -23,7 +23,7 @@ vi.mock('../lib/stokFiyat', async (importOriginal) => {
   return { ...gercek, kalemSaglamasi: () => sahte };
 });
 
-const fatura: MikroFaturaDetayVerisi = { id: 'f9', faturaNo: '944', musteri: 'TEDARİKÇİ', cariKod: '320', tarih: '2026-08-31',
+const fatura: MikroFaturaDetayVerisi = { id: 'f9', faturaNo: '944', belgeNo: undefined, musteri: 'TEDARİKÇİ', cariKod: '320', tarih: '2026-08-31',
   tutar: 119920, kdv: 19980, matrah: 100000, oran: 20, yon: 'gelen' };
 
 // Delta 2 (M19): '(fark …)' rakamı başlık farkıdır (|fark| = 40), Mikro fazlası (100) DEĞİL — o da kilitlenir.

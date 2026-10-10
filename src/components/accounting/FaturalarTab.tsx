@@ -367,7 +367,7 @@ export default function FaturalarTab({
                 .sort(faturaSatirKarsilastir<MikroFaturaRow>(invoiceSort.key, invoiceSort.direction, MIKRO_SORT_KEY))
                 .map(f => (
                 <tr key={`mikro-fat-${f.id}`}
-                  onClick={() => setFaturaDetay({ ...f, uuid: f.uuid })}
+                  onClick={() => setFaturaDetay({ ...f, uuid: f.uuid, belgeNo: f.belgeNo })}
                   title={ac(currentLanguage).detay_ve_xml_pdf_icin_tiklayin}
                   className="border-b border-gray-50 hover:bg-blue-50/60 bg-blue-50/20 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-mono font-semibold text-blue-600 underline decoration-dotted underline-offset-2">{f.faturaNo || '—'}</td>

@@ -7,8 +7,9 @@
  * "Hareket (tip 29) · Borç" görünüyordu. TR-only (8 kardeş etiket de TR-only; EN UYDURULMAZ).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import CariEkstrePanel, { hareketTipiEtiket } from './CariEkstrePanel';
+import { tarihYaz } from '../utils/zaman';
 
 const authFetch = vi.fn();
 vi.mock('../services/authFetch', () => ({ authFetch: (...a: unknown[]) => authFetch(...a) }));
@@ -111,5 +112,54 @@ describe('CariEkstrePanel — fatura detayının matrahı baslikMatrahi ile', ()
     fireEvent.click(await screen.findByTitle('Fatura detayını görüntüle'));
     expect((await matrahSatiri()).textContent).toBe('Matrah—');
     expect(kdvSatiri().textContent).toBe('KDV—');
+  });
+});
+
+// ── Fatura detayının üst bilgisi (2026-10-10): Fatura No · Belge No · Tarih ──────────────────────────────────────────
+// Kullanıcı isteği: «fatura detay ekranlarına tarih ve fatura no + belge no ekle» — pencereyi açan HER yüzey belge no'yu
+// geçirir (yarım düzeltme sınıfı). Cari Ekstre nesneyi elle kurar: belge no `mikroCariHareketler` satırının `cha_belge_no`'su.
+// DİKKAT: panelin TABLO başlığında da «Belge No» ve «Tarih» var — pencere satırı SPAN-içi-DIV ile ayrılır.
+describe('CariEkstrePanel — fatura detayına belge no geçirir', () => {
+  const SIZGEN = {
+    cha_evrak_tip: 63, cha_tip: 1, cha_meblag: 317236.5, cha_aratoplam: 398317.5, cha_ft_iskonto1: 85050, cha_ft_iskonto2: 29767.5,
+    cha_tarihi: '2026-08-31', cha_evrakno_seri: '', cha_evrakno_sira: 420, id: 'g420',
+  };
+  const yanitla = (satir: Record<string, unknown>) =>
+    authFetch.mockImplementation((url: string) => Promise.resolve({ ok: true, json: () => Promise.resolve(
+      url === '/api/mikro/fatura/kalemler' ? { success: true, kalemler: [] } : { success: true, satirlar: [satir] }) }));
+  /** Penceredeki "etiket — değer" satırı (tablo başlığındaki aynı adlı <th> değil). */
+  const pencereSatiri = async (etiket: string) => {
+    const e = (await screen.findAllByText(etiket)).find(x => x.tagName === 'SPAN' && x.parentElement?.tagName === 'DIV');
+    if (!e?.parentElement) throw new Error(`"${etiket}" pencere satırı yok`);
+    return e.parentElement;
+  };
+  const ac = async (satir: Record<string, unknown>) => {
+    yanitla(satir);
+    render(<CariEkstrePanel cariKod="320.01" currentLanguage="tr" />);
+    fireEvent.click(await screen.findByTitle('Fatura detayını görüntüle'));
+    await screen.findByText(/stok satırı yok/);
+  };
+
+  it('cha_belge_no dolu: pencerede Fatura No / Belge No (kırpılmış) / Tarih (GG.AA.YYYY, listedekiyle aynı)', async () => {
+    await ac({ ...SIZGEN, cha_belge_no: ' SZN2026000001284 ' });
+    expect((await pencereSatiri('Fatura No')).textContent).toBe('Fatura No420');
+    expect((await pencereSatiri('Belge No')).textContent).toBe('Belge NoSZN2026000001284');
+    // Satırın tarihi listede `tarihYaz` ile basılmıştı; pencere aynı günü aynı biçimde gösterir (yeniden çözüp kaydırmaz).
+    expect((await pencereSatiri('Tarih')).textContent).toBe(`Tarih${tarihYaz(SIZGEN.cha_tarihi)}`);
+    expect((await pencereSatiri('Tarih')).textContent).toMatch(/^Tarih\d{2}\.\d{2}\.2026$/);
+  });
+
+  it("cha_belge_no yok / null: satır yine çizilir, değer '—' (tablonun açıklama / evrak no sütunundan DOLDURULMAZ)", async () => {
+    await ac({ ...SIZGEN, cha_aciklama: 'ağustos alışı' });
+    expect((await pencereSatiri('Belge No')).textContent).toBe('Belge No—');
+    cleanup();
+    await ac({ ...SIZGEN, cha_belge_no: null });
+    expect((await pencereSatiri('Belge No')).textContent).toBe('Belge No—');
+  });
+
+  it("tarihi çözülemeyen satır: pencerede Tarih '—'", async () => {
+    const { cha_tarihi: _t, ...tarihsiz } = SIZGEN;
+    await ac(tarihsiz);
+    expect((await pencereSatiri('Tarih')).textContent).toBe('Tarih—');
   });
 });

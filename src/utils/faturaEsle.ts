@@ -75,12 +75,15 @@ export function hareketFaturasi(
   anahtar: FaturaAnahtari | null,
 ): MikroFaturaDetayVerisi | null {
   const baslik = faturaEsle(faturalar, olcut);
-  if (baslik && (anahtar === null || baslik.yon === anahtar.yon)) return { ...baslik, musteri: baslik.cariKod };
+  // `belgeNo` AÇIKÇA yazılır: `MikroFaturaDetayVerisi.belgeNo` zorunlu anahtar (çit), başlığın opsiyonel alanı yayılımla geçmez.
+  if (baslik && (anahtar === null || baslik.yon === anahtar.yon)) return { ...baslik, musteri: baslik.cariKod, belgeNo: baslik.belgeNo };
   if (anahtar === null) return null;
   const cari = olcut.cariKod?.trim() || '';
   return {
     id: `hareket|${anahtar.yon}|${anahtar.seri}|${anahtar.sira}`,
     faturaNo: anahtar.seri ? `${anahtar.seri}-${anahtar.sira}` : anahtar.sira,
+    // Başlık yok → belge no BİLİNMİYOR ('—'): stok hareketi belge numarası taşımıyor (kodda öyle bir kolon geçmiyor; uydurulmaz).
+    belgeNo: undefined,
     musteri: cari || '—',
     cariKod: cari,
     tarih: olcut.tarih?.slice(0, 10) ?? '',

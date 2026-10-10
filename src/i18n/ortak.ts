@@ -89,6 +89,7 @@ export const ORTAK = {
   sorumlu: 'Sorumlu',   // ×6
   kaydediliyor_2: 'Kaydediliyor…',   // ×6
   fatura_no: 'Fatura No',   // ×6
+  belge_no: 'Belge No',   // fatura detayı üst bilgisi (2026-10-10); EN «Document No» — satır içi «Doc No» çiftleri (LotSeri, Cari Ekstre başlığı) ayrı ifade
   geri_2: 'Geri',   // ×6
   tum_haklari_saklidir: 'Tüm hakları saklıdır.',   // ×6
   acik: 'Açık',   // ×6
@@ -715,6 +716,7 @@ export const ORTAK = {
   sorumlu: 'Responsible',
   kaydediliyor_2: 'Saving…',
   fatura_no: 'Invoice No',
+  belge_no: 'Document No',
   geri_2: 'Back',
   tum_haklari_saklidir: 'All rights reserved.',
   acik: 'Open',

@@ -19,7 +19,7 @@ vi.mock('../lib/stokFiyat', async (orig) => {
 });
 
 const fatura: MikroFaturaDetayVerisi = {
-  id: 'f1', faturaNo: '359', musteri: 'ACCADO KİLİT SİSTEMLERİ', cariKod: '0040488682', tarih: '2026-09-03',
+  id: 'f1', faturaNo: '359', belgeNo: undefined, musteri: 'ACCADO KİLİT SİSTEMLERİ', cariKod: '0040488682', tarih: '2026-09-03',
   tutar: 4270.01, kdv: 711.67, matrah: 3558.34, oran: 20, yon: 'giden',
 };
 
@@ -98,7 +98,7 @@ const K420 = {
   sth_vergi: 33736.5, sth_vergi_pntr: 4,
 };
 const F420: MikroFaturaDetayVerisi = {
-  id: 'f420', faturaNo: '420', musteri: 'SİZGEN YAPI', cariKod: '320.01', tarih: '2026-08-31',
+  id: 'f420', faturaNo: '420', belgeNo: 'SZN2026000001284', musteri: 'SİZGEN YAPI', cariKod: '320.01', tarih: '2026-08-31',
   tutar: 317236.5, kdv: 33736.5, matrah: 398317.5, oran: 20, yon: 'gelen',
 };
 /** Başlık bölümündeki "etiket — değer" satırı (satir() yardımcısı: iki span'lı div). */
@@ -338,5 +338,102 @@ describe('MikroFaturaDetay — matrah aşama 2: YENİ doküman (matrahKaynagi do
     render(<MikroFaturaDetay fatura={F420_YENI} currentLanguage="en" onClose={() => {}} />);
     await satirOf('RULO 1081');
     expect(baslikSatiri('Base').textContent).toBe('Base₺168.682,50Mikro header ₺283.500,00 — ₺114.817,50 added to the gross once more');
+  });
+});
+
+// ── Üst bilgi: Fatura No · Belge No · Tarih (2026-10-10) ──────────────────────────────────────────────────────────────
+// Kullanıcı isteği (420 no'lu SİZGEN alış faturasının ekran görüntüsüyle): «fatura detay ekranlarına tarih ve fatura no +
+// belge no ekle.» Pencerede fatura no yalnız başlık altındaki küçük mono metindi, tarih HAM basılıyordu ('2026-08-31'),
+// belge no (gelen faturada tedarikçinin fatura numarası — Mikro `cha_belge_no`) hiç yoktu. Üç satır gövdenin EN ÜSTÜNDE ve
+// HER ZAMAN çizilir: bilinmeyen '—' (gizlenmez).
+describe('MikroFaturaDetay — üst bilgi: Fatura No · Belge No · Tarih', () => {
+  /** Gövdedeki "etiket — değer" satırlarının etiketleri, DOM sırasıyla (satir() yardımcısı: iki span'lı div). */
+  function govdeEtiketleri(): (string | null)[] {
+    const govde = baslikSatiri(screen.queryByText('Toplam') ? 'Toplam' : 'Total').parentElement;
+    if (!govde) throw new Error('pencere gövdesi yok');
+    return [...govde.children]
+      .filter(c => c.tagName === 'DIV' && c.children.length === 2 && [...c.children].every(x => x.tagName === 'SPAN'))
+      .map(c => c.firstElementChild?.textContent ?? null);
+  }
+  /** Kalem çekimi (boş yanıt) bitene kadar bekler — sonraki durum güncellemesi testin DIŞINA taşmasın. */
+  const ciz = async (f: MikroFaturaDetayVerisi, dil: 'tr' | 'en' = 'tr') => {
+    authFetch.mockReturnValue(yanit([]));
+    render(<MikroFaturaDetay fatura={f} currentLanguage={dil} onClose={() => {}} />);
+    await screen.findByText(dil === 'tr' ? /stok satırı yok/ : /No stock lines/);
+  };
+
+  it('gövdenin EN ÜSTÜNDE üç satır, sırayla; değerler fatura no / belge no / GG.AA.YYYY', async () => {
+    await ciz(F420);
+    expect(govdeEtiketleri()).toEqual(['Fatura No', 'Belge No', 'Tarih', 'Müşteri / Cari', 'Cari kodu', 'Matrah', 'KDV', 'Toplam']);
+    expect(baslikSatiri('Fatura No').textContent).toBe('Fatura No420');
+    expect(baslikSatiri('Belge No').textContent).toBe('Belge NoSZN2026000001284');
+    expect(baslikSatiri('Tarih').textContent).toBe('Tarih31.08.2026');
+  });
+
+  it("«Tarih» satırı TEK (taşındı, yinelenmedi); başlık altındaki mono fatura no DURUR", async () => {
+    await ciz(F420);
+    expect(screen.getAllByText('Tarih')).toHaveLength(1);
+    expect(screen.queryByText('2026-08-31')).toBeNull();                          // ham tarih artık basılmıyor
+    // '420' iki yerde: başlık altındaki <p> (mono) + «Fatura No» satırının değeri.
+    expect(screen.getAllByText('420').map(e => e.tagName).sort()).toEqual(['P', 'SPAN']);
+    expect(screen.getAllByText('420').find(e => e.tagName === 'P')?.className).toContain('font-mono');
+  });
+
+  it.each([
+    ['YYYY-AA-GG (mikroFaturalar)', '2026-08-31', '31.08.2026'],
+    ['GG.AA.YYYY (Cari Ekstre satırı zaten biçimli)', '31.08.2026', '31.08.2026'],
+    ['boş metin (başlıksız açılış, tarihsiz hareket)', '', '—'],
+    ["'—' (Cari Ekstre: tarihi çözülemeyen satır)", '—', '—'],
+    ['çözülemeyen metin HAM basılır — tarih uydurulmaz', 'tarih okunamadı', 'tarih okunamadı'],
+  ])('tarih: %s', async (_ad, tarih, beklenen) => {
+    await ciz({ ...F420, tarih });
+    expect(baslikSatiri('Tarih').textContent).toBe(`Tarih${beklenen}`);
+  });
+
+  it.each([
+    ['alan yok / bilinmiyor (undefined)', undefined, '—'],
+    ['boş metin', '', '—'],
+    ['yalnız boşluk', '   ', '—'],
+    ['boşluklu değer kırpılır', '  ABC2026000000042 ', 'ABC2026000000042'],
+  ])("belge no: %s → satır HER ZAMAN çizilir", async (_ad, belgeNo, beklenen) => {
+    await ciz({ ...fatura, belgeNo });
+    expect(baslikSatiri('Belge No').textContent).toBe(`Belge No${beklenen}`);
+    expect(govdeEtiketleri().slice(0, 3)).toEqual(['Fatura No', 'Belge No', 'Tarih']);
+  });
+
+  it('boşluksuz uzun belge no: değer hücresi kırılma sınıflarını taşır (dar ekranda satır yatay taşmasın)', async () => {
+    // jsdom yerleşim hesaplamaz → taşma burada ölçülemez; sınıf çifti sabitlenir. İKİSİ BİRLİKTE gerekir: `break-words` tek
+    // başına esnek öğenin en küçük içerik genişliğini küçültmez (390 px'te 50 karakterlik değer: çiftle taşma 0, tek başına sürüyor).
+    const uzun = 'SZN' + '2026000001284'.repeat(4);
+    await ciz({ ...F420, belgeNo: uzun });
+    const deger = baslikSatiri('Belge No').lastElementChild;
+    expect(deger?.textContent).toBe(uzun);
+    expect(deger?.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'break-words']));
+    expect(deger?.className.split(/\s+/)).not.toContain('break-all');               // unvanı sözcük ortasından bölerdi
+    // Sınıf `satir()` yardımcısında: gövdedeki her satır (unvan, cari kodu …) aynı hücreyi kullanır.
+    expect(baslikSatiri('Müşteri / Cari').lastElementChild?.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'break-words']));
+  });
+
+  it("fatura no boşsa «Fatura No» satırı da '—' (gizlenmez)", async () => {
+    authFetch.mockReturnValue(yanit([]));
+    render(<MikroFaturaDetay fatura={{ ...fatura, faturaNo: '' }} currentLanguage="tr" onClose={() => {}} />);
+    expect(baslikSatiri('Fatura No').textContent).toBe('Fatura No—');
+  });
+
+  it("başlıksız açılış (hareketFaturasi): üç satır yine çizilir — belge no '—', «yüklenmedi»yi amber not söyler", async () => {
+    await ciz({ ...fatura, id: 'hareket|gelen||410', faturaNo: '410', yon: 'gelen', tarih: '', tutar: NaN, kdv: NaN, matrah: NaN, baslikYok: true });
+    expect(govdeEtiketleri().slice(0, 3)).toEqual(['Fatura No', 'Belge No', 'Tarih']);
+    expect(baslikSatiri('Fatura No').textContent).toBe('Fatura No410');
+    expect(baslikSatiri('Belge No').textContent).toBe('Belge No—');
+    expect(baslikSatiri('Tarih').textContent).toBe('Tarih—');
+    expect(screen.getByText(/Fatura başlığı Cetpa'da yok/)).toBeTruthy();
+  });
+
+  it('İngilizce: Invoice No / Document No / Date — tarih biçimi iki dilde AYNI (GG.AA.YYYY)', async () => {
+    await ciz(F420, 'en');
+    expect(govdeEtiketleri().slice(0, 4)).toEqual(['Invoice No', 'Document No', 'Date', 'Customer']);
+    expect(baslikSatiri('Invoice No').textContent).toBe('Invoice No420');
+    expect(baslikSatiri('Document No').textContent).toBe('Document NoSZN2026000001284');
+    expect(baslikSatiri('Date').textContent).toBe('Date31.08.2026');
   });
 });

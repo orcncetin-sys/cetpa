@@ -20,13 +20,21 @@ import { paraYaz } from '../utils/currency';
 import { VERGI_PNTR_ORAN, type MatrahKaynagi } from '../hooks/useMikroFaturalar';
 import { kalemleriCoz, kalemSaglamasi, birimFiyatOndaligi, satirMasrafi } from '../lib/stokFiyat';
 import { bilinenSayi } from '../utils/para';
+import { faturaTarihMetni } from '../utils/muhasebe/faturaUstBilgisi';
 import { oc } from '../i18n/ortak';
 
 export interface MikroFaturaDetayVerisi {
   id: string;
   faturaNo: string;
+  /** Mikro `cha_belge_no` (gelen faturada tedarikçinin fatura numarası); `undefined` = boş / bilinmiyor → pencerede '—'.
+   *  ANAHTAR BİLEREK ZORUNLU (`?` YOK — çit, 2026-10-10): opsiyonel olsaydı nesneyi elle kuran üretici alanı unutunca derleyici
+   *  susardı ve o yüzeyde Belge No sessizce '—' kalırdı (yarım düzeltme sınıfı). Yeni üretici `belgeNo`'yu AÇIKÇA yazmak
+   *  zorunda — kaynağında yoksa `belgeNo: undefined`. (Yayılım yetmez: `MikroFatura.belgeNo` opsiyonel, tsc reddeder.) */
+  belgeNo: string | undefined;
   musteri: string;
   cariKod: string;
+  /** Fatura tarihi. Üreticiye göre `YYYY-AA-GG` (mikroFaturalar), `GG.AA.YYYY` (Cari Ekstre), boş ya da '—' gelir;
+   *  pencere `faturaTarihMetni` ile GG.AA.YYYY basar (çözülemeyen metin ham, boş '—'). */
   tarih: string;
   /** **NaN = BİLİNMİYOR** (useMikroFaturalar ile aynı sözleşme) — ekranda '—', toplama girmez. */
   tutar: number;
@@ -206,10 +214,14 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
     setIndiriliyor(null);
   };
 
+  // Değer hücresi `min-w-0 break-words`: boşluksuz uzun belge no (tedarikçinin fatura numarası) dar ekranda satırı yatay
+  // taşırıyordu. İKİSİ BİRLİKTE gerekir — `overflow-wrap: break-word` esnek öğenin en küçük içerik genişliğini küçültmez,
+  // `min-width: 0` olmadan sözcük yine kırılmaz (390 px'te ölçüldü, inceleme 2026-10-10). `break-all` DEĞİL: unvanı sözcük
+  // ortasından bölerdi. Kardeş satır: MuhasebePage `satir564` — birlikte değişir.
   const satir = (etiket: string, deger: string, not?: ReactNode) => (
     <div className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
       <span className="text-xs text-gray-500">{etiket}</span>
-      <span className="text-sm font-semibold text-[#1D1D1F] text-right">
+      <span className="text-sm font-semibold text-[#1D1D1F] text-right min-w-0 break-words">
         {deger}
         {not && <span className="block text-[10px] font-normal text-amber-700">{not}</span>}
       </span>
@@ -238,9 +250,15 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
         </div>
 
         <div className="p-5 overflow-y-auto flex-1 min-h-0">
+          {/* Üst bilgi (2026-10-10 kullanıcı isteği): Fatura No · Belge No · Tarih, gövdenin EN ÜSTÜNDE. Üçü de HER ZAMAN çizilir —
+              boş / bilinmeyen '—' (gizlenmez; başlıksız açılışta aşağıdaki amber not «yüklenmedi»yi söyler, başlıklıda '—' =
+              Mikro'da boş). Fatura no başlık altındaki mono metinde de DURUR. Tarih eskiden cari kodunun altında HAM basılıyordu
+              ('2026-08-31'); buraya taşındı, yinelenmez. Etiketler ortak sözlükten — satır içi çift yazılmaz (ortak değişmez testi). */}
+          {satir(oc(tr).fatura_no, fatura.faturaNo || '—')}
+          {satir(oc(tr).belge_no, fatura.belgeNo?.trim() || '—')}
+          {satir(oc(tr).tarih, faturaTarihMetni(fatura.tarih))}
           {satir(tr ? 'Müşteri / Cari' : 'Customer', fatura.musteri)}
           {satir(tr ? 'Cari kodu' : 'Account code', fatura.cariKod || '—')}
-          {satir(oc(tr).tarih, fatura.tarih || '—')}
           {/* `typeof === 'number'` NaN'ı SAYI SANIYORDU: hook grubu (2026-09-18) okunamayan
               tutar/kdv/matrahı NaN yaptığından bu kontrol "biliniyor" deyip `tl(NaN)`e giriyordu.
               `bilinenSayi` NaN'ı da eler — bilinmeyen alan '—' basar (oranı da yazılmaz). */}

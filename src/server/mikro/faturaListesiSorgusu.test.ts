@@ -54,6 +54,21 @@ describe('faturaListesiSorgusu', () => {
   });
 });
 
+// ÇİT (2026-10-10, fatura detayı «Belge No»): `mikroFaturalar` dokümanındaki `cha_belge_no` bu importun `cha.*` seçimiyle
+// gelir (satır HAM yazılır; ayrı bir kolon listesi yok). Seçim adlı kolonlara daraltılırsa belge no — ve istemcinin okuduğu
+// öteki ham `cha_*` alanları — SESSİZCE gelmez olur, pencere her faturada '—' basar. İki dalda da ilk seçim `cha.*` kalmalı.
+describe('faturaListesiSorgusu — başlık kolonlarının tamamı seçilir (cha.*)', () => {
+  it('şema OKUNAN dalda seçim `cha.*` ile başlar; türetilen alanlar ARKASINA eklenir', () => {
+    const q = faturaListesiSorgusu({ ana: ANA, satir: SATIR });
+    expect(q.matrahYazilir).toBe(true);
+    expect(q.secim.split(', ')[0]).toBe('cha.*');
+    expect(q.secim.startsWith('cha.*, ')).toBe(true);
+  });
+  it('şema okunamayan dalda seçim yalnız `cha.*`', () => {
+    expect(faturaListesiSorgusu({ ana: [], satir: [] }).secim).toBe('cha.*');
+  });
+});
+
 describe('faturaListesiSaglamasi (kapanış ölçüsü)', () => {
   const f = (o: Record<string, unknown>) => ({ matrahKaynagi: 'baslik', ortakAnahtar: 0, satirSayisi: 1, ...o });
   it('tutarlı fatura tutar; tevkifat (311: meblağ KDV/2 kadar düşük) tutmayan sayılır', () => {

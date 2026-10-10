@@ -31,6 +31,10 @@ export interface MikroFatura {
   oranKarma: boolean;            // true: faturada birden fazla KDV oranı var (ör. %10 + %20) — oran tek başına yanıltıcı
   yon: 'gelen' | 'giden';        // cha_tip 1=gelen(alış), 0=giden(satış)
   uuid?: string;                 // GİB belge kimliği (e-belge XML/PDF)
+  /** Mikro `cha_belge_no` — GELEN faturada tedarikçinin fatura numarası; giden faturada boş olabilir (ne taşıdığı canlıda
+   *  ölçülmedi). `undefined` = Mikro'da boş / null ya da dokümanda alan yok (şemada kolon yoksa hiç gelmez) → ekranda '—';
+   *  sahte değer YAZILMAZ. Kaynak: fatura-listesi importunun `cha.*` seçimi (server/mikro/faturaListesiSorgusu — testte çitli). */
+  belgeNo?: string;
   /** 0 = e-Fatura, 1 = e-Arşiv, -1 = bilinmiyor (gelen faturada hep -1) — `cha_ebelge_Islemturu`'ndan; bkz. utils/muhasebe/ebelgeTuru. */
   ebelgeTuru: number;
   /** cha_subeno — şube bazlı P&L eşleşmesi için. **NaN = BİLİNMİYOR** (0 = merkez, meşru değer). */
@@ -44,6 +48,11 @@ export const VERGI_PNTR_ORAN: Record<string, number> = { '1': 0, '2': 1, '3': 10
 
 /** Bilinen sayıya çevir; değilse NaN — `Number(x ?? 0) || 0` sahte sıfırının yerine (bkz. başlık notu). */
 const paraOku = (x: unknown): number => (bilinenSayi(x) ? Number(x) : NaN);
+
+/** Ham `cha_*` satırından belge numarası (`cha_belge_no`): kırpılmış metin; boş / null / alan yok → `undefined` (`uuid` ile aynı
+ *  kalıp — boş metin DEĞİL). TEK okuyucu: `mapMikroFatura` (mikroFaturalar) ve Cari Ekstre'nin fatura satırı (mikroCariHareketler)
+ *  aynı kolonu buradan okur — iki ekranda ayrı yazılıp ayrı bozulmasın. */
+export const belgeNoOku = (x: Record<string, unknown>): string | undefined => String(x.cha_belge_no ?? '').trim() || undefined;
 
 /** Ham mikroFaturalar dokümanını normalize et (iptal edilmişler çıkarılır).
  *
@@ -89,6 +98,7 @@ export function mapMikroFatura(id: string, x: Record<string, unknown>): MikroFat
     oran:     VERGI_PNTR_ORAN[String(x.vergiPntr ?? '')] ?? null,
     oranKarma: Number(x.oranSayisi ?? 1) > 1,
     uuid:     String(x.cha_uuid ?? x.cha_ettn ?? x.uuid ?? '') || undefined,
+    belgeNo:  belgeNoOku(x),
     ebelgeTuru: ebelgeTuruCoz(x),
     // `?? 0` BURADA MEŞRU: para değil SINIFLANDIRMA varsayılanı (cha_tip 1=gelen/alış, 0=giden/satış).
     // Bilinen sınır: yönü okunamayan fatura SATIŞ sayılır ve ciroyu şişirebilir; `yon`un üçüncü bir

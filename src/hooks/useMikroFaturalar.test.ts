@@ -20,7 +20,7 @@
  * aşırı düzeltme yapılmadığının kanıtı.
  */
 import { describe, it, expect } from 'vitest';
-import { mapMikroFatura, VERGI_PNTR_ORAN, type MikroFatura } from './useMikroFaturalar';
+import { mapMikroFatura, belgeNoOku, VERGI_PNTR_ORAN, type MikroFatura } from './useMikroFaturalar';
 import { toplaBilinen, ekranTutari } from '../utils/para';
 
 /** Şirin İnşaat'ın tam okunan satış faturası — diğer fikstürler bunun üstüne yazar. */
@@ -246,5 +246,33 @@ describe('mapMikroFatura — matrahKaynagi taşınır (eski dokümanda undefined
     expect(yeni.matrah).toBe(283500);
     expect(yeni.kdv).toBe(33736.5);
     expect({ ...yeni, matrahKaynagi: undefined }).toEqual(eski);
+  });
+});
+
+// ── Belge no (2026-10-10: fatura detay pencerelerinin «Belge No» satırı) ─────────────────────────────────────────────
+// Kaynak Mikro `cha_belge_no` (fatura-listesi importu `cha.*` seçer, satır HAM yazılır; gelen faturada tedarikçinin fatura
+// numarası). `uuid` ile aynı kalıp: boş / null / alan yok → `undefined` (boş metin DEĞİL) → pencerede '—'; değer UYDURULMAZ.
+describe('mapMikroFatura — belgeNo (cha_belge_no)', () => {
+  it('boşluklu metin kırpılır', () => {
+    expect(mapMikroFatura('F', { ...tamKayit, cha_belge_no: '  SZN2026000001284 ' }).belgeNo).toBe('SZN2026000001284');
+  });
+  it.each([
+    ['null (Mikro\'da boş)', { cha_belge_no: null }],
+    ['boş metin', { cha_belge_no: '' }],
+    ['yalnız boşluk', { cha_belge_no: '   ' }],
+    ['alan hiç yok (eski doküman / şemada kolon yok)', {}],
+  ])('%s → undefined', (_ad, ek) => {
+    const f = mapMikroFatura('F', { ...tamKayit, ...ek });
+    expect(f.belgeNo).toBeUndefined();
+    expect(f.faturaNo).toBe('A-1001');          // belge no, evrak numarasının (fatura no) YERİNE geçmez / ona düşmez
+  });
+  it('fatura no ile belge no AYRI alanlardır: belge no evrak seri + sıradan türetilmez', () => {
+    const f = mapMikroFatura('F', { ...tamKayit, cha_belge_no: 'ABC2026000000042' });
+    expect([f.faturaNo, f.belgeNo]).toEqual(['A-1001', 'ABC2026000000042']);
+  });
+  it('belgeNoOku — ham cha_* satırının TEK okuyucusu (Cari Ekstre de bunu kullanır)', () => {
+    expect(belgeNoOku({ cha_belge_no: ' X-1 ' })).toBe('X-1');
+    expect(belgeNoOku({ cha_belge_no: null })).toBeUndefined();
+    expect(belgeNoOku({})).toBeUndefined();
   });
 });

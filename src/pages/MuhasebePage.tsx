@@ -18,6 +18,7 @@ import { doc, setDoc, addDoc, collection, updateDoc, deleteDoc, serverTimestamp,
 import { confirmDelete } from '../lib/confirm';
 import AccountingModule from '../components/AccountingModule';
 import { useMikroFaturalar, useCariAdMap } from '../hooks/useMikroFaturalar';
+import { faturaUstBilgisi } from '../utils/muhasebe/faturaUstBilgisi';
 import { maliyetDurumu } from '../utils/cost';
 import { bilinenSayi, satirTutari, ekranTutari } from '../utils/para';
 import { nakitAkisi, dovizTopla, ticariAlacak, stokDegeri, duranVarlik, ticariBorc, kdvBorcu, bilanco } from '../utils/muhasebe/nakitBilanco';
@@ -2659,13 +2660,19 @@ export default function MuhasebePage(props: Props) {
                         {p564DetayId && (() => {
                           const d = orders.find(o => o.id === p564DetayId);
                           if (!d) return null;
-                          const dInvoiceNo = d.mikroFaturaNo || d.lucaFaturaNo || d.irsaliyeNo || '—';
+                          // Üst bilgi (2026-10-10 kullanıcı isteği: «fatura detay ekranlarına tarih ve fatura no + belge no ekle»):
+                          // Fatura No · Belge No · Tarih gövdenin EN ÜSTÜNDE, her zaman çizilir ('—' = bilinmiyor). Hesap saf
+                          // yardımcıda (utils/muhasebe/faturaUstBilgisi): tarih = fatura tarihi (yoksa listedeki sipariş tarihi),
+                          // belge no = faturadan türetilen siparişin TEKİL eşleşen Mikro başlığından; native siparişte '—'.
+                          const ust564 = faturaUstBilgisi(d, mikroFaturalar);
                           const dSynced = d.mikroSynced || d.lucaSynced;
                           const dAdres = teslimatAdresiMetni(d);   // TAM adres: kalan + il + (yurt dışıysa) ülke; boşsa satır çizilmez
+                          // Değer hücresi `min-w-0 break-words`: boşluksuz uzun belge no dar ekranda satırı taşırmasın (ikisi
+                          // birlikte gerekir — gerekçe ve ölçüm: MikroFaturaDetay `satir`; iki pencere birlikte değişir).
                           const satir564 = (etiket: string, deger: React.ReactNode) => (
                             <div className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
                               <span className="text-xs text-gray-500">{etiket}</span>
-                              <span className="text-sm font-semibold text-[#1D1D1F] text-right">{deger}</span>
+                              <span className="text-sm font-semibold text-[#1D1D1F] text-right min-w-0 break-words">{deger}</span>
                             </div>
                           );
                           return (
@@ -2679,13 +2686,15 @@ export default function MuhasebePage(props: Props) {
                                   <button onClick={() => setP564DetayId(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"><X className="w-[18px] h-[18px]" /></button>
                                 </div>
                                 <div className="p-5 overflow-y-auto flex-1 min-h-0">
+                                  {satir564(oc(tr564).fatura_no, ust564.faturaNo)}
+                                  {satir564(oc(tr564).belge_no, ust564.belgeNo)}
+                                  {satir564(oc(tr564).tarih, ust564.tarih)}
                                   {satir564(oc(tr564).musteri, d.customerName)}
                                   {d.customerEmail && satir564(oc(tr564).e_posta, d.customerEmail)}
                                   {dAdres && satir564(oc(tr564).adres, <span className="font-normal text-xs">{dAdres}</span>)}
                                   {satir564(oc(tr564).tutar, paraYaz(d.totalPrice))}
                                   {typeof d.kdvOran === 'number' && satir564('KDV', `%${d.kdvOran}${d.kdvTutari ? ` · ${paraYaz(d.kdvTutari)}` : ''}`)}
                                   {d.faturaTipi && satir564(oc(tr564).fatura_turu, faturaTipiEtiketi(d.faturaTipi, currentLanguage))}
-                                  {satir564(oc(tr564).fatura_no, dInvoiceNo)}
                                   {d.ettn && satir564('ETTN', <span className="font-mono text-[11px]">{d.ettn}</span>)}
                                   {d.irsaliyeNo && satir564(mc(tr564).irsaliye_no, d.irsaliyeNo)}
                                   {satir564(oc(tr564).erp_durumu, dSynced
