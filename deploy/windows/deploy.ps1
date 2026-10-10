@@ -238,14 +238,25 @@ try {
 }
 
 # Local health check (no TLS - independent of the IIS/Plesk reverse proxy in front)
+#
+# WAIT WINDOW (2026-10-10): 10 attempts (~80 s) was too short for the first boot
+# after the SLOW path. The 8e0bdab deploy reinstalled node_modules (npm ci), the
+# cold start took longer than the window, this script exited 1 - and the service
+# came up healthy a few seconds later on the NEW code. Two bad side effects:
+#   1. CI showed a failed deploy for a deploy that actually worked.
+#   2. The lock stamp below was NOT written, so the NEXT deploy takes the slow
+#      path again (service stopped for npm ci) even though nothing changed.
+# 40 attempts gives the cold boot ~2-5 minutes. A healthy boot leaves the loop on
+# its first 200, so the normal (fast path) deploy is not slowed down at all.
+$healthAttempts = 40
 $ok = $false
-foreach ($i in 1..10) {
+foreach ($i in 1..$healthAttempts) {
     Start-Sleep 3
     try {
         $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 "http://localhost:$AppPort/api/health"
         if ($r.StatusCode -eq 200) { $ok = $true; break }
     } catch { }
-    Write-Host "    health attempt $i/10..."
+    Write-Host "    health attempt $i/$healthAttempts..."
 }
 if ($ok) {
     # Record the lock hash ONLY after a healthy deploy. If this deploy failed we
@@ -256,7 +267,7 @@ if ($ok) {
     } catch {
         Write-Host "    Could not write lock stamp (next deploy just runs npm ci): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-    Info 'Health OK (HTTP 200). Deploy succeeded.'
+    Info "Health OK (HTTP 200) on attempt $i/$healthAttempts. Deploy succeeded."
     exit 0
 } else {
     Write-Error "Health check failed - inspect $LogDir\service-err.log"
