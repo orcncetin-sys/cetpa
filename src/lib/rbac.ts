@@ -44,11 +44,24 @@ export const PUBLIC_WRITE_COLLECTIONS = new Set(['demoRequests', 'partnerApplica
  *
  * `magazaTalepleri`: mağazanın kimliksiz ucu (/api/magaza/siparis-talebi) ham SQL ile yazar, o yüzden
  * etkilenmez. Talep müşterinin BEYANIDIR; ekrandan düzenlenebilseydi «müşteri ne istedi» kaydı bozulurdu
- * (teyit / ret dilim 2'de kendi sunucu ucuyla gelir). OKUMA kuralı `COLLECTION_PERMISSIONS`'tadır.
+ * (aşama / açıklama / kalem teslim yazımı dilim 2a'da kendi sunucu uçlarıyla gelir: `POST /api/magaza-talepleri/:id/durum`,
+ * `…/kalem-teslim`, `…/bildirim-gonder` ve site paneli — tek yazma işlevi `src/server/kanal/magazaDurum.ts`; yetki aşağıdaki
+ * `magazaTalepIslemYetkisi`). OKUMA kuralı `COLLECTION_PERMISSIONS`'tadır.
  *
  * `SERVER_ONLY_COLLECTIONS`'tan (collections.ts) FARKI: o sınıf okumaya da kapalıdır (/api/db ve akış).
  */
 export const SUNUCU_YAZAR_COLLECTIONS = new Set(['magazaTalepleri']);
+
+/**
+ * Mağaza talebi İŞLEM yetkisi (dilim 2a, V3): site panelini görebilen ve aşama / açıklama / kalem teslim yazabilen roller =
+ * `magazaTalepleri` koleksiyonunu OKUYABİLEN roller (bugün Yönetici, Müdür, Satış). Liste KOPYALANMAZ — tek kaynak
+ * `COLLECTION_PERMISSIONS`. Süper-yönetici baypası YOK: rolü bu kümede olmayan süper-yönetici de 403 alır. Panel kapısı
+ * ve ERP uçları `requireCollectionAccess` yerine bunu okur (`'write'` üç rolü de reddeder, `'read'` süper-yöneticiyi
+ * rolüne bakmadan geçirirdi).
+ */
+export function magazaTalepIslemYetkisi(rol: AppRole | null): boolean {
+  return isAllowed(rol, 'magazaTalepleri', 'read');
+}
 
 /**
  * Rol bazlı ince ayarlı yetkilendirme (firestore.rules'dan taşınmıştır).

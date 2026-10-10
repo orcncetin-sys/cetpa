@@ -306,7 +306,7 @@ else
   # `xRoutes(app, ...)` cagrisiyla kaydolur ve o cagri zincirde yanlis yere
   # konabilir. 2026-08-24'te kirilan yalniz mikro grubuydu; digerleri dogruydu
   # ve tek sondali kontrol bu farki goremezdi.
-  BODY_PROBES="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul /api/tracking/fedex /api/ops/watchdog/run /api/dynamics/export/siparis /api/superadmin/tenants/test/status /api/parasut/import/stok /api/ai/lead-score /api/shopify/sync /api/shopify/baglanti /api/iyzico/payment-link /api/email/send}"
+  BODY_PROBES="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul /api/tracking/fedex /api/ops/watchdog/run /api/dynamics/export/siparis /api/superadmin/tenants/test/status /api/parasut/import/stok /api/ai/lead-score /api/shopify/sync /api/shopify/baglanti /api/iyzico/payment-link /api/email/send /api/magaza-panel/yetki-kodu /api/magaza-talepleri/mt-00000000000000000000000000000000/durum /api/magaza-talepleri/mt-00000000000000000000000000000000/kalem-teslim /api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder}"
   for BODY_PROBE in $BODY_PROBES; do
     PCODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
       -X POST -H 'Content-Type: application/json' --data-binary '{bozuk' \
@@ -320,6 +320,26 @@ else
       404)     fail "$BODY_PROBE -> 404: rota deploy'da YOK (grup hiç kaydolmamış olabilir)" ;;
       429)     fail "$BODY_PROBE -> 429 (hız sınırı: bu IP kimliksiz tavanı doldurdu — bekleyip yeniden çalıştırın)" ;;
       *)       fail "gövde ayrıştırma sondası beklenmedik yanıt: $PCODE ($BODY_PROBE)" ;;
+    esac
+  done
+
+  # 4b) MAĞAZA ERP UÇLARI KAYITLI MI? (mağaza dilim 2a — «yazıldı ama bağlanmadı» sondası)
+  #
+  # Yukarıdaki bozuk JSON sondası rotanın VARLIĞINI göremez: gövde hatası rota eşleşmesinden
+  # ÖNCE fırlar, kayıtlı olmayan yol da 400/500 döner. Bu yüzden aynı dört yola GEÇERLİ JSON,
+  # Authorization'sız gönderilir:
+  #   401 = rota kayıtlı ve kimlik kapısı arkasında · 404 = rota deploy'da YOK
+  # (magazaErpRoutes(app, …) çağrısı server.ts'te yok ya da uç adı değişmiş).
+  MAGAZA_ERP_PROBES="/api/magaza-panel/yetki-kodu /api/magaza-talepleri/mt-00000000000000000000000000000000/durum /api/magaza-talepleri/mt-00000000000000000000000000000000/kalem-teslim /api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder"
+  for ERP_PROBE in $MAGAZA_ERP_PROBES; do
+    ECODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
+      -X POST -H 'Content-Type: application/json' --data-binary '{}' \
+      "$BASE_URL$ERP_PROBE" 2>/dev/null || echo 000)
+    case "$ECODE" in
+      401) pass "mağaza ERP ucu kayıtlı ve kimlik kapısı arkasında: $ERP_PROBE (kimliksiz {} -> 401)" ;;
+      404) fail "MAĞAZA ERP UCU KAYITLI DEĞİL: $ERP_PROBE -> 404 (server.ts: magazaErpRoutes(app, …) çağrısı / uç adı)" ;;
+      429) fail "$ERP_PROBE -> 429 (hız sınırı: bu IP kimliksiz tavanı doldurdu — bekleyip yeniden çalıştırın)" ;;
+      *)   fail "mağaza ERP ucu sondası beklenmedik yanıt: $ECODE ($ERP_PROBE; 200/400/403 = kimlik kapısı zincirde değil)" ;;
     esac
   done
 
@@ -371,8 +391,8 @@ else
   #   kökensiz POST            -> 403 (köken kapısı çalışıyor)
   #   izinli köken + bozuk JSON -> 400 (500 = zincirin hata yakalayıcısı devrede değil,
   #                               gövde genel yakalayıcıya düşüyor; 401/404 = zincir bağlı değil)
-  #   durum ucu                -> 503 + "hazir-degil" (dilim 2'ye kadar; mağaza sayfası
-  #                               bu yanıtta «WhatsApp'tan sorun» der)
+  #   takip ucu (var olmayan sabit talep no) -> 404 + "bulunamadi" (dilim 2a: uç gerçek
+  #                               yanıt veriyor, havuz var, kiracı çözülüyor)
   #   izinli köken + şemaya uyan ama telefonu 10 rakamsız gövde
   #                            -> 400 (pg havuzu var ve kiracı çözülüyor; 503 = uç GERÇEK
   #                               talepleri düşürüyor — öbür dört sonda bu durumda da geçer,
@@ -409,14 +429,24 @@ else
       yakalayıcısı devrede değil; hata genel yakalayıcıya düşüyor (günlüğe gövde parçası yazar)." ;;
     *)   fail "mağaza gövde sondası beklenmedik yanıt: $M2" ;;
   esac
-  M3=$(curl -s --max-time 20 -w '\n%{http_code}' -X POST -H "Origin: $MK" -H "Content-Type: application/json" -d '{}' "$MU/siparis-durumu" 2>/dev/null)
+  # Takip ucu (dilim 2a): sabit sahte talep no hiç var olmadı — kayıt okumaz / yazmaz, kişisel veri taşımaz. Gövde
+  # src/server/routes/magazaRoutes.test.ts'teki sabitle BİREBİR bağlıdır (biri değişirse test kırılır).
+  #   404 + bulunamadi = uç canlı, havuz var, kiracı çözülüyor · 503 = havuz / kiracı yok ·
+  #   kod'suz 404 = rota kayıtlı değil · 503 + hazir-degil = dilim 1 hâlâ canlıda.
+  M3=$(curl -s --max-time 20 -w '\n%{http_code}' -X POST -H "Origin: $MK" -H "Content-Type: application/json" -d '{"no":"T000000-AAAA","telefon":"0000000000"}' "$MU/siparis-durumu" 2>/dev/null)
   M3KOD=$(printf '%s\n' "$M3" | tail -n 1)
-  if [ "$M3KOD" = "503" ] && printf '%s' "$M3" | grep -q 'hazir-degil'; then
-    pass "mağaza durum ucu: 503 hazir-degil (dilim 2'ye kadar beklenen)"
+  if [ "$M3KOD" = "404" ] && printf '%s' "$M3" | grep -q 'bulunamadi'; then
+    pass "mağaza takip ucu: 404 bulunamadi (uç canlı; havuz var, kiracı çözülüyor)"
   elif [ "$M3KOD" = "429" ]; then
-    fail "mağaza durum ucu ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)"
+    fail "mağaza takip ucu ÖLÇÜLEMEDİ: 429 (IP başına 20 / 15 dk — bekleyip yeniden çalıştırın)"
+  elif [ "$M3KOD" = "503" ] && printf '%s' "$M3" | grep -q 'hazir-degil'; then
+    fail "mağaza takip ucu: 503 hazir-degil — dilim 1 hâlâ canlıda (dilim 2a sunucusu yayında değil)"
+  elif [ "$M3KOD" = "503" ]; then
+    fail "MAĞAZA TAKİP UCU ÇALIŞMIYOR: 503 — pg havuzu yok (DATABASE_URL) ya da kiracı çözülemiyor (SERVER_TENANT_COMPANY_ID)"
+  elif [ "$M3KOD" = "404" ]; then
+    fail "mağaza takip ucu: kod'suz 404 — rota kayıtlı değil (zincirin rota-yok yanıtı)"
   else
-    fail "mağaza durum ucu: beklenen 503 + hazir-degil, gelen $M3KOD (404 mağaza sayfasında «talep bulunamadı» diye görünür)"
+    fail "mağaza takip ucu: beklenen 404 + bulunamadi, gelen $M3KOD"
   fi
   # Talep yolu: şemaya uyan ama telefonu 10 rakamsız gövde. Ret kiracı çözümünden SONRA gelir (talepEsle), INSERT'ten ÖNCE:
   #   400 = pg havuzu var ve kiracı çözülüyor · 503 = uç gerçek talepleri düşürüyor. Kayıt YAZMAZ, e-posta göndermez.
@@ -434,6 +464,92 @@ else
     429) fail "mağaza talep sondası ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)" ;;
     *)   fail "mağaza talep sondası beklenmedik yanıt: $M4" ;;
   esac
+
+  # 7) SİTE PANELİ ALT ZİNCİRİ (www.cetpa.com.tr/panel.html → /api/magaza/panel/*) — mağaza dilim 2a
+  #
+  # Hepsi belirteçsiz (kimliksiz) ölçülür; hiçbiri kayıt okumaz / yazmaz. Başlıklar satırın
+  # TAMAMINDA aranır (grep -i): değer virgüllü listedir, yalnız ilk sözcüğe bakmak yetmez.
+  #   503 + panel-yapilandirilmamis = panel HİÇ çalışmıyor: MAGAZA_PANEL_DONUS kökeni izinli
+  #   listede değil / https değil ya da oturum sırrı yok (bekçi de kırmızı gösterir).
+  PU="$MU/panel"
+  PANEL_SIFIR="mt-00000000000000000000000000000000"
+  panel_sonda() {  # $1 = ad, $2 = beklenen kod, $3.. = curl bağımsız değişkenleri
+    PAD="$1"; PBEK="$2"; shift 2
+    PY=$(curl -s --max-time 20 -w '\n%{http_code}' -H "Origin: $MK" "$@" 2>/dev/null)
+    PKOD=$(printf '%s\n' "$PY" | tail -n 1)
+    if [ "$PKOD" = "$PBEK" ]; then
+      pass "site paneli $PAD: $PKOD"
+    elif [ "$PKOD" = "503" ] && printf '%s' "$PY" | grep -q 'panel-yapilandirilmamis'; then
+      fail "SİTE PANELİ YAPILANDIRILMAMIŞ ($PAD -> 503 panel-yapilandirilmamis): MAGAZA_PANEL_DONUS kökeni
+      MAGAZA_IZINLI_KOKENLER listesinde değil / https değil ya da SESSION_TOKEN_SECRET ve FIREBASE_PRIVATE_KEY yok."
+    elif [ "$PKOD" = "404" ]; then
+      fail "site paneli $PAD: 404 — alt zincir bağlı değil ya da uç kayıtlı değil (magazaRoutes: r.use('/panel', …); magazaPanelZinciri kayıt sırası)"
+    elif [ "$PKOD" = "400" ] || [ "$PKOD" = "415" ]; then
+      fail "site paneli $PAD: $PKOD — belirteç kapısı gövdeden SONRA çalışıyor (kayıt sırası bozuk; belirteçsiz istek 401 almalı)"
+    elif [ "$PKOD" = "403" ]; then
+      fail "site paneli $PAD: 403 — '$MK' sunucuda izinli köken değil (MAGAZA_IZINLI_KOKENLER); MAGAZA_KOKEN ile doğru kökeni verin"
+    elif [ "$PKOD" = "429" ]; then
+      fail "site paneli $PAD ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)"
+    else
+      fail "site paneli $PAD: beklenen $PBEK, gelen $PKOD"
+    fi
+  }
+  panel_sonda "liste (belirteçsiz)" 401 "$PU/siparisler"
+  panel_sonda "oturum (geçersiz kod)" 401 -X POST -H "Content-Type: application/json" \
+    -d '{"kod":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","dogrulayici":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}' "$PU/oturum"
+  panel_sonda "kalem teslim (belirteçsiz)" 401 -X POST -H "Content-Type: application/json" -d '{}' "$PU/siparisler/$PANEL_SIFIR/kalem-teslim"
+  panel_sonda "etiket basıldı (belirteçsiz)" 401 -X POST -H "Content-Type: application/json" -d '{}' "$PU/siparisler/$PANEL_SIFIR/etiket-basildi"
+  # Panel ön uçuşu: GET + Authorization izinli olmalı (IIS'in bu ön uçuşu Node'a ilettiği burada ölçülür).
+  POPT=$(curl -s -o /dev/null -D - --max-time 20 -X OPTIONS -H "Origin: $MK" \
+    -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: authorization,content-type" \
+    "$PU/siparisler" 2>/dev/null | tr -d '\r')
+  POPTKOD=$(printf '%s\n' "$POPT" | awk '/^HTTP\//{k=$2} END{print k}')
+  if [ "$POPTKOD" = "204" ] && printf '%s\n' "$POPT" | grep -i '^access-control-allow-methods:' | grep -qi 'GET' \
+     && printf '%s\n' "$POPT" | grep -i '^access-control-allow-headers:' | grep -qi 'authorization'; then
+    pass "site paneli ön uçuşu: 204 + Allow-Methods GET + Allow-Headers Authorization"
+  elif [ "$POPTKOD" = "429" ]; then
+    fail "site paneli ön uçuşu ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)"
+  else
+    fail "site paneli ön uçuşu: beklenen 204 + Allow-Methods GET + Allow-Headers Authorization — gelen kod '${POPTKOD:-yok}'.
+      Tarayıcı belirteçli isteği HİÇ göndermez. Başlıklar yoksa OPTIONS'ı IIS yanıtlıyor ya da alt zincir bağlı değil."
+  fi
+  # Dış zincirin ön uçuşu DEĞİŞMEDİ: aynı istek başlığıyla Authorization İZİNLİ DEĞİL (ret tarayıcıda, başlık değerinden olur).
+  DOPT=$(curl -s -o /dev/null -D - --max-time 20 -X OPTIONS -H "Origin: $MK" \
+    -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: authorization,content-type" \
+    "$MU/siparis-talebi" 2>/dev/null | tr -d '\r')
+  DOPTKOD=$(printf '%s\n' "$DOPT" | awk '/^HTTP\//{k=$2} END{print k}')
+  if [ "$DOPTKOD" = "204" ] && ! printf '%s\n' "$DOPT" | grep -i '^access-control-allow-headers:' | grep -qi 'authorization'; then
+    pass "mağaza dış zinciri ön uçuşu: 204, Allow-Headers Authorization TAŞIMIYOR (panel izni dış uçlara sızmamış)"
+  elif [ "$DOPTKOD" = "429" ]; then
+    fail "mağaza dış zinciri ön uçuşu ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)"
+  else
+    fail "mağaza dış zinciri ön uçuşu: beklenen 204 ve Allow-Headers'ta Authorization YOK — gelen kod '${DOPTKOD:-yok}' (panel köken kapısı dış zincire uygulanmış olabilir)"
+  fi
+
+  # 8) İSTEMCİ DERLEMESİ «ERP ile bağlan» SAYFASINI TAŞIYOR MU? — mağaza dilim 2a («yazıldı ama bağlanmadı» sondası)
+  #
+  # Site paneli kullanıcıyı app.cetpa.com.tr/magaza-panel-baglan adresine gönderir; onay sayfası istemci derlemesindedir.
+  # `GET /magaza-panel-baglan` -> 200 + text/html KANIT DEĞİLDİR: SPA yedeği her yola index.html verir (sayfa App.tsx'e
+  # hiç bağlanmamış olsa da). Ayırt edici: ana sayfanın gösterdiği ana betikte (/assets/index-….js) yol METNİ aranır —
+  # yol sabiti App.tsx'tedir, sayfa bağlıysa ana betiğe girer. Yalnız iki GET; oturum açmaz, kayıt yazmaz.
+  ISAYFA=$(curl -s --compressed --max-time 20 "$BASE_URL/" 2>/dev/null)
+  IBETIK=$(printf '%s' "$ISAYFA" | grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' | head -n 1)
+  if [ -z "$IBETIK" ]; then
+    fail "istemci derlemesi sondası ÖLÇÜLEMEDİ: GET / yanıtında ana betik adresi (/assets/index-….js) bulunamadı"
+  else
+    # Dosyaya iner (ana betik yüzlerce KB; değişkende tutulmaz), aranır, silinir.
+    IDOSYA=$(mktemp "${TMPDIR:-/tmp}/verify-istemci.XXXXXX")
+    IKOD=$(curl -s --compressed --max-time 40 -o "$IDOSYA" -w '%{http_code}' "$BASE_URL$IBETIK" 2>/dev/null)
+    if [ "$IKOD" != "200" ] || [ ! -s "$IDOSYA" ]; then
+      fail "istemci derlemesi sondası ÖLÇÜLEMEDİ: ana betik indirilemedi ($IBETIK -> ${IKOD:-yanıt yok})"
+    elif grep -q '/magaza-panel-baglan' "$IDOSYA"; then
+      pass "istemci derlemesi «ERP ile bağlan» sayfasının yolunu taşıyor ($IBETIK içinde /magaza-panel-baglan)"
+    else
+      fail "İSTEMCİ DERLEMESİNDE /magaza-panel-baglan YOK ($IBETIK): dilim 2 istemcisi yayında değil ya da onay sayfası
+      App.tsx'e bağlanmamış — site panelindeki «ERP ile giriş yap» boş sayfaya düşer."
+    fi
+    rm -f "$IDOSYA"
+  fi
 fi
 
 echo

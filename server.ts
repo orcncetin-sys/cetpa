@@ -79,12 +79,21 @@ import { akisIstegiIsaretle, akisSorguBelirteci, apiSinirindanMuaf, ipSinirAnaht
 import { z } from "zod";
 // Mağaza (www.cetpa.com.tr) sipariş talebi — dilim 1 (2026-10-08). `magazaRoutes.js` bekçiyle (opsWatchdog) AYNI yoldan içe
 // aktarılır: `magazaSayaclari()` modül düzeyi sayaç okur; farklı yoldan ikinci bir modül örneği oluşsa bekçi hep sıfır görürdü.
-import { magaza429, magazaZinciri } from "./src/server/routes/magazaRoutes.js";
+import { magaza429, magazaIzinliKokenleriCoz, magazaZinciri } from "./src/server/routes/magazaRoutes.js";
+// Mağaza dilim 2a (2026-10-10): site paneli alt zinciri + ERP kökenindeki mağaza uçları. Panel modülü de bekçiyle AYNI yoldan
+// içe aktarılır (`magazaPanelSayaclari()` modül düzeyi sayaç okur — yukarıdaki notla aynı gerekçe).
+import { erpCikisindaPanelIptalEt, magazaPanel429, magazaPanelZinciri } from "./src/server/routes/magazaPanelZinciri.js";
+import { magazaErpRoutes, magazaYetkiKodu429 } from "./src/server/routes/magazaErpRoutes.js";
+import { panelKullanicisiKur } from "./src/server/kanal/magazaPanelKullanici.js";
+import { kodDeposuKur } from "./src/server/kanal/magazaPanelKod.js";
+import { iptalKur } from "./src/server/kanal/magazaPanelIptal.js";
+import { donusTabaniCoz, panelAnahtariTuret, panelSirriVar } from "./src/server/kanal/magazaPanelBelirtec.js";
 import {
   MAGAZA_BILDIRIM_ISCI_SECENEKLERI, MAGAZA_BILDIRIM_KUYRUGU, magazaBildirimIscisi, magazaBildirimIsteyici, magazaBildirimKacanlariKuyrukla, type MagazaBildirimDeps,
 } from "./src/server/kanal/magazaBildirim.js";
 import { smtpYapilandirmasi } from "./src/server/smtpPosta.js";
 import { ortamdanKiraci } from "./src/server/kiraciOrtami.js";
+import { DOCS_INDEKS_DDL, DOCS_TABLOSU_DDL } from "./src/server/docsSema.js";
 
 dotenv.config();
 
@@ -406,6 +415,18 @@ const magazaBildirimDeps: MagazaBildirimDeps = {
 let magazaBildirimKuyruguHazir = false;
 const magazaBildirimIste = magazaBildirimIsteyici(() => (magazaBildirimKuyruguHazir ? boss : null), magazaBildirimDeps);
 
+// ── Mağaza paneli «ERP ile bağlan» (dilim 2a, şartname § 3) — TEK örnekler, MODÜL DÜZEYİNDE ──────────────────────────────
+// Üçü de BİR kez kurulur ve bütün çağıranlara AYNI tanımlayıcı gider (her modül kendi `Map`'ini kursaydı her kod değişimi 401
+// dönerdi; iptal iki ayrı örnekte tutulsaydı ERP çıkışı panel belirteçlerini öldürmezdi):
+//  • `magazaPanelKullanici` — panel kapısının ve ERP mağaza uçlarının kullanıcı okuyucusu; hatayı YUTMAZ (kapı 503 döner).
+//    Önbelleği ÜÇ yerde düşer: aşağıdaki `dbEvents` dinleyicisinde `users` ve `companyStatus` olayları + MFA yazan üç uç.
+//  • `magazaPanelKodDeposu` — yetki kodu: yazan `magazaErpRoutes`, okuyup silen `/api/magaza/panel/oturum`.
+//  • `magazaPanelIptal`     — iptal çifti: panel kapısı, panel `cikis` ucu ve ERP `POST /api/db/session/logout` işleyicisi.
+// Modül düzeyinde: `dbEvents` dinleyicisi modül yüklenirken kaydedilir. Getter: `adminDb` / `pgPool` o an null olsa da sorun yok.
+const magazaPanelKullanici = panelKullanicisiKur({ adminDb: () => adminDb, pgPool: () => pgPool });
+const magazaPanelKodDeposu = kodDeposuKur();
+const magazaPanelIptal = iptalKur({ adminDb: () => adminDb });
+
 
 // ── Webhook Processors ───────────────────────────────────────────────────
 
@@ -517,25 +538,10 @@ async function processOutboundWebhook(data: any) {
 
 async function initDocsTable(): Promise<void> {
   if (!pgPool) { console.warn('DATABASE_URL not set — /api/db routes disabled.'); return; }
-  await pgPool.query(`CREATE TABLE IF NOT EXISTS docs (
-    coll text NOT NULL,
-    id   text NOT NULL,
-    data jsonb NOT NULL DEFAULT '{}'::jsonb,
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (coll, id)
-  )`);
-  // Kiracı filtresi indeksleri. PK (coll,id) yalnız koleksiyon önekini kapsar;
-  // tenantWhere'in `data->>'companyId' = $2 OR NOT (data ? 'companyId')`
-  // yüklemi indekssiz kalınca koleksiyonun TÜM satırları taranır. İki indeks
-  // gerekli çünkü OR'un iki kolu farklı: eşitlik kolu ifade indeksinden,
-  // "etiketsiz" kolu kısmi indeksten gelir (BitmapOr). Kısmi indeks backfill
-  // sonrası neredeyse boş kalır — maliyeti yok denecek kadar az.
-  // Hata boot'u DÜŞÜRMEZ: indeks bir optimizasyon, doğruluk koşulu değil.
-  for (const ddl of [
-    `CREATE INDEX IF NOT EXISTS idx_docs_coll_company ON docs (coll, (data->>'companyId'))`,
-    `CREATE INDEX IF NOT EXISTS idx_docs_coll_untagged ON docs (coll) WHERE NOT (data ? 'companyId')`,
-    `CREATE INDEX IF NOT EXISTS idx_docs_coll_user ON docs (coll, (data->>'userId'))`,
-  ]) {
+  // DDL TEK kaynaktan (`src/server/docsSema.ts`): gerçek motor testleri (PGlite) aynı sabiti kurar — kopya yok (dilim 2a, V10).
+  await pgPool.query(DOCS_TABLOSU_DDL);
+  // Kiracı filtresi indeksleri — gerekçe `docsSema.ts`'te. Hata boot'u DÜŞÜRMEZ: indeks bir optimizasyon, doğruluk koşulu değil.
+  for (const ddl of DOCS_INDEKS_DDL) {
     try { await pgPool.query(ddl); }
     catch (e) { console.warn('docs indeks oluşturulamadı (devam ediliyor):', (e as Error).message); }
   }
@@ -666,6 +672,24 @@ const SESSION_TOKEN_SECRET = process.env.SESSION_TOKEN_SECRET
   || createHash('sha256').update((process.env.FIREBASE_PRIVATE_KEY || 'cetpa-session-fallback') + ':session').digest('hex');
 const SESSION_TOKEN_MAX_AGE = 5 * 24 * 60 * 60 * 1000; // 5 gün
 
+// ── Mağaza paneli: dönüş adresi ve belirteç anahtarı (dilim 2a, şartname § 3.7) — açılışta BİR kez çözülür ────────────────
+// Rota modülleri sırrı GÖRMEZ: panel zinciri yalnız türetilmiş anahtarı, ERP yetki kodu ucu yalnız dönüş adresini alır; bekçi
+// yalnız VARLIKLARINI okur (`magazaPanelYapilandirmasi`, aşağıda `initOpsWatchdog`).
+//  • `MAGAZA_PANEL_DONUS` (varsayılan https://www.cetpa.com.tr/panel.html): https zorunlu (üretim dışında http://localhost de),
+//    kullanıcı adı / sorgu / parça yok, kökeni `MAGAZA_IZINLI_KOKENLER` listesinde. Geçersizse `null`. Kullanılan değer KURALLI
+//    biçimdir (`origin + pathname`), ham ortam metni değil.
+//  • Anahtar = HMAC(SESSION_TOKEN_SECRET, 'magaza-panel-v1' + dönüş adresi + APP_URL): oturum çereziyle AYNI anahtar DEĞİL,
+//    ortamı da bağlar. İki sır da (`SESSION_TOKEN_SECRET`, `FIREBASE_PRIVATE_KEY`) boş / tanımsızsa `null` — yukarıdaki sabit
+//    yedekle (`cetpa-session-fallback`) panel belirteci ÜRETİLMEZ (NODE_ENV'den bağımsız).
+// Biri `null` ise `yetki-kodu` ve bütün `/api/magaza/panel/*` uçları 503 `panel-yapilandirilmamis` döner; bekçi kırmızı gösterir.
+const magazaPanelDonusTabani = donusTabaniCoz(process.env.MAGAZA_PANEL_DONUS, {
+  uretim: process.env.NODE_ENV === 'production',
+  izinliKokenler: magazaIzinliKokenleriCoz(process.env.MAGAZA_IZINLI_KOKENLER),
+});
+const magazaPanelAnahtari = panelAnahtariTuret({
+  sirVar: panelSirriVar(process.env), oturumSirri: SESSION_TOKEN_SECRET, donusTabani: magazaPanelDonusTabani, appUrl: process.env.APP_URL,
+});
+
 function signSessionToken(uid: string): string {
   const exp = Date.now() + SESSION_TOKEN_MAX_AGE;
   const payload = Buffer.from(`${uid}|${exp}`).toString('base64url');
@@ -783,8 +807,13 @@ async function getUserCompanyId(uid: string): Promise<string> {
 // Admin'den düşürülen kullanıcı bir dakika boyunca eski rolle istek atabiliyor, o sırada açtığı akış ise ömrü boyunca eski
 // rolle — settings'te DÜZ METİN sırla — yayın alıyordu. Bütün yazma yolları (REST, süper-admin, silme) `broadcastDocChange`
 // üzerinden geçtiği için tek dinleyici hepsini kapsar; açık akışı olmayan kullanıcıda da çalışır.
+// Mağaza paneli (dilim 2a, § 3.5): panel kullanıcı okuyucusunun KENDİ önbelleği de AYNI dinleyicide düşer — `users` olayında o
+// kullanıcı; `companyStatus` olayında TAMAMI (olay kiracı anahtarlıdır, önbellek kullanıcı anahtarlı: tek tek düşürülemez).
+// Askıya alınan firmanın ya da rolü düşen kullanıcının panel belirteci 60 sn beklemeden ölür.
 dbEvents.on('change', (ev: { coll?: string; id?: string }) => {
   if (ev.coll === 'users' && ev.id) { roleCache.delete(ev.id); companyIdCache.delete(ev.id); }
+  if (ev.coll === 'users' && ev.id) magazaPanelKullanici.dusur(ev.id);
+  if (ev.coll === 'companyStatus') magazaPanelKullanici.temizle();
 });
 
 // İstek bağlamında çağıranın firması (sunucu-tarafı doğrudan yazımlara companyId
@@ -1328,6 +1357,8 @@ async function startServer() {
     getCachedExchangeRates: () => cachedExchangeRates,
     getAiHealthProbe: () => aiHealthProbe,
     serverTenantId,
+    // Panelin gördüğü AYNI tanımlayıcıların VARLIĞI (değer değil — anahtar sırdır); bekçi ortamdan yeniden türetmez.
+    magazaPanelYapilandirmasi: () => ({ anahtarVar: magazaPanelAnahtari !== null, donusVar: magazaPanelDonusTabani !== null }),
   });
 
   const app = express();
@@ -1450,16 +1481,20 @@ async function startServer() {
   // ── /api/db — PostgreSQL-backed document store ────────────────────────────
   // Registered BEFORE the global apiLimiter: every UI interaction hits these
   // routes, so they get their own (much higher) limit.
+  // `dbLimiter` TANIMI `if (pgPool) {` bloğunun DIŞINDADIR (mağaza dilim 2a, 2026-10-10; çit: magazaBaglama.degismez.test.ts):
+  // ERP kökenindeki mağaza uçları (`magazaErpRoutes`) AYNI kovayı kullanır ve o modül öbür rota modülleriyle, bloğun dışında,
+  // genel gövde ayrıştırıcıdan SONRA kaydolur — bağlama ancak tanım blok dışındaysa geçer. Modülü bloğun içinden kaydetmek onu
+  // ayrıştırıcıdan ÖNCEYE alır, POST'ları gövdesiz bırakırdı (mikroRoutes arıza sınıfı). Sınırlayıcı tanımı havuza bağlı değildir.
+  const dbLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 2000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userOrIpKey,
+    message: { error: 'Too many database requests.' },
+  });
   if (pgPool) {
     const docsDb = pgPool;
-    const dbLimiter = rateLimit({
-      windowMs: 60 * 1000,
-      max: 2000,
-      standardHeaders: true,
-      legacyHeaders: false,
-      keyGenerator: userOrIpKey,
-      message: { error: 'Too many database requests.' },
-    });
     const publicWriteLimiter = rateLimit({
       windowMs: 15 * 60 * 1000, // 15 minutes
       max: 10, // Max 10 submissions per IP
@@ -1502,13 +1537,18 @@ async function startServer() {
     app.post('/api/db/session/logout', dbLimiter, async (req: Request, res: Response) => {
       res.clearCookie(SESSION_COOKIE, { path: '/api/db' });
       res.clearCookie(MFA_COOKIE, { path: '/' });
+      // Kimlik ÇEREZDEN (uç `requireAuth` taşımaz); yalnız geçerli bir oturum token'ı varsa dolu. İki okuyucu da fırlatmaz.
+      const cikisUid = verifySessionTokenUid(parseCookie(req.headers.cookie, SESSION_COOKIE));
+      // Mağaza paneli (dilim 2a, § 3.6): ERP çıkışı o kullanıcının BÜTÜN site paneli belirteçlerini de öldürür. Çerez yoksa /
+      // süresi dolmuşsa iptal yazılmaz (sayaç artar); yazım başarısız olsa da çıkış tamamlanır (yardımcı fırlatmaz). Refresh
+      // token iptalinden BAĞIMSIZ ve ondan ÖNCE: Firebase arızası panel iptalini atlatmasın.
+      await erpCikisindaPanelIptalEt(magazaPanelIptal, cikisUid);
       // P2-2: çerezi silmek yetmiyordu — elde kalan Firebase ID token'ı süresi
       // (≤1sa) dolana dek geçerli kalıyordu. Refresh token'ları iptal et ki
       // çalınan/eski oturum YENİ token üretemesin. Best-effort: uid yalnız
       // geçerli bir oturum token'ı varsa okunur; çıkışı asla başarısız yapma.
       try {
-        const uid = verifySessionTokenUid(parseCookie(req.headers.cookie, SESSION_COOKIE));
-        if (uid) await getAuth().revokeRefreshTokens(uid);
+        if (cikisUid) await getAuth().revokeRefreshTokens(cikisUid);
       } catch (e) { console.warn('[logout] revokeRefreshTokens başarısız:', (e as Error).message); }
       res.json({ ok: true });
     });
@@ -1549,7 +1589,7 @@ async function startServer() {
            ON CONFLICT (uid) DO UPDATE SET secret = $2, enabled = false, updated_at = now()`,
           [r.uid, secret],
         );
-        mfaStatusCache.delete(r.uid);
+        mfaStatusCache.delete(r.uid); magazaPanelKullanici.dusur(r.uid);   // panel kapısı MFA durumunu KENDİ önbelleğinden okur (mfa_secrets `docs` olayı üretmez)
         const otpauth = totpURI({ strategy: 'totp', issuer: 'CETPA', label: r.userEmail || r.uid, secret });
         res.json({ otpauth, secretKey: secret });
       } catch (e) { console.error('[mfa/enroll/start]', (e as Error).message); res.status(500).json({ error: 'MFA kaydı başlatılamadı.' }); }
@@ -1568,7 +1608,7 @@ async function startServer() {
         }
         mfaFailures.delete(uid);
         await pgPool!.query('UPDATE mfa_secrets SET enabled = true, updated_at = now() WHERE uid = $1', [uid]);
-        mfaStatusCache.delete(uid);
+        mfaStatusCache.delete(uid); magazaPanelKullanici.dusur(uid);
         res.cookie(MFA_COOKIE, signMfaToken(uid), { httpOnly: true, secure: isProd, sameSite: 'strict', maxAge: MFA_COOKIE_MAX_AGE, path: '/' });
         res.json({ ok: true });
       } catch (e) { console.error('[mfa/enroll/verify]', (e as Error).message); res.status(500).json({ error: 'Doğrulama başarısız.' }); }
@@ -1604,7 +1644,7 @@ async function startServer() {
         }
         mfaFailures.delete(uid);
         await pgPool!.query('DELETE FROM mfa_secrets WHERE uid = $1', [uid]);
-        mfaStatusCache.delete(uid);
+        mfaStatusCache.delete(uid); magazaPanelKullanici.dusur(uid);
         res.clearCookie(MFA_COOKIE, { path: '/' });
         res.json({ ok: true });
       } catch (e) { console.error('[mfa/disable]', (e as Error).message); res.status(500).json({ error: 'İşlem başarısız.' }); }
@@ -2355,16 +2395,55 @@ async function startServer() {
     keyGenerator: yalnizIpAnahtari,
     handler: magaza429,
   });
+  // Takip sorgusu (dilim 2a, V11): IP başına 20 / 15 dk — dilim 1'in 60'ı BİLEREK daraltıldı (uç artık gerçek yanıt veriyor;
+  // bilinen telefon ve gün için tam tarama IP başına 291 günden 875 güne çıkar).
   const magazaDurumLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 60,
+    max: 20,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: yalnizIpAnahtari,
     handler: magaza429,
   });
+  // Site paneli (dilim 2a, § 4): kod → belirteç değişimi 20 / 15 dk; öbür panel uçları 600 / 15 dk (panel 25 sn'de bir sorar:
+  // sekme başına 36 istek / 15 dk, aynı dış IP'den 16 sekme; kalem teslim ve etiket de BU kovadadır — «tümünü işaretle» TEK
+  // istektir). İkisi de yalnız IP (belirteç `mp1-…` Firebase doğrulayıcısına gitmez); 429'u `magazaPanel429` yazar (panel sayacı).
+  const magazaPanelOturumLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: yalnizIpAnahtari,
+    handler: magazaPanel429,
+  });
+  const magazaPanelLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 600,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: yalnizIpAnahtari,
+    handler: magazaPanel429,
+  });
+  // «ERP ile bağlan» yetki kodu (ERP kökeni, kimlikli): kullanıcı başına 10 / 15 dk. `magazaErpRoutes` bağlamına gider (aşağıda,
+  // öbür rota modülleriyle); 429 gövdesi `{ ok: false, kod: 'sinir' }` (onay sayfası `kod`'dan tanır).
+  const magazaYetkiKoduLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userOrIpKey,
+    handler: magazaYetkiKodu429,
+  });
+  // Panel alt zinciri AYRI modüldedir (`magazaPanelZinciri.ts`); mağaza zinciri onu yalnız `/panel` önekine bağlar — köken
+  // kapısından ve genel sınırlayıcıdan ÖNCE (panel kendi köken kapısını ve kovalarını taşır, her isteği kendisi sonlandırır).
+  const magazaPanel = magazaPanelZinciri({
+    panelOturumSinirlayici: magazaPanelOturumLimiter, panelSinirlayici: magazaPanelLimiter, panelAnahtari: magazaPanelAnahtari,
+    panelKullanicisi: magazaPanelKullanici.panelKullanicisi, kodDeposu: magazaPanelKodDeposu, iptal: magazaPanelIptal,
+    getPgPool: () => pgPool, serverTenantId, broadcastDocChange, writeAuditLog, bildirimIste: magazaBildirimIste,
+    degisiklikDinle: (dinleyici) => { dbEvents.on('change', dinleyici); },
+  });
   app.use('/api/magaza', magazaZinciri({
-    apiLimiter, talepSinirlayici: magazaTalepLimiter, durumSinirlayici: magazaDurumLimiter,
+    apiLimiter, talepSinirlayici: magazaTalepLimiter, durumSinirlayici: magazaDurumLimiter, panelZinciri: magazaPanel,
     getPgPool: () => pgPool, serverTenantId, broadcastDocChange, bildirimIste: magazaBildirimIste,
   }));
 
@@ -4143,8 +4222,8 @@ async function startServer() {
   };
 
   // Super-admin rota grubu (10 uc) src/server/routes/superadminRoutes.ts'te.
-  // KONUM: blogun ORIJINAL yeri. Cagri yukari alinirsa PLAN_PRICES_TRY ve
-  // dbLimiter HENUZ TANIMLI OLMAZ (tsc yakaladi) ve ara katman sirasi da
+  // KONUM: blogun ORIJINAL yeri. Cagri yukari alinirsa PLAN_PRICES_TRY
+  // HENUZ TANIMLI OLMAZ (tsc yakaladi) ve ara katman sirasi da
   // bozulur - mikroRoutes'ta tam bu hata canliyi kirmisti.
   superadminRoutes(app, {
     getAdminDb: adminDbZorunlu, pgServerTimestamp, reqActor, writeAuditLog,
@@ -4161,6 +4240,21 @@ async function startServer() {
   // bozuluyor (mikroRoutes'ta tam bu hata canliyi kirmisti).
   trackingRoutes(app, {
     requireAuth, requireMfaVerified,
+  });
+
+  // Mağaza taleplerinin ERP kökenindeki uçları (dilim 2a): «ERP ile bağlan» yetki kodu + aşama / kalem teslim / elle bildirim.
+  // KONUM: öbür rota modülleriyle AYNI nokta — genel gövde ayrıştırıcıdan ve `app.use('/api', apiLimiter)`'dan SONRA (öne
+  // alınırsa dört POST gövdesiz kalır). `dbLimiter` bu yüzden `if (pgPool) {` bloğunun DIŞINDA tanımlı. Kod deposu ve kullanıcı
+  // okuyucu panel zinciriyle (`magazaPanelZinciri`, yukarıda) AYNI örneklerdir; `panelDonus` panel yapılandırılmamışsa `null`.
+  // `belirtecIptalDenetle`: Firebase belirtecinin İPTAL denetimli doğrulaması (ağ çağrısı) — YALNIZ yetki kodu ucunda,
+  // sınırlayıcıdan sonra çağrılır; `requireAuth` yerel doğrulamada kalır (inceleme 2026-10-10; ayrıntı modül başlığında).
+  magazaErpRoutes(app, {
+    requireAuth, requireMfaVerified, dbLimiter, magazaYetkiKoduLimiter,
+    belirtecIptalDenetle: (belirtec) => getAuth().verifyIdToken(belirtec, true),
+    panelKullanicisi: magazaPanelKullanici.panelKullanicisi, kodDeposu: magazaPanelKodDeposu,
+    getPgPool: () => pgPool, broadcastDocChange, writeAuditLog, bildirimIste: magazaBildirimIste,
+    smtpYapilandirmasi: () => smtpYapilandirmasi(), serverTenantId,
+    panelDonus: magazaPanelAnahtari === null ? null : magazaPanelDonusTabani,
   });
 
   opsRoutes(app, {

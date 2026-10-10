@@ -30,6 +30,10 @@ Kontroller:
 - Gönderilen commit'in **kendi** yayın işi (`ci.yml`, main'e push, uzak main'in ucu) `gh run watch --exit-status` ile beklenir. Depodaki en son işe bakılmaz: aynı gönderimde Dependabot ve CodeQL işleri de koşar (2026-10-08'de Dependabot işi «geçti» diye yazılmıştı). Yalnız bu adım: `scripts/verify-deploy.sh ci`
 - Canlı `/api/health`: `status=ok` + `postgres=true` (artık `docs` tablosundan **gerçek okuma** — `SELECT 1` ping'i değil) + `uptime ≤ (şimdi − yayın adımının başlangıcı) + 60` (taze restart kanıtı; uptime resetlenmediyse **eski kod çalışıyordur**) Yayın adımının `startedAt`i `ci_denetimi`nden gelir; okunamazsa 600 sn kuralına düşer (2026-10-09: `gh run watch` hazırlık yayınını da beklediğinden sabit 600 sahte alarm vermişti).
 - Bu push'ta eklenen `requireAuth`'lu route'lara auth'suz istek → 401/403 beklenir; **404 = route deploy'a girmemiş**
+- Mağaza (www.cetpa.com.tr) uçları — hiçbiri kayıt yazmaz, oturum açmaz, e-posta göndermez:
+  - dilim 1: ön uçuş 204 + köken başlığı, kökensiz POST 403, bozuk JSON 400, talep yolu 400 (**503 = uç talepleri düşürüyor**)
+  - dilim 2a (2026-10-10): takip ucu var olmayan talep no ile `404 bulunamadi` (**`503 hazir-degil` = canlıda hâlâ dilim 1**); site paneli belirteçsiz 401 (liste, verilmemiş kodla oturum, kalem teslim, etiket basıldı — **`503 panel-yapilandirilmamis` = `MAGAZA_PANEL_DONUS` / oturum sırrı**, 404 = alt zincir bağlı değil); panel ön uçuşu 204 + GET + Authorization, dış zincirde Authorization yok; ERP kökenindeki dört mağaza ucu bozuk JSON'a 400/500 **ve** geçerli `{}`'ye kimliksiz 401 (404 = rota kayıtlı değil — bozuk JSON sondası bunu göremez); istemci derlemesinde `/magaza-panel-baglan` metni
+- Dilim 2a yayını **kesintilidir**: `package-lock.json` değiştiği için `deploy.ps1` hizmeti durdurup `npm ci` koşar (1-2 dk 502) — mesai dışında yayınla; ayrıntı `deploy/windows/RUNBOOK.md` [13]
 
 ## Bilinmesi gerekenler
 

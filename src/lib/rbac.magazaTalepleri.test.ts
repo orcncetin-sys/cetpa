@@ -15,13 +15,13 @@
 import { describe, it, expect } from 'vitest';
 import { join } from 'path';
 import {
-  isAllowed, hasExplicitRule, APP_ROLES, SUNUCU_YAZAR_COLLECTIONS,
+  isAllowed, hasExplicitRule, APP_ROLES, SUNUCU_YAZAR_COLLECTIONS, magazaTalepIslemYetkisi,
   PUBLIC_WRITE_COLLECTIONS, APPEND_ONLY_COLLECTIONS, ADMIN_ONLY_COLLECTIONS,
   type AppRole, type DbOp,
 } from './rbac';
 import { TENANT_COLLECTIONS, USER_SCOPED_COLLECTIONS, SERVER_ONLY_COLLECTIONS } from './collections';
 import { MAGAZA_TALEP_KOLEKSIYONU } from './magazaTalep';
-import { SRC_KOK, oku } from '../test/kaynakTarama';
+import { SRC_KOK, kodSatirlari, oku } from '../test/kaynakTarama';
 import { yorumsuz } from '../test/degismezTarayici';
 
 const KOLEKSIYON = 'magazaTalepleri';
@@ -274,5 +274,23 @@ describe('rbac.ts — magazaTalepleri kuralının kendisi', () => {
   it('koleksiyon kiracı listesinin İLK elemanı değil (tenantErisim testi ilk elemanı örnek alır)', () => {
     expect(TENANT_COLLECTIONS[0]).not.toBe(KOLEKSIYON);
     expect(TENANT_COLLECTIONS.filter(c => c === KOLEKSIYON)).toHaveLength(1);
+  });
+});
+
+// ── Dilim 2a (2026-10-09, V3): panel / ERP işlem yetkisi = okuma yetkisi; süper-yönetici baypası YOK ───────────────────
+describe('magazaTalepIslemYetkisi (dilim 2a, V3)', () => {
+  it('okuyan üç rol true; diğer bütün roller ve `null` false; listeyi kopyalamaz (`isAllowed(.., read)` ile birebir)', () => {
+    for (const rol of APP_ROLES) {
+      expect(magazaTalepIslemYetkisi(rol), rol).toBe(GORENLER.includes(rol));
+      expect(magazaTalepIslemYetkisi(rol), rol).toBe(isAllowed(rol, MAGAZA_TALEP_KOLEKSIYONU, 'read'));
+    }
+    expect(magazaTalepIslemYetkisi(null)).toBe(false);
+  });
+  it('kaynak çiti: işlev `isAllowed(rol, \'magazaTalepleri\', \'read\')` döndürür — rol adı listesi yazmaz', () => {
+    const kod = kodSatirlari(join(SRC_KOK, 'lib', 'rbac.ts')).map(s => s.kod);
+    const bas = kod.findIndex(s => s.includes('export function magazaTalepIslemYetkisi'));
+    expect(bas).toBeGreaterThan(-1);
+    expect(kod.slice(bas, bas + 3).join('\n')).toContain("return isAllowed(rol, 'magazaTalepleri', 'read');");
+    expect(kod.slice(bas, bas + 3).join('\n')).not.toMatch(/'Admin'|'Manager'|'Sales'/);
   });
 });

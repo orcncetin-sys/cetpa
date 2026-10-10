@@ -8,9 +8,14 @@
  *     sema degisince tip sessizce bayatlardi (`any` verilince de z.infer
  *     calismiyor, dogrulanmis govdenin alanlari "does not exist" veriyor).
  * Semalari ortak bir modulde tutmak iki sorunu da cozer: tek kaynak, tip
- * z.infer ile SEMADAN turer, dongu yok. Bu dosya yalniz zod'a bagli.
+ * z.infer ile SEMADAN turer, dongu yok. Bu dosya yalniz zod'a ve YAPRAK ortak
+ * sozlesmeye (`src/lib/magazaTalep.ts`: asama kumesi, kalem anahtari deseni —
+ * 2026-10-09, dilim 2a) bagli; sunucu modulu ice aktarmaz.
  */
 import { z } from 'zod';
+import {
+  MAGAZA_KALEM_ANAHTARI_DESENI, MAGAZA_PANEL_43_DESENI, MAGAZA_PANEL_TUR_DESENI, MAGAZA_TALEP_ASAMALARI, PANEL_DURUMLARI,
+} from '../lib/magazaTalep.js';
 
 /** `validate()`in kabul ettigi sema tipi.
  *  Baglamda `{ parse: ... }` diye YAKLASIK yazmak strictFunctionTypes
@@ -132,3 +137,68 @@ export const MagazaSiparisTalebiSchema = z.object({
   kdv:       z.number().nonnegative().optional(),
   toplam:    z.number().nonnegative().optional(),
 });
+
+/**
+ * Mağaza sipariş takibi gövdesi — KİMLİKSİZ uç `POST /api/magaza/siparis-durumu` (dilim 2a, § 4). Yalnız tür denetimi:
+ * `no` deseni ve telefonun 10 rakamı rotada ölçülür ve «biçim bozuk» ile «bulunamadı» AYNI yanıtı alır (`404 bulunamadi`,
+ * bayt bayt eşit) — desen şemada olsaydı biçim bozuk 400'e ayrışır, uç bir talep numarasının biçimini doğrulayan kâhin olurdu.
+ * Tanınmayan alan atılır (mağaza biçimi genişlese de uç kırılmasın; `.strict()` değil — talep şemasıyla aynı tutum).
+ */
+export const MagazaSiparisDurumuSchema = z.object({
+  no:      z.string(),
+  telefon: z.string(),
+});
+
+// ── Mağaza dilim 2a (şartname v6 § 3, § 4; 2026-10-09) ─────────────────────────────────────────────────────────────────
+// Hepsi `.strict()`: tanınmayan alan 400 (panel `oturum` gövdesine `eposta` / `sifre` gelirse de 400 — V2). Rotalar ortak
+// `validate()` yardımcısını KULLANMAZ (zod ayrıntısı dönmesin): `safeParse` + sabit `400 { ok: false }`.
+
+/** Aşama ve açıklama yazımının ORTAK gövdesi; sözlük çağıranın (panel `PanelDurumGovdesi`, ERP `ErpDurumGovdesi`). */
+const durumGovdesi = <const T extends readonly [string, ...string[]]>(sozluk: T) => z.object({
+  onceki:   z.enum(sozluk),
+  // İstemcinin EKRANDA gördüğü sürüm; ZORUNLU (bayat ekran sessiz geri almaya dönüşemez — § 2.3).
+  surum:    z.number().int().min(0),
+  durum:    z.enum(sozluk),
+  // Ham en çok 2.000 karakter; temizlik + 500 birime kırpma yazma işlevinde (`magazaDurum.ts`).
+  aciklama: z.string().max(2000).optional(),
+}).strict().refine(g => g.durum !== g.onceki || g.aciklama !== undefined, { message: 'aynı aşamada açıklama zorunlu' });
+
+/** `POST /panel/siparisler/:id/durum` — panel sözlüğü (`alindi`; `'bilinmiyor'` ve saklanan `'yeni'` 400). */
+export const PanelDurumGovdesi = durumGovdesi(PANEL_DURUMLARI);
+/** `POST /api/magaza-talepleri/:id/durum` — SAKLANAN sözlük (`yeni`). */
+export const ErpDurumGovdesi = durumGovdesi(MAGAZA_TALEP_ASAMALARI);
+
+/**
+ * Kalem teslim gövdesi — TEK zod sabiti; panel (`magazaPanelZinciri.ts`) ve ERP (`magazaErpRoutes.ts`) rotaları bunu içe
+ * aktarır, ikinci `z.object(` kopyası yazılmaz (§ 4). `kalemler`: 1–500 anahtar, her biri kurallı desen (öncü sıfırlı `b:01`
+ * şemada 400), yinelenen yok; ya da `'hepsi'` («tümünü işaretle / kaldır» TEK istek).
+ */
+export const KalemTeslimGovdesi = z.object({
+  surum:    z.number().int().min(0),
+  teslim:   z.boolean(),
+  kalemler: z.union([
+    z.literal('hepsi'),
+    z.array(z.string().regex(MAGAZA_KALEM_ANAHTARI_DESENI)).min(1).max(500)
+      .refine(liste => new Set(liste).size === liste.length, { message: 'yinelenen anahtar' }),
+  ]),
+}).strict();
+
+/** `POST /panel/siparisler/:id/etiket-basildi` — `surum` YOK (aşama ile yarışmaz); `{}` geçerli (V23). */
+export const EtiketBasildiGovdesi = z.object({
+  koli: z.number().int().min(1).optional(),
+}).strict();
+
+/** `POST /api/magaza-talepleri/:id/bildirim-gonder` — boş nesne (IIS gövdesiz POST'u Node'a iletmez; V22). */
+export const BildirimGonderGovdesi = z.object({}).strict();
+
+/** `POST /api/magaza-panel/yetki-kodu` — § 3.2. */
+export const YetkiKoduGovdesi = z.object({
+  meydan: z.string().regex(MAGAZA_PANEL_43_DESENI),
+  tur:    z.string().regex(MAGAZA_PANEL_TUR_DESENI),
+}).strict();
+
+/** `POST /api/magaza/panel/oturum` — § 3.3; `eposta` / `sifre` gibi tanınmayan alan 400, gövde günlüğe YAZILMAZ. */
+export const PanelOturumGovdesi = z.object({
+  kod:         z.string().regex(MAGAZA_PANEL_43_DESENI),
+  dogrulayici: z.string().regex(MAGAZA_PANEL_43_DESENI),
+}).strict();

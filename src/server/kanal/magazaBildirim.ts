@@ -267,8 +267,16 @@ export type MagazaBildirimSonucu = 'gitti' | 'atlandi' | 'yapilandirilmamis' | '
  * bir deneme hakkı harcar. (3) SON denemesi geri çevrilen iş `atlandi` ile biter; sonucu
  * süren koşu yazar — o koşu başarısız olur ve kendisi son deneme değilse doküman
  * `bekliyor` kalır (10 dakikadan eski `bekliyor` ekranda ve bekçide uyarıdır).
+ *
+ * ANAHTAR `talepId|tur` (dilim 2a, şartname § 2.10 — K9 / Y6): kümeye çıplak `talepId` YAZILMAZ. 2a'da tek tür `ilk`tir
+ * (talebin ilk bildirimi; elle «Yeniden gönder» de aynı işi kuyruğa alır) ve işçinin davranışı değişmez. Tür anahtarda
+ * durur ki 2b'nin `revize` bildirimi AYNI talebin süren ilk bildirimine takılıp `atlandi` / `yeniden-dene` dönmesin:
+ * iki bildirim birbirini düşürmez (çit: magazaBildirim.sahiplenme.test.ts).
  */
 const gonderimde = new Set<string>();
+/** 2a'da yalnız `ilk`; 2b `'revize'`yi ekler (tip o gün genişler). */
+type BildirimTuru = 'ilk';
+const sahiplenmeAnahtari = (talepId: string, tur: BildirimTuru): string => `${talepId}|${tur}`;
 
 const OKU_SQL = 'SELECT data FROM docs WHERE coll = $1 AND id = $2';
 // TEK SQL: yalnız `bildirim` alanı değişir (dosya başı, madde 5). `gitti` ASLA ezilmez (orkestratör kararı 2026-10-08): aynı talep
@@ -372,8 +380,9 @@ export async function magazaBildirimIsle(talepId: string, D: MagazaBildirimDeps,
     // sorar (o zaman dokümanda sonucu görür); yeniden soramayacak çağrı (süreç içi yol / son deneme) sonucu süren koşuya bırakır.
     // OKUMADAN ÖNCE alınır (ilk `await`ten önce, eşzamanlı): okumadan sonra alınsaydı, süren koşu biterken bayat `bekliyor`
     // okumuş bir çağrı kümeyi boş bulur ve yine gönderirdi.
-    if (gonderimde.has(talepId)) return yenidenDenenir ? 'yeniden-dene' : 'atlandi';
-    gonderimde.add(talepId);
+    const anahtar = sahiplenmeAnahtari(talepId, 'ilk');
+    if (gonderimde.has(anahtar)) return yenidenDenenir ? 'yeniden-dene' : 'atlandi';
+    gonderimde.add(anahtar);
     sahip = true;
     // Deneme sayısı bilinmiyorsa alan YAZILMAZ (0 ya da uydurma sayı değil).
     const denemeSayisi = deneme !== undefined && Number.isInteger(deneme.sayi) && deneme.sayi > 0 ? deneme.sayi : undefined;
@@ -439,7 +448,7 @@ export async function magazaBildirimIsle(talepId: string, D: MagazaBildirimDeps,
     return gitti ? 'gitti' : basarisiz;
   } finally {
     // Sahiplenme HER çıkışta bırakılır (erken dönüş, hata); yalnız bu çağrı aldıysa — geri çevrilen çağrı süren koşununkini SİLMEZ.
-    if (sahip) gonderimde.delete(talepId);
+    if (sahip) gonderimde.delete(sahiplenmeAnahtari(talepId, 'ilk'));
   }
 }
 

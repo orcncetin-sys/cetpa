@@ -70,8 +70,12 @@ export function magazaMetniTemizle(ham: string, cokSatirli: boolean): string {
   return ayiklanmis.toWellFormed().trim();
 }
 
-/** Üst sınırda keser; kesim noktası bir vekil çiftinin ortasına geliyorsa çiftin TAMAMI dışarıda kalır. */
-function kirp(metin: string, sinir: number): { metin: string; kirpildi: boolean } {
+/**
+ * Üst sınırda keser; kesim noktası bir vekil çiftinin ortasına geliyorsa çiftin TAMAMI dışarıda kalır.
+ * Dilim 2a'da dışa açıldı (eski ad `kirp`): `durumAciklama` (500), panel `kim.ad` (80) ve takip yanıtının kalem metinleri
+ * aynı kesimi kullanır — kopyalanmaz. Girdi iyi biçimli olmalı (`magazaMetniTemizle` çıktısı).
+ */
+export function magazaMetniKirp(metin: string, sinir: number): { metin: string; kirpildi: boolean } {
   if (metin.length <= sinir) return { metin, kirpildi: false };
   const sonBirim = metin.charCodeAt(sinir - 1);
   // Metin iyi biçimli (`toWellFormed`): içeride kalan son birim üst vekilse eşi sınırın hemen dışındadır.
@@ -81,7 +85,7 @@ function kirp(metin: string, sinir: number): { metin: string; kirpildi: boolean 
 
 /** Telefonun son 10 rakamı; 10'dan az rakam varsa `null`. */
 export function telefonSon10(telefon: string): string | null {
-  // Yalnız ASCII rakam: durum sorgusunun anahtarı (dilim 2) iki tarafta aynı kümeden üretilmeli.
+  // Yalnız ASCII rakam: takip sorgusunun anahtarı (`POST /siparis-durumu`, routes/magazaRoutes.ts) iki tarafta aynı kümeden üretilir.
   const rakamlar = telefon.replace(/[^0-9]/g, '');
   return rakamlar.length >= 10 ? rakamlar.slice(-10) : null;
 }
@@ -129,7 +133,7 @@ export function talepEsle(girdi: MagazaTalepGirdisi, baglam: { companyId: string
 
   const isaret = { kirpildi: false };
   const kirpilmis = (temiz: string, sinir: number): string => {
-    const sonuc = kirp(temiz, sinir);
+    const sonuc = magazaMetniKirp(temiz, sinir);
     if (sonuc.kirpildi) isaret.kirpildi = true;
     return sonuc.metin;
   };

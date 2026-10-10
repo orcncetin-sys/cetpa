@@ -183,3 +183,36 @@ Görev Zamanlayıcı, Windows Update ve PG gösterimi OS dilimine bağlı kalır
 - Hazırlık (staging) hizmeti üretimin `.env`'ini kopyalar ve AYNI makinede koşar; deneme talepleri gerçek kutuya gitmesin diye hazırlığın `.env` dosyasına ELLE `MAGAZA_BILDIRIM=kapali` satırı eklenir (`setup-staging.ps1` yalnız dosya yokken yazar; var olan dosyaya işlemez). Geliştirme makinesinde de aynı satır.
 - Posta sunucusu kimliksiz yerel teslimi reddederse bekçi `magaza_talep` ayrıntısı nedeni ve yolu yazar: «gönderen reddi» = MailEnable SMTP → Security → Address spoofing («Authorized connections» + Privileged IPs'te 127.0.0.1); «alıcı reddi» = cetpa.com.tr posta hizmeti / `iletisim@` kutusu. Geri dönüş: `.env`'e `SMTP_HOST=mail.cetpa.com.tr`, `SMTP_USER`, `SMTP_PASS` (kimlikli kip; `SMTP_FROM` boş).
 - Yeniden başlatmada gitmemiş bildirimler (yapılandırılmamış / 3 saatten eski bekliyor) teslim sondası geçerse kendiliğinden kuyruğa alınır; kanıt `scripts/ops-istek.sh /api/ops/summary` → `magazaBildirim.sayim`.
+
+## [13] Mağaza dilim 2a — site paneli («ERP ile bağlan»), takip ucu, talep aşamaları (2026-10-10)
+
+### Yayın KESİNTİLİDİR — mesai dışında yap
+- Bu yayın `package-lock.json`'ı değiştirir (yalnız test bağımlılığı: `@electric-sql/pglite`). `deploy.ps1` kilit dosyası değişince yavaş yola girer: `Stop-Service` → `npm ci --legacy-peer-deps` → `npm run build` → `Restart-Service`. Hizmet `npm ci` + derleme süresince DURUR (1-2 dk 502).
+- O aralıkta mağaza (www.cetpa.com.tr) sipariş talebi göndermeye devam eder ve yanıtı OKUMAZ: müşteri «talebiniz alındı» görür, talep ERP'ye yazılmaz. Yayından sonra WhatsApp'tan gelip ERP → Siparişler → Mağaza Talepleri listesinde OLMAYAN talep var mı diye bak.
+- Sonraki yayınlar (kilit dosyası değişmeden) yine hızlı yoldan gider.
+
+### Ortam ayarı
+- `MAGAZA_PANEL_DONUS`: site panelinin dönüş adresi. Varsayılan `https://www.cetpa.com.tr/panel.html` doğrudur; canlı `.env`'e yazmak GEREKMEZ. Yazılacaksa: https zorunlu, kullanıcı adı / sorgu (`?`) / parça (`#`) taşıyamaz, kökeni `MAGAZA_IZINLI_KOKENLER` listesinde bulunmalı (liste boşsa varsayılan köken `https://www.cetpa.com.tr`).
+- Panel belirteci anahtarı `SESSION_TOKEN_SECRET` (o yoksa `FIREBASE_PRIVATE_KEY`), dönüş adresi ve `APP_URL`'den türer: yeni bir sır GEREKMEZ. Üçünden biri değişirse açık panel oturumları düşer (personel panelden yeniden bağlanır). Hazırlık (staging) ortamının `APP_URL`'i farklı olduğu için oradan alınan belirteç canlıda geçmez (bilerek).
+- Dönüş adresi geçersizse ya da iki sır da yoksa panel HİÇ çalışmaz: `POST /api/magaza-panel/yetki-kodu` ve bütün `/api/magaza/panel/*` uçları `503 panel-yapilandirilmamis` döner. Üç yerden görünür: bekçi `magaza_talep` ayrıntısında «SİTE PANELİ ÇALIŞMIYOR» (kırmızı), `scripts/verify-deploy.sh post` FAIL, panelin kendi ekranı.
+- `SERVER_TENANT_COMPANY_ID` tanımlı olmalı (dilim 1 ön koşulu): kiracı çözülemezse sipariş talebi ucu da panel de 503 verir; bekçi «KİRACI ÇÖZÜLEMİYOR» yazar.
+
+### Yayın sırası
+1. ERP dilim 2a canlı + `scripts/verify-deploy.sh post` geçti (aşağıdaki sondalar dâhil).
+2. Mağaza YENİ `panel.js`'i yayınlar; AYNI yayında `uclar.durum: true` ve `uclar.panel: true`. Eski `panel.js` ile `uclar.panel` AÇILMAZ (eski sürüm ERP e-posta + şifresini mağaza kökeninde alıp yollar; ERP bunu 400 ile reddeder ama parola ağa çıkmış olur).
+3. Adım 2'ye kadar eski takip sayfası kalem listesini rozetsiz gösterir (fiyat / SKU / müşteri alanı sunucudan hiç dönmez); kabul edilen geçici görünümdür — mağaza eki aynı gün ya da ertesi iş günü yayınlanır.
+
+### Yayından sonra doğrulama
+- `scripts/verify-deploy.sh post` (hiçbiri kayıt yazmaz, oturum açmaz, e-posta göndermez):
+  - takip ucu `POST /api/magaza/siparis-durumu` var olmayan talep no ile → `404 bulunamadi` (`503 hazir-degil` = canlıda hâlâ dilim 1; kodsuz 404 = rota yok; 503 = pg havuzu / kiracı yok);
+  - belirteçsiz `GET /api/magaza/panel/siparisler`, verilmemiş kodla `POST …/panel/oturum`, belirteçsiz `POST …/kalem-teslim` ve `…/etiket-basildi` → 401 (404 = panel alt zinciri bağlı değil; `503 panel-yapilandirilmamis` = yukarıdaki ortam ayarı);
+  - panel ön uçuşu → 204 + `Allow-Methods` GET + `Allow-Headers` Authorization (IIS'in bu ön uçuşu Node'a ilettiği burada ölçülür); dış zincir ön uçuşunda Authorization YOK;
+  - ERP kökenindeki dört mağaza ucu (`/api/magaza-panel/yetki-kodu`, `/api/magaza-talepleri/:id/durum`, `…/kalem-teslim`, `…/bildirim-gonder`): bozuk JSON → 400 / 500 ve geçerli `{}` kimliksiz → 401 (404 = rota kayıtlı değil);
+  - istemci derlemesi: ana betikte (`/assets/index-….js`) `/magaza-panel-baglan` metni (yoksa «ERP ile bağlan» onay sayfası yayında değil).
+- `scripts/ops-istek.sh /api/ops/summary` → `magaza.acik` (açık talep sayısı, aşama dağılımı, en eski açığın kayıt zamanı) ve `magaza.sayaclar` (`uc` / `panel` / `takip`; süreç başından beri, yeniden başlatmada sıfırlanır). Panelden ilk bağlanmadan sonra `panel.oturum` ve `panel.yetkiKodu` 1 olmalı. Aynı anda `panel.yetkiKoduIptalDenetimsiz` 0 olmalı: «ERP ile bağlan» onayında sunucu Firebase'e «bu oturum iptal edildi mi» diye sorar (ERP'den çıkış yapılmış ama süresi dolmamış kimlik belirteciyle yeni panel oturumu açılmasın). Sayaç 0'dan büyükse o denetim ÇALIŞMIYOR ve kod denetimsiz veriliyor demektir — neden: `.env`'de Firebase hizmet hesabı kimliği (`FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY`) yok ya da sunucudan Google'a çıkış yok; günlükte `[magaza-erp] yetki kodu: belirteç iptali denetlenemedi` satırı hata kodunu yazar. Panel yine çalışır; yalnız bu ek koruma devre dışıdır (bekçi de panel sayaçlarında «yetki kodu Firebase iptal denetimi YAPILAMADAN verildi» diye gösterir).
+- Bekçi (08:30) `magaza_talep` ayrıntısı artık sekiz parçadır: kiracı · SMTP · site paneli yapılandırması · bildirim sayımı · açık talepler · uç sayaçları · panel sayaçları · takip sayaçları. Açık talep sayısı / yaşı ve üç sayaç kümesi yalnız BİLGİDİR (eşik yok); kırmızı yapanlar: kiracı, SMTP, site paneli yapılandırması, gitmeyen bildirim, okunamayan sayım, dilim 1 ucunun 500'ü.
+
+### Davranış notları
+- ERP'den çıkış (`Çıkış yap`) o kullanıcının bütün site paneli oturumlarını da kapatır. Rolü düşen, firması askıya alınan ya da MFA'yı sonradan açan kullanıcının panel oturumu beklemeden düşer.
+- Hizmet yeniden başlarsa: verilmiş ama henüz kullanılmamış bağlanma kodları (60 sn ömürlü) düşer — kullanıcı panelden yeniden «ERP ile giriş yap» der; açık panel oturumları (8 saat) YAŞAR; süreç içi sayaçlar sıfırlanır.
+- «Yeniden gönder» (ERP → Mağaza Talepleri, gitmeyen bildirim rozeti) talebi yeniden kuyruğa alır; bekçinin gitmeyen bildirim sayımı talebin KAYIT saatinden ölçmeye devam eder (elle gönderim kırmızıyı tek başına söndürmez, bildirim gerçekten gidince söner).

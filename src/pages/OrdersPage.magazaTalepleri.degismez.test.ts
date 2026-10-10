@@ -12,6 +12,13 @@
  *   2. JSX ağacı — TypeScript ayrıştırıcısıyla. «'magaza'da sipariş gövdesi çizilmez» kuralı metin aramasıyla kanıtlanamaz
  *      (kapının NEREDE kapandığı önemlidir): sipariş listesi bloğunun çocukları TEK TEK sayılır; kapı dışına eklenen her
  *      yeni öğe bu dosyayı kırar.
+ *
+ * DİLİM 2a (şartname v6 § 5.2 / § 7 «yazıldı ama bağlanmadı», 2026-10-10) — BİLEREK DEĞİŞEN sabitler (gevşetilmedi; her biri yeni
+ * değeriyle): `<MagazaTalepleri>` nitelik kümesi DÖRT → YEDİ (+ `onDurumDegistir` → `magazaTalepDurumuYaz`, `onKalemTeslim` →
+ * `magazaKalemTeslimYaz`, `onBildirimGonder` → `magazaBildirimGonder`; 2b'de on bir olacak); sekme rozeti iki sayı taşır
+ * (`sayi` = görülmemiş, `yeni` = `yeniAsamaSayisi(magaza.talepler)`); kanca içe aktarım satırı (+ `yeniAsamaSayisi`). Aşama
+ * düğmesi, kalem teslim kutusu, «Yeniden gönder», arama kutusu ve «Etiket basıldı» satırı AYNI bileşendedir: bu dosyanın
+ * nitelik eşitliği onların da OrdersPage'den GERÇEKTEN açılan yolda olduğunu kilitler (arama ve etiket nitelik eklemez).
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
@@ -53,7 +60,7 @@ describe('OrdersPage — mağaza talepleri: yetki kapısı, abonelik, sekme duru
     expect(adet(kod, 'useMagazaTalepleri(')).toBe(1);
     // Kanca koşullu bir dalın / iç işlevin içinde değil: bileşen gövdesinin girintisinde (2 boşluk).
     expect(kod).toMatch(/\n {2}const magaza = useMagazaTalepleri\(magazaYetkili\);\n/);
-    expect(kod).toContain("import { useMagazaTalepleri, useMagazaYeniSayaci, magazaSonGorulenAnahtari, magazaIlkKaynakSekmesi } from '../hooks/useMagazaTalepleri';");
+    expect(kod).toContain("import { useMagazaTalepleri, useMagazaYeniSayaci, magazaSonGorulenAnahtari, magazaIlkKaynakSekmesi, yeniAsamaSayisi } from '../hooks/useMagazaTalepleri';");
   });
 
   it('`orderSourceTab` üç değerlidir; adresle açılış (`?kaynak=magaza`) İLK çizimde ve yetkiyle', () => {
@@ -203,7 +210,11 @@ describe('OrdersPage — sipariş listesi bloğu: «magaza»da sipariş gövdesi
     expect(magaza && nitelikler(magaza)).toEqual(beklenen('magaza'));
     const govde = magaza ? metin(magaza) : '';
     expect(govde).toContain('{op(currentLanguage).magaza_talepleri}');
-    expect(govde).toContain('<MagazaYeniRozeti sayi={magazaYeniSayisi} currentLanguage={currentLanguage} />');
+    // Rozet İKİ sayı taşır: «görülmemiş» (dilim 1 sayacı) ve «yeni» (aşaması `yeni` olanlar — panelin «Yeni»siyle aynı sayı;
+    // aramadan ve liste süzgecinden bağımsız, BÜTÜN taleplerden).
+    expect(govde).toContain('<MagazaYeniRozeti sayi={magazaYeniSayisi} yeni={yeniAsamaSayisi(magaza.talepler)} currentLanguage={currentLanguage} />');
+    expect(adet(kod, '<MagazaYeniRozeti ')).toBe(1);
+    expect(adet(kod, 'yeniAsamaSayisi(')).toBe(1);
 
     // Ortak sınıf dizgisi TEK yerde tanımlı; düğmelerde kopyası yok.
     expect(adet(kod, 'const kaynakSekmesiSinifi = (secili: boolean): string =>')).toBe(1);
@@ -211,19 +222,41 @@ describe('OrdersPage — sipariş listesi bloğu: «magaza»da sipariş gövdesi
     expect(adet(kod, '"px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2"')).toBe(1);
   });
 
-  it('4. çocuk — «magaza»da YALNIZ `<MagazaTalepleri … />`: veri kancadan, bileşen kendi aboneliğini açmaz', () => {
+  it('4. çocuk — «magaza»da YALNIZ `<MagazaTalepleri … />`: veri kancadan; YEDİ nitelik — üç yazma yolu GERÇEKTEN bağlı', () => {
     const k = kapi(c[3]);
     expect(k?.sol).toBe("orderSourceTab === 'magaza'");
     const oge = jsxOge(k?.sag);
     expect(oge && etiket(oge)).toBe('MagazaTalepleri');
+    // Dilim 1 = 4 nitelik; dilim 2a = 7 (2b'de 11). Bileşen istek ATMAZ: üç işlev buradan, sarmalayıcısız verilir.
     expect(oge && nitelikler(oge)).toEqual({
       talepler: '{magaza.talepler}',
       yukleniyor: '{magaza.yukleniyor}',
       hata: '{magaza.hata}',
       currentLanguage: '{currentLanguage}',
+      onDurumDegistir: '{magazaTalepDurumuYaz}',
+      onKalemTeslim: '{magazaKalemTeslimYaz}',
+      onBildirimGonder: '{magazaBildirimGonder}',
     });
     expect(ogeBul(sf, n => etiket(n) === 'MagazaTalepleri')).toHaveLength(1);   // sayfada başka yerde çizilmez
     expect(kod).toContain("import MagazaTalepleri, { MagazaYeniRozeti } from '../components/siparis/MagazaTalepleri';");
+  });
+
+  it('üç yazma işlevi `services/magazaTalepIstemcisi.ts`\'ten içe aktarılır ve sayfada YALNIZ nitelik olarak geçer (içe aktarım + nitelik)', () => {
+    expect(adet(kod, "import { magazaTalepDurumuYaz, magazaKalemTeslimYaz, magazaBildirimGonder } from '../services/magazaTalepIstemcisi';")).toBe(1);
+    for (const ad of ['magazaTalepDurumuYaz', 'magazaKalemTeslimYaz', 'magazaBildirimGonder']) expect(adet(kod, ad), ad).toBe(2);
+    // Sayfa uç adresini kendisi yazmaz (adres tek yerde: servis dosyası).
+    expect(kod).not.toMatch(/\/api\/magaza-talepleri/);
+  });
+
+  it('bileşenin nitelik arayüzü sayfanın verdiği yedi adla BİREBİR (fazla / eksik nitelik derlemede de kırılır; çit adları sabitler)', () => {
+    const bilesen = yorumsuz('src/components/siparis/MagazaTalepleri.tsx', readFileSync(join(SRC_KOK, 'components', 'siparis', 'MagazaTalepleri.tsx'), 'utf-8')).join('\n');
+    const govde = /interface Props \{\n([\s\S]*?)\n\}/.exec(bilesen)?.[1] ?? '';
+    const zorunlu = [...govde.matchAll(/^ {2}(\w+):/gm)].map(m => m[1]);
+    const oge = jsxOge(kapi(c[3])?.sag);
+    expect(zorunlu).toHaveLength(7);
+    expect(Object.keys(oge ? nitelikler(oge) : {}).sort()).toEqual([...zorunlu].sort());
+    // İsteğe bağlı nitelik YOK: «verilmezse düğme sessizce çalışmaz» yolu açılmasın.
+    expect(govde).not.toMatch(/^ {2}\w+\?:/m);
   });
 
   it('5. çocuk — sipariş gövdesinin TAMAMI `orderSourceTab !== \'magaza\'` kapısında (KPI, tablo, mobil liste, yan paneller)', () => {
@@ -266,6 +299,13 @@ describe('mağaza talepleri — abonelik TEK yerde (App.tsx\'e dinleyici eklenme
   it('kancayı çağıran TEK üretim dosyası OrdersPage', () => {
     expect(uretim.length).toBeGreaterThan(200);   // tarama gerçekten kaynak ağacını geziyor
     expect(iceren(/useMagazaTalepleri\(/)).toEqual(['src/hooks/useMagazaTalepleri.ts', 'src/pages/OrdersPage.tsx']);
+  }, 60_000);
+
+  it('yazma işlevlerini ÇAĞIRAN / veren TEK üretim dosyası OrdersPage (bileşen yalnız tip içe aktarır)', () => {
+    expect(iceren(/\bmagaza(TalepDurumuYaz|KalemTeslimYaz|BildirimGonder)\b/)).toEqual(['src/pages/OrdersPage.tsx', 'src/services/magazaTalepIstemcisi.ts']);
+    expect(iceren(/services\/magazaTalepIstemcisi'/)).toEqual(['src/components/siparis/MagazaTalepleri.tsx', 'src/pages/OrdersPage.tsx']);
+    // Mağaza talebi uç adresi istemcide TEK dosyada yazılıdır.
+    expect(iceren(/\/api\/magaza-talepleri/).filter(y => !y.startsWith('src/server/') && y !== 'server.ts')).toEqual(['src/services/magazaTalepIstemcisi.ts']);
   }, 60_000);
 
   it('koleksiyona istemciden abone olan TEK dosya kancanın kendisi', () => {

@@ -6,7 +6,13 @@
  *   - üçüncü düğme yalnız yetkili role (Yönetici, Müdür, Satış) çizilir; yetkisiz rolde abonelik HİÇ açılmaz;
  *   - «magaza» seçilince sipariş gövdesi (KPI şeridi, tablo, arama, CSV, para birimi) ekrandan kalkar, talepler çizilir;
  *   - adresle açılış (`?kaynak=magaza`) yalnız yetkili rolde;
- *   - «yeni» rozeti: sekme açılınca kalkar, sonra gelen talep sayılır.
+ *   - sekme rozeti iki sayı taşır: «görülmemiş» sekme açılınca kalkar, sonra gelen talep sayılır; «yeni» aşama sayısıdır.
+ *
+ * DİLİM 2a (şartname v6 § 7 «yazıldı ama bağlanmadı», 2026-10-10): aşama düğmesi, kalem teslim kutusu, «Yeniden gönder», arama
+ * kutusu ve «Etiket basıldı» satırı GERÇEK sayfadan açılan yoldadır — düğmeye basınca istek `authFetch` ile doğru uca, doğru
+ * gövdeyle gider (bileşen testi yalnız niteliğin çağrıldığını, servis testi yalnız işlevin isteğini görür; ikisinin sayfada
+ * birbirine BAĞLI olduğunu bu dosya kanıtlar). BİLEREK DEĞİŞEN dilim 1 sabiti: rozet adı «N yeni talep» → «N görülmemiş talep»
+ * + ayrı «N yeni talep» (aşama); sekme açılınca yalnız «görülmemiş» kalkar.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
@@ -15,6 +21,7 @@ import OrdersPage from './OrdersPage';
 import { translations } from '../translations';
 import { useAppStore } from '../store/appStore';
 import { APP_ROLES } from '../lib/rbac';
+import { authFetch } from '../services/authFetch';
 import type { Order } from '../types';
 
 // ── Akış düzeneği: sayfanın ve kancaların açtığı abonelikler kaydedilir, ağ çağrısı yapılmaz ──────────────────────────
@@ -60,11 +67,12 @@ const ozellikler = (ek: Partial<Props> = {}): Props => ({
 });
 
 const magazaAkisi = () => abonelikler.filter(a => a.ad === 'magazaTalepleri');
-const talepDokumani = (no: string, olusturma: string) => ({
+const talepDokumani = (no: string, olusturma: string, ek: Record<string, unknown> = {}) => ({
   companyId: 'kiraci-1', talepNo: no, durum: 'yeni', olusturma, istemciTarihi: null,
   musteri: { ad: 'Şükrü Çağlayan', firma: 'Çağlayan İnşaat', telefon: '0532 111 22 33', eposta: '', il: 'İzmir', adres: '', vergi: '' },
   telefonSon10: '5321112233', not: '', kalemler: [{ id: 'u1', sku: 'DYO-0001', ad: 'İç cephe boyası', marka: 'DYO', adet: 2, talepFiyat: 204.99, tedarik: false }],
   talepEdilen: { araToplam: 409.98, kdv: 82, toplam: 491.98 }, fiyatiSorulacakVar: false, bildirim: { durum: 'gitti', zaman: olusturma },
+  ...ek,
 });
 const talepGonder = (...d: Array<{ id: string; veri: unknown }>) =>
   act(() => { for (const a of magazaAkisi()) if (!a.kapandi) a.next({ docs: d.map(x => ({ id: x.id, data: () => x.veri })) }); });
@@ -83,6 +91,22 @@ async function sayfaCiz(ek: Partial<Props> = {}) {
   return sonuc;
 }
 const MAGAZA = /^Mağaza Talepleri/;
+
+// ── Dilim 2a: mağaza talebi yazma uçlarına giden istekler ──
+const sahteIstek = vi.mocked(authFetch);
+const VARSAYILAN_YANIT = () => Promise.resolve(new Response('{"success":false}', { status: 200 }));
+/** Mağaza talebi uçlarına verilen yanıt (her çağrıya yeni nesne); sayfanın öteki istekleri varsayılan yanıtı alır. */
+const magazaYaniti = (status: number, govde: unknown): void => {
+  sahteIstek.mockImplementation(adres => (String(adres).startsWith('/api/magaza-talepleri/')
+    ? Promise.resolve(new Response(JSON.stringify(govde), { status }))
+    : VARSAYILAN_YANIT()));
+};
+/** Mağaza talebi uçlarına giden istekler: [adres, yöntem, başlıklar, gövde]. */
+const magazaIstekleri = () => sahteIstek.mock.calls
+  .filter(c => String(c[0]).startsWith('/api/magaza-talepleri/'))
+  .map(c => ({ adres: String(c[0]), yontem: c[1]?.method, basliklar: c[1]?.headers, govde: JSON.parse(String(c[1]?.body)) as unknown }));
+/** Tıklar ve isteğin sözünü (mikro görev) işletir. */
+const tiklaBekle = async (oge: HTMLElement): Promise<void> => { await act(async () => { fireEvent.click(oge); }); };
 /**
  * Sipariş gövdesi ekranda mı. İKİ tür işaret: sipariş VERİSİNE bağlı olanlar (KPI şeridi, tablo satırı) ve veriden BAĞIMSIZ
  * olanlar (dönem süzgeci, iade paneli, arama, CSV, para birimi). İkinci tür şart: «magaza»da sipariş listesi zaten boştur —
@@ -105,6 +129,8 @@ beforeEach(() => {
   localStorage.clear();
   window.history.replaceState(null, '', '/orders');
   useAppStore.setState({ companyId: 'kiraci-1' });
+  sahteIstek.mockClear();
+  sahteIstek.mockImplementation(VARSAYILAN_YANIT);
 });
 afterEach(() => { window.history.replaceState(null, '', '/'); });
 
@@ -201,21 +227,26 @@ describe('OrdersPage — Mağaza Talepleri sekmesi (gerçek çizim)', { timeout:
     expect(magazaAkisi().every(a => a.kapandi)).toBe(true);
   });
 
-  it('«yeni» rozeti: görülmemiş talepler düğmede sayılır → sekme açılınca kalkar → sonra gelen sayılır; anahtar kiracı + kullanıcı', async () => {
+  it('sekme rozeti İKİ sayı: «görülmemiş» düğmede sayılır → sekme açılınca kalkar → sonra gelen sayılır (anahtar kiracı + kullanıcı); «yeni» AŞAMA sayısıdır, görülünce kalkmaz', async () => {
     await sayfaCiz();
     const a = { id: 'mt-1', veri: talepDokumani('T261008-AAAA', '2026-10-08T08:00:00.000Z') };
-    const b = { id: 'mt-2', veri: talepDokumani('T261008-BBBB', '2026-10-08T09:00:00.000Z') };
+    const b = { id: 'mt-2', veri: talepDokumani('T261008-BBBB', '2026-10-08T09:00:00.000Z', { durum: 'teyit' }) };
     talepGonder(a, b);
-    expect(dugme('Mağaza Talepleri 2 yeni talep')).not.toBeNull();
+    // İki talep görülmedi; aşaması `yeni` olan BİR talep var (ikincisi teyit edilmiş).
+    expect(dugme('Mağaza Talepleri 2 görülmemiş talep 1 yeni talep')).not.toBeNull();
 
     tikla(MAGAZA);
-    expect(dugme('Mağaza Talepleri')).not.toBeNull();   // rozet kalktı
+    expect(dugme('Mağaza Talepleri 1 yeni talep')).not.toBeNull();   // «görülmemiş» kalktı; «yeni» aşama sayısı kaldı
     expect(localStorage.getItem('cetpa:magazaTalepSonGorulen:kiraci-1:uid-7')).toBe(String(Date.parse('2026-10-08T09:00:00.000Z')));
 
     tikla('Cetpa Siparişleri');
-    expect(dugme('Mağaza Talepleri')).not.toBeNull();
-    talepGonder(a, b, { id: 'mt-3', veri: talepDokumani('T261008-CCCC', '2026-10-08T10:00:00.000Z') });
     expect(dugme('Mağaza Talepleri 1 yeni talep')).not.toBeNull();
+    talepGonder(a, b, { id: 'mt-3', veri: talepDokumani('T261008-CCCC', '2026-10-08T10:00:00.000Z') });
+    expect(dugme('Mağaza Talepleri 1 görülmemiş talep 2 yeni talep')).not.toBeNull();
+
+    // Aşaması `yeni` olan talep kalmayınca «yeni» sayısı da kalkar (panelde ilerletilen talep ERP rozetinden düşer).
+    talepGonder({ id: 'mt-1', veri: { ...a.veri, durum: 'hazirlaniyor' } }, b, { id: 'mt-3', veri: talepDokumani('T261008-CCCC', '2026-10-08T10:00:00.000Z', { durum: 'iptal' }) });
+    expect(dugme('Mağaza Talepleri 1 görülmemiş talep')).not.toBeNull();
   });
 
   it('sipariş detayı açıkken (liste ekranda değil) gelen talep «görüldü» SAYILMAZ', async () => {
@@ -227,5 +258,89 @@ describe('OrdersPage — Mağaza Talepleri sekmesi (gerçek çizim)', { timeout:
     rerender(<OrdersPage {...ozellikler({ selectedOrder: null })} />);   // detaydan listeye dönüldü — sekme «magaza»
     expect(screen.getByRole('region', { name: 'Mağaza Talepleri' })).toBeTruthy();
     expect(localStorage.getItem('cetpa:magazaTalepSonGorulen:kiraci-1:uid-7')).toBe(String(Date.parse('2026-10-08T08:00:00.000Z')));
+  });
+});
+
+// ── Dilim 2a: «yazıldı ama bağlanmadı» — işlemler GERÇEK sayfadan uca gidiyor ───────────────────────────────────────
+describe('OrdersPage — Mağaza Talepleri işlemleri gerçek sayfadan uca bağlı (dilim 2a)', { timeout: 30_000 }, () => {
+  const ILK = '2026-10-08T09:00:00.000Z';
+  const BASLIK = { 'Content-Type': 'application/json' };
+  async function magazaSekmesi(...d: Array<{ id: string; veri: unknown }>) {
+    await sayfaCiz({ userRole: 'Sales' });   // Satış da yetkilidir (sekmeyi görenler = işlem yapanlar)
+    talepGonder(...d);
+    tikla(MAGAZA);
+    return screen.getByRole('region', { name: 'Mağaza Talepleri' });
+  }
+
+  it('«İlerlet» → TAM 1 istek: `POST /api/magaza-talepleri/:id/durum`, gövdede satırın sürümü; tünel başlığı yok', async () => {
+    magazaYaniti(200, { ok: true });
+    const liste = await magazaSekmesi({ id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { durumSurum: 4 }) });
+    await tiklaBekle(within(liste).getByRole('button', { name: 'İlerlet: Teyit edildi' }));
+    expect(magazaIstekleri()).toEqual([{ adres: '/api/magaza-talepleri/mt-1/durum', yontem: 'POST', basliklar: BASLIK, govde: { onceki: 'yeni', surum: 4, durum: 'teyit' } }]);
+    // İyimser güncelleme YOK: rozet akış yeni belgeyi getirince değişir.
+    expect(within(liste).getByText('Yeni')).toBeTruthy();
+    talepGonder({ id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { durum: 'teyit', durumSurum: 5 }) });
+    expect(within(liste).getByText('Teyit edildi')).toBeTruthy();
+    expect(within(liste).getByRole('button', { name: 'İlerlet: Hazırlanıyor' })).toBeTruthy();
+  });
+
+  it('409 `gecis-yok`: sayfada «başka biri değiştirdi» uyarısı ve yanıttaki güncel aşama', async () => {
+    magazaYaniti(409, { ok: false, kod: 'gecis-yok', durum: 'sevk' });
+    const liste = await magazaSekmesi({ id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK) });
+    await tiklaBekle(within(liste).getByRole('button', { name: 'İlerlet: Teyit edildi' }));
+    expect(within(liste).getByRole('alert').textContent).toMatch(/^Başka biri değiştirdi/);
+    expect(within(liste).getByText('Sevk edildi')).toBeTruthy();
+  });
+
+  it('detayda «teslim edildi» kutusu → TAM 1 istek: `POST …/kalem-teslim`, `kalemler: [\'b:0\']`; not kaydı aynı aşamayla `…/durum`', async () => {
+    magazaYaniti(200, { ok: true });
+    const liste = await magazaSekmesi({ id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { durum: 'sevk', durumSurum: 7 }) });
+    fireEvent.click(within(liste).getByRole('button', { expanded: false }));
+    await tiklaBekle(within(liste).getByRole('checkbox', { name: 'Teslim edildi: İç cephe boyası' }));
+    expect(magazaIstekleri()).toEqual([{ adres: '/api/magaza-talepleri/mt-1/kalem-teslim', yontem: 'POST', basliklar: BASLIK, govde: { surum: 7, teslim: true, kalemler: ['b:0'] } }]);
+
+    // Akış sürüm 8'i ve işareti getirdi; ardından not yazımı YENİ sürümle gider.
+    talepGonder({ id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { durum: 'sevk', durumSurum: 8,
+      kalemTeslim: { 'b:0': { durum: 'teslim', zaman: '2026-10-08T10:00:00.000Z', kim: { uid: 'uid-7', ad: 'Satış Personeli' } } } }) });
+    expect((within(liste).getByRole('checkbox', { name: 'Teslim edildi: İç cephe boyası' }) as HTMLInputElement).checked).toBe(true);
+    expect(within(liste).getByText('1 / 1 kalem teslim')).toBeTruthy();
+    fireEvent.change(within(liste).getByRole('textbox'), { target: { value: 'Kargoya verildi' } });
+    await tiklaBekle(within(liste).getByRole('button', { name: 'Notu kaydet' }));
+    expect(magazaIstekleri()[1]).toEqual({ adres: '/api/magaza-talepleri/mt-1/durum', yontem: 'POST', basliklar: BASLIK, govde: { onceki: 'sevk', surum: 8, durum: 'sevk', aciklama: 'Kargoya verildi' } });
+  });
+
+  it('«Yeniden gönder» → TAM 1 istek: `POST …/bildirim-gonder`, gövde `{}`; 409 `yapilandirilmamis` yanıtındaki ayar ADI ekranda', async () => {
+    magazaYaniti(409, { ok: false, kod: 'yapilandirilmamis', kip: 'yerel', eksik: ['APP_URL'] });
+    const liste = await magazaSekmesi({ id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { bildirim: { durum: 'yapilandirilmamis', zaman: ILK } }) });
+    await tiklaBekle(within(liste).getByRole('button', { name: 'Yeniden gönder' }));
+    expect(magazaIstekleri()).toEqual([{ adres: '/api/magaza-talepleri/mt-1/bildirim-gonder', yontem: 'POST', basliklar: BASLIK, govde: {} }]);
+    expect(within(liste).getByRole('alert').textContent).toBe('Sunucu posta ayarı eksik: APP_URL');
+  });
+
+  it('`gitti` bildirimli talepte «Yeniden gönder» sayfada YOK (çift posta çiti)', async () => {
+    const liste = await magazaSekmesi({ id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK) });
+    expect(within(liste).queryByRole('button', { name: /yeniden gönder/i })).toBeNull();
+  });
+
+  it('arama kutusu ve «Etiket basıldı» satırı sayfada: barkod metni + Enter tek eşleşmenin detayını açar; istek ATILMAZ', async () => {
+    const etiketZamani = new Date(2026, 9, 8, 14, 5, 0).toISOString();   // yerel 14:05 (saat dilimine takılmasın)
+    const liste = await magazaSekmesi(
+      { id: 'mt-1', veri: talepDokumani('T261008-CZZF', ILK, { durum: 'teslim', etiketBasildi: { zaman: etiketZamani, koli: 3, kim: { uid: 'u-9', panel: true } } }) },
+      { id: 'mt-2', veri: talepDokumani('T261008-AB12', '2026-10-08T09:30:00.000Z') },
+    );
+    // Varsayılan süzgeç «açık»: teslim edilmiş talep listede yok.
+    expect(within(liste).queryByText('T261008-CZZF')).toBeNull();
+    expect(dugme('Mağaza Talepleri 1 yeni talep')).not.toBeNull();
+    const kutu = within(liste).getByRole('searchbox', { name: 'Talep ara (no, telefon son 4 hane, müşteri)' });
+    fireEvent.change(kutu, { target: { value: 'T261008-CZZF' } });
+    fireEvent.keyDown(kutu, { key: 'Enter' });
+    expect(within(liste).getByText('T261008-CZZF')).toBeTruthy();
+    expect(within(liste).queryByText('T261008-AB12')).toBeNull();
+    const detay = within(liste).getByRole('region', { name: 'T261008-CZZF talep detayı' });
+    expect(within(detay).getByText('Etiket basıldı 14:05 (3 koli)')).toBeTruthy();
+    expect(within(liste).queryByRole('button', { name: /etiket/i })).toBeNull();   // ERP'de etiket basma düğmesi yok
+    expect(magazaIstekleri()).toEqual([]);
+    // Sekme rozeti aramadan ETKİLENMEZ: sayı bütün taleplerden, süzülmüş listeden değil.
+    expect(dugme('Mağaza Talepleri 1 yeni talep')).not.toBeNull();
   });
 });

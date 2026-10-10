@@ -82,8 +82,9 @@ import { osc } from '../i18n/onlineSiparis';
 import { isAllowed, APP_ROLES } from '../lib/rbac';
 import { MAGAZA_TALEP_KOLEKSIYONU } from '../lib/magazaTalep';
 import { useAppStore } from '../store/appStore';
-import { useMagazaTalepleri, useMagazaYeniSayaci, magazaSonGorulenAnahtari, magazaIlkKaynakSekmesi } from '../hooks/useMagazaTalepleri';
+import { useMagazaTalepleri, useMagazaYeniSayaci, magazaSonGorulenAnahtari, magazaIlkKaynakSekmesi, yeniAsamaSayisi } from '../hooks/useMagazaTalepleri';
 import MagazaTalepleri, { MagazaYeniRozeti } from '../components/siparis/MagazaTalepleri';
+import { magazaTalepDurumuYaz, magazaKalemTeslimYaz, magazaBildirimGonder } from '../services/magazaTalepIstemcisi';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -857,15 +858,25 @@ export default function OrdersPage({
                     className={kaynakSekmesiSinifi(orderSourceTab === 'magaza')}
                   >
                     <Globe className="w-4 h-4" />
-                    {/* Açık boşluk: rozetin `aria-label`'ı düğmenin erişilebilir adına etikete YAPIŞMADAN katılsın («Mağaza Talepleri 3 yeni talep»). */}
+                    {/* Açık boşluk: rozetin `aria-label`'ı düğmenin erişilebilir adına etikete YAPIŞMADAN katılsın («Mağaza Talepleri 3 görülmemiş talep 5 yeni talep»).
+                        İki sayı, ayrı etiketle (dilim 2a): «görülmemiş» = son bakıştan sonra gelenler; «yeni» = aşaması `yeni` olanlar (site paneliyle AYNI sayı). */}
                     {op(currentLanguage).magaza_talepleri}{' '}
-                    <MagazaYeniRozeti sayi={magazaYeniSayisi} currentLanguage={currentLanguage} />
+                    <MagazaYeniRozeti sayi={magazaYeniSayisi} yeni={yeniAsamaSayisi(magaza.talepler)} currentLanguage={currentLanguage} />
                   </button>
                 )}
               </div>
 
+              {/* Bileşen istek ATMAZ: ERP'nin üç yazma yolu (`services/magazaTalepIstemcisi.ts`) buradan nitelik olarak verilir (dilim 2a). */}
               {orderSourceTab === 'magaza' && (
-                <MagazaTalepleri talepler={magaza.talepler} yukleniyor={magaza.yukleniyor} hata={magaza.hata} currentLanguage={currentLanguage} />
+                <MagazaTalepleri
+                  talepler={magaza.talepler}
+                  yukleniyor={magaza.yukleniyor}
+                  hata={magaza.hata}
+                  currentLanguage={currentLanguage}
+                  onDurumDegistir={magazaTalepDurumuYaz}
+                  onKalemTeslim={magazaKalemTeslimYaz}
+                  onBildirimGonder={magazaBildirimGonder}
+                />
               )}
               {orderSourceTab !== 'magaza' && <>
               {/* ── Phase 522: Order Fulfillment Rate KPI strip ── */}

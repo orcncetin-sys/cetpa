@@ -7,7 +7,11 @@
  * Türkçe casing 'HİGH' üretirdi → çeviri. Bilinmeyen değer HAM döner (sahte kesinlik yok).
  */
 import { describe, it, expect } from 'vitest';
-import { siparisDurumEtiketi, sevkiyatDurumEtiketi, faturaTipiEtiketi, oncelikEtiketi, odemeDurumuEtiketi, kargoDurumuEtiketi } from './durumEtiketi';
+import {
+  siparisDurumEtiketi, sevkiyatDurumEtiketi, faturaTipiEtiketi, oncelikEtiketi, odemeDurumuEtiketi, kargoDurumuEtiketi,
+  magazaTalepDurumEtiketi, magazaTalepDurumRengi, magazaKalemTeslimEtiketi, magazaKalemTeslimRengi, MAGAZA_ASAMA_RENGI,
+} from './durumEtiketi';
+import { MAGAZA_TALEP_ASAMALARI } from '../lib/magazaTalep';
 
 describe('siparisDurumEtiketi / sevkiyatDurumEtiketi', () => {
   it("TR: beş sipariş durumu Türkçe (İ/ı doğru: 'Teslim Edildi', 'İptal Edildi', 'Hazırlanıyor')", () => {
@@ -113,5 +117,43 @@ describe('kargoDurumuEtiketi — Shopify fulfillment_status', () => {
   it('bilinmeyen değer HAM döner, büyütülmez', () => {
     expect(kargoDurumuEtiketi('in_progress', 'tr')).toBe('in_progress');
     expect(kargoDurumuEtiketi('hasOwnProperty', 'tr')).toBe('hasOwnProperty');
+  });
+});
+
+// ── Mağaza sipariş talebi aşamaları (dilim 2a, şartname v6 § 5.2) ───────────────────────────────────────────────────
+describe('magazaTalepDurumEtiketi / renk tablosu / kalem teslim etiketi', () => {
+  it('altı aşamanın etiketi iki dilde — Türkçe harfler tam («Hazırlanıyor», «İptal edildi»)', () => {
+    expect(MAGAZA_TALEP_ASAMALARI.map(a => magazaTalepDurumEtiketi(a, 'tr'))).toEqual(['Yeni', 'Teyit edildi', 'Hazırlanıyor', 'Sevk edildi', 'Teslim edildi', 'İptal edildi']);
+    expect(MAGAZA_TALEP_ASAMALARI.map(a => magazaTalepDurumEtiketi(a, 'en'))).toEqual(['New', 'Confirmed', 'Preparing', 'Shipped', 'Delivered', 'Cancelled']);
+    // Slug ekrana sızmaz: hiçbir etiket saklanan değerin kendisi değildir.
+    for (const a of MAGAZA_TALEP_ASAMALARI) for (const dil of ['tr', 'en']) expect(magazaTalepDurumEtiketi(a, dil)).not.toBe(a);
+  });
+
+  it('altı sınıflık renk tablosu şartnamedeki zeminlerle; metin sınıfı zeminle aynı tonun koyusu (`*-700`: AA karşıtlık)', () => {
+    expect(MAGAZA_ASAMA_RENGI).toEqual({
+      yeni: 'bg-red-50 text-red-700',
+      teyit: 'bg-yellow-50 text-yellow-700',
+      hazirlaniyor: 'bg-blue-50 text-blue-700',
+      sevk: 'bg-indigo-50 text-indigo-700',
+      teslim: 'bg-green-50 text-green-700',
+      iptal: 'bg-gray-100 text-gray-700',
+    });
+    for (const a of MAGAZA_TALEP_ASAMALARI) {
+      expect(magazaTalepDurumRengi(a)).toBe(MAGAZA_ASAMA_RENGI[a]);
+      expect(magazaTalepDurumRengi(a)).toMatch(/^bg-(\w+)-(50|100) text-\1-700$/);
+    }
+    // Altı aşamanın altısı da AYRI renktedir (iki aşama aynı rozetle karışmaz).
+    expect(new Set(Object.values(MAGAZA_ASAMA_RENGI)).size).toBe(6);
+  });
+
+  it('kalem teslim etiketi «teslim edildi» / «bekliyor» (iki dil); rengi AYNI tablodan — yeni renk eklenmez', () => {
+    expect(magazaKalemTeslimEtiketi(true, 'tr')).toBe('teslim edildi');
+    expect(magazaKalemTeslimEtiketi(false, 'tr')).toBe('bekliyor');
+    expect(magazaKalemTeslimEtiketi(true, 'en')).toBe('delivered');
+    expect(magazaKalemTeslimEtiketi(false, 'en')).toBe('pending');
+    expect(magazaKalemTeslimRengi(true)).toBe(MAGAZA_ASAMA_RENGI.teslim);
+    expect(magazaKalemTeslimRengi(true)).toContain('bg-green-50');
+    expect(magazaKalemTeslimRengi(false)).toBe(MAGAZA_ASAMA_RENGI.iptal);
+    expect(magazaKalemTeslimRengi(false)).toContain('bg-gray-100');
   });
 });

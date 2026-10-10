@@ -13,28 +13,56 @@
  * «Yükleniyor…» demez, «okunamadı» der). Geç gelen görüntü hatayı siler: yavaş ama meşru abonelik kilitli kalmaz.
  *
  * Abonelik YALNIZ buradadır: `components/siparis/MagazaTalepleri.tsx` kendi aboneliğini AÇMAZ, App.tsx'e dinleyici
- * eklenmez. Sayaç bu yüzden Siparişler ekranı açıkken çalışır (kenar çubuğu rozeti dilim 2).
+ * eklenmez. Sayaç bu yüzden Siparişler ekranı açıkken çalışır (kenar çubuğunda rozet YOK — ayrı iş, bu dilimde değil).
  *
  * AKIŞTAN GELEN DOKÜMAN GÜVENİLMEZ BİÇİMDEDİR (eski sürümün yazdığı satır, elle düzeltilmiş kayıt, yarım göç):
  * `magazaTalebiDaralt` her alanı tek tek daraltır. Bilinmeyen sayı 0'a ÇEVRİLMEZ (`null`; adet için NaN) — ekran '—'
  * ya da «fiyat sorulacak» basar. `olusturma`'sı çözülemeyen kayıt ATILMAZ: listede kalır, yalnız «yeni» sayılmaz.
+ *
+ * DİLİM 2a (şartname v6 § 5.1, 2026-10-09): `durum` dokümandan okunur ve KAPALI kümeden geçer — bilinmeyen / eksik değer
+ * `'yeni'`ye ÇEVRİLMEZ, `null` olur (ekran «durum okunamadı» basar, işlem düğmesi çizmez). `durumSurum` sayı değilse 0 (CAS
+ * için istemci gördüğü sürümü geri gönderir). `kalemTeslim` giriş giriş daraltılır (uymayan GİRİŞ düşer, nesnenin tamamı
+ * değil); beyan kalemine `teslim` / `anahtar` YAZILMAZ (V16) — ekran anahtarı `magazaKalemAnahtarlari` ile türetir.
+ * YAZMA bu dosyada DEĞİL: `services/magazaTalepIstemcisi.ts` (`authFetch`); bu kanca ağ isteği atmaz.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, query } from '../lib/dbClient';
 import { db } from '../firebase';
 import { zamanMs } from '../utils/zaman';
 import {
-  MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_BILDIRIM_HATA_SINIFLARI,
+  MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_BILDIRIM_HATA_SINIFLARI, MAGAZA_KALEM_ANAHTARI_DESENI, magazaAsamasiMi, magazaAcikAsamaMi,
   type MagazaTalebi, type MagazaTalepKalemi, type MagazaTalepMusteri, type MagazaBildirim, type MagazaBildirimDurumu,
+  type MagazaTalepAsamasi, type MagazaAcikAsama, type MagazaDurumGecisi, type MagazaKalemTeslimGirisi, type MagazaEtiketBasildi,
+  type MagazaKanal,
 } from '../lib/magazaTalep';
 
 /**
  * Ekrandaki talep satırı: sözleşme tipi (`lib/magazaTalep.ts` `MagazaTalebi`) + doküman kimliği.
  *
- * TEK FARK `bildirim`: dokümanda okunamıyorsa (alan yok / bilinmeyen durum) `null`'dır. Sözleşme tipi orada bir durum
- * ZORUNLU kılar; uydurulacak her değer yanlış bir şey söylerdi («gitti» = sahte güvence, «bekliyor» = sahte bekleme).
+ * Sözleşmeden FARKLARI (hepsi «okunamayan değer uydurulmaz» kuralından):
+ *   - `bildirim`: dokümanda okunamıyorsa (alan yok / bilinmeyen durum) `null`. Sözleşme tipi orada bir durum ZORUNLU kılar;
+ *     uydurulacak her değer yanlış bir şey söylerdi («gitti» = sahte güvence, «bekliyor» = sahte bekleme).
+ *   - `durum`: kapalı küme dışı / eksik → `null` (`'yeni'` DEĞİL — § 5.1).
+ *   - `durumSurum` hep sayı (yoksa 0), `durumAciklama` hep metin (yoksa `''`), `iptalOncesi` dört açık aşamadan biri ya da
+ *     `null`, `durumGecmisi` daraltılmış girişler (yoksa `[]`), `kalemTeslim` hep nesne (yoksa `{}`), `etiketBasildi`
+ *     nesne ya da `null` (= basılmadı).
  */
-export type MagazaTalepSatiri = Omit<MagazaTalebi, 'bildirim'> & { id: string; bildirim: MagazaBildirim | null };
+export interface MagazaTalepSatiri extends Omit<MagazaTalebi,
+  'bildirim' | 'durum' | 'durumAciklama' | 'durumZamani' | 'durumSurum' | 'iptalOncesi' | 'durumGecmisi' | 'durumGecmisiDusen' | 'kalemTeslim' | 'etiketBasildi'> {
+  id: string;
+  bildirim: MagazaBildirim | null;
+  durum: MagazaTalepAsamasi | null;
+  durumAciklama: string;
+  /** Yalnız dokümanda metin olarak varsa; `magazaGuncellemeZamani` biçimi ayrıca denetler. */
+  durumZamani?: string;
+  durumSurum: number;
+  iptalOncesi: MagazaAcikAsama | null;
+  durumGecmisi: MagazaDurumGecisi[];
+  /** Yalnız dokümanda negatif olmayan tam sayı olarak varsa. */
+  durumGecmisiDusen?: number;
+  kalemTeslim: Record<string, MagazaKalemTeslimGirisi>;
+  etiketBasildi: MagazaEtiketBasildi | null;
+}
 
 export interface MagazaTalepleriDurumu {
   /** Daraltılmış talepler — SIRASIZ (akış önbelleğinin sırası); sıralama ve 200 sınırı ekranın işidir. */
@@ -100,15 +128,68 @@ function musteriDaralt(v: unknown): MagazaTalepMusteri {
   };
 }
 
+// ── Dilim 2a alanları ──
+// `Record<…, true>`: aşama kümesine değer eklenirse burası DERLENMEZ (dizi `includes` sessizce eksik kalırdı). Bilinmeyen /
+// eksik değer `'yeni'`ye ÇEVRİLMEZ: `null` (§ 5.1).
+const BILINEN_ASAMA: Record<MagazaTalepAsamasi, true> = { yeni: true, teyit: true, hazirlaniyor: true, sevk: true, teslim: true, iptal: true };
+const asamaYaDaNull = (v: unknown): MagazaTalepAsamasi | null =>
+  (typeof v === 'string' && Object.prototype.hasOwnProperty.call(BILINEN_ASAMA, v) && magazaAsamasiMi(v) ? v : null);
+const kanalMi = (v: unknown): v is MagazaKanal => v === 'panel' || v === 'erp';
+/** `{ uid, ad }` — ikisi de metin değilse giriş düşer (`null`). */
+const kimDaralt = (v: unknown): { uid: string; ad: string } | null => {
+  const k = nesne(v);
+  return typeof k.uid === 'string' && typeof k.ad === 'string' ? { uid: k.uid, ad: k.ad } : null;
+};
+
+/** Geçmiş girişi: aşama çifti kapalı kümeden, `zaman` metin, `kim` tam, `kanal` iki değerden biri; biri bozuksa giriş düşer. */
+function gecisDaralt(v: unknown): MagazaDurumGecisi | null {
+  const g = nesne(v);
+  const onceki = asamaYaDaNull(g.onceki), yeni = asamaYaDaNull(g.yeni), kim = kimDaralt(g.kim);
+  if (onceki === null || yeni === null || kim === null || typeof g.zaman !== 'string' || !kanalMi(g.kanal)) return null;
+  return { onceki, yeni, zaman: g.zaman, kim, kanal: g.kanal };
+}
+
+/**
+ * Kalem teslim nesnesi: anahtar kurallı desene uymalı, giriş `{ durum: 'bekliyor' | 'teslim', zaman: metin, kim: { uid, ad } }`.
+ * Uymayan GİRİŞ düşer — nesnenin tamamı değil (akış güvenilmez biçimdedir). Desene uyan anahtar `b:<n>` / `t:<hex>` olduğu
+ * için prototip adı (`__proto__`, `constructor`) hiç geçemez.
+ */
+function kalemTeslimDaralt(v: unknown): Record<string, MagazaKalemTeslimGirisi> {
+  const ham = nesne(v);
+  const out: Record<string, MagazaKalemTeslimGirisi> = {};
+  for (const anahtar of Object.keys(ham)) {
+    if (!MAGAZA_KALEM_ANAHTARI_DESENI.test(anahtar)) continue;
+    const g = nesne(ham[anahtar]);
+    const kim = kimDaralt(g.kim);
+    if ((g.durum !== 'bekliyor' && g.durum !== 'teslim') || typeof g.zaman !== 'string' || kim === null) continue;
+    out[anahtar] = { durum: g.durum, zaman: g.zaman, kim };
+  }
+  return out;
+}
+
+/** (V23) `etiketBasildi`: nesne ve `zaman` metin ise `{ zaman, koli?: pozitif tam sayıysa, kim }`; yok / `null` / bozuk → `null`. */
+function etiketBasildiDaralt(v: unknown): MagazaEtiketBasildi | null {
+  const e = nesne(v);
+  if (typeof e.zaman !== 'string') return null;
+  const kimHam = nesne(e.kim);
+  const kim: MagazaEtiketBasildi['kim'] = {
+    ...(typeof kimHam.uid === 'string' ? { uid: kimHam.uid } : {}),
+    ...(kimHam.panel === true ? { panel: true as const } : {}),
+  };
+  const koli = typeof e.koli === 'number' && Number.isInteger(e.koli) && e.koli >= 1 ? e.koli : null;
+  return { zaman: e.zaman, ...(koli !== null ? { koli } : {}), kim };
+}
+
 /** Akıştan gelen ham dokümanı ekran satırına daraltır. HİÇBİR kaydı atmaz: okunamayan alan boş / `null` / NaN olur. */
 export function magazaTalebiDaralt(id: string, ham: unknown): MagazaTalepSatiri {
   const d = nesne(ham);
   const t = nesne(d.talepEdilen);
+  const dusen = typeof d.durumGecmisiDusen === 'number' && Number.isInteger(d.durumGecmisiDusen) && d.durumGecmisiDusen >= 0 ? d.durumGecmisiDusen : null;
   return {
     id,
     companyId: metin(d.companyId),
     talepNo: metin(d.talepNo),
-    durum: 'yeni',   // dilim 1'de tek değer; ekran bu alanı göstermez (teyit / ret durumları dilim 2)
+    durum: asamaYaDaNull(d.durum),
     olusturma: metin(d.olusturma),
     istemciTarihi: typeof d.istemciTarihi === 'string' ? d.istemciTarihi : null,
     musteri: musteriDaralt(d.musteri),
@@ -119,7 +200,22 @@ export function magazaTalebiDaralt(id: string, ham: unknown): MagazaTalepSatiri 
     fiyatiSorulacakVar: d.fiyatiSorulacakVar === true,
     ...(d.kirpildi === true ? { kirpildi: true as const } : {}),
     bildirim: bildirimDaralt(d.bildirim),
+    // ── dilim 2a ──
+    durumAciklama: metin(d.durumAciklama),
+    ...(typeof d.durumZamani === 'string' ? { durumZamani: d.durumZamani } : {}),
+    // Sayı değilse 0: istemci CAS için gördüğü sürümü geri gönderir; dilim 1 kaydında alan yoktur (= 0).
+    durumSurum: typeof d.durumSurum === 'number' && Number.isInteger(d.durumSurum) && d.durumSurum >= 0 ? d.durumSurum : 0,
+    iptalOncesi: magazaAcikAsamaMi(d.iptalOncesi) ? d.iptalOncesi : null,
+    durumGecmisi: Array.isArray(d.durumGecmisi) ? d.durumGecmisi.flatMap(g => { const x = gecisDaralt(g); return x === null ? [] : [x]; }) : [],
+    ...(dusen !== null ? { durumGecmisiDusen: dusen } : {}),
+    kalemTeslim: kalemTeslimDaralt(d.kalemTeslim),
+    etiketBasildi: etiketBasildiDaralt(d.etiketBasildi),
   };
+}
+
+/** Sekme rozetinin ikinci sayısı: aşaması `yeni` olan talepler (panelin «Yeni»siyle AYNI sayı — § 5.2). */
+export function yeniAsamaSayisi(talepler: readonly Pick<MagazaTalepSatiri, 'durum'>[]): number {
+  return talepler.filter(t => t.durum === 'yeni').length;
 }
 
 // ── Abonelik ────────────────────────────────────────────────────────────────────────────────────────────────────────

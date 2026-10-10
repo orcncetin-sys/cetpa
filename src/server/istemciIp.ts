@@ -151,8 +151,9 @@ export function akisSorguBelirteci(sorgu: unknown): string {
   const t = sorgu !== null && typeof sorgu === 'object' ? (sorgu as { token?: unknown }).token : undefined;
   return String(t || '');
 }
-/** JWT biçimi (üç base64url parça) — biçimsiz dizge doğrulayıcıya hiç gitmez. */
-const JWT_BICIMI = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+/** JWT biçimi (üç base64url parça) — biçimsiz dizge doğrulayıcıya hiç gitmez. Dışa açık: mağaza paneli belirteci
+ *  (`mp1-<yük>.<imza>`, İKİ parça) bu desene UYMAZ ve hiçbir sınırlayıcıda Firebase doğrulayıcısına gitmez (çit, dilim 2a). */
+export const JWT_BICIMI = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 /** Firebase ID belirteci 1–2 KB'tır; dev başlıkla doğrulama maliyeti ödetilmesin (Node başlık sınırı 16 KB). */
 const BELIRTEC_EN_UZUN = 8192;
 /**

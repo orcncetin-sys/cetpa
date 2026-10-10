@@ -25,6 +25,11 @@ import { geceOzeti, koleksiyonOlculeri, senkronSatiri } from '../acilisTani.js';
 import { broadcastDocChange } from '../pgShim.js';
 import { smtpYapilandirmasi } from '../smtpPosta.js';
 import { magazaBildirimSayimi, MAGAZA_BILDIRIM_SAYIM_PENCERESI_GUN } from '../kanal/magazaBildirimSayim.js';
+import { magazaAcikSayimi, type MagazaAcikSayimi } from '../kanal/magazaAcikSayim.js';
+// Sayaç okuyucuları server.ts ve bekçiyle AYNI yoldan (`.js`) içe aktarılır: sayaçlar modül düzeyindedir, farklı yoldan
+// ikinci bir modül örneği oluşsa bu uç hep sıfır görürdü. İki modül de bu dosyayı / server.ts'i içe aktarmaz (döngü yok).
+import { magazaSayaclari, magazaTakipSayaclari } from './magazaRoutes.js';
+import { magazaPanelSayaclari } from './magazaPanelZinciri.js';
 import express from 'express';
 
 /** /api/ops/acilis-tani: senkron günlüğü LİSTESİNİN satır sınırı (aşılırsa yanıtta `kesildi: true`) ve gün özetinin emniyet sınırı. */
@@ -33,6 +38,30 @@ const SENKRON_OZET_SINIRI = 5000;
 /** mikroMirror.ts: yalnız bu üç tablo her koşuda `guncelleme = now()` yazar (ON CONFLICT … DO UPDATE); diğer ayna tabloları
  *  `ON CONFLICT … DO NOTHING` ile yazılır — damgaları son YENİ satırın zamanıdır, son senkronun değil. */
 const HER_KOSU_DAMGALI = new Set(['mikro_stoklar', 'mikro_stok_satis_fiyat_listeleri', 'mikro_cari_hesaplar']);
+
+/** `/api/ops/summary` → `magaza` bloğu (dilim 2a): açık talep sayımı + üç süreç içi sayaç kümesi. `null` = okunamadı / havuz yok. */
+export interface OpsMagazaOzeti {
+  acik: MagazaAcikSayimi | null;
+  sayaclar: { uc: Record<string, number> | null; panel: Record<string, number> | null; takip: Record<string, number> | null };
+}
+
+/**
+ * Sayaç okuyucusunun dönüşünü yanıta hazırlar: YALNIZ kod kimliği biçimindeki anahtarlar ve eksi olmayan tam sayılar
+ * geçer (başka hiçbir değer — metin, iç içe nesne — yanıta giremez). Okuyucu fırlatırsa ya da nesne dönmezse `null`.
+ */
+function sayacKumesi(oku: () => unknown): Record<string, number> | null {
+  try {
+    const ham = oku();
+    if (typeof ham !== 'object' || ham === null || Array.isArray(ham)) return null;
+    const temiz: Record<string, number> = {};
+    for (const [ad, deger] of Object.entries(ham)) {
+      if (/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(ad) && typeof deger === 'number' && Number.isInteger(deger) && deger >= 0) temiz[ad] = deger;
+    }
+    return temiz;
+  } catch {
+    return null;
+  }
+}
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface OpsRouteCtx {
@@ -310,11 +339,20 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
       } catch {
         magazaBildirim.hata = 'okunamadi';
       }
+      // Mağaza (dilim 2a, § 6): açık talep sayımı (bekçinin `magaza_talep` ayrıntısıyla AYNI sorgu — kanal/magazaAcikSayim.ts)
+      // + üç süreç içi sayaç kümesi (dilim 1 uçları / panel + ERP uçları / takip sorgusu). Bekçi günde bir koşar; bu blok
+      // ANLIK okumadır (yayın sonrası «uçlar kullanılıyor mu», «açık talep birikiyor mu»). Kişisel veri yok: sayım kapalı
+      // kümeden sütunlar, sayaçlar yalnız sayı. Her okuma KENDİ yakalayıcısında: biri düşerse o alan `null`, özet 500'e DÜŞMEZ.
+      const magaza: OpsMagazaOzeti = {
+        acik: pool ? await magazaAcikSayimi(pool).catch(() => null) : null,
+        sayaclar: { uc: sayacKumesi(magazaSayaclari), panel: sayacKumesi(magazaPanelSayaclari), takip: sayacKumesi(magazaTakipSayaclari) },
+      };
       res.json({
         generatedAt: new Date().toISOString(),
         uptimeSeconds: Math.round(process.uptime()),
         env: process.env.NODE_ENV || 'development',
         magazaBildirim,
+        magaza,
         watchdog: {
           date: latest?.date ?? null,
           ok: latest?.ok ?? null,

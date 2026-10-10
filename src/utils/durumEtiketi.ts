@@ -20,6 +20,7 @@
  * yerine ham değer görünür (sahte kesinlik yerine görünür bilinmezlik).
  */
 import type { Order, Shipment } from '../types';
+import type { MagazaTalepAsamasi } from '../lib/magazaTalep';
 
 const SIPARIS_TR: Record<Order['status'], string> = {
   Pending: 'Bekliyor',
@@ -164,4 +165,58 @@ export function kargoDurumuEtiketi(deger: string | undefined | null, dil: string
   const ham = typeof deger === 'string' ? deger.trim() : '';
   if (!ham) return '—';
   return ciftSec(KARGO_DURUMU, ham, dil) ?? ham;
+}
+
+/**
+ * ── MAĞAZA SİPARİŞ TALEBİ AŞAMALARI (dilim 2a, şartname v6 § 5.2; 2026-10-09) ──
+ * Saklanan değerler `lib/magazaTalep.ts` `MAGAZA_TALEP_ASAMALARI` (`yeni` → `teyit` → `hazirlaniyor` → `sevk` → `teslim`;
+ * `iptal`). Aşama BİRLİĞİ `Record<MagazaTalepAsamasi, …>` ile kilitli: kümeye aşama eklenirse etiket ve renk eklenmeden
+ * derlenmez. Renk tablosu TEK kaynak: ERP rozeti buradan okur; kalem teslim rozeti de aynı tablodan (`teslim` yeşili,
+ * `iptal` grisi) — yeni renk eklenmez. Metin sınıfları WCAG AA karşıtlığını tutar (`*-700` metin, `*-50` / `gray-100` zemin).
+ * Bilinmeyen değer bu işlevlere GİRMEZ: kanca aşamayı kapalı kümeden geçirir, okunamayanı `null` yapar; ekran `null` için
+ * kendi «durum okunamadı» metnini basar (uydurma aşama yok).
+ */
+const MAGAZA_ASAMA: Record<MagazaTalepAsamasi, Cift> = {
+  yeni:         { tr: 'Yeni',          en: 'New' },
+  teyit:        { tr: 'Teyit edildi',  en: 'Confirmed' },
+  hazirlaniyor: { tr: 'Hazırlanıyor',  en: 'Preparing' },
+  sevk:         { tr: 'Sevk edildi',   en: 'Shipped' },
+  teslim:       { tr: 'Teslim edildi', en: 'Delivered' },
+  iptal:        { tr: 'İptal edildi',  en: 'Cancelled' },
+};
+
+/** Altı sınıflık renk tablosu (zemin + metin). */
+export const MAGAZA_ASAMA_RENGI: Record<MagazaTalepAsamasi, string> = {
+  yeni:         'bg-red-50 text-red-700',
+  teyit:        'bg-yellow-50 text-yellow-700',
+  hazirlaniyor: 'bg-blue-50 text-blue-700',
+  sevk:         'bg-indigo-50 text-indigo-700',
+  teslim:       'bg-green-50 text-green-700',
+  iptal:        'bg-gray-100 text-gray-700',
+};
+
+/** Mağaza talebi aşamasının ekran etiketi (iki dil). */
+export function magazaTalepDurumEtiketi(asama: MagazaTalepAsamasi, dil: string): string {
+  return dil === 'tr' ? MAGAZA_ASAMA[asama].tr : MAGAZA_ASAMA[asama].en;
+}
+
+/** Aşama rozetinin sınıfı. */
+export function magazaTalepDurumRengi(asama: MagazaTalepAsamasi): string {
+  return MAGAZA_ASAMA_RENGI[asama];
+}
+
+const MAGAZA_KALEM_TESLIM: Record<'teslim' | 'bekliyor', Cift> = {
+  teslim:   { tr: 'teslim edildi', en: 'delivered' },
+  bekliyor: { tr: 'bekliyor',      en: 'pending' },
+};
+
+/** Kalem teslim işaretinin etiketi («teslim edildi» / «bekliyor»; iki dil). */
+export function magazaKalemTeslimEtiketi(teslim: boolean, dil: string): string {
+  const c = teslim ? MAGAZA_KALEM_TESLIM.teslim : MAGAZA_KALEM_TESLIM.bekliyor;
+  return dil === 'tr' ? c.tr : c.en;
+}
+
+/** Kalem rozetinin sınıfı — aşama tablosundan: işaretli `teslim` yeşili, bekleyen `iptal` grisi (yeni renk yok). */
+export function magazaKalemTeslimRengi(teslim: boolean): string {
+  return teslim ? MAGAZA_ASAMA_RENGI.teslim : MAGAZA_ASAMA_RENGI.iptal;
 }

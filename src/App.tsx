@@ -167,6 +167,9 @@ import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fn
 // ── Lazy auth/marketing pages (not needed on initial render) ─────────────────
 const LandingPage = React.lazy(() => import('./components/LandingPage'));
 const OnboardingFlow = React.lazy(() => import('./components/OnboardingFlow'));
+// Mağaza paneli «ERP ile bağlan» onay sayfası (şartname § 5.3). Sayfa tembel; YOL SABİTİ ise aşağıda STATİK içe aktarılır
+// (doğrulama betiğinin 7. sondası yol metnini ana betikte arar).
+const MagazaPanelBaglanPage = React.lazy(() => import('./pages/MagazaPanelBaglanPage'));
 const PricingPage = React.lazy(() => import('./components/PricingPage'));
 
 // ── Kimlik gerektirmeyen tanıtım/yasal sayfalar ───────────────────────────
@@ -281,6 +284,7 @@ import { isAllowed } from './lib/rbac';
 import { useKonumYayini } from './hooks/useKonumYayini';
 import { birlesikAraclar } from './utils/filo';
 import { publicPageKey, type PublicPageKey } from './lib/publicPaths';
+import { MAGAZA_PANEL_BAGLAN_YOLU } from './lib/magazaPanelBaglan';
 import { TOP_LEVEL_TABS } from './lib/topLevelTabs';
 import { cikisIstegiGonder } from './lib/oturumCikisi';
 
@@ -742,6 +746,9 @@ function AppContent() {
   // Eski `/#sekme` biçimi modül yüklenirken path'e göçürüldü (dosya başındaki
   // IIFE) — burada yalnız pathname okumak yeterli.
   const [ilkYol] = useState(() => window.location.pathname);
+  // Mağaza paneli «ERP ile bağlan» onay sayfası (§ 5.3): sekme DEĞİLDİR; bu yolda pazarlama sayfası çizilmez (oturumsuz
+  // kullanıcı doğrudan giriş sayfasına düşer), oturumlu kullanıcı onay sayfasını görür. `ilkYol`dan türer (kanca değil).
+  const baglanSayfasi = ilkYol === MAGAZA_PANEL_BAGLAN_YOLU;
   // <html lang> dil secimini izlesin: EN icerik acikken lang="tr" kalirsa
   // ekran okuyucu Ingilizceyi Turkce fonetikle okur (WCAG 3.1.1, a11y teshisi).
   useEffect(() => { document.documentElement.lang = currentLanguage; }, [currentLanguage]);
@@ -3748,7 +3755,7 @@ function AppContent() {
     setEnteredApp(true);
   }
   if (!enteredApp && !isGuestMode && !(user && uygulamaYolundaMi)) {
-    if (!showLoginPage || user) {
+    if ((!showLoginPage || user) && !baglanSayfasi) {
       const handleDemoSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!demoForm.name || !demoForm.email) return;
@@ -4166,6 +4173,17 @@ function AppContent() {
           </p>
         </motion.div>
       </div>
+    );
+  }
+
+  // ─── Mağaza paneli onay sayfası (§ 5.3): giriş bloğundan SONRA, Onboarding kapısından ÖNCE ───
+  // Oturumsuz kullanıcı yukarıdaki giriş sayfasına düşer, girişten sonra buraya gelir (adres parçası yerinde kalır:
+  // useRouteSync bu yolda adrese dokunmaz). İstemci rol kapısı YOK: hüküm tıklamadan sonra sunucudan gelir.
+  if (baglanSayfasi && user) {
+    return (
+      <React.Suspense fallback={<div className="fixed inset-0 flex items-center justify-center bg-white"><div className="w-8 h-8 rounded-full border-2 border-[#ff4000] border-t-transparent animate-spin" /></div>}>
+        <MagazaPanelBaglanPage currentLanguage={currentLanguage} ad={user.displayName ?? ''} eposta={user.email ?? ''} />
+      </React.Suspense>
     );
   }
 

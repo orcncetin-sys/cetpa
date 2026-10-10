@@ -17,11 +17,15 @@
 import { resendGonderici, resendSagligi } from './eposta.js';
 import type { AdminDbLike } from './adminDbTypes.js';
 import { zamanla, isGunu } from './zamanla.js';
-// Mağaza talep kontrolünün okudukları. İkisi de bu modülü (ve server.ts'i) içe
+// Mağaza talep kontrolünün okudukları. Hiçbiri bu modülü (ve server.ts'i) içe
 // AKTARMAZ — döngü yok (ölçüldü 2026-10-08; çiti: opsWatchdog.magazaTalep.test.ts).
+// Sayaç okuyucuları rota modülleriyle AYNI yoldan (`.js`) içe aktarılır: sayaçlar modül düzeyindedir, farklı yoldan
+// ikinci bir modül örneği oluşsa bekçi hep sıfır görürdü (server.ts içe aktarım notu).
 import { smtpYapilandirmasi, smtpDogrula } from './smtpPosta.js';
 import { ortamdanKiraci } from './kiraciOrtami.js';
-import { magazaSayaclari } from './routes/magazaRoutes.js';
+import { magazaSayaclari, magazaTakipSayaclari } from './routes/magazaRoutes.js';
+import { magazaPanelSayaclari } from './routes/magazaPanelZinciri.js';
+import { magazaAcikSayimi, magazaYasMetni, type MagazaAcikSayimi } from './kanal/magazaAcikSayim.js';
 import {
   MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS, MAGAZA_BILDIRIM_HATA_SINIFLARI,
   type MagazaBildirimHataSinifi,
@@ -49,6 +53,13 @@ export interface OpsDeps {
    * 503 döner ve mağaza bunu görmez — bekçi buradan ölçer (`magaza_talep`).
    */
   serverTenantId: () => Promise<string>;
+  /**
+   * Site paneli («ERP ile bağlan», mağaza dilim 2a § 3.7) yapılandırması: panel anahtarı ve dönüş adresi VAR mı.
+   * server.ts'te BİR kez çözülen değerlerin (panelin gördüğü AYNI tanımlayıcılar) varlığıdır; bekçi ortamdan yeniden
+   * türetmez — ikinci bir türetme panelin gördüğünden ayrışabilirdi. Değer DEĞİL yalnız varlık: anahtar sırdır.
+   * Biri yoksa `yetki-kodu` ve bütün `/api/magaza/panel/*` uçları 503 `panel-yapilandirilmamis` döner.
+   */
+  magazaPanelYapilandirmasi: () => { anahtarVar: boolean; donusVar: boolean };
 }
 
 /** Kayit saklama sureleri. Hem bekci (asim var mi?) hem saklamaSuresiUygula
@@ -100,12 +111,24 @@ function opsToMs(v: unknown): number {
 //       yazılırken `updated_at` ilerler, eski talep «yeni» sayılırdı. Gitmeyen
 //       bildirim (gönderilemedi / yapılandırılmamış / takılı bekleyen) YALNIZ son
 //       7 günün talebindeyse kırmızıdır; daha eskisi ayrıntıda bilgi olarak sayılır.
-//       Süresiz sayımda tek eski satır kontrolü kalıcı kırmızıda tutuyordu (satırı
-//       kapatacak yol yok — «yeniden kuyruğa al» dilim 2) ve her sabahki aynı kırmızı
-//       YENİ arızayı ayırt edilemez kılıyordu. Yaşı okunamayan satır «eski» sayılmaz.
+//       Süresiz sayımda tek eski satır kontrolü kalıcı kırmızıda tutuyordu ve her
+//       sabahki aynı kırmızı YENİ arızayı ayırt edilemez kılıyordu. Satırı kapatmanın
+//       yolu ERP'deki «Yeniden gönder»dir (dilim 2a, `POST /api/magaza-talepleri/:id/bildirim-gonder`):
+//       talebi `bekliyor`a alır, işçi sonucu yazınca sayımdan düşer. Elle gönderim bu
+//       sayıma DOKUNMAZ — yaş `olusturma`dan ölçülür, tazelenen `bildirim.zaman`dan değil
+//       (bkz. `magazaTalepSayimSql`). Yaşı okunamayan satır «eski» sayılmaz.
 //   (c) Kullanılabilirlik — kiracı çözülemiyorsa, çözülen kimlik hiçbir kiracıyla
 //       eşleşmiyorsa (hayalet kiracı) ya da pg havuzu yoksa uç yazamaz. Uç süreç
 //       başından beri 500 döndüyse de kırmızı (öbür uç sayaçları yalnız bilgidir).
+//   (d) Site paneli (dilim 2a) — panel anahtarı ya da dönüş adresi yoksa panel HİÇ
+//       çalışmaz (bütün panel uçları 503 `panel-yapilandirilmamis`); kırmızı. Kiracı
+//       çözülemiyorsa panel de 503 verir: (c)'nin kırmızısı ikisini de kapsar.
+//   (e) Açık talepler (dilim 2a) — sayı, aşama dağılımı ve en eski açık talebin yaşı.
+//       BİLGİDİR (eşik yok — alarm eşiği kullanıcı kararı); yalnız okunamayan sayım
+//       kırmızıdır. Ölçüt panel listesiyle aynı sabit (`MAGAZA_ACIK_SQL`); kalem teslim
+//       işaretleri ve «etiket basıldı» açıklığı da yaşı da değiştirmez.
+// Üç sayaç okuyucusu ÜÇ AYRI parçada yazılır: `magazaSayaclari()` (dilim 1 uçları),
+// `magazaPanelSayaclari()` (panel + ERP uçları) ve `magazaTakipSayaclari()` (takip sorgusu).
 //
 // AYRINTIYA NE YAZILMAZ: kişisel veri, sır DEĞERİ, hata METNİ. Ayrıntı
 // `opsChecks`'e kaydedilir ve uyarı e-postasıyla gider. Eksik anahtarın yalnız
@@ -152,20 +175,31 @@ const PENCEREDEN_ESKI_SQL = `COALESCE((data->>'olusturma') COLLATE "C" ~ '^[0-9]
  * o satırlar `eski_gitmeyen` sütununda toplanır (ayrıntıda bilgi). Gitmeyen her satır bu dört sütundan EN ÇOK birine
  * düşer (taze `bekliyor` hiçbirine). Yaşı okunamayan satır iki yönde de kanıtsızdır: ne «taze» ne «pencereden eski»
  * sayılır, kırmızıda kalır.
+ *
+ * ÜRETİCİ (dilim 2a, § 6): `yol` belgedeki bildirim alanıdır. 2a'da yalnız `'bildirim'` (ilk bildirim) vardır ve çıktı
+ * dilim 1'in sorgusuyla harfi harfine AYNIDIR; 2b `'bildirimRevize'` yolunu ekler ve yaş alanını yoldan türetir
+ * (`icerikZamani`, § 10.7) — imza o gün genişler.
+ *
+ * YAŞ `olusturma` İLE ÖLÇÜLÜR, `<yol>.zaman` ile DEĞİL: işçi her denemede, ERP'deki elle «Yeniden gönder» her tıklamada
+ * `bildirim.zaman`ı tazeler. Yaş ondan ölçülseydi bir günlük gitmeyen bildirim her tazelemede «taze» görünür, bekçi
+ * susardı. Ekranın `max(olusturma, bildirim.zaman)` kuralı (rozet «gönderiliyor» der) ekran içindir, bekçiye taşınmaz.
  */
-const MAGAZA_TALEP_SAYIM_SQL = `
+export function magazaTalepSayimSql(yol: 'bildirim'): string {
+  return `
   SELECT count(*)::int AS toplam,
          (count(*) FILTER (WHERE (data->>'olusturma') COLLATE "C" BETWEEN $2 AND $4))::int AS son24,
-         (count(*) FILTER (WHERE data->'bildirim'->>'durum' = 'gonderilemedi'
+         (count(*) FILTER (WHERE data->'${yol}'->>'durum' = 'gonderilemedi'
             AND NOT ${PENCEREDEN_ESKI_SQL}))::int AS gonderilemedi,
-         (count(*) FILTER (WHERE data->'bildirim'->>'durum' = 'yapilandirilmamis'
+         (count(*) FILTER (WHERE data->'${yol}'->>'durum' = 'yapilandirilmamis'
             AND NOT ${PENCEREDEN_ESKI_SQL}))::int AS yapilandirilmamis,
-         (count(*) FILTER (WHERE data->'bildirim'->>'durum' = 'bekliyor'
+         (count(*) FILTER (WHERE data->'${yol}'->>'durum' = 'bekliyor'
             AND NOT COALESCE((data->>'olusturma') COLLATE "C" BETWEEN $3 AND $4, false)
             AND NOT ${PENCEREDEN_ESKI_SQL}))::int AS bekleyen,
-         (count(*) FILTER (WHERE data->'bildirim'->>'durum' IN ('gonderilemedi', 'yapilandirilmamis', 'bekliyor')
+         (count(*) FILTER (WHERE data->'${yol}'->>'durum' IN ('gonderilemedi', 'yapilandirilmamis', 'bekliyor')
             AND ${PENCEREDEN_ESKI_SQL}))::int AS eski_gitmeyen
     FROM docs WHERE coll = $1`;
+}
+const MAGAZA_TALEP_SAYIM_SQL = magazaTalepSayimSql('bildirim');
 
 /**
  * Hayalet kiracı sorgusu. Kiracı kimliği = `companyId`, o yoksa kullanıcının kendi
@@ -240,6 +274,64 @@ const MAGAZA_SAYAC_ETIKETLERI: ReadonlyArray<readonly [anahtar: string, etiket: 
   ['r429', '429'], ['r500', '500'], ['r503', '503'],
 ];
 
+/** Açık aşamaların (ve aşaması okunamayanın) ayrıntıdaki karşılığı — anahtar kümesi tipe kilitli, sıra yazım sırasıdır. */
+const ACIK_ASAMA_ETIKETLERI: ReadonlyArray<readonly [anahtar: keyof MagazaAcikSayimi['asama'], etiket: string]> = [
+  ['yeni', 'yeni'], ['teyit', 'teyit'], ['hazirlaniyor', 'hazırlanıyor'], ['sevk', 'sevk'], ['bilinmiyor', 'aşaması bilinmeyen'],
+];
+
+/**
+ * «Açık talep» parçasının metni (saf). Yaş `olusturma`dan ölçülür (bkz. kanal/magazaAcikSayim.ts). Açık talep yoksa yaş
+ * yazılmaz; açık var ama hiçbirinin tarihi okunamıyorsa bu AÇIKÇA söylenir (uydurma yaş yok).
+ */
+function acikTalepMetni(acik: MagazaAcikSayimi, simdiMs: number): string {
+  if (acik.toplam === 0) return 'açık talep 0';
+  const dagilim = ACIK_ASAMA_ETIKETLERI.map(([anahtar, etiket]) => `${etiket} ${acik.asama[anahtar]}`).join(', ');
+  const enEskiMs = acik.enEski === null ? Number.NaN : Date.parse(acik.enEski);
+  const yas = Number.isFinite(enEskiMs) ? `en eski açığın yaşı ${magazaYasMetni(simdiMs - enEskiMs)}` : 'en eski açığın yaşı okunamadı';
+  return `açık talep ${acik.toplam} (${dagilim}) — ${yas}${acik.tarihsiz > 0 ? `, tarihi okunamayan ${acik.tarihsiz}` : ''}`;
+}
+
+/**
+ * Panel ve takip sayaçlarının ayrıntıdaki karşılıkları (sözleşme: routes/magazaPanelZinciri.ts `magazaPanelSayaclari()`,
+ * routes/magazaRoutes.ts `magazaTakipSayaclari()`). Tabloda OLMAYAN anahtar ham adıyla yazılır (yeni sayaç sessizce
+ * düşmez); tablo ile gerçek anahtar kümesinin EŞİTLİĞİ sözleşme testinde kilitlidir (opsWatchdog.magazaTalep.test.ts) —
+ * sayaç eklenir / yeniden adlandırılırsa o test önce kırılır.
+ */
+export const MAGAZA_PANEL_SAYAC_ETIKETLERI: Readonly<Record<string, string>> = {
+  oturum: 'panel oturumu', oturum401: 'oturum reddi (401)', oturum503: 'oturum 503',
+  yetkiKodu: 'yetki kodu', yetkiKoduRet: 'yetki kodu reddi',
+  yetkiKoduIptalDenetimsiz: 'yetki kodu Firebase iptal denetimi YAPILAMADAN verildi',
+  durumPanel: 'aşama (panel)', durumPanel409: 'aşama 409 (panel)', durumErp: 'aşama (ERP)', durumErp409: 'aşama 409 (ERP)',
+  kalemTeslimPanel: 'kalem teslim (panel)', kalemTeslimPanel409: 'kalem teslim 409 (panel)',
+  kalemTeslimErp: 'kalem teslim (ERP)', kalemTeslimErp409: 'kalem teslim 409 (ERP)',
+  etiketBasildi: 'etiket basıldı', etiketBasildi404: 'etiket 404', etiketBasildi409: 'etiket 409',
+  bildirimGonder: 'elle bildirim', bildirimGonder409: 'elle bildirim 409',
+  cikisUidsiz: 'ERP çıkışında panel iptali atlandı (oturum çerezi yok)',
+  r401: 'panel 401', r403: 'panel 403', r404: 'panel 404', r429: 'panel 429', r500: 'panel 500', r503: 'panel 503',
+};
+export const MAGAZA_TAKIP_SAYAC_ETIKETLERI: Readonly<Record<string, string>> = { bulundu: 'bulundu', bulunamadi: 'bulunamadı' };
+
+/**
+ * Süreç içi sayaç nesnesinin bilgi metni (saf): sıfırdan büyük ve OKUNAMAYAN (`—`) sayaçlar tek tek, sıfır olanlar
+ * yalnız adetle yazılır — yirmiyi aşkın sayacın her sabah «0» diye sıralanması ayrıntıyı okunmaz kılardı. Sayaç adı
+ * kod kimliği biçiminde değilse yazılmaz (`?`). Nesne değilse ya da hiç sayaç taşımıyorsa `null` (çağıran kırmızı yazar).
+ */
+function sayacOzeti(sayaclar: unknown, etiketler: Readonly<Record<string, string>>): string | null {
+  if (typeof sayaclar !== 'object' || sayaclar === null || Array.isArray(sayaclar)) return null;
+  const anahtarlar = Object.keys(sayaclar);
+  if (anahtarlar.length === 0) return null;
+  const yazilan: string[] = [];
+  let sifir = 0;
+  for (const anahtar of anahtarlar) {
+    const deger = sayimHucresi(sayaclar, anahtar);
+    if (deger === 0) { sifir += 1; continue; }
+    const ad = Object.hasOwn(etiketler, anahtar) ? etiketler[anahtar] : (/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(anahtar) ? anahtar : '?');
+    yazilan.push(`${ad}: ${sayiYaz(deger)}`);
+  }
+  if (yazilan.length === 0) return `hepsi 0 (${sifir} sayaç)`;
+  return yazilan.join(', ') + (sifir > 0 ? `; diğer ${sifir} sayaç 0` : '');
+}
+
 async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
   const parcalar: Array<{ ok: boolean; metin: string }> = [];
   const havuz = deps().getPgPool();
@@ -250,7 +342,7 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
     const kimlik = await deps().serverTenantId();
     if (typeof kimlik !== 'string' || kimlik === '') {
       parcalar.push({ ok: false,
-        metin: 'KİRACI ÇÖZÜLEMİYOR — mağaza ucu 503 döner ve mağaza bunu görmez (sunucuda SERVER_TENANT_COMPANY_ID tanımlı mı?)' });
+        metin: 'KİRACI ÇÖZÜLEMİYOR — mağaza ucu ve site paneli 503 döner, mağaza bunu görmez (sunucuda SERVER_TENANT_COMPANY_ID tanımlı mı?)' });
     } else if (havuz) {
       // Kimlik ayrıntıya YAZILMAZ; uçla aynı değer (kırpılmadan) sorgulanır.
       const { rows } = await havuz.query(MAGAZA_KIRACI_ESLESME_SQL, [kimlik]);
@@ -300,6 +392,27 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
     parcalar.push({ ok: false, metin: `SMTP kontrol edilemedi (${hataKodu(e)})` });
   }
 
+  // (d) Site paneli yapılandırması. Anahtar dönüş adresinden türer (kanal/magazaPanelBelirtec.ts `panelAnahtariTuret`):
+  // adres geçersizse anahtar da yoktur — o durumda kök neden adrestir, sır hakkında hüküm verilmez. Ayrıntıya DEĞER
+  // yazılmaz (anahtar sırdır, adres ortam ayarıdır); yalnız hangisinin eksik olduğu ve ortam değişkeninin ADI.
+  try {
+    const panel: unknown = deps().magazaPanelYapilandirmasi();
+    const alan = (ad: string): unknown => (typeof panel === 'object' && panel !== null ? (panel as Record<string, unknown>)[ad] : undefined);
+    const donusVar = alan('donusVar');
+    const anahtarVar = alan('anahtarVar');
+    if (typeof donusVar !== 'boolean' || typeof anahtarVar !== 'boolean') {
+      parcalar.push({ ok: false, metin: 'site paneli yapılandırması OKUNAMADI' });
+    } else if (!donusVar) {
+      parcalar.push({ ok: false,
+        metin: 'SİTE PANELİ ÇALIŞMIYOR — dönüş adresi geçersiz: MAGAZA_PANEL_DONUS https olmalı, kullanıcı adı / sorgu / parça taşımamalı ve kökeni MAGAZA_IZINLI_KOKENLER listesinde bulunmalı; panel uçları 503 «panel-yapilandirilmamis» döner' });
+    } else if (!anahtarVar) {
+      parcalar.push({ ok: false,
+        metin: 'SİTE PANELİ ÇALIŞMIYOR — oturum sırrı yok (SESSION_TOKEN_SECRET ya da FIREBASE_PRIVATE_KEY tanımlı değil); panel uçları 503 «panel-yapilandirilmamis» döner' });
+    } else parcalar.push({ ok: true, metin: 'site paneli yapılandırılmış (anahtar ve dönüş adresi var)' });
+  } catch (e) {
+    parcalar.push({ ok: false, metin: `site paneli yapılandırması kontrol edilemedi (${hataKodu(e)})` });
+  }
+
   // (b) Sayım. Kırmızı penceresindeki (son 7 gün ya da yaşı okunamayan) üç gitmeyen sayısından biri > 0 ise kırmızı;
   // pencereden eski gitmeyenler yalnız bilgi. Okunamayan sayı (bilgi sütunu dâhil) da kırmızıdır.
   if (havuz) {
@@ -335,6 +448,17 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
     }
   }
 
+  // (e) Açık talepler: sayı + aşama dağılımı + en eski açığın yaşı. BİLGİ (eşik yok); okunamayan sayım kırmızıdır.
+  if (havuz) {
+    try {
+      const acik = await magazaAcikSayimi(havuz);
+      if (acik === null) parcalar.push({ ok: false, metin: 'açık talep sayımı OKUNAMADI' });
+      else parcalar.push({ ok: true, metin: acikTalepMetni(acik, Date.now()) });
+    } catch (e) {
+      parcalar.push({ ok: false, metin: `açık talep sayımı yapılamadı (${hataKodu(e)})` });
+    }
+  }
+
   // Uç sayaçları: süreç belleğinde, yeniden başlatmada sıfırlanır. 500 DIŞINDAKİLER yalnız bilgi
   // (eşik yok — alarm eşiği kullanıcı kararı); okuyucu fırlatırsa kırmızı.
   try {
@@ -353,6 +477,21 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
   } catch (e) {
     parcalar.push({ ok: false, metin: `uç sayaçları okunamadı (${hataKodu(e)})` });
   }
+
+  // Panel + ERP uç sayaçları (panel oturumu, yetki kodu, aşama / kalem teslim / etiket yazımları, elle bildirim, panel
+  // retleri, ERP çıkışında uid'siz iptal atlaması) ve takip sorgusu sayaçları: AYRI okuyucular, AYRI parçalar. İkisi de
+  // yalnız BİLGİDİR (eşik yok); okuyucu fırlatırsa ya da sayaç nesnesi dönmezse kırmızı.
+  const sayacParcasi = (ad: string, oku: () => unknown, etiketler: Readonly<Record<string, string>>): void => {
+    try {
+      const ozet = sayacOzeti(oku(), etiketler);
+      if (ozet === null) parcalar.push({ ok: false, metin: `${ad} okunamadı (sayaç nesnesi dönmedi)` });
+      else parcalar.push({ ok: true, metin: `${ad} (süreç başından beri) — ${ozet}` });
+    } catch (e) {
+      parcalar.push({ ok: false, metin: `${ad} okunamadı (${hataKodu(e)})` });
+    }
+  };
+  sayacParcasi('panel sayaçları', magazaPanelSayaclari, MAGAZA_PANEL_SAYAC_ETIKETLERI);
+  sayacParcasi('takip sayaçları', magazaTakipSayaclari, MAGAZA_TAKIP_SAYAC_ETIKETLERI);
 
   // Bozuk parçalar başa: uyarı e-postasında satırın ilk okunan yeri neden olsun.
   const sirali = [...parcalar.filter(p => !p.ok), ...parcalar.filter(p => p.ok)];

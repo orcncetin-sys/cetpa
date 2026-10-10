@@ -188,6 +188,9 @@ export const SERVER_ONLY_COLLECTIONS: readonly string[] = [
   //     Yalniz server.ts:3768/3798 ve superadminRoutes.ts:364 yazar,
   //     /api/invites/redeem okur; hepsi adminDb uzerinden.
   'tenantInvoices', 'companyStatus', 'invites',
+  // 2026-10-09 (mağaza dilim 2a, § 3.6): panel belirteci iptali — `magazaPanelIptal/{uid}` = `{ gecersizOnce, companyId }`.
+  // Yalnız `src/server/kanal/magazaPanelIptal.ts` okur / yazar (adminDb upsert); /api/db ve akışa kapalı.
+  'magazaPanelIptal',
 ];
 
 /**

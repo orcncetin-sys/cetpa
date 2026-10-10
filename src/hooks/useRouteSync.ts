@@ -15,6 +15,7 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { publicPageKey } from '../lib/publicPaths';
+import { MAGAZA_PANEL_BAGLAN_YOLU } from '../lib/magazaPanelBaglan';
 import { TOP_LEVEL_TABS } from '../lib/topLevelTabs';
 import { sayfaGoruntulendi } from '../lib/trafik';
 
@@ -69,6 +70,10 @@ export function useRouteSync({ activeTab, setActiveTab }: RouteState) {
     // efekt sayfayı anında landing'e geri fırlatırdı. Bu guard olmadan
     // gizlilik/koşullar bağlantıları bağlansa bile AÇILMAZDI.
     if (publicPageKey(location.pathname)) return;
+    // Mağaza paneli «ERP ile bağlan» onay sayfası (şartname § 5.3): adrese DOKUNMA. `navigate(...)` yolu değiştirir ve
+    // `#meydan=…&tur=…` parçasını siler; sayfa tembel yüklendiği için parametreleri girişten SONRA, ilk çiziminde okur —
+    // parça o ana kadar yerinde kalmalı. Sekme durumu ne olursa olsun (klavye kısayolu, yetkisiz sekmeden panoya dönüş) geçerli.
+    if (location.pathname === MAGAZA_PANEL_BAGLAN_YOLU) return;
     if (!TOP_LEVEL_TABS.has(activeTab)) return; // sub-tabs / modals: no URL change
     const target = tabToPath(activeTab);
     if (location.pathname !== target) {
