@@ -77,6 +77,42 @@ describe('irsaliyeIstegi — gövde SAYFA PARİTESİ (App.tsx Shipped akışı)'
     expect(s.govde?.shipment.trackingNo).toBe('SAS-0001');
   });
 
+  // Teslimat üçlüsü (2026-10-10): `shippingAddress` yalnız «kalan»dır; `destination` TAM adres metnidir
+  // (`teslimatAdresiMetni`) — alanı doğrudan okumak pencereden seçilen ili / ülkeyi belgeden düşürürdü.
+  describe('destination — TAM teslimat adresi (kalan + il + yurt dışıysa ülke)', () => {
+    const hedef = (o: Record<string, unknown>) => irsaliyeIstegi(siparis(o), cari(), { simdi: SIMDI }).govde?.shipment.destination;
+
+    it('il seçili yurt içi sipariş: kalan + il; ülke yazılmaz', () => {
+      expect(hedef({ shippingAddress: 'Kepez, Yenigün Mah. 1063 Sok. No:4', teslimatSehri: 'Antalya', teslimatUlke: 'TR' }))
+        .toBe('Kepez, Yenigün Mah. 1063 Sok. No:4, Antalya');
+    });
+
+    it('yurt dışı sipariş: kalan + şehir + Türkçe ülke adı', () => {
+      expect(hedef({ shippingAddress: 'Hauptstr. 5', teslimatSehri: 'Berlin', teslimatUlke: 'DE' })).toBe('Hauptstr. 5, Berlin, Almanya');
+    });
+
+    it('adres kutusu boş, yalnız il seçili: il tek başına', () => {
+      expect(hedef({ shippingAddress: '', teslimatSehri: 'Antalya', teslimatUlke: 'TR' })).toBe('Antalya');
+    });
+
+    it('il metinde zaten varsa YİNELENMEZ (müşteriden gelen oto-adres ili içerebilir)', () => {
+      expect(hedef({ teslimatSehri: 'İstanbul', teslimatUlke: 'TR' })).toBe('Esenyurt / İstanbul');
+    });
+
+    it('ESKİ kayıt (il / ülke alanı yok) BİREBİR; `null` alanlar boş sayılır', () => {
+      expect(hedef({})).toBe('Esenyurt / İstanbul');
+      expect(hedef({ teslimatSehri: null, teslimatUlke: null })).toBe('Esenyurt / İstanbul');
+    });
+
+    it('gövdenin öteki alanları il / ülkeden ETKİLENMEZ ve gövdeye il / ülke ALANI eklenmez (sunucu şeması değişmedi)', () => {
+      const yalin = irsaliyeIstegi(siparis(), cari(), { simdi: SIMDI }).govde;
+      const illi = irsaliyeIstegi(siparis({ teslimatSehri: 'Antalya', teslimatUlke: 'TR' }), cari(), { simdi: SIMDI }).govde;
+      expect(Object.keys(illi?.shipment ?? {})).toEqual(Object.keys(yalin?.shipment ?? {}));
+      expect({ ...illi?.shipment, destination: '' }).toEqual({ ...yalin?.shipment, destination: '' });
+      expect(illi?.shipment.destination).toBe('Esenyurt / İstanbul, Antalya');
+    });
+  });
+
   it('kalem adı zinciri: title → name → sku', () => {
     const ad = (k: Record<string, unknown>) =>
       irsaliyeIstegi(siparis({ lineItems: [kalem(k)] }), cari(), { simdi: SIMDI }).govde?.shipment.items[0].name;

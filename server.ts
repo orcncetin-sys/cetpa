@@ -53,6 +53,7 @@ import { izinliTaban, genelHttpsTaban, genelAdresMi, TabanAdresHatasi, LUCA_TABA
 import { shopifyRoutes, shopifyIsiIsle } from './src/server/routes/shopifyRoutes.js';
 import { BAGLANTI_KOLEKSIYONU, baglantiKaydi } from './src/server/kanal/shopifyBaglanti.js';
 import { MAGAZA_KAYNAGI } from './src/server/kanal/shopifyEsleme.js';
+import { takipAdresi, teslimatAdresiMetni } from './src/utils/siparisler/teslimatAdresi.js';
 import pg from "pg";
 // vite is imported dynamically below — only in development, never in production
 import path from "path";
@@ -735,7 +736,10 @@ function maskName(name?: string): string {
 }
 
 /** Tam adresi kimliksiz uca vermeyip yalnız son iki bileşeni (ilçe, il) döner.
- *  Müşteri doğru şehre gittiğini görür; sokak/kapı/daire bilgisi dışarı çıkmaz. */
+ *  Müşteri doğru şehre gittiğini görür; sokak/kapı/daire bilgisi dışarı çıkmaz.
+ *  YALNIZ ESKİ KAYIT içindir (2026-10-10): yapısal adres taşıyan kayıtta (`teslimatSehri` / `teslimatUlke`)
+ *  `shippingAddress` «kalan»dır — ilçe, mahalle, sokak — ve son iki parçası sokak düzeyidir; o kayıtta bu işlev
+ *  ÇAĞRILMAZ, yanıt `takipAdresi`'nden gelir (bkz. /api/track). */
 function maskAddress(addr: unknown): string | null {
   if (typeof addr !== 'string' || !addr.trim()) return null;
   const parts = addr.split(',').map(p => p.trim()).filter(Boolean);
@@ -3491,6 +3495,13 @@ async function startServer() {
       // paylaşılabilir/iletilebilir olduğu için PII asgariye indirilir: ad
       // kısaltılır, adresin yalnız ilçe/il kuyruğu gösterilir. Tam adres ve
       // e-posta oturum açmış personelde kalır.
+      // ADRES (2026-10-10, sipariş penceresinde ülke / il seçimi): kayıt YAPISAL adres taşıyorsa (`teslimatSehri` ya da
+      // `teslimatUlke` dolu) yanıtın adresi YALNIZ il + (yurt dışıysa) ülke adıdır; `shippingAddress` bu dala HİÇ girmez —
+      // o kayıtta alan «kalan»dır (ilçe, mahalle, sokak, kapı no) ve «son iki parça» maskesi sokak düzeyini dışarı verirdi.
+      // İl seçilmemiş yurt içi yeni siparişte `metin` null'dur: takip sayfası adres satırı göstermez (bilerek).
+      // Yapısal DEĞİLSE (eski kayıt) maske bugünkü hâliyle çalışır — yanıt birebir aynı. Karar tek yerde:
+      // utils/siparisler/teslimatAdresi `takipAdresi`; çit: src/server/teslimatAdresi.degismez.test.ts.
+      const adres = takipAdresi(o);
       res.json({
         success: true,
         order: {
@@ -3499,7 +3510,7 @@ async function startServer() {
           customerName:      maskName(o.customerName as string | undefined),
           status:            o.status,
           trackingNumber:    o.trackingNumber ?? null,
-          shippingAddress:   maskAddress(o.shippingAddress),
+          shippingAddress:   adres.yapisal ? adres.metin : maskAddress(o.shippingAddress),
           estimatedDelivery: o.estimatedDelivery ?? null,
           lineItems:         (o.lineItems as unknown[] | undefined)?.map((l: unknown) => {
             const li = l as Record<string, unknown>;
@@ -3655,7 +3666,9 @@ async function startServer() {
       musteri: {
         ad:         order.customerName,
         vergiNo:    (order.taxId as string | undefined) ?? '11111111111',
-        adres:      order.shippingAddress ?? '',
+        // TAM adres tek yerden (utils/siparisler/teslimatAdresi): kalan + il + (yurt dışıysa) Türkçe ülke adı. Alanı doğrudan
+        // okumak (`order.shippingAddress`) pencereden seçilen ili / ülkeyi faturadaki adresten düşürürdü (2026-10-10).
+        adres:      teslimatAdresiMetni(order),
       },
       satirlar: lines,
       // Kalem `price`'ı pencereden açılan ve Mikro faturasından türeyen siparişte KDV HARİÇ net birimdir

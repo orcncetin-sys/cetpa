@@ -13,6 +13,10 @@ import { formSayisi } from '../utils/muhasebe/irsaliyeCalisan';
 import { miktarDuzelt, kurusaYuvarla } from '../utils/para';
 import { oc } from '../i18n/ortak';
 import { eslesir } from '../utils/arama';
+import { ilBul } from '../data/iller';
+import { etkinUlke, ulkeSecimiYamasi, adresKayitAlanlari } from '../utils/siparisler/teslimatAdresi';
+import UlkeSecici from './ortak/UlkeSecici';
+import IlSecici from './ortak/IlSecici';
 import {
   musteriFiyatKademesi, urunSiparisFiyati, kalemSorunu, fiyatGirdisi, fiyatKademesiEtiketi, kopyaKalemi,
   siparisTutarlari, satirTutarlari, gorunenFiyat, kayitFiyati, kayitAlanlari, fiyatBirimiMi, VARSAYILAN_FIYAT_BIRIMI,
@@ -23,6 +27,17 @@ import {
  *  `fiyatBirimi`: `price`'ın ÇAPA birimi (KDV hariç / dâhil — girildiği birim; yoksa KDV hariç). Kayda KDV HARİÇ net birim gider.
  *  `fiyatElle`: kullanıcı fiyatı kendisi yazdı → müşteri (fiyat kademesi) değişince yeniden fiyatlanmaz. */
 type Kalem = Omit<OrderLineItem, 'price'> & { price: number | null; fiyatBirimi?: FiyatBirimi; fiyatElle?: boolean };
+
+/**
+ * Formun BAŞLANGIÇ durumu — TEK sabit: ilk çizim ve kapanıştaki sıfırlama AYNI nesneyi kullanır (eskiden iki ayrı nesne
+ * değişmeziydi; birine eklenen alan ötekinde unutulunca pencere ikinci açılışta farklı varsayılanla açılırdı).
+ * `teslimatUlke: 'TR'`: ülke seçicisi hiç boş olmaz ve yeni siparişte ülke HER ZAMAN açıkça yazılır. İl (`teslimatSehri`)
+ * başlangıçta YOKTUR (seçilmemiş). Durum nesnesi yerinde DEĞİŞTİRİLMEZ (her güncelleme yeni nesne kurar) — paylaşmak güvenli.
+ */
+const BOS_SIPARIS_FORMU: Readonly<Partial<Order>> = { status: 'Pending', shippingAddress: '', faturali: true, kdvOran: 20, teslimatUlke: 'TR' };
+
+/** Teslimat üçlüsünün (ülke · il / şehir · adres) ortak girdi sınıfı — pencerenin öteki girdileriyle aynı görünüm. */
+const ADRES_GIRDI_SINIFI = 'w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors';
 
 /** Ürün listesinde bir seferde çizilen satır tavanı — 2.000+ stok kartının hepsini düğme olarak çizmek pencereyi kilitliyordu. */
 const URUN_LISTE_TAVANI = 60;
@@ -69,7 +84,7 @@ export default function AddOrderModal({
   onGoToInventory
 }: AddOrderModalProps) {
   const tr = currentLanguage === 'tr';
-  const [newOrder, setNewOrder] = useState<Partial<Order>>({ status: 'Pending', shippingAddress: '', faturali: true, kdvOran: 20 });
+  const [newOrder, setNewOrder] = useState<Partial<Order>>(BOS_SIPARIS_FORMU);
   const [orderLineItems, setOrderLineItems] = useState<Kalem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   /** Kaydı engelleyen neden (boş sipariş, fiyatı girilmemiş kalem, müşteri adı yok) ya da kayıt hatası — alt bantta görünür. */
@@ -109,9 +124,12 @@ export default function AddOrderModal({
   const kartOraniFarkli = [...new Set(kartOraniFarkliKalemler.map(k => `%${k.vatRate}`))];
   /** Adres kutusundaki, kullanıcının YAZMADIĞI (müşteri kaydından / kopyalanan siparişten gelen) adres. Müşteri değişince
    *  kutu yalnız boşsa ya da hâlâ bu değeri taşıyorsa yeni müşterinin adresiyle değişir: kullanıcının yazdığı adres ezilmez,
-   *  önceki müşterinin adresi de yeni müşterinin siparişinde kalmaz. */
+   *  önceki müşterinin adresi de yeni müşterinin siparişinde kalmaz.
+   *  İL (`teslimatSehri`) bu kutunun KADERİNİ PAYLAŞIR (2026-10-10): adres yeni müşterininkiyle değişiyorsa il de yeni
+   *  müşteriye göre yeniden kurulur; kullanıcının yazdığı adres korunuyorsa il de korunur. Koruma ölçütü YAZILMIŞ ADRESTİR —
+   *  bu ref yalnız «Adres» kutusunun metnine bakar; adres yazmadan elle seçilen il müşteri değişince yeniden kurulur (bilerek). */
   const otoAdresRef = useRef('');
-  /** Pencere kopya tohumuyla açıldı: açılıştaki müşteri doldurması kopyalanan siparişin adresini EZMEZ. */
+  /** Pencere kopya tohumuyla açıldı: açılıştaki müşteri doldurması kopyalanan siparişin adresini ve ilini EZMEZ. */
   const adresKoruRef = useRef(false);
 
 
@@ -119,7 +137,7 @@ export default function AddOrderModal({
   // taşınır ve yeniden açılışta eski sipariş verisi görünür (yanlışlıkla mükerrer sipariş riski).
   useEffect(() => {
     if (!isOpen) {
-      setNewOrder({ status: 'Pending', shippingAddress: '', faturali: true, kdvOran: 20 });
+      setNewOrder(BOS_SIPARIS_FORMU);
       setOrderLineItems([]);
       setProductSearch('');
       setShowProductPicker(false);
@@ -147,12 +165,15 @@ export default function AddOrderModal({
     const dolu = Object.fromEntries(Object.entries(t.order).filter(([, v]) => v !== undefined && v !== null)) as Partial<Order>;
     setNewOrder(prev => ({ ...prev, ...dolu, status: 'Pending' }));
     if (fiyatBirimiMi(dolu.fiyatGirisi)) setFiyatModu(dolu.fiyatGirisi);   // kopya, kaynağın giriş birimiyle açılır
-    // Adres koruması yalnız kopyanın adresi DOLUYSA ve açılışta müşteri SEÇİLİYSE kurulur:
-    //   • adressiz kopya (Mikro faturasından türeyen sipariş adres taşımaz) → müşterinin kayıtlı adresi dolar;
+    // Adres koruması yalnız kopyanın adresi YA DA ili DOLUYSA ve açılışta müşteri SEÇİLİYSE kurulur:
+    //   • adressiz ve ilsiz kopya (Mikro faturasından türeyen sipariş adres taşımaz) → müşterinin kayıtlı adresi dolar;
+    //   • yalnız İLİ dolu kopya → koruma yine kurulur: açılıştaki müşteri doldurması kopyanın ilini silmesin (il, adres
+    //     kutusunun kaderini paylaşır — kutu boş diye «değiştir» dalına girilseydi il müşteriye göre yeniden kurulurdu);
     //   • müşterisiz açılan kopya → bayrak açılış turunda tüketilemez (müşteri effect'i koşmaz) ve ilk müşteri seçimine
     //     sarkardı; bunun yerine kopyanın adresi "yazılmamış" sayılır: sonradan seçilen müşterinin adresiyle değişir.
     const tohumAdresi = String(dolu.shippingAddress ?? '').trim();
-    if (seciliMusteriRef.current) adresKoruRef.current = tohumAdresi !== '';
+    const tohumIli = typeof dolu.teslimatSehri === 'string' ? dolu.teslimatSehri.trim() : '';
+    if (seciliMusteriRef.current) adresKoruRef.current = tohumAdresi !== '' || tohumIli !== '';
     else otoAdresRef.current = tohumAdresi;
     // Alanlar beyaz listeyle, birim fiyat ÇAPA birimiyle — bkz. `kopyaKalemi`. Fiyat çözülemiyorsa kalem fiyatsız açılır ve
     // kullanıcı girer. `fiyatElle`: kopyalanan fiyat müşteri kademesiyle yeniden fiyatlanmaz.
@@ -200,7 +221,15 @@ export default function AddOrderModal({
         return {
           ...kalan,
           customerName: selectedLead.name,
+          // Adres müşteri kaydındaki metnin AYNISIDIR (ayrıştırılmaz): il / ülke içeriyorsa yineleme tam adres metni
+          // kurulurken önlenir (`teslimatAdresiMetni`).
           shippingAddress: degistir ? musteriAdresi : (prev.shippingAddress ?? ''),
+          // İL adresle AYNI anda, dar kuralla türer: müşterinin `city`'si 81 il adından birine BİREBİR eşitse o il
+          // (`ilBul`: 'ANTALYA' → Antalya); 'K.MARAŞ' / 'AFYON' gibi emin olunamayan yazımda ya da alan yoksa BOŞ — yanlış il
+          // yazılmaz, kullanıcı seçer. Önceki müşterinin ili yeni müşterinin siparişinde KALMAZ. Türetme yalnız formdaki ülke
+          // Türkiye iken: başka ülkede il boşalır (81 il adı yabancı ülkede kalmasın). ÜLKE müşteriden TÜRETİLMEZ.
+          // Adres korunuyorsa (`degistir === false`: kullanıcı yazdı / kopya açılışı) il de KORUNUR — alan yamaya girmez.
+          ...(degistir ? { teslimatSehri: etkinUlke(prev.teslimatUlke) === 'TR' ? (ilBul(selectedLead.city) ?? '') : '' } : {}),
           ...(yeniTip ? { faturaTipi: yeniTip } : {}),
         };
       });
@@ -301,8 +330,10 @@ export default function AddOrderModal({
           ? { ...yalin, ...kayitAlanlari(k, hesapOrani), vatRate: hesapOrani }
           : { ...yalin, price: kayitFiyati(k, hesapOrani) };
       });
-      const { fiyatGirisi: _eskiGiris, ...siparis } = newOrder;
-      await onSubmit({ ...siparis, customerName: musteriAdi, ...(newOrder.faturali ? { fiyatGirisi: fiyatModu } : {}) }, kalemler, tutarlar);
+      // Teslimat ülkesi HER ZAMAN açıkça yazılır ('TR' dâhil); il yalnız doluysa — boş il ANAHTARI gövdede bulunmaz
+      // ('' / `undefined` yazılmaz; kayıt katmanı `undefined` alanı reddeder). Tek kural: `adresKayitAlanlari`.
+      const { fiyatGirisi: _eskiGiris, teslimatUlke: _formUlke, teslimatSehri: _formIl, ...siparis } = newOrder;
+      await onSubmit({ ...siparis, ...adresKayitAlanlari(newOrder), customerName: musteriAdi, ...(newOrder.faturali ? { fiyatGirisi: fiyatModu } : {}) }, kalemler, tutarlar);
       onClose(); // form, kapanış effect'inde (isOpen=false) sıfırlanır
     } catch (err) {
       // Pencere AÇIK kalır ve nedeni gösterir (eskiden hata yutuluyor, pencere kapanıp form siliniyordu — kullanıcı
@@ -380,13 +411,19 @@ export default function AddOrderModal({
                     {/* Eskiden müşteri bir kez seçilince değiştirilemiyordu: pencereyi kapatıp kalemleri kaybetmek gerekiyordu. */}
                     <button type="button" onClick={() => {
                       // Bırakılan müşterinin kayıtlı adresi kutuda kalmaz (yeni müşteri elle yazılırsa sipariş eski müşterinin
-                      // adresine gitmesin); kullanıcının kendi yazdığı adres korunur.
+                      // adresine gitmesin); kullanıcının kendi yazdığı adres korunur. İL adresin kaderini paylaşır: oto-adres
+                      // siliniyorsa il de boşalır, yazılmış adres duruyorsa il de durur. ÜLKE iki durumda da kalır.
                       const oto = otoAdresRef.current;
                       otoAdresRef.current = '';
                       setSelectedLead(null);
                       setNewOrder(prev => {
                         const { faturaTipi: _tip, ...kalan } = prev;
-                        return { ...kalan, customerName: '', shippingAddress: (prev.shippingAddress ?? '').trim() === oto ? '' : (prev.shippingAddress ?? '') };
+                        const otoSiliniyor = (prev.shippingAddress ?? '').trim() === oto;
+                        return {
+                          ...kalan, customerName: '',
+                          shippingAddress: otoSiliniyor ? '' : (prev.shippingAddress ?? ''),
+                          ...(otoSiliniyor ? { teslimatSehri: '' } : {}),
+                        };
                       });
                     }}
                       className="text-xs font-bold text-brand hover:underline shrink-0">
@@ -695,7 +732,7 @@ export default function AddOrderModal({
                 )}
               </div>
 
-              {/* Status + Address */}
+              {/* Durum (+ şube) */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.status}</label>
@@ -707,11 +744,6 @@ export default function AddOrderModal({
                     <option value="Delivered">{currentT.delivered}</option>
                     <option value="Cancelled">{currentT.cancelled}</option>
                   </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase">{currentT.shipping_address}</label>
-                  <input type="text" value={newOrder.shippingAddress || ''} onChange={e => setNewOrder({ ...newOrder, shippingAddress: e.target.value })}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand transition-colors" placeholder={currentT.city_district} />
                 </div>
                 {branchNames.length > 0 && (
                   <div className="space-y-1">
@@ -728,6 +760,31 @@ export default function AddOrderModal({
                     </select>
                   </div>
                 )}
+              </div>
+
+              {/* TESLİMAT ADRESİ — üçlü: Ülke · İl / Şehir · Adres (kullanıcı 2026-10-09: «şehir ve ülke seçtir droplist
+                  (otomatik liste yap)»). Eskiden tek serbest metin kutusuydu («İl, İlçe...»). Sipariş Düzenle penceresi AYNI
+                  bileşenleri kullanır (ortak/UlkeSecici, ortak/IlSecici). İl ve ülke ZORUNLU DEĞİL. */}
+              <div role="group" aria-labelledby="yeni-siparis-teslimat-baslik" className="space-y-2">
+                <p id="yeni-siparis-teslimat-baslik" className="text-[10px] font-bold text-gray-500 uppercase">{currentT.shipping_address}</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label htmlFor="yeni-siparis-ulke" className="text-[10px] font-bold text-gray-500 uppercase">{oc(currentLanguage).ulke}</label>
+                    {/* Ülke değişince il BOŞALIR (`ulkeSecimiYamasi`): listeden seçilmiş il yabancı ülkede, serbest yazılmış şehir Türkiye'de kalmaz. */}
+                    <UlkeSecici id="yeni-siparis-ulke" deger={newOrder.teslimatUlke} dil={currentLanguage} className={ADRES_GIRDI_SINIFI}
+                      onDegis={kod => setNewOrder(prev => ({ ...prev, ...ulkeSecimiYamasi(prev.teslimatUlke, kod) }))} />
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="yeni-siparis-il" className="text-[10px] font-bold text-gray-500 uppercase">{oc(currentLanguage).il_sehir}</label>
+                    <IlSecici id="yeni-siparis-il" deger={newOrder.teslimatSehri ?? ''} ulke={etkinUlke(newOrder.teslimatUlke)} dil={currentLanguage} className={ADRES_GIRDI_SINIFI}
+                      onDegis={il => setNewOrder(prev => ({ ...prev, teslimatSehri: il }))} />
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <label htmlFor="yeni-siparis-adres" className="text-[10px] font-bold text-gray-500 uppercase">{oc(currentLanguage).adres_ilce_mahalle_sokak}</label>
+                    <input id="yeni-siparis-adres" type="text" value={newOrder.shippingAddress || ''} onChange={e => setNewOrder({ ...newOrder, shippingAddress: e.target.value })}
+                      className={ADRES_GIRDI_SINIFI} />
+                  </div>
+                </div>
               </div>
 
               {/* Fatura / KDV Seçimi — yalnız FATURALI siparişte (anahtar yukarıda, tek). */}

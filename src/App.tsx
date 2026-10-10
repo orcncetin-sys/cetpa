@@ -222,6 +222,7 @@ import { irsaliyeIstegi, irsaliyeNedenMetni, irsaliyeYanitMesaji, irsaliyeSonucY
 import { siparisBelgeTipi, belgeTipiCelisiyor, musteriBelgeTipi } from './utils/siparisler/belgeTipi';
 import { bayatKalemVar, kalemSatirKdv } from './utils/siparisler/faturaDurumu';
 import { magazaSiparisiMi } from './utils/siparisler/magazaSiparisi';
+import { teslimatAdresiMetni } from './utils/siparisler/teslimatAdresi';
 import { gorunenSiparisNo } from './utils/siparis';
 import { useDataStore } from './store/dataStore';
 
@@ -2971,7 +2972,7 @@ function AppContent() {
     const stops: RouteStop[] = eligible.map(o => ({
       orderId: o.id,
       customerName: o.customerName,
-      address: o.shippingAddress || 'Unknown Address',
+      address: teslimatAdresiMetni(o) || 'Unknown Address',
       location: o.location!,
       status: o.status,
       estimatedMinutes: 0,
@@ -3626,7 +3627,8 @@ function AppContent() {
           customerName:   order.customerName,
           customerEmail:  lead?.email || order.customerEmail || '',
           customerPhone:  lead?.phone || '',
-          shippingAddress: order.shippingAddress || 'Türkiye',
+          // TAM adres metni. Şehir / ülke istek gövdesinde YOK: sunucu ikisini sipariş kaydından okur (istemciye güvenmez).
+          shippingAddress: teslimatAdresiMetni(order) || 'Türkiye',
           taxId:          lead?.taxId || '11111111111',
           lineItems:      (order.lineItems || []).map(l => ({
             name:  l.title || l.name || l.sku,

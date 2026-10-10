@@ -633,6 +633,11 @@ export const ORTAK = {
   madde_eklenemedi_yetki: 'Madde eklenemedi (yetki?).',   // ×2
   hat: 'Hat',   // ×2
   yeniden_islem: 'Yeniden İşlem',   // ×2
+  // Teslimat adresi üçlüsü (Yeni Sipariş + Sipariş Düzenle pencereleri; ortak/IlSecici) — 2026-10-10, elle eklendi.
+  il_sehir: 'İl / Şehir',
+  adres_ilce_mahalle_sokak: 'Adres (ilçe, mahalle, sokak)',
+  il_secin: 'İl seçin',
+  sehir_yazin: 'Şehir yazın',
   },
   en: {
   iptal: 'Cancel',
@@ -1254,6 +1259,10 @@ export const ORTAK = {
   madde_eklenemedi_yetki: 'Add failed.',
   hat: 'Line',
   yeniden_islem: 'Rework',
+  il_sehir: 'Province / City',
+  adres_ilce_mahalle_sokak: 'Address (district, neighbourhood, street)',
+  il_secin: 'Select province',
+  sehir_yazin: 'Type a city',
   },
 } as const;
 

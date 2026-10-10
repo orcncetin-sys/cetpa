@@ -7,6 +7,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import type { Order, RouteStop } from '../types';
+import { teslimatAdresiMetni } from '../utils/siparisler/teslimatAdresi';
 
 // Fix Leaflet default icon paths
 // @ts-expect-error Leaflet types don't include _getIconUrl
@@ -69,7 +70,7 @@ const LogisticsMap = ({ orders, routeStops, depot, currentT }: LogisticsMapProps
                       {currentT.stop} #{routeStop.sequence} — {currentT.eta}: {routeStop.estimatedMinutes} {currentT.min}
                     </p>
                   )}
-                  <p className="text-[10px] text-gray-400 mt-2">{order.shippingAddress}</p>
+                  <p className="text-[10px] text-gray-400 mt-2">{teslimatAdresiMetni(order)}</p>
                 </div>
               </Popup>
             </Marker>

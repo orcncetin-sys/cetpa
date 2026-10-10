@@ -10,6 +10,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Package, Users, ShoppingCart, X, ArrowRight, Hash } from 'lucide-react';
 import type { Order, Lead, InventoryItem } from '../types';
 import { paraYaz } from '../utils/currency';
+import { teslimatAdresiMetni } from '../utils/siparisler/teslimatAdresi';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ function buildResults(
     const s =
       fieldScore(o.customerName, q) * 3 +
       fieldScore(o.shopifyOrderId ?? '', q) * 2 +
-      fieldScore(o.shippingAddress ?? '', q) +
+      fieldScore(teslimatAdresiMetni(o), q) +   // TAM adres metni (il / ülke dâhil); `fieldScore` değişmedi
       fieldScore(o.status, q);
     if (s > 0) {
       orderCandidates.push({

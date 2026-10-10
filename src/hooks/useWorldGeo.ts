@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { ulkeAdi } from '../utils/siparisler/teslimatAdresi';
 
 /** Dünya ülke/şehir verisi — Satış Bölgesi ekranı için (2026-08-17,
  *  kullanıcı: "tüm dünyadaki şehirleri göm, ülke seçimi ekle").
@@ -41,13 +42,12 @@ async function fetchCities(iso2: string): Promise<[string, number][]> {
 }
 
 /** ISO2 → görünen ad (Türkçe/İngilizce), Intl.DisplayNames ile. Desteklenmeyen
- *  tarayıcıda (çok eski) ISO kodun kendisine düşer — hata fırlatmaz. */
+ *  tarayıcıda (çok eski) ISO kodun kendisine düşer — hata fırlatmaz.
+ *  Ad çözümü TEK KAYNAKTAN: `utils/siparisler/teslimatAdresi.ulkeAdi` (2026-10-10 — sipariş
+ *  adresi metni ve sunucu da aynı işlevi kullanır; `Intl.DisplayNames` örneği orada dil başına
+ *  bir kez kurulur). Bu işlevin «çözülemezse kodu döner» sözleşmesi DEĞİŞMEDİ. */
 export function countryDisplayName(iso2: string, lang: 'tr' | 'en'): string {
-  try {
-    return new Intl.DisplayNames([lang], { type: 'region' }).of(iso2) ?? iso2;
-  } catch {
-    return iso2;
-  }
+  return ulkeAdi(iso2, lang) ?? iso2;
 }
 
 /** Ülke kodu listesi (bir kez fetch edilir, adlarına göre sıralı). */

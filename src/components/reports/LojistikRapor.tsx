@@ -29,6 +29,7 @@ import { db, auth } from '../../firebase';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../../utils/firebase';
 import { siparisDurumEtiketi } from '../../utils/durumEtiketi';
 import { gorunenSiparisNo } from '../../utils/siparis';
+import { teslimatAdresiMetni, siparisSehri } from '../../utils/siparisler/teslimatAdresi';
 import { sortByCreatedAt } from '../../utils/fsSort';
 import { zamanDate, zamanMs, ayAnahtari } from '../../utils/zaman';
 import { formatInCurrency, paraYaz, kisaTutar } from '../../utils/currency';
@@ -119,7 +120,7 @@ export default function LojistikRapor(ctx: ReportsCtx) {
                     <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2.5 px-3 font-mono text-xs text-gray-600">{gorunenSiparisNo(o)}</td>
                       <td className="py-2.5 px-3 font-medium text-gray-800 hidden sm:table-cell">{o.customerName||'—'}</td>
-                      <td className="py-2.5 px-3 text-xs text-gray-400 truncate max-w-[150px] hidden md:table-cell">{o.shippingAddress||'—'}</td>
+                      <td className="py-2.5 px-3 text-xs text-gray-400 truncate max-w-[150px] hidden md:table-cell">{teslimatAdresiMetni(o)||'—'}</td>
                       <td className="py-2.5 px-3 text-center">
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${o.status==='Delivered'?'bg-green-100 text-green-600':o.status==='Shipped'?'bg-blue-100 text-blue-600':o.status==='Pending'?'bg-yellow-100 text-yellow-600':'bg-gray-100 text-gray-500'}`}>{siparisDurumEtiketi(o.status, currentLanguage)}</span>
                       </td>
@@ -173,14 +174,22 @@ export default function LojistikRapor(ctx: ReportsCtx) {
           })()}
 
           {/* ── Phase 152: Order Fulfillment Rate by City ── */}
-          {orders.some(o => o.shippingAddress) && (() => {
+          {orders.some(o => siparisSehri(o) !== null || o.shippingAddress) && (() => {
             type CityFulfill = { city: string; total: number; delivered: number; rate: number };
             const cityMap: Record<string, CityFulfill> = {};
             for (const o of orders) {
-              if (!o.shippingAddress) continue;
-              // Extract city from address (last meaningful token or full address if short)
-              const parts = o.shippingAddress.split(/[,\/\n]/);
-              const city = (parts[parts.length - 1] || parts[0] || '—').trim().slice(0, 20) || '—';
+              // Şehir ÖNCE yapısal alandan (`siparisSehri`: sipariş penceresinde seçilen il / yazılan şehir). Yalnız ili seçilmiş,
+              // adres kutusu boş sipariş de sayılır. Yapısal şehir yoksa (eski kayıt; mağaza siparişi — orada alan «ilçe / il»dir)
+              // eski türetim AYNEN: adres metninin son parçası.
+              const yapisalSehir = siparisSehri(o);
+              let city: string;
+              if (yapisalSehir !== null) city = yapisalSehir;
+              else {
+                if (!o.shippingAddress) continue;
+                // Extract city from address (last meaningful token or full address if short)
+                const parts = o.shippingAddress.split(/[,\/\n]/);
+                city = (parts[parts.length - 1] || parts[0] || '—').trim().slice(0, 20) || '—';
+              }
               if (!cityMap[city]) cityMap[city] = { city, total: 0, delivered: 0, rate: 0 };
               cityMap[city].total++;
               if (o.status === 'Delivered') cityMap[city].delivered++;

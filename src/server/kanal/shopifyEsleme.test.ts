@@ -15,7 +15,7 @@ const siparis = (ek: Record<string, unknown> = {}) => ({
   email: 'musteri@example.com', phone: null, note: 'Kapıya bırakın',
   customer: { first_name: 'Şirin', last_name: 'Yılmaz', email: 'musteri@example.com', phone: '+905550000000' },
   billing_address: { name: 'Şirin Yılmaz', address1: 'Atatürk Cd. 1', city: 'Çankaya', province: 'Ankara', zip: '06000', country: 'Türkiye' },
-  shipping_address: { name: 'Şirin Yılmaz', address1: 'Atatürk Cd. 1', address2: 'Kat 2', city: 'Çankaya', province: 'Ankara', zip: '06000', country: 'Türkiye', phone: '+905551112233' },
+  shipping_address: { name: 'Şirin Yılmaz', address1: 'Atatürk Cd. 1', address2: 'Kat 2', city: 'Çankaya', province: 'Ankara', zip: '06000', country: 'Türkiye', country_code: 'TR', phone: '+905551112233' },
   payment_gateway_names: ['Havale / EFT'],
   line_items: [
     { id: 111, sku: 'DYO-1', name: 'Boya 2,5 L - Beyaz', title: 'Boya 2,5 L', quantity: 2, price: '600.00', variant_id: 9,
@@ -36,6 +36,8 @@ const BOSALTAN: Record<string, Record<string, unknown>> = {
   },
   teslimatSehri: { shipping_address: { name: 'Şirin Yılmaz', address1: 'Atatürk Cd. 1', city: '', province: null, phone: '+905551112233' } },
   shippingAddress: { shipping_address: null, billing_address: null },
+  // Yalnız `country_code` yok: adres metni ve «ilçe / il» fikstürdekiyle aynı kalır.
+  teslimatUlke: { shipping_address: { name: 'Şirin Yılmaz', address1: 'Atatürk Cd. 1', address2: 'Kat 2', city: 'Çankaya', province: 'Ankara', zip: '06000', country: 'Türkiye', phone: '+905551112233' } },
 };
 const TAZELENEN_ALANLAR = Object.keys(BOSALTAN);
 const HEPSI_BOS = { note: '', email: null, contact_email: null, phone: null, customer: null, shipping_address: null, billing_address: null };
@@ -74,6 +76,7 @@ describe('siparisOlayiEsle — oluşturma', () => {
       shopifyId: '5678901234567', shopifyOrderId: '#1001', shopifyGuncelleme: '2026-10-01T23:31:00+03:00',
       customerName: 'Şirin Yılmaz', customerEmail: 'musteri@example.com', customerPhone: '+905551112233',
       shippingAddress: 'Şirin Yılmaz, Atatürk Cd. 1, Kat 2, Çankaya / Ankara, 06000, Türkiye', teslimatSehri: 'Çankaya / Ankara',
+      teslimatUlke: 'TR',
       musteriNotu: 'Kapıya bırakın', paraBirimi: 'TRY', totalPrice: 1199.9, kargoUcreti: 49.9, iskontoToplami: 100,
       status: 'Pending', paid: false,
       companyId: 'kiraciA', source: MAGAZA_KAYNAGI, customerType: 'Retail',
@@ -137,6 +140,32 @@ describe('siparisOlayiEsle — oluşturma', () => {
   it('oluşturmada BOŞ gelen tazelenen alan YAZILMAZ (null da yazılmaz — silinecek eski değer yok)', () => {
     const { yama } = yaz(siparisOlayiEsle(siparis(HEPSI_BOS), undefined, B, SIMDI));
     for (const alan of TAZELENEN_ALANLAR) expect(yama).not.toHaveProperty(alan);
+  });
+  it('teslimatUlke: YALNIZ shipping_address.country_code ve yalnız ^[A-Z]{2}$ ise; değilse anahtar YOK (varsayılan \'TR\' yazılmaz)', () => {
+    const teslimat = siparis().shipping_address;
+    const y = (kod: unknown) => yaz(siparisOlayiEsle(siparis({ shipping_address: { ...teslimat, country_code: kod } }), undefined, B, SIMDI)).yama;
+    expect(y('DE')).toHaveProperty('teslimatUlke', 'DE');
+    expect(y(' DE ')).toHaveProperty('teslimatUlke', 'DE');   // kırpılır (öbür metin alanları gibi)
+    // Harf büyütme / ülke adından kod tahmini YOK: biçimce kod olmayan değer için anahtar hiç yazılmaz.
+    for (const kod of [undefined, null, '', '  ', 'tr', 'Tr', 'TUR', 'T', 'Türkiye', 'T1', 90, true, {}]) {
+      expect(y(kod), String(JSON.stringify(kod))).not.toHaveProperty('teslimatUlke');
+    }
+    // Teslimat adresi HİÇ yok → fatura adresindeki koda DÜŞÜLMEZ (adres metni fatura adresinden kurulsa da ülke bilinmiyor).
+    const faturadan = yaz(siparisOlayiEsle(siparis({ shipping_address: null, billing_address: { ...siparis().billing_address, country_code: 'DE' } }), undefined, B, SIMDI)).yama;
+    expect(faturadan).toHaveProperty('shippingAddress', 'Şirin Yılmaz, Atatürk Cd. 1, Çankaya / Ankara, 06000, Türkiye');
+    expect(faturadan).not.toHaveProperty('teslimatUlke');
+    // Teslimat adresinde kod yok, fatura adresinde var → yine yazılmaz.
+    expect(yaz(siparisOlayiEsle(siparis({ ...BOSALTAN.teslimatUlke, billing_address: { ...siparis().billing_address, country_code: 'DE' } }), undefined, B, SIMDI)).yama)
+      .not.toHaveProperty('teslimatUlke');
+  });
+  it('teslimatUlke eklenirken mağaza siparişinin shippingAddress (TAM adres) ve teslimatSehri («ilçe / il») anlamı DEĞİŞMEZ', () => {
+    // Yabancı ülke: adres metni ülke ADINI zaten taşır; il / ülke alanları metne karışmaz, şehir «ilçe / il» biçiminde kalır.
+    const { yama } = yaz(siparisOlayiEsle(siparis({
+      shipping_address: { name: 'Max Mustermann', address1: 'Hauptstr. 5', city: 'Berlin', province: 'Berlin', zip: '10115', country: 'Germany', country_code: 'DE' },
+    }), undefined, B, SIMDI));
+    expect(yama).toMatchObject({
+      shippingAddress: 'Max Mustermann, Hauptstr. 5, Berlin / Berlin, 10115, Germany', teslimatSehri: 'Berlin / Berlin', teslimatUlke: 'DE',
+    });
   });
   it('paidAt: kayıt ilk kez ve ZATEN ÖDENMİŞ oluşuyorsa processed_at; yoksa updated_at; o da yoksa çağıranın saati', () => {
     const y = (ek: Record<string, unknown>) => yaz(siparisOlayiEsle(siparis({ financial_status: 'paid', ...ek }), undefined, B, SIMDI)).yama;
@@ -245,7 +274,7 @@ describe('siparisOlayiEsle — güncelleme', () => {
     expect(y({ paid: true, paidAt: 'KULLANICI-ZAMANI' }, { processed_at: islenme })).not.toHaveProperty('paidAt');
   });
   it('Shopify\'da BOŞALTILAN tazelenen alan kayıtta doluysa açıkça null yazılır (yamaya koymamak silmeyi sessiz no-op yapardı)', () => {
-    const dolu = { musteriNotu: 'Kapıya bırakın', customerEmail: 'musteri@example.com', customerPhone: '+905551112233', teslimatSehri: 'Çankaya / Ankara', shippingAddress: 'Şirin Yılmaz, Atatürk Cd. 1' };
+    const dolu = { musteriNotu: 'Kapıya bırakın', customerEmail: 'musteri@example.com', customerPhone: '+905551112233', teslimatSehri: 'Çankaya / Ankara', teslimatUlke: 'TR', shippingAddress: 'Şirin Yılmaz, Atatürk Cd. 1' };
     // Alanlar TEK TEK: yalnız boşaltılan null olur.
     for (const alan of TAZELENEN_ALANLAR) {
       const { yama } = yaz(siparisOlayiEsle(siparis({ ...sonra, ...BOSALTAN[alan] }), mevcut(dolu), B, SIMDI));
@@ -253,7 +282,11 @@ describe('siparisOlayiEsle — güncelleme', () => {
       expect(birlestir(mevcut(dolu), yama)[alan], alan).toBeNull();
     }
     expect(yaz(siparisOlayiEsle(siparis({ ...sonra, note: null }), mevcut(dolu), B, SIMDI)).yama).toMatchObject({
-      musteriNotu: null, customerEmail: 'musteri@example.com', customerPhone: '+905551112233', teslimatSehri: 'Çankaya / Ankara',
+      musteriNotu: null, customerEmail: 'musteri@example.com', customerPhone: '+905551112233', teslimatSehri: 'Çankaya / Ankara', teslimatUlke: 'TR',
+    });
+    // Yalnız ülke kodu düşen gövdede adres metni ve «ilçe / il» AYNEN tazelenir; null olan yalnız ülkedir.
+    expect(yaz(siparisOlayiEsle(siparis({ ...sonra, ...BOSALTAN.teslimatUlke }), mevcut(dolu), B, SIMDI)).yama).toMatchObject({
+      teslimatUlke: null, teslimatSehri: 'Çankaya / Ankara', shippingAddress: 'Şirin Yılmaz, Atatürk Cd. 1, Kat 2, Çankaya / Ankara, 06000, Türkiye',
     });
     // Hepsi birden.
     const { yama } = yaz(siparisOlayiEsle(siparis({ ...sonra, ...HEPSI_BOS }), mevcut(dolu), B, SIMDI));
@@ -266,8 +299,15 @@ describe('siparisOlayiEsle — güncelleme', () => {
       for (const alan of TAZELENEN_ALANLAR) expect(yama, `${alan} / ${String(bos)}`).not.toHaveProperty(alan);
     }
     // Değişen değer (dolu → başka dolu) her olayda tazelenir.
-    expect(yaz(siparisOlayiEsle(siparis(sonra), mevcut({ musteriNotu: 'Eski not', customerEmail: 'eski@example.com' }), B, SIMDI)).yama)
-      .toMatchObject({ musteriNotu: 'Kapıya bırakın', customerEmail: 'musteri@example.com' });
+    expect(yaz(siparisOlayiEsle(siparis(sonra), mevcut({ musteriNotu: 'Eski not', customerEmail: 'eski@example.com', teslimatUlke: 'DE' }), B, SIMDI)).yama)
+      .toMatchObject({ musteriNotu: 'Kapıya bırakın', customerEmail: 'musteri@example.com', teslimatUlke: 'TR' });
+    // Bu dağıtımdan ÖNCE oluşmuş kayıt (ülke alanı yok): sonraki olayda kod geliyorsa yazılır, gelmiyorsa anahtar yok (null da değil).
+    expect(yaz(siparisOlayiEsle(siparis(sonra), mevcut(), B, SIMDI)).yama).toHaveProperty('teslimatUlke', 'TR');
+    expect(yaz(siparisOlayiEsle(siparis({ ...sonra, ...BOSALTAN.teslimatUlke }), mevcut(), B, SIMDI)).yama).not.toHaveProperty('teslimatUlke');
+    // Kayıtta geçerli kod varken BİÇİMSİZ kod gelirse (küçük harf) tahminle düzeltilmez: ülke bilinmiyor → null.
+    const teslimat = siparis().shipping_address;
+    expect(yaz(siparisOlayiEsle(siparis({ ...sonra, shipping_address: { ...teslimat, country_code: 'de' } }), mevcut({ teslimatUlke: 'DE' }), B, SIMDI)).yama)
+      .toHaveProperty('teslimatUlke', null);
   });
   it('kargo: takip numarası siparişteki SON başarılı gönderimden; yoksa alan yazılmaz (boşla ezilmez)', () => {
     const y = (g: unknown) => yaz(siparisOlayiEsle(siparis({ ...sonra, fulfillments: g }), mevcut({ trackingNumber: 'ESKI' }), B, SIMDI)).yama;

@@ -4,7 +4,7 @@
  * Ekran görüntüsündeki durum: her ürün "$0.00", "Stock: 60", "LOW STOCK", taşan anahtar.
  */
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import AddOrderModal from './AddOrderModal';
 import type { InventoryItem, Lead, Order, OrderLineItem } from '../types';
@@ -41,7 +41,17 @@ function ciz(ek: Partial<React.ComponentProps<typeof AddOrderModal>> = {}) {
   return { ...utils, onSubmit, onClose, yeniden };
 }
 const fiyatKutulari = () => (screen.getAllByLabelText('Birim fiyat') as HTMLInputElement[]).map(k => k.value);
-const adresKutusu = () => screen.getByPlaceholderText(translations.tr.city_district) as HTMLInputElement;
+// Teslimat üçlüsü (2026-10-10): kutular ETİKETLERİYLE bulunur (`<label htmlFor>`); eski «İl, İlçe...» yer tutucusu kalktı.
+const adresKutusu = () => screen.getByLabelText('Adres (ilçe, mahalle, sokak)') as HTMLInputElement;
+const ulkeSecici = () => screen.getByLabelText('Ülke') as HTMLSelectElement;
+const seciliUlkeAdi = () => ulkeSecici().options[ulkeSecici().selectedIndex]?.textContent;
+const ilKutusu = () => screen.getByLabelText('İl / Şehir') as HTMLInputElement;
+/** Türkiye kipinde il seçimi, kullanıcının yaptığı gibi: kutuya yaz (liste süzülür, ilk eşleşme etkin) + Enter. */
+const ilSec = (yazilan: string) => {
+  fireEvent.focus(ilKutusu());
+  fireEvent.change(ilKutusu(), { target: { value: yazilan } });
+  fireEvent.keyDown(ilKutusu(), { key: 'Enter' });
+};
 const PERAKENDE = { id: 'l2', name: 'Kaya İnşaat', company: 'Kaya İnşaat', email: 'k@k.k', customerType: 'B2C' } as unknown as Lead;   // adresi YOK
 const urunListesiniAc = () => fireEvent.click(screen.getByText(translations.tr.add_product));
 const urunEkle = (ad: string) => { urunListesiniAc(); fireEvent.click(screen.getByText(ad)); };
@@ -49,7 +59,20 @@ const kaydet = () => fireEvent.submit(document.querySelector('form') as HTMLForm
 const musteriYaz = (ad: string) => fireEvent.change(screen.getByPlaceholderText('Müşteri ara veya yaz...'), { target: { value: ad } });
 const faturasizYap = () => fireEvent.click(screen.getByRole('switch'));
 
-beforeEach(() => { vi.clearAllMocks(); });
+/**
+ * Ülke listesi `/geo/cities/_index.json` isteğinden gelir (`useCountryList`). Varsayılan: istek HİÇ yanıtlanmaz («yanıt
+ * gelene kadar» durumu — liste boş, 'Türkiye' satırı kancadan bağımsız sabittir). Böylece ülke listesiyle ilgisi olmayan
+ * testlerde test bittikten sonra gelen durum güncellemesi (`act` uyarısı) olmaz. Kanca BAŞARILI indeksi modül önbelleğine
+ * alır → indeksi dolduran testler dosyanın EN SONUNDADIR («indeks geldikten sonra» bloğu).
+ */
+const fetchTaklidi = vi.fn<(url: string) => Promise<unknown>>();
+beforeEach(() => {
+  vi.clearAllMocks();
+  fetchTaklidi.mockReset();
+  fetchTaklidi.mockImplementation(() => new Promise(() => {}));
+  vi.stubGlobal('fetch', fetchTaklidi);
+});
+afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('dil ve para birimi', () => {
   it('Türkçe arayüzde İngilizce kalıntı ve "$" yok; tutarlar ₺ ile', () => {
@@ -693,5 +716,285 @@ describe('teslimat adresi — kopya ve giriş noktaları (düzeltme turu bulgula
     expect(onAddLeadClick).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
     expect(fiyatKutulari()).toEqual(['120']);
+  });
+});
+
+/* ── Teslimat adresi üçlüsü: Ülke · İl / Şehir · Adres (kullanıcı 2026-10-09: «şehir ve ülke seçtir droplist (otomatik
+      liste yap)») ─────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** Mikro'dan gelen cari: adres yalnız caddedir, il AYRI alandadır (`city` = `adr_il`, büyük harf); `country` de dolu olabilir. */
+const ANTALYALI = { id: 'l3', name: 'Akdeniz Yapı', company: 'Akdeniz Yapı A.Ş.', email: 'a@a.a', address: 'Atatürk Cd. 5', city: 'ANTALYA', country: 'DE', customerType: 'B2B', eFaturaKayitli: true } as unknown as Lead;
+const ISTANBULLU = { id: 'l4', name: 'Boğaz Nalbur', company: 'Boğaz Nalbur', email: 'b@b.b', address: 'Bağdat Cd. 40', city: 'İSTANBUL', customerType: 'B2B', eFaturaKayitli: true } as unknown as Lead;
+/** İl yazımı 81 il adından biriyle BİREBİR eşleşmiyor (kısaltma) — il türetilmez. */
+const MARASLI = { id: 'l5', name: 'Maraş Hırdavat', company: 'Maraş Hırdavat', email: 'm@m.m', address: 'Trabzon Cd. 12', city: 'K.MARAŞ', customerType: 'B2B', eFaturaKayitli: true } as unknown as Lead;
+const kopya = (order: Partial<Order>) => ({ order, kalemler: [] });
+
+describe('teslimat adresi üçlüsü — Ülke · İl / Şehir · Adres', () => {
+  it('üç alan «Teslimat Adresi» başlıklı grupta ve etiketleriyle bağlı; ülke varsayılanı Türkiye, il boş', () => {
+    ciz();
+    const grup = screen.getByRole('group', { name: translations.tr.shipping_address });
+    expect(within(grup).getByLabelText('Ülke')).toBe(ulkeSecici());
+    expect(within(grup).getByLabelText('İl / Şehir')).toBe(ilKutusu());
+    expect(within(grup).getByLabelText('Adres (ilçe, mahalle, sokak)')).toBe(adresKutusu());
+    expect(ulkeSecici().tagName).toBe('SELECT');
+    expect(ulkeSecici().value).toBe('TR');
+    expect(seciliUlkeAdi()).toBe('Türkiye');
+    expect(ilKutusu().getAttribute('role')).toBe('combobox');      // Türkiye: arama kutulu açılır liste
+    expect(ilKutusu().value).toBe('');
+    expect(ilKutusu().placeholder).toBe('İl seçin');
+    expect(adresKutusu().value).toBe('');
+    expect(screen.queryByPlaceholderText('İl, İlçe...')).toBeNull();   // eski tek kutunun yer tutucusu
+  });
+
+  it('İngilizce arayüzde üç etiket ortak sözlükten', () => {
+    ciz({ currentLanguage: 'en', currentT: translations.en as unknown as Record<string, string> });
+    const grup = screen.getByRole('group', { name: translations.en.shipping_address });
+    expect(within(grup).getByLabelText('Country')).toBeTruthy();
+    expect(within(grup).getByLabelText('Province / City')).toBeTruthy();
+    expect(within(grup).getByLabelText('Address (district, neighbourhood, street)')).toBeTruthy();
+  });
+
+  it("indeks isteği BAŞARISIZKEN ülke 'Türkiye' seçili ve sipariş kaydedilebilir", async () => {
+    fetchTaklidi.mockRejectedValue(new Error('ağ yok'));
+    const { onSubmit } = ciz();
+    // İstek GERÇEKTEN atıldı (kanca önbelleği dolu olsaydı atılmazdı ve bu test sessizce geçersiz kalırdı).
+    await waitFor(() => expect(fetchTaklidi).toHaveBeenCalledWith('/geo/cities/_index.json'));
+    expect([...ulkeSecici().options].map(o => o.value)).toEqual(['TR']);
+    expect(seciliUlkeAdi()).toBe('Türkiye');
+    faturasizYap(); musteriYaz('Deneme'); urunEkle('AKÇALI SPREY KAHVE 400 ML');
+    kaydet();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].teslimatUlke).toBe('TR');
+  });
+
+  it("seçici değerleri gövdeye girer: `teslimatUlke: 'TR'` + seçilen il + yazılan adres", async () => {
+    const { onSubmit } = ciz();
+    faturasizYap(); musteriYaz('Deneme'); urunEkle('AKÇALI SPREY KAHVE 400 ML');
+    ilSec('ant');
+    expect(ilKutusu().value).toBe('Antalya');
+    fireEvent.change(adresKutusu(), { target: { value: 'Kepez, Yenigün Mah. 1063 Sok. No:4' } });
+    kaydet();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ teslimatUlke: 'TR', teslimatSehri: 'Antalya', shippingAddress: 'Kepez, Yenigün Mah. 1063 Sok. No:4' });
+  });
+
+  it("il seçilmediyse gövdede `teslimatSehri` ANAHTARI YOK ('' / undefined yazılmaz); ülke yine açıkça 'TR'", async () => {
+    const { onSubmit } = ciz();
+    faturasizYap(); musteriYaz('Deneme'); urunEkle('AKÇALI SPREY KAHVE 400 ML');
+    kaydet();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const siparis = onSubmit.mock.calls[0][0];
+    expect(siparis.teslimatUlke).toBe('TR');
+    expect(siparis).not.toHaveProperty('teslimatSehri');
+  });
+
+  it('seçilip sonra BOŞALTILAN il de gövdeye girmez', async () => {
+    const { onSubmit } = ciz();
+    faturasizYap(); musteriYaz('Deneme'); urunEkle('AKÇALI SPREY KAHVE 400 ML');
+    ilSec('ant');
+    fireEvent.focus(ilKutusu());
+    fireEvent.change(ilKutusu(), { target: { value: '' } });
+    fireEvent.blur(ilKutusu());
+    expect(ilKutusu().value).toBe('');
+    kaydet();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('teslimatSehri');
+  });
+});
+
+describe('teslimat adresi üçlüsü — il müşteriden TÜRER (dar kural), ülke türemez', () => {
+  it("müşteri { address: 'Atatürk Cd. 5', city: 'ANTALYA' } → adres kutusu AYNEN, il «Antalya»; `country` dolu olsa da ülke 'TR'", () => {
+    ciz({ selectedLead: ANTALYALI });
+    expect(adresKutusu().value).toBe('Atatürk Cd. 5');
+    expect(ilKutusu().value).toBe('Antalya');
+    expect(ulkeSecici().value).toBe('TR');
+  });
+
+  it("birebir eşleşmeyen yazımda ('K.MARAŞ') ya da `city` yokken il BOŞ — yanlış il yazılmaz", () => {
+    const { yeniden } = ciz({ selectedLead: MARASLI });
+    expect(adresKutusu().value).toBe('Trabzon Cd. 12');
+    expect(ilKutusu().value).toBe('');
+    yeniden({ selectedLead: BAYI });                               // `city` alanı hiç yok
+    expect(adresKutusu().value).toBe('Antalya / Kepez');
+    expect(ilKutusu().value).toBe('');
+  });
+
+  it('müşteri değişince il YENİ müşteriye göre kurulur; eşleşme yoksa önceki müşterinin ili KALMAZ', () => {
+    const { yeniden } = ciz({ selectedLead: ANTALYALI });
+    expect(ilKutusu().value).toBe('Antalya');
+    yeniden({ selectedLead: ISTANBULLU });
+    expect(adresKutusu().value).toBe('Bağdat Cd. 40');
+    expect(ilKutusu().value).toBe('İstanbul');
+    yeniden({ selectedLead: MARASLI });
+    expect(adresKutusu().value).toBe('Trabzon Cd. 12');
+    expect(ilKutusu().value).toBe('');
+    yeniden({ selectedLead: PERAKENDE });                          // adresi de ili de yok
+    expect(adresKutusu().value).toBe('');
+    expect(ilKutusu().value).toBe('');
+  });
+
+  it('kullanıcı adres YAZDIYSA müşteri değişince adres de İL de KALIR (elle seçilen il korunur)', () => {
+    const { yeniden } = ciz({ selectedLead: ANTALYALI });
+    fireEvent.change(adresKutusu(), { target: { value: 'Şantiye / Nilüfer' } });
+    ilSec('bursa');
+    expect(ilKutusu().value).toBe('Bursa');
+    yeniden({ selectedLead: ISTANBULLU });
+    expect(adresKutusu().value).toBe('Şantiye / Nilüfer');
+    expect(ilKutusu().value).toBe('Bursa');
+  });
+
+  it('adres YAZMADAN elle seçilen il müşteri değişince yeniden kurulur (koruma ölçütü yazılmış adrestir)', () => {
+    const { yeniden } = ciz({ selectedLead: ANTALYALI });
+    ilSec('bursa');
+    expect(ilKutusu().value).toBe('Bursa');
+    expect(adresKutusu().value).toBe('Atatürk Cd. 5');             // adres hâlâ müşteriden gelen
+    yeniden({ selectedLead: ISTANBULLU });
+    expect(ilKutusu().value).toBe('İstanbul');
+    ilSec('bursa');
+    yeniden({ selectedLead: MARASLI });
+    expect(ilKutusu().value).toBe('');
+  });
+
+  it("ülke 'DE' iken müşteri seçilince il TÜRETİLMEZ (81 il adı yabancı ülkede kalmaz); ülke 'DE' kalır", () => {
+    const tohum = kopya({ customerName: 'Elle Yazılan', teslimatUlke: 'DE', teslimatSehri: 'Berlin' });
+    const { yeniden } = ciz({ tohum });                            // müşterisiz açılan kopya: adresi «yazılmamış» sayılır
+    expect(ulkeSecici().value).toBe('DE');
+    expect(ilKutusu().value).toBe('Berlin');
+    yeniden({ selectedLead: ANTALYALI, tohum });
+    expect(adresKutusu().value).toBe('Atatürk Cd. 5');
+    expect(ilKutusu().value).toBe('');
+    expect(ulkeSecici().value).toBe('DE');
+  });
+});
+
+describe('teslimat adresi üçlüsü — «Değiştir», kopya, sıfırlama', () => {
+  it('«Değiştir»: oto-adresle birlikte il de boşalır', () => {
+    ciz({ selectedLead: ANTALYALI });
+    expect(ilKutusu().value).toBe('Antalya');
+    fireEvent.click(screen.getByText('Değiştir'));
+    expect(adresKutusu().value).toBe('');
+    expect(ilKutusu().value).toBe('');
+    expect(ulkeSecici().value).toBe('TR');
+  });
+
+  it("«Değiştir»: ülke KALIR — 'DE' iken yazılmış şehir oto-adresle birlikte boşalır, ülke 'DE' durur", () => {
+    ciz({ selectedLead: ANTALYALI, tohum: kopya({ customerName: 'Akdeniz Yapı', teslimatUlke: 'DE' }) });
+    expect(adresKutusu().value).toBe('Atatürk Cd. 5');             // adressiz + ilsiz kopya: müşterinin adresi dolar
+    fireEvent.change(ilKutusu(), { target: { value: 'Berlin' } });
+    expect(ilKutusu().value).toBe('Berlin');
+    fireEvent.click(screen.getByText('Değiştir'));
+    expect(adresKutusu().value).toBe('');
+    expect(ilKutusu().value).toBe('');
+    expect(ulkeSecici().value).toBe('DE');
+  });
+
+  it('«Değiştir»: kullanıcının YAZDIĞI adres duruyorsa il de durur', () => {
+    ciz({ selectedLead: ANTALYALI });
+    fireEvent.change(adresKutusu(), { target: { value: 'Şantiye / Döşemealtı' } });
+    fireEvent.click(screen.getByText('Değiştir'));
+    expect(adresKutusu().value).toBe('Şantiye / Döşemealtı');
+    expect(ilKutusu().value).toBe('Antalya');
+  });
+
+  it('kopya ili ve ülkeyi taşır; kayda da aynı değerler gider', async () => {
+    const { onSubmit } = ciz({ tohum: kopya({ customerName: 'Berlin Bau', shippingAddress: 'Hauptstr. 5, 10115', teslimatUlke: 'DE', teslimatSehri: 'Berlin', faturali: false }) });
+    expect(ulkeSecici().value).toBe('DE');
+    expect(seciliUlkeAdi()).toBe('Almanya');                       // indeks gelmeden de seçili ülke görünür
+    expect(ilKutusu().value).toBe('Berlin');
+    expect(ilKutusu().hasAttribute('aria-expanded')).toBe(false);  // yabancı ülke: serbest metin kutusu
+    expect(adresKutusu().value).toBe('Hauptstr. 5, 10115');
+    urunEkle('AKÇALI SPREY KAHVE 400 ML');
+    kaydet();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ teslimatUlke: 'DE', teslimatSehri: 'Berlin', shippingAddress: 'Hauptstr. 5, 10115' });
+  });
+
+  it('ülkesi OLMAYAN (eski) siparişin kopyası Türkiye ile açılır; ili taşınır', () => {
+    ciz({ tohum: kopya({ customerName: 'Şirin Yapı', shippingAddress: 'Şantiye / Aksu', teslimatSehri: 'Antalya' }) });
+    expect(ulkeSecici().value).toBe('TR');
+    expect(ilKutusu().value).toBe('Antalya');
+  });
+
+  it('yalnız İLİ dolu kopyada açılıştaki müşteri doldurması ili SİLMEZ (adres kutusu da kopyadaki gibi boş kalır)', () => {
+    ciz({ selectedLead: ISTANBULLU, tohum: kopya({ customerName: 'Boğaz Nalbur', teslimatSehri: 'Antalya' }) });
+    expect(ilKutusu().value).toBe('Antalya');                      // müşterinin ili (İstanbul) kopyanın ilini ezmedi
+    expect(adresKutusu().value).toBe('');
+  });
+
+  it('adresi de ili de dolu kopya açılışta korunur; müşteri SONRADAN değişirse ikisi de yeni müşteriye göre', () => {
+    const { yeniden } = ciz({ selectedLead: ISTANBULLU, tohum: kopya({ customerName: 'Boğaz Nalbur', shippingAddress: 'Şantiye / Aksu', teslimatSehri: 'Antalya' }) });
+    expect(adresKutusu().value).toBe('Şantiye / Aksu');
+    expect(ilKutusu().value).toBe('Antalya');
+    yeniden({ selectedLead: ANTALYALI, tohum: null });
+    expect(adresKutusu().value).toBe('Atatürk Cd. 5');
+    expect(ilKutusu().value).toBe('Antalya');
+    yeniden({ selectedLead: MARASLI, tohum: null });
+    expect(ilKutusu().value).toBe('');
+  });
+
+  it("pencere kapanıp açılınca ülke 'TR', il boş (önceki siparişin ülkesi / ili taşınmaz)", () => {
+    const { yeniden } = ciz({ tohum: kopya({ customerName: 'Berlin Bau', teslimatUlke: 'DE', teslimatSehri: 'Berlin' }) });
+    expect(ulkeSecici().value).toBe('DE');
+    yeniden({ isOpen: false, tohum: null });
+    yeniden({ isOpen: true, tohum: null });
+    expect(ulkeSecici().value).toBe('TR');
+    expect(ilKutusu().value).toBe('');
+    expect(ilKutusu().getAttribute('role')).toBe('combobox');      // yeniden Türkiye kipi
+  });
+});
+
+// ── Buradan sonrası ülke indeksini DOLDURUR (kanca modül önbelleğine alır) — dosyanın SONUNDA kalmalı. ──
+describe('teslimat adresi üçlüsü — ülke değişimi (indeks geldikten sonra)', () => {
+  beforeEach(() => {
+    // Şehir önerisi isteği başarısız (önbelleğe alınmaz): kutu öneri olmadan da yazılabilir.
+    fetchTaklidi.mockImplementation(async url => {
+      if (url === '/geo/cities/_index.json') return { ok: true, json: async () => ['DE', 'TR', 'US'] };
+      throw new Error('ağ yok');
+    });
+  });
+  /** Ülke listesi geldikten sonra seçiciden ülke seç; yabancı ülkede şehir önerisi isteğinin sonucu da işlensin. */
+  const ulkeSec = async (kod: string) => {
+    await waitFor(() => expect([...ulkeSecici().options].map(o => o.value)).toContain('DE'));
+    fireEvent.change(ulkeSecici(), { target: { value: kod } });
+    if (kod !== 'TR') await waitFor(() => expect(fetchTaklidi).toHaveBeenCalledWith(`/geo/cities/${kod}.json`));
+  };
+
+  it('Türkiye listede BİR kez ve ilk satır; öteki ülkeler Türkçe adıyla sıralı', async () => {
+    ciz();
+    await waitFor(() => expect(ulkeSecici().options.length).toBe(3));
+    expect([...ulkeSecici().options].map(o => [o.value, o.textContent])).toEqual([['TR', 'Türkiye'], ['DE', 'Almanya'], ['US', 'Amerika Birleşik Devletleri']]);
+  });
+
+  it('ülke TR → DE: seçili il BOŞALIR ve kutu serbest metne döner; DE → TR: yazılmış şehir BOŞALIR', async () => {
+    ciz({ selectedLead: ANTALYALI });
+    expect(ilKutusu().value).toBe('Antalya');
+    await ulkeSec('DE');
+    expect(ulkeSecici().value).toBe('DE');
+    expect(ilKutusu().value).toBe('');
+    expect(ilKutusu().hasAttribute('aria-expanded')).toBe(false);  // açılır il listesi değil
+    expect(ilKutusu().placeholder).toBe('Şehir yazın');
+    expect(adresKutusu().value).toBe('Atatürk Cd. 5');             // adres kutusuna dokunulmaz
+    fireEvent.change(ilKutusu(), { target: { value: 'Berlin' } });
+    expect(ilKutusu().value).toBe('Berlin');
+    await ulkeSec('TR');
+    expect(ulkeSecici().value).toBe('TR');
+    expect(ilKutusu().value).toBe('');
+    expect(ilKutusu().getAttribute('role')).toBe('combobox');
+  });
+
+  it('aynı ülkeyi yeniden seçmek ili SİLMEZ', async () => {
+    ciz({ selectedLead: ANTALYALI });
+    await ulkeSec('TR');
+    expect(ilKutusu().value).toBe('Antalya');
+  });
+
+  it('yurt dışı sipariş: seçilen ülke ve serbest yazılan şehir gövdeye girer (şehir kırpılır)', async () => {
+    const { onSubmit } = ciz();
+    faturasizYap(); musteriYaz('Berlin Bau'); urunEkle('AKÇALI SPREY KAHVE 400 ML');
+    await ulkeSec('DE');
+    fireEvent.change(ilKutusu(), { target: { value: ' Berlin ' } });
+    kaydet();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ teslimatUlke: 'DE', teslimatSehri: 'Berlin' });   // il kırpılır
   });
 });

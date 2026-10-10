@@ -223,11 +223,24 @@ describe('Sipariş düzenleme formu — MAĞAZA KİLİDİ: ad / adres / tutar ma
     expect(siparisler).toMatch(/const magazaKilidi = magazaSiparisiMi\(selectedOrder\);/);
   });
 
-  it('üç girdi kilitliyken SALT OKUNUR + formun başında kısa not', () => {
+  it('ad, adres ve tutar girdileri kilitliyken SALT OKUNUR + formun başında kısa not', () => {
     expect(kilitliDal).toMatch(/<input type="text" readOnly className=\{cn\('apple-input w-full text-sm', KILITLI_GIRDI\)\} value=\{\(editingOrderData\.customerName as string\) \?\? ''\} \/>/);
-    expect(modal).toMatch(/<input type="text" readOnly=\{magazaKilidi\}[^\n]*value=\{\(editingOrderData\.shippingAddress as string\) \?\? ''\}/);
+    expect(modal).toMatch(/<input id="siparis-duzenle-adres" type="text" readOnly=\{magazaKilidi\}[^\n]*value=\{\(editingOrderData\.shippingAddress as string\) \?\? ''\}/);
     expect(modal).toMatch(/<input type="number" readOnly=\{magazaKilidi\}[^\n]*value=\{editingTutarHam\}/);
     expect(modal).toMatch(/\{magazaKilidi && \(\s*<p role="note"[^\n]*\{osc\(currentLanguage\)\.magaza_alanlari_kilitli\}<\/p>\s*\)\}/);
+  });
+
+  // Teslimat üçlüsü (2026-10-10): ülke ve il de mağazanındır — seçici DEĞİL salt okunur kutu çizilir (`saltOkunur`).
+  it('teslimat ÜLKESİ ve İLİ de kilitliyken salt okunur: iki seçici `saltOkunur={magazaKilidi}` alır', () => {
+    const ulke = modal.match(/<UlkeSecici\b[^\n]*\/>/)?.[0] ?? '';
+    const il = modal.match(/<IlSecici\b[^\n]*\/>/)?.[0] ?? '';
+    expect(ulke).toMatch(/<UlkeSecici id="siparis-duzenle-ulke" deger=\{editingOrderData\.teslimatUlke\} saltOkunur=\{magazaKilidi\} /);
+    expect(il).toMatch(/<IlSecici id="siparis-duzenle-il" deger=\{duzenlenenIl\} ulke=\{etkinUlke\(editingOrderData\.teslimatUlke\)\} saltOkunur=\{magazaKilidi\} /);
+    // Pencerede bu bileşenlerden BİRER tane var (kilitsiz bir ikinci kopya kilidi delerdi).
+    expect(modal.split('<UlkeSecici').length - 1).toBe(1);
+    expect(modal.split('<IlSecici').length - 1).toBe(1);
+    // Ülke seçicisine kayıttaki HAM değer verilir: `etkinUlke` uygulansaydı ülkesi bilinmeyen mağaza kaydı «Türkiye» görünürdü.
+    expect(ulke).not.toMatch(/deger=\{etkinUlke\(/);
   });
 
   it('kilitli formda cari BAĞLAMA açık ama seçici yalnız `leadId` yazar — müşteri adına DOKUNMAZ', () => {
@@ -245,6 +258,9 @@ describe('Sipariş düzenleme formu — MAĞAZA KİLİDİ: ad / adres / tutar ma
   it('kayıt yaması: ad + adres VERİLMEZ, tutar boş GEÇİLMEZ ve yamadan DÜŞÜRÜLÜR; yazılan nesne süzülmüş `yama`', () => {
     expect(modal).toMatch(/customerName: magazaKilidi \? undefined : editingOrderData\.customerName,/);
     expect(modal).toMatch(/shippingAddress: magazaKilidi \? undefined : editingOrderData\.shippingAddress,/);
+    // Ülke ve il de yamaya VERİLMEZ (2026-10-10) — salt okunur gösterim tek başına yetmez.
+    expect(modal).toMatch(/teslimatUlke: magazaKilidi \? undefined : etkinUlke\(editingOrderData\.teslimatUlke\),/);
+    expect(modal).toMatch(/teslimatSehri: magazaKilidi \? undefined : duzenlenenIl,/);
     expect(modal).toMatch(/tutarHam: magazaKilidi \? sayiGirdisi\(selectedOrder\.totalPrice\) : editingTutarHam,/);
     expect(modal).toMatch(/const \{ totalPrice: _magazaTutari, \.\.\.tutarsizYama \} = hamYama;\s*const yama: typeof hamYama = magazaKilidi \? tutarsizYama : hamYama;/);
     expect(modal).toMatch(/await updateDoc\(doc\(db, 'orders', duzenlenenId\), \{ \.\.\.yama, updatedAt: serverTimestamp\(\) \}\);/);
@@ -271,15 +287,23 @@ describe('Sipariş düzenleme formu — MAĞAZA KİLİDİ: ad / adres / tutar ma
   // Yukarıdaki çit sayfanın HANGİ girdileri verdiğini sabitler; bu vaka o girdilerin GERÇEK yama işlevinde ne ürettiğini.
   describe('kilitli kayıt reçetesi — gerçek `siparisDuzenlemeYamasi` ile', () => {
     const MAGAZA = { source: MAGAZA_KAYNAGI, totalPrice: 1499.9 };
-    const kilitliYama = (onceki: { totalPrice?: number }, form: { kdvHam: string; depoNo?: number; leadId?: string }) => {
+    const kilitliYama = (onceki: { totalPrice?: number; teslimatSehri?: string | null; teslimatUlke?: string }, form: { kdvHam: string; depoNo?: number; leadId?: string }) => {
       const { totalPrice: _magazaTutari, ...yama } = siparisDuzenlemeYamasi(
-        { customerName: undefined, shippingAddress: undefined, tutarHam: sayiGirdisi(onceki.totalPrice), ...form }, onceki);
+        { customerName: undefined, shippingAddress: undefined, teslimatUlke: undefined, teslimatSehri: undefined, tutarHam: sayiGirdisi(onceki.totalPrice), ...form }, onceki);
       return yama;
     };
 
     it('yalnız Cetpa alanları yazılır: ad / adres / tutar ve KDV türevleri yamada YOK', () => {
       expect(kilitliYama(MAGAZA, { kdvHam: '20', depoNo: 3, leadId: 'lead-9' })).toEqual({ kdvOran: 20, depoNo: 3, leadId: 'lead-9' });
       expect(kilitliYama(MAGAZA, { kdvHam: '' })).toEqual({});
+    });
+
+    it('teslimat ülkesi / ili mağazanındır: kayıtta «ilçe / il» dolu, ülke yok / dolu — yamada İKİ anahtar da YOK', () => {
+      expect(kilitliYama({ ...MAGAZA, teslimatSehri: 'Çankaya / Ankara' }, { kdvHam: '20', depoNo: 3 })).toEqual({ kdvOran: 20, depoNo: 3 });
+      expect(kilitliYama({ ...MAGAZA, teslimatSehri: null, teslimatUlke: 'DE' }, { kdvHam: '' })).toEqual({});
+      // NEDEN `undefined` verilir: kilitsiz reçete (etkin ülke + kutudaki il) aynı kayıtta «il boşaltıldı» sayılıp `null` yazardı.
+      expect(siparisDuzenlemeYamasi({ teslimatUlke: 'TR', teslimatSehri: '', tutarHam: sayiGirdisi(MAGAZA.totalPrice), kdvHam: '' },
+        { ...MAGAZA, teslimatSehri: 'Çankaya / Ankara', teslimatUlke: 'DE' })).toMatchObject({ teslimatUlke: 'TR', teslimatSehri: null });
     });
 
     it('NEDEN boş geçilmez: boş tutar + bilinen önceki değer `totalPrice: null` üretir (tutarı SİLERDİ)', () => {

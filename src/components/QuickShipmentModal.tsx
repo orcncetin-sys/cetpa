@@ -7,6 +7,8 @@ import type { Order } from '../types';
 import type { Language } from '../translations';
 import { bugunAnahtari } from '../utils/zaman';
 import { oc } from '../i18n/ortak';
+// Sevkiyat adresi siparişin TAM adresidir (kalan + il + yurt dışıysa ülke) — tek kaynak.
+import { teslimatAdresiMetni } from '../utils/siparisler/teslimatAdresi';
 
 interface QuickShipmentModalProps {
   order: Order | null;
@@ -53,7 +55,7 @@ export default function QuickShipmentModal({
                 await addDoc(collection(db, 'shipments'), {
                   customerName: order.customerName,
                   orderId: order.id,
-                  destination: fd.get('destination') || order.shippingAddress || '',
+                  destination: fd.get('destination') || teslimatAdresiMetni(order),
                   cargoFirm: fd.get('cargoFirm') || '',
                   driver: fd.get('driver') || '',
                   date: fd.get('date') || today,
@@ -67,7 +69,7 @@ export default function QuickShipmentModal({
             }}
           >
             {[
-              { name: 'destination', label: currentLanguage === 'tr' ? 'Adres' : 'Destination', defaultValue: order.shippingAddress || '' },
+              { name: 'destination', label: currentLanguage === 'tr' ? 'Adres' : 'Destination', defaultValue: teslimatAdresiMetni(order) },
               { name: 'cargoFirm',   label: currentLanguage === 'tr' ? 'Kargo Firması' : 'Cargo Company', defaultValue: order.cargoCompany || '' },
               { name: 'driver',      label: oc(currentLanguage).surucu, defaultValue: '' },
               { name: 'trackingNo',  label: oc(currentLanguage).takip_no, defaultValue: order.trackingNumber || '' },

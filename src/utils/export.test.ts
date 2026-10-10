@@ -50,6 +50,23 @@ describe('exportOrdersCSV', () => {
     expect(dosyaAdi).toMatch(/^CETPA_Siparisler_\d{4}-\d{2}-\d{2}\.csv$/);
     expect(String(blobParcalari[0]).startsWith('\uFEFF'), 'Excel Türkçe için UTF-8 BOM ilk parça olmalı').toBe(true);
   });
+  // Teslimat üçlüsü (2026-10-10): `shippingAddress` yalnız «kalan»dır — sütun TAM adresi yazar (`teslimatAdresiMetni`).
+  it('«Teslimat Adresi» sütunu TAM adres: kalan + il (+ yurt dışıysa Türkçe ülke adı); eski kayıt birebir; adres yoksa BOŞ hücre', () => {
+    exportOrdersCSV([
+      siparis({ shippingAddress: 'Kepez, Yenigün Mah. 1063 Sok. No:4', teslimatSehri: 'Antalya', teslimatUlke: 'TR' }),
+      siparis({ id: 'o2', shippingAddress: 'Hauptstr. 5', teslimatSehri: 'Berlin', teslimatUlke: 'DE' }),
+      siparis({ id: 'o3', shippingAddress: 'Esenyurt / İstanbul' }),                                   // il / ülke alanı olmayan eski kayıt
+      siparis({ id: 'o4', shippingAddress: '', teslimatSehri: 'Antalya', teslimatUlke: 'TR' }),          // yalnız ili seçilmiş
+      siparis({ id: 'o5' }),
+    ], 'tr');
+    expect(satirlar.map(r => r['Teslimat Adresi'])).toEqual([
+      'Kepez, Yenigün Mah. 1063 Sok. No:4, Antalya',
+      'Hauptstr. 5, Berlin, Almanya',
+      'Esenyurt / İstanbul',
+      'Antalya',
+      '',
+    ]);
+  });
   it("Mikro türevi (source:'mikro-fatura', paid yok) → 'Bilinmiyor (Mikro)'; native paid:false → 'Bekliyor'; paid:true → 'Ödendi'", () => {
     exportOrdersCSV([
       siparis({ source: 'mikro-fatura' } as Partial<Order>),

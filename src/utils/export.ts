@@ -10,6 +10,7 @@ import { gorunenSiparisNo, odemeTakipli } from './siparis';
 import { gunAnahtari, bugunAnahtari } from './zaman';
 import type { Order, Lead, InventoryItem } from '../types';
 import { oc } from '../i18n/ortak';
+import { teslimatAdresiMetni } from './siparisler/teslimatAdresi';
 
 // ── Generic download helper ───────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ export function exportOrdersCSV(orders: Order[], lang: string = 'tr'): void {
     [tr ? 'KDV %'              : 'VAT %']:           o.kdvOran ?? '',   // bilinmiyorsa BOŞ hücre, 0 değil (satır 94 dersi — yarım kalmıştı)
     [tr ? 'Kargo No'           : 'Tracking No']:     o.trackingNumber ?? '',
     [tr ? 'Kargo Firması'      : 'Carrier']:         o.cargoCompany ?? '',
-    [oc(tr).teslimat_adresi]:o.shippingAddress ?? '',
+    [oc(tr).teslimat_adresi]:teslimatAdresiMetni(o),   // TAM adres: kalan + il + (yurt dışıysa) ülke
     [oc(tr).olusturulma]:
       gunAnahtari(o.createdAt) ?? '',   // yerel gün; bilinmiyorsa BOŞ hücre (bugün DEĞİL)
     [oc(tr).notlar]:           o.notes ?? '',

@@ -71,6 +71,7 @@
  */
 import { bilinenSayi } from '../para';
 import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi';
+import { teslimatAdresiMetni } from './teslimatAdresi';
 import type { ArayuzDili } from '../zaman';
 
 // ── Girdi tipleri ────────────────────────────────────────────────────────────
@@ -92,6 +93,9 @@ export interface IrsaliyeSiparisi {
   id: string;
   customerName?: unknown;
   shippingAddress?: unknown;
+  /** İl / şehir ve ülke kodu — `destination` TAM adres metnidir (`teslimatAdresiMetni`: kalan + il + yurt dışıysa ülke). */
+  teslimatSehri?: unknown;
+  teslimatUlke?: unknown;
   trackingNumber?: unknown;
   cargoCompany?: unknown;
   lineItems?: readonly IrsaliyeKalemi[] | null;
@@ -268,7 +272,9 @@ export function irsaliyeIstegi(
       shipment: {
         mikroCariKod,
         customerName: serbestMetin(siparis.customerName),
-        destination:  serbestMetin(siparis.shippingAddress),
+        // TAM adres metni. Mikro'ya il / ülke KOLONU yazılmaz: metin belge açıklamasına gider; sunucu şeması ve Mikro
+        // gövdesi değişmedi.
+        destination:  teslimatAdresiMetni(siparis),
         trackingNo:   ilkDoluDeger(siparis.trackingNumber) || siparis.id.slice(0, 8),
         cargoFirm:    serbestMetin(siparis.cargoCompany),
         items,

@@ -16,8 +16,15 @@
  *  • Durum GERİ GİTMEZ (Pending < Processing < Shipped < Delivered); `Cancelled` kalıcıdır; `paid` tek yönlüdür.
  *  • DEĞİŞMEYEN `status` / `paid: false` yamaya GİRMEZ: çağıran oku → eşle → yaz zincirinde kilit tutmaz; bayat okumayla
  *    hesaplanan yama aynı değeri yeniden yazsaydı, o arada Cetpa kullanıcısının verdiği durumu / "Ödendi"yi geri ezerdi.
- *  • Tazelenen metin alanı (e-posta, telefon, teslimat adresi / şehri, müşteri notu) Shopify'da BOŞALTILMIŞSA ve kayıtta
- *    doluysa açıkça `null` yazılır (yamaya koymamak silmeyi sessiz no-op yapar). Kargo alanları boşla EZİLMEZ.
+ *  • Tazelenen metin alanı (e-posta, telefon, teslimat adresi / şehri / ülkesi, müşteri notu) Shopify'da BOŞALTILMIŞSA ve
+ *    kayıtta doluysa açıkça `null` yazılır (yamaya koymamak silmeyi sessiz no-op yapar). Kargo alanları boşla EZİLMEZ.
+ *  • TESLİMAT ALANLARI (2026-10-10; sipariş penceresinde ülke / il seçimi geldi, mağaza siparişinde anlam DEĞİŞMEDİ):
+ *    `shippingAddress` TAM adres metnidir, `teslimatSehri` «ilçe / il» (Online Siparişler sütunu) — pencereden açılan
+ *    siparişteki «kalan» / «il» anlamı bu kaynakta GEÇERSİZDİR; okuyan taraf `source` ile ayırır
+ *    (utils/siparisler/teslimatAdresi). `teslimatUlke` yalnız `shipping_address.country_code` biçimce kod
+ *    (`^[A-Z]{2}$`) ise yazılır: varsayılan 'TR' YAZILMAZ, harf büyütülmez, ülke adından kod tahmin edilmez,
+ *    `billing_address`'e düşülmez (kod yoksa ülke BİLİNMİYORDUR). O da tazelenen alandır: kod gelmezse ve kayıtta
+ *    doluysa `null`'a döner (adresi değişen siparişte eski ülke kalmasın); kayıt boşsa anahtar hiç yazılmaz.
  *  • `faturali` / `kdvOran` / `kdvTutari` / `kdvHaricTutar` YAZILMAZ: `faturali:false` Cetpa'da "FATURASIZ SATIŞ" demektir ve
  *    fatura / e-İrsaliye yollarını kapatır. Kalemde `price` YAZILMAZ (MF sürüm-2 modeliyle aynı anlam: tutar `total`da).
  *  • TRY dışı sipariş: `totalPrice` YAZILMAZ; `dovizTutar` + `paraBirimi` (kullanıcı kararı: kur yoksa uydurma yok).
@@ -27,6 +34,7 @@
  */
 import { createHash } from 'crypto';
 import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi.js';
+import { ulkeKoduMu } from '../../utils/siparisler/teslimatAdresi.js';
 
 export const SIPARIS_TOPICLERI: ReadonlySet<string> = new Set([
   'orders/create', 'orders/updated', 'orders/paid', 'orders/cancelled', 'orders/fulfilled', 'orders/partially_fulfilled',
@@ -183,6 +191,10 @@ export function siparisOlayiEsle(govde: unknown, mevcut: Nesne | undefined, b: S
   const telefon = metin(body.phone) ?? metin(teslimat?.phone) ?? metin(fatura?.phone) ?? metin(musteri?.phone);
   const adres = adresMetni(teslimat) ?? adresMetni(fatura);
   const sehir = [metin(teslimat?.city), metin(teslimat?.province)].filter(Boolean).join(' / ');
+  // Ülke kodu: kaynak YALNIZ `shipping_address` (şehirle aynı; fatura adresine düşülmez). Kırpılmış değer biçimce kod
+  // değilse ('tr', 'TUR', '', alan yok) kod YOK sayılır — desenin tek yeri `ulkeKoduMu`.
+  const ulkeHam = metin(teslimat?.country_code);
+  const ulke = ulkeKoduMu(ulkeHam) ? ulkeHam : undefined;
   const not = metin(body.note);
   const odemeYontemi = Array.isArray(body.payment_gateway_names) ? body.payment_gateway_names.map(metin).filter(Boolean).join(', ') : '';
   const olustur = !mevcut;
@@ -197,6 +209,7 @@ export function siparisOlayiEsle(govde: unknown, mevcut: Nesne | undefined, b: S
     ...tazelenen('customerPhone', telefon, mevcut),
     ...tazelenen('shippingAddress', adres, mevcut),
     ...tazelenen('teslimatSehri', sehir || undefined, mevcut),
+    ...tazelenen('teslimatUlke', ulke, mevcut),
     ...tazelenen('musteriNotu', not, mevcut),
     ...(paraBirimi ? { paraBirimi } : {}),
     // TRY (ya da para birimi hiç gelmediyse — mağaza TRY) → totalPrice; başka birim → dovizTutar (ciro kur çevirmez).

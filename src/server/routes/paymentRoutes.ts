@@ -17,6 +17,8 @@ import type { Express, Request, Response } from 'express';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import type Stripe from 'stripe';
 import { iyzicoSepeti, iyzicoTutarMetni } from '../odeme/iyzicoSepet.js';
+import { siparisSehri, etkinUlke, ulkeAdi } from '../../utils/siparisler/teslimatAdresi.js';
+import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface PaymentRouteCtx {
@@ -40,6 +42,29 @@ export interface PaymentRouteCtx {
   randStr: (len?: number) => string;
   /** Plan fiyatlari server.ts'te (super-admin panelinde de kullaniliyor). */
   STRIPE_PLAN_PRICES: Record<string, { monthly: number; yearly: number; name: string }>;
+}
+
+/**
+ * iyzico `shippingAddress` bloğunun `city` / `country` değerleri — sipariş KAYDINDAN (2026-10-10; sipariş penceresinde
+ * ülke / il seçimi). İstemci gövdesinden DEĞİL: istek sözleşmesine alan eklenmedi, kayıt kiracı kapısında zaten okunuyor.
+ *   • `city`    = kaydın yapısal şehri (`siparisSehri`: Türkiye'de listeden seçilen il, başka ülkede yazılan şehir);
+ *                 yoksa bugünkü sabit.
+ *   • `country` = etkin ülke 'TR' ise bugünkü sabit 'Turkey' — `Intl` İngilizce adı ortama göre 'Türkiye' verir, iyzico'nun
+ *                 beklediği sabit oradan ALINMAZ. Başka kodda İngilizce ülke adı ('DE' → 'Germany'); ad çözülemezse sabit.
+ *   • MAĞAZA siparişinde blok TÜMÜYLE bugünkü hâlinde kalır: o kayıtta `teslimatSehri` «ilçe / il»dir (il değil);
+ *     `city` sabitken yalnız `country`'nin değişmesi karışık blok üretirdi.
+ * `buyer` ve `billingAddress` bloklarının `city` / `country` sabitleri ve `zipCode` bu kuralın DIŞINDADIR (değişmedi).
+ * Bilinen sınır: ülkesi yabancı, şehri yazılmamış siparişte `city` sabit ('İstanbul'), `country` o ülkedir.
+ */
+const IYZICO_SABIT_SEHIR = 'İstanbul';
+const IYZICO_SABIT_ULKE = 'Turkey';
+function iyzicoTeslimatYeri(kayit: Record<string, unknown> | undefined): { city: string; country: string } {
+  if (!kayit || kayit.source === MAGAZA_KAYNAGI) return { city: IYZICO_SABIT_SEHIR, country: IYZICO_SABIT_ULKE };
+  const kod = etkinUlke(kayit.teslimatUlke);
+  return {
+    city: siparisSehri(kayit) ?? IYZICO_SABIT_SEHIR,
+    country: kod === 'TR' ? IYZICO_SABIT_ULKE : ulkeAdi(kod, 'en') ?? IYZICO_SABIT_ULKE,
+  };
 }
 
 export function paymentRoutes(app: Express, C: PaymentRouteCtx): void {
@@ -95,9 +120,11 @@ export function paymentRoutes(app: Express, C: PaymentRouteCtx): void {
       return res.status(400).json({ success: false, error: 'orderId, amount, customerName, customerEmail gerekli.' });
     }
     // Sipariş VAR ve çağıranın kiracısının olmalı — dış sisteme (iyzico) gitmeden ÖNCE. Etiketsiz eski kayıt kendi sayılır.
+    // Kayıt (`kayit`) bloğun DIŞINDA durur: teslimat ili / ülkesi aşağıda bu AYNI okumadan alınır — ikinci okuma yok.
+    const snap = await C.getAdminDb().collection('orders').doc(String(orderId)).get();
+    const kayit = snap.exists ? (snap.data() as Record<string, unknown> | undefined) : undefined;
     {
-      const snap = await C.getAdminDb().collection('orders').doc(String(orderId)).get();
-      const dc = snap.exists ? String((snap.data() as { companyId?: unknown } | undefined)?.companyId ?? '') : null;
+      const dc = snap.exists ? String(kayit?.companyId ?? '') : null;
       if (dc === null || (dc !== '' && dc !== await C.reqCompanyId(req))) {
         return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
       }
@@ -111,6 +138,8 @@ export function paymentRoutes(app: Express, C: PaymentRouteCtx): void {
     // Sepet: kalem kırılımı YALNIZ tutarı kuruşu kuruşuna tutuyorsa; tutmuyorsa tek kalem (odeme/iyzicoSepet — kalem fiyatı
     // KDV hariç, tutar KDV dâhil olduğundan faturalı siparişte kırılım tutmaz ve iyzico isteği reddederdi).
     const basket = iyzicoSepeti(orderId, amount, lineItems);
+    // Teslimat bloğunun şehri / ülkesi sipariş kaydından (kural: `iyzicoTeslimatYeri`); istek gövdesinde böyle bir alan yok.
+    const teslimatYeri = iyzicoTeslimatYeri(kayit);
 
     const body = {
       locale: 'tr',
@@ -135,8 +164,8 @@ export function paymentRoutes(app: Express, C: PaymentRouteCtx): void {
       },
       shippingAddress: {
         contactName: customerName,
-        city: 'İstanbul',
-        country: 'Turkey',
+        city: teslimatYeri.city,
+        country: teslimatYeri.country,
         address: shippingAddress,
         zipCode: '34000',
       },

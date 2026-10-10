@@ -15,7 +15,10 @@ import {
   siparisDuzenlemeYamasi,
   yerelTutar,
   yerelSayi,
+  girilenMetinYamasi,
+  yerelMetin,
 } from './formKayit';
+import { ulkeSecimiYamasi, etkinUlke, takipAdresi } from './teslimatAdresi';
 
 // Türkçe fikstür — Cetpa inşaat malzemesi toptancısı.
 const SIPARIS = {
@@ -631,5 +634,256 @@ describe('siparisDuzenlemeYamasi — pencereden açılmış kalemli siparişte K
     const yama = siparisDuzenlemeYamasi({ tutarHam: '3600', kdvHam: '' }, HARIC);
     expect(yama.lineItems).toBeUndefined();
     expect(yama).toMatchObject({ kdvOran: null, kdvHaricTutar: null, kdvTutari: null });
+  });
+});
+
+// 2026-10-10 — teslimat adresinde ülke / il (kullanıcı isteği 2026-10-09: «şehir ve ülke seçtir droplist»).
+describe('girilenMetinYamasi — GİRİLEN metin alanı (il / şehir, ülke): boşaltma açıkça null', () => {
+  it('`undefined` (alan formda yok / kilitli) → `{}` — önceki dolu olsa da', () => {
+    expect(girilenMetinYamasi('teslimatSehri', undefined, 'Antalya')).toEqual({});
+    expect(girilenMetinYamasi('teslimatSehri', undefined, undefined)).toEqual({});
+  });
+
+  it('yeni değer → `{ alan: değer }`, KIRPILMIŞ', () => {
+    expect(girilenMetinYamasi('teslimatSehri', 'Antalya', undefined)).toEqual({ teslimatSehri: 'Antalya' });
+    expect(girilenMetinYamasi('teslimatSehri', '  Berlin ', 'Antalya')).toEqual({ teslimatSehri: 'Berlin' });
+    expect(girilenMetinYamasi('teslimatSehri', 'Antalya', null)).toEqual({ teslimatSehri: 'Antalya' });
+  });
+
+  it('aynı değer → `{}` (karşılaştırma kırpılmış değerlerle; aynı değer geri yazılmaz)', () => {
+    expect(girilenMetinYamasi('teslimatSehri', 'Antalya', 'Antalya')).toEqual({});
+    expect(girilenMetinYamasi('teslimatSehri', ' Antalya ', 'Antalya')).toEqual({});
+    expect(girilenMetinYamasi('teslimatSehri', 'Antalya', ' Antalya ')).toEqual({});
+  });
+
+  it('boş + önceki DOLU → `{ alan: null }` — mutasyon-ayırt-edici (alanı yamaya koymamak PATCH-merge\'de silmeyi no-op yapardı)', () => {
+    expect(girilenMetinYamasi('teslimatSehri', '', 'Antalya')).toEqual({ teslimatSehri: null });
+    expect(girilenMetinYamasi('teslimatSehri', '   ', 'Antalya')).toEqual({ teslimatSehri: null });
+  });
+
+  it('boş + önceki boş / yalnız boşluk / `null` / yok / metin değil → `{}` (sahte null yazılmaz)', () => {
+    for (const onceki of ['', '   ', null, undefined, 7, {}]) {
+      expect(girilenMetinYamasi('teslimatSehri', '', onceki), String(onceki)).toEqual({});
+    }
+  });
+
+  it('alan adı yama anahtarıdır', () => {
+    expect(Object.keys(girilenMetinYamasi('teslimatUlke', 'DE', 'TR'))).toEqual(['teslimatUlke']);
+  });
+});
+
+describe('siparisDuzenlemeYamasi — teslimatUlke / teslimatSehri (yalnız DEĞİŞEN yazılır)', () => {
+  it('ESKİ kayıt (`teslimatUlke` yok) açılıp yalnız not / tutar değişince yamada `teslimatUlke` YOK — sessiz \'TR\' yazılmaz', () => {
+    // Seçici hiç boş olmaz: eski kayıtta 'Türkiye' GÖSTERİLİR. Form ister kayıttaki ham değeri (undefined), ister
+    // görünen 'TR'yi versin, yamaya ülke girmez.
+    for (const formUlke of [undefined, 'TR']) {
+      const yama = siparisDuzenlemeYamasi({ shippingAddress: SIPARIS.shippingAddress, tutarHam: '19000', teslimatUlke: formUlke, teslimatSehri: '' }, SIPARIS);
+      expect(yama, String(formUlke)).toEqual({ shippingAddress: SIPARIS.shippingAddress, totalPrice: 19_000 });
+      expect('teslimatUlke' in yama, String(formUlke)).toBe(false);
+      expect('teslimatSehri' in yama, String(formUlke)).toBe(false);
+    }
+  });
+
+  it('kayıtta `teslimatUlke: null` / geçersiz kod da \'TR\' sayılır: \'TR\' seçili form değişiklik DEĞİL', () => {
+    for (const kayittaki of [null, '', 'tr']) {
+      const yama = siparisDuzenlemeYamasi({ tutarHam: '18500', teslimatUlke: 'TR', teslimatSehri: '' }, { ...SIPARIS, teslimatUlke: kayittaki });
+      expect('teslimatUlke' in yama, String(kayittaki)).toBe(false);
+    }
+  });
+
+  it("ülke TR → DE ve önceki il dolu → `teslimatUlke: 'DE'` + `teslimatSehri: null` (form ili boşaltır: `ulkeSecimiYamasi`)", () => {
+    const onceki = { ...SIPARIS, teslimatUlke: 'TR', teslimatSehri: 'Kayseri' };
+    const form = { teslimatUlke: onceki.teslimatUlke, teslimatSehri: onceki.teslimatSehri, ...ulkeSecimiYamasi(onceki.teslimatUlke, 'DE') };
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '18500', ...form }, onceki);
+    expect(yama).toEqual({ totalPrice: 18_500, teslimatUlke: 'DE', teslimatSehri: null });
+  });
+
+  it("eski kayıtta (ülke alanı yok) ülke DE seçilince `teslimatUlke: 'DE'` yazılır; il zaten boşsa il anahtarı YOK", () => {
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '18500', teslimatUlke: 'DE', teslimatSehri: '' }, SIPARIS);
+    expect(yama).toEqual({ totalPrice: 18_500, teslimatUlke: 'DE' });
+  });
+
+  it("DE → TR: `teslimatUlke: 'TR'` AÇIKÇA yazılır (kayıtta 'DE' kalmasın)", () => {
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '18500', teslimatUlke: 'TR', teslimatSehri: '' }, { ...SIPARIS, teslimatUlke: 'DE', teslimatSehri: 'Berlin' });
+    expect(yama).toEqual({ totalPrice: 18_500, teslimatUlke: 'TR', teslimatSehri: null });
+  });
+
+  it("il seçimi → `teslimatSehri: 'Antalya'` + alanı olmayan kayıtta `teslimatUlke: 'TR'` AÇIKÇA (adrese dokunuldu); aynı il yeniden kaydedilince ikisi de yazılmaz", () => {
+    expect(siparisDuzenlemeYamasi({ tutarHam: '18500', teslimatUlke: 'TR', teslimatSehri: 'Antalya' }, SIPARIS))
+      .toEqual({ totalPrice: 18_500, teslimatSehri: 'Antalya', teslimatUlke: 'TR' });
+    expect(siparisDuzenlemeYamasi({ tutarHam: '18500', teslimatUlke: 'TR', teslimatSehri: 'Antalya' }, { ...SIPARIS, teslimatUlke: 'TR', teslimatSehri: 'Antalya' }))
+      .toEqual({ totalPrice: 18_500 });
+  });
+
+  it('il boşaltma (önceki dolu) → açıkça `null`; önceki `null` iken boş il yazılmaz', () => {
+    expect(siparisDuzenlemeYamasi({ tutarHam: '18500', teslimatUlke: 'TR', teslimatSehri: '' }, { ...SIPARIS, teslimatUlke: 'TR', teslimatSehri: 'Antalya' }))
+      .toEqual({ totalPrice: 18_500, teslimatSehri: null });
+    expect(siparisDuzenlemeYamasi({ tutarHam: '18500', teslimatUlke: 'TR', teslimatSehri: '' }, { ...SIPARIS, teslimatUlke: 'TR', teslimatSehri: null }))
+      .toEqual({ totalPrice: 18_500 });
+  });
+
+  it('MAĞAZA KİLİDİ (iki alan `undefined` verilir) → iki anahtar yamada BULUNMAZ; kayıttaki «ilçe / il» ve ülke ezilmez', () => {
+    const magaza = { ...SIPARIS, source: 'shopify_webhook', teslimatSehri: 'Çankaya / Ankara', teslimatUlke: 'DE' };
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '18500', teslimatUlke: undefined, teslimatSehri: undefined }, magaza);
+    expect(yama).toEqual({ totalPrice: 18_500 });
+    expect('teslimatUlke' in yama).toBe(false);
+    expect('teslimatSehri' in yama).toBe(false);
+  });
+
+  it('adres alanları KDV türevlerini TETİKLEMEZ: yalnız il değişen faturalı siparişte türevlere dokunulmaz', () => {
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '12000', kdvHam: '20', teslimatUlke: 'TR', teslimatSehri: 'Kayseri' }, FATURALI);
+    // İl yaması var → adrese dokunuldu: alanı olmayan kayıtta ülke de açıkça yazılır; KDV türevleri yamada YOK.
+    expect(yama).toEqual({ totalPrice: 12_000, kdvOran: 20, teslimatSehri: 'Kayseri', teslimatUlke: 'TR' });
+  });
+
+  it('oran değişen yolda da (türev dalı) adres yaması korunur', () => {
+    const yama = siparisDuzenlemeYamasi({ tutarHam: '12000', kdvHam: '10', teslimatUlke: 'DE', teslimatSehri: 'Berlin' }, FATURALI);
+    expect(yama).toMatchObject({ kdvOran: 10, teslimatUlke: 'DE', teslimatSehri: 'Berlin' });
+    expect(yama.kdvHaricTutar).toBeCloseTo(12_000 / 1.1, 6);
+  });
+});
+
+// İnceleme 2026-10-10 (gizlilik — yüksek). Kimliksiz `GET /api/track/:orderId` kaydı «yapısal» sayınca adresi YALNIZ il +
+// ülkeden kurar; değilse eski «son iki parça» maskesi `shippingAddress`'i okur. Ülke yalnız etkin değeri değişince
+// yazılırken, alanı olmayan eski kayıtta adres yeni etikete göre («ilçe, mahalle, sokak») yeniden yazılıp il boş
+// bırakılınca — ya da il sonradan boşaltılınca — kayıt yapısal olmuyor / olmaktan çıkıyor, maske de «kalan»ın sokak /
+// kapı / daire düzeyini dışarı veriyordu. Burada sınanan ZİNCİRDİR: yama + `takipAdresi` + eski maske birlikte.
+describe('siparisDuzenlemeYamasi + takipAdresi — adrese DOKUNULAN kayıt kalıcı yapısal olur («kalan» dışarı çıkmaz)', () => {
+  /** `server.ts` `maskAddress` gövdesinin eşi (giriş dosyası içe aktarılamıyor); asıl gövde
+   *  `src/server/teslimatAdresi.degismez.test.ts`'te satır satır sabit. */
+  const eskiMaske = (addr: unknown): string | null => {
+    if (typeof addr !== 'string' || !addr.trim()) return null;
+    const parts = addr.split(',').map(p => p.trim()).filter(Boolean);
+    if (parts.length <= 2) return parts.join(', ') || null;
+    return parts.slice(-2).join(', ');
+  };
+  /** Takip ucunun yanıtındaki `shippingAddress` (server.ts: `adres.yapisal ? adres.metin : maskAddress(o.shippingAddress)`). */
+  const takipYaniti = (kayit: Record<string, unknown>): string | null => {
+    const adres = takipAdresi(kayit);
+    return adres.yapisal ? adres.metin : eskiMaske(kayit.shippingAddress);
+  };
+  type Kayit = Record<string, unknown>;
+  interface Form { shippingAddress?: string; teslimatUlke?: unknown; teslimatSehri: string }
+  /** «Siparişi Düzenle» kaydı: OrdersPage'in yama çağrısının eşi (ülke forma `etkinUlke` ile verilir) + PATCH-merge.
+   *  `tutarHam` tutar kutusunun metnidir; fikstürdeki tutarla aynı ('1000') → adres dışında değişiklik yok. */
+  const kaydet = (kayit: Kayit, form: Form, tutarHam: string = '1000'): { yama: Kayit; kayit: Kayit } => {
+    const yama: Kayit = { ...siparisDuzenlemeYamasi({
+      shippingAddress: form.shippingAddress, teslimatUlke: etkinUlke(form.teslimatUlke), teslimatSehri: form.teslimatSehri, tutarHam,
+    }, kayit) };
+    return { yama, kayit: { ...kayit, ...yama } };
+  };
+  /** Sokak düzeyi parçalar — yanıtta HİÇBİRİ geçmemeli. */
+  const SOKAK = ['Yenigün', '1063', 'No:4', 'D:7', 'Muratpaşa'];
+  const sizmadi = (yanit: string | null) => { for (const parca of SOKAK) expect(String(yanit), parca).not.toContain(parca); };
+
+  const ESKI: Kayit = { customerName: 'Şirin Yapı', totalPrice: 1000, shippingAddress: 'Yenigün Mah. 1063 Sok. No:4 D:7, Muratpaşa, Antalya' };
+  const KALAN = 'Muratpaşa, Yenigün Mah. 1063 Sok. No:4 D:7';
+
+  it('düzenek: eski kayıt (alan yok) bugün eski maskeden geçer — «ilçe, il» kuyruğu', () => {
+    expect(takipYaniti(ESKI)).toBe('Muratpaşa, Antalya');
+    // Düzeltmenin kapattığı delik: aynı kayıtta adres «kalan»a çevrilip yapısal alan YAZILMASAYDI maske sokağı verirdi.
+    expect(takipYaniti({ ...ESKI, shippingAddress: KALAN })).toBe(KALAN);
+  });
+
+  it("alanı olmayan kayıt + adres DEĞİŞTİ + il BOŞ → yamada `teslimatUlke: 'TR'`; takip yanıtı null, kalanın hiçbir parçası yok", () => {
+    const { yama, kayit } = kaydet(ESKI, { shippingAddress: KALAN, teslimatUlke: undefined, teslimatSehri: '' });
+    expect(yama).toMatchObject({ shippingAddress: KALAN, teslimatUlke: 'TR' });
+    expect('teslimatSehri' in yama).toBe(false);
+    expect(takipAdresi(kayit)).toEqual({ yapisal: true, metin: null });
+    expect(takipYaniti(kayit)).toBeNull();
+    sizmadi(takipYaniti(kayit));
+  });
+
+  it('ADRESSİZ eski kayıtta adres ilk kez girildi + il boş → aynı: ülke açıkça yazılır, yanıt null', () => {
+    const { yama, kayit } = kaydet({ customerName: 'Şirin Yapı', totalPrice: 1000 }, { shippingAddress: KALAN, teslimatUlke: undefined, teslimatSehri: '' });
+    expect(yama.teslimatUlke).toBe('TR');
+    expect(takipYaniti(kayit)).toBeNull();
+  });
+
+  it("il seçildi → yanıt yalnız il; sonra il BOŞALTILDI (doğrudan ya da ülke DE → TR ile) → yanıt null, eski maskeye GERİ DÜŞMEZ", () => {
+    const b1 = kaydet(ESKI, { shippingAddress: 'Muratpaşa, Yenigün Mah., 1063 Sok. No:4 D:7', teslimatUlke: undefined, teslimatSehri: 'Antalya' });
+    expect(b1.yama).toMatchObject({ teslimatSehri: 'Antalya', teslimatUlke: 'TR' });
+    expect(takipYaniti(b1.kayit)).toBe('Antalya');
+
+    // İl kutusu doğrudan boşaltıldı: ülke kayıtta artık YAZILI olduğu için yeniden yazılmaz; kayıt yapısal kalır.
+    const b2 = kaydet(b1.kayit, { shippingAddress: String(b1.kayit.shippingAddress), teslimatUlke: b1.kayit.teslimatUlke, teslimatSehri: '' });
+    expect(b2.yama).toMatchObject({ teslimatSehri: null });
+    expect('teslimatUlke' in b2.yama).toBe(false);
+    expect(takipYaniti(b2.kayit)).toBeNull();
+    sizmadi(takipYaniti(b2.kayit));
+
+    // Ülke DE seçilip TR'ye geri alındı: form ili boşaltır (`ulkeSecimiYamasi`), etkin ülke yine 'TR'.
+    let form: { teslimatUlke?: unknown; teslimatSehri?: unknown } = { teslimatUlke: b1.kayit.teslimatUlke, teslimatSehri: b1.kayit.teslimatSehri };
+    form = { ...form, ...ulkeSecimiYamasi(form.teslimatUlke, 'DE') };
+    form = { ...form, ...ulkeSecimiYamasi(form.teslimatUlke, 'TR') };
+    expect(form).toEqual({ teslimatUlke: 'TR', teslimatSehri: '' });
+    const b3 = kaydet(b1.kayit, { shippingAddress: String(b1.kayit.shippingAddress), teslimatUlke: form.teslimatUlke, teslimatSehri: '' });
+    expect(takipYaniti(b3.kayit)).toBeNull();
+    sizmadi(takipYaniti(b3.kayit));
+  });
+
+  it("ili dolu ama ülke alanı OLMAYAN kayıtta il boşaltılınca `teslimatSehri: null` + `teslimatUlke: 'TR'` — mutasyon-ayırt-edici", () => {
+    // Yalnız il `null`'lanıp ülke yazılmasaydı iki yapısal alan da boş kalır, kayıt eski maskeye düşerdi.
+    const ilYalniz: Kayit = { ...ESKI, shippingAddress: 'Muratpaşa, Yenigün Mah., 1063 Sok. No:4 D:7', teslimatSehri: 'Antalya' };
+    expect(takipYaniti(ilYalniz)).toBe('Antalya');
+    const { yama, kayit } = kaydet(ilYalniz, { shippingAddress: String(ilYalniz.shippingAddress), teslimatUlke: undefined, teslimatSehri: '' });
+    expect(yama).toMatchObject({ teslimatSehri: null, teslimatUlke: 'TR' });
+    expect(takipYaniti(kayit)).toBeNull();
+    sizmadi(takipYaniti(kayit));
+  });
+
+  it("kayıtta `teslimatUlke` `null` / '' / geçersiz ('tr') iken adrese dokunulunca 'TR' AÇIKÇA yazılır", () => {
+    for (const kayittaki of [null, '', 'tr']) {
+      const { yama } = kaydet({ ...ESKI, teslimatUlke: kayittaki }, { shippingAddress: KALAN, teslimatUlke: kayittaki, teslimatSehri: '' });
+      expect(yama.teslimatUlke, String(kayittaki)).toBe('TR');
+    }
+  });
+
+  it('KORUMA: adrese dokunulmadıysa (yalnız tutar / müşteri değişti) yamada ülke YOK; yanıt eski maskeyle birebir', () => {
+    const { yama, kayit } = kaydet(ESKI, { shippingAddress: String(ESKI.shippingAddress), teslimatUlke: undefined, teslimatSehri: '' }, '1200');
+    expect(yama).toEqual({ shippingAddress: ESKI.shippingAddress, totalPrice: 1200 });
+    expect(takipYaniti(kayit)).toBe('Muratpaşa, Antalya');
+    // Baş / son boşluk değişiklik DEĞİLDİR (karşılaştırma kırpılmış metinle).
+    const bosluklu = kaydet(ESKI, { shippingAddress: `  ${String(ESKI.shippingAddress)} `, teslimatUlke: undefined, teslimatSehri: '   ' });
+    expect('teslimatUlke' in bosluklu.yama).toBe(false);
+    // Adres formda HİÇ yoksa (alan verilmedi) dokunulmuş sayılmaz.
+    expect('teslimatUlke' in kaydet(ESKI, { teslimatUlke: undefined, teslimatSehri: '' }).yama).toBe(false);
+  });
+
+  it('KORUMA: ülkesi YAZILI kayıtta adres / il değişince aynı kod geri yazılmaz (PATCH-merge ezme riski)', () => {
+    const almanya: Kayit = { ...ESKI, shippingAddress: 'Hauptstr. 5', teslimatSehri: 'Berlin', teslimatUlke: 'DE' };
+    const adres = kaydet(almanya, { shippingAddress: 'Hauptstr. 7', teslimatUlke: 'DE', teslimatSehri: 'Berlin' });
+    expect('teslimatUlke' in adres.yama).toBe(false);
+    expect(takipYaniti(adres.kayit)).toBe('Berlin, Almanya');
+    const sehir = kaydet(almanya, { shippingAddress: 'Hauptstr. 5', teslimatUlke: 'DE', teslimatSehri: 'Hamburg' });
+    expect(sehir.yama).toMatchObject({ teslimatSehri: 'Hamburg' });
+    expect('teslimatUlke' in sehir.yama).toBe(false);
+  });
+
+  it('KORUMA: mağaza kilidi (adres, ülke, il `undefined`) → dokunma sayılmaz, üç anahtar da yamada YOK', () => {
+    const magaza: Kayit = { ...ESKI, source: 'shopify_webhook', teslimatSehri: 'Muratpaşa / Antalya' };
+    const yama = siparisDuzenlemeYamasi({ shippingAddress: undefined, teslimatUlke: undefined, teslimatSehri: undefined, tutarHam: '1000' }, magaza);
+    for (const alan of ['shippingAddress', 'teslimatUlke', 'teslimatSehri']) expect(alan in yama, alan).toBe(false);
+  });
+});
+
+describe('yerelMetin — ekrandaki siparişin OPSİYONEL metin alanı (Order tipi `string`)', () => {
+  it('yamada `null` (boşaltıldı) → `undefined` — mutasyon-ayırt-edici (`{ ...o, ...yama }` null\'ı Order\'a taşırdı)', () => {
+    expect(yerelMetin(null, 'Antalya')).toBeUndefined();
+  });
+
+  it('yamada alan yok (`undefined`) → önceki korunur; önceki metin değilse (`null`, yok) `undefined`', () => {
+    expect(yerelMetin(undefined, 'Antalya')).toBe('Antalya');
+    expect(yerelMetin(undefined, undefined)).toBeUndefined();
+    expect(yerelMetin(undefined, null)).toBeUndefined();
+  });
+
+  it('yamada değer → o değer', () => {
+    expect(yerelMetin('Kayseri', 'Antalya')).toBe('Kayseri');
+    expect(yerelMetin('DE', undefined)).toBe('DE');
+  });
+
+  it('JSON gövdesinde anahtar HİÇ bulunmaz (null değil)', () => {
+    expect(JSON.stringify({ teslimatSehri: yerelMetin(null, 'Antalya') })).toBe('{}');
   });
 });

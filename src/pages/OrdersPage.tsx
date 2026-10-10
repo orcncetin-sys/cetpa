@@ -68,7 +68,12 @@ import { teslimPerformansi, oranYuzde, ihracatToplami, ihracatToplamiYaz, memnun
 import { siparisKarliligi, mesajTutari, kalemlerTutari, stokKartiBul, BILINMIYOR } from '../utils/siparisler/siparisKarlilik';
 import { odenmemisOzeti, kovaTutari } from '../utils/siparisler/tahsilatVade';
 import { iadeTutariDogrula, iadeOnTutar, iadeTutarYamasi, iadeGorunenTutar } from '../utils/siparisler/iadeTalep';
-import { kdvEtiketi, sayiGirdisi, miktarDogrula, degerDogrula, gorunenDeger, sevkiyatDegeriKaydi, kdvOraniDogrula, siparisDuzenlemeYamasi, yerelTutar, yerelSayi } from '../utils/siparisler/formKayit';
+import { kdvEtiketi, sayiGirdisi, miktarDogrula, degerDogrula, gorunenDeger, sevkiyatDegeriKaydi, kdvOraniDogrula, siparisDuzenlemeYamasi, yerelTutar, yerelSayi, yerelMetin } from '../utils/siparisler/formKayit';
+// Teslimat adresi: TAM metin tek yerden (`teslimatAdresiMetni` — il / ülke dâhil; `o.shippingAddress` yalnız «kalan»dır);
+// üçlü alanın (Ülke · İl / Şehir · Adres) bileşenleri ve form kuralları Yeni Sipariş penceresiyle ORTAK.
+import { teslimatAdresiMetni, etkinUlke, ulkeSecimiYamasi } from '../utils/siparisler/teslimatAdresi';
+import UlkeSecici from '../components/ortak/UlkeSecici';
+import IlSecici from '../components/ortak/IlSecici';
 import SevkDeposuSecici from '../components/SevkDeposuSecici';
 import { formSayisi, girilenAlanYamasi } from '../utils/muhasebe/irsaliyeCalisan';
 import { oc } from '../i18n/ortak';
@@ -283,7 +288,7 @@ export default function OrdersPage({
     const kova = sevkiyatKovasi === 'suren' ? (teslimEdilenleriGoster ? [...suren, ...teslim] : suren) : sevkiyatKovalar[sevkiyatKovasi];
     // Arama (eskiden ölü bir kutuydu — değer de işleyici de yoktu): sipariş no, takip no, müşteri, adres.
     const gorunen = sevkiyatArama.trim() === '' ? kova
-      : kova.filter(o => eslesir(sevkiyatArama, gorunenSiparisNo(o), o.trackingNumber, o.customerName, o.shippingAddress));
+      : kova.filter(o => eslesir(sevkiyatArama, gorunenSiparisNo(o), o.trackingNumber, o.customerName, teslimatAdresiMetni(o)));
     // Harita: listedekiler + kurulmuş rotanın durakları. Rota kurulduktan SONRA teslim edilen siparişin işaretçisi kalmalı —
     // rota çizgisi o noktadan geçmeye devam ediyor (routeStops yeniden hesaplanmaz); işaretçisiz köşe çizgiyi anlamsız kılardı.
     const listede = new Set(gorunen.map(o => o.id));
@@ -335,6 +340,9 @@ export default function OrdersPage({
    * alanlar (depo, belge tipi, KDV oranı, cari BAĞI) açık kalır. Çit: lib/onlineSiparisKaydi.degismez.test.ts.
    */
   const magazaKilidi = magazaSiparisiMi(selectedOrder);
+  /** Düzenleme formundaki il / şehir, METİN olarak. Form `selectedOrder`'dan dolar ve kayıtta alan `null` bulunabilir
+   *  (mağaza eşleyicisi, önceki boşaltma) — `IlSecici` ve yama `string` ister; `null` / alan yok = '' (seçilmemiş). */
+  const duzenlenenIl = typeof editingOrderData.teslimatSehri === 'string' ? editingOrderData.teslimatSehri : '';
   /** Kilitli formda cari seçicinin ARAMA metni — `customerName`e bağlanmaz (o alan mağazanın, salt okunur). */
   const [magazaCariArama, setMagazaCariArama] = useState('');
   /** Düzenlenen siparişin RESMÎ BELGESİ kesilmiş mi (e-İrsaliye / fatura). Kesilmişse cari bağı, TUTAR ve KDV oranı kilitlenir:
@@ -793,7 +801,9 @@ export default function OrdersPage({
                           (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
                           ((o.customerName ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
                           gorunenSiparisNo(o).toLowerCase().includes(orderSearch.toLowerCase()) ||
-                          (o.shippingAddress ?? '').toLowerCase().includes(orderSearch.toLowerCase()))
+                          // Adres terimi TAM adres metninde ve Türkçe-duyarlı aranır (`eslesir`): il listeden büyük «İ» ile
+                          // yazılır ve `'İstanbul'.toLowerCase().includes('istanbul')` YANLIŞTIR (i + birleşik nokta).
+                          eslesir(orderSearch, teslimatAdresiMetni(o)))
                         );
                         exportOrdersCSV(filtered, currentLanguage);
                         toast(
@@ -1411,7 +1421,7 @@ export default function OrdersPage({
                           // Phase 523: customer filter
                           if (orderCustomerFilter && o.customerName !== orderCustomerFilter) return false;
                           const q = orderSearch.toLowerCase();
-                          if (q && !(o.customerName ?? '').toLowerCase().includes(q) && !gorunenSiparisNo(o).toLowerCase().includes(q) && !o.shippingAddress?.toLowerCase().includes(q)) return false;
+                          if (q && !(o.customerName ?? '').toLowerCase().includes(q) && !gorunenSiparisNo(o).toLowerCase().includes(q) && !eslesir(orderSearch, teslimatAdresiMetni(o))) return false;
                           // Phase 501: date range filter
                           if (orderDateRange !== 'all') {
                             // Tarihi çözülemeyen sipariş eskisi gibi filtreden GEÇER (raw yokken de geçiyordu)
@@ -1784,7 +1794,7 @@ export default function OrdersPage({
                   (orderStatusFilter === 'All' || o.status === orderStatusFilter) &&
                   ((o.customerName ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
                   gorunenSiparisNo(o).toLowerCase().includes(orderSearch.toLowerCase()) ||
-                  o.shippingAddress?.toLowerCase().includes(orderSearch.toLowerCase()))
+                  eslesir(orderSearch, teslimatAdresiMetni(o)))
                 ), orderSort.key, orderSort.dir).map(order => (
                   <div key={order.id} className="apple-card p-4 space-y-3" onClick={() => setSelectedOrder(order)}>
                     <div className="flex justify-between items-start">
@@ -2242,6 +2252,10 @@ export default function OrdersPage({
                               customerName: o.customerName,
                               customerEmail: o.customerEmail,
                               shippingAddress: o.shippingAddress,
+                              // Ülke ve il de taşınır (beyaz liste). MAĞAZA siparişinde `teslimatSehri` «ilçe / il»dir
+                              // (Online Siparişler sütunu), 81 il listesinde YOKTUR → taşınmaz; adresi zaten TAM metindir.
+                              teslimatUlke: o.teslimatUlke,
+                              ...(magazaSiparisiMi(o) ? {} : { teslimatSehri: o.teslimatSehri }),
                               status: 'Pending',
                               customerType: o.customerType,
                               cargoCompany: o.cargoCompany,
@@ -2293,7 +2307,8 @@ export default function OrdersPage({
                           doc505.text(o.customerName, 14, govdeY505);
                           doc505.setFontSize(9); doc505.setFont('Roboto', 'normal');
                           doc505.setTextColor(120, 120, 120);
-                          if (o.shippingAddress) doc505.text(o.shippingAddress, 14, govdeY505 + 6);
+                          const adres505 = teslimatAdresiMetni(o);   // TAM adres: kalan + il + (yurt dışıysa) ülke
+                          if (adres505) doc505.text(adres505, 14, govdeY505 + 6);
                           if (o.customerEmail) doc505.text(o.customerEmail, 14, govdeY505 + 11);
                           const lineItems505 = (o.lineItems || []);
                           // Kalemleri Cetpa'ya aktarılmamış Mikro faturası siparişi: kalemler Mikro'dan canlı (MF-383, 2026-09-25:
@@ -2695,7 +2710,7 @@ export default function OrdersPage({
                       </div>
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">{currentT.shipping_address}</span>
-                        <span className="font-medium">{selectedOrder.shippingAddress || '--'}</span>
+                        <span className="font-medium">{teslimatAdresiMetni(selectedOrder) || '--'}</span>
                       </div>
                       <div>
                         <span className="text-gray-500 block text-[10px] uppercase font-bold">{currentT.date}</span>
@@ -3981,7 +3996,7 @@ export default function OrdersPage({
                             )}
                             <div className="flex items-center gap-1 mt-2 text-[10px] text-gray-400">
                               <MapPin className="w-3 h-3 shrink-0" />
-                              <span className="truncate">{order.shippingAddress}</span>
+                              <span className="truncate">{teslimatAdresiMetni(order)}</span>
                             </div>
                           </>
                         );
@@ -4304,9 +4319,30 @@ export default function OrdersPage({
                     );
                   })()}
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).teslimat_adresi}</label>
-                  <input type="text" readOnly={magazaKilidi} className={cn('apple-input w-full text-sm', magazaKilidi && KILITLI_GIRDI)} value={(editingOrderData.shippingAddress as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, shippingAddress: e.target.value }))} />
+                {/* TESLİMAT ADRESİ — üçlü: Ülke · İl / Şehir · Adres (kullanıcı 2026-10-09: «şehir ve ülke seçtir droplist
+                    (otomatik liste yap)»). Yeni Sipariş penceresiyle AYNI bileşenler ve AYNI form kuralı (`ulkeSecimiYamasi`:
+                    ülke değişince il boşalır). Bu pencerede oto-adres YOKTUR: müşteri seçimi adres / il / ülkeye dokunmaz.
+                    ESKİ kayıt (alan yok): ülke 'Türkiye' GÖRÜNÜR (görünüm — adrese dokunulmadıkça kayda yazılmaz; adres metni
+                    ya da il değişince 'TR' açıkça yazılır, bkz. yama çağrısı), boş kalan yalnız il kutusudur;
+                    `shippingAddress` içinden il AYIKLANMAZ.
+                    MAĞAZA KİLİDİ: üç alan da salt okunur — il «ilçe / il» metnini aynen gösterir, ülke kayıtta yoksa «—»
+                    ('Türkiye' varsayılmaz: mağaza kaydında ülke bilinmiyordur). */}
+                <div role="group" aria-labelledby="siparis-duzenle-teslimat-baslik">
+                  <p id="siparis-duzenle-teslimat-baslik" className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).teslimat_adresi}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="siparis-duzenle-ulke" className="block text-[11px] text-gray-500 mb-1">{oc(currentLanguage).ulke}</label>
+                      <UlkeSecici id="siparis-duzenle-ulke" deger={editingOrderData.teslimatUlke} saltOkunur={magazaKilidi} dil={currentLanguage} className={cn('apple-input w-full text-sm', magazaKilidi && KILITLI_GIRDI)} onDegis={kod => setEditingOrderData(d => ({ ...d, ...ulkeSecimiYamasi(d.teslimatUlke, kod) }))} />
+                    </div>
+                    <div>
+                      <label htmlFor="siparis-duzenle-il" className="block text-[11px] text-gray-500 mb-1">{oc(currentLanguage).il_sehir}</label>
+                      <IlSecici id="siparis-duzenle-il" deger={duzenlenenIl} ulke={etkinUlke(editingOrderData.teslimatUlke)} saltOkunur={magazaKilidi} dil={currentLanguage} className={cn('apple-input w-full text-sm', magazaKilidi && KILITLI_GIRDI)} onDegis={il => setEditingOrderData(d => ({ ...d, teslimatSehri: il }))} />
+                    </div>
+                    <div className="col-span-2">
+                      <label htmlFor="siparis-duzenle-adres" className="block text-[11px] text-gray-500 mb-1">{oc(currentLanguage).adres_ilce_mahalle_sokak}</label>
+                      <input id="siparis-duzenle-adres" type="text" readOnly={magazaKilidi} className={cn('apple-input w-full text-sm', magazaKilidi && KILITLI_GIRDI)} value={(editingOrderData.shippingAddress as string) ?? ''} onChange={e => setEditingOrderData(d => ({ ...d, shippingAddress: e.target.value }))} />
+                    </div>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -4402,6 +4438,14 @@ export default function OrdersPage({
                     const hamYama = siparisDuzenlemeYamasi<Order['status']>({
                       customerName: magazaKilidi ? undefined : editingOrderData.customerName,
                       shippingAddress: magazaKilidi ? undefined : editingOrderData.shippingAddress,
+                      // Ülke ve il de kilide tabi (yama anahtarlarında BULUNMAZ). Kilitsiz kayıtta ikisi de yalnız DEĞİŞTİYSE
+                      // yazılır: ülke iki yanda `etkinUlke` ile karşılaştırılır (yalnız notu / tutarı değişen eski kayda sessiz
+                      // 'TR' yazılmaz), boşaltılan il açıkça `null` olur (`girilenMetinYamasi`). ADRESE DOKUNULDUYSA (adres metni
+                      // değişti ya da il yaması var) alanı olmayan kayda 'TR' AÇIKÇA yazılır — kayıt kimliksiz takip ucunda
+                      // kalıcı yapısal olur, «kalan» eski maskeden geçmez (inceleme 2026-10-10; `formKayit.adreseDokunuldu`).
+                      // Bu yüzden adres ile ülke BİRLİKTE verilir / birlikte kilitlenir; önceki adres `selectedOrder`'dan okunur.
+                      teslimatUlke: magazaKilidi ? undefined : etkinUlke(editingOrderData.teslimatUlke),
+                      teslimatSehri: magazaKilidi ? undefined : duzenlenenIl,
                       tutarHam: magazaKilidi ? sayiGirdisi(selectedOrder.totalPrice) : editingTutarHam,
                       kdvHam: editingKdvHam,
                       depoNo: editingOrderData.depoNo,
@@ -4431,6 +4475,9 @@ export default function OrdersPage({
                         kdvOran: yerelSayi(yama.kdvOran, o.kdvOran),
                         kdvHaricTutar: yerelSayi(yama.kdvHaricTutar, o.kdvHaricTutar),
                         kdvTutari: yerelSayi(yama.kdvTutari, o.kdvTutari),
+                        // Yamadaki `null` (boşaltılan il) ekrandaki nesnede alanın YOKLUĞUDUR — `Order` tipi `string`.
+                        teslimatUlke: yerelMetin(yama.teslimatUlke, o.teslimatUlke),
+                        teslimatSehri: yerelMetin(yama.teslimatSehri, o.teslimatSehri),
                       } : o));
                       toast(op(currentLanguage).siparis_guncellendi, 'success');
                       setIsEditingOrder(false);
@@ -4457,7 +4504,7 @@ export default function OrdersPage({
               <div className="p-5 space-y-2 text-sm text-gray-600">
                 <p>{op(currentLanguage).bu_siparisten_sevkiyat_olusturulsun_mu}</p>
                 <p className="font-semibold text-gray-800">{showQuickShipment.customerName} — {gorunenSiparisNo(showQuickShipment)}</p>
-                <p className="text-xs text-gray-400">{showQuickShipment.shippingAddress}</p>
+                <p className="text-xs text-gray-400">{teslimatAdresiMetni(showQuickShipment)}</p>
               </div>
               <div className="flex justify-end gap-2 p-5 border-t border-gray-100">
                 <button onClick={() => setShowQuickShipment(null)} className="apple-button-secondary text-sm">{oc(currentLanguage).iptal}</button>
@@ -4470,7 +4517,7 @@ export default function OrdersPage({
                     if (engel) { toast(sevkiyatEngeliMetni(engel, currentLanguage), 'error'); setShowQuickShipment(null); return; }
                     try {
                       await addDoc(collection(db, 'shipments'), {
-                        customerName: o.customerName ?? '', destination: o.shippingAddress ?? '',
+                        customerName: o.customerName ?? '', destination: teslimatAdresiMetni(o),
                         driver: '', cargoFirm: '', trackingNo: '', status: 'Pending',
                         date: bugunAnahtari(), orderId: o.id,
                         companyId: (o as unknown as { companyId?: string }).companyId ?? null,

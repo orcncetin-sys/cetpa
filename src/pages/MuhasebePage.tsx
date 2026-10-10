@@ -31,6 +31,7 @@ import ReadOnlyBanner from '../components/ReadOnlyBanner';
 import ModuleHeader from '../components/ModuleHeader';
 import type { Order, Employee, Warehouse, Supplier, InventoryItem, Lead } from '../types';
 import { faturaTipiEtiketi } from '../utils/durumEtiketi';
+import { teslimatAdresiMetni } from '../utils/siparisler/teslimatAdresi';
 import { zamanDate, zamanMs, gunAnahtari, gunBasi, bugunAnahtari, tarihYaz } from '../utils/zaman';
 import { cariHareketleri, cariOzet, krediLimiti, krediKullanimi, onayBekleyenler } from '../utils/muhasebe/cariEkstreOnay';
 import { butceGercekOzeti } from '../utils/muhasebe/butceGercek';
@@ -2660,6 +2661,7 @@ export default function MuhasebePage(props: Props) {
                           if (!d) return null;
                           const dInvoiceNo = d.mikroFaturaNo || d.lucaFaturaNo || d.irsaliyeNo || '—';
                           const dSynced = d.mikroSynced || d.lucaSynced;
+                          const dAdres = teslimatAdresiMetni(d);   // TAM adres: kalan + il + (yurt dışıysa) ülke; boşsa satır çizilmez
                           const satir564 = (etiket: string, deger: React.ReactNode) => (
                             <div className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
                               <span className="text-xs text-gray-500">{etiket}</span>
@@ -2679,7 +2681,7 @@ export default function MuhasebePage(props: Props) {
                                 <div className="p-5 overflow-y-auto flex-1 min-h-0">
                                   {satir564(oc(tr564).musteri, d.customerName)}
                                   {d.customerEmail && satir564(oc(tr564).e_posta, d.customerEmail)}
-                                  {d.shippingAddress && satir564(oc(tr564).adres, <span className="font-normal text-xs">{d.shippingAddress}</span>)}
+                                  {dAdres && satir564(oc(tr564).adres, <span className="font-normal text-xs">{dAdres}</span>)}
                                   {satir564(oc(tr564).tutar, paraYaz(d.totalPrice))}
                                   {typeof d.kdvOran === 'number' && satir564('KDV', `%${d.kdvOran}${d.kdvTutari ? ` · ${paraYaz(d.kdvTutari)}` : ''}`)}
                                   {d.faturaTipi && satir564(oc(tr564).fatura_turu, faturaTipiEtiketi(d.faturaTipi, currentLanguage))}

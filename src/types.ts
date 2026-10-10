@@ -169,7 +169,30 @@ export interface Order {
   totalPrice: number;
   status: 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled';
   trackingNumber?: string;
+  /**
+   * Teslimat adresinin «KALAN»ı: ilçe, mahalle, sokak (serbest metin). İl `teslimatSehri`nde, ülke `teslimatUlke`dedir.
+   * Eski kayıtta ve müşteriden gelen oto-adreste il / ülke de içerebilir (ayrıştırılmaz, göç yok). İSTİSNA — çevrim içi
+   * mağaza siparişinde (`source === 'shopify_webhook'`) TAM adres metnidir.
+   * TAM ADRES gereken HER yerde `teslimatAdresiMetni(order)` okunur (utils/siparisler/teslimatAdresi) — bu alanı
+   * doğrudan basmak ili / ülkeyi düşürür.
+   */
   shippingAddress?: string;
+  /**
+   * Teslimat ÜLKESİ — ISO 3166-1 alpha-2, büyük harf ('TR', 'DE'; Satış Bölgesi `countryCode` ile aynı biçim).
+   * Sipariş penceresi yeni kayıtta HER ZAMAN yazar ('TR' dâhil). Kayıtta YOKSA (bu alandan önceki sipariş) okuyan
+   * taraf 'TR' sayar: `etkinUlke(order.teslimatUlke)` — doğrudan `=== 'TR'` karşılaştırması eski kaydı kaçırır.
+   * Mağaza siparişinde yalnız Shopify `shipping_address.country_code` geçerliyse yazılır; yoksa ülke BİLİNMİYORDUR
+   * (düzenleme penceresi «—» gösterir, 'TR' varsaymaz).
+   */
+  teslimatUlke?: string;
+  /**
+   * Teslimat İLİ / ŞEHRİ. Sipariş penceresinin yazdığı kayıtta: Türkiye'de 81 il listesinden (src/data/iller) seçilen
+   * il adı, başka ülkede serbest yazılan şehir. İSTİSNA — mağaza siparişinde «ilçe / il» metnidir (Online Siparişler
+   * liste sütunu); il olarak OKUNMAZ, yapısal şehir için `siparisSehri(order)` kullanılır (mağaza kaydında `null`).
+   * Tip `string` ama kayıtta `null` bulunabilir (mağaza eşleyicisi boşalan alanı `null` yazar; düzenlemede boşaltılan il
+   * de `null` yazılır) — okuyan taraf `null`'ı ve yalnız boşluktan oluşan metni BOŞ sayar.
+   */
+  teslimatSehri?: string;
   location?: { lat: number; lng: number };
   syncedAt?: unknown;
   leadId?: string;
@@ -240,8 +263,8 @@ export interface Order {
   /** Shopify `updated_at` (ISO) — bayat olay karşılaştırması sunucuda; ekranda gösterilmez. */
   shopifyGuncelleme?: string;
   customerPhone?: string;
-  /** Teslimat adresinin ili / şehri (liste sütunu için; tam adres `shippingAddress` tek satır metindir). */
-  teslimatSehri?: string;
+  // `teslimatSehri` / `teslimatUlke` bu blokta DEĞİL: sipariş penceresi de yazar — `shippingAddress`in yanında ilan edildi
+  // (mağaza siparişindeki anlamları orada yazılı).
   /** Müşterinin siparişe yazdığı not (Shopify `note`). İç not `notes`tan AYRIDIR, düzenlenmez. */
   musteriNotu?: string;
   /** Siparişin para birimi (ISO kodu, ör. 'TRY'). */
@@ -339,6 +362,15 @@ export interface Lead {
   taxId?: string;
   taxOffice?: string;
   address?: string;
+  /**
+   * Müşterinin İLİ — serbest metin, dokümanda bulunabilir: Mikro cari-adres importu `adr_il`'i buraya yazar
+   * (server/mikro/eslemeCari; yazım Mikro'daki gibidir — büyük harf, kısaltma, eski ad olabilir; canlı veride
+   * ÖLÇÜLMEDİ; adres «en düşük adres no = varsayılan» sezgisiyle seçilir, `addressSource: 'mikro-heuristic'`),
+   * ERP / Dynamics cari importları da yazar. Müşteri kartında il girdisi YOKTUR (elle açılan müşteride alan yok).
+   * Yeni Sipariş penceresi bundan ili yalnız BİREBİR eşleşmede türetir (`ilBul`, src/data/iller) — emin olunamayan
+   * yazımda il boş kalır, kullanıcı seçer.
+   */
+  city?: string;
   authorizedContact?: string;
   creditLimit?: number;
   paymentTerms?: string;

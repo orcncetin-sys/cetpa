@@ -43,7 +43,8 @@
  *   1. Rozet metni "KDV%20" değil "KDV %20" (Türkçe yüzde yazımı); ondalıklı oran Türkçe
  *      ayraçla ("KDV %18,5"). Sayı değeri değişmez.
  *   2. Sipariş düzenleme yaması yalnız formdaki alanları yazar (customerName, shippingAddress,
- *      status, totalPrice + 2026-09-19'da eklenen depoNo/kdvOran). Eski kod
+ *      status, totalPrice + 2026-09-19'da eklenen depoNo/kdvOran + 2026-10-10'da eklenen
+ *      teslimatUlke/teslimatSehri). Eski kod
  *      `{ ...editingOrderData }` ile TÜM sipariş nesnesini geri yazıyordu (id/createdAt/
  *      lineItems dâhil) — PATCH-merge'de gereksiz ve eşzamanlı değişiklikleri ezme riski.
  *   3. Kapılar "alan boş" ile "girilen değer geçersiz"i AYRI hata anahtarıyla bildirir; eskiden
@@ -71,6 +72,7 @@ import { formSayisi, girilenAlanYamasi, pozitifSayi } from '../muhasebe/irsaliye
 import type { BelgeTipi } from './belgeTipi';
 import type { OrderLineItem } from '../../types';
 import { oranDegisimi, kayitliTutarlar, fiyatBirimiMi } from './siparisKalemFiyati';
+import { etkinUlke } from './teslimatAdresi';
 
 /* ── KDV rozeti ───────────────────────────────────────────────────────────── */
 
@@ -205,6 +207,20 @@ export function kdvOraniDogrula(ham: unknown): { gecerli: true; deger: number | 
 export interface SiparisDuzenlemeGirdileri<D extends string = string> {
   customerName?: string;
   shippingAddress?: string;
+  /**
+   * Ülke seçicisinin değeri (ISO2). `undefined` → alan yamaya GİRMEZ (mağaza kilidi; alan formda yok). Verildiyse
+   * ETKİN ülke önceki kaydın etkin ülkesiyle karşılaştırılır (`etkinUlke`: kayıtta yoksa 'TR') — eşitse YAZILMAZ:
+   * `teslimatUlke`'si olmayan eski kayıt yalnız notu / tutarı düzeltilip kaydedilince sessizce 'TR' kazanmaz.
+   * İSTİSNA (inceleme 2026-10-10, gizlilik): ADRESE DOKUNULDUYSA (`adreseDokunuldu`: adres metni değişti ya da il
+   * yaması var) kayıttaki HAM değerle karşılaştırılır — alanı olmayan eski kayda 'TR' AÇIKÇA yazılır. Çağıran, adresi
+   * (`shippingAddress`) verdiği her kayıtta ülkeyi de vermelidir; ikisi birlikte kilitlenir (mağaza kilidi).
+   */
+  teslimatUlke?: string;
+  /**
+   * İl / şehir kutusunun değeri ('' = seçilmedi / boşaltıldı). `undefined` → alan yamaya GİRMEZ. GİRİLEN metin alanıdır
+   * (`girilenMetinYamasi`): boşaltıldıysa ve önceki doluysa açıkça `null` yazılır.
+   */
+  teslimatSehri?: string;
   status?: D;
   tutarHam: unknown;
   /** "KDV Oranı (%)" kutusunun ham metni. Alan formda yoksa verilmez (yazılmaz). */
@@ -228,6 +244,11 @@ export interface SiparisDuzenlemeGirdileri<D extends string = string> {
 export interface SiparisYamasi<D extends string = string> {
   customerName?: string;
   shippingAddress?: string;
+  /** Etkin ülke DEĞİŞTİYSE ya da adrese dokunulan kayıtta alan YOKSA yazılır ('TR' dâhil — `adreseDokunuldu`). `null`
+   *  üretilmez (etkin ülke hiç boş olmaz); tip `girilenMetinYamasi` çıktısıdır. */
+  teslimatUlke?: string | null;
+  /** `null` = il BOŞALTILDI (önceki doluydu). Ekrandaki sipariş nesnesine `yerelMetin` ile uygulanır (`Order` tipi `string`). */
+  teslimatSehri?: string | null;
   status?: D;
   totalPrice?: number | null;
   kdvOran?: number | null;
@@ -256,6 +277,12 @@ export interface SiparisOncekiHali {
    *  kalemlerden türer. Yoksa (eski / kanal / başka yüzeyden gelen sipariş) kalemlerin anlamı GARANTİ DEĞİLDİR. */
   fiyatGirisi?: unknown;
   lineItems?: unknown;
+  /** Düzenlemeden ÖNCEKİ adres metni («kalan») — yalnız «adres değişti mi» sorusu için okunur (`adreseDokunuldu`). */
+  shippingAddress?: unknown;
+  /** Kayıtta yok / `null` olabilir — karşılaştırma `etkinUlke` ile ('TR' sayılır); adrese dokunulduysa HAM değerle. */
+  teslimatUlke?: unknown;
+  /** Kayıtta `null` bulunabilir (mağaza eşleyicisi, önceki boşaltma) — `null` ve yalnız boşluk BOŞ sayılır. */
+  teslimatSehri?: unknown;
 }
 
 /**
@@ -301,6 +328,45 @@ function etkinSayi(yama: SiparisYamasi, alan: 'totalPrice' | 'kdvOran', onceki: 
 const ayniSayi = (a: number | null, b: number | null): boolean => (a === null ? b === null : a === b);
 
 /**
+ * Kullanıcının GİRDİĞİ METİN alanının (il / şehir, ülke) kayıt yaması — `girilenAlanYamasi`'nın metin eşi (o işlev
+ * sayısaldır: «bilinen sayı» kapısı metne uygulanamaz). Karşılaştırma KIRPILMIŞ değerlerle yapılır; kayıttaki `null`,
+ * metin olmayan değer ve yalnız boşluktan oluşan metin BOŞ sayılır.
+ *   • `yeni` `undefined` (alan formda yok / kilitli) → `{}`
+ *   • dolu + öncekinden FARKLI → `{ alan: kırpılmış değer }`
+ *   • dolu + öncekiyle AYNI → `{}` (aynı değeri geri yazmak PATCH-merge'de eşzamanlı değişikliği ezme riskidir)
+ *   • boş + önceki DOLU → `{ alan: null }` — kullanıcı bilerek boşalttı. `updateDoc` PATCH-merge olduğundan alanı yamaya
+ *     KOYMAMAK silmeyi sessiz no-op yapardı («güncellendi» bildirimi çıkar, il kayıtta kalır).
+ *   • boş + önceki de boş / `null` / yok → `{}` (sahte `null` / '' yazılmaz)
+ */
+export function girilenMetinYamasi<K extends string>(alan: K, yeni: string | undefined, onceki: unknown): Partial<Record<K, string | null>> {
+  const yama: Partial<Record<K, string | null>> = {};
+  if (yeni === undefined) return yama;
+  const girilen = yeni.trim();
+  const eski = typeof onceki === 'string' ? onceki.trim() : '';
+  if (girilen === eski) return yama;
+  yama[alan] = girilen === '' ? null : girilen;
+  return yama;
+}
+
+/**
+ * Bu kayıtta ADRESE DOKUNULDU mu: adres metni («kalan») öncekine göre DEĞİŞTİ (kırpılmış karşılaştırma) ya da il yaması
+ * var (il seçildi / değişti / boşaltıldı). Yalnız not, tutar, durum, müşteri değişen kayıtta `false`.
+ *
+ * NEDEN VAR (inceleme 2026-10-10, gizlilik — yüksek): kimliksiz takip ucu `teslimatAdresi.takipAdresi` kaydı «yapısal»
+ * sayınca adresi YALNIZ il + ülkeden kurar; yapısal değilse eski «son iki parça» maskesi `shippingAddress`'i okur.
+ * Yapısal = `teslimatSehri` ya da `teslimatUlke` DOLU. Ülke yalnız etkin değeri değişince yazılırken, alanı olmayan eski
+ * kayıtta adres yeni etikete göre («ilçe, mahalle, sokak») yeniden yazılıp il boş bırakıldığında — ya da il sonradan
+ * boşaltıldığında — kayıt yapısal OLMUYOR / olmaktan ÇIKIYOR, maske de artık «kalan» olan metnin sokak / kapı / daire
+ * düzeyini dışarı veriyordu. Dokunulan kayıtta ülke bu yüzden kayıttaki HAM değerle karşılaştırılır: alan yoksa 'TR'
+ * açıkça yazılır ve kayıt KALICI olarak yapısal olur. Dokunulmayan kayıtta kural eskisi gibidir (sessiz 'TR' yok).
+ */
+function adreseDokunuldu(form: { shippingAddress?: unknown; teslimatSehri?: string | undefined }, onceki: SiparisOncekiHali | null | undefined): boolean {
+  const kirp = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  const adresDegisti = form.shippingAddress !== undefined && kirp(form.shippingAddress) !== kirp(onceki?.shippingAddress);
+  return adresDegisti || 'teslimatSehri' in girilenMetinYamasi('teslimatSehri', form.teslimatSehri, onceki?.teslimatSehri);
+}
+
+/**
  * Sipariş düzenleme kaydının yaması. `totalPrice` ve `kdvOran` GİRİLEN alandır (türetilen
  * değil), bu yüzden `girilenAlanYamasi` sözleşmesine uyar:
  *   • kutuda bilinen sayı → yazılır (bilinen `0` dâhil: bedelsiz/iptal sevk ve KDV'siz ihracat
@@ -322,6 +388,15 @@ const ayniSayi = (a: number | null, b: number | null): boolean => (a === null ? 
  *
  * Metin/durum alanları yalnız verildiklerinde yazılır. Sipariş nesnesinin geri kalanı (id,
  * createdAt, lineItems…) yamaya GİRMEZ — bkz. başlıktaki bilinçli fark 2.
+ *
+ * `teslimatSehri` ve `teslimatUlke` GİRİLEN METİN alanıdır (2026-10-10; `girilenMetinYamasi`): yalnız DEĞİŞTİYSE
+ * yazılır, boşaltılan il açıkça `null`. Ülke iki yanda `etkinUlke` ile karşılaştırılır (kayıtta yoksa 'TR') — seçici
+ * hiç boş olmadığı için eski kayıtta 'Türkiye' yalnız GÖRÜNÜMDÜR ve yalnız not / tutar değişen kayda sessizce yazılmaz.
+ * ADRESE DOKUNULDUYSA (`adreseDokunuldu`: adres metni değişti ya da il yaması var) ülke kayıttaki HAM değerle
+ * karşılaştırılır: alanı olmayan eski kayıtta `teslimatUlke: 'TR'` AÇIKÇA yazılır (kayıt takip ucunda kalıcı yapısal
+ * olur — inceleme 2026-10-10); ülkesi zaten yazılı kayıtta aynı kod geri yazılmaz. Ülke değişince formun ili
+ * boşalttığı (`teslimatAdresi.ulkeSecimiYamasi`) durumda yama `teslimatUlke: yeni kod` + `teslimatSehri: null` olur.
+ * İki alan da `undefined` verilirse (mağaza kilidi) yama anahtarlarında BULUNMAZ. `shippingAddress` kuralı değişmedi.
  */
 export function siparisDuzenlemeYamasi<D extends string>(
   form: SiparisDuzenlemeGirdileri<D>,
@@ -338,6 +413,10 @@ export function siparisDuzenlemeYamasi<D extends string>(
 
   const temel: SiparisYamasi<D> = {
     ...yama,
+    ...girilenMetinYamasi('teslimatSehri', form.teslimatSehri, onceki?.teslimatSehri),
+    // Adrese dokunulduysa önceki ülke HAM karşılaştırılır (alan yoksa 'TR' açıkça yazılır); dokunulmadıysa etkin değerle.
+    ...(form.teslimatUlke === undefined ? {} : girilenMetinYamasi('teslimatUlke', etkinUlke(form.teslimatUlke),
+      adreseDokunuldu(form, onceki) ? onceki?.teslimatUlke : etkinUlke(onceki?.teslimatUlke))),
     ...girilenAlanYamasi('totalPrice', formSayisi(form.tutarHam), onceki?.totalPrice),
     ...(form.kdvHam === undefined ? {} : girilenAlanYamasi('kdvOran', formSayisi(form.kdvHam), onceki?.kdvOran)),
   };
@@ -423,5 +502,16 @@ export function yerelTutar(yamaTutari: number | null | undefined, onceki: unknow
  */
 export function yerelSayi(yamaDegeri: number | null | undefined, onceki: unknown): number | undefined {
   if (yamaDegeri === undefined) return bilinenSayi(onceki) ? Number(onceki) : undefined;
+  return yamaDegeri === null ? undefined : yamaDegeri;
+}
+
+/**
+ * Yama uygulandıktan sonra ekrandaki siparişin OPSİYONEL METİN alanı (`teslimatSehri`, `teslimatUlke` — `Order`'da
+ * `string | undefined`) — `yerelSayi`'nın metin eşi. Yamadaki `null` (boşaltıldı) alanın YOKLUĞUYLA temsil edilir:
+ * `{ ...o, ...yama }` `null`'ı `Order`'a taşırdı (tip `string`; okuyan `.trim()` çağırırsa fırlar).
+ *   • yamada değer → o değer · yamada `null` → `undefined` · yamada alan yok → önceki (metin değilse `undefined`).
+ */
+export function yerelMetin(yamaDegeri: string | null | undefined, onceki: unknown): string | undefined {
+  if (yamaDegeri === undefined) return typeof onceki === 'string' ? onceki : undefined;
   return yamaDegeri === null ? undefined : yamaDegeri;
 }

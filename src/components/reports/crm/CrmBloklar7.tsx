@@ -12,6 +12,11 @@
 import { itemCostTRY, type ReportsCtx } from '../useReportsData';
 import { zamanMs, zamanDate, ayAnahtari } from '../../../utils/zaman';
 import { oc } from '../../../i18n/ortak';
+import { katla } from '../../../utils/arama';
+import { siparisSehri, etkinUlke } from '../../../utils/siparisler/teslimatAdresi';
+
+/** «Bölgeye Göre Ciro» bloğunun adıyla ayrı gösterdiği altı il (etiket = il adı); öteki iller «Other TR»de toplanır. */
+const BOLGE_ILLERI = ['İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Antalya', 'Adana'] as const;
 
 type Props = Pick<ReportsCtx, 'reportsTab' | 'orders' | 'quotations' | 'inventory' | 'exchangeRates' | 'currentLanguage' | 'fmtAna'>;
 
@@ -240,16 +245,25 @@ export default function CrmBloklar7({ reportsTab, orders, quotations, inventory,
       {reportsTab === 'crm' && orders.length >= 10 && (() => {
         const geoRevenue: Record<string, {revenue: number; orders: number}> = {};
         orders.forEach(o => {
-          const addr = (o.shippingAddress || '').toLowerCase();
           let region = 'Unknown';
-          if (addr.includes('istanbul') || addr.includes('İstanbul')) region = 'İstanbul';
-          else if (addr.includes('ankara')) region = 'Ankara';
-          else if (addr.includes('izmir') || addr.includes('İzmir')) region = 'İzmir';
-          else if (addr.includes('bursa')) region = 'Bursa';
-          else if (addr.includes('antalya')) region = 'Antalya';
-          else if (addr.includes('adana')) region = 'Adana';
-          else if (addr.match(/\b(tr|turkey|türkiye)\b/)) region = 'Other TR';
-          else if (addr.length > 3) region = 'Other';
+          // Bölge ÖNCE yapısal şehirden (`siparisSehri`: sipariş penceresinde seçilen il / yazılan şehir): altı adlı ilden
+          // biriyse o etiket; değilse yurt içinde «Other TR», başka ülkede «Other». Yapısal şehir yoksa (eski kayıt, mağaza
+          // siparişi) eski dal AYNEN: adres metninde şehir adı aranır.
+          const sehir = siparisSehri(o);
+          if (sehir !== null) {
+            const katli = katla(sehir);
+            region = BOLGE_ILLERI.find(il => katla(il) === katli) ?? (etkinUlke(o.teslimatUlke) === 'TR' ? 'Other TR' : 'Other');
+          } else {
+            const addr = (o.shippingAddress || '').toLowerCase();
+            if (addr.includes('istanbul') || addr.includes('İstanbul')) region = 'İstanbul';
+            else if (addr.includes('ankara')) region = 'Ankara';
+            else if (addr.includes('izmir') || addr.includes('İzmir')) region = 'İzmir';
+            else if (addr.includes('bursa')) region = 'Bursa';
+            else if (addr.includes('antalya')) region = 'Antalya';
+            else if (addr.includes('adana')) region = 'Adana';
+            else if (addr.match(/\b(tr|turkey|türkiye)\b/)) region = 'Other TR';
+            else if (addr.length > 3) region = 'Other';
+          }
           if (!geoRevenue[region]) geoRevenue[region] = { revenue: 0, orders: 0 };
           geoRevenue[region].revenue += o.totalPrice;
           geoRevenue[region].orders++;

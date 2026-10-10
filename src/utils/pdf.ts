@@ -17,6 +17,7 @@ import { registerTurkishFont } from './pdfFont';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz, VARSAYILAN_BASLIK, type BelgeTipi } from './belgeSablonu';
 import { tutarYaz, kdvAyristir, satirTutari, bilinenSayi, teklifToplamlari, toplaBilinen, ekranTutari } from './para';
 import { siparisTutari } from './siparis';
+import { teslimatAdresiMetni } from './siparisler/teslimatAdresi';
 import { kalemBirimFiyati, kalemTutari } from './pano/stokSevkiyat';
 // Başlık bandı / alt bant / bilgi kutusu / palet TEK KAYNAK (Faz 2 3/n, 2026-09-12): bu dosyadaki
 // 4 üretici eskiden her biri kendi bandını ve palet kopyasını yazıyordu (pdfTheme.degismez.test.ts kilitler).
@@ -85,7 +86,9 @@ export const exportOrderPDF = async (
     x: col1, y: boxY, w: colW, h: boxH, baslik: 'MÜŞTERİ BİLGİLERİ', renk: BRAND,
     satirlar: [
       { metin: normTR(String(order.customerName || '-')), dy: 13, boyut: 9 },
-      { metin: normTR(String(order.shippingAddress || '')), dy: 20, boyut: 8, renk: PDF_RENK.grey, maxWidth: colW - 8 },
+      // TAM adres (kalan + il + yurt dışıysa ülke) — tek kaynak `teslimatAdresiMetni`. Teklifte il / ülke alanı yoktur:
+      // adres metni baş / son boşluk dışında aynen basılır.
+      { metin: normTR(teslimatAdresiMetni(order)), dy: 20, boyut: 8, renk: PDF_RENK.grey, maxWidth: colW - 8 },
     ],
   });
 

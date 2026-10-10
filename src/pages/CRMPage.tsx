@@ -28,6 +28,8 @@ import { twMerge } from 'tailwind-merge';
 import Papa from 'papaparse';
 import { logFirestoreError as handleFirestoreError, OperationType } from '../utils/firebase';
 import { odemeTakipli } from '../utils/siparis';
+import { teslimatAdresiMetni } from '../utils/siparisler/teslimatAdresi';
+import { eslesir } from '../utils/arama';
 import { yerelDegistirilebilir, yerelDegistirilemezMetni, silmeYolu, mikroSilOnayMetni, mikroSilindiMetni, silmeEngelMetni, silmeHataMetni, siparisNotMetni } from '../utils/siparisler/siparisIslemleri';
 import { mikroSiparisiSil } from '../services/mikroSiparisSil';
 import { hedefGirdisi, hedefOnDoldur } from '../utils/pano/hedefButce';
@@ -628,7 +630,8 @@ export default function CRMPage({
                             const filtered = orders.filter(o =>
                               (o.customerName ?? '').toLowerCase().includes(orderSearch.toLowerCase()) ||
                               o.shopifyOrderId?.toLowerCase().includes(orderSearch.toLowerCase()) ||
-                              o.shippingAddress?.toLowerCase().includes(orderSearch.toLowerCase())
+                              // Adres terimi TAM adres metninde ve Türkçe-duyarlı aranır (il listeden büyük «İ» ile yazılır).
+                              eslesir(orderSearch, teslimatAdresiMetni(o))
                             );
                             const sorted = sortData(filtered, orderSort.key, orderSort.dir);
                             return sorted.length === 0 ? (
@@ -3422,7 +3425,7 @@ export default function CRMPage({
                               <p className="text-xs text-gray-500 mt-1">
                                 {order.syncedAt ? tarihYaz(order.syncedAt) : currentT.unknown_date}
                               </p>
-                              <p className="text-[10px] text-gray-400 mt-1 truncate max-w-[200px]">{order.shippingAddress}</p>
+                              <p className="text-[10px] text-gray-400 mt-1 truncate max-w-[200px]">{teslimatAdresiMetni(order)}</p>
                             </div>
                             <div className="text-right flex flex-col items-end gap-2">
                               <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} disabled={silmeEngelMetni(order, userRole, currentLanguage) !== null} title={silmeEngelMetni(order, userRole, currentLanguage) ?? undefined} className="p-2 -m-2 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-400">
