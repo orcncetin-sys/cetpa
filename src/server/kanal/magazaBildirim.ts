@@ -40,18 +40,40 @@
  *
  * İşlevlerin hiçbiri fırlatmaz — tek istisna işçinin «yeniden dene» hatası
  * (pg-boss yeniden denemeyi ancak fırlatılan hatadan anlar).
+ *
+ * DİLİM 2b — REVİZE BİLDİRİMİ (şartname § 10.2 (e), § 10.7; kullanıcı kararı 2026-10-09, madde 8): içerik revizyonu
+ * (`kanal/magazaIcerik.ts` `talepIcerigiDegistir`) AYRI bir bildirim üretir. Durumu belgede AYRI alandadır
+ * (`bildirimRevize`; ilk bildirimin `bildirim` alanı EZİLMEZ), AYRI kuyruktan gider (`MAGAZA_REVIZE_KUYRUGU`) ve AYNI
+ * işçi iskeletinden (`bildirimKos`) geçer — yukarıdaki beş değişmezin beşi de geçerlidir. Farklar:
+ *  • İÇERİK yalnız değişen alan ADLARI + revize eden + revize zamanı + ERP bağlantısı (`magazaRevizeIcerigi`); müşteri
+ *    verisi, kalem, adet, fiyat, tutar, KDV YOK. İşçi belgeyi DAR okur (`REVIZE_OKU_SQL`): müşteri bloğu, kalemler ve
+ *    tutarlar belleğe HİÇ çekilmez.
+ *  • SONUÇ nesneyi BÜTÜNÜYLE DEĞİŞTİRMEZ (`REVIZE_YAZ_SQL`: `(data->'bildirimRevize') || …`): `alanlar` / `kim` /
+ *    `icerikSurum` korunur ve yazım işçinin OKUDUĞU `icerikSurum` ile koşulludur — araya giren yeni revizyonun
+ *    `bekliyor`u ezilmez (0 satır; iş sessizce biter).
+ *  • SAHİPLENME anahtarı `talepId|revize`: aynı talebin süren İLK bildirimi revizeyi düşürmez (tersi de).
+ *  • İşçi kuyruğa iş GÖNDERMEZ (`MagazaBildirimDeps`'te kuyruk yoktur): revize işi YALNIZ içerik yazımından, ERP'deki elle
+ *    «Yeniden gönder»den (`?tur=revize`) ve açılıştaki kaçan süpürmesinden (`magazaRevizeKacanlariKuyrukla`) girer.
  */
-import { MAGAZA_BILDIRIM_HATA_SINIFLARI, MAGAZA_TALEP_KIMLIK_DESENI, MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_TALEP_NO_DESENI } from '../../lib/magazaTalep.js';
-import type { MagazaBildirim, MagazaBildirimHataSinifi, MagazaTalebi, MagazaTalepKalemi } from '../../lib/magazaTalep.js';
+import { MAGAZA_BILDIRIM_HATA_SINIFLARI, MAGAZA_TALEP_KIMLIK_DESENI, MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_TALEP_NO_DESENI, alanlariBirlestir } from '../../lib/magazaTalep.js';
+import type { MagazaBildirim, MagazaBildirimHataSinifi, MagazaRevizeAlani, MagazaTalebi, MagazaTalepKalemi } from '../../lib/magazaTalep.js';
 import { paraYaz } from '../../utils/currency.js';
 import { tarihSaatYaz } from '../../utils/zaman.js';
 import type { MagazaPgHavuzu } from '../routes/magazaRoutes.js';
+// «Silinmemiş» ölçütünün TEK sabiti (yazma yolları ve bekçiyle AYNI). `magazaDurum.ts` bu modülü içe AKTARMAZ — döngü yok.
+import { MAGAZA_SILINMEMIS_SQL } from './magazaDurum.js';
 import { escapeHtml } from '../eposta.js';
 import { smtpGonder, smtpHataSinifi } from '../smtpPosta.js';
 import { smtpDogrula, smtpYapilandirmasi } from '../smtpPosta.js';
 import type { SmtpSonucu } from '../smtpPosta.js';
 
 export const MAGAZA_BILDIRIM_KUYRUGU = 'magaza-talep-bildirimi';
+/**
+ * (2b) Revize bildiriminin AYRI kuyruğu (§ 10.2 (e)). İş verisi yine YALNIZ `{ talepId }`: değişen alan adları ve revize
+ * eden belgedeki `bildirimRevize`'dedir, kuyruk satırına yazılmaz. İş seçenekleri (`MAGAZA_BILDIRIM_IS_SECENEKLERI`) ve işçi
+ * seçenekleri (`MAGAZA_BILDIRIM_ISCI_SECENEKLERI`) ilk kuyrukla AYNI sabitlerdir — kopyalanmaz.
+ */
+export const MAGAZA_REVIZE_KUYRUGU = 'magaza-talep-revize-bildirimi';
 
 /** İŞ başına `send` seçenekleri (kuyruk seçeneği var olan kuyruğu güncellemez). */
 export const MAGAZA_BILDIRIM_IS_SECENEKLERI = {
@@ -241,6 +263,78 @@ export function magazaBildirimIcerigi(talep: MagazaTalebi, o: { appUrl?: string 
   return { konu, html, metin };
 }
 
+// ── Revize bildirimi içeriği (dilim 2b, § 10.2 (e)) ──────────────────────────────────────────────────────────────────
+
+/** Değişen alan ADININ e-postadaki karşılığı. Gövdeye yalnız bu üç etiket girer — alanın DEĞERİ (eski ya da yeni) asla. */
+const REVIZE_ALAN_ETIKETLERI: Readonly<Record<MagazaRevizeAlani, string>> = {
+  musteri: 'Müşteri bilgileri', not: 'Not', teyit: 'Teyit edilen kalemler',
+};
+
+/** Gövdenin sabit yönlendirme cümlesi (HTML ve düz metin bölümünde AYNI). */
+const REVIZE_YONLENDIRME = "Müşteri bilgileri, kalemler ve tutarlar bu e-postada yer almaz. Talebin güncel hâli ERP'de: Siparişler → Mağaza Talepleri.";
+
+/**
+ * Revize içeriğinin OKUYABİLDİĞİ her şey — tip bilerek DAR: işlev `musteri`, `kalemler`, `teyit`, `talepEdilen` ya da
+ * herhangi bir tutar alanına erişemez (derlenmez). Değerler güvenilmez biçimdedir (`unknown`): işlev her birini süzer.
+ * `MagazaTalebi` bu tipe atanabilir; işçi ise yalnız bu üç alanı veritabanından çeker (`REVIZE_OKU_SQL`).
+ */
+export interface MagazaRevizeIcerikGirdisi {
+  talepNo?: unknown;
+  /** Revizyonun zamanı (`icerikZamani`). `bildirimRevize.zaman` DEĞİL: onu işçi her yeniden denemede tazeler. */
+  icerikZamani?: unknown;
+  bildirimRevize?: { alanlar?: unknown; kim?: unknown } | null;
+}
+
+/**
+ * Revize bildirimi iletisi (personele gider; müşteriye bildirim YOK). Gövde YALNIZ: değişen alan ADLARI
+ * (`alanlariBirlestir` — tekilleştirir, kapalı kümede olmayan adı düşürür), revize eden, revize zamanı (İstanbul saati),
+ * ERP bağlantısı. Müşteri adı / telefonu / e-postası / adresi, kalem adı, adet, fiyat, ara toplam, KDV, toplam GİRMEZ
+ * (dilim 1'in beş değişmezi; çit: magazaBildirim.revize.test.ts).
+ *
+ * Revize edenin adı (`users.name`) kullanıcının KENDİ yazabildiği alandır: müşteri metniyle aynı kapıdan geçer
+ * (`yaDaTire`: tek satır + adres tetikleyicileri kırılır) ve HTML bölümünde `escapeHtml` ile basılır. Konuya yalnız
+ * DOĞRULANMIŞ talep no; doğrulanamazsa ayraçsız kısa konu.
+ */
+export function magazaRevizeIcerigi(talep: MagazaRevizeIcerikGirdisi, o: { appUrl?: string }): { konu: string; html: string; metin: string } {
+  const e = escapeHtml;
+  const talepNo = dogrulanmisTalepNo(talep.talepNo);
+  const konu = talepNo ? `Mağaza talebi revize edildi · ${talepNo}` : 'Mağaza talebi revize edildi';
+
+  const revize = nesneMi(talep.bildirimRevize) ? talep.bildirimRevize : {};
+  const alanlar = alanlariBirlestir(revize.alanlar).map((a) => REVIZE_ALAN_ETIKETLERI[a]);
+  // Alan adı okunamadıysa (bozuk kayıt) '—': «hiçbir şey değişmedi» DENMEZ, boş liste de basılmaz.
+  const degisen = alanlar.length > 0 ? alanlar.join(', ') : '—';
+  const revizeEden = yaDaTire(nesneMi(revize.kim) ? revize.kim.ad : undefined);
+  const an = typeof talep.icerikZamani === 'string' ? tarihSaatYaz(talep.icerikZamani, KAYIT_ZAMANI_BICIMI) : '—';
+  const revizeZamani = an === '—' ? '—' : `${an} (İstanbul saati)`;
+  const baglanti = erpBaglantisi(o.appUrl);
+
+  const html = '<div lang="tr" style="font-family:-apple-system,Segoe UI,sans-serif;max-width:640px">'
+    + `<h2 style="margin:0 0 4px">${e(konu)}</h2>`
+    + `<p style="margin:0 0 12px;color:#555">Revize zamanı: ${e(revizeZamani)} · Revize eden: ${e(revizeEden)}</p>`
+    + '<p style="margin:0 0 4px"><b>Değişen alanlar</b></p>'
+    + (alanlar.length > 0
+      ? `<ul style="margin:0;padding-left:20px">${alanlar.map((a) => `<li>${e(a)}</li>`).join('')}</ul>`
+      : '<p style="margin:0">—</p>')
+    + `<p style="margin:12px 0 0;color:#555">${e(REVIZE_YONLENDIRME)}</p>`
+    // Modülün YAZDIĞI tek bağlantı: adres sunucu yapılandırmasından gelir (ilk bildirimle aynı kural, aynı yardımcı).
+    + (baglanti ? `<p style="margin:8px 0 0"><a href="${e(baglanti)}">${e(baglanti)}</a></p>` : '')
+    + '</div>';
+
+  const metin = [
+    konu,
+    `Revize zamanı: ${revizeZamani}`,
+    `Revize eden: ${revizeEden}`,
+    '',
+    `Değişen alanlar: ${degisen}`,
+    '',
+    REVIZE_YONLENDIRME,
+    ...(baglanti ? [baglanti] : []),
+  ].join('\n');
+
+  return { konu, html, metin };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tek talebin bildirimi
 
@@ -248,7 +342,7 @@ export type MagazaBildirimSonucu = 'gitti' | 'atlandi' | 'yapilandirilmamis' | '
 
 /**
  * SÜREÇ İÇİ SAHİPLENME (dosya başı, madde 3b; inceleme turu kararı 2026-10-08): gönderimi
- * SÜREN talep kimlikleri. `magazaBildirimIsle` girişte sahiplenir, `finally`'de bırakır.
+ * SÜREN talep kimlikleri. Ortak iskelet (`bildirimKos`) girişte sahiplenir, `finally`'de bırakır.
  *
  * NEDEN: dokümandaki `gitti` denetimi okuma anındadır; aynı talep aynı süreçte iki kez
  * koşarsa ikisi de `bekliyor` okur ve İKİ posta gider (sahte gönderici + sahte havuzla
@@ -268,14 +362,13 @@ export type MagazaBildirimSonucu = 'gitti' | 'atlandi' | 'yapilandirilmamis' | '
  * süren koşu yazar — o koşu başarısız olur ve kendisi son deneme değilse doküman
  * `bekliyor` kalır (10 dakikadan eski `bekliyor` ekranda ve bekçide uyarıdır).
  *
- * ANAHTAR `talepId|tur` (dilim 2a, şartname § 2.10 — K9 / Y6): kümeye çıplak `talepId` YAZILMAZ. 2a'da tek tür `ilk`tir
- * (talebin ilk bildirimi; elle «Yeniden gönder» de aynı işi kuyruğa alır) ve işçinin davranışı değişmez. Tür anahtarda
- * durur ki 2b'nin `revize` bildirimi AYNI talebin süren ilk bildirimine takılıp `atlandi` / `yeniden-dene` dönmesin:
- * iki bildirim birbirini düşürmez (çit: magazaBildirim.sahiplenme.test.ts).
+ * ANAHTAR `talepId|tur` (dilim 2a, şartname § 2.10 — K9 / Y6): kümeye çıplak `talepId` YAZILMAZ. Tür anahtarda durur ki
+ * dilim 2b'nin `revize` bildirimi AYNI talebin süren ilk bildirimine takılıp `atlandi` / `yeniden-dene` dönmesin (tersi de):
+ * iki bildirim birbirini düşürmez (çit: magazaBildirim.sahiplenme.test.ts). Aynı türün iki koşusu ise birbirini çevirir.
  */
 const gonderimde = new Set<string>();
-/** 2a'da yalnız `ilk`; 2b `'revize'`yi ekler (tip o gün genişler). */
-type BildirimTuru = 'ilk';
+/** `ilk` = talebin ilk bildirimi (`bildirim`; elle «Yeniden gönder» de aynı işi kuyruğa alır) · `revize` = içerik revizyonu bildirimi (`bildirimRevize`, dilim 2b). */
+type BildirimTuru = 'ilk' | 'revize';
 const sahiplenmeAnahtari = (talepId: string, tur: BildirimTuru): string => `${talepId}|${tur}`;
 
 const OKU_SQL = 'SELECT data FROM docs WHERE coll = $1 AND id = $2';
@@ -283,6 +376,26 @@ const OKU_SQL = 'SELECT data FROM docs WHERE coll = $1 AND id = $2';
 // iki yerde birlikte koşarsa (ikinci süreç; tek süreçte `gonderimde` ikincisini zaten geri çevirir) geç kalan başarısız yazım,
 // gitmiş postayı «gönderilemedi» gösterirdi. Koşul tutmazsa satır dönmez → yayın da olmaz.
 const YAZ_SQL = "UPDATE docs SET data = jsonb_set(data, '{bildirim}', $3::jsonb), updated_at = now() WHERE coll = $1 AND id = $2 AND (data->'bildirim'->>'durum') IS DISTINCT FROM 'gitti' RETURNING data";
+
+/**
+ * (2b) Revize işçisinin DAR okuması: talep no, revizyon zamanı ve `bildirimRevize` nesnesi — başka HİÇBİR alan. Müşteri
+ * bloğu, not, kalemler, teyit ve tutarlar belleğe çekilmez; gövdeye sızmaları yapıca imkânsızdır (ilk bildirimin `OKU_SQL`'i
+ * belgenin tamamını okur, çünkü o gövde il ve kalem listesi basar).
+ */
+export const REVIZE_OKU_SQL = "SELECT data->>'talepNo' AS talep_no, data->>'icerikZamani' AS icerik_zamani, data->'bildirimRevize' AS revize FROM docs WHERE coll = $1 AND id = $2";
+
+/**
+ * (2b; kapı 4, Y3 (a)) Revize bildiriminin sonuç yazımı — `YAZ_SQL` kalıbından BİLEREK ayrılır. O kalıbın tam değiştirmesi
+ * (`jsonb_set(data, '{bildirim}', $3::jsonb)`) bu yola aynen uygulansaydı işçinin ilk «yeniden dene» yazımı (`bekliyor` +
+ * `deneme`) `alanlar` / `kim` / `icerikSurum`'u düşürür, sonraki koşul NULL'a takılır, `gitti` HİÇ yazılamaz ve posta her
+ * pg-boss denemesinde yeniden giderdi (PGlite ölçümü, kapı 4). Burada `||` sığ birleştirir:
+ *   $3 = yalnız `{ durum, zaman, deneme?, hataSinifi? }` (işçinin dört gövdesi) · $4 = işçinin OKUDUĞU `icerikSurum`.
+ * `(data->'bildirimRevize')` PARANTEZLİDİR (parantezsiz `->` ile `||` aynı öncelik sınıfında sola bağlanır). Koşullar:
+ * alan NESNE (çöp / yok → 0 satır, hata yok), `gitti` ASLA ezilmez, sürüm işçinin okuduğuyla AYNI — araya giren yeni
+ * revizyon `bekliyor`u yeniden yazdıysa 0 satır döner ve iş SESSİZCE biter (yeni iş GÖNDERİLMEZ; o revizyonun kendi işi
+ * zaten kuyruktadır). `gitti` yazımında önceki `deneme` / `hataSinifi` kalır (bilgi; `gitti`de okunmaz).
+ */
+export const REVIZE_YAZ_SQL = "UPDATE docs SET data = jsonb_set(data, '{bildirimRevize}', (data->'bildirimRevize') || $3::jsonb), updated_at = now() WHERE coll = $1 AND id = $2 AND jsonb_typeof(data->'bildirimRevize') = 'object' AND data->'bildirimRevize'->>'durum' IS DISTINCT FROM 'gitti' AND (data->'bildirimRevize'->>'icerikSurum')::int = $4 RETURNING data";
 
 const nesneMi = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -300,6 +413,15 @@ function icerigeYeterli(v: unknown): v is MagazaTalebi {
 function guvenliIcerik(belge: unknown, D: MagazaBildirimDeps): { konu: string; html: string; metin: string } | null {
   try {
     return icerigeYeterli(belge) ? magazaBildirimIcerigi(belge, { appUrl: D.appUrl?.() }) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** (2b) Revize içeriği; üretim fırlatırsa `null` (gönderim DENENMEZ). Biçim süzgeci işlevin içindedir (her alan `unknown`). */
+function guvenliRevizeIcerik(girdi: MagazaRevizeIcerikGirdisi, D: MagazaBildirimDeps): { konu: string; html: string; metin: string } | null {
+  try {
+    return magazaRevizeIcerigi(girdi, { appUrl: D.appUrl?.() });
   } catch {
     return null;
   }
@@ -330,19 +452,23 @@ function hataKodu(hata: unknown): string {
   }
 }
 
+/** Günlük satırlarının öneki — türe göre SABİT metin (satıra talep kimliği, alan adı ya da kişisel veri girmez). */
+const ILK_ON_EK = '[magaza-bildirim] ';
+const REVIZE_ON_EK = '[magaza-bildirim] revize: ';
+
 /**
- * `bildirim` alanını TEK SQL ile yazar; satır döndüyse akışa yayınlar. Asla
- * fırlatmaz: yazılamayan sonuç çağıranın döndürdüğü değeri DEĞİŞTİRMEZ (doküman
- * `bekliyor` kalır; 10 dakikadan eski `bekliyor` ekranda ve bekçide uyarıdır).
+ * Bildirim alanını TEK SQL ile yazar (türün kendi sabiti: `YAZ_SQL` / `REVIZE_YAZ_SQL`); satır döndüyse akışa yayınlar.
+ * Asla fırlatmaz: yazılamayan sonuç çağıranın döndürdüğü değeri DEĞİŞTİRMEZ (doküman `bekliyor` kalır; 10 dakikadan eski
+ * `bekliyor` ekranda ve bekçide uyarıdır).
  */
-async function sonucYaz(havuz: MagazaPgHavuzu, D: MagazaBildirimDeps, talepId: string, bildirim: MagazaBildirim): Promise<void> {
+async function sonucYaz(havuz: MagazaPgHavuzu, D: MagazaBildirimDeps, onEk: string, talepId: string, sql: string, parametreler: unknown[]): Promise<void> {
   let satir: unknown;
   try {
-    const { rows } = await havuz.query(YAZ_SQL, [MAGAZA_TALEP_KOLEKSIYONU, talepId, JSON.stringify(bildirim)]);
-    if (rows.length === 0) return;   // talep arada silinmiş ya da bildirim zaten `gitti`: yayın yok
+    const { rows } = await havuz.query(sql, parametreler);
+    if (rows.length === 0) return;   // talep arada silinmiş, bildirim zaten `gitti` ya da (revize) araya yeni revizyon girmiş: yayın yok
     satir = rows[0].data;
   } catch (hata) {
-    console.warn(`[magaza-bildirim] bildirim sonucu yazılamadı (kod: ${hataKodu(hata)})`);
+    console.warn(onEk + `bildirim sonucu yazılamadı (kod: ${hataKodu(hata)})`);
     return;
   }
   // Kiracı etiketi OLMAYAN olay akışta BÜTÜN kiracılara gider (server.ts süzgeci
@@ -354,20 +480,88 @@ async function sonucYaz(havuz: MagazaPgHavuzu, D: MagazaBildirimDeps, talepId: s
   } catch { /* yayın hatası sonucu değiştirmez */ }
 }
 
+/** Gönderime hazır tek iş: ileti + sonucu türün kendi SQL sabitiyle yazan kapanış. */
+interface HazirBildirim {
+  /** `null` = doküman biçimi bozuk / ileti üretilemedi: gönderim DENENMEZ, `gonderilemedi` + `diger` yazılır. */
+  ileti: { konu: string; html: string; metin: string } | null;
+  yaz: (sonuc: MagazaBildirim) => Promise<void>;
+}
+
+/** Bir bildirim türünün ortak iskelete (`bildirimKos`) verdiği üç şey. */
+interface BildirimTurAyari {
+  /** Sahiplenme anahtarının türü (`talepId|tur`). */
+  tur: BildirimTuru;
+  /** Günlük öneki (sabit metin). */
+  onEk: string;
+  /**
+   * Belgeyi okur ve gönderime hazırlar. `'atla'` = gönderim YOK (belge yok / bildirim zaten `gitti` / bekleyen revizyon
+   * yok). Okuma hatası FIRLATIR — iskelet yakalar, yalnız hata KODUNU günlükler.
+   */
+  hazirla: (havuz: MagazaPgHavuzu, D: MagazaBildirimDeps, talepId: string) => Promise<HazirBildirim | 'atla'>;
+}
+
+/** İLK bildirim: belgenin tamamı okunur (gövde il + kalem listesi basar); sonuç `bildirim` alanına tam değiştirmeyle yazılır. */
+const ILK_BILDIRIM: BildirimTurAyari = {
+  tur: 'ilk',
+  onEk: ILK_ON_EK,
+  hazirla: async (havuz, D, talepId) => {
+    const { rows } = await havuz.query(OKU_SQL, [MAGAZA_TALEP_KOLEKSIYONU, talepId]);
+    if (rows.length === 0) return 'atla';
+    const belge: unknown = rows[0].data;
+    // Çift posta olmasın: yeniden denenen iş ya da iki yoldan gelen istek, postası gitmiş talebi yeniden göndermesin.
+    // Denetim OKUMA ANINDADIR — bu satırla gönderim arasında kira yok; aynı süreçteki eşzamanlı koşuyu iskeletteki
+    // sahiplenme geri çevirir, BAŞKA süreçteki eşzamanlı koşuyu hiçbir şey çevirmez (dosya başı, madde 3).
+    if (nesneMi(belge) && nesneMi(belge.bildirim) && belge.bildirim.durum === 'gitti') return 'atla';
+    return {
+      ileti: guvenliIcerik(belge, D),
+      yaz: (sonuc) => sonucYaz(havuz, D, ILK_ON_EK, talepId, YAZ_SQL, [MAGAZA_TALEP_KOLEKSIYONU, talepId, JSON.stringify(sonuc)]),
+    };
+  },
+};
+
 /**
- * Tek talebin bildirimi: dokümanı oku → (yoksa / `gitti` ise atla) → gönder → sonucu TEK SQL ile yaz → yayınla.
+ * REVİZE bildirimi (2b): DAR okuma; yalnız `bildirimRevize.durum === 'bekliyor'` iken gönderilir. Başka her hâlde iş
+ * SESSİZCE biter: alan yok / çöp (revizyon yok), `gitti` (ikinci revizyon birleştirilmiş, önceki iş gönderdi),
+ * `gonderilemedi` / `yapilandirilmamis` (önceki deneme kalıcı sonucu yazdı — yeniden göndermenin yolu ERP'deki «Yeniden
+ * gönder» ve kaçan süpürmesidir; ikisi de önce `bekliyor` yazar). Sonuç yazımı okunan `icerikSurum` ile koşulludur; sürüm
+ * okunamıyorsa (tam sayı değil — yazma yolu üretmez) posta GÖNDERİLMEZ: sonucu yazılamayacak bir gönderim her yeniden
+ * kuyruğa alınışta yinelenirdi. Belge `bekliyor` kalır; bekçi «bekleyen» olarak gösterir.
+ */
+const REVIZE_BILDIRIMI: BildirimTurAyari = {
+  tur: 'revize',
+  onEk: REVIZE_ON_EK,
+  hazirla: async (havuz, D, talepId) => {
+    const { rows } = await havuz.query(REVIZE_OKU_SQL, [MAGAZA_TALEP_KOLEKSIYONU, talepId]);
+    if (rows.length === 0) return 'atla';
+    const okunan = rows[0];
+    const revize: unknown = okunan.revize;
+    if (!nesneMi(revize) || revize.durum !== 'bekliyor') return 'atla';
+    const surum = revize.icerikSurum;
+    if (typeof surum !== 'number' || !Number.isSafeInteger(surum) || surum < 0) {
+      console.warn(REVIZE_ON_EK + 'sürüm sayacı okunamadı — bildirim gönderilmedi');
+      return 'atla';
+    }
+    return {
+      ileti: guvenliRevizeIcerik({ talepNo: okunan.talep_no, icerikZamani: okunan.icerik_zamani, bildirimRevize: revize }, D),
+      yaz: (sonuc) => sonucYaz(havuz, D, REVIZE_ON_EK, talepId, REVIZE_YAZ_SQL, [MAGAZA_TALEP_KOLEKSIYONU, talepId, JSON.stringify(sonuc), surum]),
+    };
+  },
+};
+
+/**
+ * İKİ türün ORTAK iskeleti: kimlik deseni → sahiplen → oku / hazırla → gönder → sonucu TEK SQL ile yaz → yayınla.
  * `deneme.sonMu` yanlışken başarısızlık `'yeniden-dene'` döner (doküman `bekliyor` + deneme + hataSinifi);
  * doğruyken ya da `deneme` verilmemişken (süreç içi yol) `'gonderilemedi'`. Asla fırlatmaz.
  *
  * DÖNEN DEĞER GÖNDERİMİ anlatır, dokümanı değil:
- *   · kimlik biçimi bozuk, doküman yok, `gitti`          → 'atlandi' (gönderim yok)
- *   · aynı talebin gönderimi bu süreçte SÜRÜYOR          → yeniden denenebiliyorsa 'yeniden-dene', değilse 'atlandi'; doküman OKUNMAZ / YAZILMAZ (sonucu süren koşu yazar)
+ *   · kimlik biçimi bozuk, doküman yok, `gitti` / (revize) bekleyen revizyon yok → 'atlandi' (gönderim yok)
+ *   · aynı talebin AYNI TÜR gönderimi bu süreçte SÜRÜYOR → yeniden denenebiliyorsa 'yeniden-dene', değilse 'atlandi'; doküman OKUNMAZ / YAZILMAZ (sonucu süren koşu yazar)
  *   · havuz yok / okuma hatası (posta GİTMEDİ)           → yeniden denenebiliyorsa 'yeniden-dene', değilse 'gonderilemedi'; doküman YAZILAMAZ
  *   · doküman bozuk, içerik üretilemedi                  → 'gonderilemedi' (yeniden deneme çözmez; `hataSinifi: 'diger'`)
  *   · posta gitti ama sonuç yazılamadı                   → 'gitti' — yeniden deneme ÇİFT posta olurdu
  *   · beklenmeyen hata                                   → posta gittiyse 'gitti', gitmediyse havuz yok satırıyla aynı
  */
-export async function magazaBildirimIsle(talepId: string, D: MagazaBildirimDeps, deneme?: { sayi: number; sonMu: boolean }): Promise<MagazaBildirimSonucu> {
+async function bildirimKos(a: BildirimTurAyari, talepId: string, D: MagazaBildirimDeps, deneme?: { sayi: number; sonMu: boolean }): Promise<MagazaBildirimSonucu> {
   let basarisiz: MagazaBildirimSonucu = 'gonderilemedi';
   let gitti = false;
   let sahip = false;
@@ -380,7 +574,7 @@ export async function magazaBildirimIsle(talepId: string, D: MagazaBildirimDeps,
     // sorar (o zaman dokümanda sonucu görür); yeniden soramayacak çağrı (süreç içi yol / son deneme) sonucu süren koşuya bırakır.
     // OKUMADAN ÖNCE alınır (ilk `await`ten önce, eşzamanlı): okumadan sonra alınsaydı, süren koşu biterken bayat `bekliyor`
     // okumuş bir çağrı kümeyi boş bulur ve yine gönderirdi.
-    const anahtar = sahiplenmeAnahtari(talepId, 'ilk');
+    const anahtar = sahiplenmeAnahtari(talepId, a.tur);
     if (gonderimde.has(anahtar)) return yenidenDenenir ? 'yeniden-dene' : 'atlandi';
     gonderimde.add(anahtar);
     sahip = true;
@@ -390,42 +584,36 @@ export async function magazaBildirimIsle(talepId: string, D: MagazaBildirimDeps,
 
     const havuz = D.getPgPool();
     if (!havuz) {
-      console.warn('[magaza-bildirim] veritabanı havuzu yok — bildirim gönderilemedi');
+      console.warn(a.onEk + 'veritabanı havuzu yok — bildirim gönderilemedi');
       return basarisiz;
     }
 
-    let belge: unknown;
+    let hazir: HazirBildirim | 'atla';
     try {
-      const { rows } = await havuz.query(OKU_SQL, [MAGAZA_TALEP_KOLEKSIYONU, talepId]);
-      if (rows.length === 0) return 'atlandi';
-      belge = rows[0].data;
+      hazir = await a.hazirla(havuz, D, talepId);
     } catch (hata) {
-      console.warn(`[magaza-bildirim] talep okunamadı (kod: ${hataKodu(hata)})`);
+      console.warn(a.onEk + `talep okunamadı (kod: ${hataKodu(hata)})`);
       return basarisiz;
     }
-    // Çift posta olmasın: yeniden denenen iş ya da iki yoldan gelen istek, postası gitmiş talebi yeniden göndermesin.
-    // Denetim OKUMA ANINDADIR — bu satırla gönderim arasında kira yok; aynı süreçteki eşzamanlı koşuyu yukarıdaki
-    // sahiplenme geri çevirir, BAŞKA süreçteki eşzamanlı koşuyu hiçbir şey çevirmez (dosya başı, madde 3).
-    if (nesneMi(belge) && nesneMi(belge.bildirim) && belge.bildirim.durum === 'gitti') return 'atlandi';
+    if (hazir === 'atla') return 'atlandi';
 
-    const icerik = guvenliIcerik(belge, D);
-    if (icerik === null) {
-      console.warn('[magaza-bildirim] bildirim içeriği üretilemedi (doküman biçimi)');
-      await sonucYaz(havuz, D, talepId, { durum: 'gonderilemedi', hataSinifi: 'diger', zaman: zaman() });
+    if (hazir.ileti === null) {
+      console.warn(a.onEk + 'bildirim içeriği üretilemedi (doküman biçimi)');
+      await hazir.yaz({ durum: 'gonderilemedi', hataSinifi: 'diger', zaman: zaman() });
       return 'gonderilemedi';
     }
 
     // `smtpGonder` fırlatmaz; fırlatırsa da hata METNİ değil sınıfı alınır.
-    const sonuc = await smtpGonder(icerik).catch((hata: unknown) => ({ ok: false as const, sinif: smtpHataSinifi(hata) }));
+    const sonuc = await smtpGonder(hazir.ileti).catch((hata: unknown) => ({ ok: false as const, sinif: smtpHataSinifi(hata) }));
 
     if (sonuc.ok) {
       gitti = true;
-      await sonucYaz(havuz, D, talepId, { durum: 'gitti', zaman: zaman() });
+      await hazir.yaz({ durum: 'gitti', zaman: zaman() });
       return 'gitti';
     }
     if ('yapilandirilmamis' in sonuc) {
       // Yapılandırma eksik: bağlantı denenmedi; yeniden deneme çözmez (bekçi kırmızı gösterir).
-      await sonucYaz(havuz, D, talepId, { durum: 'yapilandirilmamis', zaman: zaman() });
+      await hazir.yaz({ durum: 'yapilandirilmamis', zaman: zaman() });
       return 'yapilandirilmamis';
     }
 
@@ -435,21 +623,38 @@ export async function magazaBildirimIsle(talepId: string, D: MagazaBildirimDeps,
     // Düzeltme yapılandırmadadır; bekçi kırmızı gösterir. Geçici sınıflar (bağlantı, tls, diğer) kuyruk yolunda yeniden denenir.
     // Sunucunun GEÇİCİ (4xx) reddi kalıcı sınıfa hiç girmez: `smtpHataSinifi` onu `diger`e indirir (450 / 451 / 452 / 454).
     const tekrarEdilir = yenidenDenenir && !KALICI_HATA_SINIFLARI.has(hataSinifi);
-    await sonucYaz(havuz, D, talepId, {
+    await hazir.yaz({
       durum: tekrarEdilir ? 'bekliyor' : 'gonderilemedi',
       ...(denemeSayisi !== undefined ? { deneme: denemeSayisi } : {}),
       hataSinifi,
       zaman: zaman(),
     });
-    if (!tekrarEdilir) console.warn(`[magaza-bildirim] bildirim gönderilemedi (sınıf: ${hataSinifi})`);
+    if (!tekrarEdilir) console.warn(a.onEk + `bildirim gönderilemedi (sınıf: ${hataSinifi})`);
     return tekrarEdilir ? 'yeniden-dene' : 'gonderilemedi';
   } catch {
     // Buraya düşen hata beklenmeyendir; metni yazılmaz. Posta gittiyse yeniden deneme YOK.
     return gitti ? 'gitti' : basarisiz;
   } finally {
     // Sahiplenme HER çıkışta bırakılır (erken dönüş, hata); yalnız bu çağrı aldıysa — geri çevrilen çağrı süren koşununkini SİLMEZ.
-    if (sahip) gonderimde.delete(sahiplenmeAnahtari(talepId, 'ilk'));
+    if (sahip) gonderimde.delete(sahiplenmeAnahtari(talepId, a.tur));
   }
+}
+
+/**
+ * Tek talebin İLK bildirimi (`bildirim` alanı): dokümanı oku → (yoksa / `gitti` ise atla) → gönder → sonucu TEK SQL ile
+ * yaz → yayınla. Dönen değerler ve yeniden deneme kuralı için bkz. `bildirimKos`. Asla fırlatmaz.
+ */
+export async function magazaBildirimIsle(talepId: string, D: MagazaBildirimDeps, deneme?: { sayi: number; sonMu: boolean }): Promise<MagazaBildirimSonucu> {
+  return bildirimKos(ILK_BILDIRIM, talepId, D, deneme);
+}
+
+/**
+ * (2b) Tek talebin REVİZE bildirimi (`bildirimRevize` alanı): dar oku → (bekleyen revizyon yoksa atla) → gönder → sonucu
+ * `REVIZE_YAZ_SQL` ile yaz (okunan `icerikSurum` koşuluyla) → yayınla. İlk bildirimle AYNI dört sonuç (`gitti`,
+ * `gonderilemedi` + `hataSinifi`, `yapilandirilmamis`, `bekliyor` + `deneme`) ve aynı yeniden deneme kuralı. Asla fırlatmaz.
+ */
+export async function magazaRevizeBildirimIsle(talepId: string, D: MagazaBildirimDeps, deneme?: { sayi: number; sonMu: boolean }): Promise<MagazaBildirimSonucu> {
+  return bildirimKos(REVIZE_BILDIRIMI, talepId, D, deneme);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -501,6 +706,15 @@ export function magazaBildirimIscisi(D: MagazaBildirimDeps): (isler: Array<{ dat
 }
 
 /**
+ * (2b) Revize kuyruğunun (`MAGAZA_REVIZE_KUYRUGU`) pg-boss işçisi — ilk bildirimin işçisiyle AYNI gövde (`magazaBildirimIscisiKur`:
+ * iş verisi yalnız `{ talepId }`, bozuk iş atlanır, sabit iletili tek «yeniden dene» hatası), yalnız tek talep işlevi farklı.
+ * AYNI seçeneklerle kaydedilir (`MAGAZA_BILDIRIM_ISCI_SECENEKLERI`; `includeMetadata` olmadan yeniden deneme sessizce kapanır).
+ */
+export function magazaRevizeBildirimIscisi(D: MagazaBildirimDeps): (isler: Array<{ data: unknown; retryCount?: number; retryLimit?: number }>) => Promise<void> {
+  return magazaBildirimIscisiKur(D, magazaRevizeBildirimIsle);
+}
+
+/**
  * `magazaBildirimIscisi`'nin gövdesi; tek talep işlevi verilir (test: biçimi bozuk
  * iş işleve HİÇ ulaşmaz; işlev sözleşmesine aykırı fırlatsa da hatası iş satırına
  * sızmaz). Üretim kodu `magazaBildirimIscisi`'ni çağırır.
@@ -529,6 +743,8 @@ export function magazaBildirimIscisiKur(
 }
 
 type BildirimKuyrugu = { send: (ad: string, veri: object, secenek?: object) => Promise<unknown> };
+/** `send`'e giden kuyruk adı YALNIZ bu iki sabitten biridir (serbest dizge derlenmez). */
+type MagazaKuyrukAdi = typeof MAGAZA_BILDIRIM_KUYRUGU | typeof MAGAZA_REVIZE_KUYRUGU;
 
 /**
  * Kuyruğa TEK giriş noktası (isteyici ve kaçanlar): iş verisi YALNIZ `{ talepId }`. pg-boss `send` iş
@@ -536,8 +752,38 @@ type BildirimKuyrugu = { send: (ad: string, veri: object, secenek?: object) => P
  * pratikte üretmez; politika `exclusive`e çekilirse null = «zaten kuyrukta» olur ve isteyici süreç içi yola
  * DÜŞMEMELİ — o gün bu yorum okunacak.
  */
-async function kuyrugaEkle(k: BildirimKuyrugu, talepId: string): Promise<boolean> {
-  return (await k.send(MAGAZA_BILDIRIM_KUYRUGU, { talepId }, MAGAZA_BILDIRIM_IS_SECENEKLERI)) != null;
+async function kuyrugaEkle(k: BildirimKuyrugu, kuyrukAdi: MagazaKuyrukAdi, talepId: string): Promise<boolean> {
+  return (await k.send(kuyrukAdi, { talepId }, MAGAZA_BILDIRIM_IS_SECENEKLERI)) != null;
+}
+
+/** Bir kuyruğun isteyiciye / kaçan süpürmesine verdiği sabitler: kuyruk adı + günlük öneki (ikisi de sabit metin). */
+interface KuyrukAyari { kuyrukAdi: MagazaKuyrukAdi; onEk: string }
+const ILK_KUYRUK: KuyrukAyari = { kuyrukAdi: MAGAZA_BILDIRIM_KUYRUGU, onEk: ILK_ON_EK };
+const REVIZE_KUYRUK: KuyrukAyari = { kuyrukAdi: MAGAZA_REVIZE_KUYRUGU, onEk: REVIZE_ON_EK };
+
+/** İki isteyicinin ORTAK gövdesi (`magazaBildirimIsteyiciKur` / `magazaRevizeBildirimIsteyiciKur`): yalnız kuyruk ve süreç içi işlev farklıdır. */
+function isteyiciKur(
+  a: KuyrukAyari,
+  kuyruk: () => BildirimKuyrugu | null,
+  D: MagazaBildirimDeps,
+  isle: (talepId: string, D: MagazaBildirimDeps) => Promise<unknown>,
+): (talepId: string) => Promise<void> {
+  return async (talepId) => {
+    try {
+      if (typeof talepId !== 'string' || !MAGAZA_TALEP_KIMLIK_DESENI.test(talepId)) return;
+      let kuyrukta = false;
+      try {
+        const k = kuyruk();
+        if (k) kuyrukta = await kuyrugaEkle(k, a.kuyrukAdi, talepId);
+      } catch {
+        console.warn(a.onEk + 'bildirim kuyruğa eklenemedi — süreç içi gönderime geçildi');
+      }
+      if (kuyrukta) return;
+      // Süreç içi yol: BAŞLATILIR, BEKLENMEZ (yanıt SMTP'yi beklemez). Kendi reddini
+      // kendisi yutar: genel `unhandledRejection` işleyicisi ret nedenini günlüğe basar.
+      void isle(talepId, D).catch(() => { /* sonuç dokümanda */ });
+    } catch { /* asla reddetmez */ }
+  };
 }
 
 /**
@@ -550,22 +796,7 @@ export function magazaBildirimIsteyiciKur(
   D: MagazaBildirimDeps,
   isle: (talepId: string, D: MagazaBildirimDeps) => Promise<unknown>,
 ): (talepId: string) => Promise<void> {
-  return async (talepId) => {
-    try {
-      if (typeof talepId !== 'string' || !MAGAZA_TALEP_KIMLIK_DESENI.test(talepId)) return;
-      let kuyrukta = false;
-      try {
-        const k = kuyruk();
-        if (k) kuyrukta = await kuyrugaEkle(k, talepId);
-      } catch {
-        console.warn('[magaza-bildirim] bildirim kuyruğa eklenemedi — süreç içi gönderime geçildi');
-      }
-      if (kuyrukta) return;
-      // Süreç içi yol: BAŞLATILIR, BEKLENMEZ (yanıt SMTP'yi beklemez). Kendi reddini
-      // kendisi yutar: genel `unhandledRejection` işleyicisi ret nedenini günlüğe basar.
-      void isle(talepId, D).catch(() => { /* sonuç dokümanda */ });
-    } catch { /* asla reddetmez */ }
-  };
+  return isteyiciKur(ILK_KUYRUK, kuyruk, D, isle);
 }
 
 /**
@@ -577,6 +808,31 @@ export function magazaBildirimIsteyici(
   D: MagazaBildirimDeps,
 ): (talepId: string) => Promise<void> {
   return magazaBildirimIsteyiciKur(kuyruk, D, magazaBildirimIsle);
+}
+
+/**
+ * (2b) `magazaRevizeBildirimIsteyici`'nin gövdesi; süreç içi işlev verilir (test). Üretim kodu `magazaRevizeBildirimIsteyici`'yi çağırır.
+ */
+export function magazaRevizeBildirimIsteyiciKur(
+  kuyruk: () => { send: (ad: string, veri: object, secenek?: object) => Promise<unknown> } | null,
+  D: MagazaBildirimDeps,
+  isle: (talepId: string, D: MagazaBildirimDeps) => Promise<unknown>,
+): (talepId: string) => Promise<void> {
+  return isteyiciKur(REVIZE_KUYRUK, kuyruk, D, isle);
+}
+
+/**
+ * (2b, § 10.2 (e)) Yazma bağlamının `revizeBildirimiIste` gerçekleştirimi (`MagazaIcerikDeps`) — `magazaBildirimIsteyici` ile
+ * AYNI sözleşme, İKİNCİ kuyruk: kuyruk hazırsa `MAGAZA_REVIZE_KUYRUGU`'na `send` (iş verisi YALNIZ `{ talepId }`); kuyruk yoksa
+ * ya da `send` fırlatırsa süreç içi revize gönderimini (`magazaRevizeBildirimIsle`) BAŞLATIR ve beklemeden döner. Asla reddetmez.
+ * server.ts `() => (magazaRevizeKuyruguHazir ? boss : null)` ile kurar: bayrak revize kuyruğunun KENDİ işçisi bağlandıktan
+ * sonra kalkar — ilk kuyruğun bayrağı verilirse, işçisi olmayan kuyruğa giden iş hiç işlenmez.
+ */
+export function magazaRevizeBildirimIsteyici(
+  kuyruk: () => { send: (ad: string, veri: object, secenek?: object) => Promise<unknown> } | null,
+  D: MagazaBildirimDeps,
+): (talepId: string) => Promise<void> {
+  return magazaRevizeBildirimIsteyiciKur(kuyruk, D, magazaRevizeBildirimIsle);
 }
 
 // ── Kaçan bildirimleri yeniden kuyruğa alma (K6, 2026-10-09) ─────────────────────────────────────────────────────────
@@ -596,6 +852,11 @@ export function magazaBildirimIsteyici(
  *  • `yapilandirilmamis` için yaş penceresi YOK (hiç denenmemiş talepte çift posta riski yok); sel koruması LIMIT.
  *  • `gitti` ASLA ezilmez (durum süzgeci). Sahiplenme yazımı kiracı etiketiyle yayınlanır (ekran kırmızıdan çıkar; ara
  *    «bekleme aşıldı» sarısı bilerek kabul edilir).
+ *  • SİLİNMİŞ talep sahiplenilMEZ (V17 «silinmiş talep donuktur»; inceleme 2b, bulgu 9): yumuşak silinen talebin
+ *    `yapilandirilmamis` / yetim `bekliyor` bildirimi kuyruğa ALINMAZ, belge AYNEN kalır — silinmiş (mükerrer ya da deneme)
+ *    talep için «Yeni mağaza talebi» / revize postası gitmez. İki alanda da (ilk + revize; tek üretici). Talep geri
+ *    alınırsa (`silindi: null`) sonraki açılışta sahiplenilir. Silinmeden ÖNCE kuyruğa girmiş iş bu kuralın dışındadır
+ *    (işçi yazımı `silindi` koşulu taşımaz — şartname metni).
  *  • Günlüğe yalnız SAYI yazılır (talep no / kişisel veri yok). Asla fırlatmaz.
  */
 export const MAGAZA_KACAN_SINIRI = 50;
@@ -605,21 +866,42 @@ export const MAGAZA_KACAN_SINIRI = 50;
  *  için iki yeniden deneme zinciri ve `deneme` sayacının ezilmesi demekti (inceleme 2026-10-09). Bilinen kör nokta: SON
  *  denemede sonuç yazımı düşerse doküman `bekliyor` + `deneme` kalır; bekçi / ekran «bekleme aşıldı» ile gösterir. */
 export const MAGAZA_KACAN_YETIM_ESIGI_MS = 3 * 60 * 60 * 1000;
-export const MAGAZA_KACAN_SAHIPLEN_SQL = `WITH aday AS (
+
+/**
+ * Sahiplenme sorgusunun iki alan için AYNI kalıptan üreticisi (kopya sabit yok). Aday süzgeci iki alanda BİREBİR aynıdır
+ * (SİLİNMEMİŞ talep VE — `yapilandirilmamis` ya da `deneme`siz + yetim eşiğinden eski `bekliyor`; yaş alanın KENDİ
+ * `zaman`ından — süpürmenin ölçütüdür, bekçinin yaşı değil). Alana göre değişen yalnız iki parça:
+ *  • SIRA: ilk bildirimde `olusturma`, revizede `icerikZamani` (revizyonun `olusturma` eşdeğeri) — en yeni önce.
+ *  • YAMA: ilk bildirimde nesne BÜTÜNÜYLE değişir (`deneme` / `hataSinifi` silinir — korunacak başka alan yok). Revizede
+ *    nesne bütünüyle DEĞİŞTİRİLMEZ (kapı 3 K9 → kapı 4 Y3 (c)): `(d.data->'bildirimRevize') || …` yalnız `durum` ve `zaman`
+ *    yazar; `alanlar` / `kim` / `icerikSurum` korunur. İlk bildirimin kalıbı aynen uygulansaydı üçü düşer, `REVIZE_YAZ_SQL`
+ *    0 satır kalır, `gitti` hiç yazılamaz ve her açılışta alan adsız bir posta daha giderdi (PGlite ölçümü).
+ */
+function kacanSahiplenSql(yol: 'bildirim' | 'bildirimRevize'): string {
+  const siraAlani = yol === 'bildirim' ? 'olusturma' : 'icerikZamani';
+  const yama = yol === 'bildirim'
+    ? "jsonb_build_object('durum', 'bekliyor', 'zaman', $2::text)"
+    : "(d.data->'bildirimRevize') || jsonb_build_object('durum', 'bekliyor', 'zaman', $2::text)";
+  return `WITH aday AS (
   SELECT id FROM docs
    WHERE coll = $1
-     AND ( data->'bildirim'->>'durum' = 'yapilandirilmamis'
-        OR ( data->'bildirim'->>'durum' = 'bekliyor'
-             AND NOT (data->'bildirim' ? 'deneme')
-             AND COALESCE((data->'bildirim'->>'zaman') COLLATE "C" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$'
-                      AND (data->'bildirim'->>'zaman') COLLATE "C" < $3, false) ) )
-   ORDER BY (data->>'olusturma') COLLATE "C" DESC
+     AND ${MAGAZA_SILINMEMIS_SQL}
+     AND ( data->'${yol}'->>'durum' = 'yapilandirilmamis'
+        OR ( data->'${yol}'->>'durum' = 'bekliyor'
+             AND NOT (data->'${yol}' ? 'deneme')
+             AND COALESCE((data->'${yol}'->>'zaman') COLLATE "C" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$'
+                      AND (data->'${yol}'->>'zaman') COLLATE "C" < $3, false) ) )
+   ORDER BY (data->>'${siraAlani}') COLLATE "C" DESC
    LIMIT ${MAGAZA_KACAN_SINIRI}
    FOR UPDATE SKIP LOCKED )
 UPDATE docs d
-   SET data = jsonb_set(d.data, '{bildirim}', jsonb_build_object('durum', 'bekliyor', 'zaman', $2::text)), updated_at = now()
+   SET data = jsonb_set(d.data, '{${yol}}', ${yama}), updated_at = now()
   FROM aday WHERE d.coll = $1 AND d.id = aday.id
 RETURNING d.id, d.data`;
+}
+export const MAGAZA_KACAN_SAHIPLEN_SQL = kacanSahiplenSql('bildirim');
+/** (2b) Revize bildiriminin sahiplenme sorgusu: aynı aday süzgeci, `bildirim` alanına DOKUNMAZ, üç revize alanını KORUR. */
+export const MAGAZA_REVIZE_KACAN_SAHIPLEN_SQL = kacanSahiplenSql('bildirimRevize');
 
 export interface MagazaKacanSonucu {
   alinan: number;
@@ -627,14 +909,16 @@ export interface MagazaKacanSonucu {
   neden?: 'kuyruk-hazir-degil' | 'yapilandirma' | 'teslim-sondasi' | 'havuz-yok' | 'sorgu';
 }
 
-export async function magazaBildirimKacanlariKuyrukla(
+/** İki süpürmenin ORTAK gövdesi: yalnız sahiplenme sorgusu, kuyruk ve günlük öneki farklıdır (kurallar yukarıdaki listede). */
+async function kacanlariKuyrukla(
+  a: KuyrukAyari & { sahiplenSql: string },
   D: MagazaBildirimDeps,
   kuyruk: () => BildirimKuyrugu | null,
-  dogrula: () => Promise<SmtpSonucu | { ok: false; yapilandirilmamis: true }> = smtpDogrula,
-  yapilandirma: () => { tamam: boolean } = smtpYapilandirmasi,
-  simdi: () => number = Date.now,
+  dogrula: () => Promise<SmtpSonucu | { ok: false; yapilandirilmamis: true }>,
+  yapilandirma: () => { tamam: boolean },
+  simdi: () => number,
 ): Promise<MagazaKacanSonucu> {
-  const gunluk = (ileti: string): void => console.warn('[magaza-bildirim] kaçanlar: ' + ileti);
+  const gunluk = (ileti: string): void => console.warn(a.onEk + 'kaçanlar: ' + ileti);
   try {
     const k = kuyruk();
     if (!k) { gunluk('kuyruğa alınmadı — kuyruk hazır değil'); return { alinan: 0, kuyrukta: 0, neden: 'kuyruk-hazir-degil' }; }
@@ -649,7 +933,7 @@ export async function magazaBildirimKacanlariKuyrukla(
     const an = simdi();
     let satirlar: unknown[];
     try {
-      const { rows } = await havuz.query(MAGAZA_KACAN_SAHIPLEN_SQL, [MAGAZA_TALEP_KOLEKSIYONU, new Date(an).toISOString(), new Date(an - MAGAZA_KACAN_YETIM_ESIGI_MS).toISOString()]);
+      const { rows } = await havuz.query(a.sahiplenSql, [MAGAZA_TALEP_KOLEKSIYONU, new Date(an).toISOString(), new Date(an - MAGAZA_KACAN_YETIM_ESIGI_MS).toISOString()]);
       satirlar = Array.isArray(rows) ? rows : [];
     } catch (hata) {
       gunluk(`sorgu başarısız (kod: ${hataKodu(hata)})`);
@@ -665,7 +949,7 @@ export async function magazaBildirimKacanlariKuyrukla(
         try { D.broadcastDocChange(MAGAZA_TALEP_KOLEKSIYONU, 'set', id, veri, { cid }); } catch { /* yayın hatası sonucu değiştirmez */ }
       }
       try {
-        if (await kuyrugaEkle(k, id)) kuyrukta += 1;
+        if (await kuyrugaEkle(k, a.kuyrukAdi, id)) kuyrukta += 1;
       } catch { /* sayıyla raporlanır; satır `bekliyor` kalır, 3 saat sonra yeniden alınır */ }
     }
     if (satirlar.length > 0) gunluk(`${satirlar.length} talep sahiplenildi, ${kuyrukta} kuyruğa alındı${satirlar.length - kuyrukta > 0 ? `, kuyruğa alınamadı: ${satirlar.length - kuyrukta}` : ''}`);
@@ -673,4 +957,30 @@ export async function magazaBildirimKacanlariKuyrukla(
   } catch {
     return { alinan: 0, kuyrukta: 0, neden: 'sorgu' };
   }
+}
+
+export async function magazaBildirimKacanlariKuyrukla(
+  D: MagazaBildirimDeps,
+  kuyruk: () => BildirimKuyrugu | null,
+  dogrula: () => Promise<SmtpSonucu | { ok: false; yapilandirilmamis: true }> = smtpDogrula,
+  yapilandirma: () => { tamam: boolean } = smtpYapilandirmasi,
+  simdi: () => number = Date.now,
+): Promise<MagazaKacanSonucu> {
+  return kacanlariKuyrukla({ ...ILK_KUYRUK, sahiplenSql: MAGAZA_KACAN_SAHIPLEN_SQL }, D, kuyruk, dogrula, yapilandirma, simdi);
+}
+
+/**
+ * (2b, § 10.2 (e) / § 10.7) Kaçan REVİZE bildirimleri: `magazaBildirimKacanlariKuyrukla` ile AYNI kurallar (kuyruk hazır
+ * değilse hiç koşmaz, önce teslim sondası, TEK SQL ile sahiplen → sonra kuyruğa al, günlüğe yalnız sayı, asla fırlatmaz),
+ * `bildirimRevize` alanı ve `MAGAZA_REVIZE_KUYRUGU` için. Açılışta revize işçisi bağlandıktan sonra çağrılır; `kuyruk`
+ * revize kuyruğunun hazır olduğu `boss`tur. İlk bildirimin süpürmesinden BAĞIMSIZDIR: `bildirim` alanına dokunmaz.
+ */
+export async function magazaRevizeKacanlariKuyrukla(
+  D: MagazaBildirimDeps,
+  kuyruk: () => BildirimKuyrugu | null,
+  dogrula: () => Promise<SmtpSonucu | { ok: false; yapilandirilmamis: true }> = smtpDogrula,
+  yapilandirma: () => { tamam: boolean } = smtpYapilandirmasi,
+  simdi: () => number = Date.now,
+): Promise<MagazaKacanSonucu> {
+  return kacanlariKuyrukla({ ...REVIZE_KUYRUK, sahiplenSql: MAGAZA_REVIZE_KACAN_SAHIPLEN_SQL }, D, kuyruk, dogrula, yapilandirma, simdi);
 }

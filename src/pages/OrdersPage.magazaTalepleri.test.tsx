@@ -13,6 +13,11 @@
  * gövdeyle gider (bileşen testi yalnız niteliğin çağrıldığını, servis testi yalnız işlevin isteğini görür; ikisinin sayfada
  * birbirine BAĞLI olduğunu bu dosya kanıtlar). BİLEREK DEĞİŞEN dilim 1 sabiti: rozet adı «N yeni talep» → «N görülmemiş talep»
  * + ayrı «N yeni talep» (aşama); sekme açılınca yalnız «görülmemiş» kalkar.
+ *
+ * DİLİM 2b (şartname v6 § 10.4 / § 10.8 «yazıldı ama bağlanmadı» + V24, 2026-10-11): «Düzenle» formu, «Sil» / «Geri al» (yalnız
+ * Yönetici), «Yeni talep (elle)», revize bildirimini «Yeniden gönder», iki tablo ve dört süzgeç düğmesi GERÇEK sayfadan açılan
+ * yoldadır: istekler doğru uca (`…/icerik`, `…/sil`, kök, `…/bildirim-gonder?tur=revize`) doğru gövdeyle gider; teyit kaleminin
+ * KDV varsayılanı sayfanın GERÇEK `inventory` kopyasından okunur (`magazaUrunKdvOrani` — taban stok kodu kuralı dâhil).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
@@ -22,6 +27,7 @@ import { translations } from '../translations';
 import { useAppStore } from '../store/appStore';
 import { APP_ROLES } from '../lib/rbac';
 import { authFetch } from '../services/authFetch';
+import { _registerConfirmListener, _resolveConfirm, type ConfirmOpts } from '../lib/confirm';
 import type { Order } from '../types';
 
 // ── Akış düzeneği: sayfanın ve kancaların açtığı abonelikler kaydedilir, ağ çağrısı yapılmaz ──────────────────────────
@@ -95,15 +101,15 @@ const MAGAZA = /^Mağaza Talepleri/;
 // ── Dilim 2a: mağaza talebi yazma uçlarına giden istekler ──
 const sahteIstek = vi.mocked(authFetch);
 const VARSAYILAN_YANIT = () => Promise.resolve(new Response('{"success":false}', { status: 200 }));
-/** Mağaza talebi uçlarına verilen yanıt (her çağrıya yeni nesne); sayfanın öteki istekleri varsayılan yanıtı alır. */
+/** Mağaza talebi uçlarına (2b: kök uç — elle talep — dâhil) verilen yanıt (her çağrıya yeni nesne); sayfanın öteki istekleri varsayılan yanıtı alır. */
 const magazaYaniti = (status: number, govde: unknown): void => {
-  sahteIstek.mockImplementation(adres => (String(adres).startsWith('/api/magaza-talepleri/')
+  sahteIstek.mockImplementation(adres => (String(adres).startsWith('/api/magaza-talepleri')
     ? Promise.resolve(new Response(JSON.stringify(govde), { status }))
     : VARSAYILAN_YANIT()));
 };
 /** Mağaza talebi uçlarına giden istekler: [adres, yöntem, başlıklar, gövde]. */
 const magazaIstekleri = () => sahteIstek.mock.calls
-  .filter(c => String(c[0]).startsWith('/api/magaza-talepleri/'))
+  .filter(c => String(c[0]).startsWith('/api/magaza-talepleri'))
   .map(c => ({ adres: String(c[0]), yontem: c[1]?.method, basliklar: c[1]?.headers, govde: JSON.parse(String(c[1]?.body)) as unknown }));
 /** Tıklar ve isteğin sözünü (mikro görev) işletir. */
 const tiklaBekle = async (oge: HTMLElement): Promise<void> => { await act(async () => { fireEvent.click(oge); }); };
@@ -342,5 +348,206 @@ describe('OrdersPage — Mağaza Talepleri işlemleri gerçek sayfadan uca bağl
     expect(magazaIstekleri()).toEqual([]);
     // Sekme rozeti aramadan ETKİLENMEZ: sayı bütün taleplerden, süzülmüş listeden değil.
     expect(dugme('Mağaza Talepleri 1 yeni talep')).not.toBeNull();
+  });
+});
+
+// ── Dilim 2b: «yazıldı ama bağlanmadı» — içerik, silme / geri alma, elle talep ve revize bildirimi GERÇEK sayfadan uca gidiyor ──
+describe('OrdersPage — Mağaza Talepleri dilim 2b işlemleri gerçek sayfadan uca bağlı', { timeout: 30_000 }, () => {
+  const ILK = '2026-10-08T09:00:00.000Z';
+  const BASLIK = { 'Content-Type': 'application/json' };
+  const MUSTERI = { ad: 'Şükrü Çağlayan', firma: 'Çağlayan İnşaat', telefon: '0532 111 22 33', eposta: '', il: 'İzmir', adres: '', vergi: '' };
+  const silindi = { zaman: '2026-10-08T10:00:00.000Z', kim: { uid: 'uid-7', ad: 'Yönetici' }, kanal: 'erp' };
+  async function magazaSekmesi(ek: Partial<Props>, ...d: Array<{ id: string; veri: unknown }>) {
+    await sayfaCiz(ek);
+    talepGonder(...d);
+    tikla(MAGAZA);
+    return screen.getByRole('region', { name: 'Mağaza Talepleri' });
+  }
+  const detayAc = (liste: HTMLElement): void => { fireEvent.click(within(liste).getByRole('button', { expanded: false })); };
+  /**
+   * Onay penceresi: uygulamada `GlobalConfirm` `lib/confirm`e dinleyici bağlar; bu sayfa testinde o bileşen yoktur. Aynı kapıdan
+   * (gerçek `confirmAction`) verilen yanıtla kapanan dinleyici bağlanır — bağlanmazsa `confirmAction` «hayır» döner (fail-closed).
+   */
+  const onaylar: ConfirmOpts[] = [];
+  let dinleyiciyiKaldir: (() => void) | null = null;
+  const onayYaniti = (yanit: boolean): void => {
+    dinleyiciyiKaldir = _registerConfirmListener(secenek => { if (secenek !== null) { onaylar.push(secenek); _resolveConfirm(yanit); } });
+  };
+  beforeEach(() => { onaylar.length = 0; });
+  afterEach(() => { dinleyiciyiKaldir?.(); dinleyiciyiKaldir = null; });
+
+  it('süzgeç DÖRT düğme (V24): Açık · Kapalı · Silinen / İptal · Hepsi — sayılar canlı / silinmiş ayrımıyla; silinmiş talep yalnız sekmesinde', async () => {
+    const liste = await magazaSekmesi({},
+      { id: 'mt-1', veri: talepDokumani('T261008-ACIK', ILK) },
+      { id: 'mt-2', veri: talepDokumani('T261008-TSLM', ILK, { durum: 'teslim' }) },
+      { id: 'mt-3', veri: talepDokumani('T261008-IPTL', ILK, { durum: 'iptal' }) },
+      { id: 'mt-4', veri: talepDokumani('T261008-SLNM', ILK, { silindi }) },
+    );
+    const dugmeler = within(within(liste).getByRole('group', { name: 'Durum süzgeci' })).getAllByRole('button');
+    expect(dugmeler.map(b => b.textContent)).toEqual(['Açık 1', 'Kapalı 1', 'Silinen / İptal 2', 'Hepsi 3']);
+    expect(within(liste).queryByText('T261008-SLNM')).toBeNull();
+    fireEvent.click(dugmeler[3]);
+    expect(within(liste).queryByText('T261008-SLNM')).toBeNull();                 // «Hepsi»de silinmiş YOK
+    fireEvent.click(dugmeler[2]);
+    expect(within(liste).getByText('T261008-SLNM')).toBeTruthy();
+    expect(within(liste).getByText('Silindi')).toBeTruthy();
+    // Sekme rozetinin «yeni» sayısı silinmişi saymaz (canlı `yeni`: yalnız T261008-ACIK).
+    expect(dugme('Mağaza Talepleri 1 yeni talep')).not.toBeNull();
+  });
+
+  it('«Düzenle» → form → «İçeriği kaydet» → TAM 1 istek: `POST …/:id/icerik`, gövdede açılıştaki `icerikSurum` + yedi müşteri alanı + not + beyan kopyasından teyit; başarıda «İçerik kaydedildi»', async () => {
+    magazaYaniti(200, { ok: true, degisti: true });
+    const liste = await magazaSekmesi({ userRole: 'Sales' }, { id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { icerikSurum: 2, not: 'Öğleden sonra' }) });
+    detayAc(liste);
+    fireEvent.click(within(liste).getByRole('button', { name: 'Düzenle' }));
+    const form = within(liste).getByRole('group', { name: 'İçeriği düzenle — T261008-AB12' });
+    fireEvent.change(within(form).getByLabelText('Müşteri adı (zorunlu)'), { target: { value: 'Şükrü Çağlayan (yetkili)' } });
+    await tiklaBekle(within(form).getByRole('button', { name: 'İçeriği kaydet' }));
+    expect(magazaIstekleri()).toEqual([{
+      adres: '/api/magaza-talepleri/mt-1/icerik', yontem: 'POST', basliklar: BASLIK,
+      // Teyidi olmayan talep beyan kopyasıyla açılır (§ 10.4) ve form TAM gövde gönderir: `teyit` `b:<dizin>` satırıyla.
+      govde: {
+        icerikSurum: 2, musteri: { ...MUSTERI, ad: 'Şükrü Çağlayan (yetkili)' }, not: 'Öğleden sonra',
+        teyit: { kalemler: [{ anahtar: 'b:0', id: 'u1', sku: 'DYO-0001', ad: 'İç cephe boyası', marka: 'DYO', adet: 2, birimFiyat: 204.99, tedarik: false }] },
+      },
+    }]);
+    expect(within(liste).queryByRole('group', { name: /^İçeriği düzenle/ })).toBeNull();
+    expect(within(liste).getByRole('status').textContent).toBe('İçerik kaydedildi.');
+    // İyimser güncelleme YOK: ad akış yeni belgeyi getirince değişir.
+    expect(within(liste).queryByText('Şükrü Çağlayan (yetkili)')).toBeNull();
+  });
+
+  it('409 `surum-eski` sayfada: form açık kalır ve «başka biri düzenledi; yeniden açın» der', async () => {
+    magazaYaniti(409, { ok: false, kod: 'surum-eski', icerikSurum: 9 });
+    const liste = await magazaSekmesi({}, { id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK) });
+    detayAc(liste);
+    fireEvent.click(within(liste).getByRole('button', { name: 'Düzenle' }));
+    const form = within(liste).getByRole('group', { name: /^İçeriği düzenle/ });
+    await tiklaBekle(within(form).getByRole('button', { name: 'İçeriği kaydet' }));
+    expect(within(form).getByRole('alert').textContent).toBe('Başka biri bu talebin içeriğini düzenledi; kaydedilmedi. Formu kapatıp yeniden açın.');
+  });
+
+  it('`urunKdvOrani` sayfanın GERÇEK `inventory` kopyasından: taban stok koduyla (`-Dnnn` soneki) eşleşen kalem ürünün oranıyla, eşleşmeyen %20 + «varsayılan» imiyle açılır', async () => {
+    magazaYaniti(200, { ok: true, degisti: true });
+    const inventory = [
+      { id: 'i1', sku: 'DYO-0001', name: 'İç cephe boyası', stockLevel: 5, lowStockThreshold: 1, prices: {}, costPrice: 0, vatRate: 10 },
+      { id: 'i2', sku: 'ESKI-18', name: 'Eski oranlı', stockLevel: 5, lowStockThreshold: 1, prices: {}, costPrice: 0, vatRate: 18 },
+    ];
+    const kalemler = [
+      { id: 'u1', sku: 'DYO-0001-D012', ad: 'Boya (12\'li paket)', marka: 'DYO', adet: 1, talepFiyat: 2400, tedarik: false },
+      { id: 'u2', sku: 'ESKI-18', ad: 'Eski oranlı ürün', marka: '', adet: 2, talepFiyat: 50, tedarik: false },
+      { id: 'u3', sku: 'YOK-1', ad: 'Kartı olmayan ürün', marka: '', adet: 1, talepFiyat: null, tedarik: true },
+    ];
+    const liste = await magazaSekmesi({ inventory }, { id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { kalemler }) });
+    detayAc(liste);
+    fireEvent.click(within(liste).getByRole('button', { name: 'Düzenle' }));
+    const form = within(liste).getByRole('group', { name: /^İçeriği düzenle/ });
+    // Teyidi olmayan talep müşteri beyanının kopyasıyla açılır (§ 10.4): «kopyala» düğmesine gerek yok.
+    expect(within(form).queryByRole('button', { name: 'Müşteri beyanından kopyala' })).toBeNull();
+    const secici = (ad: string) => within(form).getByLabelText(`KDV oranı: ${ad}`) as HTMLSelectElement;
+    expect([secici('Boya (12\'li paket)').value, secici('Eski oranlı ürün').value, secici('Kartı olmayan ürün').value]).toEqual(['10', '20', '20']);
+    // %18 kümede yok ve kartı olmayan ürün: ikisi de %20 + «varsayılan» imi; ürün kaydından okunan %10'da im yok.
+    expect(within(form).getAllByText('varsayılan')).toHaveLength(2);
+    // Önizleme (fiyatı boş kalem var): üç toplam da «fiyat sorulacak».
+    expect(within(form).getByRole('status', { name: 'Genel toplam' }).textContent).toBe('fiyat sorulacak');
+
+    await tiklaBekle(within(form).getByRole('button', { name: 'İçeriği kaydet' }));
+    const govde = magazaIstekleri()[0].govde as { teyit: { kalemler: Array<Record<string, unknown>> } };
+    // Beyandan kopya `b:<dizin>` anahtarıyla; personel oran seçmedi → gövdede `kdvOrani` YOK (sunucu aynı kuralla çözer).
+    expect(govde.teyit.kalemler).toEqual([
+      { anahtar: 'b:0', id: 'u1', sku: 'DYO-0001-D012', ad: 'Boya (12\'li paket)', marka: 'DYO', adet: 1, birimFiyat: 2400, tedarik: false },
+      { anahtar: 'b:1', id: 'u2', sku: 'ESKI-18', ad: 'Eski oranlı ürün', marka: '', adet: 2, birimFiyat: 50, tedarik: false },
+      { anahtar: 'b:2', id: 'u3', sku: 'YOK-1', ad: 'Kartı olmayan ürün', marka: '', adet: 1, birimFiyat: null, tedarik: true },
+    ]);
+  });
+
+  it('«Sil» yalnız Yönetici\'de çizilir (Müdür ve Satış\'ta YOK); onayda «hayır» → istek yok', async () => {
+    onayYaniti(false);
+    const { rerender } = await sayfaCiz({ userRole: 'Sales' });
+    talepGonder({ id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { durumSurum: 4 }) });
+    tikla(MAGAZA);
+    const liste = screen.getByRole('region', { name: 'Mağaza Talepleri' });
+    detayAc(liste);
+    expect(within(liste).getByRole('button', { name: 'Düzenle' })).toBeTruthy();
+    expect(within(liste).queryByRole('button', { name: 'Sil' })).toBeNull();
+    rerender(<OrdersPage {...ozellikler({ userRole: 'Manager' })} />);
+    expect(within(liste).queryByRole('button', { name: 'Sil' })).toBeNull();
+    rerender(<OrdersPage {...ozellikler({ userRole: 'Admin' })} />);
+    await tiklaBekle(within(liste).getByRole('button', { name: 'Sil' }));
+    expect(onaylar).toHaveLength(1);
+    expect(onaylar[0].message).toContain('«T261008-AB12» silinecek. Kayıt durur');
+    expect(magazaIstekleri()).toEqual([]);
+  });
+
+  it('Yönetici «Sil» + onay → TAM 1 istek: `POST …/:id/sil`, gövde `{ surum }`; akış silinmiş belgeyi getirince «Silinen / İptal»de «Geri al» → `{ surum, geriAl: true }`', async () => {
+    onayYaniti(true);
+    magazaYaniti(200, { ok: true });
+    const liste = await magazaSekmesi({ userRole: 'Admin' }, { id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { durumSurum: 4 }) });
+    detayAc(liste);
+    await tiklaBekle(within(liste).getByRole('button', { name: 'Sil' }));
+    await act(async () => {});
+    expect(magazaIstekleri()).toEqual([{ adres: '/api/magaza-talepleri/mt-1/sil', yontem: 'POST', basliklar: BASLIK, govde: { surum: 4 } }]);
+    expect(within(liste).getByRole('status').textContent).toMatch(/^Talep T261008-AB12 silindi\. Kayıt durur/);
+
+    talepGonder({ id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { durumSurum: 5, silindi }) });
+    expect(within(liste).queryByText('T261008-AB12')).toBeNull();                  // «Açık»tan düştü
+    fireEvent.click(within(liste).getByRole('button', { name: /^Silinen \/ İptal/ }));
+    await tiklaBekle(within(liste).getByRole('button', { name: 'Geri al' }));
+    expect(onaylar).toHaveLength(1);                                               // geri alma onay sormaz
+    expect(magazaIstekleri()[1]).toEqual({ adres: '/api/magaza-talepleri/mt-1/sil', yontem: 'POST', basliklar: BASLIK, govde: { surum: 5, geriAl: true } });
+  });
+
+  it('«Yeni talep (elle)» → form → «Talebi aç» → TAM 1 istek: `POST /api/magaza-talepleri` (kök); 201 yanıtındaki numara liste başında', async () => {
+    magazaYaniti(201, { ok: true, id: 'mt-0123456789abcdef0123456789abcdef', talepNo: 'T261011-ELLE' });
+    const liste = await magazaSekmesi({ userRole: 'Manager' });
+    fireEvent.click(within(liste).getByRole('button', { name: 'Yeni talep (elle)' }));
+    const form = within(liste).getByRole('group', { name: 'Yeni talep (elle)' });
+    fireEvent.change(within(form).getByLabelText('Müşteri adı (zorunlu)'), { target: { value: 'Hüseyin Ağaoğlu' } });
+    fireEvent.change(within(form).getByLabelText('Telefon (zorunlu, en az 10 rakam)'), { target: { value: '0532 111 22 33' } });
+    fireEvent.change(within(form).getByLabelText('Ürün adı: 1. kalem'), { target: { value: 'Dış cephe boyası' } });
+    fireEvent.change(within(form).getByLabelText('Adet: Dış cephe boyası'), { target: { value: '3' } });
+    await tiklaBekle(within(form).getByRole('button', { name: 'Talebi aç' }));
+    expect(magazaIstekleri()).toEqual([{
+      adres: '/api/magaza-talepleri', yontem: 'POST', basliklar: BASLIK,
+      govde: {
+        musteri: { ad: 'Hüseyin Ağaoğlu', firma: '', telefon: '0532 111 22 33', eposta: '', il: '', adres: '', vergi: '' },
+        not: '',
+        kalemler: [{ ad: 'Dış cephe boyası', adet: 3, sku: '', marka: '', birimFiyat: null, tedarik: false }],
+      },
+    }]);
+    expect(within(liste).queryByRole('group', { name: 'Yeni talep (elle)' })).toBeNull();
+    expect(within(liste).getByRole('status').textContent).toBe('Talep açıldı: T261011-ELLE. «Yeni» aşamasında; bildirim e-postası kuyruğa alındı.');
+  });
+
+  it('revize bildirimi rozeti + «Revizeyi yeniden gönder» → TAM 1 istek: `POST …/bildirim-gonder?tur=revize`, gövde `{}`', async () => {
+    magazaYaniti(200, { ok: true });
+    const liste = await magazaSekmesi({ userRole: 'Sales' }, { id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, {
+      icerikSurum: 1, icerikZamani: ILK,
+      bildirimRevize: { durum: 'gonderilemedi', zaman: ILK, alanlar: ['not', 'not', 'teyit'], kim: { uid: 'uid-7', ad: 'Satış Personeli' }, icerikSurum: 1 },
+    }) });
+    const rozet = within(liste).getByText('Revize bildirimi: gönderilmedi');
+    expect(rozet.getAttribute('title')).toBe('Değişen alanlar: müşteri notu, teyit edilen kalemler');   // yinelenen ad tekilleşti
+    // İlk bildirim `gitti`: yalnız revize düğmesi var.
+    expect(within(liste).queryByRole('button', { name: 'Yeniden gönder' })).toBeNull();
+    await tiklaBekle(within(liste).getByRole('button', { name: 'Revizeyi yeniden gönder' }));
+    expect(magazaIstekleri()).toEqual([{ adres: '/api/magaza-talepleri/mt-1/bildirim-gonder?tur=revize', yontem: 'POST', basliklar: BASLIK, govde: {} }]);
+    expect(within(liste).getByRole('status').textContent).toBe('Bildirim kuyruğa alındı.');
+  });
+
+  it('teyit yazılmış talep sayfada: iki tablo yan yana ve teslim kutusu `t:` anahtarıyla istek atar', async () => {
+    magazaYaniti(200, { ok: true });
+    const teyit = {
+      kalemler: [{ anahtar: 't:aaaaaaaaaaaa', id: 'u1', sku: 'DYO-0001', ad: 'İç cephe boyası', marka: 'DYO', adet: 2, birimFiyat: 95, kdvOrani: 20, kdvKaynagi: 'urun', tedarik: false },
+        { anahtar: 't:bbbbbbbbbbbb', id: '', sku: 'FRC-12', ad: 'Fırça', marka: '', adet: 1, birimFiyat: 40, kdvOrani: 20, kdvKaynagi: 'personel', tedarik: false }],
+      araToplam: 230, kdv: 46, toplam: 276, zaman: ILK, kim: { uid: 'uid-7', ad: 'Satış Personeli' },
+    };
+    const liste = await magazaSekmesi({ userRole: 'Sales' }, { id: 'mt-1', veri: talepDokumani('T261008-AB12', ILK, { durum: 'sevk', durumSurum: 3, icerikSurum: 1, teyit }) });
+    detayAc(liste);
+    const teyitGrubu = within(liste).getByRole('group', { name: 'Teyit edilen' });
+    expect(within(liste).getAllByRole('table')).toHaveLength(2);
+    expect(within(teyitGrubu).getByText('Genel toplam').nextElementSibling?.textContent).toBe('₺276,00');
+    expect(within(within(liste).getByRole('group', { name: 'Talep edilen (sitede görülen)' })).queryByRole('checkbox')).toBeNull();
+    await tiklaBekle(within(teyitGrubu).getByRole('checkbox', { name: 'Teslim edildi: Fırça' }));
+    expect(magazaIstekleri()).toEqual([{ adres: '/api/magaza-talepleri/mt-1/kalem-teslim', yontem: 'POST', basliklar: BASLIK, govde: { surum: 3, teslim: true, kalemler: ['t:bbbbbbbbbbbb'] } }]);
   });
 });

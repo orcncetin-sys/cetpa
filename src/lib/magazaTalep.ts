@@ -17,6 +17,13 @@
  * «Etiket basıldı», bildirim rozeti kuralı. Geçiş tablosunun TEK kaynağı `magazaGecisi`'dir; panel ve ERP ekranı
  * tabloyu kopyalamaz (`magazaIzinliGecisler`). Kalem teslim saf işlevleri `Siparis` eşlemesi, takip yanıtı ve ERP
  * ekranı tarafından ORTAK okunur; kopya `durum === 'teslim'` karşılaştırması yazılmaz.
+ *
+ * DİLİM 2b (şartname v6 § 10.1, 2026-10-10): teyit edilen içerik (`teyit` — müşterinin BEYANI `kalemler` / `talepEdilen`
+ * hiçbir yazma yolunda değişmez, V16), kalem başına KDV oranı ve kaynağı, içerik sürümü, yumuşak silme (`silindi`), elle
+ * açılan talep (`elle`), revize bildirimi (`bildirimRevize`) ve liste süzgeci (V24 «Silinen / İptal» sekmesi). PARA KURALI
+ * (V19): teyit kalemi birim fiyatı KDV HARİÇ net; toplamlar TEK işlevde (`magazaTeyitToplamlari`) tam sayı KURUŞLA türetilir —
+ * sunucu kayıtlı tutarı, form canlı önizlemeyi AYNI işlevle üretir. KDV oranının varsayılanı da tek zincirdir:
+ * `magazaKdvVarsayilani(magazaUrunKdvOrani(kayitlar, sku))`. Yazma yolu `src/server/kanal/magazaIcerik.ts`.
  */
 
 export const MAGAZA_TALEP_KOLEKSIYONU = 'magazaTalepleri';
@@ -197,6 +204,296 @@ export interface MagazaTalebi {
   kalemTeslim?: Record<string, MagazaKalemTeslimGirisi>;
   /** (V23) yok / `null` = etiket basılmadı. */
   etiketBasildi?: MagazaEtiketBasildi | null;
+  // ── Dilim 2b alanları (hepsi isteğe bağlı; 2a ve dilim 1 kayıtlarında yok — § 10.1) ──
+  /** Personelin TEYİT ETTİĞİ içerik; yok = teyit yazılmadı (ekranın ikinci sütunu «—»). BEYAN (`kalemler`) değişmez (V16). */
+  teyit?: MagazaTeyit;
+  /** Yoksa 0; `musteri` / `not` / `teyit` yazımında +1. `durumSurum`'dan BAĞIMSIZ; kalem teslim yazımı artırmaz ama KOŞUL olarak okur. */
+  icerikSurum?: number;
+  /** Son içerik yazımı (UTC `toISOString()`); revize bildirimi rozetinin ve bekçi yaşının dayanağı. */
+  icerikZamani?: string;
+  /** Nesne = silinmiş; `null` = geri alınmış (`||` alan silemez); yok = hiç silinmemiş. Ölçüt `magazaSilinmisMi`. */
+  silindi?: MagazaSilindi | null;
+  /** Yalnız ERP'de elle açılan talepte; yok = mağazadan geldi. */
+  elle?: MagazaElle;
+  /** İçerik revizyonunun AYRI bildirim durumu; ilk bildirim alanı (`bildirim`) ezilmez. */
+  bildirimRevize?: MagazaBildirimRevize;
+}
+
+/** Akıştan / veritabanından gelen değer güvenilmez biçimdedir: düz nesne mi (dizi ve `null` değil). */
+const nesneMi = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+// ── Dilim 2b: teyit edilen içerik, KDV, silme, elle talep, revize bildirimi (§ 10.1) ───────────────────────────────────
+
+/**
+ * Teyit kaleminin KDV oranları — sabitin TEK tanımı (mağaza yolu içe aktarır, kopyalamaz; çit: magazaTalep.icerik.test.ts).
+ * ERP sipariş formunun sunduğu 8 ve 18 bu kümede YOK: ürün kaydında o oranlar varsa kalem `varsayilan`a düşer (V19, bilinçli).
+ */
+export const MAGAZA_KDV_ORANLARI = [0, 1, 10, 20] as const;
+export type MagazaKdvOrani = typeof MAGAZA_KDV_ORANLARI[number];
+/** Ürün kaydından oran okunamadığında gelen oran (`kdvKaynagi: 'varsayilan'` imiyle birlikte — tek başına basılmaz). */
+export const MAGAZA_KDV_VARSAYILAN_ORANI = 20 satisfies MagazaKdvOrani;
+
+export function magazaKdvOraniMi(v: unknown): v is MagazaKdvOrani {
+  return typeof v === 'number' && (MAGAZA_KDV_ORANLARI as readonly number[]).includes(v);
+}
+
+/**
+ * Oranın KAYNAĞI — sunucunun çıkarımıdır, istekte kabul edilmez: `urun` = ERP ürün kaydının `vatRate`'i; `varsayilan` =
+ * ürün kaydından okunamadı (eşleşen SKU yok / `vatRate` yok ya da küme dışı / çelişen kayıt) → 20 + ekranda «varsayılan»
+ * imi; `personel` = personel kalem başına seçti.
+ */
+export const MAGAZA_KDV_KAYNAKLARI = ['urun', 'varsayilan', 'personel'] as const;
+export type MagazaKdvKaynagi = typeof MAGAZA_KDV_KAYNAKLARI[number];
+
+export function magazaKdvKaynagiMi(v: unknown): v is MagazaKdvKaynagi {
+  return typeof v === 'string' && (MAGAZA_KDV_KAYNAKLARI as readonly string[]).includes(v);
+}
+
+/**
+ * Teyit edilen kalem. `anahtar` `t:<12 onaltılık>` — SUNUCU üretir, kalem ekle / sil / sırala ile KAYMAZ; teslim işareti
+ * kalemin İÇİNE yazılmaz, `kalemTeslim[anahtar]`'da tutulur. `birimFiyat` KDV HARİÇ net; `null` = «fiyat sorulacak» (0 DEĞİL).
+ */
+export interface MagazaTeyitKalemi {
+  anahtar: string;
+  id: string;
+  sku: string;
+  ad: string;
+  marka: string;
+  /** Güvenli tam sayı > 0. */
+  adet: number;
+  birimFiyat: number | null;
+  kdvOrani: MagazaKdvOrani;
+  kdvKaynagi: MagazaKdvKaynagi;
+  tedarik: boolean;
+}
+
+/**
+ * `MagazaTeyitKalemi`'nin BÜTÜN alanları — `degisenAlanlar` kalemleri bu listeyle alan alan karşılaştırır. Tipe yeni alan
+ * eklenip buraya eklenmezse derleme aşağıdaki satırda kırılır (unutulan alanın değişikliği «değişiklik yok» sayılmasın).
+ */
+export const MAGAZA_TEYIT_KALEM_ALANLARI = [
+  'anahtar', 'id', 'sku', 'ad', 'marka', 'adet', 'birimFiyat', 'kdvOrani', 'kdvKaynagi', 'tedarik',
+] as const satisfies readonly (keyof MagazaTeyitKalemi)[];
+const teyitKalemAlanlariTam: Exclude<keyof MagazaTeyitKalemi, typeof MAGAZA_TEYIT_KALEM_ALANLARI[number]> extends never ? true : never = true;
+void teyitKalemAlanlariTam;
+
+/** Üç toplam BİRLİKTE dolu ya da BİRLİKTE `null`'dır (kısmi toplam basılmaz). */
+export interface MagazaTeyitToplami {
+  /** KDV hariç ara toplam (matrah). */
+  araToplam: number | null;
+  kdv: number | null;
+  toplam: number | null;
+}
+
+export interface MagazaTeyit extends MagazaTeyitToplami {
+  /** En az 1 kalem (bütün kalemleri silmek isteyen talebi `iptal` eder — aşama). */
+  kalemler: MagazaTeyitKalemi[];
+  zaman: string;
+  kim: { uid: string; ad: string };
+}
+
+export interface MagazaSilindi {
+  zaman: string;
+  kim: { uid: string; ad: string };
+  kanal: MagazaKanal;
+}
+
+export interface MagazaElle {
+  zaman: string;
+  kim: { uid: string; ad: string };
+}
+
+/** Müşteri bloğunun yedi alanı — içerik yazımında YEDİSİ birden gelir (`||` sığ birleştirir; kısmi nesne eski alanı silerdi). */
+export const MAGAZA_MUSTERI_ALANLARI = ['ad', 'firma', 'telefon', 'eposta', 'il', 'adres', 'vergi'] as const satisfies readonly (keyof MagazaTalepMusteri)[];
+const musteriAlanlariTam: Exclude<keyof MagazaTalepMusteri, typeof MAGAZA_MUSTERI_ALANLARI[number]> extends never ? true : never = true;
+void musteriAlanlariTam;
+
+/** İçerik revizyonunda değişebilen alan adları (bildirim gövdesi ve denetim ayrıntısı yalnız bu ADLARI basar; değer basmaz). */
+export const MAGAZA_REVIZE_ALANLARI = ['musteri', 'not', 'teyit'] as const;
+export type MagazaRevizeAlani = typeof MAGAZA_REVIZE_ALANLARI[number];
+
+/**
+ * Revize bildirimi — `bildirim` ile AYNI sözlük (`MagazaBildirimDurumu`, `MAGAZA_BILDIRIM_HATA_SINIFLARI`; kopya küme yok).
+ * `alanlar` o revizyonda GERÇEKTEN değişen alanlar (sunucu ölçer); önceki revize bildirimi GİTMEMİŞKEN (`bekliyor` /
+ * `gonderilemedi` / `yapilandirilmamis` — inceleme 2b, bulgu 10) yeni revizyon gelirse SQL'de dizi
+ * birleştirilir ve yinelenen ad kalabilir — okuyan `alanlariBirlestir` ile tekilleştirir. `icerikSurum` = yazımın ürettiği
+ * sürüm (işçi bayat işi tanır).
+ */
+export interface MagazaBildirimRevize extends MagazaBildirim {
+  alanlar: MagazaRevizeAlani[];
+  kim: { uid: string; ad: string };
+  icerikSurum: number;
+}
+
+/**
+ * Teyit toplamları — kuruş formülünün TEK kaynağı (V19; sunucu kayıtlı tutarı, form önizlemeyi bununla üretir):
+ *   satirKurus = Math.round(birimFiyat × 100) × adet · araToplamKurus = Σ satirKurus
+ *   kdvKurus = Σ Math.round(satirKurus × kdvOrani / 100) (KDV KALEM oranıyla; tek orandan değil) · toplam = ara + kdv
+ * Birim fiyatın kuruşa yuvarlanmasında YARIM KURUŞ YUKARI (inceleme 2b, bulgu 2): `birimFiyat × 100` çarpımının kayan nokta
+ * kalıntısı yuvarlamadan önce 15 anlamlı haneyle temizlenir (`toPrecision(15)`) — yoksa 1,005 → 100 kuruş, 0,145 → 14 kuruş
+ * çıkar ve yön fiyata göre değişirdi. İki ondalıklı fiyatta sonuç eskisiyle AYNIDIR (95 → 9.500 kuruş) — birim fiyat 1e15
+ * kuruşun (10 trilyon TL) altındayken; üstü üçünü `null` yapar (inceleme 2b ikinci tur: 15 anlamlı hane o büyüklükte kuruşun
+ * kendisini yuvarlar, 12.345.678.901.234,56 → …,60 yazılırdı).
+ * Örnek: 2 × 95,00 (%20) + 1 × 40,00 (%20) → 230,00 / 46,00 / 276,00; ikinci kalem %10 ise 230,00 / 42,00 / 272,00.
+ * Herhangi bir `birimFiyat === null` → ÜÇÜ de `null` («fiyat sorulacak»; kısmi toplam basılmaz, sıfır değil). Sonlu olmayan
+ * fiyat / adet, 1e15 kuruş ve üstü birim fiyat YA DA satır tutarı, güvenli tam sayıyı aşan kuruş tutarı da üçünü `null` yapar (yuvarlanmış
+ * sahte tutar yazılmaz).
+ */
+export function magazaTeyitToplamlari(
+  kalemler: ReadonlyArray<{ adet: number; birimFiyat: number | null; kdvOrani: MagazaKdvOrani }>,
+): MagazaTeyitToplami {
+  const bilinmiyor: MagazaTeyitToplami = { araToplam: null, kdv: null, toplam: null };
+  let araKurus = 0, kdvKurus = 0;
+  for (const k of kalemler) {
+    if (k.birimFiyat === null || !Number.isFinite(k.birimFiyat) || !Number.isFinite(k.adet)) return bilinmiyor;
+    // Yarım kuruş HER ZAMAN yukarı: çarpımın kayan nokta kalıntısı (1,005 × 100 = 100,49999999999999) önce 15 anlamlı
+    // haneyle temizlenir, sonra yuvarlanır — 1,005 → 101 kuruş, 0,145 → 15 kuruş (kalıntıyla 100 ve 14 çıkıyordu).
+    // 15 anlamlı hane kuruşu ancak 1e15 kuruşun (10 trilyon TL) ALTINDA tam taşır; üstünde temizlik kuruşun kendisini
+    // yuvarlar (12.345.678.901.234,56 → …,60) — o aralıkta tutar yazılmaz.
+    if (k.birimFiyat * 100 >= 1e15) return bilinmiyor;
+    const satirKurus = Math.round(Number((k.birimFiyat * 100).toPrecision(15))) * k.adet;
+    // Aynı sınır SATIR tutarı için de geçerli: adet ≥ 2 ile satır 1e15 kuruşu geçerse KDV 1 kuruş kayık çıkabiliyordu.
+    if (satirKurus >= 1e15) return bilinmiyor;
+    const satirKdvKurus = Math.round(satirKurus * k.kdvOrani / 100);
+    araKurus += satirKurus;
+    kdvKurus += satirKdvKurus;
+    if (!Number.isSafeInteger(satirKurus) || !Number.isSafeInteger(araKurus) || !Number.isSafeInteger(araKurus + kdvKurus)) return bilinmiyor;
+  }
+  return { araToplam: araKurus / 100, kdv: kdvKurus / 100, toplam: (araKurus + kdvKurus) / 100 };
+}
+
+/**
+ * Ürün kaydının `vatRate`'inden teyit kaleminin BAŞLANGIÇ oranı. Sonlu sayı VE kümede ise o oran (`urun`); `undefined`
+ * (eşleşme yok / çelişen kayıt), `null`, `'20'` dizgesi, küme dışı sayı (4, 8, 18) → 20 + `varsayilan` (ekran im basar).
+ */
+export function magazaKdvVarsayilani(vatRate: unknown): { kdvOrani: MagazaKdvOrani; kdvKaynagi: 'urun' | 'varsayilan' } {
+  return magazaKdvOraniMi(vatRate) ? { kdvOrani: vatRate, kdvKaynagi: 'urun' } : { kdvOrani: MAGAZA_KDV_VARSAYILAN_ORANI, kdvKaynagi: 'varsayilan' };
+}
+
+/** Mağaza kataloğunun paket soneki: `<kod>-Dnnn` = ERP kartı `<kod>` (çarpan nnn). TAM üç rakam; iki / dört haneli son ek sayılmaz. */
+const PAKET_SONEKI = /-D\d{3}$/;
+
+/** `DEKOR-1325-D002` → `DEKOR-1325`; son ek yoksa (ya da taban boş kalıyorsa) `null`. Başka dönüşüm YOK (büyütme / kırpma yok). */
+export function magazaTabanSku(sku: string): string | null {
+  if (!PAKET_SONEKI.test(sku)) return null;
+  const taban = sku.replace(PAKET_SONEKI, '');
+  return taban === '' ? null : taban;
+}
+
+/**
+ * Kalem SKU'sunun ERP ürün kaydındaki KDV oranı — eşleme sırasının TEK kaynağı (sunucu `URUN_KDV_SQL` satırlarını,
+ * OrdersPage `inventory` kopyasını verir): önce `sku` BİREBİR eşit kayıt(lar); yoksa `-D\d{3}` son eki atılmış TABAN SKU'ya
+ * birebir eşit kayıt(lar). Seçilen kümede `vatRate`'i sonlu sayı olan değerler TEK bir sayıysa o sayı; birden fazla ve
+ * FARKLIYSA `undefined` (çelişen ürün kaydı sessizce bir oran uydurmaz); hiç yoksa `undefined`. `sku` boşsa `undefined`.
+ * `vatRate` İSTEĞE BAĞLI: `InventoryItem[]` (dizin imzalı tip) daraltma / `as` olmadan doğrudan geçer.
+ */
+export function magazaUrunKdvOrani(kayitlar: ReadonlyArray<{ sku: string; vatRate?: unknown }>, sku: string): number | undefined {
+  if (sku === '') return undefined;
+  let secilen = kayitlar.filter(k => k.sku === sku);
+  if (secilen.length === 0) {
+    const taban = magazaTabanSku(sku);
+    if (taban === null) return undefined;
+    secilen = kayitlar.filter(k => k.sku === taban);
+  }
+  let oran: number | undefined;
+  for (const k of secilen) {
+    const v = k.vatRate;
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    if (oran !== undefined && oran !== v) return undefined;
+    oran = v;
+  }
+  return oran;
+}
+
+/** Silinmiş mi: `silindi` NESNE ise. `null` (geri alınmış) ve yok (hiç silinmemiş) → false. SQL eşi `jsonb_typeof(…) = 'object'`. */
+export function magazaSilinmisMi(t: { silindi?: unknown }): boolean {
+  return nesneMi(t.silindi);
+}
+
+/** `degisenAlanlar`'ın ESKİ tarafı — veritabanından okunur, güvenilmez biçimdedir. `teyit` = `{ kalemler }` taşıyan nesne. */
+export interface MagazaIcerikOnceki { musteri?: unknown; not?: unknown; teyit?: unknown }
+/** `degisenAlanlar`'ın YENİ tarafı — temizlenmiş, KDV'si çözülmüş, anahtarı atanmış içerik; verilmeyen alan karşılaştırılmaz. */
+export interface MagazaIcerikYeni {
+  musteri?: MagazaTalepMusteri;
+  not?: string;
+  teyit?: { kalemler: ReadonlyArray<MagazaTeyitKalemi> };
+}
+
+/**
+ * Bir içerik yazımında GERÇEKTEN değişen alan adları (sıra sabit: `musteri`, `not`, `teyit`). Form her zaman TAM gövde
+ * gönderir; «ne değişti» burada ölçülür. `musteri` yedi alan alan alan eşitse; `not` metni eşitse; `teyit` kalem dizisi —
+ * her kalemin BÜTÜN alanları (`MAGAZA_TEYIT_KALEM_ALANLARI`) ve SIRA — eşitse listede YOK. `teyit.zaman` / `teyit.kim`
+ * karşılaştırmaya girmez. Eski değer beklenen biçimde değilse (alan yok, nesne / dizge değil) alan DEĞİŞMİŞ sayılır.
+ */
+export function degisenAlanlar(onceki: MagazaIcerikOnceki, yeni: MagazaIcerikYeni): MagazaRevizeAlani[] {
+  const alanlar: MagazaRevizeAlani[] = [];
+  if (yeni.musteri !== undefined) {
+    const yeniMusteri = yeni.musteri, eski = onceki.musteri;
+    if (!nesneMi(eski) || MAGAZA_MUSTERI_ALANLARI.some(a => eski[a] !== yeniMusteri[a])) alanlar.push('musteri');
+  }
+  if (yeni.not !== undefined && onceki.not !== yeni.not) alanlar.push('not');
+  if (yeni.teyit !== undefined) {
+    const yeniKalemler = yeni.teyit.kalemler;
+    const eskiKalemler = nesneMi(onceki.teyit) ? onceki.teyit.kalemler : undefined;
+    const esit = Array.isArray(eskiKalemler) && eskiKalemler.length === yeniKalemler.length
+      && yeniKalemler.every((k, i) => { const e: unknown = eskiKalemler[i]; return nesneMi(e) && MAGAZA_TEYIT_KALEM_ALANLARI.every(a => e[a] === k[a]); });
+    if (!esit) alanlar.push('teyit');
+  }
+  return alanlar;
+}
+
+/**
+ * Saklanan `bildirimRevize.alanlar`'ın okunuşu: küme birleşimi, İLK görülme sırası; bilinmeyen ad düşer; dizi değilse `[]`.
+ * (SQL birleştirmesi `['not'] || ['not', 'teyit']` yinelenen ad bırakır — tekilleştirme okuyandadır: işçi gövdeyi, kanca
+ * daraltıcısı ekranı bununla üretir.)
+ */
+export function alanlariBirlestir(deger: unknown): MagazaRevizeAlani[] {
+  if (!Array.isArray(deger)) return [];
+  const sonuc: MagazaRevizeAlani[] = [];
+  for (const v of deger) {
+    const ad = MAGAZA_REVIZE_ALANLARI.find(a => a === v);
+    if (ad !== undefined && !sonuc.includes(ad)) sonuc.push(ad);
+  }
+  return sonuc;
+}
+
+// ── Liste süzgeci (V24 — «Silinen / İptal» sekmesi; V17'deki «silinenleri gizle» onay kutusunun YERİNE) ──────────────────
+
+/** ERP «Mağaza Talepleri» listesinin dört düğmesi, ekran sırasıyla: Açık · Kapalı · Silinen / İptal · Hepsi. */
+export const MAGAZA_DURUM_SUZGECLERI = ['acik', 'kapali', 'silinenIptal', 'hepsi'] as const;
+export type MagazaDurumSuzgeci = typeof MAGAZA_DURUM_SUZGECLERI[number];
+
+/** Süzgecin okuduğu alanlar (kanca satırı buna uyar; kanca tipi burada içe aktarılmaz — yaprak modül). */
+export interface MagazaSuzgecSatiri { durum: MagazaTalepAsamasi | null; silindi?: unknown }
+
+/**
+ * Süzgeç kuralı — TEK yer (düğme sayıları da buradan):
+ *   • Açık            = silinmemiş VE aşaması açık (`magazaAcikMi`; aşaması okunamayan `null` satır AÇIKTIR, kaybolmaz).
+ *   • Kapalı          = silinmemiş VE aşaması `teslim` (`iptal` artık BURADA DEĞİL — 2a'da «Kapalı» teslim + iptal idi).
+ *   • Silinen / İptal = silinmiş (`magazaSilinmisMi`) YA DA aşaması `iptal` (silinmiş + iptal tek satırdır, bir kez sayılır).
+ *   • Hepsi           = silinmemişlerin tamamı (açık + teslim + iptal). Silinmişler «Hepsi»de GÖRÜNMEZ.
+ * Tutarlılık: Açık + Kapalı + (iptal ama silinmemiş) = Hepsi.
+ */
+export function magazaSuzgeceUyar(t: MagazaSuzgecSatiri, suzgec: MagazaDurumSuzgeci): boolean {
+  const silinmis = magazaSilinmisMi(t);
+  switch (suzgec) {
+    case 'acik': return !silinmis && magazaAcikMi(t.durum);
+    case 'kapali': return !silinmis && t.durum === 'teslim';
+    case 'silinenIptal': return silinmis || t.durum === 'iptal';
+    case 'hepsi': return !silinmis;
+  }
+}
+
+/** Sıra korunur; girdi dizisi değişmez (yeni dizi döner). */
+export function magazaSuzgecle<T extends MagazaSuzgecSatiri>(talepler: readonly T[], suzgec: MagazaDurumSuzgeci): T[] {
+  return talepler.filter(t => magazaSuzgeceUyar(t, suzgec));
+}
+
+/** Dört düğmenin sayıları — `magazaSuzgecle` ile AYNI kuraldan (ayrı sayım formülü yazılmaz). */
+export function magazaSuzgecSayilari(talepler: readonly MagazaSuzgecSatiri[]): Record<MagazaDurumSuzgeci, number> {
+  const sayilar: Record<MagazaDurumSuzgeci, number> = { acik: 0, kapali: 0, silinenIptal: 0, hepsi: 0 };
+  for (const t of talepler) for (const s of MAGAZA_DURUM_SUZGECLERI) if (magazaSuzgeceUyar(t, s)) sayilar[s] += 1;
+  return sayilar;
 }
 
 // ── Kalem teslim işareti (V6) ───────────────────────────────────────────────────────────────────────────────────────
@@ -209,7 +506,14 @@ export interface MagazaTalebi {
  */
 export const MAGAZA_KALEM_ANAHTARI_DESENI = /^(b:(0|[1-9]\d{0,3})|t:[0-9a-f]{12})$/;
 
-const nesneMi = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+/**
+ * Anahtarın kaynağı (desenin TEK yorumu; ikinci desen yazılmaz): `b:<dizin>` → beyan + dizin, `t:…` → teyit; desene uymayan → `null`.
+ * 2b içerik yazımı bununla ayırır: `b:` «form bu kalemi beyandan kopyaladı», `t:` «mevcut teyit kalemi».
+ */
+export function magazaKalemAnahtariCoz(anahtar: string): { kaynak: 'beyan'; dizin: number } | { kaynak: 'teyit' } | null {
+  if (!MAGAZA_KALEM_ANAHTARI_DESENI.test(anahtar)) return null;
+  return anahtar.startsWith('b:') ? { kaynak: 'beyan', dizin: Number(anahtar.slice(2)) } : { kaynak: 'teyit' };
+}
 
 /** Kaynağı belirleyen alanlar — akış güvenilmez biçimdedir, `unknown` okunur. 2b'nin `teyit` nesnesi burada tiplenmez. */
 export interface MagazaTeslimKaynakGirdisi {

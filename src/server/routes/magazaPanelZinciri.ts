@@ -1,5 +1,6 @@
 /**
- * magazaPanelZinciri.ts — site paneli (www.cetpa.com.tr/panel.html) uçlarının ALT ZİNCİRİ (dilim 2a, şartname v6 § 3–§ 4).
+ * magazaPanelZinciri.ts — site paneli (www.cetpa.com.tr/panel.html) uçlarının ALT ZİNCİRİ (dilim 2a, şartname v6 § 3–§ 4;
+ * dilim 2b § 10.3, § 10.5: yumuşak silme ucu, kartta salt okunur `teyit` + `elle` + `silebilir`, listede silinmiş talep YOK).
  *
  * `magazaRoutes.ts` bu zinciri yalnız `r.use('/panel', C.panelZinciri)` satırıyla bağlar — dış zincirin köken kapısından ve
  * genel sınırlayıcıdan ÖNCE. Zincir her isteği KENDİSİ sonlandırır: dış zincire, genel /api sınırlayıcısına (kova mağazanın
@@ -7,7 +8,8 @@
  * `originalUrl` karşılaştırması YOKTUR (bu depoda iki kez yaşanmış arıza sınıfı: `/PANEL/siparisler` işleyiciye ulaşır ama
  * `startsWith('/panel/')` yanlış der).
  *
- * KAYIT SIRASI SABİT (çit: magazaPanelUclar.test.ts «kayıt sırası»; şartname § 4 numaralarıyla):
+ * KAYIT SIRASI SABİT (çit: magazaPanelUclar.test.ts «kayıt sırası»; şartname § 4 numaralarıyla — 7 aşama, 7a kalem teslim,
+ * 7b (2b) silme, 7c etiket):
  *   0.  `onbelleksiz`        — HER yanıta `Cache-Control: no-store` (403 / 204 / 429 / 503 dâhil).
  *   1.  köken kapısı         — dış zincirle AYNI izinli köken listesi; `GET, POST` + `Authorization, Content-Type`;
  *                              `Allow-Credentials` YOK; `OPTIONS` → 204; izinsiz / kökensiz → 403.
@@ -19,7 +21,7 @@
  *   4.  panel sınırlayıcısı  — belirteçsiz 401'ler de sayılır.
  *   5.  `belirtecKapisi`     — bundan sonra kaydedilen HER ŞEY (bilinmeyen yol dâhil) belirteçsiz 401 alır. Gövde kapıdan
  *                              SONRA ayrıştırılır: belirteçsiz + bozuk gövdeli istek 401'dir (400 değil).
- *   6-8. liste, aşama, kalem teslim, etiket, çıkış · 9. 404 · 10. hata yakalayıcı (dört parametreli).
+ *   6-8. liste, aşama, kalem teslim, silme, etiket, çıkış · 9. 404 · 10. hata yakalayıcı (dört parametreli).
  *
  * KAPI (her panel isteğinde, § 3.5): (1) imza + `bas ≤ şimdi < bitis`; (2) `panelKullanicisi(uid)` YENİDEN okunur — kullanıcı
  * var, `magazaTalepIslemYetkisi(rol)`, `cid === yük.cid` ve `=== kiracı`, firma askıda değil, MFA açıksa `yük.mfa === true`;
@@ -28,8 +30,13 @@
  * İptal BEKLEYEN YETKİ KODUNU da öldürür (inceleme 2026-10-10): `/oturum` kodun VERİLİŞ anını aynı değerle ölçer (`veriliş >
  * gecersizOnce`; değilse 401, iptal okunamazsa 503) — çıkıştan önce alınmış kod çıkıştan sonra belirtece çevrilemez.
  *
- * YAZMA KURALI BU DOSYADA DEĞİL: aşama / kalem teslim / etiket yazımı `kanal/magazaDurum.ts` işlevleridir (ERP uçlarıyla
- * ortak). Bu dosyada `adminDb`, `UPDATE` / `INSERT` / `DELETE` yoktur; tek ham SQL liste okumasıdır (`MAGAZA_PANEL_LISTE_SQL`).
+ * YAZMA KURALI BU DOSYADA DEĞİL: aşama / kalem teslim / etiket yazımı `kanal/magazaDurum.ts`, (2b) yumuşak silme
+ * `kanal/magazaIcerik.ts` işlevleridir (ERP uçlarıyla ortak). Bu dosyada `adminDb`, `UPDATE` / `INSERT` / `DELETE` yoktur; tek ham
+ * SQL liste okumasıdır (`MAGAZA_PANEL_LISTE_SQL`). Yazma işlevinin HER sonucu `switch` ile ele alınır (`eleAlinmamisSonuc`).
+ *
+ * PANEL İÇERİK DÜZENLEMEZ (V15): müşteri bilgisi, not, teyit kalemi, fiyat ve yeni talep yalnız ERP'dedir. Panel teyit edilen
+ * içeriği SALT OKUR, kalem teslim işaretini (teyit varken `t:` anahtarıyla) verir ve — yalnız Yönetici — talebi SİLER; panelden
+ * geri alma YOKTUR (V18). Silinmiş talep DONUKTUR: listede görünmez, aşama / kalem teslim / etiket yazımı `409 silindi` alır.
  *
  * GÜNLÜK: kişisel veri, gövde, kod, doğrulayıcı, belirteç YAZILMAZ; yalnız sabit metin + hata kodu (`hataKodu`). 4xx retleri
  * günlüğe hiç yazılmaz; süreç içi sayaçlara işlenir (`magazaPanelSayaclari()`, bekçi okur).
@@ -38,21 +45,22 @@ import express, { Router } from 'express';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import {
   MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_UTC_ZAMAN_DESENI, magazaAsamasiMi, magazaGuncellemeZamani, magazaIzinliGecisler,
-  magazaKalemTeslimMi, magazaTeslimIsaretsiz, magazaTeslimKaynagi, panelDurumuna, paneldenAsamaya,
+  magazaKalemTeslimMi, magazaKdvOraniMi, magazaTeslimIsaretsiz, magazaTeslimKaynagi, panelDurumuna, paneldenAsamaya,
 } from '../../lib/magazaTalep.js';
-import type { MagazaTalepAsamasi, PanelDurumu, PanelKartDurumu } from '../../lib/magazaTalep.js';
-import { magazaTalepIslemYetkisi } from '../../lib/rbac.js';
+import type { MagazaKdvOrani, MagazaTalepAsamasi, PanelDurumu, PanelKartDurumu } from '../../lib/magazaTalep.js';
+import { magazaTalepIslemYetkisi, magazaTalepSilmeYetkisi } from '../../lib/rbac.js';
 import { yetkiBelirteci } from '../istemciIp.js';
 import { MAGAZA_BILDIRIM_KALEM_SINIRI } from '../kanal/magazaBildirim.js';
-import { MAGAZA_ACIK_SQL, etiketBasildiYaz, kalemTeslimYaz, talepDurumunuDegistir } from '../kanal/magazaDurum.js';
+import { MAGAZA_ACIK_SQL, MAGAZA_SILINMEMIS_SQL, etiketBasildiYaz, kalemTeslimYaz, talepDurumunuDegistir } from '../kanal/magazaDurum.js';
 import type { MagazaDurumDeps } from '../kanal/magazaDurum.js';
+import { talepSil } from '../kanal/magazaIcerik.js';
 import { MAGAZA_PANEL_BELIRTEC_OMRU_MS, belirtecSuresiIcinde, panelBelirteciCoz, panelBelirteciUret } from '../kanal/magazaPanelBelirtec.js';
 import type { PanelBelirtecYuku } from '../kanal/magazaPanelBelirtec.js';
 import type { PanelIptalCifti } from '../kanal/magazaPanelIptal.js';
 import { MAGAZA_PANEL_KOD_OMRU_MS, kodOzetiHesapla, meydanEslesiyor } from '../kanal/magazaPanelKod.js';
 import type { PanelKodDeposu } from '../kanal/magazaPanelKod.js';
 import type { PanelKullanicisi } from '../kanal/magazaPanelKullanici.js';
-import { EtiketBasildiGovdesi, KalemTeslimGovdesi, PanelDurumGovdesi, PanelOturumGovdesi } from '../schemas.js';
+import { EtiketBasildiGovdesi, KalemTeslimGovdesi, PanelDurumGovdesi, PanelOturumGovdesi, PanelSilGovdesi } from '../schemas.js';
 import { MAGAZA_GOVDE_SINIRI_BAYT, hataKodu, magazaIzinliKokenleriCoz, magazaKiraciCozucuKur } from './magazaRoutes.js';
 import type { MagazaPgHavuzu } from './magazaRoutes.js';
 
@@ -105,14 +113,27 @@ const sayaclar = {
    * aşımı, hizmet hesabı kimliği yok — `magazaErpRoutes` `iptalKapisi`; sıfırdan büyükse o denetim devrede DEĞİLDİR).
    */
   yetkiKodu: 0, yetkiKoduRet: 0, yetkiKoduIptalDenetimsiz: 0,
-  /** Aşama / açıklama yazımı: başarılı / 409 — panel ve ERP ayrı anahtar. */
+  /** Aşama / açıklama yazımı: başarılı / 409 (`gecis-yok`, 2b `silindi`) — panel ve ERP ayrı anahtar. */
   durumPanel: 0, durumPanel409: 0, durumErp: 0, durumErp409: 0,
-  /** Kalem teslim yazımı: tamam / 409 — aynı kalıp (`gecersiz` rota 400'üdür, ayrı sayılmaz). */
+  /** Kalem teslim yazımı: tamam / 409 (2b `silindi` dâhil) — aynı kalıp (`gecersiz` rota 400'üdür, ayrı sayılmaz). */
   kalemTeslimPanel: 0, kalemTeslimPanel409: 0, kalemTeslimErp: 0, kalemTeslimErp409: 0,
-  /** Etiket basıldı (yalnız panel; denetim yok): tamam / 404 / 409 (`silindi` — 2b; 2a'da artmaz). */
+  /** Etiket basıldı (yalnız panel; denetim yok): tamam / 404 / 409 (`silindi` — 2b). */
   etiketBasildi: 0, etiketBasildi404: 0, etiketBasildi409: 0,
-  /** Elle bildirim (ERP): tamam / 409 (`kapali`, `yapilandirilmamis`, `zaten-gitti` tek sayaçta). */
+  /** Elle bildirim (ERP): tamam / 409 (`kapali`, `yapilandirilmamis`, `zaten-gitti`, 2b `silindi` tek sayaçta). */
   bildirimGonder: 0, bildirimGonder409: 0,
+  /** (2b) Revize bildirimini elle yeniden kuyruğa alma (ERP, `?tur=revize`): tamam / 409 — ilk bildirim sayacına KARIŞMAZ. */
+  bildirimGonderRevize: 0, bildirimGonderRevize409: 0,
+  /** (2b) Revize bildirimi isteği (içerik yazımı + elle yeniden gönderme): istendi / isteyici sözleşmesine aykırı REDDETTİ. */
+  revizeBildirimIstendi: 0, revizeBildirimIstenemedi: 0,
+  /**
+   * (2b) İçerik yazımı (ERP): tamam / değişiklik yok (yazım yapılmadı) / 409 (`surum-eski`, `silindi`) / 400 (şema, `gecersiz`) /
+   * 503 (ürün KDV oranı okunamadı — yazılmadı) / 429 (elle talep, içerik ve silme / geri alma uçlarının ORTAK kovası).
+   */
+  icerik: 0, icerikDegisiklikYok: 0, icerik409: 0, icerik400: 0, icerik503: 0, icerik429: 0,
+  /** (2b) Yumuşak silme: tamam / 409 (`surum-eski`, zaten silinmiş) — panel ve ERP ayrı anahtar; geri alma yalnız ERP. */
+  silPanel: 0, silPanel409: 0, silErp: 0, silErp409: 0, geriAl: 0, geriAl409: 0,
+  /** (2b) Elle talep (ERP): tamam / üretilen numara üst üste çakıştı (503). */
+  elleTalep: 0, elleTalepCakisti: 0,
   /** ERP çıkışında oturum çerezi yok / süresi dolmuş → panel iptali YAZILAMADI. */
   cikisUidsiz: 0,
   /** Panel zincirinin retleri: kapı 401, köken 403, 404, sınırlayıcı 429, 500, 503. */
@@ -133,6 +154,15 @@ export function magazaPanelSayaclariniSifirla(): void {
 /** Tek sayaç artırır — `magazaErpRoutes.ts` ve ERP çıkış yardımcısı için (sayaçlar TEK modül örneğinde dursun). */
 export function magazaPanelSay(anahtar: MagazaPanelSayaci): void {
   sayaclar[anahtar] += 1;
+}
+
+/**
+ * Tüketici denetim: rota, yazma işlevinin sonucunu `switch` ile ele alır ve `default` dalında bunu çağırır — işlev YENİ bir sonuç
+ * kazanırsa çağıran rota DERLENMEZ (2b'nin `silindi` sonucu `if` zincirli rotalarda sessizce 200'e düşüyordu). Çalışma anında
+ * ulaşılırsa (tip dışı değer) SABİT metinle fırlatır: sonuç nesnesi belge taşıyabilir, iletiye YAZILMAZ. ERP uçları da bunu kullanır.
+ */
+export function eleAlinmamisSonuc(_sonuc: never): never {
+  throw new Error('magaza: yazma işlevinin sonucu rota tarafından ele alınmadı');
 }
 
 /** Panel zincirinin sayaçlı ret kodları. */
@@ -181,11 +211,13 @@ export const MAGAZA_PANEL_LISTE_BUTCESI_BAYT = 2 * 1024 * 1024;
  * $3 kapalı penceresinin başı (`toISOString()`).
  *  • AÇIK: ölçüt `MAGAZA_ACIK_SQL` (bekçiyle AYNI sabit) — aşaması olmayan / bilinmeyen satır AÇIKTIR, kaybolmaz; en çok 500,
  *    `toplam` süzgecin TAMAMININ sayısıdır (`count(*) OVER ()`, `LIMIT`ten önce).
- *  • KAPALI: `NOT (açık ölçütü)`; kapanış zamanı `durumZamani` (yoksa `olusturma`) pencerede; en çok 200.
+ *  • KAPALI: `NOT (açık ölçütü)` VE silinmemiş; kapanış zamanı `durumZamani` (yoksa `olusturma`) pencerede; en çok 200.
+ *  • (2b) SİLİNMİŞ talep iki kümede de YOKTUR: açık ölçütü silinmemiş koşulunu İÇERİR (`MAGAZA_ACIK_SQL`); onun değillemesi
+ *    silinmişi de yakalayacağı için kapalı kümeye `MAGAZA_SILINMEMIS_SQL` ayrıca eklenir. `toplam` (= `acikToplam`) canlı açıkları sayar.
  *  • Zaman karşılaştırması BİLEREK metin (`COLLATE "C"`): alanlar `toISOString()` biçimindedir, bayt sırası zaman sırasıdır;
  *    `::timestamptz` tek bozuk satırda bütün sorguyu düşürürdü. Tarihsiz satır sona düşer (`NULLS LAST`).
  */
-export const MAGAZA_PANEL_LISTE_SQL = `WITH acik AS (SELECT id, data, count(*) OVER () AS toplam FROM docs WHERE coll = $1 AND data->>'companyId' = $2 AND ${MAGAZA_ACIK_SQL} ORDER BY (data->>'olusturma') COLLATE "C" DESC NULLS LAST LIMIT ${MAGAZA_PANEL_ACIK_SINIRI}), kapali AS (SELECT id, data FROM docs WHERE coll = $1 AND data->>'companyId' = $2 AND NOT (${MAGAZA_ACIK_SQL}) AND (COALESCE(data->>'durumZamani', data->>'olusturma')) COLLATE "C" >= $3 ORDER BY (COALESCE(data->>'durumZamani', data->>'olusturma')) COLLATE "C" DESC NULLS LAST LIMIT ${MAGAZA_PANEL_KAPALI_SINIRI}) SELECT 'a' AS tur, id, data, toplam FROM acik UNION ALL SELECT 'k', id, data, NULL FROM kapali`;
+export const MAGAZA_PANEL_LISTE_SQL = `WITH acik AS (SELECT id, data, count(*) OVER () AS toplam FROM docs WHERE coll = $1 AND data->>'companyId' = $2 AND ${MAGAZA_ACIK_SQL} ORDER BY (data->>'olusturma') COLLATE "C" DESC NULLS LAST LIMIT ${MAGAZA_PANEL_ACIK_SINIRI}), kapali AS (SELECT id, data FROM docs WHERE coll = $1 AND data->>'companyId' = $2 AND NOT (${MAGAZA_ACIK_SQL}) AND ${MAGAZA_SILINMEMIS_SQL} AND (COALESCE(data->>'durumZamani', data->>'olusturma')) COLLATE "C" >= $3 ORDER BY (COALESCE(data->>'durumZamani', data->>'olusturma')) COLLATE "C" DESC NULLS LAST LIMIT ${MAGAZA_PANEL_KAPALI_SINIRI}) SELECT 'a' AS tur, id, data, toplam FROM acik UNION ALL SELECT 'k', id, data, NULL FROM kapali`;
 
 export interface PanelSiparisKalemi {
   /** Kalem teslim isteğinin anahtarı (`b:<dizin>`); sunucu verir, panel üretmez. */
@@ -199,6 +231,32 @@ export interface PanelSiparisKalemi {
   birimFiyat: number | null;
   tedarik: boolean;
   teslim: boolean;
+}
+
+/** (2b) Teyit edilen kalem — SALT OKUNUR (panel içerik düzenlemez). `kdvKaynagi` panele GİRMEZ (personelin düzenleme bilgisi). */
+export interface PanelTeyitKalemi {
+  /** Kalem teslim isteğinin anahtarı (`t:<12 onaltılık>`); sunucu verir. Teyit varken kutular BU kalemlere bağlıdır. */
+  anahtar: string;
+  sku: string;
+  ad: string;
+  marka: string;
+  adet: number | null;
+  /** KDV HARİÇ net; `null` = fiyat sorulacak (0 değil). */
+  birimFiyat: number | null;
+  /** Saklı değer `MAGAZA_KDV_ORANLARI` dışındaysa `null` (BİLİNMİYOR; oran uydurulmaz). */
+  kdvOrani: MagazaKdvOrani | null;
+  tedarik: boolean;
+  teslim: boolean;
+}
+
+/** (2b) Personelin TEYİT ETTİĞİ içerik. Toplamlar sunucunun türettiği kayıtlı değerlerdir; `null` = fiyatı sorulacak kalem var. */
+export interface PanelTeyit {
+  /** En çok `MAGAZA_BILDIRIM_KALEM_SINIRI` kalem; tamamının sayısı `kalemSayisi`. */
+  kalemler: PanelTeyitKalemi[];
+  kalemSayisi: number;
+  araToplam: number | null;
+  kdv: number | null;
+  toplam: number | null;
 }
 
 /** Panel kartı (§ 4 `Siparis`). Yol ve kart anahtarı `id`'dir; `no` kiracıda TEKİL DEĞİLDİR (yalnız gösterim / arama). */
@@ -227,6 +285,15 @@ export interface PanelSiparis {
   toplam: number | null;
   /** `kim` yanıta GİRMEZ (personel bilgisidir). */
   etiketBasildi: { zaman: string; koli?: number } | null;
+  /** (2b) Yalnız teyit yazılmış talepte (`teslimKaynagi: 'teyit'`); `zaman` / `kim` yanıta GİRMEZ. */
+  teyit?: PanelTeyit;
+  /** (2b) ERP'de elle açılmış talep (mağazadan gelmedi). */
+  elle: boolean;
+  /**
+   * (2b) İsteği yapan kullanıcı bu talebi silebilir mi (yalnız Yönetici). GÖSTERİMDİR: hüküm silme ucunda yeniden verilir.
+   * `panelSiparisiEsle` hep `false` üretir (liste gövdesi kiracı başına önbelleklenir); rota yanıtı kullanıcıya göre işaretler.
+   */
+  silebilir: boolean;
 }
 
 export interface PanelListe { siparisler: PanelSiparis[]; acikToplam: number; kesildi: boolean }
@@ -240,6 +307,9 @@ const tutar = (v: unknown): number | null => (typeof v === 'number' && Number.is
  * Saklı belgeden panel kartı (SAF). Yanıta GİRMEYENLER: `durumGecmisi`, `bildirim`, `telefonSon10`, `istemciTarihi`,
  * `companyId`, `iptalOncesi`, ham `kalemTeslim` nesnesi ve `etiketBasildi.kim` (kim / zaman personel bilgisidir; kart yalnız
  * `teslim` bayrağını basar). Bilinmeyen saklı aşama `alindi`'ye ÇEVRİLMEZ: `'bilinmiyor'`, `gecisler: []`.
+ * (2b) `teyit` kalemleri `anahtar` + `teslim` ile (teyit varken `teslimKaynagi` / `teslimIsaretsiz` teyit kalemlerinden; beyan
+ * `kalemler[].teslim` yine `b:<i>` girişinden okunur — tarihçe); `teyit.zaman` / `teyit.kim`, `kdvKaynagi`, `icerikSurum`,
+ * `silindi`, `bildirimRevize`, `elle.kim` yanıta GİRMEZ. `araToplam` / `kdv` / `toplam` müşterinin BEYANI olarak kalır (V16).
  */
 export function panelSiparisiEsle(id: string, data: Record<string, unknown>): PanelSiparis {
   const asama: MagazaTalepAsamasi | null = magazaAsamasiMi(data.durum) ? data.durum : null;
@@ -256,6 +326,22 @@ export function panelSiparisiEsle(id: string, data: Record<string, unknown>): Pa
       teslim: magazaKalemTeslimMi(data.kalemTeslim, anahtar),
     };
   });
+  // (2b) Teyit: kaynak ölçütü ortak işlevden (`teyit` nesne VE `kalemler` boş olmayan dizi). Bozuk kalem fırlatmaz.
+  const teyitNesnesi = magazaTeslimKaynagi(data) === 'teyit' && nesneMi(data.teyit) ? data.teyit : null;
+  const teyitKalemleri: unknown[] | null = teyitNesnesi !== null && Array.isArray(teyitNesnesi.kalemler) ? teyitNesnesi.kalemler : null;
+  const teyit: PanelTeyit | null = teyitNesnesi === null || teyitKalemleri === null ? null : {
+    kalemler: teyitKalemleri.slice(0, MAGAZA_BILDIRIM_KALEM_SINIRI).map((ham): PanelTeyitKalemi => {
+      const k = nesneMi(ham) ? ham : {};
+      const anahtar = metin(k.anahtar);
+      return {
+        anahtar, sku: metin(k.sku), ad: metin(k.ad), marka: metin(k.marka),
+        adet: tutar(k.adet), birimFiyat: tutar(k.birimFiyat), kdvOrani: magazaKdvOraniMi(k.kdvOrani) ? k.kdvOrani : null,
+        tedarik: k.tedarik === true, teslim: magazaKalemTeslimMi(data.kalemTeslim, anahtar),
+      };
+    }),
+    kalemSayisi: teyitKalemleri.length,
+    araToplam: tutar(teyitNesnesi.araToplam), kdv: tutar(teyitNesnesi.kdv), toplam: tutar(teyitNesnesi.toplam),
+  };
   const etiket = data.etiketBasildi;
   const etiketBasildi = nesneMi(etiket) && typeof etiket.zaman === 'string' && MAGAZA_UTC_ZAMAN_DESENI.test(etiket.zaman)
     ? { zaman: etiket.zaman, ...(typeof etiket.koli === 'number' && Number.isSafeInteger(etiket.koli) && etiket.koli >= 1 ? { koli: etiket.koli } : {}) }
@@ -284,6 +370,9 @@ export function panelSiparisiEsle(id: string, data: Record<string, unknown>): Pa
     kdv: tutar(beyan.kdv),
     toplam: tutar(beyan.toplam),
     etiketBasildi,
+    ...(teyit !== null ? { teyit } : {}),
+    elle: nesneMi(data.elle),
+    silebilir: false,
   };
 }
 
@@ -529,12 +618,23 @@ export function magazaPanelZinciri(C: MagazaPanelCtx): Router {
     if (!res.headersSent) reddet(res, 500);
   };
 
+  /**
+   * Liste gövdesi (liste ucu ve yazma uçlarının 200 yanıtı). Gövde önbellekte KİRACI başına tutulur (N sekme tek sorgu);
+   * `silebilir` (2b) ise isteği yapan KULLANICIYA göredir — önbelleğe girmez, yanıt verilirken işaretlenir: silme yetkisi
+   * olana (yalnız Yönetici) her kartta `true`, öbürlerine önbellekteki `false`. Rol kapıda bu istek için okunan değerdir.
+   */
+  const listeYaniti = async (h: { b: PanelIstegi; havuz: MagazaPgHavuzu }): Promise<PanelListe> => {
+    const liste = await listeOku(h.havuz, h.b.kullanici.cid);
+    if (!magazaTalepSilmeYetkisi(h.b.kullanici.rol)) return liste;
+    return { ...liste, siparisler: liste.siparisler.map(s => ({ ...s, silebilir: true })) };
+  };
+
   // 6. Liste. Kapı önbellekten ÖNCEDİR: yetkisi düşen kullanıcıya önbellekten yanıt gitmez.
   const liste = async (req: Request, res: Response): Promise<void> => {
     try {
       const h = hazirla(req, res);
       if (!h) return;
-      res.status(200).json(await listeOku(h.havuz, h.b.kullanici.cid));
+      res.status(200).json(await listeYaniti(h));
     } catch (e) { hata500(res, e, 'liste'); }
   };
 
@@ -553,16 +653,28 @@ export function magazaPanelZinciri(C: MagazaPanelCtx): Router {
         ...(cozum.data.aciklama !== undefined ? { aciklama: cozum.data.aciklama } : {}),
         kim: yazan(h.b), kanal: 'panel',
       });
-      if (sonuc.sonuc === 'bulunamadi') { reddet(res, 404); return; }
-      if (sonuc.sonuc === 'gecis-yok') {
-        sayaclar.durumPanel409 += 1;
-        // Güncel aşama panel sözlüğüyle; bilinmiyorsa alan YOK.
-        res.status(409).json({ ok: false, kod: 'gecis-yok', ...(sonuc.durum !== null ? { durum: panelDurumuna(sonuc.durum) } : {}) });
-        return;
+      switch (sonuc.sonuc) {
+        case 'tamam':
+          sayaclar.durumPanel += 1;
+          onbellegiDusur();
+          res.status(200).json(await listeYaniti(h));
+          return;
+        case 'bulunamadi':
+          reddet(res, 404);
+          return;
+        case 'gecis-yok':
+          sayaclar.durumPanel409 += 1;
+          // Güncel aşama panel sözlüğüyle; bilinmiyorsa alan YOK.
+          res.status(409).json({ ok: false, kod: 'gecis-yok', ...(sonuc.durum !== null ? { durum: panelDurumuna(sonuc.durum) } : {}) });
+          return;
+        case 'silindi':
+          // (2b) Silinmiş talep DONUKTUR (panel listeyi yeniler; talep listeden düşmüştür).
+          sayaclar.durumPanel409 += 1;
+          res.status(409).json({ ok: false, kod: 'silindi' });
+          return;
+        default:
+          eleAlinmamisSonuc(sonuc);
       }
-      sayaclar.durumPanel += 1;
-      onbellegiDusur();
-      res.status(200).json(await listeOku(h.havuz, h.b.kullanici.cid));
     } catch (e) { hata500(res, e, 'aşama yazımı'); }
   };
 
@@ -577,23 +689,74 @@ export function magazaPanelZinciri(C: MagazaPanelCtx): Router {
         id: talepKimligi(req), companyId: h.b.kullanici.cid, surum: cozum.data.surum, teslim: cozum.data.teslim,
         kalemler: cozum.data.kalemler, kim: yazan(h.b), kanal: 'panel',
       });
-      if (sonuc.sonuc === 'bulunamadi') { reddet(res, 404); return; }
-      // Tanınmayan / öbür kaynağın anahtarı: hiçbir şey yazılmadı.
-      if (sonuc.sonuc === 'gecersiz') { reddet(res, 400); return; }
-      if (sonuc.sonuc === 'gecis-yok') {
-        sayaclar.kalemTeslimPanel409 += 1;
-        res.status(409).json({ ok: false, kod: 'gecis-yok', ...(sonuc.durum !== null ? { durum: panelDurumuna(sonuc.durum) } : {}) });
-        return;
+      switch (sonuc.sonuc) {
+        case 'tamam':
+          sayaclar.kalemTeslimPanel += 1;
+          onbellegiDusur();
+          res.status(200).json(await listeYaniti(h));
+          return;
+        case 'bulunamadi':
+          reddet(res, 404);
+          return;
+        case 'gecersiz':
+          // Tanınmayan / öbür kaynağın anahtarı (2b: teyit yazılmış talepte `b:` anahtarı): hiçbir şey yazılmadı.
+          reddet(res, 400);
+          return;
+        case 'gecis-yok':
+          sayaclar.kalemTeslimPanel409 += 1;
+          res.status(409).json({ ok: false, kod: 'gecis-yok', ...(sonuc.durum !== null ? { durum: panelDurumuna(sonuc.durum) } : {}) });
+          return;
+        case 'surum-eski':
+          // (2b) Okuma ile yazma arasına teyit yazımı girdi: kutuların anahtar kümesi bayat — panel listeyi yeniler.
+          sayaclar.kalemTeslimPanel409 += 1;
+          res.status(409).json({ ok: false, kod: 'surum-eski' });
+          return;
+        case 'silindi':
+          sayaclar.kalemTeslimPanel409 += 1;
+          res.status(409).json({ ok: false, kod: 'silindi' });
+          return;
+        default:
+          eleAlinmamisSonuc(sonuc);
       }
-      if (sonuc.sonuc === 'surum-eski') {
-        sayaclar.kalemTeslimPanel409 += 1;
-        res.status(409).json({ ok: false, kod: 'surum-eski' });
-        return;
-      }
-      sayaclar.kalemTeslimPanel += 1;
-      onbellegiDusur();
-      res.status(200).json(await listeOku(h.havuz, h.b.kullanici.cid));
     } catch (e) { hata500(res, e, 'kalem teslim yazımı'); }
+  };
+
+  // 7b. Yumuşak silme (2b; V17, V18): yalnız Yönetici; panelden GERİ ALMA yok (ERP'de). Kayıt silinmez, `silindi` işareti
+  // alır; yanıt güncel listedir (silinen talep listede YOKTUR). Bildirim ÜRETMEZ. `surum` = kartta görülen `durumSurum`.
+  const sil = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const h = hazirla(req, res);
+      if (!h) return;
+      // Kapı «paneli görebilir mi»yi ölçtü; silme AYRI yetkidir ve bu istek için kapıda YENİDEN okunan rolle ölçülür
+      // (karttaki `silebilir` yalnız gösterimdir; rolü düşen Yönetici'nin açık sekmesi silemez).
+      if (!magazaTalepSilmeYetkisi(h.b.kullanici.rol)) { sayaclar.r403 += 1; res.status(403).json({ ok: false, kod: 'rol' }); return; }
+      const cozum = PanelSilGovdesi.safeParse(req.body);
+      if (!cozum.success) { reddet(res, 400); return; }
+      const sonuc = await talepSil(D, {
+        id: talepKimligi(req), companyId: h.b.kullanici.cid, surum: cozum.data.surum, kim: yazan(h.b), kanal: 'panel',
+      });
+      switch (sonuc.sonuc) {
+        case 'tamam':
+          sayaclar.silPanel += 1;
+          onbellegiDusur();
+          res.status(200).json(await listeYaniti(h));
+          return;
+        case 'bulunamadi':
+          reddet(res, 404);
+          return;
+        case 'zaten-silindi':
+          sayaclar.silPanel409 += 1;
+          res.status(409).json({ ok: false, kod: 'silindi' });
+          return;
+        case 'surum-eski':
+          // Kart bayat (araya aşama / kalem teslim yazımı girdi): panel listeyi yeniler, kullanıcı güncel kartla yeniden dener.
+          sayaclar.silPanel409 += 1;
+          res.status(409).json({ ok: false, kod: 'surum-eski' });
+          return;
+        default:
+          eleAlinmamisSonuc(sonuc);
+      }
+    } catch (e) { hata500(res, e, 'silme'); }
   };
 
   // 7c. Etiket basıldı (V23): `surum` İSTEMEZ, liste DÖNMEZ (önbellek değişiklik olayıyla / aşağıda düşer); denetim YOK.
@@ -608,12 +771,27 @@ export function magazaPanelZinciri(C: MagazaPanelCtx): Router {
         ...(cozum.data.koli !== undefined ? { koli: cozum.data.koli } : {}),
         kim: { uid: h.b.yuk.uid },
       });
-      if (sonuc.sonuc === 'bulunamadi') { sayaclar.etiketBasildi404 += 1; res.status(404).json({ ok: false }); return; }
-      sayaclar.etiketBasildi += 1;
-      onbellegiDusur();
-      // `kim` yanıta GİRMEZ (personel bilgisidir; yalnız belgede).
-      const { zaman, koli } = sonuc.etiketBasildi;
-      res.status(200).json({ ok: true, etiketBasildi: { zaman, ...(koli !== undefined ? { koli } : {}) } });
+      switch (sonuc.sonuc) {
+        case 'tamam': {
+          sayaclar.etiketBasildi += 1;
+          onbellegiDusur();
+          // `kim` yanıta GİRMEZ (personel bilgisidir; yalnız belgede).
+          const { zaman, koli } = sonuc.etiketBasildi;
+          res.status(200).json({ ok: true, etiketBasildi: { zaman, ...(koli !== undefined ? { koli } : {}) } });
+          return;
+        }
+        case 'bulunamadi':
+          sayaclar.etiketBasildi404 += 1;
+          res.status(404).json({ ok: false });
+          return;
+        case 'silindi':
+          // (2b) Silinmiş talebe etiket işareti yazılmaz.
+          sayaclar.etiketBasildi409 += 1;
+          res.status(409).json({ ok: false, kod: 'silindi' });
+          return;
+        default:
+          eleAlinmamisSonuc(sonuc);
+      }
     } catch (e) { hata500(res, e, 'etiket yazımı'); }
   };
 
@@ -661,6 +839,7 @@ export function magazaPanelZinciri(C: MagazaPanelCtx): Router {
   panel.get('/siparisler', liste);
   panel.post('/siparisler/:id/durum', jsonDegilse415, govdeAyristir, durumYaz);
   panel.post('/siparisler/:id/kalem-teslim', jsonDegilse415, govdeAyristir, kalemTeslim);
+  panel.post('/siparisler/:id/sil', jsonDegilse415, govdeAyristir, sil);
   panel.post('/siparisler/:id/etiket-basildi', jsonDegilse415, govdeAyristir, etiketBasildi);
   panel.post('/cikis', jsonDegilse415, govdeAyristir, cikis);
   panel.use(bulunamadi);

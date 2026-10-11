@@ -19,6 +19,13 @@
  * (`sayi` = görülmemiş, `yeni` = `yeniAsamaSayisi(magaza.talepler)`); kanca içe aktarım satırı (+ `yeniAsamaSayisi`). Aşama
  * düğmesi, kalem teslim kutusu, «Yeniden gönder», arama kutusu ve «Etiket basıldı» satırı AYNI bileşendedir: bu dosyanın
  * nitelik eşitliği onların da OrdersPage'den GERÇEKTEN açılan yolda olduğunu kilitler (arama ve etiket nitelik eklemez).
+ *
+ * DİLİM 2b (şartname v6 § 10.4 / § 10.8 «yazıldı ama bağlanmadı», 2026-10-11) — BİLEREK DEĞİŞEN sabitler (gevşetilmedi; her biri
+ * yeni değeriyle): nitelik kümesi YEDİ → ON BİR (+ `onIcerikKaydet` → `magazaTalepIcerigiYaz`, `onSil` → silebilen rolde
+ * `magazaTalepSil`, değilse `null`; `onElleTalep` → `magazaElleTalepAc`; `urunKdvOrani` → `sku => magazaUrunKdvOrani(inventory,
+ * sku)`); rbac içe aktarımı (+ `magazaTalepSilmeYetkisi`), sözleşme içe aktarımı (+ `magazaUrunKdvOrani`), servis içe aktarımı
+ * (+ üç işlev). «Düzenle» formu, «Sil» / «Geri al», «Yeni talep (elle)», iki tablo, revize rozeti ve V24'ün dört süzgeç düğmesi
+ * AYNI bileşendedir; form bileşeni (`MagazaTalepDuzenle`) yalnız o bileşenden çizilir — bu dosya ikisini de kilitler.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
@@ -49,10 +56,21 @@ describe('OrdersPage — mağaza talepleri: yetki kapısı, abonelik, sekme duru
     expect(adet(kod, "const magazaYetkili = isAllowed(APP_ROLES.find(r => r === userRole) ?? null, MAGAZA_TALEP_KOLEKSIYONU, 'read');")).toBe(1);
     expect(adet(kod, 'magazaYetkili =')).toBe(1);                                    // ikinci bir tanım / atama yok
     expect(dilim).not.toMatch(/'Admin'|'Manager'|'Sales'|UserRole\.|ADMIN_ROLES|STAFF_ROLES|hasFullAccess|\.includes\(userRole\)/);
-    expect(kod).toContain("import { isAllowed, APP_ROLES } from '../lib/rbac';");
-    expect(kod).toContain("import { MAGAZA_TALEP_KOLEKSIYONU } from '../lib/magazaTalep';");
+    expect(kod).toContain("import { isAllowed, APP_ROLES, magazaTalepSilmeYetkisi } from '../lib/rbac';");
+    expect(kod).toContain("import { MAGAZA_TALEP_KOLEKSIYONU, magazaUrunKdvOrani } from '../lib/magazaTalep';");
     // Rol tip DARALTMASI gerçek denetimle (bilinmeyen metin → null); tip zorlaması ile değil.
     expect(dilim).not.toMatch(/as AppRole|as unknown|as any/);
+  });
+
+  it('(2b) silme / geri alma yetkisi de rbac\'ın saf işlevinden: `magazaTalepSilmeYetkisi(rol)` — elle `\'Admin\'` karşılaştırması YOK', () => {
+    expect(adet(kod, 'const magazaSilebilir = magazaTalepSilmeYetkisi(APP_ROLES.find(r => r === userRole) ?? null);')).toBe(1);
+    expect(dilim).toContain('const magazaSilebilir = magazaTalepSilmeYetkisi(');
+    // Tanım + `onSil` niteliği: yetki başka yerde okunmaz, başka bir kapıya (sekme düğmesi, abonelik) karışmaz.
+    expect(adet(kod, 'magazaSilebilir')).toBe(2);
+    expect(adet(kod, 'magazaTalepSilmeYetkisi')).toBe(2);                              // içe aktarım + tek çağrı
+    // Kuralın kendisi rbac'ta ve yalnız Yönetici (davranış testi: lib/rbac.magazaTalepleri.test.ts).
+    const rbac = yorumsuz('src/lib/rbac.ts', readFileSync(join(SRC_KOK, 'lib', 'rbac.ts'), 'utf-8')).join('\n');
+    expect(rbac).toMatch(/export function magazaTalepSilmeYetkisi\(rol: AppRole \| null\): boolean \{/);
   });
 
   it('abonelik kancası OrdersPage GÖVDESİNDE, yetki kapısıyla ve TEK kez çağrılır', () => {
@@ -222,12 +240,12 @@ describe('OrdersPage — sipariş listesi bloğu: «magaza»da sipariş gövdesi
     expect(adet(kod, '"px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2"')).toBe(1);
   });
 
-  it('4. çocuk — «magaza»da YALNIZ `<MagazaTalepleri … />`: veri kancadan; YEDİ nitelik — üç yazma yolu GERÇEKTEN bağlı', () => {
+  it('4. çocuk — «magaza»da YALNIZ `<MagazaTalepleri … />`: veri kancadan; ON BİR nitelik — altı yazma yolu ve `urunKdvOrani` GERÇEKTEN bağlı', () => {
     const k = kapi(c[3]);
     expect(k?.sol).toBe("orderSourceTab === 'magaza'");
     const oge = jsxOge(k?.sag);
     expect(oge && etiket(oge)).toBe('MagazaTalepleri');
-    // Dilim 1 = 4 nitelik; dilim 2a = 7 (2b'de 11). Bileşen istek ATMAZ: üç işlev buradan, sarmalayıcısız verilir.
+    // Dilim 1 = 4 nitelik; dilim 2a = 7; dilim 2b = 11. Bileşen istek ATMAZ: işlevler buradan, sarmalayıcısız verilir.
     expect(oge && nitelikler(oge)).toEqual({
       talepler: '{magaza.talepler}',
       yukleniyor: '{magaza.yukleniyor}',
@@ -236,24 +254,37 @@ describe('OrdersPage — sipariş listesi bloğu: «magaza»da sipariş gövdesi
       onDurumDegistir: '{magazaTalepDurumuYaz}',
       onKalemTeslim: '{magazaKalemTeslimYaz}',
       onBildirimGonder: '{magazaBildirimGonder}',
+      onIcerikKaydet: '{magazaTalepIcerigiYaz}',
+      // Silemeyen rolde `null`: bileşen «Sil» / «Geri al» çizmez (istemci rolü gösterimdir; hüküm sunucuda aynı işlevle).
+      onSil: '{magazaSilebilir ? magazaTalepSil : null}',
+      onElleTalep: '{magazaElleTalepAc}',
+      // Ürün listesinin TAMAMI bileşene geçmez; `inventory` daraltma / kopya / `as` olmadan DOĞRUDAN saf işleve gider.
+      urunKdvOrani: '{sku => magazaUrunKdvOrani(inventory, sku)}',
     });
+    expect(Object.keys(oge ? nitelikler(oge) : {})).toHaveLength(11);
     expect(ogeBul(sf, n => etiket(n) === 'MagazaTalepleri')).toHaveLength(1);   // sayfada başka yerde çizilmez
     expect(kod).toContain("import MagazaTalepleri, { MagazaYeniRozeti } from '../components/siparis/MagazaTalepleri';");
   });
 
-  it('üç yazma işlevi `services/magazaTalepIstemcisi.ts`\'ten içe aktarılır ve sayfada YALNIZ nitelik olarak geçer (içe aktarım + nitelik)', () => {
-    expect(adet(kod, "import { magazaTalepDurumuYaz, magazaKalemTeslimYaz, magazaBildirimGonder } from '../services/magazaTalepIstemcisi';")).toBe(1);
-    for (const ad of ['magazaTalepDurumuYaz', 'magazaKalemTeslimYaz', 'magazaBildirimGonder']) expect(adet(kod, ad), ad).toBe(2);
+  it('altı yazma işlevi `services/magazaTalepIstemcisi.ts`\'ten içe aktarılır ve sayfada YALNIZ nitelik olarak geçer (içe aktarım + nitelik)', () => {
+    expect(adet(kod, "import { magazaTalepDurumuYaz, magazaKalemTeslimYaz, magazaBildirimGonder, magazaTalepIcerigiYaz, magazaTalepSil, magazaElleTalepAc } from '../services/magazaTalepIstemcisi';")).toBe(1);
+    // Sözcük sınırıyla sayılır (`magazaTalepSil`, `magazaTalepSilmeYetkisi`'nin ön ekidir).
+    const kelime = (ad: string): number => (kod.match(new RegExp(`\\b${ad}\\b`, 'g')) ?? []).length;
+    for (const ad of ['magazaTalepDurumuYaz', 'magazaKalemTeslimYaz', 'magazaBildirimGonder', 'magazaTalepIcerigiYaz', 'magazaTalepSil', 'magazaElleTalepAc']) expect(kelime(ad), ad).toBe(2);
+    // `urunKdvOrani` sayfada `magazaUrunKdvOrani(inventory, …)` çağrısıyla tanımlı (içe aktarım + TEK çağrı); tip zorlaması yok.
+    expect(kelime('magazaUrunKdvOrani')).toBe(2);
+    expect(adet(kod, 'magazaUrunKdvOrani(inventory, sku)')).toBe(1);
+    expect(kod).not.toMatch(/magazaUrunKdvOrani\([^)]*\bas\b/);
     // Sayfa uç adresini kendisi yazmaz (adres tek yerde: servis dosyası).
     expect(kod).not.toMatch(/\/api\/magaza-talepleri/);
   });
 
-  it('bileşenin nitelik arayüzü sayfanın verdiği yedi adla BİREBİR (fazla / eksik nitelik derlemede de kırılır; çit adları sabitler)', () => {
+  it('bileşenin nitelik arayüzü sayfanın verdiği on bir adla BİREBİR (fazla / eksik nitelik derlemede de kırılır; çit adları sabitler)', () => {
     const bilesen = yorumsuz('src/components/siparis/MagazaTalepleri.tsx', readFileSync(join(SRC_KOK, 'components', 'siparis', 'MagazaTalepleri.tsx'), 'utf-8')).join('\n');
     const govde = /interface Props \{\n([\s\S]*?)\n\}/.exec(bilesen)?.[1] ?? '';
     const zorunlu = [...govde.matchAll(/^ {2}(\w+):/gm)].map(m => m[1]);
     const oge = jsxOge(kapi(c[3])?.sag);
-    expect(zorunlu).toHaveLength(7);
+    expect(zorunlu).toHaveLength(11);
     expect(Object.keys(oge ? nitelikler(oge) : {}).sort()).toEqual([...zorunlu].sort());
     // İsteğe bağlı nitelik YOK: «verilmezse düğme sessizce çalışmaz» yolu açılmasın.
     expect(govde).not.toMatch(/^ {2}\w+\?:/m);
@@ -302,10 +333,26 @@ describe('mağaza talepleri — abonelik TEK yerde (App.tsx\'e dinleyici eklenme
   }, 60_000);
 
   it('yazma işlevlerini ÇAĞIRAN / veren TEK üretim dosyası OrdersPage (bileşen yalnız tip içe aktarır)', () => {
-    expect(iceren(/\bmagaza(TalepDurumuYaz|KalemTeslimYaz|BildirimGonder)\b/)).toEqual(['src/pages/OrdersPage.tsx', 'src/services/magazaTalepIstemcisi.ts']);
+    expect(iceren(/\bmagaza(TalepDurumuYaz|KalemTeslimYaz|BildirimGonder|TalepIcerigiYaz|TalepSil|ElleTalepAc)\b/)).toEqual(['src/pages/OrdersPage.tsx', 'src/services/magazaTalepIstemcisi.ts']);
     expect(iceren(/services\/magazaTalepIstemcisi'/)).toEqual(['src/components/siparis/MagazaTalepleri.tsx', 'src/pages/OrdersPage.tsx']);
     // Mağaza talebi uç adresi istemcide TEK dosyada yazılıdır.
     expect(iceren(/\/api\/magaza-talepleri/).filter(y => !y.startsWith('src/server/') && y !== 'server.ts')).toEqual(['src/services/magazaTalepIstemcisi.ts']);
+  }, 60_000);
+
+  it('(2b) içerik formu `MagazaTalepDuzenle` GERÇEKTEN çiziliyor: yalnız `MagazaTalepleri`\'nden, İKİ kipte (düzenle + yeni) ve `urunKdvOrani` ile', () => {
+    expect(iceren(/<MagazaTalepDuzenle\b/)).toEqual(['src/components/siparis/MagazaTalepleri.tsx']);
+    const bilesen = yorumsuz('src/components/siparis/MagazaTalepleri.tsx', readFileSync(join(SRC_KOK, 'components', 'siparis', 'MagazaTalepleri.tsx'), 'utf-8')).join('\n');
+    expect((bilesen.match(/<MagazaTalepDuzenle\b/g) ?? [])).toHaveLength(2);
+    expect((bilesen.match(/kip="duzenle"/g) ?? [])).toHaveLength(1);
+    expect((bilesen.match(/kip="yeni"/g) ?? [])).toHaveLength(1);
+    expect(bilesen).toContain('urunKdvOrani={islem.urunKdvOrani}');
+    // Bileşenin kendi niteliği detaya, oradan forma taşınır (zincir kopuk değil).
+    expect(bilesen).toMatch(/\n\s+urunKdvOrani,\n\s+onIcerik: govde => icerikYaz\(t, govde\),/);
+    // Formun saf kuralları ve ortak süzgeç de üretimde çağrılıyor (yalnız testte değil).
+    expect(iceren(/\bmagazaIcerikGovdesi\(|\bmagazaElleTalepGovdesi\(/)).toEqual(['src/components/siparis/MagazaTalepDuzenle.tsx', 'src/lib/magazaTalepFormu.ts']);
+    expect(iceren(/\bmagazaSuzgecle\b/)).toEqual(['src/components/siparis/MagazaTalepleri.tsx', 'src/lib/magazaTalep.ts']);
+    expect(iceren(/\bmagazaSuzgecSayilari\b/)).toEqual(['src/components/siparis/MagazaTalepleri.tsx', 'src/lib/magazaTalep.ts']);
+    expect(iceren(/\bmagazaUrunKdvOrani\(/).filter(y => !y.startsWith('src/server/'))).toEqual(['src/lib/magazaTalep.ts', 'src/pages/OrdersPage.tsx']);
   }, 60_000);
 
   it('koleksiyona istemciden abone olan TEK dosya kancanın kendisi', () => {

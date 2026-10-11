@@ -19,17 +19,22 @@
  * Sütunlar KAPALI kümeden `count(*) FILTER` ile üretilir — `GROUP BY` YOK: dokümandaki hiçbir metin (bilinmeyen bir
  * `durum` değeri, ad, telefon) yanıta geçemez. Kiracı süzgeci yok (bekçinin sayımıyla aynı evren; koleksiyon yalnız
  * sunucu kiracısına yazılır).
+ *
+ * DİLİM 2b (§ 10.7): açıklık ölçütü silinmişi DIŞLAR (`MAGAZA_ACIK_SQL` artık silinmemiş koşulunu da taşır) — yumuşak
+ * silinen talep açık sayımdan ve «en eski açık»tan düşer, geri alınınca döner. Düşen talepler kaybolmasın diye bekçi
+ * ayrıca SİLİNMİŞ sayımını yazar (`magazaSilinmisSayimi`, aşağıda): son `MAGAZA_SILINMIS_PENCERESI_GUN` günde silinenler.
  */
 import { MAGAZA_ACIK_ASAMALAR, MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_UTC_ZAMAN_DESENI } from '../../lib/magazaTalep.js';
 import type { MagazaAcikAsama } from '../../lib/magazaTalep.js';
-import { MAGAZA_ACIK_SQL } from './magazaDurum.js';
+import { MAGAZA_ACIK_SQL, MAGAZA_SILINMIS_SQL } from './magazaDurum.js';
 
 /**
  * `olusturma` sunucunun yazdığı biçimde mi (`toISOString()`). Desen PostgreSQL'e AYNEN gider; ters bölü YOK (`[.]`,
  * `[0-9]`): şablon dizgesi ters bölüyü yutardı. Bekçinin «pencereden eski» kanıtındaki desenle AYNI metindir (çit:
  * opsWatchdog.magazaTalep.test.ts) ve `MAGAZA_UTC_ZAMAN_DESENI` ile aynı dili tanır.
  */
-const OLUSTURMA_BICIMLI_SQL = `(data->>'olusturma') COLLATE "C" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$'`;
+const UTC_ZAMAN_DESENI_SQL = '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$';
+const OLUSTURMA_BICIMLI_SQL = `(data->>'olusturma') COLLATE "C" ~ '${UTC_ZAMAN_DESENI_SQL}'`;
 
 const ACIK_ASAMA_LISTESI_SQL = MAGAZA_ACIK_ASAMALAR.map(a => `'${a}'`).join(', ');
 
@@ -95,6 +100,52 @@ export async function magazaAcikSayimi(
 ): Promise<MagazaAcikSayimi | null> {
   const { rows } = await havuz.query(MAGAZA_ACIK_SAYIM_SQL, [MAGAZA_TALEP_KOLEKSIYONU]);
   return magazaAcikSayiminiCoz(Array.isArray(rows) ? rows[0] : undefined);
+}
+
+// ── Silinmiş talepler (dilim 2b, § 10.7) ─────────────────────────────────────────────────────────────────────────────
+
+/** Bekçi ayrıntısındaki «silinmiş: N (son 30 gün)» parçasının penceresi. Bilgi içindir (eşik yok); hiçbir satırı silmez. */
+export const MAGAZA_SILINMIS_PENCERESI_GUN = 30;
+
+/** `silindi.zaman` sunucunun yazdığı biçimde mi (`toISOString()`) — `olusturma` ile AYNI desen (tek sabit). */
+const SILINME_ZAMANI_BICIMLI_SQL = `(data->'silindi'->>'zaman') COLLATE "C" ~ '${UTC_ZAMAN_DESENI_SQL}'`;
+
+/**
+ * $1 koleksiyon · $2 pencerenin başı (şimdi − `MAGAZA_SILINMIS_PENCERESI_GUN` gün). Tek satır döner.
+ * Evren: SİLİNMİŞ talepler — ölçüt her yerdeki AYNI sabit (`MAGAZA_SILINMIS_SQL`: `silindi` NESNE; geri alınmış `null`
+ * ve alanın yokluğu silinmiş DEĞİLDİR). YAŞ `silindi.zaman` ile ölçülür (`olusturma` ile DEĞİL: «son 30 günde silinen»
+ * talebin ne zaman GELDİĞİ değil ne zaman SİLİNDİĞİ sorulur). Karşılaştırma BİLEREK metin (`COLLATE "C"`; açık sayımla
+ * aynı gerekçe). Biçime uymayan / eksik silinme zamanı pencereye GİRMEZ ve ayrı sayılır (`tarihsiz`) — yaşı okunamayan
+ * satır sessizce «eski» sayılmaz. Silen kişi, müşteri alanı, kanal metni okunmaz: yalnız iki sayı.
+ */
+export const MAGAZA_SILINMIS_SAYIM_SQL = `SELECT
+  (count(*) FILTER (WHERE COALESCE(${SILINME_ZAMANI_BICIMLI_SQL} AND (data->'silindi'->>'zaman') COLLATE "C" >= $2, false)))::int AS pencerede,
+  (count(*) FILTER (WHERE NOT COALESCE(${SILINME_ZAMANI_BICIMLI_SQL}, false)))::int AS tarihsiz
+  FROM docs WHERE coll = $1 AND ${MAGAZA_SILINMIS_SQL}`;
+
+export interface MagazaSilinmisSayimi {
+  /** Pencere içinde (son `MAGAZA_SILINMIS_PENCERESI_GUN` gün) silinmiş ve hâlâ silinmiş duran talep sayısı. */
+  pencerede: number;
+  /** Silinmiş olup silinme zamanı sunucu biçiminde OLMAYAN talep sayısı (pencereye girmez). */
+  tarihsiz: number;
+}
+
+/** Sorgu satırını sayıma çevirir (saf). Satır yoksa ya da bir sayı okunamıyorsa `null` — uydurma sıfır yok. */
+export function magazaSilinmisSayiminiCoz(satir: unknown): MagazaSilinmisSayimi | null {
+  if (typeof satir !== 'object' || satir === null || Array.isArray(satir)) return null;
+  const s = satir as Record<string, unknown>;
+  const pencerede = tamSayi(s, 'pencerede');
+  const tarihsiz = tamSayi(s, 'tarihsiz');
+  return pencerede === null || tarihsiz === null ? null : { pencerede, tarihsiz };
+}
+
+/** Sayımı okur. Sorgu hatası FIRLATILIR (çağıran yalnız hata KODUNU yazar); okunamayan satır `null`. */
+export async function magazaSilinmisSayimi(
+  havuz: { query: (sql: string, params: unknown[]) => Promise<{ rows: unknown[] }> },
+  simdiMs: number,
+): Promise<MagazaSilinmisSayimi | null> {
+  const { rows } = await havuz.query(MAGAZA_SILINMIS_SAYIM_SQL, [MAGAZA_TALEP_KOLEKSIYONU, new Date(simdiMs - MAGAZA_SILINMIS_PENCERESI_GUN * GUN_MS).toISOString()]);
+  return magazaSilinmisSayiminiCoz(Array.isArray(rows) ? rows[0] : undefined);
 }
 
 const DAKIKA_MS = 60_000;

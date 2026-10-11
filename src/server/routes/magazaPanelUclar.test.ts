@@ -2,7 +2,8 @@
 /**
  * magazaPanelUclar.test.ts — site paneli alt zinciri (`magazaPanelZinciri.ts`) + ERP kökenindeki mağaza uçları
  * (`magazaErpRoutes.ts`) GERÇEK express, GERÇEK zincir ve GERÇEK PostgreSQL motoruyla (dilim 2a, şartname v6 § 7 «Oturum»,
- * «Belirteç ve kapı», «Uçlar», «Liste», «ERP durum ucu») + iki modülün kaynak çitleri.
+ * «Belirteç ve kapı», «Uçlar», «Liste», «ERP durum ucu»; dilim 2b § 10.8 «Uçlar»: elle talep, içerik, silme / geri alma,
+ * `bildirim-gonder?tur=revize`, panel silme ucu, kartta `teyit` / `elle` / `silebilir`, takipte `silindi`) + iki modülün kaynak çitleri.
  *
  * DÜZENEK üretimdeki gibi AYRI kurulmuş iki kayıt çağrısıdır: `app.use('/api/magaza', magazaZinciri({ …, panelZinciri }))`
  * genel gövde ayrıştırıcıdan ÖNCE, `magazaErpRoutes(app, { … })` SONRA; kod deposu, iptal çifti ve kullanıcı okuyucu TEK
@@ -24,13 +25,14 @@ import { join } from 'node:path';
 import rateLimit from 'express-rate-limit';
 import { PGlite } from '@electric-sql/pglite';
 import { kaynakDosyalari, kodSatirlari, oku, SRC_KOK, suclular } from '../../test/kaynakTarama';
-import { MAGAZA_TALEP_KOLEKSIYONU } from '../../lib/magazaTalep';
-import { APP_ROLES, magazaTalepIslemYetkisi, type AppRole } from '../../lib/rbac';
+import { MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_TALEP_NO_DESENI } from '../../lib/magazaTalep';
+import { APP_ROLES, magazaTalepIslemYetkisi, magazaTalepSilmeYetkisi, type AppRole } from '../../lib/rbac';
 import type { AdminDbLike, AdminDocRef } from '../adminDbTypes';
 import { DOCS_INDEKS_DDL, DOCS_TABLOSU_DDL } from '../docsSema';
 import { JWT_BICIMI, yetkiBelirteci } from '../istemciIp';
 import { MAGAZA_BILDIRIM_KALEM_SINIRI } from '../kanal/magazaBildirim';
-import { KALEM_TESLIM_SQL } from '../kanal/magazaDurum';
+import { KALEM_TESLIM_SQL, MAGAZA_ACIK_SQL, MAGAZA_SILINMEMIS_SQL } from '../kanal/magazaDurum';
+import { ELLE_TALEP_DENEME_SINIRI, ICERIK_SQL, URUN_KDV_SQL } from '../kanal/magazaIcerik';
 import {
   MAGAZA_PANEL_BELIRTEC_OMRU_MS, donusTabaniCoz, panelAnahtariTuret, panelBelirteciUret, type PanelBelirtecYuku,
 } from '../kanal/magazaPanelBelirtec';
@@ -38,14 +40,15 @@ import { iptalKur } from '../kanal/magazaPanelIptal';
 import { kodDeposuKur, meydanHesapla, panelKoduUret } from '../kanal/magazaPanelKod';
 import { panelKullanicisiKur } from '../kanal/magazaPanelKullanici';
 import { magazaTalepKimligi } from '../kanal/magazaTalep';
+import { EKLEME_SQL } from '../kanal/magazaTalepSql';
 import type { SmtpKipi } from '../smtpPosta';
-import { magazaErpRoutes, magazaYetkiKodu429 } from './magazaErpRoutes';
+import { magazaErpRoutes, magazaIcerik429, magazaYetkiKodu429 } from './magazaErpRoutes';
 import {
   MAGAZA_PANEL_ACIK_SINIRI, MAGAZA_PANEL_KAPALI_PENCERE_MS, MAGAZA_PANEL_KAPALI_SINIRI, MAGAZA_PANEL_LISTE_ONBELLEK_MS,
   MAGAZA_PANEL_LISTE_SQL, erpCikisindaPanelIptalEt, magazaPanel429, magazaPanelSayaclari, magazaPanelSayaclariniSifirla,
   magazaPanelZinciri, panelListesiKur, panelSiparisiEsle, type PanelListe, type PanelSiparis,
 } from './magazaPanelZinciri';
-import { MAGAZA_TAKIP_SQL, magaza429, magazaSayaclari, magazaSayaclariniSifirla, magazaZinciri, type MagazaPgHavuzu } from './magazaRoutes';
+import { MAGAZA_TAKIP_SQL, magaza429, magazaSayaclari, magazaSayaclariniSifirla, magazaTakipSayaclari, magazaZinciri, type MagazaPgHavuzu } from './magazaRoutes';
 
 type Satir = Record<string, unknown>;
 const COLL = MAGAZA_TALEP_KOLEKSIYONU;
@@ -146,9 +149,15 @@ interface Ayar {
   panelTavani?: number;
   yetkiTavani?: number;
   dbTavani?: number;
+  /** (2b) Elle talep / içerik / silme uçlarının ORTAK kovası (`magazaIcerikLimiter`). */
+  icerikTavani?: number;
   talepTavani?: number;
   smtp?: { tamam: boolean; eksik: string[]; kip: SmtpKipi };
   bildirimIste?: (id: string) => Promise<void>;
+  /** (2b) Revize kuyruğunun isteyicisi (server.ts `magazaRevizeBildirimIste` vekili). */
+  revizeBildirimiIste?: (id: string) => Promise<void>;
+  /** (2b) Elle talep numarası üreteci (çakışma senaryosu için; verilmezse gerçek üreteç). */
+  elleNoUret?: (simdi: Date) => string;
   /** Yetki kodu ucundaki Firebase iptal denetiminin bekleme tavanı (ms). */
   iptalDenetimiSuresiMs?: number;
 }
@@ -170,6 +179,8 @@ interface Duzenek {
   yayinlar: unknown[][];
   denetim: unknown[][];
   bildirimler: string[];
+  /** (2b) Revize kuyruğuna istenen işler (`{ talepId }` — sahte isteyicinin gördüğü kimlikler, çağrı sırasıyla). */
+  revizeler: string[];
   /** Kimlik kapısı sayacı: sahte `requireAuth`'un belirteci doğruladığı istek sayısı (Firebase doğrulayıcısının vekili). */
   sayim: { kiraci: number; apiLimiter: number; kimlikDogrulama: number };
   mfaEngeli: boolean;
@@ -200,7 +211,7 @@ async function kur(a: Ayar = {}): Promise<Duzenek> {
   const d: Duzenek = {
     taban: '', saat, anahtar, sahte,
     kullaniciOkuyucu: undefined as never, kodDeposu: kodDeposuKur({ simdi }), iptal: iptalKur({ adminDb: () => sahte.adminDb, simdi }),
-    sorgular: [], sorguHatasi: null, kanca: null, gecikme: null, yayinlar: [], denetim: [], bildirimler: [],
+    sorgular: [], sorguHatasi: null, kanca: null, gecikme: null, yayinlar: [], denetim: [], bildirimler: [], revizeler: [],
     sayim: { kiraci: 0, apiLimiter: 0, kimlikDogrulama: 0 }, mfaEngeli: false, firebase: { cagrilar: [], davranis: null },
     kacan: { genelAyristirici: 0, genel404: 0, genelYakalayici: 0 },
   };
@@ -225,6 +236,7 @@ async function kur(a: Ayar = {}): Promise<Duzenek> {
   };
   const writeAuditLog = async (...argumanlar: unknown[]): Promise<void> => { d.denetim.push(argumanlar); };
   const bildirimIste = (id: string): Promise<void> => { d.bildirimler.push(id); return a.bildirimIste ? a.bildirimIste(id) : Promise.resolve(); };
+  const revizeBildirimiIste = (id: string): Promise<void> => { d.revizeler.push(id); return a.revizeBildirimiIste ? a.revizeBildirimiIste(id) : Promise.resolve(); };
   const serverTenantId = (): Promise<string> => { d.sayim.kiraci += 1; return a.kiraci ? a.kiraci() : Promise.resolve(CID); };
   const getPgPool = (): MagazaPgHavuzu => havuz;
 
@@ -269,15 +281,17 @@ async function kur(a: Ayar = {}): Promise<Duzenek> {
   });
   magazaErpRoutes(app, {
     requireAuth, requireMfaVerified, dbLimiter, magazaYetkiKoduLimiter: sinirlayici(a.yetkiTavani ?? 1000, magazaYetkiKodu429),
+    magazaIcerikLimiter: sinirlayici(a.icerikTavani ?? 1000, magazaIcerik429),
     belirtecIptalDenetle: (belirtec) => {
       d.firebase.cagrilar.push(belirtec);
       return d.firebase.davranis ? d.firebase.davranis(belirtec) : Promise.resolve({ uid: belirtec.slice(4) });
     },
     ...(a.iptalDenetimiSuresiMs !== undefined ? { iptalDenetimiSuresiMs: a.iptalDenetimiSuresiMs } : {}),
     panelKullanicisi: d.kullaniciOkuyucu.panelKullanicisi, kodDeposu: d.kodDeposu,
-    getPgPool, broadcastDocChange, writeAuditLog, bildirimIste,
+    getPgPool, broadcastDocChange, writeAuditLog, bildirimIste, revizeBildirimiIste,
     smtpYapilandirmasi: () => a.smtp ?? { tamam: true, eksik: [], kip: 'kimlikli' }, serverTenantId,
     panelDonus: a.panelDonus === undefined ? DONUS : a.panelDonus, simdi,
+    ...(a.elleNoUret !== undefined ? { elleNoUret: a.elleNoUret } : {}),
   });
   app.use((_req, res) => { d.kacan.genel404 += 1; res.status(404).json({ error: 'Not found' }); });
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -1207,7 +1221,8 @@ describe('panel yazma uçları — aşama, kalem teslim, etiket (§ 4; yazma kur
     const b = belirtec(d);
     const id = await talepEkle();
     kullanici(d, 'u-satis', { role: 'Accounting' });
-    for (const [uc, g] of [['durum', { onceki: 'sevk', surum: 3, durum: 'teslim' }], ['kalem-teslim', { surum: 3, teslim: true, kalemler: 'hepsi' }], ['etiket-basildi', {}]] as Array<[string, unknown]>) {
+    // (2b) `sil` de: paneli göremeyen role düşen kullanıcı silme ucunda 403 `rol` DEĞİL, kapının 401'ini alır (kapı önce).
+    for (const [uc, g] of [['durum', { onceki: 'sevk', surum: 3, durum: 'teslim' }], ['kalem-teslim', { surum: 3, teslim: true, kalemler: 'hepsi' }], ['etiket-basildi', {}], ['sil', { surum: 3 }]] as Array<[string, unknown]>) {
       expect((await panel(d, `/siparisler/${id}/${uc}`, { belirtec: b, govde: g })).kod, uc).toBe(401);
     }
     expect(await belge(id)).toEqual(talepVerisi());
@@ -1249,6 +1264,8 @@ describe('liste — GET /panel/siparisler (§ 4; tek ifade, gerçek motor)', () 
         kalemSayisi: 3, teslimKaynagi: 'beyan', teslimIsaretsiz: 2,
         araToplam: 459.97, kdv: null, toplam: null,
         etiketBasildi: { zaman: zaman(SAAT_0 - 10 * DAKIKA), koli: 2 },
+        // Dilim 2b: mağazadan gelen talep (`elle` yok) ve Satış rolü (silemez); `teyit` alanı yalnız teyit yazılmış talepte.
+        elle: false, silebilir: false,
       }],
       acikToplam: 1, kesildi: false,
     });
@@ -1401,6 +1418,8 @@ describe('liste — GET /panel/siparisler (§ 4; tek ifade, gerçek motor)', () 
   it('TEK ifade = tek anlık görüntü: aynı satır açık VE kapalı kümede birlikte dönemez; `acikToplam` aynı ifadeden (gerçek motor)', async () => {
     await topluEkle(3, i => ({ durum: 'sevk', talepNo: `A-${i}` }));
     await topluEkle(2, i => ({ durum: 'teslim', durumZamani: zaman(SAAT_0 - 1000), talepNo: `K-${i}` }));
+    // (2b) Silinmiş açık ve silinmiş kapalı satır iki kümeye de GİRMEZ, `toplam`a sayılmaz.
+    await topluEkle(4, i => ({ durum: i % 2 === 0 ? 'sevk' : 'teslim', durumZamani: zaman(SAAT_0 - 1000), talepNo: `S-${i}`, silindi: { zaman: zaman(SAAT_0), kim: { uid: 'u', ad: 'a' }, kanal: 'erp' } }));
     const r = await db.query<Satir>(MAGAZA_PANEL_LISTE_SQL, [COLL, CID, zaman(SAAT_0 - MAGAZA_PANEL_KAPALI_PENCERE_MS)]);
     expect(r.rows.map(s => s.tur).sort()).toEqual(['a', 'a', 'a', 'k', 'k']);
     expect(r.rows.filter(s => s.tur === 'a').every(s => Number(s.toplam) === 3)).toBe(true);
@@ -1408,7 +1427,16 @@ describe('liste — GET /panel/siparisler (§ 4; tek ifade, gerçek motor)', () 
     // Kaynak: tek ifade (iki CTE + UNION ALL), noktalı virgül yok; açık ölçütü bekçiyle AYNI sabit; metin karşılaştırması `COLLATE "C"`.
     expect(MAGAZA_PANEL_LISTE_SQL).not.toContain(';');
     expect(MAGAZA_PANEL_LISTE_SQL.match(/COALESCE\(data->>'durum', ''\) NOT IN \('teslim', 'iptal'\)/g)).toHaveLength(2);
-    expect(MAGAZA_PANEL_LISTE_SQL).toContain(`AND NOT (COALESCE(data->>'durum', '') NOT IN ('teslim', 'iptal'))`);
+    // Dilim 2b (bilerek değişen çit): açık ölçütü silinmemiş koşulunu İÇERİR; onun değillemesi silinmişi de yakalayacağı için
+    // kapalı kümeye silinmemiş koşulu AYRICA eklenir — silinmiş talep iki kümede de yok.
+    const SILINMEMIS = `jsonb_typeof(data->'silindi') IS DISTINCT FROM 'object'`;
+    const ACIK = `COALESCE(data->>'durum', '') NOT IN ('teslim', 'iptal') AND ${SILINMEMIS}`;
+    expect(MAGAZA_SILINMEMIS_SQL).toBe(SILINMEMIS);
+    expect(MAGAZA_ACIK_SQL).toBe(ACIK);
+    expect(MAGAZA_PANEL_LISTE_SQL).toContain(`WHERE coll = $1 AND data->>'companyId' = $2 AND ${ACIK} ORDER BY (data->>'olusturma')`);
+    expect(MAGAZA_PANEL_LISTE_SQL).toContain(`WHERE coll = $1 AND data->>'companyId' = $2 AND NOT (${ACIK}) AND ${SILINMEMIS} AND (COALESCE(data->>'durumZamani', data->>'olusturma')) COLLATE "C" >= $3`);
+    expect(MAGAZA_PANEL_LISTE_SQL.match(/IS DISTINCT FROM 'object'/g)).toHaveLength(3);
+    expect(MAGAZA_PANEL_LISTE_SQL).not.toMatch(/data->'silindi' IS (NOT )?NULL/);
     expect(MAGAZA_PANEL_LISTE_SQL.match(/COLLATE "C"/g)).toHaveLength(3);   // açık sırası + kapalı süzgeci + kapalı sırası
     expect(MAGAZA_PANEL_LISTE_SQL).toMatch(/LIMIT 500\), kapali AS .* LIMIT 200\) SELECT 'a' AS tur, id, data, toplam FROM acik UNION ALL SELECT 'k', id, data, NULL FROM kapali$/);
     expect(MAGAZA_PANEL_LISTE_SQL).not.toMatch(/now\(\)|::timestamptz|UPDATE|DELETE|INSERT/);
@@ -1614,11 +1642,16 @@ describe('ERP uçları — aşama, kalem teslim, elle bildirim (§ 4; `magazaErp
     expect([d.bildirimler, d.denetim, d.yayinlar]).toEqual([[], [], []]);
     expect(magazaPanelSayaclari()).toMatchObject({ bildirimGonder: 0, bildirimGonder409: 3 });
   });
-  it('elle bildirim: gövde `{}` dışı 400; `?tur` 2a\'da tanınmaz (400); bozuk kimlik / başka kiracı 404; bozuk JSON genel ayrıştırıcıdan (rota gövdesiz kalmıyor)', async () => {
+  it('elle bildirim: gövde `{}` dışı 400; `?tur` YALNIZ `revize` değerini alır (2b — `ilk` dâhil başka değer 400); bozuk kimlik / başka kiracı 404; bozuk JSON genel ayrıştırıcıdan (rota gövdesiz kalmıyor)', async () => {
     const d = await kur();
     const id = await talepEkle(bildirimsiz);
     for (const g of [{ tur: 'ilk' }, { id }, [], { '': 0 }]) expect((await erp(d, YOL(id, 'bildirim-gonder'), 'u-satis', g)).kod, JSON.stringify(g)).toBe(400);
-    for (const sorgu of ['?tur=revize', '?tur=ilk', '?tur=']) expect((await erp(d, `${YOL(id, 'bildirim-gonder')}${sorgu}`, 'u-satis', {})).kod, sorgu).toBe(400);
+    // Dilim 2b (bilerek değişen çit): 2a'da her `?tur` 400'dü; artık `?tur=revize` revize bildirimi demektir (bu talebin
+    // revizyonu yok → 409 `revize-yok`, ilk bildirimin kuyruğuna DÜŞÜLMEZ). `ilk` ve boş değer 400 kalır.
+    for (const sorgu of ['?tur=ilk', '?tur=']) expect((await erp(d, `${YOL(id, 'bildirim-gonder')}${sorgu}`, 'u-satis', {})).kod, sorgu).toBe(400);
+    const revize = await erp(d, `${YOL(id, 'bildirim-gonder')}?tur=revize`, 'u-satis', {});
+    expect([revize.kod, revize.json]).toEqual([409, { ok: false, kod: 'revize-yok' }]);
+    expect(d.bildirimler).toEqual([]);
     // Yanlış içerik türü: zincirde 415 denetimi YOK — genel ayrıştırıcı gövdeyi atlar, `.strict()` 400 verir.
     expect((await erp(d, YOL(id, 'durum'), 'u-satis', undefined, { ham: JSON.stringify(GOVDELER.durum), tur: 'text/plain' })).kod).toBe(400);
     const baska = await talepEkle({ companyId: 'kiraci-2', ...bildirimsiz });
@@ -1632,7 +1665,7 @@ describe('ERP uçları — aşama, kalem teslim, elle bildirim (§ 4; `magazaErp
     const bozuk = await iste(d, YOL(id, 'durum'), { ham: '{bozuk', belirtec: 'erp-u-satis' });
     expect(bozuk.kod).toBe(400);
     expect(d.kacan.genelYakalayici).toBe(1);
-    // ERP'de etiket ucu YOK (yalnız panelde): zincirin rota-yok 404'ü.
+    // ERP'de etiket ucu YOK (yalnız panelde; 2b de eklemez): zincirin rota-yok 404'ü.
     const etiket = await erp(d, YOL(id, 'etiket-basildi'), 'u-satis', {});
     expect(etiket.kod).toBe(404);
     expect(etiket.json).toEqual({ error: 'Not found' });
@@ -1651,6 +1684,8 @@ describe('takip okuması — `MAGAZA_TAKIP_SQL` gerçek motorda (§ 4; rota mant
       // Nesne olmayan üç öğe atıldı; kalan kalemler dizideki YERİNİ korur (`b:4` işareti `b:1`e kaymaz).
       kalemler: [{ sira: 0, ad: 'Boya', marka: 'DYO', adet: 2 }, { sira: 4, ad: 'Rulo', marka: null, adet: 1 }],
       beyan_sayisi: 5, teyit_kalemleri: null, teyit_sayisi: 0, kalem_teslim: null,
+      // Dilim 2b: `silindi` alanının TÜRÜ (hiç silinmemiş talepte SQL NULL).
+      silindi_turu: null,
     });
     const metin = JSON.stringify(s);
     for (const yasak of ['DYO-0001', '204.99', 'u-1', 'tedarik', 'Şükrü', '5321112233', 'Öğleden', 'gitti']) expect(metin, yasak).not.toContain(yasak);
@@ -1690,6 +1725,1002 @@ describe('takip okuması — `MAGAZA_TAKIP_SQL` gerçek motorda (§ 4; rota mant
     // Yanlış telefonla aynı no: bulunamadı (kimlik no + telefondan türer).
     expect((await iste(d, '/api/magaza/siparis-durumu', { koken: IZINLI, govde: { no, telefon: '0532 123 45 68' } })).json).toEqual({ ok: false, kod: 'bulunamadi' });
   });
+  it('(2b, § 10.6) `silindi_turu` üç hâli AYIRIR: hiç silinmemiş → NULL, geri alınmış (`silindi: null`) → `"null"`, silinmiş → `"object"`; silen / zaman / kanal belleğe GELMEZ', async () => {
+    const hic = await talepEkle();
+    const geri = await talepEkle({ silindi: null });
+    const silinmis = await talepEkle(silinmisEk());
+    expect((await sor(hic))?.silindi_turu).toBeNull();
+    expect((await sor(geri))?.silindi_turu).toBe('null');
+    expect((await sor(silinmis))?.silindi_turu).toBe('object');
+    expect(JSON.stringify(await sor(silinmis))).not.toMatch(/Silen Kişi|u-x|"kanal"|"erp"/);
+    // Nesne olmayan çöp değer «silinmiş» sayılmaz (ölçüt yalnız `'object'`).
+    for (const [cop, tur] of [['evet', 'string'], [true, 'boolean'], [[1], 'array'], [7, 'number']] as Array<[unknown, string]>) {
+      expect((await sor(await talepEkle({ silindi: cop })))?.silindi_turu, tur).toBe(tur);
+    }
+  });
+  it('(2b, § 10.6) uçtan uca: ERP\'de silinen talep takip ucunda `404 { ok: false, kod: "silindi" }` + `no-store` (aşama / kalem / tarih YOK; bulunamadı gövdesinden FARKLI); geri alınınca AYNI sorgu 200 ve kalem listesi döner', async () => {
+    const d = await kur();
+    const no = 'T261009-ZK78';
+    const sorgu: Istek = { koken: IZINLI, govde: { no, telefon: '0532 123 45 67' } };
+    expect((await iste(d, '/api/magaza/siparis-talebi', {
+      koken: IZINLI, govde: { no, musteri: { ad: 'Şükrü Ağaoğlu', telefon: '+90 (532) 123 45 67' }, kalemler: [{ ad: 'İç cephe boyası', marka: 'DYO', adet: 2 }] },
+    })).kod).toBe(201);
+    const id = magazaTalepKimligi(CID, no, '5321234567');
+    expect((await iste(d, '/api/magaza/siparis-durumu', sorgu)).kod).toBe(200);
+    expect((await erp(d, ERP_YOLU(id, 'sil'), 'u-yonetici', { surum: 0 })).kod).toBe(200);
+    const silinmis = await iste(d, '/api/magaza/siparis-durumu', sorgu);
+    expect(silinmis.kod).toBe(404);
+    expect(silinmis.metin).toBe('{"ok":false,"kod":"silindi"}');
+    expect(silinmis.baslik('cache-control')).toBe('no-store');
+    for (const yasak of ['durum', 'kalemler', 'tarih', 'guncelleme', 'boyası', 'Yönetici']) expect(silinmis.metin, yasak).not.toContain(yasak);
+    // Hiç olmayan talep «bulunamadı»dır; iki 404'ün gövdesi FARKLI (başlıkları aynı).
+    const yok = await iste(d, '/api/magaza/siparis-durumu', { koken: IZINLI, govde: { no: 'T261009-YOK1', telefon: '0532 123 45 67' } });
+    expect(yok.metin).toBe('{"ok":false,"kod":"bulunamadi"}');
+    expect(Buffer.from(silinmis.metin).equals(Buffer.from(yok.metin))).toBe(false);
+    for (const ad of ['content-type', 'cache-control', 'access-control-allow-origin']) expect(silinmis.baslik(ad), ad).toBe(yok.baslik(ad));
+    // Yanlış telefonla silinmiş talep de «bulunamadı»dır (kimlik no + telefondan; silindiği yalnız ikisini bilene açıklanır).
+    expect((await iste(d, '/api/magaza/siparis-durumu', { koken: IZINLI, govde: { no, telefon: '0532 123 45 68' } })).metin).toBe('{"ok":false,"kod":"bulunamadi"}');
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 1, bulunamadi: 2, silindi: 1 });
+    // Geri alınan talep yeniden bulunur.
+    expect((await erp(d, ERP_YOLU(id, 'sil'), 'u-yonetici', { surum: 1, geriAl: true })).kod).toBe(200);
+    const geri = await iste(d, '/api/magaza/siparis-durumu', sorgu);
+    expect(geri.kod).toBe(200);
+    expect(geri.json).toMatchObject({ ok: true, durum: 'alindi', kaynak: 'beyan', kalemSayisi: 1, kalemler: [{ ad: 'İç cephe boyası', marka: 'DYO', adet: 2, teslim: false }] });
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 2, bulunamadi: 2, silindi: 1 });
+    expect(magazaSayaclari().r404).toBe(0);
+  });
+  it('(2b) uçtan uca: teyit yazılınca takip ucu TEYİT edilen kalemleri basar (`kaynak: "teyit"`), teslim işareti `t:` girişinden; fiyat / KDV / anahtar yanıta GİRMEZ', async () => {
+    const d = await kur();
+    const id = await talepEkle({}, magazaTalepKimligi(CID, 'T261009-AB12', '5321112233'));
+    expect((await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', { icerikSurum: 0, teyit: { kalemler: [
+      { anahtar: 'b:0', sku: 'DYO-0001', ad: 'İç cephe boyası 15 L', marka: 'DYO', adet: 3, birimFiyat: 95, kdvOrani: 20 },
+      { ad: 'Astar', adet: 1, birimFiyat: null },
+    ] } })).json).toEqual({ ok: true, degisti: true });
+    const astar = (await teyitOku(id)).kalemler[1].anahtar;
+    expect((await erp(d, ERP_YOLU(id, 'kalem-teslim'), 'u-satis', { surum: 3, teslim: true, kalemler: [astar] })).kod).toBe(200);
+    const y = await iste(d, '/api/magaza/siparis-durumu', { koken: IZINLI, govde: { no: 'T261009-AB12', telefon: '0532 111 22 33' } });
+    expect(y.kod).toBe(200);
+    expect(y.json).toMatchObject({
+      ok: true, durum: 'sevk', kaynak: 'teyit', kalemSayisi: 2,
+      kalemler: [{ ad: 'İç cephe boyası 15 L', marka: 'DYO', adet: 3, teslim: false }, { ad: 'Astar', adet: 1, teslim: true }],
+    });
+    for (const yasak of ['birimFiyat', 'kdv', 'anahtar', 't:', 'DYO-0001', 'Rulo', 'Fayans']) expect(y.metin, yasak).not.toContain(yasak);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// DİLİM 2b (şartname v6 § 10.3, § 10.5, § 10.6; § 10.8 «Uçlar»). Yazma işlevlerinin KENDİ senaryoları (CAS, taşıma, KDV
+// çözümü, revize birleştirme) `kanal/magazaIcerik.pglite.test.ts`'tedir; burada UÇ ölçülür: zincir, rol, şema, durum
+// kodu / gövde, kuyruk isteği, sayaç — gerçek express + gerçek zincir + gerçek motor.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+/** Saklı `talepVerisi().musteri` ile AYNI yedi alan: içerik gövdesinde gönderilince «değişmedi» sayılır. */
+const MUSTERI_AYNI = { ad: 'Şükrü Ağaoğlu', firma: 'Iğdır Yapı', telefon: '0532 111 22 33', eposta: 'sukru@ornek.com.tr', il: 'İstanbul', adres: 'Çiçek Sk. 4', vergi: '1234567890' };
+const NOT_AYNI = 'Öğleden sonra arayın.';
+const TEYIT_ANAHTARI = /^t:[0-9a-f]{12}$/;
+const ERP_YOLU = (id: string, uc: string): string => `/api/magaza-talepleri/${id}/${uc}`;
+/** Para kuralı örneği (kullanıcı kararı): 2 × 95,00 + 1 × 40,00, %20 → ara toplam 230,00 · KDV 46,00 · toplam 276,00. */
+const TEYIT_GOVDESI = { kalemler: [
+  { anahtar: 'b:0', id: 'u-1', sku: 'DYO-0001', ad: 'İç cephe boyası 15 L', marka: 'DYO', adet: 2, birimFiyat: 95, kdvOrani: 20 },
+  { ad: 'Rulo', adet: 1, birimFiyat: 40, kdvOrani: 20 },
+] };
+interface SakliTeyitKalemi { anahtar: string; id: string; sku: string; ad: string; marka: string; adet: number; birimFiyat: number | null; kdvOrani: number; kdvKaynagi: string; tedarik: boolean }
+interface SakliTeyit { kalemler: SakliTeyitKalemi[]; araToplam: number | null; kdv: number | null; toplam: number | null; zaman: string; kim: { uid: string; ad: string } }
+const teyitOku = async (id: string): Promise<SakliTeyit> => (await belge(id)).teyit as SakliTeyit;
+/** Saklı teyit kalemini, formun göndereceği gövde kalemine çevirir (kendi `t:` anahtarıyla; `kdvKaynagi` gövdeye GİRMEZ). */
+const govdeKalemi = (k: SakliTeyitKalemi, oranla = true): Satir => ({
+  anahtar: k.anahtar, id: k.id, sku: k.sku, ad: k.ad, marka: k.marka, adet: k.adet, birimFiyat: k.birimFiyat, tedarik: k.tedarik,
+  ...(oranla ? { kdvOrani: k.kdvOrani } : {}),
+});
+/** ERP ürün kaydı (`inventory`); `companyId: undefined` → etiketsiz eski kayıt. */
+async function urunEkle(sku: string, ek: Satir = {}): Promise<void> {
+  await db.query('INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3::jsonb)', ['inventory', `urun-${++kimlikSirasi}`, JSON.stringify({ companyId: CID, sku, ...ek })]);
+}
+const silinmisEk = (surum = 4): Satir => ({ silindi: { zaman: zaman(SAAT_0 - DAKIKA), kim: { uid: 'u-x', ad: 'Silen Kişi' }, kanal: 'erp' }, durumSurum: surum });
+const revizeEk = (durum: string, ek: Satir = {}): Satir => ({
+  icerikSurum: 2, icerikZamani: zaman(SAAT_0 - GUN),
+  bildirimRevize: { durum, zaman: zaman(SAAT_0 - GUN), alanlar: ['not', 'teyit'], kim: { uid: 'u-mudur', ad: 'Müdür Bey' }, icerikSurum: 2, ...ek },
+});
+
+describe('ERP uçları (dilim 2b) — elle talep, içerik düzenleme, yumuşak silme / geri alma (§ 10.3; `magazaErpRoutes.ts`)', () => {
+  const ELLE_GOVDESI = {
+    musteri: { ad: 'Ümit Çağlar', telefon: '0533 444 55 66', firma: 'Çağlar İnşaat' },
+    kalemler: [{ ad: 'Saten alçı 25 kg', marka: 'Knauf', sku: 'KNF-25', adet: 4, birimFiyat: 180 }, { ad: 'Mala', adet: 1 }],
+    not: 'Telefonla geldi.',
+  };
+  const ELLE_SON10 = '5334445566';
+  const elleSayisi = async (): Promise<number> =>
+    Number((await db.query<{ n: string }>(`SELECT count(*) AS n FROM docs WHERE coll = $1 AND jsonb_typeof(data->'elle') = 'object'`, [COLL])).rows[0].n);
+
+  it('zincir: üç 2b ucu genel ayrıştırıcıdan SONRA ve `requireAuth` → `requireMfaVerified` zincirinde (kimliksiz `{}` 401 · bozuk JSON 400 · MFA gövdesi AYNEN); `panelKullanicisi` fırlatınca 503', async () => {
+    const d = await kur();
+    const id = await talepEkle();
+    const UCLAR: Array<[string, unknown]> = [['/api/magaza-talepleri', ELLE_GOVDESI], [ERP_YOLU(id, 'icerik'), { icerikSurum: 0, not: 'Yeni not' }], [ERP_YOLU(id, 'sil'), { surum: 3 }]];
+    for (const [yol, govde] of UCLAR) {
+      // Kimliksiz + GEÇERLİ gövde → kimlik kapısının 401'i (rota kayıtlı ve kapının arkasında — yayın sondasının ölçtüğü).
+      const kimliksiz = await erp(d, yol, null, govde);
+      expect(kimliksiz.kod, yol).toBe(401);
+      expect(kimliksiz.json).toEqual({ error: 'Missing Authorization header.' });
+      // Bozuk JSON → genel ayrıştırıcının 400'ü (kimlik kapısına varmaz: rota modülü ayrıştırıcıdan SONRA kayıtlı).
+      expect((await iste(d, yol, { ham: '{bozuk', belirtec: 'erp-u-yonetici' })).kod, yol).toBe(400);
+      d.mfaEngeli = true;
+      const mfa = await erp(d, yol, 'u-yonetici', govde);
+      expect(mfa.kod, yol).toBe(403);
+      expect(mfa.json).toEqual({ error: 'İki faktörlü doğrulama gerekli.', mfaRequired: true });
+      d.mfaEngeli = false;
+    }
+    expect(d.kacan.genelYakalayici).toBe(3);
+    // Kullanıcı okunamadı → 503 (403 DEĞİL: yetkisizlik değildir).
+    d.sahte.durum.okumaHatasi = Object.assign(new Error(ISARET), { code: '57P01' });
+    d.kullaniciOkuyucu.temizle();
+    for (const [yol, govde] of UCLAR) {
+      const hata = await erp(d, yol, 'u-yonetici', govde);
+      expect(hata.kod, yol).toBe(503);
+      expect(hata.json).toEqual({ ok: false });
+    }
+    d.sahte.durum.okumaHatasi = null;
+    expect(await belge(id)).toEqual(talepVerisi());
+    expect(await elleSayisi()).toBe(0);
+    expect([d.yayinlar, d.denetim, d.bildirimler, d.revizeler]).toEqual([[], [], [], []]);
+    expect(konsol).toEqual(Array.from({ length: 3 }, () => 'error: [magaza-erp] kullanıcı okunamadı: 57P01'));
+  });
+  it('yayın sonrası sonda değişmezi (§ 10.8 «Sondalar»): betikteki 2b yolları GERÇEK zincirde beklenen yanıtı verir — kimliksiz `{}` 401 (rota kayıtlı), bozuk JSON 400, `?tur=revize` 401 (400 DEĞİL), panel silme belirteçsiz 401; hiçbiri kayıt okumaz', async () => {
+    const d = await kur();
+    const betik = oku(join(SRC_KOK, '..', 'scripts', 'verify-deploy.sh'));
+    for (const yol of ['/api/magaza-talepleri', `/api/magaza-talepleri/${SIFIR_KIMLIK}/icerik`, `/api/magaza-talepleri/${SIFIR_KIMLIK}/sil`]) {
+      // Yol betiğin İKİ listesinde de var (bozuk JSON + geçerli JSON); listelerin tamamı `verifyDeployMagaza.test.ts`'te kilitli.
+      expect(betik.split(yol).length - 1, yol).toBeGreaterThanOrEqual(2);
+      expect((await erp(d, yol, null, {})).kod, yol).toBe(401);
+      expect((await iste(d, yol, { ham: '{bozuk' })).kod, yol).toBe(400);
+    }
+    const revize = `/api/magaza-talepleri/${SIFIR_KIMLIK}/bildirim-gonder?tur=revize`;
+    expect(betik).toContain(`REVIZE_PROBE="${revize}"`);
+    expect((await erp(d, revize, null, {})).kod).toBe(401);
+    expect(betik).toContain('"$PU/siparisler/$PANEL_SIFIR/sil"');
+    expect(betik).toContain(`PANEL_SIFIR="${SIFIR_KIMLIK}"`);
+    const panelSil = await panel(d, `/siparisler/${SIFIR_KIMLIK}/sil`, { govde: {} });
+    expect([panelSil.kod, panelSil.metin]).toEqual([401, '{"ok":false}']);
+    // Sondalar oturum açmaz, kayıt okumaz / yazmaz.
+    expect(d.sorgular).toEqual([]);
+    expect([d.yayinlar, d.denetim, d.bildirimler, d.revizeler]).toEqual([[], [], [], []]);
+  });
+  it('`magazaIcerikLimiter`: üç uç TEK kovada — 60 istekten sonra 61. istek 429 `{ ok: false, kod: "sinir" }`; kimlik / MFA reddi kovaya SAYILMAZ; 2a uçlarının `dbLimiter` kovası etkilenmez', async () => {
+    const d = await kur({ icerikTavani: 60 });
+    const id = await talepEkle();
+    // Reddedilen (kimliksiz, MFA) istekler kovadan DÜŞMEZ: sınırlayıcı zincirde iki kapıdan SONRA.
+    for (let i = 0; i < 5; i++) expect((await erp(d, ERP_YOLU(id, 'icerik'), null, {})).kod).toBe(401);
+    d.mfaEngeli = true;
+    for (let i = 0; i < 5; i++) expect((await erp(d, ERP_YOLU(id, 'sil'), 'u-yonetici', { surum: 3 })).kod).toBe(403);
+    d.mfaEngeli = false;
+    // 60 istek üç uca dağılmış (şema 400'leri: kovaya sayılır, hiçbir şey yazılmaz).
+    const yollar = ['/api/magaza-talepleri', ERP_YOLU(id, 'icerik'), ERP_YOLU(id, 'sil')];
+    const kodlar: number[] = [];
+    for (let i = 0; i < 60; i++) kodlar.push((await erp(d, yollar[i % 3], 'u-yonetici', {})).kod);
+    expect(kodlar).toEqual(Array.from({ length: 60 }, () => 400));
+    for (const yol of yollar) {
+      const dolu = await erp(d, yol, 'u-yonetici', {});
+      expect(dolu.kod, yol).toBe(429);
+      expect(dolu.json).toEqual({ ok: false, kod: 'sinir' });
+      expect(dolu.baslik('cache-control')).toBe('no-store');
+    }
+    // 2a uçları AYRI kovada (`dbLimiter`): içerik kovası doluyken aşama yazımı ve revize bildirimi isteği geçer.
+    expect((await erp(d, ERP_YOLU(id, 'durum'), 'u-yonetici', { onceki: 'sevk', surum: 3, durum: 'teslim' })).kod).toBe(200);
+    expect((await erp(d, `${ERP_YOLU(id, 'bildirim-gonder')}?tur=revize`, 'u-yonetici', {})).kod).toBe(409);
+    expect(magazaPanelSayaclari()).toMatchObject({ icerik429: 3, icerik400: 20 });
+    expect(magazaSayaclari().r429).toBe(0);
+  }, 30_000);
+  it('`/sil` (silme VE geri alma): yalnız Yönetici 200; Müdür / Satış ve diğer BÜTÜN `APP_ROLES` 403 `{ ok: false, kod: "rol" }`; süper-yönetici baypası YOK; kayıtsız 403; kimliksiz 401', async () => {
+    const d = await kur();
+    expect(APP_ROLES.filter(r => magazaTalepSilmeYetkisi(r))).toEqual(['Admin']);
+    for (const rol of APP_ROLES) {
+      const uid = `u-rol-${rol}`;
+      kullanici(d, uid, { role: rol, name: `Ad ${rol}` });
+      const canli = await talepEkle();
+      const olu = await talepEkle(silinmisEk());
+      const sil = await erp(d, ERP_YOLU(canli, 'sil'), uid, { surum: 3 });
+      const geriAl = await erp(d, ERP_YOLU(olu, 'sil'), uid, { surum: 4, geriAl: true });
+      if (rol === 'Admin') {
+        expect([sil.kod, sil.json], rol).toEqual([200, { ok: true }]);
+        expect([geriAl.kod, geriAl.json], rol).toEqual([200, { ok: true }]);
+        expect((await belge(canli)).silindi).toEqual({ zaman: zaman(SAAT_0), kim: { uid, ad: 'Ad Admin' }, kanal: 'erp' });
+        expect((await belge(olu)).silindi).toBeNull();
+      } else {
+        for (const y of [sil, geriAl]) {
+          expect(y.kod, rol).toBe(403);
+          expect(y.json).toEqual({ ok: false, kod: 'rol' });
+        }
+        expect(await belge(canli)).toEqual(talepVerisi());
+        expect(await belge(olu)).toEqual(talepVerisi(silinmisEk()));
+      }
+    }
+    // Süper-yönetici: modül süper-yöneticiyi HİÇ tanımaz (rol `panelKullanicisi(uid)`'den) — rolü Yönetici olmayan süper-yönetici de 403.
+    vi.stubEnv('SUPER_ADMIN_EMAILS', 'u-super@ornek.com.tr');
+    try {
+      kullanici(d, 'u-super', { role: 'Manager', name: 'Süper Yönetici' });
+      const canli = await talepEkle();
+      const olu = await talepEkle(silinmisEk());
+      for (const y of [await erp(d, ERP_YOLU(canli, 'sil'), 'u-super', { surum: 3 }), await erp(d, ERP_YOLU(olu, 'sil'), 'u-super', { surum: 4, geriAl: true })]) {
+        expect(y.kod).toBe(403);
+        expect(y.json).toEqual({ ok: false, kod: 'rol' });
+      }
+      expect(await belge(canli)).toEqual(talepVerisi());
+      // Kayıtsız kullanıcı (users belgesi yok) ve kimliksiz istek.
+      const kayitsiz = await erp(d, ERP_YOLU(canli, 'sil'), 'u-kayitsiz', { surum: 3 });
+      expect([kayitsiz.kod, kayitsiz.json]).toEqual([403, { ok: false, kod: 'rol' }]);
+      expect((await erp(d, ERP_YOLU(canli, 'sil'), null, { surum: 3 })).kod).toBe(401);
+    } finally { vi.unstubAllEnvs(); }
+    // Silme ve geri alma bildirim ÜRETMEZ (V20).
+    expect([d.bildirimler, d.revizeler]).toEqual([[], []]);
+    expect(magazaPanelSayaclari()).toMatchObject({ silErp: 1, geriAl: 1, silErp409: 0, geriAl409: 0 });
+  });
+  it('`/icerik` ve `POST /api/magaza-talepleri`: yetkili üç rol 200 / 201; diğer BÜTÜN `APP_ROLES` 403 `rol`; kayıtsız 403; kimliksiz 401', async () => {
+    const d = await kur();
+    const yetkililer = APP_ROLES.filter(r => magazaTalepIslemYetkisi(r));
+    expect([...yetkililer].sort()).toEqual(['Admin', 'Manager', 'Sales']);
+    for (const rol of APP_ROLES) {
+      const uid = `u-rol-${rol}`;
+      kullanici(d, uid, { role: rol, name: rol });
+      const id = await talepEkle();
+      const icerik = await erp(d, ERP_YOLU(id, 'icerik'), uid, { icerikSurum: 0, not: `Not ${rol}` });
+      const elle = await erp(d, '/api/magaza-talepleri', uid, ELLE_GOVDESI);
+      if (yetkililer.includes(rol)) {
+        expect([icerik.kod, icerik.json], rol).toEqual([200, { ok: true, degisti: true }]);
+        expect(elle.kod, rol).toBe(201);
+        expect((await belge(id)).not).toBe(`Not ${rol}`);
+      } else {
+        for (const y of [icerik, elle]) {
+          expect(y.kod, rol).toBe(403);
+          expect(y.json).toEqual({ ok: false, kod: 'rol' });
+        }
+        expect(await belge(id)).toEqual(talepVerisi());
+      }
+    }
+    // Yalnız üç yetkili rolün açtığı üç elle talep var.
+    expect(await elleSayisi()).toBe(3);
+    const id = await talepEkle();
+    for (const [yol, govde] of [[ERP_YOLU(id, 'icerik'), { icerikSurum: 0, not: 'x' }], ['/api/magaza-talepleri', ELLE_GOVDESI]] as Array<[string, unknown]>) {
+      const kayitsiz = await erp(d, yol, 'u-kayitsiz', govde);
+      expect([kayitsiz.kod, kayitsiz.json], yol).toEqual([403, { ok: false, kod: 'rol' }]);
+      expect((await erp(d, yol, null, govde)).kod, yol).toBe(401);
+    }
+    expect(await elleSayisi()).toBe(3);
+    expect(d.bildirimler).toHaveLength(3);
+    expect(d.revizeler).toHaveLength(3);
+  });
+
+  // ── İçerik ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  it('içerik 200 `{ ok: true, degisti: true }`: PARA ÖRNEĞİ 2 × 95,00 + 1 × 40,00 (%20) → 230,00 / 46,00 / 276,00 (sunucuda); müşterinin ilk talebi (`kalemler`, `talepEdilen`) DEĞİŞMEZ; revize kuyruğuna tam 1 iş ve YANITTAN ÖNCE', async () => {
+    let cozuldu = false;
+    const d = await kur({ revizeBildirimiIste: async () => { await new Promise(coz => setTimeout(coz, 30)); cozuldu = true; } });
+    const id = await talepEkle();
+    const onceki = await belge(id);
+    // Form her zaman TAM gövde gönderir (müşteri ve not saklıyla AYNI): «ne değişti» sunucuda ölçülür.
+    const y = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', { icerikSurum: 0, musteri: MUSTERI_AYNI, not: NOT_AYNI, teyit: TEYIT_GOVDESI });
+    expect(y.kod).toBe(200);
+    expect(y.json).toEqual({ ok: true, degisti: true });
+    expect(cozuldu).toBe(true);
+    expect(d.revizeler).toEqual([id]);
+    expect(d.bildirimler).toEqual([]);
+    const yazilan = await belge(id);
+    // V16: beyan ve içerik dışı her alan alan alan AYNI. Eklenenler: dört içerik alanı + boş `kalemTeslim` (beyandan kopyalanan
+    // `b:0` kaleminin taşınacak işareti yoktu: taşıma ifadesi boş nesne bırakır — işaret üretmez).
+    expect(Object.keys(yazilan).sort()).toEqual([...Object.keys(onceki), 'teyit', 'icerikSurum', 'icerikZamani', 'bildirimRevize', 'kalemTeslim'].sort());
+    for (const alan of Object.keys(onceki)) expect(yazilan[alan], alan).toEqual(onceki[alan]);
+    expect(yazilan.kalemTeslim).toEqual({});
+    expect(yazilan.kalemler).toEqual(talepVerisi().kalemler);
+    expect(yazilan.talepEdilen).toEqual({ araToplam: 459.97, kdv: null, toplam: null });
+    expect(yazilan.teyit).toEqual({
+      kalemler: [
+        { anahtar: expect.stringMatching(TEYIT_ANAHTARI), id: 'u-1', sku: 'DYO-0001', ad: 'İç cephe boyası 15 L', marka: 'DYO', adet: 2, birimFiyat: 95, kdvOrani: 20, kdvKaynagi: 'personel', tedarik: false },
+        { anahtar: expect.stringMatching(TEYIT_ANAHTARI), id: '', sku: '', ad: 'Rulo', marka: '', adet: 1, birimFiyat: 40, kdvOrani: 20, kdvKaynagi: 'personel', tedarik: false },
+      ],
+      araToplam: 230, kdv: 46, toplam: 276, zaman: zaman(SAAT_0), kim: { uid: 'u-satis', ad: 'Ayşe Yılmaz' },
+    });
+    expect([yazilan.icerikSurum, yazilan.icerikZamani]).toEqual([1, zaman(SAAT_0)]);
+    // `alanlar` = GERÇEKTEN değişen (gövdede müşteri ve not da vardı).
+    expect(yazilan.bildirimRevize).toEqual({ durum: 'bekliyor', zaman: zaman(SAAT_0), alanlar: ['teyit'], kim: { uid: 'u-satis', ad: 'Ayşe Yılmaz' }, icerikSurum: 1 });
+    expect(d.yayinlar).toEqual([[COLL, 'set', id, yazilan, { cid: CID }]]);
+    // Denetim: alan ADLARI; müşteri verisi / tutar / KDV oranı / anahtar YOK.
+    expect(d.denetim).toEqual([[{ uid: 'u-satis', email: 'u-satis@ornek.com.tr' }, 'Mağaza talebi içeriği', 'T261009-AB12 · erp · teyit']]);
+    expect(JSON.stringify(d.denetim)).not.toMatch(/Şükrü|sukru@|0532|230|276|t:[0-9a-f]|b:0/);
+    expect(y.metin).not.toMatch(/teyit|230|Şükrü/);
+    expect(magazaPanelSayaclari()).toMatchObject({ icerik: 1, icerikDegisiklikYok: 0, revizeBildirimIstendi: 1, revizeBildirimIstenemedi: 0 });
+  });
+  it('içerik: aynı içerik ikinci kez → `200 { ok: true, degisti: false }` — yazım / revize işi / denetim / yayın YOK; sonra yalnız `not` değişince `alanlar` yalnız `not` (gövdede müşteri de olsa), `teyit.zaman` DEĞİŞMEZ', async () => {
+    const d = await kur();
+    const id = await talepEkle();
+    expect((await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', { icerikSurum: 0, musteri: MUSTERI_AYNI, not: NOT_AYNI, teyit: TEYIT_GOVDESI })).json).toEqual({ ok: true, degisti: true });
+    const ilk = await belge(id);
+    const teyit = await teyitOku(id);
+    d.saat.ms += 5000;
+    // Formun ikinci «Kaydet»i: aynı kalemler artık kendi `t:` anahtarlarıyla, güncel sürümle.
+    const ayni = { icerikSurum: 1, musteri: MUSTERI_AYNI, not: NOT_AYNI, teyit: { kalemler: teyit.kalemler.map(k => govdeKalemi(k)) } };
+    const y = await erp(d, ERP_YOLU(id, 'icerik'), 'u-mudur', ayni);
+    expect(y.kod).toBe(200);
+    expect(y.json).toEqual({ ok: true, degisti: false });
+    expect(await belge(id)).toEqual(ilk);
+    expect([d.revizeler, d.denetim.length, d.yayinlar.length]).toEqual([[id], 1, 1]);
+    // KDV oranı gövdede YOKKEN de değişiklik yok: personelin daha önce seçtiği oran korunur (başkasının kaydı tutarı değiştirmez).
+    const oransiz = await erp(d, ERP_YOLU(id, 'icerik'), 'u-mudur', { ...ayni, teyit: { kalemler: teyit.kalemler.map(k => govdeKalemi(k, false)) } });
+    expect(oransiz.json).toEqual({ ok: true, degisti: false });
+    expect(await belge(id)).toEqual(ilk);
+    // Yalnız not değişti.
+    const notlu = await erp(d, ERP_YOLU(id, 'icerik'), 'u-mudur', { ...ayni, not: '  Sabah arayın.\r\n' });
+    expect(notlu.json).toEqual({ ok: true, degisti: true });
+    const sonra = await belge(id);
+    expect(sonra.not).toBe('Sabah arayın.');
+    expect(sonra.teyit).toEqual(ilk.teyit);   // `teyit.zaman` / `teyit.kim` notu düzenleyene GEÇMEZ
+    expect(sonra.musteri).toEqual(ilk.musteri);
+    expect([sonra.icerikSurum, sonra.icerikZamani]).toEqual([2, zaman(SAAT_0 + 5000)]);
+    // İlk revize bildirimi hâlâ `bekliyor`: alan adları BİRLEŞİR, `zaman` / `kim` / `icerikSurum` sonuncusunun.
+    expect(sonra.bildirimRevize).toEqual({ durum: 'bekliyor', zaman: zaman(SAAT_0 + 5000), alanlar: ['teyit', 'not'], kim: { uid: 'u-mudur', ad: 'Müdür Bey' }, icerikSurum: 2 });
+    expect(d.denetim.map(k => k[2])).toEqual(['T261009-AB12 · erp · teyit', 'T261009-AB12 · erp · not']);
+    expect(d.revizeler).toEqual([id, id]);
+    expect(sonra.bildirim).toEqual(talepVerisi().bildirim);   // ilk bildirim alanı EZİLMEZ
+    expect(magazaPanelSayaclari()).toMatchObject({ icerik: 2, icerikDegisiklikYok: 2, icerik409: 0, icerik400: 0 });
+  });
+  it('içerik: `kdvOrani` verilmeyen kalemde oran ERP ürün kaydından (`urun`), eşleşmeyen / küme dışı / çelişen kayıtta 20 + `varsayilan`; karışık oran 2 × 95 (%20) + 1 × 40 (%10) → 230 / 42 / 272; fiyatı `null` kalem varsa ÜÇ toplam da `null`', async () => {
+    const d = await kur();
+    await urunEkle('X20', { vatRate: 20 });
+    await urunEkle('X10', { vatRate: 10 });
+    await urunEkle('DEKOR-1325', { vatRate: 10, companyId: undefined });   // etiketsiz eski kayıt + `-Dnnn` paket SKU'sunun tabanı
+    await urunEkle('ESKI-18', { vatRate: 18 });                            // küme dışı
+    await urunEkle('CELISEN', { vatRate: 10 });
+    await urunEkle('CELISEN', { vatRate: 20 });
+    await urunEkle('YABANCI', { vatRate: 10, companyId: 'kiraci-2' });     // başka kiracının kartı EŞLEŞMEZ
+    const id = await talepEkle();
+    const y = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', { icerikSurum: 0, teyit: { kalemler: [
+      { sku: 'X20', ad: 'Yirmilik', adet: 2, birimFiyat: 95 },
+      { sku: 'X10', ad: 'Onluk', adet: 1, birimFiyat: 40 },
+    ] } });
+    expect(y.json).toEqual({ ok: true, degisti: true });
+    const karisik = await teyitOku(id);
+    expect(karisik.kalemler.map(k => [k.sku, k.kdvOrani, k.kdvKaynagi])).toEqual([['X20', 20, 'urun'], ['X10', 10, 'urun']]);
+    expect([karisik.araToplam, karisik.kdv, karisik.toplam]).toEqual([230, 42, 272]);
+    // Akışa giden satır da kaynağı taşır (ekran «varsayılan» imini buradan basar).
+    expect(JSON.stringify(d.yayinlar[0][3])).toContain('"kdvKaynagi":"urun"');
+
+    const kaynaklar = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', { icerikSurum: 1, teyit: { kalemler: [
+      { sku: 'DEKOR-1325-D002', ad: 'Paket', adet: 1, birimFiyat: 10 },
+      { sku: 'ESKI-18', ad: 'Eski oran', adet: 1, birimFiyat: 10 },
+      { sku: 'CELISEN', ad: 'Çelişen', adet: 1, birimFiyat: 10 },
+      { sku: 'YABANCI', ad: 'Yabancı', adet: 1, birimFiyat: 10 },
+      { sku: 'YOK-1', ad: 'Eşleşmeyen', adet: 1, birimFiyat: 10 },
+      { ad: 'SKU\'suz', adet: 1, birimFiyat: 10 },
+      { sku: 'YOK-2', ad: 'Personel seçti', adet: 1, birimFiyat: 10, kdvOrani: 1 },
+      { sku: 'X10', ad: 'Fiyatı sorulacak', adet: 3, birimFiyat: null },
+    ] } });
+    expect(kaynaklar.json).toEqual({ ok: true, degisti: true });
+    const t = await teyitOku(id);
+    expect(t.kalemler.map(k => [k.sku, k.kdvOrani, k.kdvKaynagi])).toEqual([
+      ['DEKOR-1325-D002', 10, 'urun'], ['ESKI-18', 20, 'varsayilan'], ['CELISEN', 20, 'varsayilan'], ['YABANCI', 20, 'varsayilan'],
+      ['YOK-1', 20, 'varsayilan'], ['', 20, 'varsayilan'], ['YOK-2', 1, 'personel'], ['X10', 10, 'urun'],
+    ]);
+    // Akıştaki satır iki kaynağı da taşır (ekran «varsayılan» imini buradan basar; istemci kaynağı KENDİ çıkarmaz).
+    expect(d.yayinlar).toHaveLength(2);
+    for (const kaynak of ['urun', 'varsayilan', 'personel']) expect(JSON.stringify(d.yayinlar[1][3]), kaynak).toContain(`"kdvKaynagi":"${kaynak}"`);
+    // «Fiyat sorulacak»: kısmi toplam basılmaz, sıfır DEĞİL.
+    expect(t.kalemler[7].birimFiyat).toBeNull();
+    expect([t.araToplam, t.kdv, t.toplam]).toEqual([null, null, null]);
+    // TEK dar ürün okuması / yazım (kalem başına sorgu yok).
+    expect(d.sorgular.filter(s => s === URUN_KDV_SQL)).toHaveLength(2);
+  });
+  it('içerik 400 (şema): `kdvKaynagi`, `kdvOrani: 18` / 8, kısmi `musteri`, boş gövde, boş `kalemler`, `b:01`, yinelenen anahtar, beyan / toplam alanları, 4.001 karakter not, bozuk `icerikSurum`, `companyId` — ve yazma işlevinin `gecersiz`i (tanınmayan `t:`, aralık dışı `b:`, boş ad, 9 rakamlı telefon)', async () => {
+    const d = await kur();
+    const id = await talepEkle();
+    const kalem = { ad: 'Rulo', adet: 1, birimFiyat: 40 };
+    const alti = { ad: 'A', firma: '', telefon: '0532 111 22 33', eposta: '', il: '', adres: '' };
+    const govdeler: unknown[] = [
+      {}, { icerikSurum: 0 }, { not: 'x' }, { icerikSurum: -1, not: 'x' }, { icerikSurum: 0.5, not: 'x' }, { icerikSurum: '0', not: 'x' },
+      { icerikSurum: 0, not: 'x', companyId: CID }, { icerikSurum: 0, not: 'x'.repeat(4001) }, { icerikSurum: 0, not: 7 },
+      { icerikSurum: 0, musteri: alti }, { icerikSurum: 0, musteri: { ...MUSTERI_AYNI, telefonSon10: '5321112233' } }, { icerikSurum: 0, musteri: { ...MUSTERI_AYNI, vergi: null } },
+      { icerikSurum: 0, teyit: { kalemler: [] } }, { icerikSurum: 0, teyit: {} }, { icerikSurum: 0, teyit: { kalemler: [kalem], araToplam: 40 } },
+      { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, kdvKaynagi: 'personel' }] } },
+      { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, kdvOrani: 18 }] } }, { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, kdvOrani: 8 }] } },
+      { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, kdvOrani: '20' }] } },
+      { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, anahtar: 'b:01' }] } }, { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, anahtar: 'c:0' }] } },
+      { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, anahtar: 'b:0' }, { ...kalem, anahtar: 'b:0' }] } },
+      { icerikSurum: 0, teyit: { kalemler: [{ ad: 'Rulo', adet: 1 }] } },                       // `birimFiyat` anahtarı ZORUNLU (sayı ya da açıkça null)
+      { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, adet: 0 }] } }, { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, adet: 1.5 }] } },
+      { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, birimFiyat: -1 }] } }, { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, talepFiyat: 40 }] } },
+      { icerikSurum: 0, not: 'x', kalemler: [kalem] }, { icerikSurum: 0, not: 'x', talepEdilen: { araToplam: 1 } }, { icerikSurum: 0, not: 'x', silindi: null },
+      // Şemadan geçer, yazma işlevi `gecersiz` der:
+      { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, anahtar: 't:0123456789ab' }] } }, { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, anahtar: 'b:3' }] } },
+      { icerikSurum: 0, teyit: { kalemler: [{ ...kalem, ad: ' \n ' }] } },
+      { icerikSurum: 0, musteri: { ...MUSTERI_AYNI, ad: '   ' } }, { icerikSurum: 0, musteri: { ...MUSTERI_AYNI, telefon: '532 111 22 3' } },
+    ];
+    for (const g of govdeler) {
+      const y = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', g);
+      expect(y.kod, JSON.stringify(g).slice(0, 90)).toBe(400);
+      expect(y.json).toEqual({ ok: false });
+    }
+    expect(await belge(id)).toEqual(talepVerisi());
+    expect([d.yayinlar, d.denetim, d.revizeler]).toEqual([[], [], []]);
+    expect(d.sorgular.filter(s => /^UPDATE/.test(s))).toEqual([]);
+    expect(magazaPanelSayaclari()).toMatchObject({ icerik400: govdeler.length, icerik: 0 });
+  });
+  it('içerik 409 `surum-eski` + güncel `icerikSurum` · 409 `silindi` · 404 (başka kiracı / bozuk kimlik / olmayan talep) — hiçbirinde revize işi / yazım / denetim YOK', async () => {
+    const d = await kur();
+    const id = await talepEkle({ icerikSurum: 4 });
+    for (const bayat of [0, 3, 5]) {
+      const y = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', { icerikSurum: bayat, not: 'Yeni' });
+      expect(y.kod, String(bayat)).toBe(409);
+      expect(y.json).toEqual({ ok: false, kod: 'surum-eski', icerikSurum: 4 });
+    }
+    expect(await belge(id)).toEqual(talepVerisi({ icerikSurum: 4 }));
+    const silinmis = await talepEkle(silinmisEk());
+    const s = await erp(d, ERP_YOLU(silinmis, 'icerik'), 'u-satis', { icerikSurum: 0, not: 'Yeni' });
+    expect([s.kod, s.json]).toEqual([409, { ok: false, kod: 'silindi' }]);
+    expect(await belge(silinmis)).toEqual(talepVerisi(silinmisEk()));
+    const baska = await talepEkle({ companyId: 'kiraci-2' });
+    for (const [kimlik, uid] of [[baska, 'u-satis'], ['mt-bozuk', 'u-satis'], [SIFIR_KIMLIK, 'u-satis'], [id, 'u-baska']] as Array<[string, string]>) {
+      const y = await erp(d, ERP_YOLU(kimlik, 'icerik'), uid, { icerikSurum: 0, not: 'Yeni' });
+      expect(y.kod, `${kimlik} ${uid}`).toBe(404);
+      expect(y.json).toEqual({ ok: false });
+    }
+    expect([d.yayinlar, d.denetim, d.revizeler, d.bildirimler]).toEqual([[], [], [], []]);
+    expect(magazaPanelSayaclari()).toMatchObject({ icerik409: 4, icerik: 0, revizeBildirimIstendi: 0 });
+  });
+  it('içerik 503: ürün KDV oranı OKUNAMAZSA yazım YAPILMAZ (varsayılan 20 ile sessizce yazılmaz); belge değişmez, revize işi yok; başka veritabanı hatası 500', async () => {
+    const d = await kur();
+    const id = await talepEkle();
+    const govde = { icerikSurum: 0, teyit: { kalemler: [{ sku: 'DYO-0001', ad: 'Boya', adet: 1, birimFiyat: 10 }] } };
+    d.sorguHatasi = sql => (sql === URUN_KDV_SQL ? Object.assign(new Error(`ürün okunamadı ${ISARET}`), { code: '57P01', detail: ISARET }) : null);
+    const y = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', govde);
+    expect(y.kod).toBe(503);
+    expect(y.json).toEqual({ ok: false });
+    expect(await belge(id)).toEqual(talepVerisi());
+    expect([d.yayinlar, d.denetim, d.revizeler]).toEqual([[], [], []]);
+    expect(d.sorgular).not.toContain(ICERIK_SQL);
+    // Oran personelden geldiyse ürün okuması HİÇ yapılmaz: aynı arıza yazımı durdurmaz.
+    const personel = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', { icerikSurum: 0, teyit: { kalemler: [{ sku: 'DYO-0001', ad: 'Boya', adet: 1, birimFiyat: 10, kdvOrani: 10 }] } });
+    expect(personel.json).toEqual({ ok: true, degisti: true });
+    // Yazım ifadesinin hatası «ürün KDV okuması» DEĞİLDİR: 500.
+    d.sorguHatasi = sql => (sql === ICERIK_SQL ? Object.assign(new Error('koptu'), { code: '08006' }) : null);
+    const baska = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', { icerikSurum: 1, not: 'Yeni' });
+    expect(baska.kod).toBe(500);
+    expect(baska.json).toEqual({ ok: false });
+    d.sorguHatasi = null;
+    expect(konsol).toEqual([
+      'error: [magaza-erp] içerik yazılmadı, ürün KDV oranı okunamadı: 57P01',
+      'error: [magaza-erp] içerik yazımı işlenemedi: 08006',
+    ]);
+    expect(magazaPanelSayaclari()).toMatchObject({ icerik503: 1, icerik: 1, r500: 0 });
+  });
+  it('içerik: revize isteyicisi sözleşmeye AYKIRI reddetse de yazım geri alınmaz, 200 döner (belge `bekliyor` taşır; kaçan süpürmesi sahiplenir) — sayaç + günlük', async () => {
+    const d = await kur({ revizeBildirimiIste: () => Promise.reject(Object.assign(new Error(ISARET), { code: 'EKUYRUK' })) });
+    const id = await talepEkle();
+    const y = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', { icerikSurum: 0, not: 'Yeni not' });
+    expect([y.kod, y.json]).toEqual([200, { ok: true, degisti: true }]);
+    expect((await belge(id)).bildirimRevize).toMatchObject({ durum: 'bekliyor', alanlar: ['not'], icerikSurum: 1 });
+    expect(d.denetim).toHaveLength(1);
+    expect(konsol).toEqual(['error: [magaza-icerik] içerik yazıldı, revize bildirimi istenemedi: EKUYRUK']);
+    expect(magazaPanelSayaclari()).toMatchObject({ icerik: 1, revizeBildirimIstendi: 1, revizeBildirimIstenemedi: 1 });
+  });
+
+  // ── Elle talep ────────────────────────────────────────────────────────────────────────────────────────────────────
+  it('elle talep 201 `{ ok, id, talepNo }`: numarayı SUNUCU üretir (İstanbul günü); belge `elle` + `durum: "yeni"` + `bildirim: bekliyor` + `istemciTarihi: null`; ilk kuyruğa tam 1 iş (`{ talepId }`) ve YANITTAN ÖNCE; takip ucunda aynı no + telefonla bulunur', async () => {
+    let cozuldu = false;
+    const d = await kur({ bildirimIste: async () => { await new Promise(coz => setTimeout(coz, 30)); cozuldu = true; } });
+    const y = await erp(d, '/api/magaza-talepleri', 'u-mudur', ELLE_GOVDESI);
+    expect(y.kod).toBe(201);
+    const g = y.json as { ok: boolean; id: string; talepNo: string };
+    expect(Object.keys(g)).toEqual(['ok', 'id', 'talepNo']);
+    expect(g.ok).toBe(true);
+    expect(g.talepNo).toMatch(MAGAZA_TALEP_NO_DESENI);
+    // SAAT_0 = 2026-10-09 12:00 UTC = 15:00 İstanbul.
+    expect(g.talepNo.slice(0, 8)).toBe('T261009-');
+    // Kimlik türetimi dilim 1'le AYNI (kiracı + no + telefonun son 10 hanesi).
+    expect(g.id).toBe(magazaTalepKimligi(CID, g.talepNo, ELLE_SON10));
+    expect(cozuldu).toBe(true);
+    expect(d.bildirimler).toEqual([g.id]);
+    expect(d.revizeler).toEqual([]);
+    const yazilan = await belge(g.id);
+    expect(yazilan).toEqual({
+      companyId: CID, talepNo: g.talepNo, durum: 'yeni', olusturma: zaman(SAAT_0), istemciTarihi: null,
+      musteri: { ad: 'Ümit Çağlar', firma: 'Çağlar İnşaat', telefon: '0533 444 55 66', eposta: '', il: '', adres: '', vergi: '' },
+      telefonSon10: ELLE_SON10, not: 'Telefonla geldi.',
+      kalemler: [
+        { id: '', sku: 'KNF-25', ad: 'Saten alçı 25 kg', marka: 'Knauf', adet: 4, talepFiyat: 180, tedarik: false },
+        { id: '', sku: '', ad: 'Mala', marka: '', adet: 1, talepFiyat: null, tedarik: false },
+      ],
+      talepEdilen: { araToplam: null, kdv: null, toplam: null }, fiyatiSorulacakVar: true,
+      bildirim: { durum: 'bekliyor', zaman: zaman(SAAT_0) },
+      elle: { zaman: zaman(SAAT_0), kim: { uid: 'u-mudur', ad: 'Müdür Bey' } },
+    });
+    // Kaldırılan beşinci bildirim durumu hiçbir yazımda üretilmez.
+    expect(JSON.stringify(yazilan)).not.toContain('gerekmiyor');
+    expect(d.yayinlar).toEqual([[COLL, 'set', g.id, yazilan, { cid: CID }]]);
+    expect(d.denetim).toEqual([[{ uid: 'u-mudur', email: 'u-mudur@ornek.com.tr' }, 'Mağaza talebi elle açıldı', `${g.talepNo} · erp`]]);
+    expect(JSON.stringify(d.denetim)).not.toMatch(/Ümit|0533|Saten/);
+    expect(magazaPanelSayaclari()).toMatchObject({ elleTalep: 1, elleTalepCakisti: 0 });
+    // Müşteri takip ucunda aynı `no` + telefonla sorgular (V20).
+    const takip = await iste(d, '/api/magaza/siparis-durumu', { koken: IZINLI, govde: { no: g.talepNo, telefon: '+90 533 444 55 66' } });
+    expect(takip.kod).toBe(200);
+    expect(takip.json).toMatchObject({ ok: true, durum: 'alindi', kaynak: 'beyan', kalemSayisi: 2, kalemler: [{ ad: 'Saten alçı 25 kg', marka: 'Knauf', adet: 4, teslim: false }, { ad: 'Mala', adet: 1, teslim: false }] });
+    // Panel kartında `elle: true`.
+    expect(siparisler(await panel(d, '/siparisler', { belirtec: belirtec(d) })).find(s => s.id === g.id)).toMatchObject({ elle: true, no: g.talepNo, durum: 'alindi' });
+  });
+  it('elle talep 400: telefonu 9 rakamlı gövde, `no` / `tarih` / tanınmayan alan (`.strict()`), boş kalem listesi, boş ad, `adet: 0` — kayıt, kuyruk işi, denetim YOK', async () => {
+    const d = await kur();
+    const govdeler: unknown[] = [
+      { ...ELLE_GOVDESI, musteri: { ad: 'Ümit Çağlar', telefon: '533 444 55 6' } },                 // 9 rakam (takip ucu no + telefonla çalışır)
+      { ...ELLE_GOVDESI, musteri: { ad: 'Ümit Çağlar', telefon: '' } }, { ...ELLE_GOVDESI, musteri: { ad: ' ', telefon: '0533 444 55 66' } },
+      { ...ELLE_GOVDESI, no: 'T261009-ZZ99' }, { ...ELLE_GOVDESI, tarih: zaman(SAAT_0) }, { ...ELLE_GOVDESI, companyId: CID }, { ...ELLE_GOVDESI, elle: true },
+      { ...ELLE_GOVDESI, durum: 'teslim' }, { ...ELLE_GOVDESI, kalemler: [] }, { ...ELLE_GOVDESI, kalemler: [{ ad: 'x', adet: 0 }] },
+      { ...ELLE_GOVDESI, kalemler: [{ ad: ' ', adet: 1 }] }, { musteri: ELLE_GOVDESI.musteri }, {}, [],
+    ];
+    for (const g of govdeler) {
+      const y = await erp(d, '/api/magaza-talepleri', 'u-satis', g);
+      expect(y.kod, JSON.stringify(g).slice(0, 90)).toBe(400);
+      expect(y.json).toEqual({ ok: false });
+    }
+    expect(Number((await db.query<{ n: string }>('SELECT count(*) AS n FROM docs WHERE coll = $1', [COLL])).rows[0].n)).toBe(0);
+    expect([d.yayinlar, d.denetim, d.bildirimler]).toEqual([[], [], []]);
+  });
+  it('elle talep: numara çakışırsa yeni numarayla dener — üç çakışmada 503 `{ ok: false }` ve kuyrukta iş YOK (mevcut kayda dokunulmaz); ikinci denemede tutarsa 201 ve tam 1 iş', async () => {
+    const dolu = (no: string): Promise<string> => talepEkle({ talepNo: no, not: 'MEVCUT' }, magazaTalepKimligi(CID, no, ELLE_SON10));
+    const hep = await kur({ elleNoUret: () => 'T261009-AAAA' });
+    const mevcut = await dolu('T261009-AAAA');
+    const y = await erp(hep, '/api/magaza-talepleri', 'u-satis', ELLE_GOVDESI);
+    expect(y.kod).toBe(503);
+    expect(y.json).toEqual({ ok: false });
+    expect(ELLE_TALEP_DENEME_SINIRI).toBe(3);
+    expect(hep.sorgular.filter(s => s === EKLEME_SQL)).toHaveLength(3);
+    expect(await belge(mevcut)).toEqual(talepVerisi({ talepNo: 'T261009-AAAA', not: 'MEVCUT' }));
+    expect([hep.bildirimler, hep.yayinlar, hep.denetim]).toEqual([[], [], []]);
+    expect(magazaPanelSayaclari()).toMatchObject({ elleTalep: 0, elleTalepCakisti: 1 });
+
+    const numaralar = ['T261009-AAAA', 'T261009-BBBB'];
+    const ikinci = await kur({ elleNoUret: () => numaralar.shift() ?? 'T261009-CCCC' });
+    const tutan = await erp(ikinci, '/api/magaza-talepleri', 'u-satis', ELLE_GOVDESI);
+    expect(tutan.kod).toBe(201);
+    expect(tutan.json).toEqual({ ok: true, id: magazaTalepKimligi(CID, 'T261009-BBBB', ELLE_SON10), talepNo: 'T261009-BBBB' });
+    // Çakışan denemede kuyruk isteği / yayın YOK; tutan denemede tam 1.
+    expect(ikinci.bildirimler).toEqual([magazaTalepKimligi(CID, 'T261009-BBBB', ELLE_SON10)]);
+    expect(ikinci.yayinlar).toHaveLength(1);
+    expect(await belge(mevcut)).toEqual(talepVerisi({ talepNo: 'T261009-AAAA', not: 'MEVCUT' }));
+  });
+  it('elle talep: mağaza talepleri yalnız SUNUCU kiracısına yazılır — başka kiracının kullanıcısı 403 `kiraci`; kiracı çözülemiyorsa 503; kuyruğa ekleme reddetse de 201 (kayıt geri alınmaz)', async () => {
+    const d = await kur();
+    const baska = await erp(d, '/api/magaza-talepleri', 'u-baska', ELLE_GOVDESI);
+    expect([baska.kod, baska.json]).toEqual([403, { ok: false, kod: 'kiraci' }]);
+    for (const kiraci of [() => Promise.resolve(''), () => Promise.reject(new Error(ISARET))]) {
+      const kiracisiz = await kur({ kiraci });
+      const y = await erp(kiracisiz, '/api/magaza-talepleri', 'u-satis', ELLE_GOVDESI);
+      expect([y.kod, y.json]).toEqual([503, { ok: false }]);
+      expect(kiracisiz.bildirimler).toEqual([]);
+    }
+    expect(await elleSayisi()).toBe(0);
+    const reddeden = await kur({ bildirimIste: () => Promise.reject(Object.assign(new Error(ISARET), { code: 'EKUYRUK' })) });
+    const y = await erp(reddeden, '/api/magaza-talepleri', 'u-satis', ELLE_GOVDESI);
+    expect(y.kod).toBe(201);
+    expect((await belge((y.json as { id: string }).id)).bildirim).toEqual({ durum: 'bekliyor', zaman: zaman(SAAT_0) });
+    expect(reddeden.denetim).toHaveLength(1);
+    expect(konsol).toEqual(['error: [magaza-icerik] elle talep yazıldı, bildirim istenemedi: EKUYRUK']);
+  });
+
+  // ── Silme / geri alma ─────────────────────────────────────────────────────────────────────────────────────────────
+  it('sil → 200: kayıt DURUR, `silindi: { zaman, kim, kanal: "erp" }` + `durumSurum` +1 (başka alan değişmez); zaten silinmiş 409 `silindi`; bayat sürüm 409 `surum-eski` + güncel `surum`; geri al → `silindi: null` ve aşama yazımı yeniden geçer; silinmemişte 409 `silinmemis`', async () => {
+    const d = await kur();
+    const ek = { kalemTeslim: { 'b:1': { durum: 'teslim', zaman: zaman(SAAT_0 - DAKIKA), kim: { uid: 'u', ad: 'a' } } }, ...revizeEk('gonderilemedi') };
+    const id = await talepEkle(ek);
+    // Bayat ekran (teslim'e geçmiş talep bayat ekrandan silinmesin).
+    const bayat = await erp(d, ERP_YOLU(id, 'sil'), 'u-yonetici', { surum: 2 });
+    expect([bayat.kod, bayat.json]).toEqual([409, { ok: false, kod: 'surum-eski', surum: 3 }]);
+    const y = await erp(d, ERP_YOLU(id, 'sil'), 'u-yonetici', { surum: 3 });
+    expect([y.kod, y.json]).toEqual([200, { ok: true }]);
+    const silinen = await belge(id);
+    expect(silinen).toEqual(talepVerisi({ ...ek, silindi: { zaman: zaman(SAAT_0), kim: { uid: 'u-yonetici', ad: 'Yönetici Hanım' }, kanal: 'erp' }, durumSurum: 4 }));
+    expect(d.yayinlar).toEqual([[COLL, 'set', id, silinen, { cid: CID }]]);
+    expect(d.denetim).toEqual([[{ uid: 'u-yonetici', email: 'u-yonetici@ornek.com.tr' }, 'Mağaza talebi silindi', 'T261009-AB12 · erp']]);
+    const yine = await erp(d, ERP_YOLU(id, 'sil'), 'u-yonetici', { surum: 4 });
+    expect([yine.kod, yine.json]).toEqual([409, { ok: false, kod: 'silindi' }]);
+
+    // Geri alma: silmenin artırdığı güncel sürümle.
+    d.saat.ms += 5000;
+    const eskiSurum = await erp(d, ERP_YOLU(id, 'sil'), 'u-yonetici', { surum: 3, geriAl: true });
+    expect([eskiSurum.kod, eskiSurum.json]).toEqual([409, { ok: false, kod: 'surum-eski', surum: 4 }]);
+    const geri = await erp(d, ERP_YOLU(id, 'sil'), 'u-yonetici', { surum: 4, geriAl: true });
+    expect([geri.kod, geri.json]).toEqual([200, { ok: true }]);
+    const canli = await belge(id);
+    // Anahtar VAR, değer JSON null (`||` alan silemez); başka her alan aynen.
+    expect(canli).toEqual(talepVerisi({ ...ek, silindi: null, durumSurum: 5 }));
+    expect('silindi' in canli).toBe(true);
+    expect(d.denetim[1]).toEqual([{ uid: 'u-yonetici', email: 'u-yonetici@ornek.com.tr' }, 'Mağaza talebi geri alındı', 'T261009-AB12 · erp']);
+    const silinmemis = await erp(d, ERP_YOLU(id, 'sil'), 'u-yonetici', { surum: 5, geriAl: true });
+    expect([silinmemis.kod, silinmemis.json]).toEqual([409, { ok: false, kod: 'silinmemis' }]);
+    // Geri alınan talep yeniden CANLIDIR: aşama yazımı geçer.
+    expect((await erp(d, ERP_YOLU(id, 'durum'), 'u-satis', { onceki: 'sevk', surum: 5, durum: 'teslim' })).kod).toBe(200);
+    // Silme / geri alma bildirim ÜRETMEZ; bildirim alanlarına DOKUNMAZ (yukarıdaki tam eşitlik).
+    expect([d.bildirimler, d.revizeler]).toEqual([[], []]);
+    expect(magazaPanelSayaclari()).toMatchObject({ silErp: 1, silErp409: 2, geriAl: 1, geriAl409: 2 });
+  });
+  it('sil 400 (şema): `surum`suz, eksi / kesirli / dizge `surum`, `geriAl: "evet"`, tanınmayan alan; 404: başka kiracı / bozuk kimlik / olmayan talep (silme ve geri almada)', async () => {
+    const d = await kur();
+    const id = await talepEkle();
+    for (const g of [{}, { geriAl: true }, { surum: -1 }, { surum: 1.5 }, { surum: '3' }, { surum: 3, geriAl: 'evet' }, { surum: 3, kanal: 'panel' }, { surum: 3, companyId: CID }, [3]]) {
+      const y = await erp(d, ERP_YOLU(id, 'sil'), 'u-yonetici', g);
+      expect(y.kod, JSON.stringify(g)).toBe(400);
+      expect(y.json).toEqual({ ok: false });
+    }
+    const baska = await talepEkle({ companyId: 'kiraci-2' });
+    for (const kimlik of [baska, 'mt-bozuk', SIFIR_KIMLIK]) {
+      for (const g of [{ surum: 3 }, { surum: 3, geriAl: true }]) {
+        const y = await erp(d, ERP_YOLU(kimlik, 'sil'), 'u-yonetici', g);
+        expect(y.kod, `${kimlik} ${JSON.stringify(g)}`).toBe(404);
+        expect(y.json).toEqual({ ok: false });
+      }
+    }
+    // Başka kiracının Yöneticisi bu kiracının talebini SİLEMEZ (kiracı gövdeden değil, kullanıcıdan).
+    expect((await erp(d, ERP_YOLU(id, 'sil'), 'u-baska', { surum: 3 })).kod).toBe(404);
+    expect(await belge(id)).toEqual(talepVerisi());
+    expect(await belge(baska)).toEqual(talepVerisi({ companyId: 'kiraci-2' }));
+    expect([d.yayinlar, d.denetim]).toEqual([[], []]);
+    // ERP'de ayrı geri alma / panel silme yolu YOK: geri alma `sil` ucunun `geriAl` bayrağıdır.
+    expect((await erp(d, ERP_YOLU(id, 'geri-al'), 'u-yonetici', { surum: 3 })).json).toEqual({ error: 'Not found' });
+  });
+  it('silinmiş talep DONUKTUR (V17): ERP aşama / kalem teslim / elle bildirim (ilk + revize) / içerik ve panel aşama / kalem teslim / etiket → 409 `{ ok: false, kod: "silindi" }`; belge değişmez, kuyruk / yayın / denetim 0', async () => {
+    const d = await kur();
+    const ek = { ...silinmisEk(), ...revizeEk('gonderilemedi'), bildirim: { durum: 'gonderilemedi', zaman: zaman(SAAT_0 - GUN), deneme: 3, hataSinifi: 'baglanti' } };
+    const id = await talepEkle(ek);
+    const erpIstekleri: Array<[string, unknown]> = [
+      [ERP_YOLU(id, 'durum'), { onceki: 'sevk', surum: 4, durum: 'teslim' }], [ERP_YOLU(id, 'durum'), { onceki: 'sevk', surum: 4, durum: 'sevk', aciklama: 'Not' }],
+      [ERP_YOLU(id, 'kalem-teslim'), { surum: 4, teslim: true, kalemler: 'hepsi' }], [ERP_YOLU(id, 'bildirim-gonder'), {}],
+      [`${ERP_YOLU(id, 'bildirim-gonder')}?tur=revize`, {}], [ERP_YOLU(id, 'icerik'), { icerikSurum: 2, not: 'Yeni' }],
+    ];
+    for (const [yol, govde] of erpIstekleri) {
+      const y = await erp(d, yol, 'u-yonetici', govde);
+      expect(y.kod, yol).toBe(409);
+      expect(y.json).toEqual({ ok: false, kod: 'silindi' });
+    }
+    const b = belirtec(d);
+    for (const [uc, govde] of [['durum', { onceki: 'sevk', surum: 4, durum: 'teslim' }], ['kalem-teslim', { surum: 4, teslim: true, kalemler: ['b:0'] }], ['etiket-basildi', { koli: 2 }]] as Array<[string, unknown]>) {
+      const y = await panel(d, `/siparisler/${id}/${uc}`, { belirtec: b, govde });
+      expect(y.kod, uc).toBe(409);
+      expect(y.json).toEqual({ ok: false, kod: 'silindi' });
+      expect(y.baslik('cache-control')).toBe('no-store');
+    }
+    expect(await belge(id)).toEqual(talepVerisi(ek));
+    expect([d.yayinlar, d.denetim, d.bildirimler, d.revizeler]).toEqual([[], [], [], []]);
+    expect(magazaPanelSayaclari()).toMatchObject({
+      durumErp409: 2, kalemTeslimErp409: 1, bildirimGonder409: 1, bildirimGonderRevize409: 1, icerik409: 1,
+      durumPanel409: 1, kalemTeslimPanel409: 1, etiketBasildi409: 1, etiketBasildi404: 0,
+    });
+  });
+
+  // ── Kalem teslim: teyit yazılmış talepte (2a ucu, 2b dokunuşu) ────────────────────────────────────────────────────
+  it('kalem teslim teyitli talepte (iki kanal): `b:` anahtarı 400, `t:` 200, `"hepsi"` teyit kalemlerini işaretler; beyandan kopyalanan kalemin işareti yeni `t:` anahtarına TAŞINIR; araya giren teyit yazımında 409 `surum-eski`', async () => {
+    const d = await kur();
+    const b = belirtec(d);
+    const id = await talepEkle();
+    // Beyan kalemi `b:1` teslim işaretli; teyit `b:1`'i kopyalar + yeni kalem ekler.
+    expect((await erp(d, ERP_YOLU(id, 'kalem-teslim'), 'u-satis', { surum: 3, teslim: true, kalemler: ['b:1'] })).kod).toBe(200);
+    expect((await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', { icerikSurum: 0, teyit: { kalemler: [
+      { anahtar: 'b:1', sku: 'KRB-77', ad: 'Fayans yapıştırıcısı', marka: 'Karbosan', adet: 5, birimFiyat: 120, kdvOrani: 20 },
+      { ad: 'Derz dolgu', adet: 2, birimFiyat: 60, kdvOrani: 20 },
+    ] } })).json).toEqual({ ok: true, degisti: true });
+    const [tasinan, yeni] = (await teyitOku(id)).kalemler.map(k => k.anahtar);
+    const kart = siparisler(await panel(d, '/siparisler', { belirtec: b }))[0];
+    expect(kart).toMatchObject({ teslimKaynagi: 'teyit', teslimIsaretsiz: 1, kalemSayisi: 3, surum: 4 });
+    expect(kart.teyit?.kalemler.map(k => [k.anahtar, k.teslim])).toEqual([[tasinan, true], [yeni, false]]);
+    // Beyan girişi DURUYOR (tarihçe): beyan tablosu işareti göstermeye devam eder.
+    expect(kart.kalemler.map(k => [k.anahtar, k.teslim])).toEqual([['b:0', false], ['b:1', true], ['b:2', false]]);
+    // Kaynak artık teyit: `b:` anahtarı iki kanalda da 400, belge değişmez.
+    const once = await belge(id);
+    expect((await erp(d, ERP_YOLU(id, 'kalem-teslim'), 'u-satis', { surum: 4, teslim: true, kalemler: ['b:0'] })).kod).toBe(400);
+    expect((await panel(d, `/siparisler/${id}/kalem-teslim`, { belirtec: b, govde: { surum: 4, teslim: true, kalemler: ['b:0'] } })).kod).toBe(400);
+    expect(await belge(id)).toEqual(once);
+    // `t:` anahtarı: ERP 200, panel 200 + güncel liste.
+    expect((await erp(d, ERP_YOLU(id, 'kalem-teslim'), 'u-satis', { surum: 4, teslim: true, kalemler: [yeni] })).json).toEqual({ ok: true });
+    const kaldir = await panel(d, `/siparisler/${id}/kalem-teslim`, { belirtec: b, govde: { surum: 5, teslim: false, kalemler: 'hepsi' } });
+    expect(kaldir.kod).toBe(200);
+    expect(siparisler(kaldir)[0]).toMatchObject({ teslimKaynagi: 'teyit', teslimIsaretsiz: 2, surum: 6 });
+    expect(siparisler(kaldir)[0].teyit?.kalemler.map(k => k.teslim)).toEqual([false, false]);
+    expect(d.denetim.map(k => k[2]).slice(-2)).toEqual(['T261009-AB12 · erp · teyit · işaretlendi 1 / kaldırıldı 0', 'T261009-AB12 · panel · teyit · işaretlendi 0 / kaldırıldı 2']);
+
+    // Yarış: kalem teslim isteğinin dar okuması ile yazımı arasına GERÇEK içerik yazımı girer (kalem silinir → anahtar kümesi bayat).
+    for (const kanal of ['erp', 'panel'] as const) {
+      const surum = Number((await belge(id)).durumSurum);
+      const icerikSurum = Number((await belge(id)).icerikSurum);
+      const kalemler = (await teyitOku(id)).kalemler;
+      let yapildi = false;
+      d.kanca = async (sql) => {
+        if (yapildi || !sql.startsWith('SELECT') || !sql.includes('icerik_surum')) return;
+        yapildi = true;
+        const araya = await erp(d, ERP_YOLU(id, 'icerik'), 'u-mudur', { icerikSurum, teyit: { kalemler: [{ ...govdeKalemi(kalemler[0]), adet: kalemler[0].adet + 1 }, govdeKalemi(kalemler[1])] } });
+        expect(araya.json).toEqual({ ok: true, degisti: true });
+      };
+      const istek = { surum, teslim: true, kalemler: [kalemler[1].anahtar] };
+      const y = kanal === 'erp'
+        ? await erp(d, ERP_YOLU(id, 'kalem-teslim'), 'u-satis', istek)
+        : await panel(d, `/siparisler/${id}/kalem-teslim`, { belirtec: b, govde: istek });
+      d.kanca = null;
+      expect(yapildi, kanal).toBe(true);
+      expect(y.kod, kanal).toBe(409);
+      expect(y.json).toEqual({ ok: false, kod: 'surum-eski' });
+      // İşaret yazılmadı, aşama sürümü artmadı.
+      expect((await belge(id)).durumSurum).toBe(surum);
+      expect(((await belge(id)).kalemTeslim as Satir)[kalemler[1].anahtar]).toMatchObject({ durum: 'bekliyor' });
+    }
+  });
+
+  // ── Revize bildirimini elle yeniden gönder (`bildirim-gonder?tur=revize`; K19) ────────────────────────────────────
+  it('`?tur=revize` 200: `bildirimRevize` → `bekliyor` + yeni `zaman`, `deneme` / `hataSinifi` YOK, `alanlar` / `kim` / `icerikSurum` AYNEN; REVİZE kuyruğuna tam 1 iş (ilk kuyruğa 0) ve YANITTAN ÖNCE; denetim `· erp · revize`; ilk `bildirim` alanı değişmez', async () => {
+    let cozuldu = false;
+    const d = await kur({ revizeBildirimiIste: async () => { await new Promise(coz => setTimeout(coz, 30)); cozuldu = true; } });
+    const ek = revizeEk('gonderilemedi', { deneme: 3, hataSinifi: 'baglanti' });
+    const id = await talepEkle(ek);
+    const y = await erp(d, `${ERP_YOLU(id, 'bildirim-gonder')}?tur=revize`, 'u-satis', {});
+    expect([y.kod, y.json]).toEqual([200, { ok: true }]);
+    expect(cozuldu).toBe(true);
+    expect([d.revizeler, d.bildirimler]).toEqual([[id], []]);
+    const yazilan = await belge(id);
+    expect(yazilan).toEqual(talepVerisi({ ...ek, bildirimRevize: { durum: 'bekliyor', zaman: zaman(SAAT_0), alanlar: ['not', 'teyit'], kim: { uid: 'u-mudur', ad: 'Müdür Bey' }, icerikSurum: 2 } }));
+    expect(d.yayinlar).toEqual([[COLL, 'set', id, yazilan, { cid: CID }]]);
+    expect(d.denetim).toEqual([[{ uid: 'u-satis', email: 'u-satis@ornek.com.tr' }, 'Mağaza talebi bildirimi elle kuyruğa alındı', 'T261009-AB12 · erp · revize']]);
+    // `yapilandirilmamis` ve süresi geçmiş `bekliyor` da yeniden kuyruğa alınır.
+    for (const durum of ['yapilandirilmamis', 'bekliyor']) {
+      const baska = await talepEkle(revizeEk(durum));
+      expect((await erp(d, `${ERP_YOLU(baska, 'bildirim-gonder')}?tur=revize`, 'u-mudur', {})).kod, durum).toBe(200);
+      expect((await belge(baska)).bildirimRevize).toMatchObject({ durum: 'bekliyor', zaman: zaman(SAAT_0), alanlar: ['not', 'teyit'], icerikSurum: 2 });
+    }
+    // Sayaçlar AYRI: revize, ilk bildirim sayacına karışmaz.
+    expect(magazaPanelSayaclari()).toMatchObject({ bildirimGonderRevize: 3, bildirimGonderRevize409: 0, bildirimGonder: 0, bildirimGonder409: 0, revizeBildirimIstendi: 3 });
+  });
+  it('`?tur=revize` retleri: kimliksiz 401 (sorgu dizesi kapıdan SONRA ayrıştırılır) · `?tur=x` / `?tur=ilk` / `?tur=` / tanınmayan parametre 400 · rol dışı 403 `rol` · bozuk kimlik / başka kiracı 404', async () => {
+    const d = await kur();
+    const id = await talepEkle(revizeEk('gonderilemedi'));
+    const yol = `${ERP_YOLU(id, 'bildirim-gonder')}?tur=revize`;
+    // Yayın sondasının ölçtüğü: 400 olsaydı `tur` ayrıştırması kapıdan önce koşuyor demekti.
+    for (const sorgu of ['?tur=revize', '?tur=x', '?tur=ilk']) {
+      const kimliksiz = await erp(d, `${ERP_YOLU(id, 'bildirim-gonder')}${sorgu}`, null, {});
+      expect(kimliksiz.kod, sorgu).toBe(401);
+    }
+    for (const sorgu of ['?tur=x', '?tur=ilk', '?tur=', '?tur=Revize', '?tur=revize&tur=revize', '?tur=revize&kanal=erp', '?kanal=erp']) {
+      const y = await erp(d, `${ERP_YOLU(id, 'bildirim-gonder')}${sorgu}`, 'u-satis', {});
+      expect(y.kod, sorgu).toBe(400);
+      expect(y.json).toEqual({ ok: false });
+    }
+    expect((await erp(d, yol, 'u-satis', { tur: 'revize' })).kod).toBe(400);   // tür gövdede DEĞİL, sorgu dizesinde
+    const rolDisi = await erp(d, yol, 'u-depo', {});
+    expect([rolDisi.kod, rolDisi.json]).toEqual([403, { ok: false, kod: 'rol' }]);
+    // Rol dışı kullanıcıya bozuk `tur` de 403'tür (yetki, sorgu ayrıştırmasından ÖNCE).
+    expect((await erp(d, `${ERP_YOLU(id, 'bildirim-gonder')}?tur=x`, 'u-depo', {})).kod).toBe(403);
+    const baska = await talepEkle({ companyId: 'kiraci-2', ...revizeEk('gonderilemedi') });
+    for (const kimlik of [baska, 'mt-bozuk', SIFIR_KIMLIK]) {
+      const y = await erp(d, `${ERP_YOLU(kimlik, 'bildirim-gonder')}?tur=revize`, 'u-satis', {});
+      expect([y.kod, y.json], kimlik).toEqual([404, { ok: false }]);
+    }
+    expect(await belge(id)).toEqual(talepVerisi(revizeEk('gonderilemedi')));
+    expect([d.revizeler, d.bildirimler, d.denetim, d.yayinlar]).toEqual([[], [], [], []]);
+  });
+  it('`?tur=revize` 409: `kapali` · `yapilandirilmamis` + eksik ADLARI (sır / değer yok) · `revize-yok` (alan yok / çöp — yoktan revizyon YARATILMAZ) · `zaten-gitti` (çift posta yok) — hiçbirinde kuyruk işi / denetim / yazım yok', async () => {
+    const ek = revizeEk('gonderilemedi');
+    const id = await talepEkle(ek);
+    const yol = (kimlik: string): string => `${ERP_YOLU(kimlik, 'bildirim-gonder')}?tur=revize`;
+    const kapali = await kur({ smtp: { tamam: false, eksik: [], kip: 'kapali' } });
+    const y1 = await erp(kapali, yol(id), 'u-satis', {});
+    expect([y1.kod, y1.json]).toEqual([409, { ok: false, kod: 'kapali' }]);
+    const eksik = await kur({ smtp: { tamam: false, eksik: ['APP_URL'], kip: 'yerel' } });
+    const y2 = await erp(eksik, yol(id), 'u-satis', {});
+    expect([y2.kod, y2.json]).toEqual([409, { ok: false, kod: 'yapilandirilmamis', kip: 'yerel', eksik: ['APP_URL'] }]);
+    // Yalnız ortam değişkeni ADI: değer / adres / sır yok.
+    expect(y2.metin).not.toMatch(/https?:|=|@/);
+    for (const k of [kapali, eksik]) {
+      expect(k.sorgular.filter(s => /UPDATE/.test(s))).toEqual([]);
+      expect([k.revizeler, k.bildirimler, k.denetim, k.yayinlar]).toEqual([[], [], [], []]);
+    }
+    const d = await kur();
+    // Revizyonu OLMAYAN talep (ilk bildirimi gönderilemedi olsa da): ilk bildirimin kuyruğuna DÜŞÜLMEZ.
+    const ilkGonderilemedi = { bildirim: { durum: 'gonderilemedi', zaman: zaman(SAAT_0 - GUN) } };
+    const revizesiz = await talepEkle(ilkGonderilemedi);
+    const cop = await talepEkle({ bildirimRevize: 'çöp' });
+    const bos = await talepEkle({ bildirimRevize: null });
+    for (const kimlik of [revizesiz, cop, bos]) {
+      const y = await erp(d, yol(kimlik), 'u-satis', {});
+      expect([y.kod, y.json], kimlik).toEqual([409, { ok: false, kod: 'revize-yok' }]);
+    }
+    expect(await belge(revizesiz)).toEqual(talepVerisi(ilkGonderilemedi));
+    expect((await belge(cop)).bildirimRevize).toBe('çöp');
+    const gitti = await talepEkle(revizeEk('gitti'));
+    const y4 = await erp(d, yol(gitti), 'u-satis', {});
+    expect([y4.kod, y4.json]).toEqual([409, { ok: false, kod: 'zaten-gitti' }]);
+    expect(await belge(gitti)).toEqual(talepVerisi(revizeEk('gitti')));
+    expect(await belge(id)).toEqual(talepVerisi(ek));
+    expect([d.revizeler, d.bildirimler, d.denetim, d.yayinlar]).toEqual([[], [], [], []]);
+    // 2 (kapalı + eksik) + 3 (revize yok) + 1 (gitti); ilk bildirimin sayacı ARTMAZ.
+    expect(magazaPanelSayaclari()).toMatchObject({ bildirimGonderRevize: 0, bildirimGonderRevize409: 6, bildirimGonder409: 0, revizeBildirimIstendi: 0 });
+  });
+  it('`?tur=revize` yalnız REVİZE alanına bakar: revize `gitti` iken `tur`suz istek ilk bildirimi yeniden kuyruğa alır (ilk kuyruk), ilk bildirim `gitti` iken `?tur=revize` revizeyi (revize kuyruğu)', async () => {
+    const d = await kur();
+    const ilkAcik = await talepEkle({ ...revizeEk('gitti'), bildirim: { durum: 'gonderilemedi', zaman: zaman(SAAT_0 - GUN) } });
+    expect((await erp(d, ERP_YOLU(ilkAcik, 'bildirim-gonder'), 'u-satis', {})).kod).toBe(200);
+    expect([d.bildirimler, d.revizeler]).toEqual([[ilkAcik], []]);
+    expect((await belge(ilkAcik)).bildirimRevize).toEqual(revizeEk('gitti').bildirimRevize);
+    const revizeAcik = await talepEkle(revizeEk('gonderilemedi'));   // ilk bildirim `gitti`
+    expect((await erp(d, `${ERP_YOLU(revizeAcik, 'bildirim-gonder')}?tur=revize`, 'u-satis', {})).kod).toBe(200);
+    expect([d.bildirimler, d.revizeler]).toEqual([[ilkAcik], [revizeAcik]]);
+    expect((await belge(revizeAcik)).bildirim).toEqual(talepVerisi().bildirim);
+    expect(d.denetim.map(k => k[2])).toEqual(['T261009-AB12 · erp', 'T261009-AB12 · erp · revize']);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+describe('site paneli (dilim 2b) — yumuşak silme ucu, salt okunur `teyit`, `silebilir`, silinmiş talep listede YOK (§ 10.3, § 10.5)', () => {
+  /** Yönetici'nin panel belirteci (kapı rolü her istekte `panelKullanicisi`'nden YENİDEN okur; belirteçteki `rol` gösterimdir). */
+  const yoneticiBelirteci = (d: Duzenek): string => belirtec(d, 'u-yonetici', { rol: 'Admin', ad: 'Yönetici Hanım' });
+
+  it('panel sil: Yönetici 200 + GÜNCEL liste (silinen talep listede YOK, `acikToplam` düşer); belgeye `kanal: "panel"`, `kim.ad` okuyucudan; Müdür / Satış 403 `{ ok: false, kod: "rol" }`', async () => {
+    const d = await kur();
+    const hedef = await talepEkle({ talepNo: 'SİLİNECEK' });
+    const kalan = await talepEkle({ talepNo: 'KALAN', olusturma: zaman(SAAT_0 - 4 * 60 * DAKIKA) });
+    for (const [uid, rol] of [['u-mudur', 'Manager'], ['u-satis', 'Sales']] as Array<[string, AppRole]>) {
+      const y = await panel(d, `/siparisler/${hedef}/sil`, { belirtec: belirtec(d, uid, { rol }), govde: { surum: 3 } });
+      expect(y.kod, uid).toBe(403);
+      expect(y.json).toEqual({ ok: false, kod: 'rol' });
+      expect(y.baslik('cache-control')).toBe('no-store');
+    }
+    expect(await belge(hedef)).toEqual(talepVerisi({ talepNo: 'SİLİNECEK' }));
+    const b = yoneticiBelirteci(d);
+    // Önbellek dolsun: silmeden sonra dönen liste yine de günceldir.
+    expect(((await panel(d, '/siparisler', { belirtec: b })).json as PanelListe)).toMatchObject({ acikToplam: 2 });
+    const y = await panel(d, `/siparisler/${hedef}/sil`, { belirtec: b, govde: { surum: 3 } });
+    expect(y.kod).toBe(200);
+    expect(Object.keys(y.json as object)).toEqual(['siparisler', 'acikToplam', 'kesildi']);
+    expect(siparisler(y).map(s => s.id)).toEqual([kalan]);
+    expect(y.json).toMatchObject({ acikToplam: 1, kesildi: false });
+    // Kayıt DURUR.
+    const silinen = await belge(hedef);
+    expect(silinen).toEqual(talepVerisi({ talepNo: 'SİLİNECEK', silindi: { zaman: zaman(SAAT_0), kim: { uid: 'u-yonetici', ad: 'Yönetici Hanım' }, kanal: 'panel' }, durumSurum: 4 }));
+    expect(d.yayinlar).toEqual([[COLL, 'set', hedef, silinen, { cid: CID }]]);
+    expect(d.denetim).toEqual([[{ uid: 'u-yonetici', email: 'u-yonetici@ornek.com.tr' }, 'Mağaza talebi silindi', 'SİLİNECEK · panel']]);
+    expect([d.bildirimler, d.revizeler]).toEqual([[], []]);
+    // Başka kullanıcının listesinde de yok (önbellek değişiklik olayıyla düştü).
+    expect(siparisler(await panel(d, '/siparisler', { belirtec: belirtec(d) })).map(s => s.id)).toEqual([kalan]);
+    expect(magazaPanelSayaclari()).toMatchObject({ silPanel: 1, silPanel409: 0, r403: 2, silErp: 0 });
+  });
+  it('panel sil: yetki İSTEK anında yeniden ölçülür — belirteci «Yönetici» diyen ama rolü Müdür\'e düşmüş kullanıcı 403; belirteci «Satış» diyen ama rolü Yönetici olan kullanıcı 200', async () => {
+    const d = await kur();
+    const id = await talepEkle();
+    const b = yoneticiBelirteci(d);
+    kullanici(d, 'u-yonetici', { role: 'Manager', name: 'Yönetici Hanım' });
+    const dusen = await panel(d, `/siparisler/${id}/sil`, { belirtec: b, govde: { surum: 3 } });
+    expect([dusen.kod, dusen.json]).toEqual([403, { ok: false, kod: 'rol' }]);
+    expect(await belge(id)).toEqual(talepVerisi());
+    kullanici(d, 'u-satis', { role: 'Admin', name: 'Ayşe Yılmaz' });
+    const yukselen = await panel(d, `/siparisler/${id}/sil`, { belirtec: belirtec(d, 'u-satis', { rol: 'Sales' }), govde: { surum: 3 } });
+    expect(yukselen.kod).toBe(200);
+    expect((await belge(id)).silindi).toEqual({ zaman: zaman(SAAT_0), kim: { uid: 'u-satis', ad: 'Ayşe Yılmaz' }, kanal: 'panel' });
+  });
+  it('panel sil retleri: belirteçsiz 401 (gövde kapıdan SONRA) · 415 / 413 / bozuk JSON 400 · şema 400 (`surum`suz, `geriAl` — panelden geri alma YOK) · 409 `surum-eski` / `silindi` · 404 · panelde geri alma ucu YOK', async () => {
+    const d = await kur();
+    const id = await talepEkle();
+    const yol = `/siparisler/${id}/sil`;
+    // Kapı gövdeden ÖNCE: belirteçsiz + bozuk gövde / yanlış tür 401'dir.
+    for (const o of [{ govde: { surum: 3 } }, { ham: '{bozuk' }, { ham: 'x', tur: 'text/plain' }] as Istek[]) {
+      const y = await panel(d, yol, o);
+      expect(y.kod).toBe(401);
+      expect(y.metin).toBe('{"ok":false}');
+    }
+    const b = yoneticiBelirteci(d);
+    expect((await panel(d, yol, { belirtec: b, ham: '{}', tur: 'text/plain' })).kod).toBe(415);
+    expect((await panel(d, yol, { belirtec: b, ham: JSON.stringify({ dolgu: 'x'.repeat(70 * 1024) }) })).kod).toBe(413);
+    expect((await panel(d, yol, { belirtec: b, ham: `{"surum": ${ISARET}` })).kod).toBe(400);
+    for (const g of [{}, { surum: -1 }, { surum: '3' }, { surum: 3, geriAl: true }, { surum: 3, geriAl: false }, { surum: 3, kanal: 'erp' }, [3]]) {
+      const y = await panel(d, yol, { belirtec: b, govde: g });
+      expect(y.kod, JSON.stringify(g)).toBe(400);
+      expect(y.metin).toBe('{"ok":false}');
+    }
+    // Bayat kart (araya aşama yazımı girdi).
+    const bayat = await panel(d, yol, { belirtec: b, govde: { surum: 2 } });
+    expect([bayat.kod, bayat.json]).toEqual([409, { ok: false, kod: 'surum-eski' }]);
+    expect(await belge(id)).toEqual(talepVerisi());
+    const silinmis = await talepEkle(silinmisEk());
+    const zaten = await panel(d, `/siparisler/${silinmis}/sil`, { belirtec: b, govde: { surum: 4 } });
+    expect([zaten.kod, zaten.json]).toEqual([409, { ok: false, kod: 'silindi' }]);
+    const baska = await talepEkle({ companyId: 'kiraci-2' });
+    for (const kimlik of [baska, 'mt-BOZUK', SIFIR_KIMLIK]) {
+      const y = await panel(d, `/siparisler/${kimlik}/sil`, { belirtec: b, govde: { surum: 3 } });
+      expect(y.kod, kimlik).toBe(404);
+      expect(y.metin).toBe('{"ok":false}');
+    }
+    // Panelden geri alma YOK (V18): uç yok, `sil` gövdesinde `geriAl` 400 (yukarıda) — silinmiş talep panelden canlandırılamaz.
+    expect((await panel(d, `/siparisler/${silinmis}/geri-al`, { belirtec: b, govde: { surum: 4 } })).kod).toBe(404);
+    expect(await belge(silinmis)).toEqual(talepVerisi(silinmisEk()));
+    expect([d.yayinlar, d.denetim]).toEqual([[], []]);
+    expect(magazaPanelSayaclari()).toMatchObject({ silPanel: 0, silPanel409: 2 });
+    expect(d.kacan).toEqual({ genelAyristirici: 0, genel404: 0, genelYakalayici: 0 });
+  });
+  it('liste: silinmiş talep (açık DA kapalı DA) listede YOK ve `acikToplam` yalnız CANLI açıkları sayar; geri alınmış (`silindi: null`) talep listede (gerçek motor)', async () => {
+    const d = await kur();
+    const acik = await talepEkle({ durum: 'yeni', talepNo: 'AÇIK', olusturma: zaman(SAAT_0 - 1000) });
+    const kapali = await talepEkle({ durum: 'teslim', talepNo: 'KAPALI', durumZamani: zaman(SAAT_0 - 2000) });
+    const geriAlinan = await talepEkle({ durum: 'sevk', talepNo: 'GERİ-ALINAN', olusturma: zaman(SAAT_0 - 3000), silindi: null });
+    const geriAlinanKapali = await talepEkle({ durum: 'iptal', talepNo: 'GERİ-ALINAN-KAPALI', durumZamani: zaman(SAAT_0 - 4000), silindi: null });
+    await talepEkle({ durum: 'yeni', talepNo: 'SİLİNMİŞ-AÇIK', ...silinmisEk() });
+    await talepEkle({ durum: 'teslim', talepNo: 'SİLİNMİŞ-KAPALI', durumZamani: zaman(SAAT_0 - 500), ...silinmisEk() });
+    await talepEkle({ durum: 'iptal', talepNo: 'SİLİNMİŞ-İPTAL', durumZamani: zaman(SAAT_0 - 500), ...silinmisEk() });
+    await talepEkle({ durum: undefined, talepNo: 'SİLİNMİŞ-AŞAMASIZ', ...silinmisEk() });
+    const y = await panel(d, '/siparisler', { belirtec: belirtec(d) });
+    const liste = y.json as PanelListe;
+    expect(liste.siparisler.map(s => s.id)).toEqual([acik, geriAlinan, kapali, geriAlinanKapali]);
+    expect(liste).toMatchObject({ acikToplam: 2, kesildi: false });
+    expect(y.metin).not.toContain('SİLİNMİŞ');
+    // Silen kişi / silme zamanı / `silindi` alanı yanıta GİRMEZ (canlı kartta da).
+    for (const yasak of ['silindi', 'Silen Kişi']) expect(y.metin, yasak).not.toContain(yasak);
+  });
+  it('`silebilir`: Yönetici\'ye her kartta `true`, Satış / Müdür\'e `false` — liste gövdesi kiracı başına ÖNBELLEKTE olsa da kullanıcıya göre işaretlenir (yazma uçlarının 200 listesinde de)', async () => {
+    const d = await kur();
+    const id = await talepEkle();
+    await talepEkle({ durum: 'teslim', durumZamani: zaman(SAAT_0 - 1000) });
+    const satis = belirtec(d);
+    const yonetici = yoneticiBelirteci(d);
+    const say = (): number => d.sorgular.filter(s => s === MAGAZA_PANEL_LISTE_SQL).length;
+    // Önce Satış okur (önbellek `false`larla dolar), sonra Yönetici: önbellekten gelir ama `true` görür; sonra yine Satış: `false`.
+    expect(siparisler(await panel(d, '/siparisler', { belirtec: satis })).map(s => s.silebilir)).toEqual([false, false]);
+    expect(siparisler(await panel(d, '/siparisler', { belirtec: yonetici })).map(s => s.silebilir)).toEqual([true, true]);
+    expect(siparisler(await panel(d, '/siparisler', { belirtec: belirtec(d, 'u-mudur', { rol: 'Manager' }) })).map(s => s.silebilir)).toEqual([false, false]);
+    expect(siparisler(await panel(d, '/siparisler', { belirtec: satis })).map(s => s.silebilir)).toEqual([false, false]);
+    expect(say()).toBe(1);
+    // Yazma ucunun 200 listesi de aynı kuralla.
+    const yoneticiYazdi = await panel(d, `/siparisler/${id}/kalem-teslim`, { belirtec: yonetici, govde: { surum: 3, teslim: true, kalemler: ['b:0'] } });
+    expect(siparisler(yoneticiYazdi).map(s => s.silebilir)).toEqual([true, true]);
+    const satisYazdi = await panel(d, `/siparisler/${id}/durum`, { belirtec: satis, govde: { onceki: 'sevk', surum: 4, durum: 'sevk', aciklama: 'Yolda' } });
+    expect(siparisler(satisYazdi).map(s => s.silebilir)).toEqual([false, false]);
+    // Rolü düşen Yönetici artık `false` görür (gösterim de istekte okunan rolden).
+    kullanici(d, 'u-yonetici', { role: 'Sales', name: 'Yönetici Hanım' });
+    expect(siparisler(await panel(d, '/siparisler', { belirtec: yonetici })).map(s => s.silebilir)).toEqual([false, false]);
+  });
+  it('kart: `teyit` SALT OKUNUR — 60 teyit kalemi → 50 + `kalemSayisi` 60, her biri `anahtar` + `teslim`; `teslimKaynagi: "teyit"`, `teslimIsaretsiz` BÜTÜNDEN; `kdvKaynagi` / `icerikSurum` / `bildirimRevize` / teyit `zaman`-`kim` yanıta GİRMEZ; beyan toplamları beyan olarak kalır', async () => {
+    const d = await kur();
+    const isaret = { durum: 'teslim', zaman: zaman(SAAT_0 - DAKIKA), kim: { uid: 'u-x', ad: 'Gizli Personel' } };
+    const anahtar = (i: number): string => `t:${i.toString(16).padStart(12, '0')}`;
+    const kalemler = Array.from({ length: 60 }, (_, i) => ({
+      anahtar: anahtar(i), id: `u-${i}`, sku: `SKU-${i}`, ad: `Teyit ${i}`, marka: 'M', adet: i + 1, birimFiyat: i === 3 ? null : 10,
+      kdvOrani: i === 4 ? 18 : 20, kdvKaynagi: 'personel', tedarik: i === 5,
+    }));
+    const id = await talepEkle({
+      teyit: { kalemler, araToplam: null, kdv: null, toplam: null, zaman: zaman(SAAT_0 - 5 * DAKIKA), kim: { uid: 'u-x', ad: 'Gizli Personel' } },
+      kalemTeslim: { [anahtar(0)]: isaret, [anahtar(55)]: isaret, 'b:1': isaret },
+      ...revizeEk('bekliyor'), elle: { zaman: zaman(SAAT_0 - GUN), kim: { uid: 'u-x', ad: 'Gizli Personel' } },
+    });
+    const y = await panel(d, '/siparisler', { belirtec: belirtec(d) });
+    const kart = siparisler(y)[0];
+    expect(kart).toMatchObject({ id, teslimKaynagi: 'teyit', kalemSayisi: 3, teslimIsaretsiz: 58, elle: true, silebilir: false, araToplam: 459.97, kdv: null, toplam: null });
+    expect(Object.keys(kart.teyit ?? {})).toEqual(['kalemler', 'kalemSayisi', 'araToplam', 'kdv', 'toplam']);
+    expect(kart.teyit).toMatchObject({ kalemSayisi: 60, araToplam: null, kdv: null, toplam: null });
+    expect(kart.teyit?.kalemler).toHaveLength(50);
+    expect(kart.teyit?.kalemler[0]).toEqual({ anahtar: anahtar(0), sku: 'SKU-0', ad: 'Teyit 0', marka: 'M', adet: 1, birimFiyat: 10, kdvOrani: 20, tedarik: false, teslim: true });
+    expect(kart.teyit?.kalemler[1].teslim).toBe(false);
+    // `null` fiyat KORUNUR (0 değil); küme dışı saklı oran BİLİNMİYOR (`null` — oran uydurulmaz).
+    expect(kart.teyit?.kalemler[3].birimFiyat).toBeNull();
+    expect(kart.teyit?.kalemler[4].kdvOrani).toBeNull();
+    expect(kart.teyit?.kalemler[5].tedarik).toBe(true);
+    expect(kart.teyit?.kalemler[49].anahtar).toBe(anahtar(49));
+    // Beyan kalemleri işaretini `b:<i>` girişinden okumaya devam eder (tarihçe).
+    expect(kart.kalemler.map(k => k.teslim)).toEqual([false, true, false]);
+    for (const yasak of ['kdvKaynagi', 'icerikSurum', 'icerikZamani', 'bildirimRevize', 'Gizli Personel', '"kim"', '"alanlar"', '"zaman"']) expect(y.metin, yasak).not.toContain(yasak);
+  });
+  it('`panelSiparisiEsle` (saf, 2b): teyit yok / `kalemler` boş dizi / dizi değil → `teyit` alanı YOK ve kaynak `beyan`; bozuk teyit kalemi fırlatmaz (bilinmeyen sayı `null`); `elle` yalnız NESNEYSE `true`; `silebilir` hep `false`', () => {
+    for (const teyit of [undefined, null, 'çöp', {}, { kalemler: [] }, { kalemler: 'x' }, { kalemler: { a: 1 } }]) {
+      const kart = panelSiparisiEsle('mt-x', talepVerisi({ teyit }));
+      expect('teyit' in kart, JSON.stringify(teyit)).toBe(false);
+      expect(kart).toMatchObject({ teslimKaynagi: 'beyan', kalemSayisi: 3, teslimIsaretsiz: 3, elle: false, silebilir: false });
+    }
+    const bozuk = panelSiparisiEsle('mt-x', talepVerisi({ teyit: { kalemler: ['dizge', { anahtar: 7, ad: 9, adet: '2', birimFiyat: '9', kdvOrani: '20', tedarik: 'evet' }], araToplam: '230', kdv: Number.NaN, toplam: 276 } }));
+    expect(bozuk.teyit).toEqual({
+      kalemler: [
+        { anahtar: '', sku: '', ad: '', marka: '', adet: null, birimFiyat: null, kdvOrani: null, tedarik: false, teslim: false },
+        { anahtar: '', sku: '', ad: '', marka: '', adet: null, birimFiyat: null, kdvOrani: null, tedarik: false, teslim: false },
+      ],
+      kalemSayisi: 2, araToplam: null, kdv: null, toplam: 276,
+    });
+    expect(bozuk.teslimKaynagi).toBe('teyit');
+    for (const elle of [true, 'evet', 1, null, undefined, []]) expect(panelSiparisiEsle('mt-x', talepVerisi({ elle })).elle, JSON.stringify(elle)).toBe(false);
+    expect(panelSiparisiEsle('mt-x', talepVerisi({ elle: {} })).elle).toBe(true);
+    // Saf eşleyici `silebilir`i ASLA `true` üretmez (liste gövdesi kiracı başına önbelleklenir; hüküm rota yanıtında).
+    expect(panelSiparisiEsle('mt-x', talepVerisi({ silebilir: true })).silebilir).toBe(false);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1699,8 +2730,15 @@ describe('sayaçlar ve 429 yazıcıları', () => {
       'oturum', 'oturum401', 'oturum503', 'yetkiKodu', 'yetkiKoduRet', 'yetkiKoduIptalDenetimsiz',
       'durumPanel', 'durumPanel409', 'durumErp', 'durumErp409',
       'kalemTeslimPanel', 'kalemTeslimPanel409', 'kalemTeslimErp', 'kalemTeslimErp409', 'etiketBasildi', 'etiketBasildi404', 'etiketBasildi409',
-      'bildirimGonder', 'bildirimGonder409', 'cikisUidsiz', 'r401', 'r403', 'r404', 'r429', 'r500', 'r503',
+      'bildirimGonder', 'bildirimGonder409',
+      // Dilim 2b (§ 10.7; bilerek değişen çit): revize bildirimi, içerik, silme / geri alma, elle talep.
+      'bildirimGonderRevize', 'bildirimGonderRevize409', 'revizeBildirimIstendi', 'revizeBildirimIstenemedi',
+      'icerik', 'icerikDegisiklikYok', 'icerik409', 'icerik400', 'icerik503', 'icerik429',
+      'silPanel', 'silPanel409', 'silErp', 'silErp409', 'geriAl', 'geriAl409', 'elleTalep', 'elleTalepCakisti',
+      'cikisUidsiz', 'r401', 'r403', 'r404', 'r429', 'r500', 'r503',
     ]);
+    // Tek yazım (kapı 4, Y8): revize sayacının adı `bildirimGonderRevize`'dir.
+    expect(Object.keys(magazaPanelSayaclari())).not.toContain('revizeBildirimGonder');
     expect(Object.values(magazaPanelSayaclari()).every(v => v === 0)).toBe(true);
     (magazaPanelSayaclari() as Record<string, number>).oturum = 99;
     expect(magazaPanelSayaclari().oturum).toBe(0);
@@ -1708,13 +2746,14 @@ describe('sayaçlar ve 429 yazıcıları', () => {
     // Bekçinin sayaç özeti adı kod kimliği biçiminde bekler.
     for (const ad of Object.keys(magazaPanelSayaclari())) expect(ad).toMatch(/^[A-Za-z][A-Za-z0-9_]{0,39}$/);
   });
-  it('`magazaPanel429` ve `magazaYetkiKodu429`: sabit gövde + kendi sayacı; dilim 1\'in `r429`\'u ARTMAZ', () => {
+  it('`magazaPanel429`, `magazaYetkiKodu429` ve (2b) `magazaIcerik429`: sabit gövde + kendi sayacı; dilim 1\'in `r429`\'u ARTMAZ', () => {
     const cagrilar: unknown[] = [];
     const yanit = { setHeader() { return yanit; }, status(kod: number) { cagrilar.push(kod); return yanit; }, json(g: unknown) { cagrilar.push(g); return yanit; } };
     magazaPanel429({} as Request, yanit as unknown as Response);
     magazaYetkiKodu429({} as Request, yanit as unknown as Response);
-    expect(cagrilar).toEqual([429, { ok: false }, 429, { ok: false, kod: 'sinir' }]);
-    expect(magazaPanelSayaclari()).toMatchObject({ r429: 1, yetkiKoduRet: 1 });
+    magazaIcerik429({} as Request, yanit as unknown as Response);
+    expect(cagrilar).toEqual([429, { ok: false }, 429, { ok: false, kod: 'sinir' }, 429, { ok: false, kod: 'sinir' }]);
+    expect(magazaPanelSayaclari()).toMatchObject({ r429: 1, yetkiKoduRet: 1, icerik429: 1 });
     expect(magazaSayaclari().r429).toBe(0);
   });
 });
@@ -1728,7 +2767,7 @@ describe('kaynak çitleri — magazaPanelZinciri.ts ve magazaErpRoutes.ts', () =
   const erpSatirlari = kodSatirlari(ERP).map(s => s.kod);
   const erpKodu = erpSatirlari.join('\n');
 
-  it('panel alt zincirinin kayıt sırası SABİT (§ 4: 0, 1, 1b, 2–8, 7a, 7c, 9, 10)', () => {
+  it('panel alt zincirinin kayıt sırası SABİT (§ 4: 0, 1, 1b, 2–8, 7a, 7b [2b silme], 7c, 9, 10)', () => {
     expect(panelSatirlari.map(s => s.trim()).filter(s => /^panel\.\w+\(/.test(s))).toEqual([
       'panel.use(onbelleksiz);',
       'panel.use(kokenKapisi);',
@@ -1740,6 +2779,8 @@ describe('kaynak çitleri — magazaPanelZinciri.ts ve magazaErpRoutes.ts', () =
       "panel.get('/siparisler', liste);",
       "panel.post('/siparisler/:id/durum', jsonDegilse415, govdeAyristir, durumYaz);",
       "panel.post('/siparisler/:id/kalem-teslim', jsonDegilse415, govdeAyristir, kalemTeslim);",
+      // Dilim 2b (7b): silme — `kalem-teslim`'den (7a) SONRA, belirteç kapısından SONRA; panelde geri alma / içerik / elle talep ucu YOK.
+      "panel.post('/siparisler/:id/sil', jsonDegilse415, govdeAyristir, sil);",
       "panel.post('/siparisler/:id/etiket-basildi', jsonDegilse415, govdeAyristir, etiketBasildi);",
       "panel.post('/cikis', jsonDegilse415, govdeAyristir, cikis);",
       'panel.use(bulunamadi);',
@@ -1800,13 +2841,19 @@ describe('kaynak çitleri — magazaPanelZinciri.ts ve magazaErpRoutes.ts', () =
       expect(kod).not.toMatch(/\bz\.\w+\(|from 'zod'/);
     }
   });
-  it('ERP uçları: üç talep ucu AYNI zincirde (`requireAuth` + `requireMfaVerified` + `C.dbLimiter`), yetki kodu kendi sınırlayıcısıyla; başka `app.` kaydı yok', () => {
+  it('ERP uçları: üç 2a talep ucu AYNI zincirde (`requireAuth` + `requireMfaVerified` + `C.dbLimiter`), üç 2b ucu `C.magazaIcerikLimiter` ile, yetki kodu kendi sınırlayıcısıyla; başka `app.` kaydı yok', () => {
     expect(erpSatirlari.map(s => s.trim()).filter(s => /^app\.\w+\(/.test(s))).toEqual([
       "app.post('/api/magaza-panel/yetki-kodu', onbelleksiz, C.requireAuth, C.requireMfaVerified, C.magazaYetkiKoduLimiter, iptalKapisi, yetkiKodu);",
       "app.post('/api/magaza-talepleri/:id/durum', C.requireAuth, C.requireMfaVerified, C.dbLimiter, durum);",
       "app.post('/api/magaza-talepleri/:id/kalem-teslim', C.requireAuth, C.requireMfaVerified, C.dbLimiter, kalemTeslim);",
       "app.post('/api/magaza-talepleri/:id/bildirim-gonder', C.requireAuth, C.requireMfaVerified, C.dbLimiter, bildirimGonder);",
+      // Dilim 2b (§ 10.3): elle talep, içerik, silme / geri alma — kimlik ve MFA kapısından SONRA ortak içerik kovası.
+      "app.post('/api/magaza-talepleri', C.requireAuth, C.requireMfaVerified, C.magazaIcerikLimiter, elleTalep);",
+      "app.post('/api/magaza-talepleri/:id/icerik', C.requireAuth, C.requireMfaVerified, C.magazaIcerikLimiter, icerik);",
+      "app.post('/api/magaza-talepleri/:id/sil', C.requireAuth, C.requireMfaVerified, C.magazaIcerikLimiter, sil);",
     ]);
+    // Her uçta iki kapı da var ve sınırlayıcıdan ÖNCE (reddedilen istek kovaya sayılmaz).
+    for (const kayit of erpSatirlari.map(x => x.trim()).filter(x => /^app\.post\(/.test(x))) expect(kayit).toMatch(/C\.requireAuth, C\.requireMfaVerified, C\.(dbLimiter|magazaIcerikLimiter|magazaYetkiKoduLimiter), /);
     // İptal denetimi YALNIZ yetki kodu zincirinde, sınırlayıcıdan SONRA (tanım + zincir satırı); Firebase çağrısı TEK yerde ve
     // süre tavanının içinde. Panel zinciri Firebase belirteci görmez.
     expect(erpKodu.match(/\biptalKapisi\b/g)).toHaveLength(2);
@@ -1814,20 +2861,76 @@ describe('kaynak çitleri — magazaPanelZinciri.ts ve magazaErpRoutes.ts', () =
     expect(erpKodu).toContain('await sureli(C.belirtecIptalDenetle(belirtec), iptalDenetimiSuresi);');
     expect(panelKodu).not.toMatch(/belirtecIptalDenetle|iptalKapisi/);
     // Yazma işlevine giden kanal ve kiracı: sabit `'erp'`, `panelKullanicisi(uid).cid` (gövdeden değil).
-    expect(erpKodu.match(/kanal: 'erp'/g)).toHaveLength(2);
-    expect(erpKodu.match(/companyId: y\.kullanici\.cid/g)).toHaveLength(3);
+    // Dilim 2b ile sayılar bilerek değişti: ERP'de + içerik ve silme (`kanal`), + elle talep / içerik / silme-geri alma (kiracı);
+    // panelde + silme.
+    expect(erpKodu.match(/kanal: 'erp'/g)).toHaveLength(4);
+    expect(erpKodu.match(/companyId: y\.kullanici\.cid/g)).toHaveLength(6);
     expect(erpKodu).not.toMatch(/req\.body\??\.companyId|cozum\.data\.companyId/);
-    expect(panelKodu.match(/kanal: 'panel'/g)).toHaveLength(2);
-    expect(panelKodu.match(/companyId: h\.b\.kullanici\.cid/g)).toHaveLength(3);
+    expect(panelKodu.match(/kanal: 'panel'/g)).toHaveLength(3);
+    expect(panelKodu.match(/companyId: h\.b\.kullanici\.cid/g)).toHaveLength(4);
     // `bildirimIste` rota modülünde ÇAĞRILMAZ: tek çağrı yazma işlevindedir (`bildirimiYenidenKuyrugaAl`, yanıttan önce beklenir).
     expect(erpKodu).not.toMatch(/bildirimIste\(/);
     expect(panelKodu).not.toMatch(/bildirimIste\(/);
     expect(kodSatirlari(join(SRC_KOK, 'server', 'kanal', 'magazaDurum.ts')).filter(s => /D\.bildirimIste\(/.test(s.kod))).toHaveLength(1);
   });
+  it('(2b) yazma işlevinin HER sonucu `switch` ile ele alınır: `if (sonuc.sonuc …` zinciri YOK ve her `switch`in `default` dalı `eleAlinmamisSonuc(sonuc)` — işlev yeni sonuç kazanınca rota DERLENMEZ (`silindi` sessizce 200\'e düşüyordu)', () => {
+    for (const [ad, kod, adet] of [['panel', panelKodu, 4], ['erp', erpKodu, 7]] as const) {
+      expect(kod, ad).not.toMatch(/\bif \(sonuc\.sonuc\b|sonuc\.sonuc (===|!==)/);
+      // Panel: aşama, kalem teslim, silme, etiket · ERP: aşama, kalem teslim, elle bildirim, elle talep, içerik, silme, geri alma.
+      expect(kod.match(/switch \(sonuc\.sonuc\) \{/g), ad).toHaveLength(adet);
+      expect(kod.match(/default:\s+eleAlinmamisSonuc\(sonuc\);/g), ad).toHaveLength(adet);
+      expect(kod.match(/\bswitch \(/g), ad).toHaveLength(adet);
+    }
+    // TEK tanım (panel modülünde); ERP modülü içe aktarır. Parametre `never`: ele alınmamış dal derleme hatasıdır.
+    expect(panelKodu).toContain('export function eleAlinmamisSonuc(_sonuc: never): never {');
+    expect(erpKodu).toContain("import { eleAlinmamisSonuc, magazaPanelSay } from './magazaPanelZinciri.js';");
+    expect(suclular(kaynakDosyalari(join(SRC_KOK, 'server')), /function eleAlinmamisSonuc\b/).map(t => t.site.replace(/:\d+$/, ''))).toEqual(['src/server/routes/magazaPanelZinciri.ts']);
+    // Fırlatılan ileti SABİT: sonuç nesnesi belge taşıyabilir, iletiye yazılmaz.
+    expect(panelKodu).toContain("throw new Error('magaza: yazma işlevinin sonucu rota tarafından ele alınmadı');");
+  });
+  it('(2b) «yazıldı ama bağlanmadı»: dört yazma işlevi ve beş şema rota modüllerinden GERÇEKTEN çağrılıyor; silme yetkisi iki kanalda da `magazaTalepSilmeYetkisi`; panel içerik / elle talep / geri alma / bildirim işlevi ÇAĞIRMAZ', () => {
+    for (const cagri of ['elleTalepAc(D, ', 'talepIcerigiDegistir(D, ', 'talepGeriAl(D, ', 'talepSil(D, ']) expect(erpKodu.split(cagri).length - 1, cagri).toBe(1);
+    expect(panelKodu.split('talepSil(D, ').length - 1).toBe(1);
+    for (const sema of ['ErpElleTalepGovdesi', 'ErpIcerikGovdesi', 'ErpSilGovdesi']) expect(erpKodu.split(`${sema}.safeParse(req.body)`).length - 1, sema).toBe(1);
+    expect(erpKodu.split('BildirimGonderSorgusu.safeParse({ ...req.query })').length - 1).toBe(1);
+    expect(panelKodu.split('PanelSilGovdesi.safeParse(req.body)').length - 1).toBe(1);
+    // Silme / geri alma: ERP'de `yetkili(…, magazaTalepSilmeYetkisi)`; öbür beş ERP ucu varsayılan ölçütle (`magazaTalepIslemYetkisi`).
+    expect(erpKodu.match(/await yetkili\(req, res, magazaTalepSilmeYetkisi\)/g)).toHaveLength(1);
+    expect(erpKodu.match(/await yetkili\(req, res\);/g)).toHaveLength(5);
+    // Panelde iki yerde: kartın `silebilir` işareti (gösterim) ve silme ucunun hükmü — ikisi de kapıda bu istek için okunan rolle.
+    expect(panelKodu.match(/magazaTalepSilmeYetkisi\(h\.b\.kullanici\.rol\)/g)).toHaveLength(2);
+    expect(panelKodu).not.toMatch(/yuk\.rol\b/);
+    // Panel içerik düzenlemez, elle talep açmaz, geri almaz, bildirim istemez (V15, V18). (`geriAl` yalnız ERP uçlarının da
+    // yazdığı ortak sayaç tablosunun anahtarı olarak geçer — sayaç satırı dışında adı yok.)
+    expect(panelKodu).not.toMatch(/talepIcerigiDegistir|elleTalepAc|talepGeriAl|bildirimiYenidenKuyrugaAl|revizeBildirimiIste/);
+    expect(panelSatirlari.filter(x => /geriAl/i.test(x)).map(x => x.trim())).toEqual(['silPanel: 0, silPanel409: 0, silErp: 0, silErp409: 0, geriAl: 0, geriAl409: 0,']);
+    expect(panelSatirlari.map(x => x.trim()).filter(x => /^panel\.post\(/.test(x) && /icerik|geri-al|bildirim/.test(x))).toEqual([]);
+  });
+  it('(2b) revize bildirimi isteği: rota modülünde YALNIZ sayaçlı sarmalayıcıda (`C.revizeBildirimiIste`) — asıl çağrılar yazma işlevlerinde, yanıttan ÖNCE; sorgu dizesi kimlik / rol kapısından SONRA ayrıştırılır', () => {
+    expect(erpKodu.match(/C\.revizeBildirimiIste\(/g)).toHaveLength(1);
+    expect(erpKodu).not.toMatch(/D\.revizeBildirimiIste\(|D\.bildirimIste\(|C\.bildirimIste\(/);
+    const icerikKodu = kodSatirlari(join(SRC_KOK, 'server', 'kanal', 'magazaIcerik.ts')).map(x => x.kod).join('\n');
+    const durumKodu = kodSatirlari(join(SRC_KOK, 'server', 'kanal', 'magazaDurum.ts')).map(x => x.kod).join('\n');
+    // İçerik yazımı → revize kuyruğu; elle talep → İLK kuyruk; elle yeniden gönderme → türüne göre.
+    expect(icerikKodu.match(/await D\.revizeBildirimiIste\(/g)).toHaveLength(1);
+    expect(icerikKodu.match(/await D\.bildirimIste\(/g)).toHaveLength(1);
+    expect(durumKodu.match(/await D\.revizeBildirimiIste\?\.\(/g)).toHaveLength(1);
+    expect(durumKodu.match(/await D\.bildirimIste\(/g)).toHaveLength(1);
+    // `bildirim-gonder`: yetki → sorgu ayrıştırma → SMTP ön denetimi → yazma işlevi (kimliksiz `?tur=x` 401, rol dışı 403 alır).
+    const bas = erpSatirlari.findIndex(x => /const bildirimGonder = async \(req: Request, res: Response\): Promise<void> => \{/.test(x));
+    const sira = ['await yetkili(req, res);', 'BildirimGonderSorgusu.safeParse(', 'C.smtpYapilandirmasi()', 'await bildirimiYenidenKuyrugaAl(D, {'].map(parca => erpSatirlari.findIndex((x, i) => i > bas && x.includes(parca)));
+    expect(bas).toBeGreaterThan(-1);
+    expect(sira.every(n => n > bas)).toBe(true);
+    expect([...sira].sort((a, b) => a - b)).toEqual(sira);
+    // `tur` yalnız `revize`: rota `'ilk'` değerini istekten OKUMAZ (yokluk = ilk bildirim).
+    expect(erpKodu).toContain("tur: revize ? 'revize' : 'ilk'");
+    expect(erpKodu).toContain("const revize = sorgu.data.tur === 'revize';");
+    expect(erpKodu).not.toMatch(/req\.query\.tur|req\.body\??\.tur/);
+  });
   it('`src/` altında test dışı dosyada `pglite` içe aktarımı YOK (çalışma anında yüklenmez — V10)', () => {
     const uretim = kaynakDosyalari(SRC_KOK).filter(y => !/\.test\.tsx?$/.test(y));
     expect(suclular(uretim, /pglite/i)).toEqual([]);
-  });
+  }, 60_000);   // `src/`in tamamı tek testte taranır: yük altında 5 sn'lik varsayılan süre yetmez (depo kalıbı)
   it('rol kümesi kopyalanmaz: iki modül de `magazaTalepIslemYetkisi`\'ni çağırır, rol adı yazmaz', () => {
     const roller = (APP_ROLES as readonly AppRole[]).map(r => `'${r}'`);
     for (const kod of [panelKodu, erpKodu]) {

@@ -46,7 +46,9 @@ export const PUBLIC_WRITE_COLLECTIONS = new Set(['demoRequests', 'partnerApplica
  * etkilenmez. Talep müşterinin BEYANIDIR; ekrandan düzenlenebilseydi «müşteri ne istedi» kaydı bozulurdu
  * (aşama / açıklama / kalem teslim yazımı dilim 2a'da kendi sunucu uçlarıyla gelir: `POST /api/magaza-talepleri/:id/durum`,
  * `…/kalem-teslim`, `…/bildirim-gonder` ve site paneli — tek yazma işlevi `src/server/kanal/magazaDurum.ts`; yetki aşağıdaki
- * `magazaTalepIslemYetkisi`). OKUMA kuralı `COLLECTION_PERMISSIONS`'tadır.
+ * `magazaTalepIslemYetkisi`). Dilim 2b'nin içerik düzenleme / elle talep / yumuşak silme uçları da aynı kalıptadır
+ * (`POST /api/magaza-talepleri`, `…/:id/icerik`, `…/:id/sil` — yazma işlevleri `src/server/kanal/magazaIcerik.ts`; silme yetkisi
+ * `magazaTalepSilmeYetkisi`): bu sınıf DEĞİŞMEZ, `/api/db` koleksiyona yine yazamaz. OKUMA kuralı `COLLECTION_PERMISSIONS`'tadır.
  *
  * `SERVER_ONLY_COLLECTIONS`'tan (collections.ts) FARKI: o sınıf okumaya da kapalıdır (/api/db ve akış).
  */
@@ -61,6 +63,16 @@ export const SUNUCU_YAZAR_COLLECTIONS = new Set(['magazaTalepleri']);
  */
 export function magazaTalepIslemYetkisi(rol: AppRole | null): boolean {
   return isAllowed(rol, 'magazaTalepleri', 'read');
+}
+
+/**
+ * Mağaza talebi SİLME ve GERİ ALMA yetkisi (dilim 2b, V17): yalnız Yönetici (`Admin`). Silme YUMUŞAKTIR (kayıt durur,
+ * `silindi` işareti alır); site paneli ve ERP — İKİ kanal da bunu okur, rol karşılaştırması kopyalanmaz. Süper-yönetici
+ * baypası YOK (rolü `Admin` olmayan süper-yönetici de 403 alır). `SUNUCU_YAZAR_COLLECTIONS` DEĞİŞMEZ: `/api/db` üzerinden
+ * silme Yönetici dâhil herkese kapalı kalır; bu yetki yalnız sunucunun kendi silme uçları (`…/sil`) içindir.
+ */
+export function magazaTalepSilmeYetkisi(rol: AppRole | null): boolean {
+  return rol === 'Admin';
 }
 
 /**

@@ -20,12 +20,16 @@
  *
  * TUTARLAR BEYANDIR: `birimFiyat` yok ya da null = «fiyat sorulacak» → `talepFiyat: null` (0'a ÇEVRİLMEZ);
  * toplamlar gönderilmediyse `null`. `fiyatiSorulacakVar` istemciden alınmaz, burada kalemlerden türetilir.
+ *
+ * DİLİM 2b (şartname v6 § 10.2): müşteri bloğu (`musteriEsle`), kalem bloğu (`kalemEsle`) ve not (`notEsle`) DIŞA AÇIKTIR —
+ * ERP'deki içerik düzenleme ve elle talep (`kanal/magazaIcerik.ts`) AYNI temizlik / kırpma / ret kuralını bunlardan alır;
+ * `talepEsle` onları çağırmaya devam eder (kopya eşleyici yok — çit: magazaTalep.test.ts).
  */
 // `toWellFormed` ES2024'tür; tsconfig `lib` ES2022. Aşağıdaki yönerge yalnız dizge TİPLERİNİ ekler (çalışma anı: Node ≥ 20).
 /// <reference lib="es2024.string" />
 import { createHash } from 'node:crypto';
 import { MAGAZA_TALEP_NO_DESENI } from '../../lib/magazaTalep.js';
-import type { MagazaTalebi, MagazaTalepKalemi } from '../../lib/magazaTalep.js';
+import type { MagazaTalebi, MagazaTalepKalemi, MagazaTalepMusteri } from '../../lib/magazaTalep.js';
 
 /** Şemadan (schemas.ts `MagazaSiparisTalebiSchema`) çıkan, henüz TEMİZLENMEMİŞ gövde. */
 export interface MagazaTalepGirdisi {
@@ -121,6 +125,82 @@ function beyanTutari(deger: number | null | undefined): { ok: true; tutar: numbe
   return Number.isFinite(deger) && deger >= 0 ? { ok: true, tutar: deger } : { ok: false };
 }
 
+/** Kırpma izleyen temizleyici çifti: `metin` isteğe bağlı alan (yok = boş dizge), `kirpilmis` zaten temizlenmiş metin. */
+function kirpici(): { kirpildi: () => boolean; kirpilmis: (temiz: string, sinir: number) => string; metin: (ham: string | undefined, sinir: number, cokSatirli?: boolean) => string } {
+  let kirpildi = false;
+  const kirpilmis = (temiz: string, sinir: number): string => {
+    const sonuc = magazaMetniKirp(temiz, sinir);
+    if (sonuc.kirpildi) kirpildi = true;
+    return sonuc.metin;
+  };
+  /** İsteğe bağlı metin: yok = boş dizge. */
+  const metin = (ham: string | undefined, sinir: number, cokSatirli = false): string =>
+    kirpilmis(magazaMetniTemizle(ham ?? '', cokSatirli), sinir);
+  return { kirpildi: () => kirpildi, kirpilmis, metin };
+}
+
+export type MusteriEsleSonucu =
+  | { ok: true; musteri: MagazaTalepMusteri; /** Telefonun son 10 rakamı — KIRPMADAN ÖNCEKİ değerden. */ telefonSon10: string; kirpildi: boolean }
+  | { ok: false };
+
+/**
+ * Müşteri bloğu: temizlik + kırpma. `ok: false` = temizlikten sonra `ad` boş ya da telefonda 10 rakam yok.
+ * İçerik düzenlemesi (2b) dönen `telefonSon10`'u KULLANMAZ: takip anahtarı ve kimlik ilk telefonla kalır (V21).
+ */
+export function musteriEsle(m: MagazaTalepGirdisi['musteri']): MusteriEsleSonucu {
+  // Zorunlu iki alan KIRPMADAN ÖNCEKİ değere bakar; `telefonSon10` da kırpmadan önceki değerin rakamlarından.
+  const son10 = telefonSon10(m.telefon);
+  if (son10 === null) return { ok: false };
+  const adTemiz = magazaMetniTemizle(m.ad, false);
+  if (adTemiz === '') return { ok: false };
+  const S = MAGAZA_METIN_SINIRLARI;
+  const { kirpildi, kirpilmis, metin } = kirpici();
+  const musteri: MagazaTalepMusteri = {
+    ad: kirpilmis(adTemiz, S.ad),
+    firma: metin(m.firma, S.firma),
+    telefon: metin(m.telefon, S.telefon),
+    eposta: metin(m.eposta, S.eposta),
+    il: metin(m.il, S.il),
+    adres: metin(m.adres, S.adres, true),
+    vergi: metin(m.vergi, S.vergi),
+  };
+  return { ok: true, musteri, telefonSon10: son10, kirpildi: kirpildi() };
+}
+
+export type KalemEsleSonucu = { ok: true; kalem: MagazaTalepKalemi; kirpildi: boolean } | { ok: false };
+
+/**
+ * Tek kalem: temizlik + kırpma. `ok: false` = temizlikten sonra ad boş, adet güvenli pozitif tam sayı değil ya da fiyat
+ * geçersiz (eksi / sonlu değil). `birimFiyat` yok ya da null → `talepFiyat: null` («fiyat sorulacak»; 0 DEĞİL).
+ */
+export function kalemEsle(k: MagazaTalepGirdisi['kalemler'][number]): KalemEsleSonucu {
+  const kalemAdi = magazaMetniTemizle(k.ad, false);
+  if (kalemAdi === '') return { ok: false };
+  // Üst sınır YOK (kullanıcı kararı K4); güvenli tam sayı dışı reddedilir.
+  if (!Number.isSafeInteger(k.adet) || k.adet <= 0) return { ok: false };
+  const fiyat = beyanTutari(k.birimFiyat);
+  if (!fiyat.ok) return { ok: false };
+  const S = MAGAZA_METIN_SINIRLARI;
+  const { kirpildi, kirpilmis, metin } = kirpici();
+  const kalem: MagazaTalepKalemi = {
+    id: metin(k.id, S.kalemId),
+    sku: metin(k.sku, S.kalemSku),
+    ad: kirpilmis(kalemAdi, S.kalemAd),
+    marka: metin(k.marka, S.kalemMarka),
+    adet: k.adet,
+    talepFiyat: fiyat.tutar,
+    tedarik: k.tedarik === true,
+  };
+  return { ok: true, kalem, kirpildi: kirpildi() };
+}
+
+/** Not: çok satırlı temizlik + 1.000 birime kırpma (yok = boş dizge). */
+export function notEsle(ham: string | undefined): { not: string; kirpildi: boolean } {
+  const { kirpildi, metin } = kirpici();
+  const not = metin(ham, MAGAZA_METIN_SINIRLARI.not, true);
+  return { not, kirpildi: kirpildi() };
+}
+
 /**
  * Temizlik + kırpma + doküman kurma. `ok: false` = temizlikten sonra zorunlu alan boş
  * (ad, kalem adı) ya da telefonda 10 rakam yok → rota sabit 400 döner.
@@ -131,40 +211,16 @@ export function talepEsle(girdi: MagazaTalepGirdisi, baglam: { companyId: string
   if (baglam.companyId.trim() === '') throw new Error('magazaTalep: kiracı kimliği boş — eşleyici kiracısız çağrılamaz');
   if (!MAGAZA_TALEP_NO_DESENI.test(girdi.no)) return { ok: false };
 
-  const isaret = { kirpildi: false };
-  const kirpilmis = (temiz: string, sinir: number): string => {
-    const sonuc = magazaMetniKirp(temiz, sinir);
-    if (sonuc.kirpildi) isaret.kirpildi = true;
-    return sonuc.metin;
-  };
-  /** İsteğe bağlı metin: yok = boş dizge. */
-  const metin = (ham: string | undefined, sinir: number, cokSatirli = false): string =>
-    kirpilmis(magazaMetniTemizle(ham ?? '', cokSatirli), sinir);
+  const musteri = musteriEsle(girdi.musteri);
+  if (!musteri.ok) return { ok: false };
+  let kirpildi = musteri.kirpildi;
 
-  // Zorunlu iki alan KIRPMADAN ÖNCEKİ değere bakar; `telefonSon10` da kırpmadan önceki değerin rakamlarından.
-  const son10 = telefonSon10(girdi.musteri.telefon);
-  if (son10 === null) return { ok: false };
-  const adTemiz = magazaMetniTemizle(girdi.musteri.ad, false);
-  if (adTemiz === '') return { ok: false };
-
-  const S = MAGAZA_METIN_SINIRLARI;
   const kalemler: MagazaTalepKalemi[] = [];
   for (const k of girdi.kalemler) {
-    const kalemAdi = magazaMetniTemizle(k.ad, false);
-    if (kalemAdi === '') return { ok: false };
-    // Üst sınır YOK (kullanıcı kararı K4); güvenli tam sayı dışı reddedilir.
-    if (!Number.isSafeInteger(k.adet) || k.adet <= 0) return { ok: false };
-    const fiyat = beyanTutari(k.birimFiyat);
-    if (!fiyat.ok) return { ok: false };
-    kalemler.push({
-      id: metin(k.id, S.kalemId),
-      sku: metin(k.sku, S.kalemSku),
-      ad: kirpilmis(kalemAdi, S.kalemAd),
-      marka: metin(k.marka, S.kalemMarka),
-      adet: k.adet,
-      talepFiyat: fiyat.tutar,
-      tedarik: k.tedarik === true,
-    });
+    const kalem = kalemEsle(k);
+    if (!kalem.ok) return { ok: false };
+    if (kalem.kirpildi) kirpildi = true;
+    kalemler.push(kalem.kalem);
   }
   if (kalemler.length === 0) return { ok: false };
 
@@ -176,16 +232,8 @@ export function talepEsle(girdi: MagazaTalepGirdisi, baglam: { companyId: string
   // `olusturma` ve `bildirim.zaman` aynı an: UTC, ISO-8601 METİN. `pgServerTimestamp()` nöbetçisi KULLANILMAZ —
   // ham `INSERT` onu çözmez, satıra `{ __op }` düşer ve ekran '—' basardı.
   const zaman = baglam.simdi.toISOString();
-  const musteri = {
-    ad: kirpilmis(adTemiz, S.ad),
-    firma: metin(girdi.musteri.firma, S.firma),
-    telefon: metin(girdi.musteri.telefon, S.telefon),
-    eposta: metin(girdi.musteri.eposta, S.eposta),
-    il: metin(girdi.musteri.il, S.il),
-    adres: metin(girdi.musteri.adres, S.adres, true),
-    vergi: metin(girdi.musteri.vergi, S.vergi),
-  };
-  const not = metin(girdi.not, S.not, true);
+  const not = notEsle(girdi.not);
+  if (not.kirpildi) kirpildi = true;
 
   const belge: MagazaTalebi = {
     companyId: baglam.companyId,
@@ -193,14 +241,14 @@ export function talepEsle(girdi: MagazaTalepGirdisi, baglam: { companyId: string
     durum: 'yeni',
     olusturma: zaman,
     istemciTarihi: istemciTarihiCoz(girdi.tarih),
-    musteri,
-    telefonSon10: son10,
-    not,
+    musteri: musteri.musteri,
+    telefonSon10: musteri.telefonSon10,
+    not: not.not,
     kalemler,
     talepEdilen: { araToplam: araToplam.tutar, kdv: kdv.tutar, toplam: toplam.tutar },
     fiyatiSorulacakVar: kalemler.some(k => k.talepFiyat === null),
-    ...(isaret.kirpildi ? { kirpildi: true as const } : {}),
+    ...(kirpildi ? { kirpildi: true as const } : {}),
     bildirim: { durum: 'bekliyor', zaman },
   };
-  return { ok: true, id: magazaTalepKimligi(baglam.companyId, girdi.no, son10), belge };
+  return { ok: true, id: magazaTalepKimligi(baglam.companyId, girdi.no, musteri.telefonSon10), belge };
 }

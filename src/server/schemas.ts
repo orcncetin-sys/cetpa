@@ -14,8 +14,9 @@
  */
 import { z } from 'zod';
 import {
-  MAGAZA_KALEM_ANAHTARI_DESENI, MAGAZA_PANEL_43_DESENI, MAGAZA_PANEL_TUR_DESENI, MAGAZA_TALEP_ASAMALARI, PANEL_DURUMLARI,
+  MAGAZA_KALEM_ANAHTARI_DESENI, MAGAZA_PANEL_43_DESENI, MAGAZA_PANEL_TUR_DESENI, MAGAZA_TALEP_ASAMALARI, PANEL_DURUMLARI, magazaKdvOraniMi,
 } from '../lib/magazaTalep.js';
+import type { MagazaKdvOrani } from '../lib/magazaTalep.js';
 
 /** `validate()`in kabul ettigi sema tipi.
  *  Baglamda `{ parse: ... }` diye YAKLASIK yazmak strictFunctionTypes
@@ -190,6 +191,92 @@ export const EtiketBasildiGovdesi = z.object({
 
 /** `POST /api/magaza-talepleri/:id/bildirim-gonder` — boş nesne (IIS gövdesiz POST'u Node'a iletmez; V22). */
 export const BildirimGonderGovdesi = z.object({}).strict();
+
+// ── Mağaza dilim 2b (şartname v6 § 10.3; 2026-10-10) ───────────────────────────────────────────────────────────────────
+// 2a ile AYNI tutum: `.strict()` (tanınmayan alan 400), rotalar `safeParse` + sabit `400 { ok: false }`. Temizlik, kırpma,
+// «temizlikten sonra boş mu / telefonda 10 rakam var mı», anahtarın kaynağa aitliği ve KDV oranının çözümü şemanın ardındaki
+// yazma yolundadır (`kanal/magazaIcerik.ts`); şema yalnız TÜR ve BİÇİM süzer.
+
+/**
+ * `POST /api/magaza-talepleri/:id/bildirim-gonder` sorgu dizesi (2b; kapı 4, Y8): `tur` YALNIZ `revize` değerini alır — yok =
+ * ilk bildirim (2a davranışı); `ilk` dâhil başka her değer ve tanınmayan parametre 400.
+ */
+export const BildirimGonderSorgusu = z.object({
+  tur: z.enum(['revize']).optional(),
+}).strict();
+
+/**
+ * İçerik gövdesinin müşteri bloğu: YEDİ alan birden ZORUNLU (`''` = boş). Yazma yolu `data || yama` ile SIĞ birleştirir —
+ * kısmi `musteri` nesnesi eski alanları SİLERDİ. Metinlerde `.max()` yok: aşım ret değil KIRPMA (dilim 1 kuralı).
+ */
+const IcerikMusteriGovdesi = z.object({
+  ad:      z.string(),
+  firma:   z.string(),
+  telefon: z.string(),
+  eposta:  z.string(),
+  il:      z.string(),
+  adres:   z.string(),
+  vergi:   z.string(),
+}).strict();
+
+/**
+ * Teyit kalemi. `birimFiyat` KDV HARİÇ net ve ZORUNLU anahtar: sayı ya da açıkça `null` («fiyat sorulacak»; varsayılan YOK,
+ * 0'a çevrilmez). `kdvOrani` İSTEĞE BAĞLI: verilmişse kümede olmalı (`MAGAZA_KDV_ORANLARI` — sabit içe aktarılır, kopyalanmaz;
+ * 8 / 18 → 400), verilmemişse sunucu ürün kaydından çözer. `kdvKaynagi` şemada BİLEREK yok: kaynak sunucunun çıkarımıdır,
+ * gövdede gelirse `.strict()` 400 verir. `anahtar` kurallı desen (öncü sıfırlı `b:01` → 400); yalnız «hangi kalem» bilgisidir.
+ */
+const IcerikTeyitKalemGovdesi = z.object({
+  anahtar:    z.string().regex(MAGAZA_KALEM_ANAHTARI_DESENI).optional(),
+  id:         z.string().optional(),
+  sku:        z.string().optional(),
+  ad:         z.string(),
+  marka:      z.string().optional(),
+  adet:       z.number().int().positive(),
+  birimFiyat: z.number().nonnegative().nullable(),
+  kdvOrani:   z.custom<MagazaKdvOrani>(magazaKdvOraniMi).optional(),
+  tedarik:    z.boolean().optional(),
+}).strict();
+
+/**
+ * `POST /api/magaza-talepleri/:id/icerik` — içerik düzenleme (V15: yalnız ERP). `icerikSurum` = ekranda görülen sürüm (CAS).
+ * Üç bölümden EN AZ BİRİ; form her zaman tam gövde gönderir, «ne değişti» sunucuda ölçülür. `not` ham en çok 4.000 karakter
+ * (temizlik + 1.000 birime kırpma yazma yolunda). `teyit.kalemler` en az 1 kalem (bütün kalemleri silmek isteyen talebi
+ * iptal eder — aşama); aynı istekte yinelenen `anahtar` 400. Müşterinin BEYANI (`kalemler`, `talepEdilen`) ve toplamlar
+ * gövdede KABUL EDİLMEZ (`.strict()`): beyan değişmez, toplamları sunucu türetir.
+ */
+export const ErpIcerikGovdesi = z.object({
+  icerikSurum: z.number().int().min(0),
+  musteri:     IcerikMusteriGovdesi.optional(),
+  not:         z.string().max(4000).optional(),
+  teyit:       z.object({
+    kalemler: z.array(IcerikTeyitKalemGovdesi).min(1)
+      .refine(liste => {
+        const anahtarlar = liste.flatMap(k => (k.anahtar !== undefined ? [k.anahtar] : []));
+        return new Set(anahtarlar).size === anahtarlar.length;
+      }, { message: 'yinelenen anahtar' }),
+  }).strict().optional(),
+}).strict().refine(g => g.musteri !== undefined || g.not !== undefined || g.teyit !== undefined, { message: 'en az bir bölüm' });
+
+/**
+ * `POST /api/magaza-talepleri/:id/sil` — yumuşak silme / geri alma (yalnız Yönetici; yetki rotada `magazaTalepSilmeYetkisi`).
+ * `surum` = ekranda görülen `durumSurum`; `geriAl: true` → geri alma.
+ */
+export const ErpSilGovdesi = z.object({
+  surum:  z.number().int().min(0),
+  geriAl: z.boolean().optional(),
+}).strict();
+
+/** `POST /panel/siparisler/:id/sil` — site paneli yalnız SİLER (panelden geri alma YOK — V18; `geriAl` gelirse 400). */
+export const PanelSilGovdesi = z.object({
+  surum: z.number().int().min(0),
+}).strict();
+
+/**
+ * `POST /api/magaza-talepleri` — ERP'de elle talep. Mağaza talebi gövdesinin `no` ve `tarih`'siz hâli: numarayı SUNUCU üretir,
+ * müşteri cihazı saati yoktur. Kimliksiz uçtan farkı `.strict()`: ERP'nin kendi formu tanınmayan alan göndermez (gelirse 400).
+ * Telefonda 10 rakam ZORUNLU — eşleyicide ölçülür (takip ucu aynı `no` + telefonla çalışır).
+ */
+export const ErpElleTalepGovdesi = MagazaSiparisTalebiSchema.omit({ no: true, tarih: true }).strict();
 
 /** `POST /api/magaza-panel/yetki-kodu` — § 3.2. */
 export const YetkiKoduGovdesi = z.object({

@@ -13,10 +13,18 @@
  *      eksik değer `'yeni'`ye ÇEVRİLMEZ, `null` olur; `durumSurum` sayı değilse 0; `kalemTeslim` giriş giriş daraltılır (uymayan
  *      GİRİŞ düşer, nesnenin tamamı değil); `etiketBasildi` bozuksa `null`; beyan kalemine `teslim` / `anahtar` YAZILMAZ.
  *      Kanca ağ isteği ATMAZ (yazma `services/magazaTalepIstemcisi.ts`'te).
+ *   7. DİLİM 2b (şartname v6 § 10.4 / § 10.8 «İstemci», 2026-10-11): `teyit` kalem kalem okunur ve TEK bozuk kalem (anahtarı desene
+ *      uymayan, KDV oranı küme dışı, oran kaynağı tanınmayan) teyidi bütünüyle `null` yapar; `icerikSurum` sayı değilse 0;
+ *      `silindi` NESNE ise silinmiş (alanları bozuk olsa da), `null` / yok ise canlı; `elle` nesne ya da `null`; `bildirimRevize`
+ *      ilk bildirimle AYNI dört durumlu sözlükten ve `alanlar` `alanlariBirlestir` ile; `gerekmiyor` diye durum yok. Sekme
+ *      rozetinin iki sayısı YALNIZ canlı talepleri sayar.
  *
  * BİLEREK DEĞİŞEN dilim 1 sabiti: «tam dokümanı OLDUĞU GİBI okur» eşitliği — satır artık dilim 2a alanlarının VARSAYILANINI da
  * taşır (`durumAciklama: ''`, `durumSurum: 0`, `iptalOncesi: null`, `durumGecmisi: []`, `kalemTeslim: {}`, `etiketBasildi: null`);
  * beklenen nesne `DILIM1_VARSAYILAN` ile birlikte TAM eşitliktir (gevşetilmedi).
+ *
+ * BİLEREK DEĞİŞEN dilim 2a sabiti (2b): aynı TAM eşitlik artık 2b alanlarının varsayılanını da taşır (`teyit: null`,
+ * `icerikSurum: 0`, `silindi: null`, `elle: null`, `bildirimRevize: null`) — `DILIM1_VARSAYILAN` genişledi, eşitlik gevşemedi.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
@@ -31,9 +39,10 @@ import {
   type MagazaTalepSatiri,
 } from './useMagazaTalepleri';
 import {
-  MAGAZA_TALEP_ASAMALARI, magazaKalemAnahtarlari, magazaKalemTeslimMi, magazaTeslimIsaretsiz, magazaGuncellemeZamani,
+  MAGAZA_TALEP_ASAMALARI, magazaKalemAnahtarlari, magazaKalemTeslimMi, magazaTeslimIsaretsiz, magazaGuncellemeZamani, magazaSilinmisMi,
   type MagazaTalebi,
 } from '../lib/magazaTalep';
+import { MAGAZA_BILDIRIM_DURUMLARI } from '../server/kanal/magazaBildirimSayim';
 import { yorumsuz } from '../test/degismezTarayici';
 
 // ── Akış düzeneği: `lib/dbClient` yerine abonelikleri kaydeden sahte ────────────────────────────────────────────────
@@ -70,8 +79,14 @@ const tamTalep: MagazaTalebi = {
   bildirim: { durum: 'gitti', zaman: '2026-10-08T09:15:04.000Z' },
 };
 
-/** Dilim 1 kaydında OLMAYAN dilim 2a alanlarının satırdaki varsayılanı (okunamayan değer uydurulmaz: boş / 0 / `null`). */
-const DILIM1_VARSAYILAN = { durumAciklama: '', durumSurum: 0, iptalOncesi: null, durumGecmisi: [], kalemTeslim: {}, etiketBasildi: null } as const;
+/**
+ * Dilim 1 kaydında OLMAYAN dilim 2a ve 2b alanlarının satırdaki varsayılanı (okunamayan değer uydurulmaz: boş / 0 / `null`).
+ * 2b: teyit yok, içerik sürümü 0, silinmemiş, mağazadan gelmiş, revize bildirimi yok.
+ */
+const DILIM1_VARSAYILAN = {
+  durumAciklama: '', durumSurum: 0, iptalOncesi: null, durumGecmisi: [], kalemTeslim: {}, etiketBasildi: null,
+  teyit: null, icerikSurum: 0, silindi: null, elle: null, bildirimRevize: null,
+} as const;
 
 beforeEach(() => { abonelikler.length = 0; localStorage.clear(); });
 afterEach(() => { vi.restoreAllMocks(); });
@@ -105,7 +120,8 @@ describe('magazaTalebiDaralt — akıştan gelen doküman güvenilmez', () => {
       },
       etiketBasildi: { zaman: '2026-10-08T14:05:00.000Z', koli: 3, kim: { uid: 'u-1', panel: true } },
     };
-    expect(magazaTalebiDaralt('mt-2a', tam2a)).toEqual({ ...tam2a, id: 'mt-2a' });
+    // 2a kaydında 2b alanları yoktur: satırda varsayılanlarıyla durur.
+    expect(magazaTalebiDaralt('mt-2a', tam2a)).toEqual({ ...tam2a, id: 'mt-2a', teyit: null, icerikSurum: 0, silindi: null, elle: null, bildirimRevize: null });
   });
 
   it('nesne olmayan / boş doküman ATILMAZ: metinler boş, sayılar BİLİNMİYOR, bildirim null', () => {
@@ -312,6 +328,161 @@ describe('magazaTalebiDaralt — dilim 2a: aşama, sürüm, kalem teslim, etiket
   });
 });
 
+// ── 1c. Dilim 2b alanları ───────────────────────────────────────────────────────────────────────────────────────────
+describe('magazaTalebiDaralt — dilim 2b: teyit, içerik sürümü, silindi, elle, revize bildirimi (şartname v6 § 10.4)', () => {
+  const d = (ek: Record<string, unknown>) => magazaTalebiDaralt('mt-1', { ...tamTalep, ...ek });
+  const z = '2026-10-09T08:00:00.000Z';
+  const teyitKalemi = (ek: Record<string, unknown> = {}) =>
+    ({ anahtar: 't:aaaaaaaaaaaa', id: 'u1', sku: 'DYO-0001', ad: 'İç cephe boyası', marka: 'DYO', adet: 2, birimFiyat: 95, kdvOrani: 20, kdvKaynagi: 'urun', tedarik: false, ...ek });
+  const teyit = (ek: Record<string, unknown> = {}) => ({
+    kalemler: [teyitKalemi(), teyitKalemi({ anahtar: 't:bbbbbbbbbbbb', id: 'u2', sku: 'FRC-12', ad: 'Fırça', marka: 'İzmir Fırça', adet: 1, birimFiyat: 40, kdvOrani: 10, kdvKaynagi: 'personel' })],
+    araToplam: 230, kdv: 42, toplam: 272, zaman: z, kim: { uid: 'u-2', ad: 'Mehmet Öztürk' }, ...ek,
+  });
+
+  it('dilim 2b alanlarını taşıyan TAM doküman olduğu gibi okunur', () => {
+    const tam2b = {
+      ...tamTalep,
+      teyit: teyit(),
+      icerikSurum: 4,
+      icerikZamani: z,
+      silindi: { zaman: z, kim: { uid: 'u-9', ad: 'Zeynep Yönetici' }, kanal: 'panel' },
+      elle: { zaman: '2026-10-08T09:15:00.000Z', kim: { uid: 'u-1', ad: 'Ayşe Yılmaz' } },
+      bildirimRevize: { durum: 'gonderilemedi', zaman: z, alanlar: ['musteri', 'teyit'], kim: { uid: 'u-2', ad: 'Mehmet Öztürk' }, icerikSurum: 4, deneme: 3, hataSinifi: 'baglanti' },
+    };
+    const { teyit: _t, icerikSurum: _s, silindi: _x, elle: _e, bildirimRevize: _b, ...kalan } = DILIM1_VARSAYILAN;
+    expect(magazaTalebiDaralt('mt-2b', tam2b)).toEqual({ ...tam2b, id: 'mt-2b', ...kalan });
+  });
+
+  it('2a / dilim 1 kaydı (2b alanı yok): teyit `null`, `icerikSurum` 0, silinmemiş, mağazadan gelmiş, revize yok; `icerikZamani` satırda YOK', () => {
+    const t = d({});
+    expect([t.teyit, t.icerikSurum, t.silindi, t.elle, t.bildirimRevize]).toEqual([null, 0, null, null, null]);
+    expect('icerikZamani' in t).toBe(false);
+  });
+
+  it('`teyit` bozuksa BÜTÜNÜYLE `null` (yarım okunmuş teyit yanlış tutar basardı): nesne değil / kalem dizisi yok / boş dizi', () => {
+    for (const bozuk of [undefined, null, 'teyit', 3, true, [teyitKalemi()], {}, { kalemler: 'x' }, { kalemler: {} }, teyit({ kalemler: [] })]) {
+      expect(d({ teyit: bozuk }).teyit, JSON.stringify(bozuk)).toBeNull();
+    }
+  });
+
+  it('TEK bozuk kalem teyidi düşürür: `anahtar` desene uymuyor, `kdvOrani` küme dışı, `kdvKaynagi` tanınmıyor, kalem nesne değil, yinelenen anahtar', () => {
+    const bozukKalemler: Array<[string, unknown]> = [
+      ['anahtar yok', teyitKalemi({ anahtar: undefined })],
+      ['beyan anahtarı değil ama öncü sıfırlı', teyitKalemi({ anahtar: 'b:01' })],
+      ['kısa onaltılık', teyitKalemi({ anahtar: 't:abc' })],
+      ['büyük harfli onaltılık', teyitKalemi({ anahtar: 't:AAAAAAAAAAAA' })],
+      ['anahtar sayı', teyitKalemi({ anahtar: 7 })],
+      ['kdvOrani 18 (küme dışı)', teyitKalemi({ kdvOrani: 18 })],
+      ['kdvOrani 8', teyitKalemi({ kdvOrani: 8 })],
+      ['kdvOrani metin', teyitKalemi({ kdvOrani: '20' })],
+      ['kdvOrani yok', teyitKalemi({ kdvOrani: undefined })],
+      ['kdvKaynagi tanınmıyor', teyitKalemi({ kdvKaynagi: 'mikro' })],
+      ['kdvKaynagi yok', teyitKalemi({ kdvKaynagi: undefined })],
+      ['kalem null', null],
+      ['kalem metin', 'kalem'],
+    ];
+    for (const [ad, kalem] of bozukKalemler) {
+      expect(d({ teyit: teyit({ kalemler: [teyitKalemi({ anahtar: 't:cccccccccccc' }), kalem] }) }).teyit, ad).toBeNull();
+    }
+    // Aynı anahtar iki kalemde: teslim işareti hangisine ait belli olmaz.
+    expect(d({ teyit: teyit({ kalemler: [teyitKalemi(), teyitKalemi()] }) }).teyit).toBeNull();
+    // Denetim: aynı kalemlerin SAĞLAM hâli okunur (yukarıdaki `null`lar gerçekten bozukluktan).
+    expect(d({ teyit: teyit({ kalemler: [teyitKalemi({ anahtar: 't:cccccccccccc' }), teyitKalemi()] }) }).teyit?.kalemler).toHaveLength(2);
+  });
+
+  it('beyandan kopya anahtarı (`b:<dizin>`) desene UYAR ama teyit kalemi sunucuda hep `t:` taşır — desen ortak, kalem okunur', () => {
+    // Desen `lib/magazaTalep.ts` MAGAZA_KALEM_ANAHTARI_DESENI'dir (ikinci desen yazılmaz); sunucu teyide `b:` yazmaz.
+    expect(d({ teyit: teyit({ kalemler: [teyitKalemi({ anahtar: 'b:0' })] }) }).teyit?.kalemler[0].anahtar).toBe('b:0');
+  });
+
+  it('teyit toplamları ve fiyat: sayı değilse `null` (0 DEĞİL); meşru 0 KORUNUR; adet sayı değilse NaN; `tedarik` yalnız TAM `true`', () => {
+    const t = d({ teyit: teyit({ araToplam: '230', kdv: NaN, toplam: undefined, kalemler: [teyitKalemi({ birimFiyat: '95', adet: '2', tedarik: 'evet', id: 7, marka: null })] }) }).teyit;
+    expect([t?.araToplam, t?.kdv, t?.toplam]).toEqual([null, null, null]);
+    expect(t?.kalemler[0]).toEqual({ anahtar: 't:aaaaaaaaaaaa', id: '', sku: 'DYO-0001', ad: 'İç cephe boyası', marka: '', adet: NaN, birimFiyat: null, kdvOrani: 20, kdvKaynagi: 'urun', tedarik: false });
+    const sifir = d({ teyit: teyit({ araToplam: 0, kdv: 0, toplam: 0, kalemler: [teyitKalemi({ birimFiyat: 0, kdvOrani: 0 })] }) }).teyit;
+    expect([sifir?.araToplam, sifir?.kdv, sifir?.toplam, sifir?.kalemler[0].birimFiyat, sifir?.kalemler[0].kdvOrani]).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it('teyit eden okunamıyorsa ad boş kalır, teyit DÜŞMEZ; `zaman` metin değilse boş', () => {
+    const t = d({ teyit: teyit({ kim: 'Mehmet', zaman: 1760000000000 }) }).teyit;
+    expect(t?.kim).toEqual({ uid: '', ad: '' });
+    expect(t?.zaman).toBe('');
+    expect(t?.kalemler).toHaveLength(2);
+  });
+
+  it('`icerikSurum`: negatif olmayan tam sayı ise kendisi; sayı değilse / kesirliyse / negatifse 0; `icerikZamani` yalnız metinse taşınır', () => {
+    expect(d({ icerikSurum: 0 }).icerikSurum).toBe(0);
+    expect(d({ icerikSurum: 12 }).icerikSurum).toBe(12);
+    for (const bozuk of ['3', 2.5, -1, NaN, null, undefined, true, [3]]) expect(d({ icerikSurum: bozuk }).icerikSurum, String(bozuk)).toBe(0);
+    expect(d({ icerikZamani: z }).icerikZamani).toBe(z);
+    for (const bozuk of [1760000000000, null, undefined, { z }]) expect('icerikZamani' in d({ icerikZamani: bozuk })).toBe(false);
+  });
+
+  it('`silindi`: NESNE → silinmiş; `null` (geri alınmış) → `null`; yok → `null`; nesne olmayan değer → `null`', () => {
+    expect(d({ silindi: { zaman: z, kim: { uid: 'u-9', ad: 'Zeynep Yönetici' }, kanal: 'erp' } }).silindi).toEqual({ zaman: z, kim: { uid: 'u-9', ad: 'Zeynep Yönetici' }, kanal: 'erp' });
+    expect(d({ silindi: null }).silindi).toBeNull();
+    expect(d({}).silindi).toBeNull();
+    for (const bozuk of ['silindi', true, 1, [{ zaman: z }]]) expect(d({ silindi: bozuk }).silindi, JSON.stringify(bozuk)).toBeNull();
+  });
+
+  it('alanları BOZUK silme nesnesi `null`\'a DÜŞMEZ: talep yine SİLİNMİŞ görünür (sunucu 409 `silindi` verirken ekran canlı göstermesin)', () => {
+    expect(d({ silindi: {} }).silindi).toEqual({ zaman: '', kim: { uid: '', ad: '' }, kanal: null });
+    expect(d({ silindi: { zaman: 7, kim: 'biri', kanal: 'mobil' } }).silindi).toEqual({ zaman: '', kim: { uid: '', ad: '' }, kanal: null });
+    // Ölçüt ortak saf işlevle AYNI hükmü verir (SQL eşi `jsonb_typeof(…) = 'object'`).
+    for (const v of [{}, { zaman: z }, null, undefined, 'x', [], 0]) expect(d({ silindi: v }).silindi !== null, JSON.stringify(v)).toBe(magazaSilinmisMi({ silindi: v }));
+  });
+
+  it('`elle`: nesne → `{ zaman, kim }` (ERP\'de elle açıldı); yok / `null` / dizi / metin → `null` (mağazadan geldi)', () => {
+    expect(d({ elle: { zaman: z, kim: { uid: 'u-1', ad: 'Ayşe Yılmaz' }, fazladan: 1 } }).elle).toEqual({ zaman: z, kim: { uid: 'u-1', ad: 'Ayşe Yılmaz' } });
+    expect(d({ elle: {} }).elle).toEqual({ zaman: '', kim: { uid: '', ad: '' } });
+    for (const yok of [undefined, null, [], 'elle', true]) expect(d({ elle: yok }).elle, JSON.stringify(yok)).toBeNull();
+  });
+
+  it('`bildirimRevize` DÖRT durumda tanınır (ilk bildirimle AYNI sözlük); `kim` / `icerikSurum` / `deneme` / hata sınıfı taşınır', () => {
+    for (const durum of MAGAZA_BILDIRIM_DURUMLARI) {
+      expect(d({ bildirimRevize: { durum, zaman: z, alanlar: ['not'], kim: { uid: 'u-2', ad: 'Mehmet Öztürk' }, icerikSurum: 3 } }).bildirimRevize, durum)
+        .toEqual({ durum, zaman: z, alanlar: ['not'], kim: { uid: 'u-2', ad: 'Mehmet Öztürk' }, icerikSurum: 3 });
+    }
+    expect(MAGAZA_BILDIRIM_DURUMLARI).toHaveLength(4);
+    expect(d({ bildirimRevize: { durum: 'bekliyor', zaman: z, alanlar: ['teyit'], kim: { uid: 'u', ad: 'A' }, icerikSurum: 1, deneme: 2, hataSinifi: 'tls' } }).bildirimRevize)
+      .toEqual({ durum: 'bekliyor', zaman: z, alanlar: ['teyit'], kim: { uid: 'u', ad: 'A' }, icerikSurum: 1, deneme: 2, hataSinifi: 'tls' });
+  });
+
+  it('`bildirimRevize.alanlar` `alanlariBirlestir` ile: yinelenen ad tekilleşir (SQL birleştirmesi `[\'not\', \'not\']` bırakır), bilinmeyen ad süzülür', () => {
+    const r = (alanlar: unknown) => d({ bildirimRevize: { durum: 'bekliyor', zaman: z, alanlar, kim: { uid: 'u', ad: 'A' }, icerikSurum: 1 } }).bildirimRevize?.alanlar;
+    expect(r(['not', 'not'])).toEqual(['not']);
+    expect(r(['not', 'teyit', 'not', 'musteri'])).toEqual(['not', 'teyit', 'musteri']);
+    expect(r(['not', 'fiyat', 7, null, 'teyit'])).toEqual(['not', 'teyit']);
+    for (const bozuk of [undefined, null, 'not', { 0: 'not' }]) expect(r(bozuk), JSON.stringify(bozuk)).toEqual([]);
+  });
+
+  it('`bildirimRevize` bozuksa `null` (ikinci rozet çizilmez): alan yok, nesne değil, durum bilinmiyor; `icerikSurum` okunamıyorsa `null`, kim okunamıyorsa boş', () => {
+    for (const bozuk of [undefined, null, 'bekliyor', [], {}, { zaman: z }, { durum: 'Bekliyor', zaman: z }, { durum: 'vazgecildi', zaman: z }, { durum: 'hata', zaman: z }]) {
+      expect(d({ bildirimRevize: bozuk }).bildirimRevize, JSON.stringify(bozuk)).toBeNull();
+    }
+    expect(d({ bildirimRevize: { durum: 'gitti', zaman: z, icerikSurum: '3', kim: null } }).bildirimRevize).toEqual({ durum: 'gitti', zaman: z, alanlar: [], kim: { uid: '', ad: '' }, icerikSurum: null });
+  });
+
+  it('`gerekmiyor` özel bir durum DEĞİLDİR: iki bildirim alanında da bilinmeyen dizge gibi işlenir (`null`)', () => {
+    expect(d({ bildirim: { durum: 'gerekmiyor', zaman: z } }).bildirim).toBeNull();
+    expect(d({ bildirimRevize: { durum: 'gerekmiyor', zaman: z, alanlar: ['not'], kim: { uid: 'u', ad: 'A' }, icerikSurum: 1 } }).bildirimRevize).toBeNull();
+  });
+
+  it('içerik düzenlemesi BEYANI değiştirmez: teyitli dokümanda `kalemler` ve `talepEdilen` aynen okunur (iki tablo ayrı kaynaktan)', () => {
+    const t = d({ teyit: teyit() });
+    expect(t.kalemler).toEqual(tamTalep.kalemler);
+    expect(t.talepEdilen).toEqual(tamTalep.talepEdilen);
+    expect(magazaKalemAnahtarlari(t)).toEqual(['t:aaaaaaaaaaaa', 't:bbbbbbbbbbbb']);       // aktif kaynak teyit
+    expect(magazaKalemAnahtarlari(d({}))).toEqual(['b:0', 'b:1']);
+  });
+
+  it('sayaçlar YALNIZ canlı talepleri sayar: `yeniAsamaSayisi` silinmişi saymaz; geri alınan (`null`) yeniden sayılır', () => {
+    const silinmis = { zaman: z, kim: { uid: 'u', ad: 'A' }, kanal: 'erp' };
+    expect(yeniAsamaSayisi([d({ durum: 'yeni' }), d({ durum: 'yeni', silindi: silinmis }), d({ durum: 'yeni', silindi: null }), d({ durum: 'teyit' })])).toBe(2);
+    expect(yeniAsamaSayisi([{ durum: 'yeni' }])).toBe(1);                                   // `silindi` alanı olmayan girdi canlıdır
+  });
+});
+
 describe('useMagazaTalepleri.ts — kaynak çiti (yorumlar süzülür)', () => {
   const kod = yorumsuz('src/hooks/useMagazaTalepleri.ts', oku(join(SRC_KOK, 'hooks', 'useMagazaTalepleri.ts'))).join('\n');
 
@@ -326,6 +497,29 @@ describe('useMagazaTalepleri.ts — kaynak çiti (yorumlar süzülür)', () => {
   it('kanca ağ isteği ATMAZ ve koleksiyona YAZMAZ: yazma `services/magazaTalepIstemcisi.ts`\'tedir', () => {
     expect(kod).not.toMatch(/authFetch|fetch\(|setDoc|updateDoc|addDoc|deleteDoc/);
     expect(kod).not.toMatch(/services\//);
+  });
+
+  it('bildirim sözlüğü DEĞİŞMEDİ: `BILINEN_BILDIRIM_DURUMU` anahtarları tam DÖRT ve sunucunun `MAGAZA_BILDIRIM_DURUMLARI` kümesiyle aynı; beşinci dal yok', () => {
+    const govde = /const BILINEN_BILDIRIM_DURUMU: Record<MagazaBildirimDurumu, true> = \{([^}]*)\};/.exec(kod)?.[1] ?? '';
+    const anahtarlar = [...govde.matchAll(/(\w+): true/g)].map(m => m[1]);
+    expect(anahtarlar).toHaveLength(4);
+    expect([...anahtarlar].sort()).toEqual([...MAGAZA_BILDIRIM_DURUMLARI].sort());
+    expect(kod).not.toMatch(/gerekmiyor|vazgecildi/);
+  });
+
+  it('revize bildirimi ilk bildirimle AYNI daraltıcıdan geçer (kopya sözlük yok); `alanlar` `alanlariBirlestir` ile; silinmiş ölçütü ortak saf işlev', () => {
+    const govde = /function bildirimRevizeDaralt\(v: unknown\): MagazaSatirBildirimRevize \| null \{\n([\s\S]*?)\n\}/.exec(kod)?.[1] ?? '';
+    expect(govde).toContain('const taban = bildirimDaralt(v);');
+    expect(govde).toContain('alanlar: alanlariBirlestir(b.alanlar)');
+    expect((kod.match(/bildirimDurumuMu\(/g) ?? [])).toHaveLength(1);                 // tek karşılaştırma: `bildirimDaralt` içinde
+    expect(kod).toContain('if (!magazaSilinmisMi({ silindi: v })) return null;');
+    // Teyit kalemi: anahtar deseni, oran kümesi ve kaynak kümesi ortak sözleşmeden (kopya desen / kopya küme yok).
+    expect(kod).toContain('MAGAZA_KALEM_ANAHTARI_DESENI.test(k.anahtar)');
+    expect(kod).toContain('!magazaKdvOraniMi(k.kdvOrani) || !magazaKdvKaynagiMi(k.kdvKaynagi)');
+    expect(kod).not.toMatch(/\[0, 1, 10, 20\]|'personel'|'varsayilan'/);
+    // Sayısal alanda varsayılan yok: teyit toplamları `sayiYaDaNull`.
+    expect(kod).toContain('araToplam: sayiYaDaNull(t.araToplam), kdv: sayiYaDaNull(t.kdv), toplam: sayiYaDaNull(t.toplam),');
+    expect(kod).not.toMatch(/(\?\?|\|\|)\s*0\b/);
   });
 
   it('kalem daraltıcısı beyan kalemine `teslim` / `anahtar` YAZMAZ (V16); türetilen değer kancada saklanmaz', () => {
@@ -584,6 +778,19 @@ describe('useMagazaYeniSayaci', () => {
     const { result } = kur({ talepler: [satir('a', SABAH), satir('b', OGLE), satir('c', 'bozuk')], anahtar: ANAHTAR, acik: false });
     expect(result.current).toBe(2);
     expect(localStorage.getItem(ANAHTAR)).toBeNull();   // sekme açılmadan hiçbir şey «görüldü» diye yazılmaz
+  });
+
+  it('(2b) silinmiş talep «görülmemiş» SAYILMAZ (rozeti kabartmaz); ama GÖRÜLDÜ sayılır — geri alınınca yeniden «görülmemiş» olmaz', () => {
+    const silinmis = (id: string, olusturma: string): MagazaTalepSatiri =>
+      magazaTalebiDaralt(id, { ...tamTalep, olusturma, silindi: { zaman: AKSAM, kim: { uid: 'u', ad: 'A' }, kanal: 'erp' } });
+    const { result, rerender } = kur({ talepler: [satir('a', SABAH), silinmis('b', OGLE)], anahtar: ANAHTAR, acik: false });
+    expect(result.current).toBe(1);                                             // yalnız canlı `a`
+    // Sekme açıldı: saklanan değer BÜTÜN taleplerin en büyüğüdür (silinmiş `b` de görüldü).
+    rerender({ talepler: [satir('a', SABAH), silinmis('b', OGLE)], anahtar: ANAHTAR, acik: true });
+    expect(localStorage.getItem(ANAHTAR)).toBe(String(ms(OGLE)));
+    // `b` geri alındı ve sekme kapandı: zaten görülmüştü, sayaç 0 kalır.
+    rerender({ talepler: [satir('a', SABAH), satir('b', OGLE)], anahtar: ANAHTAR, acik: false });
+    expect(result.current).toBe(0);
   });
 
   it('depodaki son görülenden SONRA gelenler sayılır', () => {

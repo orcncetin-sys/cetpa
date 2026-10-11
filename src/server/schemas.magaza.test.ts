@@ -2,6 +2,8 @@
 /**
  * schemas.magaza.test.ts — mağaza dilim 2a gövde şemaları (§ 3.2, § 3.3, § 4). Hepsi `.strict()`; `KalemTeslimGovdesi` TEK sabit
  * (iki rota dosyası içe aktarır — ikinci `z.object(` kopyası yazılmaz; kaynak çiti rota testlerinde).
+ * Dilim 2b şemalarının (`ErpIcerikGovdesi`, `ErpSilGovdesi`, `PanelSilGovdesi`, `ErpElleTalepGovdesi`, `BildirimGonderSorgusu`)
+ * davranış testleri `kanal/magazaIcerik.test.ts`'tedir; buradaki kaynak çiti iki dilimi birlikte sayar.
  */
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
@@ -89,6 +91,15 @@ describe('YetkiKoduGovdesi / PanelOturumGovdesi (§ 3.2, 3.3)', () => {
     const bas = satirlar.findIndex(s => s.includes('const durumGovdesi'));
     expect(bas).toBeGreaterThan(-1);
     expect(satirlar.slice(bas).join('\n')).not.toMatch(/\.default\(|\.coerce|\.transform\(|\.catch\(/);
-    expect(satirlar.slice(bas).filter(s => /z\.object\(/.test(s))).toHaveLength(6);
+    // Dilim 2a: 6 nesne şeması. Dilim 2b (bilerek değişen çit, § 10.3): + 7 — `BildirimGonderSorgusu`, içerik gövdesinin müşteri
+    // bloğu, teyit kalemi, `ErpIcerikGovdesi` (dış nesne + `teyit`), `ErpSilGovdesi`, `PanelSilGovdesi`. `ErpElleTalepGovdesi` yeni
+    // `z.object(` YAZMAZ: mağaza talebi şemasından `.omit(…)` ile türer (kopya gövde yok).
+    expect(satirlar.slice(bas).filter(s => /z\.object\(/.test(s))).toHaveLength(13);
+    expect(satirlar.filter(s => /export const ErpElleTalepGovdesi = /.test(s))).toEqual(['export const ErpElleTalepGovdesi = MagazaSiparisTalebiSchema.omit({ no: true, tarih: true }).strict();']);
+    // İçe aktarım yine yalnız zod + yaprak sözleşme (2b: KDV kümesi denetimi `magazaKdvOraniMi` oradan gelir, küme burada kopyalanmaz).
+    expect(satirlar.filter(s => /from '/.test(s) && /^(import |\} from )/.test(s)).map(s => s.replace(/^.*from /, 'from '))).toEqual([
+      "from 'zod';", "from '../lib/magazaTalep.js';", "from '../lib/magazaTalep.js';",
+    ]);
+    expect(satirlar.join('\n')).not.toMatch(/\[\s*0\s*,\s*1\s*,\s*10\s*,\s*20\s*\]|z\.literal\((0|1|10|20)\)/);
   });
 });

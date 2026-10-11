@@ -45,6 +45,9 @@ describe('her sınırlayıcı anahtar üreticisini AÇIKÇA seçer — doğru ol
     magazaPanelOturumLimiter: 'yalnizIpAnahtari',
     magazaPanelLimiter: 'yalnizIpAnahtari',
     magazaYetkiKoduLimiter: 'userOrIpKey',
+    // Mağaza dilim 2b (2026-10-10): ERP kökenindeki elle talep / içerik / silme uçları kimliklidir — kullanıcı anahtarı
+    // (bu uçlar e-posta bildirimi üretir; aynı ofis tek kovaya girmesin, tek kullanıcı da kutuyu dolduramasın).
+    magazaIcerikLimiter: 'userOrIpKey',
   };
   it('server.ts\'teki rateLimit çağrıları tabloyla BİREBİR (yeni sınırlayıcı eklenince bu tablo bilinçli güncellenir)', () => {
     const olculen = Object.fromEntries(sinirlayicilar().map(s => [s.ad, s.govde.match(/keyGenerator: (\w+)/)?.[1] ?? '(YOK — varsayılan üretici)']));

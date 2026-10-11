@@ -83,13 +83,14 @@ import { magaza429, magazaIzinliKokenleriCoz, magazaZinciri } from "./src/server
 // Mağaza dilim 2a (2026-10-10): site paneli alt zinciri + ERP kökenindeki mağaza uçları. Panel modülü de bekçiyle AYNI yoldan
 // içe aktarılır (`magazaPanelSayaclari()` modül düzeyi sayaç okur — yukarıdaki notla aynı gerekçe).
 import { erpCikisindaPanelIptalEt, magazaPanel429, magazaPanelZinciri } from "./src/server/routes/magazaPanelZinciri.js";
-import { magazaErpRoutes, magazaYetkiKodu429 } from "./src/server/routes/magazaErpRoutes.js";
+import { magazaErpRoutes, magazaIcerik429, magazaYetkiKodu429 } from "./src/server/routes/magazaErpRoutes.js";
 import { panelKullanicisiKur } from "./src/server/kanal/magazaPanelKullanici.js";
 import { kodDeposuKur } from "./src/server/kanal/magazaPanelKod.js";
 import { iptalKur } from "./src/server/kanal/magazaPanelIptal.js";
 import { donusTabaniCoz, panelAnahtariTuret, panelSirriVar } from "./src/server/kanal/magazaPanelBelirtec.js";
 import {
   MAGAZA_BILDIRIM_ISCI_SECENEKLERI, MAGAZA_BILDIRIM_KUYRUGU, magazaBildirimIscisi, magazaBildirimIsteyici, magazaBildirimKacanlariKuyrukla, type MagazaBildirimDeps,
+  MAGAZA_REVIZE_KUYRUGU, magazaRevizeBildirimIscisi, magazaRevizeBildirimIsteyici, magazaRevizeKacanlariKuyrukla,
 } from "./src/server/kanal/magazaBildirim.js";
 import { smtpYapilandirmasi } from "./src/server/smtpPosta.js";
 import { ortamdanKiraci } from "./src/server/kiraciOrtami.js";
@@ -414,6 +415,11 @@ const magazaBildirimDeps: MagazaBildirimDeps = {
  *  `send` iş oluşturmaz; bayrak inikken istek süreç içi gönderime düşer (bildirim sessizce kaybolmaz). */
 let magazaBildirimKuyruguHazir = false;
 const magazaBildirimIste = magazaBildirimIsteyici(() => (magazaBildirimKuyruguHazir ? boss : null), magazaBildirimDeps);
+/** (Mağaza dilim 2b, şartname § 10.2 (e)) Revize bildirimi AYRI kuyruktadır ve bayrağı da AYRIDIR: revize kuyruğunun KENDİ `createQueue` +
+ *  `work`'ü bittikten sonra kalkar. İlk kuyruğun bayrağı paylaşılsaydı, revize işçisi bağlanamadığında işler işçisiz kuyruğa girer ve hiç
+ *  işlenmezdi (bildirim sessizce gitmezdi); bayrak inikken istek süreç içi gönderime düşer. Yazma bağlamına `revizeBildirimiIste` olarak geçer. */
+let magazaRevizeKuyruguHazir = false;
+const magazaRevizeBildirimIste = magazaRevizeBildirimIsteyici(() => (magazaRevizeKuyruguHazir ? boss : null), magazaBildirimDeps);
 
 // ── Mağaza paneli «ERP ile bağlan» (dilim 2a, şartname § 3) — TEK örnekler, MODÜL DÜZEYİNDE ──────────────────────────────
 // Üçü de BİR kez kurulur ve bütün çağıranlara AYNI tanımlayıcı gider (her modül kendi `Map`'ini kursaydı her kod değişimi 401
@@ -573,7 +579,7 @@ async function initDocsTable(): Promise<void> {
     // yaratmaz; olmayan kuyruğa işçi bağlamak sonsuz "Queue does not exist"
     // hata döngüsü üretir. Bu üç işçi 2026-07 boyunca tam olarak bunu yaptı.
     // createQueue idempotent — zaten varsa sorun çıkarmaz.
-    const kuyruklar = ['shopify-webhook', 'stripe-webhook', 'outbound-webhook', MAGAZA_BILDIRIM_KUYRUGU] as const;
+    const kuyruklar = ['shopify-webhook', 'stripe-webhook', 'outbound-webhook', MAGAZA_BILDIRIM_KUYRUGU, MAGAZA_REVIZE_KUYRUGU] as const;
     const olusanKuyruklar = new Set<string>();
     for (const q of kuyruklar) {
       try { await boss.createQueue(q); olusanKuyruklar.add(q); }
@@ -600,9 +606,19 @@ async function initDocsTable(): Promise<void> {
         magazaBildirimKuyruguHazir = true;
       } catch (e) { console.warn(`pg-boss işçi bağlanamadı (${MAGAZA_BILDIRIM_KUYRUGU}):`, (e as Error).message); }
     }
+    // Mağaza talebi REVİZE bildirimi (dilim 2b): AYNI kurallar (kuyruk oluştuysa, aynı meta seçenekleriyle, `batchSize`sız), AYRI kuyruk,
+    // AYRI işçi ve AYRI bayrak — bir kuyruğun işçisi bağlanamazsa öbürünün bildirimi kuyruk yolunda kalır, bağlanamayanınki süreç içi yola düşer.
+    if (olusanKuyruklar.has(MAGAZA_REVIZE_KUYRUGU)) {
+      try {
+        await boss.work(MAGAZA_REVIZE_KUYRUGU, MAGAZA_BILDIRIM_ISCI_SECENEKLERI, magazaRevizeBildirimIscisi(magazaBildirimDeps));
+        magazaRevizeKuyruguHazir = true;
+      } catch (e) { console.warn(`pg-boss işçi bağlanamadı (${MAGAZA_REVIZE_KUYRUGU}):`, (e as Error).message); }
+    }
     // Kaçan bildirimler (SMTP yokken «yapılandırılmamış» kalanlar, yetim «bekliyor»): yalnız işçi bağlandıysa, teslim sondası
     // geçerse, tek SQL ile sahiplenip kuyruğa alır; açılışı beklemez, fırlatmaz, kendi günlüğünü yazar (K6, 2026-10-09).
     if (magazaBildirimKuyruguHazir) void magazaBildirimKacanlariKuyrukla(magazaBildirimDeps, () => boss).catch(() => undefined);
+    // Kaçan REVİZE bildirimleri: aynı kurallar, `bildirimRevize` alanı ve revize kuyruğu; ilk bildirimin süpürmesinden bağımsız koşar.
+    if (magazaRevizeKuyruguHazir) void magazaRevizeKacanlariKuyrukla(magazaBildirimDeps, () => boss).catch(() => undefined);
     console.log('pg-boss ready ✓ (kuyruklar: ' + [...olusanKuyruklar].join(', ') + ')');
   }
 }
@@ -2434,6 +2450,17 @@ async function startServer() {
     keyGenerator: userOrIpKey,
     handler: magazaYetkiKodu429,
   });
+  // Mağaza talebi İÇERİK uçları (dilim 2b, ERP kökeni, kimlikli): elle talep + içerik düzenleme + silme / geri alma TEK kovada,
+  // kullanıcı başına 60 / 15 dk. Bu üç uç e-posta bildirimi üretebilir (elle talep → ilk bildirim, içerik → revize bildirimi);
+  // gevşek `dbLimiter` (2.000 / dk) buna sel koruması olmaz. `magazaErpRoutes` bağlamına gider; 429 gövdesi `{ ok: false, kod: 'sinir' }`.
+  const magazaIcerikLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userOrIpKey,
+    handler: magazaIcerik429,
+  });
   // Panel alt zinciri AYRI modüldedir (`magazaPanelZinciri.ts`); mağaza zinciri onu yalnız `/panel` önekine bağlar — köken
   // kapısından ve genel sınırlayıcıdan ÖNCE (panel kendi köken kapısını ve kovalarını taşır, her isteği kendisi sonlandırır).
   const magazaPanel = magazaPanelZinciri({
@@ -4242,17 +4269,19 @@ async function startServer() {
     requireAuth, requireMfaVerified,
   });
 
-  // Mağaza taleplerinin ERP kökenindeki uçları (dilim 2a): «ERP ile bağlan» yetki kodu + aşama / kalem teslim / elle bildirim.
+  // Mağaza taleplerinin ERP kökenindeki uçları (dilim 2a): «ERP ile bağlan» yetki kodu + aşama / kalem teslim / elle bildirim;
+  // (dilim 2b) elle talep + içerik düzenleme + yumuşak silme / geri alma + revize bildirimini yeniden gönderme.
   // KONUM: öbür rota modülleriyle AYNI nokta — genel gövde ayrıştırıcıdan ve `app.use('/api', apiLimiter)`'dan SONRA (öne
-  // alınırsa dört POST gövdesiz kalır). `dbLimiter` bu yüzden `if (pgPool) {` bloğunun DIŞINDA tanımlı. Kod deposu ve kullanıcı
+  // alınırsa bütün POST'lar gövdesiz kalır). `dbLimiter` bu yüzden `if (pgPool) {` bloğunun DIŞINDA tanımlı. Kod deposu ve kullanıcı
   // okuyucu panel zinciriyle (`magazaPanelZinciri`, yukarıda) AYNI örneklerdir; `panelDonus` panel yapılandırılmamışsa `null`.
   // `belirtecIptalDenetle`: Firebase belirtecinin İPTAL denetimli doğrulaması (ağ çağrısı) — YALNIZ yetki kodu ucunda,
   // sınırlayıcıdan sonra çağrılır; `requireAuth` yerel doğrulamada kalır (inceleme 2026-10-10; ayrıntı modül başlığında).
+  // `revizeBildirimiIste`: revize bildiriminin AYRI kuyruğunun isteyicisi (modül düzeyinde, kendi «hazır» bayrağıyla kurulur).
   magazaErpRoutes(app, {
-    requireAuth, requireMfaVerified, dbLimiter, magazaYetkiKoduLimiter,
+    requireAuth, requireMfaVerified, dbLimiter, magazaYetkiKoduLimiter, magazaIcerikLimiter,
     belirtecIptalDenetle: (belirtec) => getAuth().verifyIdToken(belirtec, true),
     panelKullanicisi: magazaPanelKullanici.panelKullanicisi, kodDeposu: magazaPanelKodDeposu,
-    getPgPool: () => pgPool, broadcastDocChange, writeAuditLog, bildirimIste: magazaBildirimIste,
+    getPgPool: () => pgPool, broadcastDocChange, writeAuditLog, bildirimIste: magazaBildirimIste, revizeBildirimiIste: magazaRevizeBildirimIste,
     smtpYapilandirmasi: () => smtpYapilandirmasi(), serverTenantId,
     panelDonus: magazaPanelAnahtari === null ? null : magazaPanelDonusTabani,
   });

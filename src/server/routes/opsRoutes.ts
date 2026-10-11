@@ -330,6 +330,8 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
         mikroSorgu: (await getMikroCreds()) ? (sql: string) => mikroSql(sql, { zamanAsimiMs: 8000 }) : null,
       });
       // Mağaza bildirimi (K7, 2026-10-09): kip + eksik anahtar ADLARI + son 7 günün sayımı — kapalı kümelerden, kişisel veri yok.
+      // Dilim 2b: sayım revize bildirimini de taşır (`sayim.revize.durum` / `.hataSinifi`; son 7 günde REVİZE edilen talepler —
+      // ilk bildirim sayılarına karışmaz; kanal/magazaBildirimSayim.ts).
       // Kendi try'ında: havuz yoksa / sorgu düşerse `sayim: null`, özetin geneli 500'e DÜŞMEZ.
       let magazaBildirim: { kip: string | null; eksik: string[]; pencereGun: number; sayim: unknown; hata?: 'okunamadi' } =
         { kip: null, eksik: [], pencereGun: MAGAZA_BILDIRIM_SAYIM_PENCERESI_GUN, sayim: null };

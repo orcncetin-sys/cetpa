@@ -1,11 +1,12 @@
 // @vitest-environment node
 /**
- * scripts/verify-deploy.sh `post` — mağaza dilim 2a sondaları UÇTAN UCA (şartname § 7 «Yayın sonrası sondalar» 1-9).
+ * scripts/verify-deploy.sh `post` — mağaza dilim 2a sondaları UÇTAN UCA (şartname § 7 «Yayın sonrası sondalar» 1-9) +
+ * dilim 2b sondaları (§ 10.8 «Sondalar»: üç yeni ERP ucu iki listede, `bildirim-gonder?tur=revize`, panel silme ucu).
  *
  * Betiğin `post` kipi GERÇEKTEN koşturulur (`bash scripts/verify-deploy.sh post`); `BASE_URL` bu dosyanın açtığı YEREL bir
  * sunucuyu gösterir (`listen(0)`), `gh` ve `git` PATH'e konan sahteleriyle değiştirilir. Canlıya / GitHub'a istek YOK.
- * Sahte sunucu senaryoya göre yanıt verir: sağlıklı dilim 2a, dilim 1 (2a hiç yayınlanmamış), site paneli
- * yapılandırılmamış, tekil arızalar. Sınanan şey sondanın AYIRT EDİCİLİĞİDİR: doğru sunucuda PASS, her arıza biçiminde
+ * Sahte sunucu senaryoya göre yanıt verir: sağlıklı dilim 2b, dilim 2a (2b yayınlanmamış), dilim 1 (2a hiç yayınlanmamış),
+ * site paneli yapılandırılmamış, tekil arızalar. Sınanan şey sondanın AYIRT EDİCİLİĞİDİR: doğru sunucuda PASS, her arıza biçiminde
  * FAIL ve doğru teşhis (yanlış PASS = canlıda görülmeyen arıza; bu betik «yayın sağlıklı» hükmünün tek kanıtıdır).
  *
  * İkinci yarı kaynak çitleridir: sondaların hiçbiri kimlik / çerez taşımaz (oturum açmaz, kayıt yazmaz), ERP uçları iki
@@ -33,7 +34,17 @@ const ERP_UCLARI = [
   `/api/magaza-talepleri/${KIMLIK}/durum`,
   `/api/magaza-talepleri/${KIMLIK}/kalem-teslim`,
   `/api/magaza-talepleri/${KIMLIK}/bildirim-gonder`,
+  // Dilim 2b (§ 10.3): elle talep, içerik düzenleme, yumuşak silme / geri alma.
+  '/api/magaza-talepleri',
+  `/api/magaza-talepleri/${KIMLIK}/icerik`,
+  `/api/magaza-talepleri/${KIMLIK}/sil`,
 ];
+/** Dilim 2b'nin üç yeni ERP ucu (2a sunucusunda YOK). */
+const ERP_UCLARI_2B = ERP_UCLARI.slice(4);
+/** `bildirim-gonder` ucunun sorgu dizeli varyantı (2b): kimliksiz `{}` → 401 (400 = `tur` kapıdan önce ayrıştırılıyor). */
+const REVIZE_UCU = `/api/magaza-talepleri/${KIMLIK}/bildirim-gonder?tur=revize`;
+/** Belirteçsiz 401 beklenen panel sondaları (son ad dilim 2b). */
+const PANEL_SONDALARI = ['liste', 'oturum', 'kalem teslim', 'etiket basıldı', 'silme'];
 const TAKIP_GOVDESI = '{"no":"T000000-AAAA","telefon":"0000000000"}';
 const ANA_BETIK = '/assets/index-AbC_12-x9.js';
 
@@ -67,7 +78,7 @@ const json = (kod: number, nesne: unknown, basliklar: Record<string, string> = {
 const jsonMu = (metin: string): boolean => { try { JSON.parse(metin); return true; } catch { return false; } };
 
 let kalanHak = 290;
-/** Sağlıklı dilim 2a sunucusunun dışarıdan görünen davranışı (şartname § 4 kayıt sırası ve yanıt tablosu). */
+/** Sağlıklı dilim 2b sunucusunun dışarıdan görünen davranışı (şartname § 4 kayıt sırası ve yanıt tablosu; § 10.3 yeni uçlar). */
 function saglikli(i: Istek): Yanit {
   const koken = i.basliklar.origin;
   const izinli = koken === KOKEN;
@@ -95,7 +106,8 @@ function saglikli(i: Istek): Yanit {
   // ERP kökeni: genel gövde ayrıştırıcı rotadan ÖNCE; kayıtlı rota kimliksiz isteğe 401 verir.
   if (i.yontem === 'POST' && i.yol.startsWith('/api/')) {
     if (!jsonMu(i.govde)) return json(400, { error: 'bozuk JSON' });
-    if (ERP_UCLARI.includes(i.yol)) return json(401, { error: 'Missing Authorization header.' });
+    // Kimlik kapısı sorgu dizesinden ÖNCE: `?tur=revize` varyantı da 401.
+    if (ERP_UCLARI.includes(i.yol) || i.yol === REVIZE_UCU) return json(401, { error: 'Missing Authorization header.' });
     return json(404, { error: 'yok' });
   }
   return { kod: 404, govde: 'yok' };
@@ -157,12 +169,12 @@ async function post(s: Senaryo = () => null): Promise<Kosu> {
 }
 
 const iceren = (satirlar: string[], ...parcalar: string[]): string[] => satirlar.filter(l => parcalar.every(p => l.includes(p)));
-const magazaIstekleri = (): Istek[] => istekler.filter(i => /^\/api\/magaza(-panel|-talepleri)?\//.test(i.yol));
+const magazaIstekleri = (): Istek[] => istekler.filter(i => /^\/api\/magaza(-panel|-talepleri)?(\/|$)/.test(i.yol));
 const sirali = (liste: string[]): string[] => [...liste].sort();
 
 // Betik bash ister; Windows'ta (yayın sunucusu) koşulmaz — CI derleme işi ubuntu'da koşturur.
-describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza dilim 2a sondaları (yerel sunucuya karşı, uçtan uca)', { timeout: 60_000 }, () => {
-  it('sağlıklı dilim 2a sunucusu: bütün sondalar PASS, çıkış kodu 0; dokuz sondanın her biri kendi satırını yazar', async () => {
+describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza dilim 2a + 2b sondaları (yerel sunucuya karşı, uçtan uca)', { timeout: 60_000 }, () => {
+  it('sağlıklı dilim 2b sunucusu: bütün sondalar PASS, çıkış kodu 0; her sonda kendi satırını yazar (2a\'nın dokuzu + 2b: üç ERP ucu, `?tur=revize`, panel silme)', async () => {
     const k = await post();
     expect(k.fail, k.cikti).toEqual([]);
     expect(k.kod).toBe(0);
@@ -173,12 +185,16 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     expect(iceren(k.pass, 'site paneli oturum', '401')).toHaveLength(1);
     expect(iceren(k.pass, 'site paneli kalem teslim', '401')).toHaveLength(1);
     expect(iceren(k.pass, 'site paneli etiket basıldı', '401')).toHaveLength(1);
+    expect(iceren(k.pass, 'site paneli silme', '401')).toHaveLength(1);                       // dilim 2b
     expect(iceren(k.pass, 'site paneli ön uçuşu', 'Allow-Methods GET', 'Allow-Headers Authorization')).toHaveLength(1);
     expect(iceren(k.pass, 'dış zinciri ön uçuşu', 'Authorization TAŞIMIYOR')).toHaveLength(1);
     for (const uc of ERP_UCLARI) {
       expect(iceren(k.pass, 'gövde ayrıştırma zincirde', `${uc} (bozuk JSON -> 400)`), uc).toHaveLength(1);
       expect(iceren(k.pass, 'mağaza ERP ucu kayıtlı', `${uc} (kimliksiz {} -> 401)`), uc).toHaveLength(1);
     }
+    expect(ERP_UCLARI).toHaveLength(7);
+    // Dilim 2b: sorgu dizeli varyant AYRI sondadır (kendi satırı, kendi teşhisi).
+    expect(iceren(k.pass, 'revize bildirimi kimlik kapısı arkasında', `${REVIZE_UCU} (kimliksiz {} -> 401)`)).toHaveLength(1);
     expect(iceren(k.pass, 'istemci derlemesi', ANA_BETIK, '/magaza-panel-baglan')).toHaveLength(1);
   });
 
@@ -206,6 +222,9 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
       `POST /api/magaza/panel/oturum {"kod":"${'A'.repeat(43)}","dogrulayici":"${'A'.repeat(43)}"}`,
       `POST /api/magaza/panel/siparisler/${KIMLIK}/kalem-teslim {}`,
       `POST /api/magaza/panel/siparisler/${KIMLIK}/etiket-basildi {}`,
+      // dilim 2b: panel silme ucu (belirteçsiz) + `bildirim-gonder?tur=revize` (kimliksiz); üç yeni ERP ucu aşağıdaki iki listede
+      `POST /api/magaza/panel/siparisler/${KIMLIK}/sil {}`,
+      `POST ${REVIZE_UCU} {}`,
       'OPTIONS /api/magaza/panel/siparisler ',
       'OPTIONS /api/magaza/siparis-talebi ',
       ...ERP_UCLARI.map(uc => `POST ${uc} {bozuk`),
@@ -230,14 +249,15 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
         if (i.yontem === 'OPTIONS') return { kod: 204, basliklar: { ...cors, 'access-control-allow-methods': 'POST', 'access-control-allow-headers': 'Content-Type' } };
         return json(404, { ok: false }, cors);
       }
-      if (ERP_UCLARI.includes(i.yol) && jsonMu(i.govde)) return json(404, { error: 'yok' });
+      if ((ERP_UCLARI.includes(i.yol) || i.yol === REVIZE_UCU) && jsonMu(i.govde)) return json(404, { error: 'yok' });
       if (i.yol === ANA_BETIK) return { kod: 200, govde: 'const yollar=["/siparisler"];export{yollar};', basliklar: { 'content-type': 'text/javascript' } };
       return null;
     });
     expect(k.kod).toBe(1);
     expect(k.cikti).toContain('== verify-deploy post: BASARISIZ KONTROL VAR ==');
     expect(iceren(k.fail, 'takip ucu', 'hazir-degil', 'dilim 1 hâlâ canlıda')).toHaveLength(1);
-    for (const ad of ['liste', 'oturum', 'kalem teslim', 'etiket basıldı']) expect(iceren(k.fail, `site paneli ${ad}`, '404', 'alt zincir bağlı değil'), ad).toHaveLength(1);
+    for (const ad of PANEL_SONDALARI) expect(iceren(k.fail, `site paneli ${ad}`, '404', 'alt zincir bağlı değil'), ad).toHaveLength(1);
+    expect(iceren(k.fail, 'MAĞAZA ERP UCU KAYITLI DEĞİL', `${REVIZE_UCU} -> 404`)).toHaveLength(1);
     expect(iceren(k.fail, 'site paneli ön uçuşu', 'beklenen 204 + Allow-Methods GET + Allow-Headers Authorization')).toHaveLength(1);
     for (const uc of ERP_UCLARI) {
       expect(iceren(k.fail, 'MAĞAZA ERP UCU KAYITLI DEĞİL', `${uc} -> 404`), uc).toHaveLength(1);
@@ -247,10 +267,34 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     expect(iceren(k.fail, 'İSTEMCİ DERLEMESİNDE /magaza-panel-baglan YOK', ANA_BETIK)).toHaveLength(1);
     // Dış zincir ön uçuşu dilim 1'de de doğrudur (Authorization yok): yanlış FAIL yazılmaz.
     expect(iceren(k.pass, 'dış zinciri ön uçuşu')).toHaveLength(1);
-    expect(k.pass.filter(l => /takip ucu|site paneli|istemci derlemesi|ERP ucu kayıtlı/.test(l))).toEqual([]);
+    expect(k.pass.filter(l => /takip ucu|site paneli|istemci derlemesi|ERP ucu kayıtlı|revize bildirimi/.test(l))).toEqual([]);
   });
 
-  it('site paneli YAPILANDIRILMAMIŞ (dönüş adresi / sır yok): dört panel sondası 503 panel-yapilandirilmamis → FAIL ve ortam ayarını söyler; ön uçuş ve öbür sondalar etkilenmez', async () => {
+  it('canlıda hâlâ DİLİM 2a (2b yayınlanmamış): üç yeni ERP ucu 404 → her biri FAIL «KAYITLI DEĞİL»; 2a sondaları yeşil kalır — belirteçsiz panel silme ve kimliksiz `?tur=revize` 2a\'da da 401\'dir (kapı rota eşleşmesinden önce)', async () => {
+    const k = await post((i): Yanit | null => (ERP_UCLARI_2B.includes(i.yol) && jsonMu(i.govde) ? json(404, { error: 'Not found' }) : null));
+    expect(k.kod).toBe(1);
+    expect(ERP_UCLARI_2B).toEqual(['/api/magaza-talepleri', `/api/magaza-talepleri/${KIMLIK}/icerik`, `/api/magaza-talepleri/${KIMLIK}/sil`]);
+    for (const uc of ERP_UCLARI_2B) {
+      expect(iceren(k.fail, 'MAĞAZA ERP UCU KAYITLI DEĞİL', `${uc} -> 404`), uc).toHaveLength(1);
+      // Bozuk JSON sondası rotanın yokluğunu GÖREMEZ (gövde hatası rota eşleşmesinden önce fırlar): bu yüzden iki liste de gerekir.
+      expect(iceren(k.pass, 'gövde ayrıştırma zincirde', `${uc} (bozuk JSON -> 400)`), uc).toHaveLength(1);
+    }
+    expect(k.fail).toHaveLength(3);                                   // 2a'nın hiçbir sondası düşmedi
+    for (const uc of ERP_UCLARI.slice(0, 4)) expect(iceren(k.pass, 'mağaza ERP ucu kayıtlı', `${uc} (kimliksiz {} -> 401)`), uc).toHaveLength(1);
+    for (const ad of PANEL_SONDALARI) expect(iceren(k.pass, `site paneli ${ad}`), ad).toHaveLength(1);
+    expect(iceren(k.pass, 'revize bildirimi kimlik kapısı arkasında')).toHaveLength(1);
+    expect(iceren(k.pass, 'takip ucu', '404 bulunamadi')).toHaveLength(1);
+  });
+
+  it('(2b) `bildirim-gonder?tur=revize` kimliksiz isteğe 400 dönerse (sorgu dizesi kimlik kapısından ÖNCE ayrıştırılıyor) FAIL «SIRA BOZUK»; `tur`suz uç 401 ile yeşil kalır', async () => {
+    const k = await post((i): Yanit | null => (i.yol === REVIZE_UCU && jsonMu(i.govde) ? json(400, { ok: false }) : null));
+    expect(k.kod).toBe(1);
+    expect(iceren(k.fail, 'REVİZE BİLDİRİMİ UCUNDA SIRA BOZUK', `${REVIZE_UCU} -> 400`, 'kimlik kapısından ÖNCE')).toHaveLength(1);
+    expect(k.fail).toHaveLength(1);
+    expect(iceren(k.pass, 'mağaza ERP ucu kayıtlı', `${ERP_UCLARI[3]} (kimliksiz {} -> 401)`)).toHaveLength(1);
+  });
+
+  it('site paneli YAPILANDIRILMAMIŞ (dönüş adresi / sır yok): beş panel sondası (2b: + silme) 503 panel-yapilandirilmamis → FAIL ve ortam ayarını söyler; ön uçuş ve öbür sondalar etkilenmez', async () => {
     const k = await post((i): Yanit | null => {
       if (i.yol.startsWith('/api/magaza/panel/') && i.basliklar.origin === KOKEN && i.yontem !== 'OPTIONS') {
         return json(503, { ok: false, kod: 'panel-yapilandirilmamis' }, { 'access-control-allow-origin': KOKEN, 'cache-control': 'no-store' });
@@ -259,9 +303,9 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     });
     expect(k.kod).toBe(1);
     const panel = iceren(k.fail, 'SİTE PANELİ YAPILANDIRILMAMIŞ', '503 panel-yapilandirilmamis', 'MAGAZA_PANEL_DONUS');
-    expect(panel).toHaveLength(4);
-    for (const ad of ['liste', 'oturum', 'kalem teslim', 'etiket basıldı']) expect(panel.filter(l => l.includes(ad)), ad).toHaveLength(1);
-    expect(k.fail).toHaveLength(4);                                   // başka hiçbir sonda düşmedi
+    expect(panel).toHaveLength(PANEL_SONDALARI.length);
+    for (const ad of PANEL_SONDALARI) expect(panel.filter(l => l.includes(ad)), ad).toHaveLength(1);
+    expect(k.fail).toHaveLength(5);                                   // başka hiçbir sonda düşmedi
     expect(iceren(k.pass, 'site paneli ön uçuşu')).toHaveLength(1);    // ön uçuş yapılandırma kapısından ÖNCE biter (204)
     expect(iceren(k.pass, 'takip ucu')).toHaveLength(1);
     expect(k.cikti).not.toMatch(/SESSION_TOKEN_SECRET=|https:\/\/www\.cetpa\.com\.tr\/panel/);   // değer yazılmaz, yalnız ad
@@ -290,7 +334,7 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     expect(iceren(k.fail, 'istemci derlemesi sondası ÖLÇÜLEMEDİ', 'ana betik indirilemedi', '502')).toHaveLength(1);
     expect(k.fail).toHaveLength(6);
     // Arızasız kalan komşu sondalar yeşil kaldı (bir arıza öbürünü boyamaz).
-    for (const ad of ['liste', 'oturum', 'etiket basıldı']) expect(iceren(k.pass, `site paneli ${ad}`), ad).toHaveLength(1);
+    for (const ad of ['liste', 'oturum', 'etiket basıldı', 'silme']) expect(iceren(k.pass, `site paneli ${ad}`), ad).toHaveLength(1);
     for (const uc of ERP_UCLARI.slice(0, 3)) expect(iceren(k.pass, 'mağaza ERP ucu kayıtlı', uc), uc).toHaveLength(1);
   });
 
@@ -342,17 +386,17 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     });
     expect(k.kod).toBe(1);
     expect(iceren(k.fail, 'takip ucu ÖLÇÜLEMEDİ: 429')).toHaveLength(1);
-    expect(iceren(k.fail, 'site paneli', 'ÖLÇÜLEMEDİ: 429')).toHaveLength(4);
-    expect(k.fail).toHaveLength(5);
+    expect(iceren(k.fail, 'site paneli', 'ÖLÇÜLEMEDİ: 429')).toHaveLength(PANEL_SONDALARI.length);
+    expect(k.fail).toHaveLength(6);
   });
 });
 
-describe('verify-deploy.sh — mağaza dilim 2a sondaları (kaynak çitleri)', () => {
+describe('verify-deploy.sh — mağaza dilim 2a + 2b sondaları (kaynak çitleri)', () => {
   const satirlar = readFileSync(BETIK, 'utf8').split('\n');
   const kod = satirlar.map(s => s.replace(/^\s*#.*$/, ''));
   const metin = kod.join('\n');
 
-  it('ERP kökenindeki dört mağaza ucu İKİ listede de aynı: bozuk JSON (BODY_PROBES) ve geçerli JSON (kimliksiz 401) — biri eksikse «rota var mı» ya da «zincir doğru mu» ölçülmez', () => {
+  it('ERP kökenindeki yedi mağaza ucu (2a dört + 2b üç) İKİ listede de aynı: bozuk JSON (BODY_PROBES) ve geçerli JSON (kimliksiz 401) — biri eksikse «rota var mı» ya da «zincir doğru mu» ölçülmez', () => {
     const govde = (kod.find(s => /^\s*BODY_PROBES="\$\{VERIFY_BODY_PROBE:-/.test(s)) ?? '').replace(/^\s*BODY_PROBES="\$\{VERIFY_BODY_PROBE:-/, '').replace(/\}"\s*$/, '').split(/\s+/);
     const gecerli = (kod.find(s => /^\s*MAGAZA_ERP_PROBES="/.test(s)) ?? '').replace(/^\s*MAGAZA_ERP_PROBES="/, '').replace(/"\s*$/, '').split(/\s+/);
     expect(gecerli).toEqual(ERP_UCLARI);
@@ -361,6 +405,14 @@ describe('verify-deploy.sh — mağaza dilim 2a sondaları (kaynak çitleri)', (
     // Geçerli JSON sondası gövdeyi `{}` ile ve Content-Type ile yollar (içerik türü yoksa ayrıştırıcı atlar, ölçüm bozulur).
     const dongu = metin.slice(metin.indexOf('for ERP_PROBE in $MAGAZA_ERP_PROBES; do'));
     expect(dongu.slice(0, dongu.indexOf('done'))).toMatch(/-X POST -H 'Content-Type: application\/json' --data-binary '\{\}'/);
+    // (2b) Sorgu dizeli varyant listelerde DEĞİL (kabukta `?` dosya adı kalıbıdır): tırnak içinde, ayrı sondada, TEK kez istenir.
+    expect([...govde, ...gecerli].filter(uc => uc.includes('?'))).toEqual([]);
+    expect(metin).toContain(`REVIZE_PROBE="${REVIZE_UCU}"`);
+    expect(metin.split('"$BASE_URL$REVIZE_PROBE"').length - 1).toBe(1);
+    const revize = metin.slice(metin.indexOf('REVIZE_PROBE="'), metin.indexOf('case "$RCODE" in'));
+    expect(revize).toMatch(/-X POST -H 'Content-Type: application\/json' --data-binary '\{\}'/);
+    // 401 PASS; 400 ayrı teşhis (sıra bozuk) — genel «beklenmedik yanıt» dalına düşmez.
+    expect(metin).toMatch(/case "\$RCODE" in\n\s+401\) pass [^\n]+\n\s+400\) fail "REVİZE BİLDİRİMİ UCUNDA SIRA BOZUK/);
   });
 
   it('mağaza / panel / ERP / istemci sondalarının hiçbiri kimlik, çerez ya da ops jetonu taşımaz (oturum açmaz); kimlik taşıyan tek curl auth zinciri sondası', () => {
@@ -383,6 +435,7 @@ describe('verify-deploy.sh — mağaza dilim 2a sondaları (kaynak çitleri)', (
     expect(metin).toContain(`PANEL_SIFIR="${KIMLIK}"`);
     expect(metin).toContain('"$PU/siparisler/$PANEL_SIFIR/kalem-teslim"');
     expect(metin).toContain('"$PU/siparisler/$PANEL_SIFIR/etiket-basildi"');
+    expect(metin).toContain(`panel_sonda "silme (belirteçsiz)" 401 -X POST -H "Content-Type: application/json" -d '{}' "$PU/siparisler/$PANEL_SIFIR/sil"`);   // dilim 2b
     expect(metin).toMatch(/PY=\$\(curl -s --max-time 20 -w '\\n%\{http_code\}' -H "Origin: \$MK" "\$@" 2>\/dev\/null\)/);
     expect(metin.split(`-d '${TAKIP_GOVDESI}' "$MU/siparis-durumu"`).length - 1).toBe(1);
     expect(metin).not.toContain('hazir-degil (dilim 2\'ye kadar beklenen)');   // dilim 1'in «503 beklenir» sondası kalktı
@@ -435,7 +488,7 @@ describe('verify-deploy.sh — mağaza dilim 2a sondaları (kaynak çitleri)', (
     expect(gorulen.has(join(SRC_KOK, 'App.tsx'))).toBe(true);   // yürüyücünün kendisi: App.tsx giriş betiğinden statik erişilir
     const statikte = tasiyanlar.filter(d => gorulen.has(d));
     expect(statikte.map(gorece), `yol metnini taşıyan dosyalar: ${tasiyanlar.map(gorece).join(', ')}`).not.toEqual([]);
-  });
+  }, 60_000);   // `src/`in tamamı tek testte taranır: yük altında 5 sn'lik varsayılan süre yetmez (depo kalıbı)
 
   it('`post` dalının yapısı bozulmadı: satır başındaki iki `else` (kip dalı + özet) ve tek `magaza` köken değişkeni', () => {
     expect(kod.filter(s => s === 'else')).toHaveLength(2);

@@ -26,8 +26,8 @@
  *     `ad` + `adet` taşıyan kalemlerle 64 KB gövde ~4 katı belgeye dönüşüyordu ve belgenin tamamı akış olayına da
  *     iliştirilir. Mağazanın gönderdiği biçimde (yedi alan da gövdede) çarpan en çok ×1,01'dir: tavan gerçek talebe çarpmaz.
  *
- * YANIT GÖVDELERİ SABİTTİR: `{ ok: true }` / `{ ok: false }` (takip ucunda ek `kod: 'bulunamadi'`; bulunan talepte dar yanıt —
- * aşağıda «TAKİP»). zod ayrıntısı, hata iletisi, gövde parçası DÖNMEZ — rota ortak `validate()` yardımcısını bu yüzden KULLANMAZ.
+ * YANIT GÖVDELERİ SABİTTİR: `{ ok: true }` / `{ ok: false }` (takip ucunda ek `kod: 'bulunamadi'` / `kod: 'silindi'`; bulunan
+ * talepte dar yanıt — aşağıda «TAKİP»). zod ayrıntısı, hata iletisi, gövde parçası DÖNMEZ — rota ortak `validate()` yardımcısını bu yüzden KULLANMAZ.
  * İSTİSNA — bu modülün ÜRETMEDİĞİ iki 429: adım 2'deki genel sınırlayıcının ve zincirden ÖNCE koşan IP başına sel
  * korumasının 429'u kendi sabit gövdesini (`{ error: … }`) taşır ve `r429` sayacına İŞLENMEZ; `r429` yalnız mağaza
  * sınırlayıcılarının (adım 3, `magaza429`) retlerini sayar. Sel koruması zincirin dışındadır: `OPTIONS` ve 403'leri
@@ -40,6 +40,10 @@
  * tarih, son güncelleme, kalem listesi + kalem başına «teslim» işareti. «Bulunamadı» ile «biçim bozuk» BAYT BAYT aynı yanıtı
  * alır (`404 { ok: false, kod: 'bulunamadi' }`) — uç, talep numarası biçimini doğrulayan kâhin olmasın; zincirin rota-yok
  * 404'ü `{ ok: false }` kalır (sonda ikisini ayırt eder). Sayaçları AYRI işlevdedir: `magazaTakipSayaclari()`.
+ * SİLİNMİŞ talep (dilim 2b, § 10.6; kullanıcı kararı: «talebiniz silinmiş desin; hiç olmadıysa bulunamadı»): dar okuma `silindi`nin
+ * TÜRÜNÜ de getirir; nesneyse `404 { ok: false, kod: 'silindi' }` — gövde YALNIZ bu iki alan (aşama, açıklama, tarih, kalem
+ * listesi DÖNMEZ). Geri alınan (`silindi: null`) ve hiç silinmemiş talep bulunur. Bu yanıt, talep no + telefonu bilen kişiye
+ * talebin var olup silindiğini açıklar (ikisi müşterinin kendi bilgisidir; tarama sınırlayıcısı aynı kalır).
  *
  * GÜNLÜK: kişisel veri (ad, telefon, adres, vergi no, not), gövde parçası ve hata NESNESİ yazılmaz. body-parser
  * hata iletisi gövdenin ilk karakterlerini, `err.body` gövdenin TAMAMINI taşır; pg hata nesnesinin `detail` /
@@ -52,6 +56,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_TALEP_NO_DESENI, magazaAsamasiMi, magazaGuncellemeZamani, magazaKalemTeslimMi, panelDurumuna } from '../../lib/magazaTalep.js';
 import { MAGAZA_BILDIRIM_KALEM_SINIRI } from '../kanal/magazaBildirim.js';
 import { MAGAZA_METIN_SINIRLARI, magazaMetniKirp, magazaMetniTemizle, magazaTalepKimligi, talepEsle, telefonSon10 } from '../kanal/magazaTalep.js';
+import { EKLEME_SQL } from '../kanal/magazaTalepSql.js';
 import { MagazaSiparisDurumuSchema, MagazaSiparisTalebiSchema } from '../schemas.js';
 
 /** Ham SQL çalıştıran en dar havuz yüzeyi (pg `Pool` buna uyar). */
@@ -111,9 +116,9 @@ export function magazaSayaclari(): Readonly<Record<string, number>> {
 /**
  * Takip sorgusu (`POST /siparis-durumu`) sayaçları — AYRI küme (dilim 2a, § 6; kapı 3 K15): `magazaSayaclari()`'nın sabit
  * anahtarlarına EKLENMEZ ve dilim 1'in `r404`'üyle ortak DEĞİLDİR (bekçi üçüncü parçada basar). `bulunamadi` biçimi bozuk
- * sorguyu da sayar (ikisi aynı yanıttır); 503 / 500 / 429 buraya sayılmaz. 2b `silindi` anahtarını ekler.
+ * sorguyu da sayar (ikisi aynı yanıttır); 503 / 500 / 429 buraya sayılmaz. `silindi` (2b) = silinmiş talebe gelen sorgu.
  */
-const takipSayaclari = { bulundu: 0, bulunamadi: 0 };
+const takipSayaclari = { bulundu: 0, bulunamadi: 0, silindi: 0 };
 
 export function magazaTakipSayaclari(): Readonly<Record<string, number>> {
   return { ...takipSayaclari };
@@ -124,6 +129,7 @@ export function magazaSayaclariniSifirla(): void {
   for (const anahtar of Object.keys(sayaclar) as SayacAnahtari[]) sayaclar[anahtar] = 0;
   takipSayaclari.bulundu = 0;
   takipSayaclari.bulunamadi = 0;
+  takipSayaclari.silindi = 0;
 }
 
 /** Zincirin kendi ürettiği ret kodları; her birinin sayacı var. */
@@ -192,9 +198,6 @@ export const MAGAZA_GOVDE_SINIRI_BAYT = 64 * 1024;
  */
 export const MAGAZA_BELGE_SINIRI_BAYT = 2 * MAGAZA_GOVDE_SINIRI_BAYT;
 
-/** Çakışmada mevcut kayda DOKUNULMAZ; `RETURNING` yalnız GERÇEKTEN eklenen satırı döndürür. */
-const EKLEME_SQL = 'INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3::jsonb) ON CONFLICT (coll, id) DO NOTHING RETURNING id';
-
 /**
  * Takip ucunun DAR okuması — TEK `SELECT`, tek satır (kimlik + kiracı). Kalemler SQL'de `ad` / `marka` / `adet` alanlarına
  * İNDİRİLİR: SKU, fiyat, `id`, `tedarik`, `musteri`, `not`, `talepEdilen`, `bildirim*`, `durumGecmisi` belleğe bile çekilmez.
@@ -204,8 +207,10 @@ const EKLEME_SQL = 'INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3::jsonb)
  *    sonraki kalemlerin anahtarı KAYMASIN (işaret yanlış kaleme düşerdi). Sıra `ORDER BY` ile açıkça korunur.
  *  • `teyit*` sütunları 2b içindir (2a'da `teyit_sayisi` 0, `teyit_kalemleri` NULL); teyit kalemi kendi `anahtar`ını taşır.
  *  • `kalem_teslim` yalnız `durum` ve `zaman` için okunur; `kim` yanıta girmez.
+ *  • `silindi_turu` (2b): `silindi` alanının TÜRÜ — `'object'` = silinmiş, `'null'` = geri alınmış, NULL = hiç silinmemiş
+ *    (`IS NULL` karşılaştırması ikisini karıştırırdı). Silen / zaman belleğe ÇEKİLMEZ (personel bilgisi).
  */
-export const MAGAZA_TAKIP_SQL = `SELECT data->>'durum' AS durum, data->>'durumAciklama' AS aciklama, data->>'durumZamani' AS zaman, data->>'olusturma' AS olusturma, (SELECT COALESCE(jsonb_agg(jsonb_build_object('sira', e.sira - 1, 'ad', e.k->'ad', 'marka', e.k->'marka', 'adet', e.k->'adet') ORDER BY e.sira), '[]'::jsonb) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(data->'kalemler') = 'array' THEN data->'kalemler' ELSE '[]'::jsonb END) WITH ORDINALITY AS e(k, sira) WHERE jsonb_typeof(e.k) = 'object') AS kalemler, (CASE WHEN jsonb_typeof(data->'kalemler') = 'array' THEN jsonb_array_length(data->'kalemler') ELSE 0 END) AS beyan_sayisi, (SELECT jsonb_agg(jsonb_build_object('anahtar', e.k->'anahtar', 'ad', e.k->'ad', 'marka', e.k->'marka', 'adet', e.k->'adet') ORDER BY e.sira) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(data->'teyit'->'kalemler') = 'array' THEN data->'teyit'->'kalemler' ELSE '[]'::jsonb END) WITH ORDINALITY AS e(k, sira) WHERE jsonb_typeof(e.k) = 'object') AS teyit_kalemleri, (CASE WHEN jsonb_typeof(data->'teyit'->'kalemler') = 'array' THEN jsonb_array_length(data->'teyit'->'kalemler') ELSE 0 END) AS teyit_sayisi, data->'kalemTeslim' AS kalem_teslim FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`;
+export const MAGAZA_TAKIP_SQL = `SELECT data->>'durum' AS durum, data->>'durumAciklama' AS aciklama, data->>'durumZamani' AS zaman, data->>'olusturma' AS olusturma, (SELECT COALESCE(jsonb_agg(jsonb_build_object('sira', e.sira - 1, 'ad', e.k->'ad', 'marka', e.k->'marka', 'adet', e.k->'adet') ORDER BY e.sira), '[]'::jsonb) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(data->'kalemler') = 'array' THEN data->'kalemler' ELSE '[]'::jsonb END) WITH ORDINALITY AS e(k, sira) WHERE jsonb_typeof(e.k) = 'object') AS kalemler, (CASE WHEN jsonb_typeof(data->'kalemler') = 'array' THEN jsonb_array_length(data->'kalemler') ELSE 0 END) AS beyan_sayisi, (SELECT jsonb_agg(jsonb_build_object('anahtar', e.k->'anahtar', 'ad', e.k->'ad', 'marka', e.k->'marka', 'adet', e.k->'adet') ORDER BY e.sira) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(data->'teyit'->'kalemler') = 'array' THEN data->'teyit'->'kalemler' ELSE '[]'::jsonb END) WITH ORDINALITY AS e(k, sira) WHERE jsonb_typeof(e.k) = 'object') AS teyit_kalemleri, (CASE WHEN jsonb_typeof(data->'teyit'->'kalemler') = 'array' THEN jsonb_array_length(data->'teyit'->'kalemler') ELSE 0 END) AS teyit_sayisi, data->'kalemTeslim' AS kalem_teslim, jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`;
 
 /** Takip yanıtının kalemi: müşterinin kendi beyanı (2b'de teyit edilen içerik) + teslim işareti. SKU / fiyat / anahtar YOK. */
 export interface MagazaTakipKalemi {
@@ -365,6 +370,7 @@ export function magazaZinciri(C: MagazaRouteCtx): Router {
   };
 
   // 6b. Takip sorgusu (dosya başı «TAKİP»). Bulunamadı ve biçim bozuk AYNI yanıt; `takipSayaclari`'na işlenir (`r404` DEĞİL).
+  // Silinmiş talebin 404'ü AYRI gövdedir (`kod: 'silindi'`) ve bu işlevden GEÇMEZ.
   const takipBulunamadi = (res: Response): void => {
     takipSayaclari.bulunamadi += 1;
     res.status(404).json({ ok: false, kod: 'bulunamadi' });
@@ -390,6 +396,13 @@ export function magazaZinciri(C: MagazaRouteCtx): Router {
       const { rows } = await havuz.query(MAGAZA_TAKIP_SQL, [MAGAZA_TALEP_KOLEKSIYONU, magazaTalepKimligi(cid, cozum.data.no, son10), cid]);
       const satir = rows[0];
       if (!satir) { takipBulunamadi(res); return; }
+      // (2b) Silinmiş talep: «bulunamadı» DEĞİL, ayrı kod — ve talebin içeriğinden HİÇBİR şey dönmez. Geri alınmış (`'null'`)
+      // ve hiç silinmemiş (NULL) talep aşağıda bulunur.
+      if (satir.silindi_turu === 'object') {
+        takipSayaclari.silindi += 1;
+        res.status(404).json({ ok: false, kod: 'silindi' });
+        return;
+      }
       const yanit = takipYaniti(satir);
       takipSayaclari.bulundu += 1;
       res.status(200).json(yanit);

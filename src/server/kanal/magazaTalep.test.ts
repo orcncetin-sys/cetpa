@@ -20,7 +20,7 @@ import { kodSatirlari, SRC_KOK } from '../../test/kaynakTarama';
 import { MAGAZA_TALEP_KIMLIK_DESENI, MAGAZA_TALEP_NO_DESENI } from '../../lib/magazaTalep';
 import { MagazaSiparisTalebiSchema } from '../schemas';
 import {
-  MAGAZA_METIN_SINIRLARI, magazaMetniTemizle, magazaTalepKimligi, talepEsle, telefonSon10,
+  MAGAZA_METIN_SINIRLARI, kalemEsle, magazaMetniTemizle, magazaTalepKimligi, musteriEsle, notEsle, talepEsle, telefonSon10,
   type MagazaTalepGirdisi, type TalepEsleSonucu,
 } from './magazaTalep';
 
@@ -499,6 +499,86 @@ describe('MagazaSiparisTalebiSchema', () => {
   });
 });
 
+// ── Dilim 2b (2026-10-10, § 10.2): müşteri / kalem / not blokları DIŞA AÇIK — ERP'deki içerik düzenleme ve elle talep AYNI kuralı kullanır ──
+describe('musteriEsle / kalemEsle / notEsle — `talepEsle` ile AYNI işlev (kopya eşleyici yok)', () => {
+  it('müşteri bloğu: `talepEsle` belgesindeki `musteri` ve `telefonSon10` ile birebir; kırpma işareti aynı', () => {
+    for (const musteri of [
+      govde().musteri,
+      { ad: '  Şükrü\tAğaoğlu ', telefon: '0532 123 45 67' },
+      { ...govde().musteri, ad: 'a'.repeat(MAGAZA_METIN_SINIRLARI.ad + 5), adres: `Satır 1${LS}Satır 2${NUL}` },
+      { ...govde().musteri, telefon: `0532 123 45 67${' x'.repeat(40)}` },
+    ]) {
+      const blok = musteriEsle(musteri);
+      const tam = esle(govde({ musteri }));
+      if (!blok.ok) throw new Error('müşteri bloğu geçerli olmalıydı');
+      expect(blok.musteri).toEqual(tam.belge.musteri);
+      expect(blok.telefonSon10).toBe(tam.belge.telefonSon10);
+      // Gövdenin geri kalanı kırpılmıyor: belgenin `kirpildi`si yalnız müşteri bloğundan gelir.
+      expect(blok.kirpildi).toBe(tam.belge.kirpildi === true);
+    }
+  });
+  it('müşteri bloğu ret: ad temizlikten sonra boş / telefonda 10 rakam yok → `ok: false` (`talepEsle` de reddeder)', () => {
+    for (const musteri of [{ ad: ` ${NUL} `, telefon: '0532 123 45 67' }, { ad: 'A', telefon: '532 123 45 6' }, { ad: 'A', telefon: '' }]) {
+      expect(musteriEsle(musteri)).toEqual({ ok: false });
+      expect(reddedildi(talepEsle(govde({ musteri }), BAGLAM))).toBe(true);
+    }
+  });
+  it('kalem bloğu: `talepEsle` belgesindeki kalemle birebir; `birimFiyat` yok / null → `talepFiyat: null` (0 DEĞİL); kırpma işareti aynı', () => {
+    for (const kalem of [
+      ...govde().kalemler,
+      { ad: 'Yalnız ad', adet: 1 },
+      { ad: `  Boya${VT} `, adet: 3, sku: ' ABC ', marka: 'D\tYO', birimFiyat: 0, tedarik: true },
+      { ad: 'x'.repeat(MAGAZA_METIN_SINIRLARI.kalemAd + 1), adet: 1, id: 'i'.repeat(MAGAZA_METIN_SINIRLARI.kalemId + 1) },
+    ]) {
+      const blok = kalemEsle(kalem);
+      const tam = esle(govde({ kalemler: [kalem] }));
+      if (!blok.ok) throw new Error('kalem bloğu geçerli olmalıydı');
+      expect(blok.kalem).toEqual(tam.belge.kalemler[0]);
+      expect(blok.kirpildi).toBe(tam.belge.kirpildi === true);
+    }
+    const fiyatsiz = kalemEsle({ ad: 'x', adet: 1 });
+    expect(fiyatsiz.ok && fiyatsiz.kalem.talepFiyat).toBeNull();
+    const sifir = kalemEsle({ ad: 'x', adet: 1, birimFiyat: 0 });
+    expect(sifir.ok && sifir.kalem.talepFiyat).toBe(0);
+  });
+  it('kalem bloğu ret: ad boş, adet 0 / kesirli / eksi / güvensiz, fiyat eksi / NaN / sonsuz → `ok: false` (`talepEsle` de reddeder)', () => {
+    for (const kalem of [
+      { ad: ' ', adet: 1 }, { ad: 'x', adet: 0 }, { ad: 'x', adet: 1.5 }, { ad: 'x', adet: -1 }, { ad: 'x', adet: Number.MAX_SAFE_INTEGER + 1 },
+      { ad: 'x', adet: 1, birimFiyat: -0.01 }, { ad: 'x', adet: 1, birimFiyat: Number.NaN }, { ad: 'x', adet: 1, birimFiyat: Number.POSITIVE_INFINITY },
+    ]) {
+      expect(kalemEsle(kalem), JSON.stringify(kalem)).toEqual({ ok: false });
+      expect(reddedildi(talepEsle(govde({ kalemler: [kalem] }), BAGLAM)), JSON.stringify(kalem)).toBe(true);
+    }
+  });
+  it('not bloğu: `talepEsle` belgesindeki `not` ile birebir (çok satırlı, 1.000 birim); yok → boş dizge', () => {
+    for (const not of [undefined, '', '  Öğleden sonra\r\narayın.  ', 'n'.repeat(MAGAZA_METIN_SINIRLARI.not + 7)]) {
+      const blok = notEsle(not);
+      const tam = esle(govde({ not }));
+      expect(blok.not).toBe(tam.belge.not);
+      expect(blok.kirpildi).toBe(tam.belge.kirpildi === true);
+    }
+    expect(notEsle(undefined)).toEqual({ not: '', kirpildi: false });
+  });
+  it('kaynak çiti: `talepEsle` üç bloğu ÇAĞIRIR (içinde ikinci temizlik kopyası yok); sınır sözlüğü TEK', () => {
+    const satirlar = kodSatirlari(join(SRC_KOK, 'server', 'kanal', 'magazaTalep.ts')).map(s => s.kod);
+    const bas = satirlar.findIndex(s => s.startsWith('export function talepEsle('));
+    expect(bas).toBeGreaterThan(-1);
+    const govdeKodu = satirlar.slice(bas).join('\n');
+    expect(govdeKodu).toContain('const musteri = musteriEsle(girdi.musteri);');
+    expect(govdeKodu).toContain('const kalem = kalemEsle(k);');
+    expect(govdeKodu).toContain('const not = notEsle(girdi.not);');
+    // Temizlik / kırpma çağrıları yalnız blok işlevlerindedir; `talepEsle` gövdesinde yeniden yazılmaz.
+    expect(govdeKodu).not.toMatch(/magazaMetniTemizle\(|magazaMetniKirp\(|MAGAZA_METIN_SINIRLARI|kirpici\(/);
+    const tumKod = satirlar.join('\n');
+    expect(tumKod.match(/export const MAGAZA_METIN_SINIRLARI = /g)).toHaveLength(1);
+    for (const ad of ['musteriEsle', 'kalemEsle', 'notEsle']) expect(tumKod.match(new RegExp(`export function ${ad}\\(`, 'g')), ad).toHaveLength(1);
+    // 2b yazma yolu bu işlevleri İÇE AKTARIR (kendi temizlik kopyasını yazmaz).
+    const icerik = kodSatirlari(join(SRC_KOK, 'server', 'kanal', 'magazaIcerik.ts')).map(s => s.kod).join('\n');
+    expect(icerik).toContain("import { kalemEsle, musteriEsle, notEsle, talepEsle } from './magazaTalep.js';");
+    expect(icerik).not.toMatch(/magazaMetniTemizle|magazaMetniKirp|MAGAZA_METIN_SINIRLARI|\.replace\(|\.trim\(/);
+  });
+});
+
 describe('kaynak çiti — eşleyici SAF ve harfe dokunmaz', () => {
   const yol = join(SRC_KOK, 'server', 'kanal', 'magazaTalep.ts');
   const kod = kodSatirlari(yol).map(s => s.kod).join('\n');
@@ -510,7 +590,7 @@ describe('kaynak çiti — eşleyici SAF ve harfe dokunmaz', () => {
     expect(kod.match(/^import .*$/gm)).toEqual([
       "import { createHash } from 'node:crypto';",
       "import { MAGAZA_TALEP_NO_DESENI } from '../../lib/magazaTalep.js';",
-      "import type { MagazaTalebi, MagazaTalepKalemi } from '../../lib/magazaTalep.js';",
+      "import type { MagazaTalebi, MagazaTalepKalemi, MagazaTalepMusteri } from '../../lib/magazaTalep.js';",
     ]);
   });
   it('sayısal alanda sessiz varsayılan yok (`?? 0` / `|| 0`)', () => {

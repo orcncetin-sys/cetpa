@@ -1575,9 +1575,21 @@ describe('ÇİT: kaynak taraması (yorumlar süzülür)', () => {
     expect(KOD.match(/\bthrow\b[^\n]*/g)).toEqual(['throw new Error(MAGAZA_BILDIRIM_YENIDEN_DENE_ILETISI);']);
   });
 
-  it('kuyruğa giden veri kaynakta da yalnız { talepId }', () => {
+  it('kuyruğa giden veri kaynakta da yalnız { talepId }; kuyruk adı YALNIZ iki sabitten biri (dilim 2b: revize kuyruğu AYNI tek `send`ten geçer)', () => {
     expect(KOD.match(/\.send\([^\n]*/g)).toHaveLength(1);
-    expect(KOD).toMatch(/\.send\(MAGAZA_BILDIRIM_KUYRUGU, \{ talepId \}, MAGAZA_BILDIRIM_IS_SECENEKLERI\)/);
+    expect(KOD).toMatch(/\.send\(kuyrukAdi, \{ talepId \}, MAGAZA_BILDIRIM_IS_SECENEKLERI\)/);
+    // `kuyrukAdi` serbest dizge DEĞİL: tipi iki kuyruk sabitinin birleşimidir, değeri iki sabit ayardan gelir.
+    expect(KOD).toContain('type MagazaKuyrukAdi = typeof MAGAZA_BILDIRIM_KUYRUGU | typeof MAGAZA_REVIZE_KUYRUGU;');
+    expect(KOD).toContain('const ILK_KUYRUK: KuyrukAyari = { kuyrukAdi: MAGAZA_BILDIRIM_KUYRUGU, onEk: ILK_ON_EK };');
+    expect(KOD).toContain('const REVIZE_KUYRUK: KuyrukAyari = { kuyrukAdi: MAGAZA_REVIZE_KUYRUGU, onEk: REVIZE_ON_EK };');
+    expect(KOD.match(/\bkuyrukAdi: MAGAZA_[A-Z_]+/g)).toEqual(['kuyrukAdi: MAGAZA_BILDIRIM_KUYRUGU', 'kuyrukAdi: MAGAZA_REVIZE_KUYRUGU']);
+  });
+
+  it('günlük öneki (`onEk`) YALNIZ iki sabit metinden gelir (dilim 2b: önek türe göre seçilir; satıra kimlik / alan adı / kişisel veri girmez)', () => {
+    expect(KOD).toContain("const ILK_ON_EK = '[magaza-bildirim] ';");
+    expect(KOD).toContain("const REVIZE_ON_EK = '[magaza-bildirim] revize: ';");
+    // `onEk:` atamalarının hepsi bu iki sabitten biridir.
+    expect([...new Set(KOD.match(/\bonEk: [A-Za-z_]+/g))].sort()).toEqual(['onEk: ILK_ON_EK', 'onEk: REVIZE_ON_EK', 'onEk: string']);
   });
 
   it('Resend yoluna dokunulmaz; server.ts içe aktarılmaz; gönderim yalnız smtpPosta üzerinden', () => {
@@ -1708,5 +1720,19 @@ describe('magazaBildirimKacanlariKuyrukla — açılışta kaçan bildirimler (K
     expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain('RETURNING d.id, d.data');
     expect(MAGAZA_KACAN_SAHIPLEN_SQL).not.toContain("'gitti'");
     expect(MAGAZA_KACAN_SAHIPLEN_SQL).not.toContain("'gonderilemedi'");
+  });
+
+  it('(inceleme 2b, bulgu 9) SQL çiti: silinmiş talep ADAY OLMAZ — silinmemiş koşulu aday süzgecinde, durum ayrımının DIŞINDA (iki dalı da kapsar); ölçüt her yerdeki AYNI sabit', () => {
+    const SILINMEMIS = "jsonb_typeof(data->'silindi') IS DISTINCT FROM 'object'";
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).toContain(SILINMEMIS);
+    // Koşul `WHERE coll = $1` ile durum ayrımı arasında, `AND` ile bağlı: `OR` dalının içine düşmedi (düşseydi yetim `bekliyor` silinmişi yine alırdı).
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL.replace(/\s+/g, ' ')).toContain(`WHERE coll = $1 AND ${SILINMEMIS} AND ( data->'bildirim'->>'durum' = 'yapilandirilmamis' OR ( data->'bildirim'->>'durum' = 'bekliyor'`);
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL.split(SILINMEMIS)).toHaveLength(2);   // tam bir kez (aday CTE'si); UPDATE yalnız adayları yazar
+    // `silindi` alanından okunan tek şey TÜRÜDÜR.
+    expect(MAGAZA_KACAN_SAHIPLEN_SQL).not.toMatch(/data->'silindi'->/);
+    // Sabit içe aktarılır, bu modülde yeniden YAZILMAZ (yorumlar süzülmüş kodda aranır).
+    const kod = yorumsuz('magazaBildirim.ts', readFileSync(join(__dirname, 'magazaBildirim.ts'), 'utf-8')).join('\n');
+    expect(kod).toContain("import { MAGAZA_SILINMEMIS_SQL } from './magazaDurum.js';");
+    expect(kod).not.toContain("jsonb_typeof(data->'silindi')");
   });
 });

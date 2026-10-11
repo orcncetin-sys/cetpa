@@ -24,6 +24,13 @@
  * için istemci gördüğü sürümü geri gönderir). `kalemTeslim` giriş giriş daraltılır (uymayan GİRİŞ düşer, nesnenin tamamı
  * değil); beyan kalemine `teslim` / `anahtar` YAZILMAZ (V16) — ekran anahtarı `magazaKalemAnahtarlari` ile türetir.
  * YAZMA bu dosyada DEĞİL: `services/magazaTalepIstemcisi.ts` (`authFetch`); bu kanca ağ isteği atmaz.
+ *
+ * DİLİM 2b (şartname v6 § 10.4, 2026-10-10): `teyit` (kalemler tek tek — anahtarı desene uymayan, KDV oranı küme dışı ya da
+ * oran kaynağı tanınmayan TEK kalem `teyit`'i bütünüyle `null` yapar: yarım okunmuş teyit yanlış tutar basardı), `icerikSurum`
+ * (sayı değilse 0), `icerikZamani`, `silindi`, `elle`, `bildirimRevize` (ilk bildirimle AYNI daraltıcı ve AYNI sözlük; `alanlar`
+ * `alanlariBirlestir` ile tekilleşir). `silindi` NESNE ise satır SİLİNMİŞTİR — ölçüt `magazaSilinmisMi` (SQL eşi
+ * `jsonb_typeof(…) = 'object'`): alanları bozuk bir silme nesnesi `null`'a DÜŞMEZ, yoksa sunucunun 409 `silindi` verdiği
+ * talep ekranda canlı görünürdü. Sayaçlar (sekme rozetinin iki sayısı) YALNIZ canlı talepleri sayar.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, query } from '../lib/dbClient';
@@ -31,9 +38,10 @@ import { db } from '../firebase';
 import { zamanMs } from '../utils/zaman';
 import {
   MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_BILDIRIM_HATA_SINIFLARI, MAGAZA_KALEM_ANAHTARI_DESENI, magazaAsamasiMi, magazaAcikAsamaMi,
+  alanlariBirlestir, magazaKdvKaynagiMi, magazaKdvOraniMi, magazaSilinmisMi,
   type MagazaTalebi, type MagazaTalepKalemi, type MagazaTalepMusteri, type MagazaBildirim, type MagazaBildirimDurumu,
   type MagazaTalepAsamasi, type MagazaAcikAsama, type MagazaDurumGecisi, type MagazaKalemTeslimGirisi, type MagazaEtiketBasildi,
-  type MagazaKanal,
+  type MagazaKanal, type MagazaTeyit, type MagazaTeyitKalemi, type MagazaElle, type MagazaRevizeAlani,
 } from '../lib/magazaTalep';
 
 /**
@@ -46,9 +54,13 @@ import {
  *   - `durumSurum` hep sayı (yoksa 0), `durumAciklama` hep metin (yoksa `''`), `iptalOncesi` dört açık aşamadan biri ya da
  *     `null`, `durumGecmisi` daraltılmış girişler (yoksa `[]`), `kalemTeslim` hep nesne (yoksa `{}`), `etiketBasildi`
  *     nesne ya da `null` (= basılmadı).
+ *   - (2b) `teyit` okunabilen TAM teyit ya da `null` (= teyit yok / okunamadı; ekran «henüz teyit edilmedi» basar),
+ *     `icerikSurum` hep sayı (yoksa 0), `silindi` nesne ya da `null` (= silinmemiş), `elle` nesne ya da `null` (= mağazadan
+ *     geldi), `bildirimRevize` nesne ya da `null` (= revizyon yok / okunamadı — ikinci rozet çizilmez).
  */
 export interface MagazaTalepSatiri extends Omit<MagazaTalebi,
-  'bildirim' | 'durum' | 'durumAciklama' | 'durumZamani' | 'durumSurum' | 'iptalOncesi' | 'durumGecmisi' | 'durumGecmisiDusen' | 'kalemTeslim' | 'etiketBasildi'> {
+  'bildirim' | 'durum' | 'durumAciklama' | 'durumZamani' | 'durumSurum' | 'iptalOncesi' | 'durumGecmisi' | 'durumGecmisiDusen' | 'kalemTeslim' | 'etiketBasildi'
+  | 'teyit' | 'icerikSurum' | 'icerikZamani' | 'silindi' | 'elle' | 'bildirimRevize'> {
   id: string;
   bildirim: MagazaBildirim | null;
   durum: MagazaTalepAsamasi | null;
@@ -62,6 +74,32 @@ export interface MagazaTalepSatiri extends Omit<MagazaTalebi,
   durumGecmisiDusen?: number;
   kalemTeslim: Record<string, MagazaKalemTeslimGirisi>;
   etiketBasildi: MagazaEtiketBasildi | null;
+  // ── dilim 2b ──
+  teyit: MagazaTeyit | null;
+  /** İçerik yazımının CAS'ı için: form AÇILDIĞI andaki sürümü geri gönderir. */
+  icerikSurum: number;
+  /** Yalnız dokümanda metin olarak varsa (revize bildirimi rozetinin bekleme tabanı). */
+  icerikZamani?: string;
+  silindi: MagazaSatirSilindi | null;
+  elle: MagazaElle | null;
+  bildirimRevize: MagazaSatirBildirimRevize | null;
+}
+
+/**
+ * Satırdaki silme işareti. Nesnenin VARLIĞI «silinmiş» demektir; alanları okunamıyorsa boş / `null` kalır (kim sildiği
+ * bilinmiyor diye talep canlı sayılmaz).
+ */
+export interface MagazaSatirSilindi {
+  zaman: string;
+  kim: { uid: string; ad: string };
+  kanal: MagazaKanal | null;
+}
+
+/** Satırdaki revize bildirimi: ilk bildirimin alanları + tekilleştirilmiş `alanlar`; `icerikSurum` okunamıyorsa `null`. */
+export interface MagazaSatirBildirimRevize extends MagazaBildirim {
+  alanlar: MagazaRevizeAlani[];
+  kim: { uid: string; ad: string };
+  icerikSurum: number | null;
 }
 
 export interface MagazaTalepleriDurumu {
@@ -180,6 +218,82 @@ function etiketBasildiDaralt(v: unknown): MagazaEtiketBasildi | null {
   return { zaman: e.zaman, ...(koli !== null ? { koli } : {}), kim };
 }
 
+// ── Dilim 2b alanları ──
+/** `kim` okunamıyorsa: ad basılmaz ('—'), kayıt yine de taşınır (silme / teyit bilgisi kaybolmasın). */
+const kimYaDaBos = (v: unknown): { uid: string; ad: string } => kimDaralt(v) ?? { uid: '', ad: '' };
+const surumYaDaNull = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
+
+/**
+ * Teyit kalemi. Üç alan kalemi BOZUK sayar (→ `null`, çağıran teyidi bütünüyle düşürür): `anahtar` kurallı desene uymuyor
+ * (teslim işareti bu anahtara bağlıdır), `kdvOrani` küme dışı ya da `kdvKaynagi` tanınmıyor (tutarın dayanağı). Metinler ve
+ * `tedarik` beyan kalemiyle aynı daraltmadan geçer; `adet` sayı değilse NaN, `birimFiyat` sayı değilse `null` («fiyat sorulacak»).
+ */
+function teyitKalemiDaralt(v: unknown): MagazaTeyitKalemi | null {
+  const k = nesne(v);
+  if (typeof k.anahtar !== 'string' || !MAGAZA_KALEM_ANAHTARI_DESENI.test(k.anahtar)) return null;
+  if (!magazaKdvOraniMi(k.kdvOrani) || !magazaKdvKaynagiMi(k.kdvKaynagi)) return null;
+  return {
+    anahtar: k.anahtar,
+    id: metin(k.id),
+    sku: metin(k.sku),
+    ad: metin(k.ad),
+    marka: metin(k.marka),
+    adet: typeof k.adet === 'number' && Number.isFinite(k.adet) ? k.adet : NaN,
+    birimFiyat: sayiYaDaNull(k.birimFiyat),
+    kdvOrani: k.kdvOrani,
+    kdvKaynagi: k.kdvKaynagi,
+    tedarik: k.tedarik === true,
+  };
+}
+
+/**
+ * `teyit`: nesne VE `kalemler` boş olmayan dizi VE HER kalem okunabiliyor VE anahtarlar tekil ise teyit; değilse `null`.
+ * Üç toplam sunucunun türettiği değerdir (`sayiYaDaNull` — okunamayan toplam 0 olmaz); ekran bunlardan yeniden hesap YAPMAZ.
+ */
+function teyitDaralt(v: unknown): MagazaTeyit | null {
+  const t = nesne(v);
+  if (!Array.isArray(t.kalemler) || t.kalemler.length === 0) return null;
+  const kalemler: MagazaTeyitKalemi[] = [];
+  const gorulen = new Set<string>();
+  for (const ham of t.kalemler) {
+    const k = teyitKalemiDaralt(ham);
+    if (k === null || gorulen.has(k.anahtar)) return null;
+    gorulen.add(k.anahtar);
+    kalemler.push(k);
+  }
+  return {
+    kalemler,
+    araToplam: sayiYaDaNull(t.araToplam), kdv: sayiYaDaNull(t.kdv), toplam: sayiYaDaNull(t.toplam),
+    zaman: metin(t.zaman),
+    kim: kimYaDaBos(t.kim),
+  };
+}
+
+/** `silindi`: NESNE ise silinmiş (alanları tek tek daraltılır, nesne düşmez); `null` (geri alınmış) / yok / başka tür → `null`. */
+function silindiDaralt(v: unknown): MagazaSatirSilindi | null {
+  if (!magazaSilinmisMi({ silindi: v })) return null;
+  const s = nesne(v);
+  return { zaman: metin(s.zaman), kim: kimYaDaBos(s.kim), kanal: kanalMi(s.kanal) ? s.kanal : null };
+}
+
+/** `elle`: nesne ise ERP'de elle açılmış talep; yok / başka tür → `null` (mağazadan geldi). */
+function elleDaralt(v: unknown): MagazaElle | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
+  const e = nesne(v);
+  return { zaman: metin(e.zaman), kim: kimYaDaBos(e.kim) };
+}
+
+/**
+ * `bildirimRevize`: ilk bildirimle AYNI daraltıcı (aynı dört durumlu sözlük — bilinmeyen durum → `null`, ikinci rozet çizilmez)
+ * + `alanlar` (`alanlariBirlestir`: SQL birleştirmesinin bıraktığı yinelenen ad tekilleşir, bilinmeyen ad düşer).
+ */
+function bildirimRevizeDaralt(v: unknown): MagazaSatirBildirimRevize | null {
+  const taban = bildirimDaralt(v);
+  if (taban === null) return null;
+  const b = nesne(v);
+  return { ...taban, alanlar: alanlariBirlestir(b.alanlar), kim: kimYaDaBos(b.kim), icerikSurum: surumYaDaNull(b.icerikSurum) };
+}
+
 /** Akıştan gelen ham dokümanı ekran satırına daraltır. HİÇBİR kaydı atmaz: okunamayan alan boş / `null` / NaN olur. */
 export function magazaTalebiDaralt(id: string, ham: unknown): MagazaTalepSatiri {
   const d = nesne(ham);
@@ -210,12 +324,23 @@ export function magazaTalebiDaralt(id: string, ham: unknown): MagazaTalepSatiri 
     ...(dusen !== null ? { durumGecmisiDusen: dusen } : {}),
     kalemTeslim: kalemTeslimDaralt(d.kalemTeslim),
     etiketBasildi: etiketBasildiDaralt(d.etiketBasildi),
+    // ── dilim 2b ──
+    teyit: teyitDaralt(d.teyit),
+    // Sayı değilse 0: 2a ve dilim 1 kaydında alan yoktur (= 0); sunucu CAS'ı `COALESCE(…, '0')` ile aynı okur.
+    icerikSurum: typeof d.icerikSurum === 'number' && Number.isInteger(d.icerikSurum) && d.icerikSurum >= 0 ? d.icerikSurum : 0,
+    ...(typeof d.icerikZamani === 'string' ? { icerikZamani: d.icerikZamani } : {}),
+    silindi: silindiDaralt(d.silindi),
+    elle: elleDaralt(d.elle),
+    bildirimRevize: bildirimRevizeDaralt(d.bildirimRevize),
   };
 }
 
-/** Sekme rozetinin ikinci sayısı: aşaması `yeni` olan talepler (panelin «Yeni»siyle AYNI sayı — § 5.2). */
-export function yeniAsamaSayisi(talepler: readonly Pick<MagazaTalepSatiri, 'durum'>[]): number {
-  return talepler.filter(t => t.durum === 'yeni').length;
+/**
+ * Sekme rozetinin ikinci sayısı: aşaması `yeni` olan CANLI talepler (panelin «Yeni»siyle AYNI sayı — § 5.2). Silinmiş talep
+ * SAYILMAZ (2b, § 10.4): panel listesi silinmişi zaten dışlar; ERP rozeti onu saysaydı iki ekran ayrışırdı.
+ */
+export function yeniAsamaSayisi(talepler: readonly { durum: MagazaTalepAsamasi | null; silindi?: unknown }[]): number {
+  return talepler.filter(t => t.durum === 'yeni' && !magazaSilinmisMi(t)).length;
 }
 
 // ── Abonelik ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -364,5 +489,7 @@ export function useMagazaYeniSayaci(talepler: readonly MagazaTalepSatiri[], anah
   // Başka kimliğin (kiracı / kullanıcı değişti) bellekteki değeri bu kimlik için geçersizdir.
   const bellekMs = bellek !== null && bellek.anahtar === anahtar ? bellek.ms : null;
   const sonGorulen = kayitli === null ? bellekMs : bellekMs === null ? kayitli : Math.max(kayitli, bellekMs);
-  return yeniTalepSayisi(talepler, sonGorulen);
+  // (2b) «görülmemiş» yalnız CANLI talepleri sayar: silinmiş talep rozeti kabartmaz. «Görüldü» işareti (yukarıdaki `enBuyuk`)
+  // ise BÜTÜN taleplerden: silinmiş talep de görülmüştür, geri alınınca yeniden «görülmemiş» olmaz.
+  return yeniTalepSayisi(talepler.filter(t => !magazaSilinmisMi(t)), sonGorulen);
 }

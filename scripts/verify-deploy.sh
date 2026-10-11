@@ -306,7 +306,7 @@ else
   # `xRoutes(app, ...)` cagrisiyla kaydolur ve o cagri zincirde yanlis yere
   # konabilir. 2026-08-24'te kirilan yalniz mikro grubuydu; digerleri dogruydu
   # ve tek sondali kontrol bu farki goremezdi.
-  BODY_PROBES="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul /api/tracking/fedex /api/ops/watchdog/run /api/dynamics/export/siparis /api/superadmin/tenants/test/status /api/parasut/import/stok /api/ai/lead-score /api/shopify/sync /api/shopify/baglanti /api/iyzico/payment-link /api/email/send /api/magaza-panel/yetki-kodu /api/magaza-talepleri/mt-00000000000000000000000000000000/durum /api/magaza-talepleri/mt-00000000000000000000000000000000/kalem-teslim /api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder}"
+  BODY_PROBES="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul /api/tracking/fedex /api/ops/watchdog/run /api/dynamics/export/siparis /api/superadmin/tenants/test/status /api/parasut/import/stok /api/ai/lead-score /api/shopify/sync /api/shopify/baglanti /api/iyzico/payment-link /api/email/send /api/magaza-panel/yetki-kodu /api/magaza-talepleri/mt-00000000000000000000000000000000/durum /api/magaza-talepleri/mt-00000000000000000000000000000000/kalem-teslim /api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder /api/magaza-talepleri /api/magaza-talepleri/mt-00000000000000000000000000000000/icerik /api/magaza-talepleri/mt-00000000000000000000000000000000/sil}"
   for BODY_PROBE in $BODY_PROBES; do
     PCODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
       -X POST -H 'Content-Type: application/json' --data-binary '{bozuk' \
@@ -323,14 +323,16 @@ else
     esac
   done
 
-  # 4b) MAĞAZA ERP UÇLARI KAYITLI MI? (mağaza dilim 2a — «yazıldı ama bağlanmadı» sondası)
+  # 4b) MAĞAZA ERP UÇLARI KAYITLI MI? (mağaza dilim 2a + 2b — «yazıldı ama bağlanmadı» sondası)
   #
   # Yukarıdaki bozuk JSON sondası rotanın VARLIĞINI göremez: gövde hatası rota eşleşmesinden
-  # ÖNCE fırlar, kayıtlı olmayan yol da 400/500 döner. Bu yüzden aynı dört yola GEÇERLİ JSON,
+  # ÖNCE fırlar, kayıtlı olmayan yol da 400/500 döner. Bu yüzden aynı yedi yola GEÇERLİ JSON,
   # Authorization'sız gönderilir:
   #   401 = rota kayıtlı ve kimlik kapısı arkasında · 404 = rota deploy'da YOK
   # (magazaErpRoutes(app, …) çağrısı server.ts'te yok ya da uç adı değişmiş).
-  MAGAZA_ERP_PROBES="/api/magaza-panel/yetki-kodu /api/magaza-talepleri/mt-00000000000000000000000000000000/durum /api/magaza-talepleri/mt-00000000000000000000000000000000/kalem-teslim /api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder"
+  # Son üç yol dilim 2b'dir (elle talep, içerik düzenleme, yumuşak silme / geri alma): 404 = 2b sunucusu
+  # canlıda değil. Hiçbiri kayıt okumaz / yazmaz (kimlik kapısı gövdeden ve veritabanından ÖNCE reddeder).
+  MAGAZA_ERP_PROBES="/api/magaza-panel/yetki-kodu /api/magaza-talepleri/mt-00000000000000000000000000000000/durum /api/magaza-talepleri/mt-00000000000000000000000000000000/kalem-teslim /api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder /api/magaza-talepleri /api/magaza-talepleri/mt-00000000000000000000000000000000/icerik /api/magaza-talepleri/mt-00000000000000000000000000000000/sil"
   for ERP_PROBE in $MAGAZA_ERP_PROBES; do
     ECODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
       -X POST -H 'Content-Type: application/json' --data-binary '{}' \
@@ -342,6 +344,24 @@ else
       *)   fail "mağaza ERP ucu sondası beklenmedik yanıt: $ECODE ($ERP_PROBE; 200/400/403 = kimlik kapısı zincirde değil)" ;;
     esac
   done
+
+  # 4c) REVİZE BİLDİRİMİNİ YENİDEN GÖNDER (mağaza dilim 2b): bildirim-gonder?tur=revize
+  #
+  # Aynı ucun sorgu dizeli varyantı; geçerli JSON, Authorization'sız:
+  #   401 = sorgu dizesi kimlik kapısından SONRA ayrıştırılıyor (doğru sıra)
+  #   400 = `tur` ayrıştırması kapıdan ÖNCE koşuyor: kimliksiz istek şema yanıtı alıyor (sıra bozuk)
+  # Adres tırnak içinde ve listeden AYRI verilir: `?` kabukta dosya adı kalıbıdır.
+  REVIZE_PROBE="/api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder?tur=revize"
+  RCODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
+    -X POST -H 'Content-Type: application/json' --data-binary '{}' \
+    "$BASE_URL$REVIZE_PROBE" 2>/dev/null || echo 000)
+  case "$RCODE" in
+    401) pass "mağaza ERP ucu revize bildirimi kimlik kapısı arkasında: $REVIZE_PROBE (kimliksiz {} -> 401)" ;;
+    400) fail "REVİZE BİLDİRİMİ UCUNDA SIRA BOZUK: $REVIZE_PROBE -> 400 (sorgu dizesi kimlik kapısından ÖNCE ayrıştırılıyor; kimliksiz istek 401 almalı)" ;;
+    404) fail "MAĞAZA ERP UCU KAYITLI DEĞİL: $REVIZE_PROBE -> 404 (server.ts: magazaErpRoutes(app, …) çağrısı / uç adı)" ;;
+    429) fail "$REVIZE_PROBE -> 429 (hız sınırı: bu IP kimliksiz tavanı doldurdu — bekleyip yeniden çalıştırın)" ;;
+    *)   fail "revize bildirimi sondası beklenmedik yanıt: $RCODE ($REVIZE_PROBE; 200/403 = kimlik kapısı zincirde değil)" ;;
+  esac
 
   # 5) HIZ SINIRI IP BAŞINA MI SAYIYOR? (2026-10-08'de canlıda ölçülen arıza)
   #
@@ -433,6 +453,9 @@ else
   # src/server/routes/magazaRoutes.test.ts'teki sabitle BİREBİR bağlıdır (biri değişirse test kırılır).
   #   404 + bulunamadi = uç canlı, havuz var, kiracı çözülüyor · 503 = havuz / kiracı yok ·
   #   kod'suz 404 = rota kayıtlı değil · 503 + hazir-degil = dilim 1 hâlâ canlıda.
+  # Dilim 2b: SİLİNMİŞ talep bu uçta 404 + kod 'silindi' alır. O yanıt sonda ile ÜRETİLEMEZ (canlıda yapay silinmiş kayıt
+  # açılmaz): hiç var olmamış sabit talep no 2b'de de 'bulunamadi' döner. 'silindi' ayrımı rota testindedir; canlıda ilk
+  # gerçek silmeden sonra elle doğrulanır (RUNBOOK [14]).
   M3=$(curl -s --max-time 20 -w '\n%{http_code}' -X POST -H "Origin: $MK" -H "Content-Type: application/json" -d '{"no":"T000000-AAAA","telefon":"0000000000"}' "$MU/siparis-durumu" 2>/dev/null)
   M3KOD=$(printf '%s\n' "$M3" | tail -n 1)
   if [ "$M3KOD" = "404" ] && printf '%s' "$M3" | grep -q 'bulunamadi'; then
@@ -499,6 +522,8 @@ else
     -d '{"kod":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","dogrulayici":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}' "$PU/oturum"
   panel_sonda "kalem teslim (belirteçsiz)" 401 -X POST -H "Content-Type: application/json" -d '{}' "$PU/siparisler/$PANEL_SIFIR/kalem-teslim"
   panel_sonda "etiket basıldı (belirteçsiz)" 401 -X POST -H "Content-Type: application/json" -d '{}' "$PU/siparisler/$PANEL_SIFIR/etiket-basildi"
+  # Dilim 2b: yumuşak silme ucu (yalnız Yönetici). Belirteçsiz 401 = kapı gövdeden ÖNCE; kayıt okunmaz / yazılmaz.
+  panel_sonda "silme (belirteçsiz)" 401 -X POST -H "Content-Type: application/json" -d '{}' "$PU/siparisler/$PANEL_SIFIR/sil"
   # Panel ön uçuşu: GET + Authorization izinli olmalı (IIS'in bu ön uçuşu Node'a ilettiği burada ölçülür).
   POPT=$(curl -s -o /dev/null -D - --max-time 20 -X OPTIONS -H "Origin: $MK" \
     -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: authorization,content-type" \

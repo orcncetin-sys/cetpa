@@ -6,9 +6,14 @@
  * yalnız gerçek jsonb işleçleriyle göründü; sahte havuz bunu sınayamaz. Örnek DOSYA başına bir kez kurulur (`beforeAll`,
  * ~1–2 sn); testler arasında `DELETE FROM docs`. Tablo DDL'i `src/server/docsSema.ts`'ten (kopya yok; server.ts aynı sabiti kurar).
  *
- * Gerçek motor testleri TEK dosyada toplanır: aşama / açıklama (§ 2.1–2.8), kalem teslim (§ 2.9), elle bildirim (§ 2.10),
+ * `magazaDurum.ts`'in gerçek motor testleri TEK dosyada toplanır: aşama / açıklama (§ 2.1–2.8), kalem teslim (§ 2.9), elle bildirim (§ 2.10),
  * etiket (§ 2.11), bekçi / ops sayımları (§ 6: açık talep sayımı `magazaAcikSayim.ts`, bildirim sayımının yaşı `opsWatchdog.ts`)
  * + kaynak çitleri (SQL metni, parametre sırası, kapalı yama kümesi, denetim gövdesi, `pglite` içe aktarım yasağı).
+ *
+ * DİLİM 2b (§ 10.8): bu dosyadaki işlevlerin 2b dokunuşu BURADA sınanır — silinmiş talebin donukluğu (dört yazma işlevi),
+ * `jsonb_typeof` ölçütünün üç hâli, revize bildirimini elle yeniden kuyruğa alma (`BILDIRIM_REVIZE_YENIDEN_SQL`) ve 2a SQL
+ * çitlerinin `silindi` koşuluyla yeniden sabitlenmesi. 2b'nin KENDİ yazma yolu (`magazaIcerik.ts`: içerik, silme, geri alma,
+ * elle talep, ürün KDV okuması, teyit kaleminin teslim işareti) ayrı dosyadadır: `magazaIcerik.pglite.test.ts`.
  */
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
@@ -23,11 +28,11 @@ import { magazaAcikSayimi } from './magazaAcikSayim';
 import type { MagazaAcikSayimi } from './magazaAcikSayim';
 import type { MagazaPgHavuzu } from '../routes/magazaRoutes';
 import {
-  BILDIRIM_OKU_SQL, BILDIRIM_YENIDEN_SQL, DURUM_ACIKLAMA_SQL, DURUM_GECIS_SQL, DURUM_OKU_SQL, ETIKET_BASILDI_SQL, KALEM_OKU_SQL,
-  KALEM_TESLIM_SQL, MAGAZA_ACIK_SQL,
+  BILDIRIM_OKU_SQL, BILDIRIM_REVIZE_YENIDEN_SQL, BILDIRIM_YENIDEN_SQL, DURUM_ACIKLAMA_SQL, DURUM_GECIS_SQL, DURUM_OKU_SQL, ETIKET_BASILDI_SQL,
+  KALEM_OKU_SQL, KALEM_TESLIM_SQL, MAGAZA_ACIK_SQL, MAGAZA_SILINMEMIS_SQL, MAGAZA_SILINMIS_SQL, SILINDI_OKU_SQL,
   bildirimiYenidenKuyrugaAl, etiketBasildiYaz, kalemTeslimYaz, talepDurumunuDegistir,
 } from './magazaDurum';
-import type { KalemTeslimGirdisi, MagazaDurumDeps } from './magazaDurum';
+import type { KalemTeslimGirdisi, MagazaDurumDeps, MagazaIcerikDeps } from './magazaDurum';
 
 type Satir = Record<string, unknown>;
 const COLL = MAGAZA_TALEP_KOLEKSIYONU;
@@ -527,6 +532,172 @@ describe('etiketBasildiYaz — «Etiket basıldı» (§ 2.11, V23)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+describe('dilim 2b — silinmiş talep DONUKTUR (V17): dört yazma işlevi de `silindi` döner, belge değişmez (§ 10.2 son paragraf)', () => {
+  const SILINDI = { zaman: '2026-10-09T11:30:00.000Z', kim: { uid: 'u-yonetici', ad: 'Yönetici' }, kanal: 'erp' };
+  const REVIZE = { durum: 'gonderilemedi', zaman: '2026-10-09T11:00:00.000Z', alanlar: ['not', 'teyit'], kim: { uid: 'u-r', ad: 'Revize Eden' }, icerikSurum: 2, deneme: 3, hataSinifi: 'baglanti' };
+  /** Geniş bağlam (ERP uçlarının `D`'si): revize bildirimi isteyicisi de bağlı. */
+  function genis(ek: Partial<MagazaIcerikDeps> = {}) {
+    const d = deps();
+    const revizeIste = vi.fn<MagazaIcerikDeps['revizeBildirimiIste']>(async () => undefined);
+    const D: MagazaIcerikDeps = { ...d.D, revizeBildirimiIste: revizeIste, ...ek };
+    return { ...d, D, revizeIste };
+  }
+
+  it('`jsonb_typeof` ölçütü üç hâli ayırır: alan yok → NULL, JSON `null` (geri alınmış) → \'null\', nesne → \'object\'; yalnız nesne silinmiştir', async () => {
+    const yok = await talep();
+    const geriAlinmis = await talep({ silindi: null });
+    const silinmis = await talep({ silindi: SILINDI });
+    const tur = async (id: string): Promise<unknown> => (await db.query<Satir>(SILINDI_OKU_SQL, [COLL, id, CID])).rows[0]?.silindi_turu;
+    expect(await tur(yok)).toBeNull();
+    expect(await tur(geriAlinmis)).toBe('null');
+    expect(await tur(silinmis)).toBe('object');
+    const say = async (kosul: string): Promise<number> => (await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM docs WHERE coll = $1 AND ${kosul}`, [COLL])).rows[0].n;
+    expect(await say(MAGAZA_SILINMIS_SQL)).toBe(1);
+    expect(await say(MAGAZA_SILINMEMIS_SQL)).toBe(2);
+    // `IS NULL` / `IS NOT NULL` ölçüt OLAMAZ: geri alınmış satırın `silindi`si JSON null'dır, SQL NULL değil — `IS NOT NULL`
+    // onu SİLİNMİŞ sayardı (2 satır), `IS NULL` «canlı» kümeden düşürürdü (1 satır; doğrusu 2). Bu yüzden kullanılmaz.
+    expect(await say(`data->'silindi' IS NOT NULL`)).toBe(2);
+    expect(await say(`data->'silindi' IS NULL`)).toBe(1);
+    // Açık sayımı (bekçi ve panel listesinin ORTAK sabiti) silinmişi saymaz; geri alınmış yeniden sayılır.
+    expect(await say(MAGAZA_ACIK_SQL)).toBe(2);
+  });
+  it('silinmiş belgeye aşama / açıklama / kalem teslim / elle bildirim (ilk + revize) / etiket yazımı → `silindi`; belge alan alan AYNI; yayın / denetim / kuyruk YOK', async () => {
+    const id = await talep({ silindi: SILINDI, bildirim: { durum: 'gonderilemedi', zaman: 'z' }, bildirimRevize: REVIZE });
+    const once = await belge(id);
+    const { D, yayin, denetim, iste, revizeIste } = genis();
+    expect(await talepDurumunuDegistir(D, { id, companyId: CID, onceki: 'sevk', surum: 3, yeni: 'teslim', kim: KIM, kanal: 'erp' })).toEqual({ sonuc: 'silindi' });
+    expect(await talepDurumunuDegistir(D, { id, companyId: CID, onceki: 'sevk', surum: 3, yeni: 'sevk', aciklama: 'not', kim: KIM, kanal: 'panel' })).toEqual({ sonuc: 'silindi' });
+    expect(await kalemTeslimYaz(D, { id, companyId: CID, surum: 3, teslim: true, kalemler: ['b:0'], kim: KIM, kanal: 'panel' })).toEqual({ sonuc: 'silindi' });
+    expect(await kalemTeslimYaz(D, { id, companyId: CID, surum: 3, teslim: true, kalemler: 'hepsi', kim: KIM, kanal: 'erp' })).toEqual({ sonuc: 'silindi' });
+    expect(await bildirimiYenidenKuyrugaAl(D, { id, companyId: CID, tur: 'ilk', kim: KIM })).toEqual({ sonuc: 'silindi' });
+    expect(await bildirimiYenidenKuyrugaAl(D, { id, companyId: CID, tur: 'revize', kim: KIM })).toEqual({ sonuc: 'silindi' });
+    expect(await etiketBasildiYaz(D, { id, companyId: CID, koli: 2, kim: { uid: 'u' } })).toEqual({ sonuc: 'silindi' });
+    expect(await belge(id)).toEqual(once);
+    expect(yayin).not.toHaveBeenCalled(); expect(denetim).not.toHaveBeenCalled(); expect(iste).not.toHaveBeenCalled(); expect(revizeIste).not.toHaveBeenCalled();
+    // Silinmişlik aşama / sürüm denetiminden ÖNCE gelir: bayat sürümle de `silindi` (gecis-yok değil — ekran «talep silinmiş» der).
+    expect(await talepDurumunuDegistir(D, { id, companyId: CID, onceki: 'teyit', surum: 0, yeni: 'hazirlaniyor', kim: KIM, kanal: 'erp' })).toEqual({ sonuc: 'silindi' });
+    expect(await kalemTeslimYaz(D, { id, companyId: CID, surum: 0, teslim: true, kalemler: ['b:9'], kim: KIM, kanal: 'erp' })).toEqual({ sonuc: 'silindi' });
+  });
+  it('okuma ile yazma ARASINA giren silme: UPDATE 0 satır → `silindi` (aşama, açıklama, kalem teslim); hiçbir alan yazılmaz', async () => {
+    const silAraya = (id: string) => arayaGiren(sql => sql.startsWith('SELECT'), async () => {
+      await db.query(`UPDATE docs SET data = data || $3::jsonb WHERE coll = $1 AND id = $2`, [COLL, id, JSON.stringify({ silindi: SILINDI })]);
+    });
+    const a = await talep();
+    expect(await talepDurumunuDegistir(sahte({ getPgPool: () => silAraya(a) }), { id: a, companyId: CID, onceki: 'sevk', surum: 3, yeni: 'teslim', kim: KIM, kanal: 'erp' })).toEqual({ sonuc: 'silindi' });
+    expect((await belge(a)).durum).toBe('sevk');
+    expect((await belge(a)).durumGecmisi).toBeUndefined();
+    const b = await talep();
+    expect(await talepDurumunuDegistir(sahte({ getPgPool: () => silAraya(b) }), { id: b, companyId: CID, onceki: 'sevk', surum: 3, yeni: 'sevk', aciklama: 'yeni not', kim: KIM, kanal: 'erp' })).toEqual({ sonuc: 'silindi' });
+    expect((await belge(b)).durumAciklama).toBe('Kargoya verildi');
+    const c = await talep();
+    expect(await kalemTeslimYaz(sahte({ getPgPool: () => silAraya(c) }), { id: c, companyId: CID, surum: 3, teslim: true, kalemler: ['b:0'], kim: KIM, kanal: 'panel' })).toEqual({ sonuc: 'silindi' });
+    expect((await belge(c)).kalemTeslim).toBeUndefined();
+    expect((await belge(c)).durumSurum).toBe(3);
+  });
+  it('geri alınmış talep (`silindi: null`) yeniden CANLIDIR: aşama, kalem teslim, elle bildirim ve etiket yazımı `tamam`', async () => {
+    const id = await talep({ silindi: null, bildirim: { durum: 'gonderilemedi', zaman: 'z' } });
+    expect((await talepDurumunuDegistir(sahte(), { id, companyId: CID, onceki: 'sevk', surum: 3, yeni: 'teslim', kim: KIM, kanal: 'erp' })).sonuc).toBe('tamam');
+    expect((await kalemTeslimYaz(sahte(), { id, companyId: CID, surum: 4, teslim: true, kalemler: ['b:0'], kim: KIM, kanal: 'erp' })).sonuc).toBe('tamam');
+    expect((await bildirimiYenidenKuyrugaAl(sahte(), { id, companyId: CID, tur: 'ilk', kim: KIM })).sonuc).toBe('tamam');
+    expect((await etiketBasildiYaz(sahte(), { id, companyId: CID, kim: { uid: 'u' } })).sonuc).toBe('tamam');
+    // `silindi: null` anahtarı yazımlardan sonra da DURUR (hiçbir yama `silindi` taşımaz).
+    const b = await belge(id);
+    expect('silindi' in b).toBe(true);
+    expect(b.silindi).toBeNull();
+  });
+  it('aşama / açıklama / kalem teslim / etiket yazımı `bildirim` ve `bildirimRevize`\'yi DEĞİŞTİRMEZ (alan alan eşit) — bu yazımlar bildirim üretmez (V20)', async () => {
+    const id = await talep({ bildirim: { durum: 'gonderilemedi', zaman: 'z', deneme: 2, hataSinifi: 'tls' }, bildirimRevize: REVIZE, icerikSurum: 2 });
+    const once = await belge(id);
+    const { D, iste, revizeIste } = genis();
+    expect((await talepDurumunuDegistir(D, { id, companyId: CID, onceki: 'sevk', surum: 3, yeni: 'sevk', aciklama: 'a', kim: KIM, kanal: 'erp' })).sonuc).toBe('tamam');
+    expect((await talepDurumunuDegistir(D, { id, companyId: CID, onceki: 'sevk', surum: 4, yeni: 'teslim', kim: KIM, kanal: 'erp' })).sonuc).toBe('tamam');
+    expect((await kalemTeslimYaz(D, { id, companyId: CID, surum: 5, teslim: true, kalemler: 'hepsi', kim: KIM, kanal: 'panel' })).sonuc).toBe('tamam');
+    expect((await etiketBasildiYaz(D, { id, companyId: CID, kim: { uid: 'u' } })).sonuc).toBe('tamam');
+    const b = await belge(id);
+    for (const alan of ['bildirim', 'bildirimRevize', 'icerikSurum', 'kalemler', 'talepEdilen', 'musteri', 'not']) expect(b[alan], alan).toEqual(once[alan]);
+    expect(iste).not.toHaveBeenCalled();
+    expect(revizeIste).not.toHaveBeenCalled();
+  });
+
+  describe('bildirimiYenidenKuyrugaAl — `tur: \'revize\'` (§ 2.10, § 10.3; kapı 4, Y3 (b))', () => {
+    const G = (id: string) => ({ id, companyId: CID, tur: 'revize' as const, kim: KIM });
+
+    it('gonderilemedi + deneme 3 + hataSinifi + alanlar → `bekliyor` + yeni zaman; `deneme` / `hataSinifi` YOK; `alanlar` / `kim` / `icerikSurum` AYNEN; ilk bildirim ve sürümler değişmez', async () => {
+      const id = await talep({ bildirimRevize: REVIZE, icerikSurum: 2, icerikZamani: '2026-10-09T11:00:00.000Z' });
+      const once = await belge(id);
+      const { D, yayin, denetim, iste, revizeIste } = genis();
+      const s = await bildirimiYenidenKuyrugaAl(D, G(id));
+      expect(s.sonuc).toBe('tamam');
+      const b = await belge(id);
+      expect(b.bildirimRevize).toEqual({ durum: 'bekliyor', zaman: SAAT.toISOString(), alanlar: ['not', 'teyit'], kim: { uid: 'u-r', ad: 'Revize Eden' }, icerikSurum: 2 });
+      for (const alan of ['bildirim', 'durum', 'durumSurum', 'durumZamani', 'icerikSurum', 'icerikZamani', 'kalemler', 'musteri', 'not']) expect(b[alan], alan).toEqual(once[alan]);
+      // Revize bildirimi KENDİ kuyruğuna gider; ilk bildirimin isteyicisi ÇAĞRILMAZ. İş verisi yalnız talep kimliği.
+      expect(revizeIste).toHaveBeenCalledTimes(1);
+      expect(revizeIste).toHaveBeenCalledWith(id);
+      expect(iste).not.toHaveBeenCalled();
+      expect(yayin.mock.calls[0]).toEqual([COLL, 'set', id, b, { cid: CID }]);
+      expect(denetim.mock.calls[0]).toEqual([{ uid: KIM.uid, email: KIM.eposta }, 'Mağaza talebi bildirimi elle kuyruğa alındı', 'T261009-AB12 · erp · revize']);
+      if (s.sonuc === 'tamam') expect(s.belge).toEqual(b);
+    });
+    it('yapilandirilmamis ve süresi geçmiş bekliyor da yeniden kuyruğa alınır; çöp `alanlar` korunur (okuyan süzer), hata yok', async () => {
+      for (const revize of [{ ...REVIZE, durum: 'yapilandirilmamis' }, { durum: 'bekliyor', zaman: '2026-10-09T08:00:00.000Z', alanlar: 'çöp', kim: { uid: 'u', ad: 'A' }, icerikSurum: 1, deneme: 8 }]) {
+        const id = await talep({ bildirimRevize: revize });
+        expect((await bildirimiYenidenKuyrugaAl(genis().D, G(id))).sonuc, revize.durum).toBe('tamam');
+        const r = (await belge(id)).bildirimRevize as Satir;
+        expect(r.durum).toBe('bekliyor');
+        expect(r.zaman).toBe(SAAT.toISOString());
+        expect('deneme' in r).toBe(false);
+        expect('hataSinifi' in r).toBe(false);
+        expect(r.alanlar).toEqual(revize.alanlar);
+        expect(r.kim).toEqual(revize.kim);
+        expect(r.icerikSurum).toBe(revize.icerikSurum);
+      }
+    });
+    it('`gitti` → zaten-gitti (0 satır; kuyruk / yayın / denetim YOK); ilk bildirim `gonderilemedi` olsa da revize ucu ona DOKUNMAZ', async () => {
+      const id = await talep({ bildirim: { durum: 'gonderilemedi', zaman: 'z' }, bildirimRevize: { ...REVIZE, durum: 'gitti' } });
+      const once = await belge(id);
+      const { D, yayin, denetim, iste, revizeIste } = genis();
+      expect(await bildirimiYenidenKuyrugaAl(D, G(id))).toEqual({ sonuc: 'zaten-gitti' });
+      expect(await belge(id)).toEqual(once);
+      expect(revizeIste).not.toHaveBeenCalled(); expect(iste).not.toHaveBeenCalled(); expect(yayin).not.toHaveBeenCalled(); expect(denetim).not.toHaveBeenCalled();
+      // Tersi: revize `gitti` iken İLK bildirim yeniden kuyruğa alınır ve `bildirimRevize` aynen kalır.
+      expect((await bildirimiYenidenKuyrugaAl(D, { id, companyId: CID, tur: 'ilk', kim: KIM })).sonuc).toBe('tamam');
+      const b = await belge(id);
+      expect(b.bildirim).toEqual({ durum: 'bekliyor', zaman: SAAT.toISOString() });
+      expect(b.bildirimRevize).toEqual(once.bildirimRevize);
+      expect(iste).toHaveBeenCalledTimes(1);
+      expect(revizeIste).not.toHaveBeenCalled();
+    });
+    it('`bildirimRevize` yok / çöp dizge / dizi / JSON null → revize-yok (0 satır; yoktan revizyon YARATILMAZ), belge değişmez', async () => {
+      for (const revize of [undefined, 'çöp', ['not'], null]) {
+        const id = await talep(revize === undefined ? {} : { bildirimRevize: revize });
+        const once = await belge(id);
+        const { D, revizeIste, denetim } = genis();
+        expect(await bildirimiYenidenKuyrugaAl(D, G(id)), JSON.stringify(revize)).toEqual({ sonuc: 'revize-yok' });
+        expect(await belge(id)).toEqual(once);
+        expect(revizeIste).not.toHaveBeenCalled();
+        expect(denetim).not.toHaveBeenCalled();
+      }
+    });
+    it('başka kiracı → bulunamadi; bozuk kimlik → sorgu 0; kuyruğa ekleme fırlatsa da yazım geri alınmaz; isteyici BAĞLI DEĞİLSE yazımdan önce fırlatır', async () => {
+      const id = await talep({ bildirimRevize: REVIZE });
+      expect(await bildirimiYenidenKuyrugaAl(genis().D, { ...G(id), companyId: 'kiraci-2' })).toEqual({ sonuc: 'bulunamadi' });
+      sayac = 0;
+      expect(await bildirimiYenidenKuyrugaAl(genis().D, G('mt-bozuk'))).toEqual({ sonuc: 'bulunamadi' });
+      expect(sayac).toBe(0);
+      // Dar bağlamla revize istenirse (tür imzası bunu engeller; çalışma anı savunması): hiçbir şey yazılmadan dur.
+      const once = await belge(id);
+      const dar: MagazaDurumDeps = deps().D;
+      await expect(bildirimiYenidenKuyrugaAl(dar as MagazaIcerikDeps, G(id))).rejects.toThrow(/revizeBildirimiIste/);
+      expect(await belge(id)).toEqual(once);
+      const s = await bildirimiYenidenKuyrugaAl(genis({ revizeBildirimiIste: async () => { throw new Error('kuyruk yok'); } }).D, G(id));
+      expect(s.sonuc).toBe('tamam');
+      expect(((await belge(id)).bildirimRevize as Satir).durum).toBe('bekliyor');
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('bekçi / ops sayımları gerçek motorda — açık talep sayımı ve bildirim sayımının yaşı (§ 6)', () => {
   /** Tabandan bağımsız ham ekleme (alanı HİÇ olmayan / çöp değerli satır için). */
   let hamSira = 0;
@@ -628,28 +799,43 @@ describe('kaynak çitleri — SQL metni, parametre sırası, kapalı yama kümes
   const DOSYA = join(SRC_KOK, 'server', 'kanal', 'magazaDurum.ts');
   const kod = kodSatirlari(DOSYA).map(s => s.kod).join('\n');
 
-  it('dar okumalar: musteri / not / talepEdilen / bildirim* SELECT metninde YOK; kalem okuması teyit->kalemler, beyan sayısı ve icerikSurum çeker', () => {
-    for (const sql of [DURUM_OKU_SQL, KALEM_OKU_SQL]) {
+  it('dar okumalar: musteri / not / talepEdilen / bildirim* SELECT metninde YOK; kalem okuması teyit->kalemler, beyan sayısı ve icerikSurum çeker; (2b) hepsi `silindi`nin TÜRÜNÜ okur', () => {
+    for (const sql of [DURUM_OKU_SQL, KALEM_OKU_SQL, SILINDI_OKU_SQL]) {
       expect(sql).toMatch(/^SELECT /);
       expect(sql).not.toMatch(/musteri|'not'|talepEdilen|bildirim|durumGecmisi|SELECT data FROM|SELECT \*/);
       expect(sql).toContain("data->>'companyId' = $3");
     }
+    // Dilim 2b: silinmiş ölçütü her dar okumada AYNI sütun — `jsonb_typeof` (JSON `null` ile yokluğu ayırır); `IS NULL` metni YOK.
+    for (const sql of [DURUM_OKU_SQL, KALEM_OKU_SQL, SILINDI_OKU_SQL, BILDIRIM_OKU_SQL]) {
+      expect(sql).toContain("jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3");
+      expect(sql).not.toMatch(/'silindi' IS (NOT )?NULL/);
+    }
+    expect(DURUM_OKU_SQL).toBe(`SELECT data->>'durum' AS durum, COALESCE(data->>'durumSurum', '0') AS surum, data->'iptalOncesi' AS iptal_oncesi, data->>'talepNo' AS talep_no, jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`);
+    expect(SILINDI_OKU_SQL).toBe(`SELECT COALESCE(data->>'durumSurum', '0') AS surum, data->>'talepNo' AS talep_no, jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`);
     expect(DURUM_OKU_SQL).toContain("COALESCE(data->>'durumSurum', '0') AS surum");
     expect(DURUM_OKU_SQL).toContain("data->'iptalOncesi' AS iptal_oncesi");
     expect(KALEM_OKU_SQL).toContain("COALESCE(data->>'icerikSurum', '0') AS icerik_surum");
     expect(KALEM_OKU_SQL).toContain("data->'teyit'->'kalemler' AS teyit_kalemleri");
     expect(KALEM_OKU_SQL).toContain("jsonb_array_length(data->'kalemler')");
-    expect(BILDIRIM_OKU_SQL).toBe(`SELECT data->'bildirim'->>'durum' AS durum FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`);
+    expect(KALEM_OKU_SQL).toBe(`SELECT data->>'durum' AS durum, COALESCE(data->>'durumSurum', '0') AS surum, COALESCE(data->>'icerikSurum', '0') AS icerik_surum, data->>'talepNo' AS talep_no, (CASE WHEN jsonb_typeof(data->'kalemler') = 'array' THEN jsonb_array_length(data->'kalemler') ELSE 0 END) AS beyan_sayisi, data->'teyit'->'kalemler' AS teyit_kalemleri, jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`);
+    // Dilim 2b (bilerek değişen çit): iki bildirimin durumu + revize alanının ve `silindi`nin türü — müşteri verisi yine yok.
+    expect(BILDIRIM_OKU_SQL).toBe(`SELECT data->'bildirim'->>'durum' AS durum, data->'bildirimRevize'->>'durum' AS revize_durum, jsonb_typeof(data->'bildirimRevize') AS revize_turu, jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`);
+    expect(BILDIRIM_OKU_SQL).not.toMatch(/musteri|'not'|talepEdilen|alanlar|'kim'|SELECT data FROM|SELECT \*/);
   });
   it('iki aşama sabiti: koşul kiracı + okunan durum + okunan sürüm; geçmiş SQL içinde (sınır − 1 + yeni giriş); `now()` yalnız updated_at', () => {
-    expect(DURUM_ACIKLAMA_SQL).toBe(`UPDATE docs SET data = data || $4::jsonb, updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND data->>'durum' = $5 AND COALESCE(data->>'durumSurum', '0') = $6 RETURNING data`);
+    // Dilim 2b (bilerek değişen çit): bütün yazma sabitleri silinmiş satıra YAZMAZ — koşulun sonunda `MAGAZA_SILINMEMIS_SQL`.
+    expect(MAGAZA_SILINMEMIS_SQL).toBe(`jsonb_typeof(data->'silindi') IS DISTINCT FROM 'object'`);
+    expect(MAGAZA_SILINMIS_SQL).toBe(`jsonb_typeof(data->'silindi') = 'object'`);
+    expect(DURUM_ACIKLAMA_SQL).toBe(`UPDATE docs SET data = data || $4::jsonb, updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND data->>'durum' = $5 AND COALESCE(data->>'durumSurum', '0') = $6 AND jsonb_typeof(data->'silindi') IS DISTINCT FROM 'object' RETURNING data`);
     expect(DURUM_GECIS_SQL).toMatch(/^UPDATE docs SET data = \(data \|\| \$4::jsonb\) \|\| jsonb_build_object\('durumGecmisi', /);
     expect(DURUM_GECIS_SQL).toContain(`LIMIT ${MAGAZA_DURUM_GECMISI_SINIRI - 1}`);
     expect(DURUM_GECIS_SQL).toContain("|| jsonb_build_array($5::jsonb), 'durumGecmisiDusen',");
     expect(DURUM_GECIS_SQL).toContain("jsonb_typeof(data->'durumGecmisi') = 'array'");
     expect(DURUM_GECIS_SQL).toContain("jsonb_typeof(data->'durumGecmisiDusen') = 'number'");
-    expect(DURUM_GECIS_SQL).toMatch(/WHERE coll = \$1 AND id = \$2 AND data->>'companyId' = \$3 AND data->>'durum' = \$6 AND COALESCE\(data->>'durumSurum', '0'\) = \$7 RETURNING data$/);
-    for (const sql of [DURUM_ACIKLAMA_SQL, DURUM_GECIS_SQL, KALEM_TESLIM_SQL, BILDIRIM_YENIDEN_SQL, ETIKET_BASILDI_SQL]) {
+    expect(DURUM_GECIS_SQL).toMatch(/WHERE coll = \$1 AND id = \$2 AND data->>'companyId' = \$3 AND data->>'durum' = \$6 AND COALESCE\(data->>'durumSurum', '0'\) = \$7 AND jsonb_typeof\(data->'silindi'\) IS DISTINCT FROM 'object' RETURNING data$/);
+    for (const sql of [DURUM_ACIKLAMA_SQL, DURUM_GECIS_SQL, KALEM_TESLIM_SQL, BILDIRIM_YENIDEN_SQL, BILDIRIM_REVIZE_YENIDEN_SQL, ETIKET_BASILDI_SQL]) {
+      expect(sql.endsWith(` AND ${MAGAZA_SILINMEMIS_SQL} RETURNING data`), sql.slice(0, 40)).toBe(true);
+      expect((sql.match(/'silindi'/g) ?? []).length, sql.slice(0, 40)).toBe(1);
       expect((sql.match(/UPDATE /g) ?? []).length, sql.slice(0, 40)).toBe(1);
       expect((sql.match(/now\(\)/g) ?? []).length, sql.slice(0, 40)).toBe(1);
       expect(sql).toContain('updated_at = now()');
@@ -658,13 +844,25 @@ describe('kaynak çitleri — SQL metni, parametre sırası, kapalı yama kümes
     }
   });
   it('`KALEM_TESLIM_SQL`: $4 yama, $5 işaret nesnesi, $6 durumSurum, $7 icerikSurum; kalemTeslim nesne koruması metinde', () => {
-    expect(KALEM_TESLIM_SQL).toBe(`UPDATE docs SET data = (data || $4::jsonb) || jsonb_build_object('kalemTeslim', (CASE WHEN jsonb_typeof(data->'kalemTeslim') = 'object' THEN data->'kalemTeslim' ELSE '{}'::jsonb END) || $5::jsonb), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND COALESCE(data->>'durumSurum', '0') = $6 AND COALESCE(data->>'icerikSurum', '0') = $7 RETURNING data`);
+    expect(KALEM_TESLIM_SQL).toBe(`UPDATE docs SET data = (data || $4::jsonb) || jsonb_build_object('kalemTeslim', (CASE WHEN jsonb_typeof(data->'kalemTeslim') = 'object' THEN data->'kalemTeslim' ELSE '{}'::jsonb END) || $5::jsonb), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND COALESCE(data->>'durumSurum', '0') = $6 AND COALESCE(data->>'icerikSurum', '0') = $7 AND jsonb_typeof(data->'silindi') IS DISTINCT FROM 'object' RETURNING data`);
   });
   it('`BILDIRIM_YENIDEN_SQL`: jsonb_set {bildirim} + jsonb_build_object + IS DISTINCT FROM gitti; `ETIKET_BASILDI_SQL`: jsonb_set {etiketBasildi}, aşama / sürüm koşulu YOK', () => {
-    expect(BILDIRIM_YENIDEN_SQL).toBe(`UPDATE docs SET data = jsonb_set(data, '{bildirim}', jsonb_build_object('durum', 'bekliyor', 'zaman', $4::text)), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND (data->'bildirim'->>'durum') IS DISTINCT FROM 'gitti' RETURNING data`);
-    expect(ETIKET_BASILDI_SQL).toBe(`UPDATE docs SET data = jsonb_set(data, '{etiketBasildi}', $4::jsonb), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 RETURNING data`);
+    expect(BILDIRIM_YENIDEN_SQL).toBe(`UPDATE docs SET data = jsonb_set(data, '{bildirim}', jsonb_build_object('durum', 'bekliyor', 'zaman', $4::text)), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND (data->'bildirim'->>'durum') IS DISTINCT FROM 'gitti' AND jsonb_typeof(data->'silindi') IS DISTINCT FROM 'object' RETURNING data`);
+    expect(ETIKET_BASILDI_SQL).toBe(`UPDATE docs SET data = jsonb_set(data, '{etiketBasildi}', $4::jsonb), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND jsonb_typeof(data->'silindi') IS DISTINCT FROM 'object' RETURNING data`);
     expect(ETIKET_BASILDI_SQL).not.toMatch(/durum'|durumSurum|icerikSurum/);
-    expect(MAGAZA_ACIK_SQL).toBe(`COALESCE(data->>'durum', '') NOT IN ('teslim', 'iptal')`);
+    // Dilim 2b (bilerek değişen çit, § 4): AÇIK koşulu + silinmemiş koşulu TEK sabittir — bekçi ve panel listesi aynı metni kullanır.
+    expect(MAGAZA_ACIK_SQL).toBe(`COALESCE(data->>'durum', '') NOT IN ('teslim', 'iptal') AND jsonb_typeof(data->'silindi') IS DISTINCT FROM 'object'`);
+  });
+  it('(2b; kapı 4, Y3 (b)) `BILDIRIM_REVIZE_YENIDEN_SQL`: nesne bütünüyle DEĞİŞTİRİLMEZ — `(data->\'bildirimRevize\')` PARANTEZLİ, `deneme` / `hataSinifi` düşer, `||` ile durum + zaman; nesne değilse yazmaz', () => {
+    expect(BILDIRIM_REVIZE_YENIDEN_SQL).toBe(`UPDATE docs SET data = jsonb_set(data, '{bildirimRevize}', ((data->'bildirimRevize') - 'deneme' - 'hataSinifi') || jsonb_build_object('durum', 'bekliyor', 'zaman', $4::text)), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND jsonb_typeof(data->'bildirimRevize') = 'object' AND (data->'bildirimRevize'->>'durum') IS DISTINCT FROM 'gitti' AND jsonb_typeof(data->'silindi') IS DISTINCT FROM 'object' RETURNING data`);
+    // Parantezsiz `data->'bildirimRevize' - 'deneme'` PostgreSQL'de `data -> ('bildirimRevize' - 'deneme')` okunur ve düşer (kapı 4 ölçümü).
+    expect(BILDIRIM_REVIZE_YENIDEN_SQL).toContain(`((data->'bildirimRevize') - 'deneme' - 'hataSinifi')`);
+    expect(BILDIRIM_REVIZE_YENIDEN_SQL).not.toMatch(/data->'bildirimRevize' - /);
+    // Tam değiştirme (`'{bildirimRevize}', jsonb_build_object(`) `alanlar` / `kim` / `icerikSurum`'u düşürürdü — metinde YOK.
+    expect(BILDIRIM_REVIZE_YENIDEN_SQL).not.toContain(`'{bildirimRevize}', jsonb_build_object(`);
+    // İlk bildirimin sabiti DEĞİŞMEDİ: `bildirim`de korunacak başka alan yoktur, tam değiştirme orada doğrudur.
+    expect(BILDIRIM_YENIDEN_SQL).toContain(`'{bildirim}', jsonb_build_object(`);
+    expect(BILDIRIM_YENIDEN_SQL).not.toContain('bildirimRevize');
   });
   it('yama anahtar kümesi KAPALI (havuz gözlemi): geçişte durum / durumZamani / durumSurum (+ iptalOncesi, durumAciklama); açıklamada üç anahtar; kalemde yalnız durumSurum; etikette yalnız { zaman, koli?, kim }', async () => {
     const yamalar: Array<{ sql: string; params: unknown[] }> = [];
@@ -722,5 +920,5 @@ describe('kaynak çitleri — SQL metni, parametre sırası, kapalı yama kümes
     expect(server).toContain('await pgPool.query(DOCS_TABLOSU_DDL);');
     expect(server).toContain('for (const ddl of DOCS_INDEKS_DDL) {');
     expect(server).toMatch(/import \{ DOCS_INDEKS_DDL, DOCS_TABLOSU_DDL \} from "\.\/src\/server\/docsSema\.js";/);
-  });
+  }, 60_000);   // `src/`in tamamı tek testte taranır: yük altında 5 sn'lik varsayılan süre yetmez (depo kalıbı)
 });

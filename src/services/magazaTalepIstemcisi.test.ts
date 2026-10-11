@@ -1,5 +1,6 @@
 /**
- * magazaTalepIstemcisi.test.ts — ERP'den mağaza talebine yazan üç isteğin SÖZLEŞMESİ (dilim 2a, şartname v6 § 5.1 / § 7 «İstemci»).
+ * magazaTalepIstemcisi.test.ts — ERP'den mağaza talebine yazan isteklerin SÖZLEŞMESİ (dilim 2a: üç istek, şartname v6 § 5.1 / § 7
+ * «İstemci»; dilim 2b: + içerik, silme / geri alma, elle talep ve `?tur=revize`, § 10.4 / § 10.8).
  *
  * KİLİTLENEN DEĞİŞMEZLER:
  *   1. Üçü de `authFetch` ile DÜZ POST: yol `/api/magaza-talepleri/:id/{durum,kalem-teslim,bildirim-gonder}`, gövde JSON,
@@ -7,12 +8,21 @@
  *   2. Durum kodu → kapalı `kod` eşlemesi (şartnamedeki tablo); 409 gövdesindeki aşama SAKLANAN sözlükle ve kapalı kümeden.
  *   3. ASLA fırlatmaz: ağ hatası, 5xx, JSON olmayan gövde → `kod: 'ag'`. Sunucunun `error` metni sonuca TAŞINMAZ.
  *   4. `eksik` yalnız ortam değişkeni ADLARI: değer / adres / sır görünümlü öğe düşer.
+ *   5. DİLİM 2b: `…/:id/icerik` (gövde formun ürettiği nesnenin aynısı; `degisti` yanıttan), `…/:id/sil` (`{ surum, geriAl? }`),
+ *      kök `POST /api/magaza-talepleri` (elle talep; `id` / `talepNo` biçim denetimiyle), `…/bildirim-gonder?tur=revize`.
+ *      503 (ürün KDV okuması / numara çakışması) → `ag`; 409 gövdesindeki sürüm sayacı negatif olmayan tam sayı değilse taşınmaz.
+ *
+ * BİLEREK DEĞİŞEN dilim 2a sabitleri (2b; gevşetilmedi — yeni değerleriyle): `yol` yardımcısının son parça kümesi (+ `icerik`,
+ * + `sil`); `bildirim-gonder`'de 409 `revize-yok` artık kendi koduna eşlenir (2a'da tanınmayan 409 = `ag` idi); «yazıldı ama
+ * bağlanmadı» çiti altı yolu sayar.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { join } from 'node:path';
 import { oku, SRC_KOK } from '../test/kaynakTarama';
 import { yorumsuz } from '../test/degismezTarayici';
-import { magazaTalepDurumuYaz, magazaKalemTeslimYaz, magazaBildirimGonder, MAGAZA_TALEP_UCU } from './magazaTalepIstemcisi';
+import {
+  magazaTalepDurumuYaz, magazaKalemTeslimYaz, magazaBildirimGonder, magazaTalepIcerigiYaz, magazaTalepSil, magazaElleTalepAc, MAGAZA_TALEP_UCU,
+} from './magazaTalepIstemcisi';
 import { authFetch } from './authFetch';
 
 vi.mock('./authFetch', () => ({ authFetch: vi.fn() }));
@@ -56,7 +66,7 @@ describe('istek biçimi — düz POST, JSON gövde, tünel yok', () => {
     expect(JSON.parse(String(son()[1]?.body))).toEqual({ surum: 12, teslim: false, kalemler: 'hepsi' });
   });
 
-  it('`magazaBildirimGonder`: `POST …/:id/bildirim-gonder`; gövde `{}` ve `Content-Type` VAR; sorgu parametresi yok (`?tur` 2b\'nindir)', async () => {
+  it('`magazaBildirimGonder`: `POST …/:id/bildirim-gonder`; gövde `{}` ve `Content-Type` VAR; `tur`\'suz çağrıda sorgu parametresi yok', async () => {
     hepYanitla(200, { ok: true });
     expect(await magazaBildirimGonder(ID)).toEqual({ ok: true });
     expect(son()[0]).toBe(`/api/magaza-talepleri/${ID}/bildirim-gonder`);
@@ -185,9 +195,182 @@ describe('magazaBildirimGonder — yanıt eşlemesi', () => {
   it('ağ hatası / 5xx / 400 / tanınmayan 409 → `ag`; fırlatmaz', async () => {
     istek.mockRejectedValue(new TypeError('Failed to fetch'));
     await expect(magazaBildirimGonder(ID)).resolves.toEqual({ ok: false, kod: 'ag' });
-    for (const y of [yanit(500, {}), yanit(503, { ok: false }), htmlYanit(502), yanit(400, { ok: false }), yanit(409, { ok: false }), yanit(409, { ok: false, kod: 'revize-yok' })]) {
+    for (const y of [yanit(500, {}), yanit(503, { ok: false }), htmlYanit(502), yanit(400, { ok: false }), yanit(409, { ok: false }), yanit(409, { ok: false, kod: 'surum-eski' })]) {
       istek.mockResolvedValue(y);
       await expect(magazaBildirimGonder(ID)).resolves.toEqual({ ok: false, kod: 'ag' });
+    }
+  });
+
+  it('(2b) 409 `revize-yok` → `revize-yok` (talepte revize bildirimi yok); 409 `silindi` → `silindi` (silinmiş talep donuk) — iki `tur`da da', async () => {
+    for (const tur of [undefined, 'revize'] as const) {
+      istek.mockResolvedValue(yanit(409, { ok: false, kod: 'revize-yok' }));
+      expect(await magazaBildirimGonder(ID, tur)).toEqual({ ok: false, kod: 'revize-yok' });
+      istek.mockResolvedValue(yanit(409, { ok: false, kod: 'silindi' }));
+      expect(await magazaBildirimGonder(ID, tur)).toEqual({ ok: false, kod: 'silindi' });
+      istek.mockResolvedValue(yanit(409, { ok: false, kod: 'yapilandirilmamis', eksik: ['APP_URL'] }));
+      expect(await magazaBildirimGonder(ID, tur)).toEqual({ ok: false, kod: 'yapilandirilmamis', eksik: ['APP_URL'] });
+      istek.mockResolvedValue(yanit(409, { ok: false, kod: 'kapali' }));
+      expect(await magazaBildirimGonder(ID, tur)).toEqual({ ok: false, kod: 'kapali' });
+      istek.mockResolvedValue(yanit(409, { ok: false, kod: 'zaten-gitti' }));
+      expect(await magazaBildirimGonder(ID, tur)).toEqual({ ok: false, kod: 'zaten-gitti' });
+    }
+  });
+});
+
+// ── 2b. Dilim 2b: içerik, silme / geri alma, elle talep, revize bildirimi ───────────────────────────────────────────
+describe('dilim 2b — istek biçimi', () => {
+  const MUSTERI = { ad: 'Şükrü Çağlayan', firma: '', telefon: '0532 111 22 33', eposta: '', il: 'İzmir', adres: '', vergi: '' };
+
+  it('`magazaTalepIcerigiYaz`: `POST …/:id/icerik`; gövde formun ürettiği nesnenin AYNISI (alan eklenmez / çıkarılmaz); `birimFiyat: null` korunur', async () => {
+    hepYanitla(200, { ok: true, degisti: true });
+    const govde = {
+      icerikSurum: 3, musteri: MUSTERI, not: 'Öğleden sonra arayın',
+      teyit: { kalemler: [{ anahtar: 'b:0', sku: 'DYO-0001', ad: 'İç cephe boyası', marka: 'DYO', adet: 2, birimFiyat: 95, tedarik: false }, { ad: 'Fırça', adet: 1, birimFiyat: null, kdvOrani: 10 as const }] },
+    };
+    expect(await magazaTalepIcerigiYaz(ID, govde)).toEqual({ ok: true, degisti: true });
+    expect(istek).toHaveBeenCalledTimes(1);
+    expect(son()[0]).toBe(`/api/magaza-talepleri/${ID}/icerik`);
+    expect(son()[1]).toEqual({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(govde) });
+    expect(JSON.parse(String(son()[1]?.body))).toEqual(govde);
+    expect(String(son()[1]?.body)).toContain('"birimFiyat":null');
+    expect(String(son()[1]?.body)).not.toMatch(/kdvKaynagi|talepEdilen|toplam/);
+  });
+
+  it('`magazaTalepSil`: `POST …/:id/sil`; silmede gövde `{ surum }`, geri almada `{ surum, geriAl: true }`', async () => {
+    hepYanitla(200, { ok: true });
+    expect(await magazaTalepSil(ID, { surum: 7 })).toEqual({ ok: true });
+    expect(son()[0]).toBe(`/api/magaza-talepleri/${ID}/sil`);
+    expect(son()[1]).toEqual({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"surum":7}' });
+    expect(await magazaTalepSil(ID, { surum: 8, geriAl: true })).toEqual({ ok: true });
+    expect(son()[1]?.body).toBe('{"surum":8,"geriAl":true}');
+    expect(istek).toHaveBeenCalledTimes(2);
+  });
+
+  it('`magazaElleTalepAc`: `POST /api/magaza-talepleri` (kimliksiz yol — numarayı SUNUCU üretir); 201 → `id` + `talepNo`', async () => {
+    hepYanitla(201, { ok: true, id: ID, talepNo: 'T261011-AB12' });
+    const govde = { musteri: MUSTERI, not: '', kalemler: [{ ad: 'Dış cephe boyası', adet: 3, sku: 'DYO-0042', marka: 'DYO', birimFiyat: null, tedarik: false }] };
+    expect(await magazaElleTalepAc(govde)).toEqual({ ok: true, id: ID, talepNo: 'T261011-AB12' });
+    expect(son()[0]).toBe('/api/magaza-talepleri');
+    expect(son()[1]).toEqual({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(govde) });
+    expect(String(son()[1]?.body)).not.toMatch(/"no"|"tarih"/);
+  });
+
+  it('`magazaBildirimGonder(id, \'revize\')`: AYNI uç + `?tur=revize`, gövde `{}`; `tur` verilmezse sorgu dizesi HİÇ yok (`tur=ilk` gönderilmez)', async () => {
+    hepYanitla(200, { ok: true });
+    expect(await magazaBildirimGonder(ID, 'revize')).toEqual({ ok: true });
+    expect(son()[0]).toBe(`/api/magaza-talepleri/${ID}/bildirim-gonder?tur=revize`);
+    expect(son()[1]).toEqual({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    await magazaBildirimGonder(ID);
+    expect(son()[0]).toBe(`/api/magaza-talepleri/${ID}/bildirim-gonder`);
+    await magazaBildirimGonder(ID, undefined);
+    expect(String(son()[0])).not.toContain('?');
+    // Kimlik kaçırılır; sorgu dizesi kimlikten SONRA ve sabittir.
+    await magazaBildirimGonder('a/b?c', 'revize');
+    expect(son()[0]).toBe('/api/magaza-talepleri/a%2Fb%3Fc/bildirim-gonder?tur=revize');
+  });
+});
+
+describe('magazaTalepIcerigiYaz — yanıt eşlemesi', () => {
+  const cagir = () => magazaTalepIcerigiYaz(ID, { icerikSurum: 2, not: 'yeni not' });
+
+  it('200 `degisti: true` → yazıldı; 200 `degisti: false` → «değişiklik yok» (yazım YOK); gövde okunamıyorsa `degisti: true` (sahte «değişiklik yok» denmez)', async () => {
+    istek.mockResolvedValue(yanit(200, { ok: true, degisti: true }));
+    expect(await cagir()).toEqual({ ok: true, degisti: true });
+    istek.mockResolvedValue(yanit(200, { ok: true, degisti: false }));
+    expect(await cagir()).toEqual({ ok: true, degisti: false });
+    for (const y of [yanit(200, { ok: true }), yanit(200, { ok: true, degisti: 'false' }), yanit(200, { ok: true, degisti: 0 }), yanit(200, { ok: true, degisti: null }), htmlYanit(200)]) {
+      istek.mockResolvedValue(y);
+      expect(await cagir()).toEqual({ ok: true, degisti: true });
+    }
+  });
+
+  it('409 `surum-eski` → kod + güncel `icerikSurum` (negatif olmayan tam sayıysa; değilse alan YOK); 409 `silindi` → `silindi`', async () => {
+    istek.mockResolvedValue(yanit(409, { ok: false, kod: 'surum-eski', icerikSurum: 5 }));
+    expect(await cagir()).toEqual({ ok: false, kod: 'surum-eski', icerikSurum: 5 });
+    istek.mockResolvedValue(yanit(409, { ok: false, kod: 'surum-eski', icerikSurum: 0 }));
+    expect(await cagir()).toEqual({ ok: false, kod: 'surum-eski', icerikSurum: 0 });
+    for (const icerikSurum of [undefined, null, '5', -1, 2.5, NaN]) {
+      istek.mockResolvedValue(yanit(409, { ok: false, kod: 'surum-eski', icerikSurum }));
+      expect(await cagir(), String(icerikSurum)).toEqual({ ok: false, kod: 'surum-eski' });
+    }
+    istek.mockResolvedValue(yanit(409, { ok: false, kod: 'silindi' }));
+    expect(await cagir()).toEqual({ ok: false, kod: 'silindi' });
+  });
+
+  it('400 → `gecersiz`; 403 / 401 → `yetki`; 404 → `bulunamadi`', async () => {
+    istek.mockResolvedValue(yanit(400, { ok: false }));
+    expect(await cagir()).toEqual({ ok: false, kod: 'gecersiz' });
+    istek.mockResolvedValue(yanit(403, { ok: false, kod: 'rol' }));
+    expect(await cagir()).toEqual({ ok: false, kod: 'yetki' });
+    istek.mockResolvedValue(yanit(401, { error: 'Unauthorized' }));
+    expect(await cagir()).toEqual({ ok: false, kod: 'yetki' });
+    istek.mockResolvedValue(yanit(404, { ok: false }));
+    expect(await cagir()).toEqual({ ok: false, kod: 'bulunamadi' });
+  });
+
+  it('503 (ürün KDV okuması başarısız — sunucu varsayılan oranla sessizce YAZMAZ) / ağ hatası / 5xx / tanınmayan 409 → `ag`; fırlatmaz', async () => {
+    istek.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(cagir()).resolves.toEqual({ ok: false, kod: 'ag' });
+    for (const y of [yanit(503, { ok: false }), yanit(500, { error: 'boom' }), htmlYanit(502), yanit(429, {}), yanit(409, { ok: false }), yanit(409, { ok: false, kod: 'gecis-yok' })]) {
+      istek.mockResolvedValue(y);
+      await expect(cagir()).resolves.toEqual({ ok: false, kod: 'ag' });
+    }
+  });
+});
+
+describe('magazaTalepSil — yanıt eşlemesi', () => {
+  const sil = () => magazaTalepSil(ID, { surum: 4 });
+  const geriAl = () => magazaTalepSil(ID, { surum: 5, geriAl: true });
+
+  it('409 `surum-eski` (+ güncel `surum`) / `silindi` (zaten silinmiş) / `silinmemis` (geri alınacak bir şey yok) AYRI kodlar', async () => {
+    istek.mockResolvedValue(yanit(409, { ok: false, kod: 'surum-eski', surum: 6 }));
+    expect(await sil()).toEqual({ ok: false, kod: 'surum-eski', surum: 6 });
+    istek.mockResolvedValue(yanit(409, { ok: false, kod: 'surum-eski', surum: 'altı' }));
+    expect(await sil()).toEqual({ ok: false, kod: 'surum-eski' });
+    istek.mockResolvedValue(yanit(409, { ok: false, kod: 'silindi' }));
+    expect(await sil()).toEqual({ ok: false, kod: 'silindi' });
+    istek.mockResolvedValue(yanit(409, { ok: false, kod: 'silinmemis' }));
+    expect(await geriAl()).toEqual({ ok: false, kod: 'silinmemis' });
+  });
+
+  it('403 `rol` (Yönetici değil) → `yetki`; 404 → `bulunamadi`; ağ hatası / 5xx / 400 / tanınmayan 409 → `ag`; fırlatmaz', async () => {
+    istek.mockResolvedValue(yanit(403, { ok: false, kod: 'rol' }));
+    expect(await sil()).toEqual({ ok: false, kod: 'yetki' });
+    istek.mockResolvedValue(yanit(404, { ok: false }));
+    expect(await geriAl()).toEqual({ ok: false, kod: 'bulunamadi' });
+    istek.mockRejectedValue(new Error('ağ yok'));
+    await expect(sil()).resolves.toEqual({ ok: false, kod: 'ag' });
+    for (const y of [yanit(500, {}), yanit(503, { ok: false }), htmlYanit(504), yanit(400, { ok: false }), yanit(409, { ok: false }), yanit(409, { ok: false, kod: 'gecis-yok' })]) {
+      istek.mockResolvedValue(y);
+      await expect(sil()).resolves.toEqual({ ok: false, kod: 'ag' });
+    }
+  });
+});
+
+describe('magazaElleTalepAc — yanıt eşlemesi', () => {
+  const cagir = () => magazaElleTalepAc({ musteri: { ad: 'A', telefon: '0532 111 22 33' }, kalemler: [{ ad: 'Boya', adet: 1 }] });
+
+  it('201\'de `id` / `talepNo` beklenen biçimde değilse `null` (talep yine AÇILMIŞTIR — numara uydurulmaz)', async () => {
+    istek.mockResolvedValue(yanit(201, { ok: true, id: 'mt-kisa', talepNo: 'T-1' }));
+    expect(await cagir()).toEqual({ ok: true, id: null, talepNo: null });
+    istek.mockResolvedValue(yanit(201, { ok: true }));
+    expect(await cagir()).toEqual({ ok: true, id: null, talepNo: null });
+    istek.mockResolvedValue(htmlYanit(201));
+    expect(await cagir()).toEqual({ ok: true, id: null, talepNo: null });
+    istek.mockResolvedValue(yanit(201, { ok: true, id: ID, talepNo: '<b>T261011-AB12</b>' }));
+    expect(await cagir()).toEqual({ ok: true, id: ID, talepNo: null });
+  });
+
+  it('400 → `gecersiz` (ad boş / telefonda 10 rakam yok); 403 → `yetki`; 503 (numara çakışması / kiracı) ve ağ hatası → `ag`; fırlatmaz', async () => {
+    istek.mockResolvedValue(yanit(400, { ok: false }));
+    expect(await cagir()).toEqual({ ok: false, kod: 'gecersiz' });
+    istek.mockResolvedValue(yanit(403, { ok: false, kod: 'rol' }));
+    expect(await cagir()).toEqual({ ok: false, kod: 'yetki' });
+    istek.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(cagir()).resolves.toEqual({ ok: false, kod: 'ag' });
+    for (const y of [yanit(503, { ok: false }), yanit(500, {}), htmlYanit(502), yanit(409, { ok: false, kod: 'silindi' }), yanit(404, { ok: false })]) {
+      istek.mockResolvedValue(y);
+      await expect(cagir()).resolves.toEqual({ ok: false, kod: 'ag' });
     }
   });
 });
@@ -206,17 +389,27 @@ describe('magazaTalepIstemcisi.ts — kaynak çiti (yorumlar süzülür)', () =>
     expect(kod).toContain("headers: { 'Content-Type': 'application/json' },");
   });
 
-  it('üç yol da aynı kökten ve kimlik kaçırılarak kurulur; `/api/db` ve koleksiyon yazımı yok', () => {
-    expect(kod).toContain("const yol = (id: string, son: 'durum' | 'kalem-teslim' | 'bildirim-gonder'): string => `${MAGAZA_TALEP_UCU}/${encodeURIComponent(id)}/${son}`;");
+  it('kimlikli beş yol da aynı kökten ve kimlik kaçırılarak kurulur; elle talep kökün kendisidir; `/api/db` ve koleksiyon yazımı yok', () => {
+    expect(kod).toContain("const yol = (id: string, son: 'durum' | 'kalem-teslim' | 'bildirim-gonder' | 'icerik' | 'sil'): string => `${MAGAZA_TALEP_UCU}/${encodeURIComponent(id)}/${son}`;");
+    expect(kod).toContain('const y = await gonder(MAGAZA_TALEP_UCU, g);');
+    // Uç adresi TEK sabittedir; sorgu dizesi yalnız `?tur=revize` (istek metninden üretilmez).
+    expect((kod.match(/\/api\/magaza-talepleri/g) ?? [])).toHaveLength(1);
+    expect([...kod.matchAll(/\?(\w+)=(\w+)/g)].map(m => m[0])).toEqual(['?tur=revize']);
     expect(kod).not.toMatch(/\/api\/db|dbClient|setDoc|updateDoc|addDoc|deleteDoc/);
   });
 
-  it('«yazıldı ama bağlanmadı»: istemcinin üç yolu sunucuda GERÇEKTEN kayıtlı (`routes/magazaErpRoutes.ts`, düz `app.post`)', () => {
+  it('«yazıldı ama bağlanmadı»: istemcinin ALTI yolu sunucuda GERÇEKTEN kayıtlı (`routes/magazaErpRoutes.ts`, düz `app.post`)', () => {
     const sunucu = yorumsuz('src/server/routes/magazaErpRoutes.ts', oku(join(SRC_KOK, 'server', 'routes', 'magazaErpRoutes.ts'))).join('\n');
     expect(sunucu.length).toBeGreaterThan(2000);
-    for (const son of ['durum', 'kalem-teslim', 'bildirim-gonder']) {
+    for (const son of ['durum', 'kalem-teslim', 'bildirim-gonder', 'icerik', 'sil']) {
       expect((sunucu.match(new RegExp(`app\\.post\\('${MAGAZA_TALEP_UCU}/:id/${son}',`, 'g')) ?? []), son).toHaveLength(1);
     }
+    // Elle talep: kökün kendisi (kimliksiz yol).
+    expect((sunucu.match(new RegExp(`app\\.post\\('${MAGAZA_TALEP_UCU}',`, 'g')) ?? [])).toHaveLength(1);
+    // İstemcinin okuduğu yanıt alanları sunucuda gerçekten yazılıyor: içerikte `degisti`, elle talepte `id` + `talepNo`.
+    expect(sunucu).toMatch(/status\(200\)\.json\(\{\s*ok: true,\s*degisti: true\s*\}\)/);
+    expect(sunucu).toMatch(/status\(200\)\.json\(\{\s*ok: true,\s*degisti: false\s*\}\)/);
+    expect(sunucu).toMatch(/status\(201\)\.json\(\{\s*ok: true,\s*id: [\w.]+,\s*talepNo: [\w.]+\s*\}\)/);
     // İstemci PUT / PATCH / DELETE göndermez; sunucuda da bu yollar yalnız POST'tur (IIS'in engellediği fiiller ve tünel gerekmez).
     expect(sunucu).not.toMatch(/app\.(put|patch|delete)\('\/api\/magaza-talepleri/);
   });

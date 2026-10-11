@@ -76,7 +76,7 @@ describe('onay sayfası App.tsx\'e bağlı — dört dokunuş (§ 5.3)', () => {
   it('yol metni üretim kaynağında TEK yerde yazılır (sabit); App.tsx ve useRouteSync sabiti okur', () => {
     const tasiyanlar = kaynakDosyalari(SRC_KOK).filter(yol => kodSatirlari(yol).some(s => s.kod.includes(MAGAZA_PANEL_BAGLAN_YOLU)));
     expect(tasiyanlar.map(gorece)).toEqual(['src/lib/magazaPanelBaglan.ts']);
-  });
+  }, 60_000);   // `src/`in tamamı tek testte taranır: yük altında 5 sn'lik varsayılan süre yetmez (depo kalıbı)
 });
 
 describe('useRouteSync onay sayfası yolunda adrese dokunmaz — koruma «durum → adres» efektinde, `navigate`ten ÖNCE', () => {

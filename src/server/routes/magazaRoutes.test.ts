@@ -28,6 +28,7 @@ import { TabanAdresHatasi } from '../../lib/guvenliTaban';
 import { MAGAZA_TALEP_KIMLIK_DESENI, MAGAZA_TALEP_KOLEKSIYONU } from '../../lib/magazaTalep';
 import { MAGAZA_BILDIRIM_KALEM_SINIRI } from '../kanal/magazaBildirim';
 import { magazaTalepKimligi } from '../kanal/magazaTalep';
+import { EKLEME_SQL as TASINAN_EKLEME_SQL } from '../kanal/magazaTalepSql';
 import { MagazaSiparisDurumuSchema, MagazaSiparisTalebiSchema } from '../schemas';
 import {
   MAGAZA_BELGE_SINIRI_BAYT, MAGAZA_GOVDE_SINIRI_BAYT, MAGAZA_TAKIP_SQL, MAGAZA_VARSAYILAN_KOKEN,
@@ -1021,6 +1022,8 @@ describe('takip ucu — POST /siparis-durumu (dilim 2a, § 4; V6 kalem listesi +
       { sira: 1, ad: 'Fayans yapıştırıcısı', marka: '', adet: 5 },
     ],
     beyan_sayisi: 2, teyit_kalemleri: null, teyit_sayisi: 0, kalem_teslim: null,
+    // (2b) `jsonb_typeof(data->'silindi')`: hiç silinmemiş talepte SQL NULL.
+    silindi_turu: null,
     ...ustune,
   });
   const sor = (d: Duzenek, g: Record<string, unknown> = { no: NO, telefon: TELEFON }, o: Istek = {}): Promise<Yanit> =>
@@ -1045,7 +1048,7 @@ describe('takip ucu — POST /siparis-durumu (dilim 2a, § 4; V6 kalem listesi +
     expect(y.baslik('access-control-allow-origin')).toBe(IZINLI);
     // TEK dar okuma: kimlik no + telefonun son 10 hanesinden, kiracı sunucudan.
     expect(d.sorgular).toEqual([{ sql: MAGAZA_TAKIP_SQL, params: [MAGAZA_TALEP_KOLEKSIYONU, KIMLIK, 'kiraci-1'] }]);
-    expect(magazaTakipSayaclari()).toEqual({ bulundu: 1, bulunamadi: 0 });
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 1, bulunamadi: 0, silindi: 0 });
     expect(magazaSayaclari()).toEqual(SIFIR_SAYACLAR);
     expect(konsol).toEqual([]);
   });
@@ -1164,10 +1167,65 @@ describe('takip ucu — POST /siparis-durumu (dilim 2a, § 4; V6 kalem listesi +
     // Yalnız GERÇEK sorgu veritabanına gider.
     expect(d.sorgular).toHaveLength(1);
     // Sayaç ayrı kümede: biçim bozuk da `bulunamadi`; dilim 1'in `r404`'ü ARTMAZ.
-    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 6 });
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 6, silindi: 0 });
     expect(magazaSayaclari()).toEqual(SIFIR_SAYACLAR);
     // Zincirin rota-yok 404'ü `kod`suz kalır (sonda ikisini ayırt eder).
     expect((await iste(d, '/siparis-durumu-yok', { govde: {} })).metin).toBe('{"ok":false}');
+  });
+  it('(2b, § 10.6) silinmiş talep → `404 { ok: false, kod: "silindi" }` + `no-store`: gövde YALNIZ iki alan (aşama / açıklama / tarih / kalem listesi YOK); bulunamadı gövdesinden FARKLI', async () => {
+    // Satır dolu (aşama, açıklama, kalemler, teslim işareti) — silinmiş talebin içeriğinden HİÇBİR şey müşteriye basılmaz.
+    const dolu = satir({
+      silindi_turu: 'object',
+      kalem_teslim: { 'b:0': { durum: 'teslim', zaman: '2026-10-08T11:00:00.000Z', kim: { uid: 'u1', ad: 'Ayşe' } } },
+      teyit_kalemleri: [{ anahtar: 't:0123456789ab', ad: 'Teyitli boya', marka: 'DYO', adet: 3 }], teyit_sayisi: 1,
+    });
+    const d = await kur({ takip: () => [dolu] });
+    const y = await sor(d);
+    expect(y.kod).toBe(404);
+    expect(y.metin).toBe('{"ok":false,"kod":"silindi"}');
+    expect(Object.keys(y.json as object)).toEqual(['ok', 'kod']);
+    for (const yasak of ['durum', 'aciklama', 'tarih', 'guncelleme', 'kalemler', 'kalemSayisi', 'kaynak', 'Kargoya', 'boya', '2026-10-08']) expect(y.metin, yasak).not.toContain(yasak);
+    expect(y.baslik('cache-control')).toBe('no-store');
+    expect(y.baslik('access-control-allow-origin')).toBe(IZINLI);
+    // Okuma YAPILDI (hüküm satırdan) ve TEK sorgu — silinmiş denetimi için ikinci okuma yok.
+    expect(d.sorgular).toEqual([{ sql: MAGAZA_TAKIP_SQL, params: [MAGAZA_TALEP_KOLEKSIYONU, KIMLIK, 'kiraci-1'] }]);
+    // Kendi sayacı: `bulundu` / `bulunamadi` ve dilim 1'in `r404`'ü ARTMAZ.
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 0, silindi: 1 });
+    expect(magazaSayaclari()).toEqual(SIFIR_SAYACLAR);
+    expect(konsol).toEqual([]);
+
+    // Silinmiş ↔ bulunamadı: durum kodu aynı (404), gövdeler FARKLI (müşteri «silinmiş» ile «bizde yok»u ayırt eder — kullanıcı kararı).
+    const bos = await kur();
+    const bulunamadi = await sor(bos);
+    expect(bulunamadi.kod).toBe(404);
+    expect(bulunamadi.metin).toBe('{"ok":false,"kod":"bulunamadi"}');
+    expect(Buffer.from(y.metin).equals(Buffer.from(bulunamadi.metin))).toBe(false);
+    expect(bulunamadi.baslik('cache-control')).toBe('no-store');
+  });
+  it('(2b, § 10.6) `silindi_turu` ölçütü yalnız `"object"`: geri alınmış (`"null"`) ve hiç silinmemiş (NULL) talep BULUNUR — 200 ve kalem listesi döner; başka tür de silinmiş SAYILMAZ', async () => {
+    for (const tur of ['null', null, undefined, 'string', 'boolean', 'array', 'number']) {
+      magazaSayaclariniSifirla();
+      const d = await kur({ takip: () => [satir({ silindi_turu: tur })] });
+      const y = await sor(d);
+      expect(y.kod, String(tur)).toBe(200);
+      expect(y.json, String(tur)).toMatchObject({ ok: true, durum: 'sevk', kaynak: 'beyan', kalemSayisi: 2 });
+      expect((y.json as { kalemler: unknown[] }).kalemler).toHaveLength(2);
+      expect(y.json).not.toHaveProperty('kod');
+      expect(magazaTakipSayaclari()).toEqual({ bulundu: 1, bulunamadi: 0, silindi: 0 });
+    }
+  });
+  it('(2b, § 10.6) silinmiş denetimi okumadan SONRADIR: biçim bozuk sorgu veritabanına gitmez (yine `bulunamadi`); havuz / kiracı yokken 503, okuma hatasında 500 — `silindi` DEĞİL', async () => {
+    const silinmis = (): Array<Record<string, unknown>> => [satir({ silindi_turu: 'object' })];
+    const d = await kur({ takip: silinmis });
+    const bozuk = await sor(d, { no: 'T261008-5Y9', telefon: TELEFON });
+    expect(bozuk.metin).toBe('{"ok":false,"kod":"bulunamadi"}');
+    expect(d.sorgular).toEqual([]);
+    expect((await sor(await kur({ takip: silinmis, havuzYok: true }))).kod).toBe(503);
+    expect((await sor(await kur({ takip: silinmis, kiraci: () => Promise.resolve('') }))).kod).toBe(503);
+    const hata = await sor(await kur({ sorguHatasi: Object.assign(new Error('koptu'), { code: '57P01' }) }));
+    expect(hata.kod).toBe(500);
+    expect(hata.metin).toBe('{"ok":false}');
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 1, silindi: 0 });
   });
   it('şemaya uymayan gövde (alan eksik / dizge değil) → 400 { ok: false }; kiracı ve havuz HİÇ sorulmaz', async () => {
     const d = await kur();
@@ -1177,7 +1235,7 @@ describe('takip ucu — POST /siparis-durumu (dilim 2a, § 4; V6 kalem listesi +
       expect(y.metin).toBe('{"ok":false}');
     }
     expect(d.sayim).toMatchObject({ kiraci: 0, havuz: 0 });
-    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 0 });
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 0, silindi: 0 });
   });
   it.each<[string, Ayar]>([
     ['kiracı çözülemiyor', { kiraci: () => Promise.resolve('') }],
@@ -1192,7 +1250,7 @@ describe('takip ucu — POST /siparis-durumu (dilim 2a, § 4; V6 kalem listesi +
     }
     expect(d.sorgular).toEqual([]);
     expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r503: 2 });
-    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 0 });
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 0, silindi: 0 });
   });
   it('okuma hatası → 500 { ok: false } (404 değil); günlükte yalnız kod', async () => {
     const d = await kur({ sorguHatasi: Object.assign(new Error(`bağlantı koptu ${ISARET}`), { code: '57P01', detail: ISARET }) });
@@ -1201,7 +1259,7 @@ describe('takip ucu — POST /siparis-durumu (dilim 2a, § 4; V6 kalem listesi +
     expect(y.metin).toBe('{"ok":false}');
     expect(konsol).toEqual(['error: [magaza] takip sorgusu işlenemedi: 57P01']);
     expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r500: 1 });
-    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 0 });
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 0, silindi: 0 });
   });
   it('kiracı dilim 1 ile AYNI önbellekli çözümden: talep + takip + takip → çözümleyici 1 kez', async () => {
     const d = await kur({ takip: () => [satir()] });
@@ -1215,7 +1273,7 @@ describe('takip ucu — POST /siparis-durumu (dilim 2a, § 4; V6 kalem listesi +
     const kodlar: number[] = [];
     for (let i = 0; i < 21; i++) kodlar.push((await sor(d)).kod);
     expect(kodlar).toEqual([...Array.from({ length: 20 }, () => 404), 429]);
-    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 20 });
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 20, silindi: 0 });
     expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r429: 1 });
   });
   it('aynı zincir: kökensiz 403, JSON olmayan 415, bozuk JSON 400', async () => {
@@ -1446,18 +1504,22 @@ describe('sayaçlar', () => {
     const d2 = await kur({ havuzYok: true });
     await talep(d2);                                             // 503
     expect(magazaSayaclari()).toEqual({ eklenen: 1, cakisan: 1, r400: 3, r403: 1, r404: 1, r413: 1, r415: 1, r429: 1, r500: 0, r503: 1 });
-    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 1 });
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 1, silindi: 0 });
     expect(d.kacan).toEqual({ sonrakiAraKatman: 0, genelAyristirici: 0, genel404: 0, genelYakalayici: 0 });
     magazaSayaclariniSifirla();
     expect(magazaSayaclari()).toEqual(SIFIR_SAYACLAR);
-    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 0 });
+    expect(magazaTakipSayaclari()).toEqual({ bulundu: 0, bulunamadi: 0, silindi: 0 });
   });
   it('takip sayaçları AYRI kümedir: anahtarlar sabit, dönen nesne kopya; `magazaSayaclari()` anahtarlarına karışmaz', () => {
-    expect(Object.keys(magazaTakipSayaclari())).toEqual(['bulundu', 'bulunamadi']);
+    // Dilim 2b: üçüncü anahtar `silindi` (silinmiş talebe gelen sorgu) — bilerek değişen çit; `magazaSayaclari()` / `magazaPanelSayaclari()` değişmez.
+    expect(Object.keys(magazaTakipSayaclari())).toEqual(['bulundu', 'bulunamadi', 'silindi']);
     const kopya = magazaTakipSayaclari() as Record<string, number>;
     kopya.bulundu = 99;
+    kopya.silindi = 99;
     expect(magazaTakipSayaclari().bulundu).toBe(0);
+    expect(magazaTakipSayaclari().silindi).toBe(0);
     expect(Object.keys(magazaSayaclari())).not.toContain('bulundu');
+    expect(Object.keys(magazaSayaclari())).not.toContain('silindi');
   });
 });
 
@@ -1497,7 +1559,7 @@ describe('kaynak çiti — magazaRoutes.ts', () => {
     expect(kod).not.toMatch(/\brateLimit\s*\(/);
     expect(kod.match(/C\.(talepSinirlayici|durumSinirlayici|apiLimiter)\b/g)).toEqual(['C.apiLimiter', 'C.talepSinirlayici', 'C.durumSinirlayici']);
   });
-  it('içe aktarımlar: yalnız express, ortak sözleşme, saf eşleyici, kalem sınırı, şema (server.ts / pgShim / bekçi / panel modülü YOK)', () => {
+  it('içe aktarımlar: yalnız express, ortak sözleşme, saf eşleyici, ekleme sorgusu, kalem sınırı, şema (server.ts / pgShim / bekçi / panel modülü YOK)', () => {
     expect(kod.match(/^import .*$/gm)).toEqual([
       "import express, { Router } from 'express';",
       "import type { NextFunction, Request, RequestHandler, Response } from 'express';",
@@ -1505,6 +1567,8 @@ describe('kaynak çiti — magazaRoutes.ts', () => {
       "import { MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_TALEP_NO_DESENI, magazaAsamasiMi, magazaGuncellemeZamani, magazaKalemTeslimMi, panelDurumuna } from '../../lib/magazaTalep.js';",
       "import { MAGAZA_BILDIRIM_KALEM_SINIRI } from '../kanal/magazaBildirim.js';",
       "import { MAGAZA_METIN_SINIRLARI, magazaMetniKirp, magazaMetniTemizle, magazaTalepKimligi, talepEsle, telefonSon10 } from '../kanal/magazaTalep.js';",
+      // Dilim 2b: ekleme sorgusu ortak modülde (ERP'deki elle talep AYNI sabiti kullanır) — bilerek değişen çit.
+      "import { EKLEME_SQL } from '../kanal/magazaTalepSql.js';",
       "import { MagazaSiparisDurumuSchema, MagazaSiparisTalebiSchema } from '../schemas.js';",
     ]);
     expect(kod).not.toMatch(/\brequire\(|\bimport\(/);
@@ -1518,11 +1582,16 @@ describe('kaynak çiti — magazaRoutes.ts', () => {
     expect(kod.match(/\.safeParse\(/g)).toHaveLength(2);
     const govdeler = [...kod.matchAll(/res\.status\([^)]*\)\.json\(([^)]*)\)/g)].map(m => m[1]);
     // `yanit` = bulunan talebin dar yanıtı (`takipYaniti`); `hazir-degil` gövdesi kalktı, yerine `bulunamadi` geldi.
-    expect([...new Set(govdeler)].sort()).toEqual(["yanit", "{ ok: false }", "{ ok: false, kod: 'bulunamadi' }", "{ ok: true }"].sort());
+    // Dilim 2b: + silinmiş talebin AYRI gövdesi `{ ok: false, kod: 'silindi' }` (bilerek değişen çit).
+    expect([...new Set(govdeler)].sort()).toEqual(["yanit", "{ ok: false }", "{ ok: false, kod: 'bulunamadi' }", "{ ok: false, kod: 'silindi' }", "{ ok: true }"].sort());
     expect(kod).not.toContain('hazir-degil');
     // `bulunamadi` gövdesi TEK yerde üretilir (bulunamadı ile biçim bozuk aynı işlevden — bayt bayt aynı yanıt).
     expect(govdeler.filter(g => g === "{ ok: false, kod: 'bulunamadi' }")).toHaveLength(1);
     expect(kod.match(/takipBulunamadi\(res\)/g)).toHaveLength(2);
+    // `silindi` gövdesi de TEK yerde ve `takipBulunamadi`'den GEÇMEZ; hüküm dar okumanın `silindi_turu` sütunundan (`'object'`).
+    expect(govdeler.filter(g => g === "{ ok: false, kod: 'silindi' }")).toHaveLength(1);
+    expect(kod.match(/satir\.silindi_turu === 'object'/g)).toHaveLength(1);
+    expect(kod).not.toMatch(/silindi_turu (!==|===) (null|undefined)|silindi_turu == /);
     // Başka yanıt yolu yok: her `.json(` ya yukarıdakilerden biri ya da ayrıştırıcı.
     expect((kod.match(/\.json\(/g) ?? []).length).toBe(govdeler.length + 1);
     expect(kod).not.toMatch(/res\.(send|write|sendFile|render|redirect)\(/);
@@ -1537,8 +1606,14 @@ describe('kaynak çiti — magazaRoutes.ts', () => {
     expect(kod).not.toMatch(/JSON\.stringify\((e|err|hata|req)\b/);
   });
   it('yazma yolu: tek ham ekleme + takip ucunun TEK dar okuması; `adminDb` / `pgServerTimestamp` / UPDATE / DELETE yok', () => {
-    expect(kod).toContain(`const EKLEME_SQL = '${EKLEME_SQL}';`);
-    // Dilim 2a: ekleme + takip okuması (1 → 2; bilerek değişen çit). Başka sorgu yok.
+    // Dilim 2b: `INSERT` metni `kanal/magazaTalepSql.ts`'e TAŞINDI (elle talep aynı sabiti kullanır); rota sabiti içe aktarır,
+    // kendi kopyasını TANIMLAMAZ — metin birebir dilim 1 metnidir.
+    expect(TASINAN_EKLEME_SQL).toBe(EKLEME_SQL);
+    expect(kod).not.toMatch(/const EKLEME_SQL\b|INSERT INTO/);
+    const sqlKodu = kodSatirlari(join(SRC_KOK, 'server', 'kanal', 'magazaTalepSql.ts')).map(s => s.kod).join('\n');
+    expect(sqlKodu).toContain(`export const EKLEME_SQL = '${EKLEME_SQL}';`);
+    expect(sqlKodu).not.toMatch(/^import /m);
+    // Dilim 2a: ekleme + takip okuması (1 → 2; bilerek değişen çit). Başka sorgu yok — 2b bu sayıyı DEĞİŞTİRMEZ.
     expect(kod.match(/\.query\(/g)).toHaveLength(2);
     expect(kod).toContain('await havuz.query(MAGAZA_TAKIP_SQL, [MAGAZA_TALEP_KOLEKSIYONU, magazaTalepKimligi(cid, cozum.data.no, son10), cid]);');
     expect(kod).not.toMatch(/adminDb|pgServerTimestamp|UPDATE |DELETE /);
@@ -1571,6 +1646,11 @@ describe('kaynak çiti — magazaRoutes.ts', () => {
     expect(MAGAZA_TAKIP_SQL.match(/WHERE jsonb_typeof\(e\.k\) = 'object'/g)).toHaveLength(2);
     expect(MAGAZA_TAKIP_SQL).toContain("jsonb_build_object('sira', e.sira - 1, 'ad', e.k->'ad', 'marka', e.k->'marka', 'adet', e.k->'adet')");
     expect(MAGAZA_TAKIP_SQL).toContain("jsonb_build_object('anahtar', e.k->'anahtar', 'ad', e.k->'ad', 'marka', e.k->'marka', 'adet', e.k->'adet')");
+    // Dilim 2b (§ 10.6): `silindi`nin yalnız TÜRÜ okunur — aynı TEK `SELECT`'e sütun (yeni sorgu yok); silen / zaman / kanal
+    // (personel bilgisi) belleğe gelmez; `IS NULL` karşılaştırması YOK (JSON `null` = geri alınmış ile yokluğu karıştırırdı).
+    expect(MAGAZA_TAKIP_SQL).toContain(", data->'kalemTeslim' AS kalem_teslim, jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE ");
+    expect(MAGAZA_TAKIP_SQL.match(/silindi/g)).toHaveLength(2);
+    expect(MAGAZA_TAKIP_SQL).not.toMatch(/data->'silindi' IS|data->'silindi'->/);
     // Fiyat, SKU, kişisel veri, bildirim, geçmiş: sütun da alt alan da YOK.
     expect(MAGAZA_TAKIP_SQL).not.toMatch(/musteri|talepEdilen|bildirim|durumGecmisi|telefon|'sku'|'id'|talepFiyat|tedarik|'not'|etiketBasildi|iptalOncesi/);
     expect(MAGAZA_TAKIP_SQL).not.toMatch(/\bUPDATE\b|\bINSERT\b|\bDELETE\b|;|data\s+AS\b|SELECT \*|, data,/);

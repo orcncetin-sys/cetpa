@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { join } from 'path';
 import {
-  isAllowed, hasExplicitRule, APP_ROLES, SUNUCU_YAZAR_COLLECTIONS, magazaTalepIslemYetkisi,
+  isAllowed, hasExplicitRule, APP_ROLES, SUNUCU_YAZAR_COLLECTIONS, magazaTalepIslemYetkisi, magazaTalepSilmeYetkisi,
   PUBLIC_WRITE_COLLECTIONS, APPEND_ONLY_COLLECTIONS, ADMIN_ONLY_COLLECTIONS,
   type AppRole, type DbOp,
 } from './rbac';
@@ -292,5 +292,29 @@ describe('magazaTalepIslemYetkisi (dilim 2a, V3)', () => {
     expect(bas).toBeGreaterThan(-1);
     expect(kod.slice(bas, bas + 3).join('\n')).toContain("return isAllowed(rol, 'magazaTalepleri', 'read');");
     expect(kod.slice(bas, bas + 3).join('\n')).not.toMatch(/'Admin'|'Manager'|'Sales'/);
+  });
+});
+
+// ── Dilim 2b (2026-10-10, V17): yumuşak silme ve geri alma YALNIZ Yönetici; iki kanal (site paneli + ERP) aynı işlevi okur ──
+describe('magazaTalepSilmeYetkisi (dilim 2b, V17)', () => {
+  it('yalnız `Admin` true; Müdür ve Satış (talebi gören / aşama yazan roller) DÂHİL diğer bütün roller ve `null` false', () => {
+    for (const rol of APP_ROLES) expect(magazaTalepSilmeYetkisi(rol), rol).toBe(rol === 'Admin');
+    expect(magazaTalepSilmeYetkisi(null)).toBe(false);
+    expect(APP_ROLES.filter(rol => magazaTalepSilmeYetkisi(rol))).toEqual(['Admin']);
+    // Silebilen rol talebi görebilen rollerin ALT kümesidir (göremeyen silemez).
+    for (const rol of APP_ROLES) if (magazaTalepSilmeYetkisi(rol)) expect(magazaTalepIslemYetkisi(rol), rol).toBe(true);
+  });
+  it('`/api/db` yolu AÇILMADI: `SUNUCU_YAZAR_COLLECTIONS` değişmedi — Yönetici dâhil hiçbir rol koleksiyona `write` / `delete` yapamaz', () => {
+    expect([...SUNUCU_YAZAR_COLLECTIONS]).toEqual(['magazaTalepleri']);
+    for (const rol of APP_ROLES) {
+      expect(isAllowed(rol, MAGAZA_TALEP_KOLEKSIYONU, 'write'), rol).toBe(false);
+      expect(isAllowed(rol, MAGAZA_TALEP_KOLEKSIYONU, 'delete'), rol).toBe(false);
+    }
+  });
+  it('kaynak çiti: işlev yalnız `rol === \'Admin\'` döndürür — süper-yönetici / e-posta / kural tablosu baypası yok', () => {
+    const kod = kodSatirlari(join(SRC_KOK, 'lib', 'rbac.ts')).map(s => s.kod);
+    const bas = kod.findIndex(s => s.includes('export function magazaTalepSilmeYetkisi'));
+    expect(bas).toBeGreaterThan(-1);
+    expect(kod.slice(bas, bas + 3).join('\n').replace(/\s+/g, ' ')).toBe("export function magazaTalepSilmeYetkisi(rol: AppRole | null): boolean { return rol === 'Admin'; }");
   });
 });

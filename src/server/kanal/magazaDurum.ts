@@ -22,6 +22,13 @@
  *
  * `bildirim` alanına aşama / kalem yazımı DOKUNMAZ (kapı ölçümü: bildirim yazımı `jsonb_set(data, '{bildirim}', …)` ile
  * aşama yazımı aynı satırda iki sırada da iki alanı korudu). § 2.10 yalnız `bildirim`e `jsonb_set` ile dokunur.
+ *
+ * DİLİM 2b (§ 10.2 son paragraf, § 10.9): SİLİNMİŞ TALEP DONUKTUR (V17) — buradaki DÖRT yazma işlevi de dar okumada
+ * `silindi_turu` okur, yazım koşuluna `MAGAZA_SILINMEMIS_SQL` ekler ve `{ sonuc: 'silindi' }` döner (rota 409). Ölçüt her
+ * yerde `jsonb_typeof(data->'silindi')`: nesne = silinmiş, JSON `null` = geri alınmış, yok = hiç silinmemiş (`IS NULL`
+ * KULLANILMAZ — ikisini karıştırır). Kalem teslim CAS'ının `icerikSurum` koşulu teyit yazımıyla CANLANIR (`surum-eski`);
+ * elle bildirim `tur: 'revize'` kazanır (`BILDIRIM_REVIZE_YENIDEN_SQL` — `bildirimRevize` nesnesi bütünüyle DEĞİŞTİRİLMEZ).
+ * İçerik / silme / geri alma / elle talep yazımı AYRI dosyada: `kanal/magazaIcerik.ts` (aynı bağlam, aynı yardımcılar).
  */
 import {
   MAGAZA_DURUM_ACIKLAMA_SINIRI, MAGAZA_DURUM_GECMISI_SINIRI, MAGAZA_KALEM_ANAHTARI_DESENI, MAGAZA_TALEP_KIMLIK_DESENI,
@@ -42,6 +49,26 @@ export interface MagazaDurumDeps {
   simdi?: () => Date;
 }
 
+/**
+ * Dilim 2b'nin GENİŞ bağlamı — ERP uçlarının `D`'si budur (`MagazaDurumDeps`'in üst kümesi: buradaki ve `magazaIcerik.ts`'teki
+ * bütün yazma işlevlerine geçer). Site paneli içerik yazmaz ve bildirim istemez; dar `MagazaDurumDeps` ile kalır (`talepSil`
+ * dar bağlamı kabul eder). `revizeBildirimiIste` ZORUNLUDUR: içerik yazımı (`talepIcerigiDegistir`) ve revize bildirimini elle
+ * yeniden kuyruğa alma (`bildirimiYenidenKuyrugaAl`, `tur: 'revize'`) bu tipi ister — bağlanmadan derlenmez («yazıldı ama
+ * bağlanmadı» çiti derleyicidedir).
+ */
+export interface MagazaIcerikDeps extends MagazaDurumDeps {
+  /**
+   * Revize bildirimi isteği (ikinci kuyruk `MAGAZA_REVIZE_KUYRUGU`; server.ts `magazaBildirimIsteyici` kalıbıyla kurar).
+   * `bildirimIste` ile AYNI sözleşme: asla reddetmez; kuyruk yoksa süreç içi gönderim; iş verisi yalnız `{ talepId }` (gövde
+   * bilgisi belgedeki `bildirimRevize`'dedir). Yalnız yazım GERÇEKTEN yapıldıysa ve yanıttan ÖNCE beklenir.
+   */
+  revizeBildirimiIste: (talepId: string) => Promise<void>;
+  /** Elle talep numarası üreteci (test için); varsayılan `elleTalepNoUret` (`magazaIcerik.ts`). */
+  elleNoUret?: (simdi: Date) => string;
+  /** Teyit kalemi anahtarı üreteci (test için); varsayılan `t:` + `randomBytes(6)` onaltılık. */
+  teyitAnahtariUret?: () => string;
+}
+
 export interface MagazaYazan {
   uid: string;
   /** Yazma anında `panelKullanicisi(uid).ad` (iki kanalda da); belirteçteki `ad` yalnız panel başlığıdır. */
@@ -49,26 +76,27 @@ export interface MagazaYazan {
   eposta: string;
 }
 
-type Satir = Record<string, unknown>;
-const nesneMi = (v: unknown): v is Satir => typeof v === 'object' && v !== null && !Array.isArray(v);
-const metin = (v: unknown): string => (typeof v === 'string' ? v : '');
+// Aşağıdaki yardımcılar `kanal/magazaIcerik.ts` (2b yazma yolu) ile ORTAKTIR — oraya kopyalanmaz, buradan içe aktarılır.
+export type Satir = Record<string, unknown>;
+export const nesneMi = (v: unknown): v is Satir => typeof v === 'object' && v !== null && !Array.isArray(v);
+export const metin = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 /** PostgreSQL hata nesnesinin `detail` / `where` alanı JSON verisinden parça taşır — günlüğe yalnız kod (SQLSTATE) yazılır. */
-const hataKodu = (hata: unknown): string => {
+export const hataKodu = (hata: unknown): string => {
   const kod = nesneMi(hata) ? hata.code : undefined;
   return typeof kod === 'string' && /^[0-9A-Z_]{1,24}$/.test(kod) ? kod : 'yok';
 };
 
-function havuz(D: MagazaDurumDeps): MagazaPgHavuzu {
+export function havuz(D: MagazaDurumDeps): MagazaPgHavuzu {
   const h = D.getPgPool();
   if (!h) throw new Error('magazaDurum: PostgreSQL havuzu yok — rota 503 dönmeli, yazma yolu çağrılmamalı');
   return h;
 }
 
-const zaman = (D: MagazaDurumDeps): string => (D.simdi?.() ?? new Date()).toISOString();
+export const zaman = (D: MagazaDurumDeps): string => (D.simdi?.() ?? new Date()).toISOString();
 
 /** `RETURNING data` satırını akışa yayınlar; kiracı etiketi satırdan. Yayın arızası yazımı geri almaz, hata nesnesi günlüğe yazılmaz. */
-function yayinla(D: MagazaDurumDeps, id: string, satir: Satir): void {
+export function yayinla(D: MagazaDurumDeps, id: string, satir: Satir): void {
   const cid = satir.companyId;
   if (typeof cid !== 'string' || cid === '') return;
   try {
@@ -78,7 +106,7 @@ function yayinla(D: MagazaDurumDeps, id: string, satir: Satir): void {
   }
 }
 
-async function denetle(D: MagazaDurumDeps, kim: MagazaYazan, eylem: string, ayrinti: string, diff?: Record<string, { from: unknown; to: unknown }>): Promise<void> {
+export async function denetle(D: MagazaDurumDeps, kim: MagazaYazan, eylem: string, ayrinti: string, diff?: Record<string, { from: unknown; to: unknown }>): Promise<void> {
   try {
     // `diff` yalnız geçişte verilir; yalnız-açıklama / kalem / bildirim çağrısında dördüncü bağımsız değişken HİÇ yoktur.
     if (diff) await D.writeAuditLog({ uid: kim.uid, email: kim.eposta }, eylem, ayrinti, diff);
@@ -92,10 +120,20 @@ async function denetle(D: MagazaDurumDeps, kim: MagazaYazan, eylem: string, ayri
 const asamaCoz = (v: unknown): MagazaTalepAsamasi | null => (magazaAsamasiMi(v) ? v : null);
 
 /**
- * AÇIK talep ölçütü — § 4 panel listesi (`acik` CTE) ve bekçinin açık sayımı AYNI metni kullanır: aşaması olmayan /
- * bilinmeyen satır AÇIK sayılır, kaybolmaz (`magazaAcikMi` ile aynı anlam). 2b silinmiş süzgecini buraya ekler.
+ * SİLİNMİŞ ölçütü (dilim 2b, V17) — her okuyucu ve yazıcı AYNI iki metni kullanır (`magazaSilinmisMi`'nin SQL eşi):
+ * `silindi` NESNE ise silinmiş. JSON `null` (geri alınmış) ve alanın yokluğu silinmiş DEĞİLDİR; `data->'silindi' IS NULL`
+ * KULLANILMAZ (JSON `null` ile yokluğu karıştırır — `jsonb_typeof` üç hâli ayırır: yok → NULL, `null` → `'null'`, nesne → `'object'`).
  */
-export const MAGAZA_ACIK_SQL = `COALESCE(data->>'durum', '') NOT IN ('teslim', 'iptal')`;
+export const MAGAZA_SILINMIS_SQL = `jsonb_typeof(data->'silindi') = 'object'`;
+export const MAGAZA_SILINMEMIS_SQL = `jsonb_typeof(data->'silindi') IS DISTINCT FROM 'object'`;
+
+/**
+ * AÇIK talep ölçütü — § 4 panel listesi (`acik` CTE) ve bekçinin açık sayımı AYNI metni kullanır: aşaması olmayan /
+ * bilinmeyen satır AÇIK sayılır, kaybolmaz (`magazaAcikMi` ile aynı anlam). Dilim 2b: + silinmiş HARİÇ (silinmiş talep açık
+ * sayılmaz; § 4 «AÇIK koşulu + silinmemiş koşulu tek sabittir»). İki koşul `AND` ile bağlıdır: `NOT (MAGAZA_ACIK_SQL)`
+ * yazan okuyucu (panel listesinin `kapali` CTE'si) silinmişi DE yakalar — orada ayrıca `AND MAGAZA_SILINMEMIS_SQL` gerekir.
+ */
+export const MAGAZA_ACIK_SQL = `COALESCE(data->>'durum', '') NOT IN ('teslim', 'iptal') AND ${MAGAZA_SILINMEMIS_SQL}`;
 
 // ── § 2.1–2.8 Aşama / açıklama ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -115,30 +153,35 @@ export interface DurumDegistirGirdisi {
 export type DurumDegistirSonucu =
   | { sonuc: 'tamam'; belge: Satir }
   | { sonuc: 'bulunamadi' }
-  | { sonuc: 'gecis-yok'; durum: MagazaTalepAsamasi | null };
+  | { sonuc: 'gecis-yok'; durum: MagazaTalepAsamasi | null }
+  /** (2b) Silinmiş talep DONUKTUR: aşama / açıklama yazılmaz (rota `409 { kod: 'silindi' }`). */
+  | { sonuc: 'silindi' };
 
-/** DAR okuma: aşama, sürüm, `iptalOncesi`, talep no — başka hiçbir alan. */
-export const DURUM_OKU_SQL = `SELECT data->>'durum' AS durum, COALESCE(data->>'durumSurum', '0') AS surum, data->'iptalOncesi' AS iptal_oncesi, data->>'talepNo' AS talep_no FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`;
+/** DAR okuma: aşama, sürüm, `iptalOncesi`, talep no ve (2b) `silindi`nin TÜRÜ — başka hiçbir alan. */
+export const DURUM_OKU_SQL = `SELECT data->>'durum' AS durum, COALESCE(data->>'durumSurum', '0') AS surum, data->'iptalOncesi' AS iptal_oncesi, data->>'talepNo' AS talep_no, jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`;
 
-/** Aynı aşamada yalnız-açıklama yazımı. $4 yama (`durumAciklama`, `durumZamani`, `durumSurum`), $5 okunan durum, $6 okunan sürüm. */
-export const DURUM_ACIKLAMA_SQL = `UPDATE docs SET data = data || $4::jsonb, updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND data->>'durum' = $5 AND COALESCE(data->>'durumSurum', '0') = $6 RETURNING data`;
+/**
+ * Aynı aşamada yalnız-açıklama yazımı. $4 yama (`durumAciklama`, `durumZamani`, `durumSurum`), $5 okunan durum, $6 okunan sürüm.
+ * (2b) Silinmiş satıra yazılmaz: okuma ile yazma arasına giren silme de 0 satır döndürür.
+ */
+export const DURUM_ACIKLAMA_SQL = `UPDATE docs SET data = data || $4::jsonb, updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND data->>'durum' = $5 AND COALESCE(data->>'durumSurum', '0') = $6 AND ${MAGAZA_SILINMEMIS_SQL} RETURNING data`;
 
 /**
  * Aşama geçişi. Geçmiş dizisi uygulamada KURULMAZ, SQL içinde eklenir (kapı deneyi `yaris.mjs`: uygulamada kurulan dizi
  * yarışta girişi sessizce siliyordu): son (sınır − 1) giriş sırası korunarak + yeni giriş; düşen sayısı sayaca eklenir.
  * `durumGecmisi` dizi değilse boş dizi, `durumGecmisiDusen` sayı değilse 0 sayılır (hata fırlatmaz).
  * $4 yama (`durum`, `durumZamani`, `durumSurum` + varsa `iptalOncesi`, `durumAciklama`), $5 geçmiş girişi, $6 okunan durum,
- * $7 okunan sürüm.
+ * $7 okunan sürüm. (2b) Silinmiş satıra yazılmaz.
  */
-export const DURUM_GECIS_SQL = `UPDATE docs SET data = (data || $4::jsonb) || jsonb_build_object('durumGecmisi', (SELECT COALESCE(jsonb_agg(g.giris ORDER BY g.sira), '[]'::jsonb) FROM (SELECT giris, sira FROM jsonb_array_elements(CASE WHEN jsonb_typeof(data->'durumGecmisi') = 'array' THEN data->'durumGecmisi' ELSE '[]'::jsonb END) WITH ORDINALITY AS e(giris, sira) ORDER BY sira DESC LIMIT ${MAGAZA_DURUM_GECMISI_SINIRI - 1}) g) || jsonb_build_array($5::jsonb), 'durumGecmisiDusen', (CASE WHEN jsonb_typeof(data->'durumGecmisiDusen') = 'number' THEN (data->>'durumGecmisiDusen')::numeric ELSE 0 END) + GREATEST(0, (CASE WHEN jsonb_typeof(data->'durumGecmisi') = 'array' THEN jsonb_array_length(data->'durumGecmisi') ELSE 0 END) - ${MAGAZA_DURUM_GECMISI_SINIRI - 1})), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND data->>'durum' = $6 AND COALESCE(data->>'durumSurum', '0') = $7 RETURNING data`;
+export const DURUM_GECIS_SQL = `UPDATE docs SET data = (data || $4::jsonb) || jsonb_build_object('durumGecmisi', (SELECT COALESCE(jsonb_agg(g.giris ORDER BY g.sira), '[]'::jsonb) FROM (SELECT giris, sira FROM jsonb_array_elements(CASE WHEN jsonb_typeof(data->'durumGecmisi') = 'array' THEN data->'durumGecmisi' ELSE '[]'::jsonb END) WITH ORDINALITY AS e(giris, sira) ORDER BY sira DESC LIMIT ${MAGAZA_DURUM_GECMISI_SINIRI - 1}) g) || jsonb_build_array($5::jsonb), 'durumGecmisiDusen', (CASE WHEN jsonb_typeof(data->'durumGecmisiDusen') = 'number' THEN (data->>'durumGecmisiDusen')::numeric ELSE 0 END) + GREATEST(0, (CASE WHEN jsonb_typeof(data->'durumGecmisi') = 'array' THEN jsonb_array_length(data->'durumGecmisi') ELSE 0 END) - ${MAGAZA_DURUM_GECMISI_SINIRI - 1})), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND data->>'durum' = $6 AND COALESCE(data->>'durumSurum', '0') = $7 AND ${MAGAZA_SILINMEMIS_SQL} RETURNING data`;
 
-interface DurumSatiri { durum: MagazaTalepAsamasi | null; surum: string; iptalOncesi: unknown; talepNo: string }
+interface DurumSatiri { durum: MagazaTalepAsamasi | null; surum: string; iptalOncesi: unknown; talepNo: string; silindi: boolean }
 
 async function durumOku(h: MagazaPgHavuzu, id: string, companyId: string): Promise<DurumSatiri | null> {
   const { rows } = await h.query(DURUM_OKU_SQL, [MAGAZA_TALEP_KOLEKSIYONU, id, companyId]);
   const s = rows[0];
   if (!s) return null;
-  return { durum: asamaCoz(s.durum), surum: metin(s.surum), iptalOncesi: s.iptal_oncesi, talepNo: metin(s.talep_no) };
+  return { durum: asamaCoz(s.durum), surum: metin(s.surum), iptalOncesi: s.iptal_oncesi, talepNo: metin(s.talep_no), silindi: s.silindi_turu === 'object' };
 }
 
 /** Temizlenmiş, tek satırlık, en çok 500 birim; yalnız boşluk → `''`. */
@@ -151,6 +194,7 @@ export async function talepDurumunuDegistir(D: MagazaDurumDeps, g: DurumDegistir
   const h = havuz(D);
   const okunan = await durumOku(h, g.id, g.companyId);
   if (!okunan) return { sonuc: 'bulunamadi' };
+  if (okunan.silindi) return { sonuc: 'silindi' };
   if (okunan.durum === null) return { sonuc: 'gecis-yok', durum: null };
   // Bayat ekran: saklı aşama ya da sürüm ekrandakinden farklıysa tabloya HİÇ bakılmadan güncel aşama döner.
   if (okunan.durum !== g.onceki || okunan.surum !== String(g.surum)) return { sonuc: 'gecis-yok', durum: okunan.durum };
@@ -177,9 +221,10 @@ export async function talepDurumunuDegistir(D: MagazaDurumDeps, g: DurumDegistir
     satir = rows[0]?.data;
   }
   if (!nesneMi(satir)) {
-    // Araya başka yazım girdi: aşama yeniden okunur.
+    // Araya başka yazım girdi: aşama yeniden okunur (araya giren SİLME ise `silindi`).
     const guncel = await durumOku(h, g.id, g.companyId);
-    return guncel ? { sonuc: 'gecis-yok', durum: guncel.durum } : { sonuc: 'bulunamadi' };
+    if (!guncel) return { sonuc: 'bulunamadi' };
+    return guncel.silindi ? { sonuc: 'silindi' } : { sonuc: 'gecis-yok', durum: guncel.durum };
   }
 
   yayinla(D, g.id, satir);
@@ -212,21 +257,26 @@ export type KalemTeslimSonucu =
   | { sonuc: 'gecis-yok'; durum: MagazaTalepAsamasi | null }
   /** Tanınmayan / öbür kaynağın / aralık dışı / yinelenen anahtar, boş liste — HİÇBİR şey yazılmaz (rota 400). */
   | { sonuc: 'gecersiz' }
-  /** `icerikSurum` değişti (kaynak beyan → teyit; 2a'da ölü dal) — istemci anahtar kümesini yeniler (rota 409). */
-  | { sonuc: 'surum-eski' };
+  /** `icerikSurum` değişti (kaynak beyan → teyit; 2b'de teyit yazımıyla canlanır) — istemci anahtar kümesini yeniler (rota 409). */
+  | { sonuc: 'surum-eski' }
+  /** (2b) Silinmiş talebe işaret yazılmaz (rota `409 { kod: 'silindi' }`). */
+  | { sonuc: 'silindi' };
 
-/** DAR okuma: `teyit.kalemler` personel verisidir (2a'da hep NULL); `musteri`, `not`, `talepEdilen`, `bildirim*` çekilmez. */
-export const KALEM_OKU_SQL = `SELECT data->>'durum' AS durum, COALESCE(data->>'durumSurum', '0') AS surum, COALESCE(data->>'icerikSurum', '0') AS icerik_surum, data->>'talepNo' AS talep_no, (CASE WHEN jsonb_typeof(data->'kalemler') = 'array' THEN jsonb_array_length(data->'kalemler') ELSE 0 END) AS beyan_sayisi, data->'teyit'->'kalemler' AS teyit_kalemleri FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`;
+/**
+ * DAR okuma: `teyit.kalemler` personel verisidir (teyit yazılmamış talepte NULL); `musteri`, `not`, `talepEdilen`, `bildirim*`
+ * çekilmez. (2b) `silindi`nin türü.
+ */
+export const KALEM_OKU_SQL = `SELECT data->>'durum' AS durum, COALESCE(data->>'durumSurum', '0') AS surum, COALESCE(data->>'icerikSurum', '0') AS icerik_surum, data->>'talepNo' AS talep_no, (CASE WHEN jsonb_typeof(data->'kalemler') = 'array' THEN jsonb_array_length(data->'kalemler') ELSE 0 END) AS beyan_sayisi, data->'teyit'->'kalemler' AS teyit_kalemleri, jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`;
 
 /**
  * CAS iki sayaçlı (kapı 3, K6): $6 okunan `durumSurum` VE $7 okunan `icerikSurum` — okuma ile yazma arasına giren teyit
  * yazımı işareti pasif `b:` anahtarına düşürmesin (PGlite ölçümü: yalnız `durumSurum` denetlenince hayalet işaret yazıldı).
  * $4 KAPALI: yalnız `{ durumSurum }`; `icerikSurum`'a DOKUNULMAZ (kalem teslim içerik değildir). $5 = anahtar → giriş;
- * nesne olmayan (çöp) `kalemTeslim` `{}` sayılır; önceki giriş üzerine yazılır.
+ * nesne olmayan (çöp) `kalemTeslim` `{}` sayılır; önceki giriş üzerine yazılır. (2b) Silinmiş satıra yazılmaz.
  */
-export const KALEM_TESLIM_SQL = `UPDATE docs SET data = (data || $4::jsonb) || jsonb_build_object('kalemTeslim', (CASE WHEN jsonb_typeof(data->'kalemTeslim') = 'object' THEN data->'kalemTeslim' ELSE '{}'::jsonb END) || $5::jsonb), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND COALESCE(data->>'durumSurum', '0') = $6 AND COALESCE(data->>'icerikSurum', '0') = $7 RETURNING data`;
+export const KALEM_TESLIM_SQL = `UPDATE docs SET data = (data || $4::jsonb) || jsonb_build_object('kalemTeslim', (CASE WHEN jsonb_typeof(data->'kalemTeslim') = 'object' THEN data->'kalemTeslim' ELSE '{}'::jsonb END) || $5::jsonb), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND COALESCE(data->>'durumSurum', '0') = $6 AND COALESCE(data->>'icerikSurum', '0') = $7 AND ${MAGAZA_SILINMEMIS_SQL} RETURNING data`;
 
-interface KalemSatiri { durum: MagazaTalepAsamasi | null; surum: string; icerikSurum: string; talepNo: string; beyanSayisi: number; teyitKalemleri: unknown }
+interface KalemSatiri { durum: MagazaTalepAsamasi | null; surum: string; icerikSurum: string; talepNo: string; beyanSayisi: number; teyitKalemleri: unknown; silindi: boolean }
 
 async function kalemOku(h: MagazaPgHavuzu, id: string, companyId: string): Promise<KalemSatiri | null> {
   const { rows } = await h.query(KALEM_OKU_SQL, [MAGAZA_TALEP_KOLEKSIYONU, id, companyId]);
@@ -235,7 +285,7 @@ async function kalemOku(h: MagazaPgHavuzu, id: string, companyId: string): Promi
   const beyan = typeof s.beyan_sayisi === 'number' ? s.beyan_sayisi : Number(s.beyan_sayisi);
   return {
     durum: asamaCoz(s.durum), surum: metin(s.surum), icerikSurum: metin(s.icerik_surum), talepNo: metin(s.talep_no),
-    beyanSayisi: Number.isSafeInteger(beyan) && beyan >= 0 ? beyan : 0, teyitKalemleri: s.teyit_kalemleri,
+    beyanSayisi: Number.isSafeInteger(beyan) && beyan >= 0 ? beyan : 0, teyitKalemleri: s.teyit_kalemleri, silindi: s.silindi_turu === 'object',
   };
 }
 
@@ -253,6 +303,7 @@ export async function kalemTeslimYaz(D: MagazaDurumDeps, g: KalemTeslimGirdisi):
   const h = havuz(D);
   const okunan = await kalemOku(h, g.id, g.companyId);
   if (!okunan) return { sonuc: 'bulunamadi' };
+  if (okunan.silindi) return { sonuc: 'silindi' };
   if (okunan.durum === null) return { sonuc: 'gecis-yok', durum: null };
   if (okunan.durum === 'iptal') return { sonuc: 'gecis-yok', durum: 'iptal' };
   if (okunan.surum !== String(g.surum)) return { sonuc: 'gecis-yok', durum: okunan.durum };
@@ -280,6 +331,7 @@ export async function kalemTeslimYaz(D: MagazaDurumDeps, g: KalemTeslimGirdisi):
   if (!nesneMi(satir)) {
     const guncel = await kalemOku(h, g.id, g.companyId);
     if (!guncel) return { sonuc: 'bulunamadi' };
+    if (guncel.silindi) return { sonuc: 'silindi' };
     if (guncel.surum !== okunan.surum) return { sonuc: 'gecis-yok', durum: guncel.durum };
     if (guncel.icerikSurum !== okunan.icerikSurum) return { sonuc: 'surum-eski' };
     return { sonuc: 'gecis-yok', durum: guncel.durum };
@@ -296,47 +348,75 @@ export async function kalemTeslimYaz(D: MagazaDurumDeps, g: KalemTeslimGirdisi):
 export interface BildirimYenidenGirdisi {
   id: string;
   companyId: string;
-  /** 2a'da yalnız `'ilk'`; 2b `'revize'`yi (`BILDIRIM_REVIZE_YENIDEN_SQL`, `D.revizeBildirimiIste`) ekler. */
-  tur: 'ilk';
+  /** `'ilk'` = ilk bildirim (`bildirim`); `'revize'` (2b) = revize bildirimi (`bildirimRevize`, `BILDIRIM_REVIZE_YENIDEN_SQL`, `D.revizeBildirimiIste`). */
+  tur: 'ilk' | 'revize';
   kim: MagazaYazan;
 }
 
 export type BildirimYenidenSonucu =
   | { sonuc: 'tamam'; belge: Satir }
   | { sonuc: 'bulunamadi' }
-  /** Çift posta engeli: `bildirim.durum === 'gitti'` (dar okuma ile yazım arasına giren işçi yazımı dâhil). */
-  | { sonuc: 'zaten-gitti' };
+  /** Çift posta engeli: ilgili bildirimin durumu `gitti` (dar okuma ile yazım arasına giren işçi yazımı dâhil). */
+  | { sonuc: 'zaten-gitti' }
+  /** (2b) Silinmiş talep DONUKTUR: bildirimi de yeniden kuyruğa alınmaz (rota `409 { kod: 'silindi' }`). */
+  | { sonuc: 'silindi' }
+  /** (2b, yalnız `tur: 'revize'`) `bildirimRevize` nesne değil — alan yok ya da çöp: revizyon yok (rota `409 { kod: 'revize-yok' }`). */
+  | { sonuc: 'revize-yok' };
 
 /**
  * `MAGAZA_KACAN_SAHIPLEN_SQL`'in (`magazaBildirim.ts`) tekil hâli, aynı `jsonb_set` kalıbı: `bildirim` TAM OLARAK
  * `{ durum: 'bekliyor', zaman }` olur — `deneme` / `hataSinifi` SİLİNİR (bilinçli; bekçi bunu `bekleyen` olarak görür).
  * `durumSurum` / `icerikSurum` ARTMAZ (bildirim yazımı sürüm değildir). `gitti` ASLA ezilmez (koşul). Alan yok / çöp → yazılır.
+ * (2b) Silinmiş satıra yazılmaz.
  */
-export const BILDIRIM_YENIDEN_SQL = `UPDATE docs SET data = jsonb_set(data, '{bildirim}', jsonb_build_object('durum', 'bekliyor', 'zaman', $4::text)), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND (data->'bildirim'->>'durum') IS DISTINCT FROM 'gitti' RETURNING data`;
+export const BILDIRIM_YENIDEN_SQL = `UPDATE docs SET data = jsonb_set(data, '{bildirim}', jsonb_build_object('durum', 'bekliyor', 'zaman', $4::text)), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND (data->'bildirim'->>'durum') IS DISTINCT FROM 'gitti' AND ${MAGAZA_SILINMEMIS_SQL} RETURNING data`;
 
-/** Satır dönmeyince DAR okuma: yalnız bildirim durumu (müşteri verisi yok). */
-export const BILDIRIM_OKU_SQL = `SELECT data->'bildirim'->>'durum' AS durum FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`;
+/**
+ * (2b; kapı 4, Y3 (b)) Revize bildirimini yeniden kuyruğa alma — `BILDIRIM_YENIDEN_SQL`'den BİLEREK ayrı sabit: o kalıp
+ * (`jsonb_build_object` ile tam değiştirme) `'{bildirimRevize}'` yoluna uygulansaydı `alanlar` / `kim` / `icerikSurum` düşer,
+ * işçinin `REVIZE_YAZ_SQL` CAS'ı NULL'a takılır, `gitti` hiç yazılamaz ve posta her denemede yeniden giderdi. Burada nesne
+ * bütünüyle DEĞİŞTİRİLMEZ: `durum` ve `zaman` yazılır, `deneme` / `hataSinifi` silinir, üç alan korunur.
+ * DIŞ PARANTEZ ZORUNLU: PostgreSQL'de `-`, `->`'tan önce bağlanır — parantezsiz metin «operator is not unique: unknown - unknown»
+ * ile düşer (PGlite 18.3, kapı 4 ölçümü). Alan nesne değilse (yok / çöp) 0 satır: yoktan revizyon YARATILMAZ.
+ */
+export const BILDIRIM_REVIZE_YENIDEN_SQL = `UPDATE docs SET data = jsonb_set(data, '{bildirimRevize}', ((data->'bildirimRevize') - 'deneme' - 'hataSinifi') || jsonb_build_object('durum', 'bekliyor', 'zaman', $4::text)), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND jsonb_typeof(data->'bildirimRevize') = 'object' AND (data->'bildirimRevize'->>'durum') IS DISTINCT FROM 'gitti' AND ${MAGAZA_SILINMEMIS_SQL} RETURNING data`;
 
-export async function bildirimiYenidenKuyrugaAl(D: MagazaDurumDeps, g: BildirimYenidenGirdisi): Promise<BildirimYenidenSonucu> {
+/** Satır dönmeyince DAR okuma: iki bildirimin durumu, revize alanının ve `silindi`nin türü (müşteri verisi yok). */
+export const BILDIRIM_OKU_SQL = `SELECT data->'bildirim'->>'durum' AS durum, data->'bildirimRevize'->>'durum' AS revize_durum, jsonb_typeof(data->'bildirimRevize') AS revize_turu, jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`;
+
+/** Revize bildirimi GENİŞ bağlamı ister (`revizeBildirimiIste`); ilk bildirim dar bağlamla da çağrılır (site paneli bu ucu açmaz). */
+export function bildirimiYenidenKuyrugaAl(D: MagazaIcerikDeps, g: BildirimYenidenGirdisi): Promise<BildirimYenidenSonucu>;
+export function bildirimiYenidenKuyrugaAl(D: MagazaDurumDeps, g: BildirimYenidenGirdisi & { tur: 'ilk' }): Promise<BildirimYenidenSonucu>;
+export async function bildirimiYenidenKuyrugaAl(
+  D: MagazaDurumDeps & { revizeBildirimiIste?: MagazaIcerikDeps['revizeBildirimiIste'] }, g: BildirimYenidenGirdisi,
+): Promise<BildirimYenidenSonucu> {
   if (!MAGAZA_TALEP_KIMLIK_DESENI.test(g.id)) return { sonuc: 'bulunamadi' };
+  const revize = g.tur === 'revize';
+  // Tür imzası revizeyi geniş bağlama bağlar; yine de eksikse SESSİZCE ilk bildirimin kuyruğuna düşülmez (yazımdan ÖNCE dur).
+  if (revize && !D.revizeBildirimiIste) throw new Error('magazaDurum: revize bildirimi isteyicisi bağlanmamış (D.revizeBildirimiIste)');
   const h = havuz(D);
-  const { rows } = await h.query(BILDIRIM_YENIDEN_SQL, [MAGAZA_TALEP_KOLEKSIYONU, g.id, g.companyId, zaman(D)]);
+  const { rows } = await h.query(revize ? BILDIRIM_REVIZE_YENIDEN_SQL : BILDIRIM_YENIDEN_SQL, [MAGAZA_TALEP_KOLEKSIYONU, g.id, g.companyId, zaman(D)]);
   const satir: unknown = rows[0]?.data;
   if (!nesneMi(satir)) {
     const okuma = await h.query(BILDIRIM_OKU_SQL, [MAGAZA_TALEP_KOLEKSIYONU, g.id, g.companyId]);
-    if (!okuma.rows[0]) return { sonuc: 'bulunamadi' };
-    if (okuma.rows[0].durum === 'gitti') return { sonuc: 'zaten-gitti' };
-    // Koşul yalnız `gitti`dir; satır varken başka bir nedenle 0 satır dönmesi bu tabanda üretilemez (işçi `gitti`yi geri almaz).
+    const s = okuma.rows[0];
+    if (!s) return { sonuc: 'bulunamadi' };
+    if (s.silindi_turu === 'object') return { sonuc: 'silindi' };
+    if (revize && s.revize_turu !== 'object') return { sonuc: 'revize-yok' };
+    if ((revize ? s.revize_durum : s.durum) === 'gitti') return { sonuc: 'zaten-gitti' };
+    // Koşullar bunlardır; satır varken başka bir nedenle 0 satır dönmesi üretilemez (işçi `gitti`yi geri almaz, silme geri alınınca yazım geçer).
     throw new Error('magazaDurum: bildirim yeniden kuyruğa alma yazımı satır döndürmedi');
   }
   // Yanıttan ÖNCE kuyruğa alınır (sözleşmece reddetmez; reddederse yazım geri alınmaz — kaçan süpürmesi sahiplenir).
+  // İki bildirim İKİ AYRI kuyruktur: revize `MAGAZA_REVIZE_KUYRUGU`'na, ilk bildirim dilim 1 kuyruğuna (isteyicinin yokluğu yukarıda fırlatıldı).
   try {
-    await D.bildirimIste(g.id);
+    if (revize) await D.revizeBildirimiIste?.(g.id);
+    else await D.bildirimIste(g.id);
   } catch (e) {
     console.error('[magaza-durum] bildirim bekliyor yazıldı, kuyruğa alınamadı:', hataKodu(e));
   }
   yayinla(D, g.id, satir);
-  await denetle(D, g.kim, 'Mağaza talebi bildirimi elle kuyruğa alındı', `${metin(satir.talepNo)} · erp`);
+  await denetle(D, g.kim, 'Mağaza talebi bildirimi elle kuyruğa alındı', `${metin(satir.talepNo)} · erp${revize ? ' · revize' : ''}`);
   return { sonuc: 'tamam', belge: satir };
 }
 
@@ -354,14 +434,22 @@ export interface EtiketBasildiKaydi { zaman: string; koli?: number; kim: { uid: 
 
 export type EtiketBasildiSonucu =
   | { sonuc: 'tamam'; belge: Satir; etiketBasildi: EtiketBasildiKaydi }
-  | { sonuc: 'bulunamadi' };
+  | { sonuc: 'bulunamadi' }
+  /** (2b) Silinmiş talebe etiket işareti yazılmaz (rota `409 { kod: 'silindi' }`). */
+  | { sonuc: 'silindi' };
 
 /**
  * `surum` / CAS YOK: ayrı alan, aşama ve içerikle yarışmaz; `durumSurum` / `icerikSurum` / `durumZamani` ARTMAZ. `jsonb_set`
  * yalnız `{etiketBasildi}` yoluna (nesne bütünüyle değişir — tek alan olduğu için tam değiştirme doğrudur; yeniden basış
- * zaman / koliyi yeniler). Aşama koşulu YOK: `iptal` / `teslim`de de yazılır.
+ * zaman / koliyi yeniler). Aşama koşulu YOK: `iptal` / `teslim`de de yazılır. (2b) Silinmiş satıra yazılmaz.
  */
-export const ETIKET_BASILDI_SQL = `UPDATE docs SET data = jsonb_set(data, '{etiketBasildi}', $4::jsonb), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 RETURNING data`;
+export const ETIKET_BASILDI_SQL = `UPDATE docs SET data = jsonb_set(data, '{etiketBasildi}', $4::jsonb), updated_at = now() WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3 AND ${MAGAZA_SILINMEMIS_SQL} RETURNING data`;
+
+/**
+ * (2b) En dar okuma: `durumSurum`, talep no ve `silindi`nin türü. Etiket yazımı satır döndürmeyince «yok mu, silinmiş mi»
+ * ayrımını; silme / geri alma (`magazaIcerik.ts`) ekrandaki sürümün bayatlığını bununla ölçer.
+ */
+export const SILINDI_OKU_SQL = `SELECT COALESCE(data->>'durumSurum', '0') AS surum, data->>'talepNo' AS talep_no, jsonb_typeof(data->'silindi') AS silindi_turu FROM docs WHERE coll = $1 AND id = $2 AND data->>'companyId' = $3`;
 
 export async function etiketBasildiYaz(D: MagazaDurumDeps, g: EtiketBasildiGirdisi): Promise<EtiketBasildiSonucu> {
   if (!MAGAZA_TALEP_KIMLIK_DESENI.test(g.id)) return { sonuc: 'bulunamadi' };
@@ -370,7 +458,11 @@ export async function etiketBasildiYaz(D: MagazaDurumDeps, g: EtiketBasildiGirdi
   const kayit: EtiketBasildiKaydi = { zaman: zaman(D), ...(g.koli !== undefined ? { koli: g.koli } : {}), kim: { uid: g.kim.uid, panel: true } };
   const { rows } = await h.query(ETIKET_BASILDI_SQL, [MAGAZA_TALEP_KOLEKSIYONU, g.id, g.companyId, JSON.stringify(kayit)]);
   const satir: unknown = rows[0]?.data;
-  if (!nesneMi(satir)) return { sonuc: 'bulunamadi' };
+  if (!nesneMi(satir)) {
+    // Koşul yalnız kiracı + silinmemiş: satır varsa silinmiştir.
+    const okuma = await h.query(SILINDI_OKU_SQL, [MAGAZA_TALEP_KOLEKSIYONU, g.id, g.companyId]);
+    return okuma.rows[0] ? { sonuc: 'silindi' } : { sonuc: 'bulunamadi' };
+  }
   yayinla(D, g.id, satir);
   return { sonuc: 'tamam', belge: satir, etiketBasildi: kayit };
 }

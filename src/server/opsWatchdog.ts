@@ -25,10 +25,16 @@ import { smtpYapilandirmasi, smtpDogrula } from './smtpPosta.js';
 import { ortamdanKiraci } from './kiraciOrtami.js';
 import { magazaSayaclari, magazaTakipSayaclari } from './routes/magazaRoutes.js';
 import { magazaPanelSayaclari } from './routes/magazaPanelZinciri.js';
-import { magazaAcikSayimi, magazaYasMetni, type MagazaAcikSayimi } from './kanal/magazaAcikSayim.js';
+import {
+  magazaAcikSayimi, magazaSilinmisSayimi, magazaYasMetni, MAGAZA_SILINMIS_PENCERESI_GUN, type MagazaAcikSayimi,
+} from './kanal/magazaAcikSayim.js';
+// Bildirim durumlarının kapalı kümesi TEK yerde tanımlıdır (ops özetinin sayım modülü); bekçi içe aktarır, kopyalamaz.
+import { MAGAZA_BILDIRIM_DURUMLARI } from './kanal/magazaBildirimSayim.js';
+// «Silinmemiş» ölçütü de TEK sabittir (yazma yolları, açık sayımı ve kaçan süpürmesiyle AYNI); bekçi kopya ölçüt yazmaz.
+import { MAGAZA_SILINMEMIS_SQL } from './kanal/magazaDurum.js';
 import {
   MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS, MAGAZA_BILDIRIM_HATA_SINIFLARI,
-  type MagazaBildirimHataSinifi,
+  type MagazaBildirimDurumu, type MagazaBildirimHataSinifi,
 } from '../lib/magazaTalep.js';
 import fs from 'fs';
 import path from 'path';
@@ -117,6 +123,15 @@ function opsToMs(v: unknown): number {
 //       talebi `bekliyor`a alır, işçi sonucu yazınca sayımdan düşer. Elle gönderim bu
 //       sayıma DOKUNMAZ — yaş `olusturma`dan ölçülür, tazelenen `bildirim.zaman`dan değil
 //       (bkz. `magazaTalepSayimSql`). Yaşı okunamayan satır «eski» sayılmaz.
+//       SİLİNMİŞ TALEP (inceleme 2b, bulgu 8): yumuşak silinen talebin gitmeyen bildirimi kırmızıya SAYILMAZ (üç kırmızı
+//       sütun silinmişi dışlar; iki alanda da). Silinmiş talepte «Yeniden gönder» 409 `silindi` döner ve kaçan süpürmesi
+//       onu sahiplenmez — sayılsaydı satır 7 gün boyunca kapatılamayan bir kırmızı olurdu. Talep geri alınırsa bildirimi
+//       yeniden sayılır; silinmişler «silinmiş: N (son 30 gün)» parçasında görünmeye devam eder.
+//       REVİZE BİLDİRİMİ (dilim 2b, § 10.7): içerik revizyonunun AYRI bildirimi (`bildirimRevize`) AYNI
+//       kalıptan üretilen ikinci sorguyla, AYRI parçada sayılır («revize bildirimi: …»); yaşı revizyonun
+//       zamanından (`icerikZamani`) ölçülür. İki alandan biri eşiği aşarsa kırmızıdır; kapalı kipte
+//       `yapilandirilmamis` iki alanda da bilgidir. Satırı kapatmanın yolu yine ERP'deki «Yeniden gönder»dir
+//       (revize rozeti; aynı uç, `?tur=revize`).
 //   (c) Kullanılabilirlik — kiracı çözülemiyorsa, çözülen kimlik hiçbir kiracıyla
 //       eşleşmiyorsa (hayalet kiracı) ya da pg havuzu yoksa uç yazamaz. Uç süreç
 //       başından beri 500 döndüyse de kırmızı (öbür uç sayaçları yalnız bilgidir).
@@ -126,7 +141,9 @@ function opsToMs(v: unknown): number {
 //   (e) Açık talepler (dilim 2a) — sayı, aşama dağılımı ve en eski açık talebin yaşı.
 //       BİLGİDİR (eşik yok — alarm eşiği kullanıcı kararı); yalnız okunamayan sayım
 //       kırmızıdır. Ölçüt panel listesiyle aynı sabit (`MAGAZA_ACIK_SQL`); kalem teslim
-//       işaretleri ve «etiket basıldı» açıklığı da yaşı da değiştirmez.
+//       işaretleri ve «etiket basıldı» açıklığı da yaşı da değiştirmez. Dilim 2b: yumuşak SİLİNEN
+//       talep açık SAYILMAZ (aynı sabit silinmemiş koşulunu da taşır); ayrı parçada «silinmiş: N
+//       (son 30 gün)» yazılır — o da bilgidir, yalnız okunamayan sayım kırmızıdır.
 // Üç sayaç okuyucusu ÜÇ AYRI parçada yazılır: `magazaSayaclari()` (dilim 1 uçları),
 // `magazaPanelSayaclari()` (panel + ERP uçları) ve `magazaTakipSayaclari()` (takip sorgusu).
 //
@@ -149,26 +166,50 @@ const MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS = 7 * GUN_MS;
 /** `olusturma` bu sunucunun saatiyle yazılır; «şimdi»nin bu kadar ilerisi hâlâ geçerli zaman sayılır. */
 const SAAT_TOLERANSI_MS = 5 * 60_000;
 
+/** Sayılan bildirim alanı: `bildirim` = talebin ilk bildirimi · `bildirimRevize` = içerik revizyonu bildirimi (dilim 2b). */
+export type MagazaSayimYolu = 'bildirim' | 'bildirimRevize';
+
 /**
- * `olusturma` kırmızı penceresinden KANITLI eski mi ($5 = pencerenin başı): sunucunun yazdığı biçimde (`toISOString()`) VE
+ * Bildirimin YAŞ alanı — yoldan türetilir (§ 10.7; kapı 4, Y2): ilk bildirimde talebin `olusturma`sı, revizede revizyonun
+ * zamanı `icerikZamani` (revizenin `olusturma` eşdeğeri; ekran rozetinin `taban`ıyla aynı dayanak). İKİSİ DE işçi
+ * yazımlarıyla İLERLEMEZ. `<yol>.zaman` yaş alanı DEĞİLDİR: işçi her yeniden denemede, ERP'deki «Yeniden gönder» her
+ * tıklamada onu tazeler — yaş ondan ölçülseydi «bekleyen» penceresi her denemede sıfırlanır, eski revize hiç «pencereden
+ * eski» olmaz ve bekçi 8 deneme (≈ 2 sa 22 dk) boyunca susardı.
+ */
+const SAYIM_YAS_ALANI: Readonly<Record<MagazaSayimYolu, string>> = { bildirim: 'olusturma', bildirimRevize: 'icerikZamani' };
+
+/**
+ * Yaş alanı kırmızı penceresinden KANITLI eski mi ($5 = pencerenin başı): sunucunun yazdığı biçimde (`toISOString()`) VE
  * $5'ten küçük. Eksik (NULL) ya da biçimsiz değer «eski» SAYILMAZ (`COALESCE(…, false)`) — yaşı okunamayan satır bilgiye
  * düşmez, kırmızıda kalır. Biçim denetimi ŞART: yalnız metin karşılaştırmasında boş dizge ya da '0' / '2020-bozuk' gibi
  * bir değer bayt sırasında eşikten «küçük» çıkar ve sessizce bilgiye düşerdi (ölçüldü 2026-10-08). Desende ters bölü YOK
  * (`[.]`, `[0-9]`): şablon dizgesi ters bölüyü yutardı.
  */
-const PENCEREDEN_ESKI_SQL = `COALESCE((data->>'olusturma') COLLATE "C" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$'
-              AND (data->>'olusturma') COLLATE "C" < $5, false)`;
+const penceredenEskiSql = (yasAlani: string): string => `COALESCE((data->>'${yasAlani}') COLLATE "C" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$'
+              AND (data->>'${yasAlani}') COLLATE "C" < $5, false)`;
+
+/**
+ * Bekçinin saydığı durumlar = kapalı küme − `gitti` (dört dizgeden ÜÇÜ; `gitti` sayılmaz, dört değer dışında sütun yok).
+ * Dizgeler `MAGAZA_BILDIRIM_DURUMLARI`'ndan SÜZÜLÜR (ikinci bir liste yazılmaz); `Record` tipi kümeye kilitlidir — kapalı
+ * kümeye beşinci bir durum eklenirse burası DERLENMEZ (yeni durumun kırmızı mı bilgi mi olduğuna bilerek karar verilir).
+ * Sıra sütun sırasıdır ve `eski_gitmeyen` sütununun `IN (…)` listesinin sırasıdır.
+ */
+type GitmeyenDurum = Exclude<MagazaBildirimDurumu, 'gitti'>;
+const GITMEYEN_SIRASI: Readonly<Record<GitmeyenDurum, number>> = { gonderilemedi: 0, yapilandirilmamis: 1, bekliyor: 2 };
+const GITMEYEN_DURUMLAR: readonly GitmeyenDurum[] = MAGAZA_BILDIRIM_DURUMLARI
+  .filter((d): d is GitmeyenDurum => d !== 'gitti')
+  .sort((a, b) => GITMEYEN_SIRASI[a] - GITMEYEN_SIRASI[b]);
 
 /**
  * $1 koleksiyon · $2 «son 24 saat» eşiği · $3 bekleme eşiği · $4 üst sınır (şimdi + tolerans) ·
  * $5 kırmızı penceresinin başı (şimdi − MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS).
  *
- * `olusturma` ISO-8601 UTC METİNDİR (`toISOString()`): aynı biçimdeki iki metnin
+ * Yaş alanı (`olusturma` / `icerikZamani`) ISO-8601 UTC METİNDİR (`toISOString()`): aynı biçimdeki iki metnin
  * bayt sırası zaman sırasıdır; `COLLATE "C"` veritabanının dil sıralamasını devreden
  * çıkarır. Karşılaştırma BİLEREK metin: `::timestamptz` dönüşümü tek bozuk satırda
  * bütün sorguyu düşürürdü.
  *
- * «Bekleyen» = TAZE olduğu KANITLANAMAYAN `bekliyor`. `olusturma`sı eksik ya da
+ * «Bekleyen» = TAZE olduğu KANITLANAMAYAN `bekliyor`. Yaş alanı eksik ya da
  * zaman olmayan satır bekleyen sayılır — bilinmeyen yaş sessizce «taze» sayılmaz.
  *
  * Kırmızıya giren üç sayım (`gonderilemedi`, `yapilandirilmamis`, `bekleyen`) pencereden KANITLI eski satırı saymaz;
@@ -176,30 +217,42 @@ const PENCEREDEN_ESKI_SQL = `COALESCE((data->>'olusturma') COLLATE "C" ~ '^[0-9]
  * düşer (taze `bekliyor` hiçbirine). Yaşı okunamayan satır iki yönde de kanıtsızdır: ne «taze» ne «pencereden eski»
  * sayılır, kırmızıda kalır.
  *
- * ÜRETİCİ (dilim 2a, § 6): `yol` belgedeki bildirim alanıdır. 2a'da yalnız `'bildirim'` (ilk bildirim) vardır ve çıktı
- * dilim 1'in sorgusuyla harfi harfine AYNIDIR; 2b `'bildirimRevize'` yolunu ekler ve yaş alanını yoldan türetir
- * (`icerikZamani`, § 10.7) — imza o gün genişler.
+ * ÜRETİCİ (dilim 2a § 6 → dilim 2b § 10.7): `yol` belgedeki bildirim alanıdır. İki alan AYNI kalıptan üretilir (iki kopya
+ * sorgu YOK): `'bildirim'` çıktısı dilim 1'in sorgusudur + (inceleme 2b, bulgu 8) üç kırmızı sütunda silinmemiş koşulu;
+ * `'bildirimRevize'` aynı metnin `data->'bildirimRevize'` ve `icerikZamani` yaşıyla sürümüdür (`toplam` her iki çıktıda
+ * koleksiyonun satır sayısıdır; revize çıktısında `son24` = son 24 saatte REVİZE edilen talep).
  *
- * YAŞ `olusturma` İLE ÖLÇÜLÜR, `<yol>.zaman` ile DEĞİL: işçi her denemede, ERP'deki elle «Yeniden gönder» her tıklamada
- * `bildirim.zaman`ı tazeler. Yaş ondan ölçülseydi bir günlük gitmeyen bildirim her tazelemede «taze» görünür, bekçi
- * susardı. Ekranın `max(olusturma, bildirim.zaman)` kuralı (rozet «gönderiliyor» der) ekran içindir, bekçiye taşınmaz.
+ * SİLİNMİŞ TALEP: kırmızıya giren üç sayım yumuşak silinen talebi SAYMAZ (`MAGAZA_SILINMEMIS_SQL` — her yerdeki AYNI
+ * sabit; geri alınmış `silindi: null` silinmemiştir, yeniden sayılır). `toplam`, `son24` ve `eski_gitmeyen` (bilgi)
+ * silinmişi dışlamaz: üçü de kırmızı üretmez.
+ *
+ * YAŞ yolun KENDİ yaş alanıyla ölçülür (`SAYIM_YAS_ALANI`), `<yol>.zaman` ile DEĞİL: işçi her denemede, ERP'deki elle
+ * «Yeniden gönder» her tıklamada `<yol>.zaman`ı tazeler. Yaş ondan ölçülseydi bir günlük gitmeyen bildirim her tazelemede
+ * «taze» görünür, bekçi susardı. Ekranın `max(taban, <yol>.zaman)` kuralı (rozet «gönderiliyor» der) ekran içindir,
+ * bekçiye taşınmaz.
  */
-export function magazaTalepSayimSql(yol: 'bildirim'): string {
+export function magazaTalepSayimSql(yol: MagazaSayimYolu): string {
+  const yas = SAYIM_YAS_ALANI[yol];
+  const eski = penceredenEskiSql(yas);
+  const kirmiziSutunlari = GITMEYEN_DURUMLAR.map(d => (d === 'bekliyor'
+    ? `(count(*) FILTER (WHERE data->'${yol}'->>'durum' = '${d}'
+            AND NOT COALESCE((data->>'${yas}') COLLATE "C" BETWEEN $3 AND $4, false)
+            AND NOT ${eski}
+            AND ${MAGAZA_SILINMEMIS_SQL}))::int AS bekleyen`
+    : `(count(*) FILTER (WHERE data->'${yol}'->>'durum' = '${d}'
+            AND NOT ${eski}
+            AND ${MAGAZA_SILINMEMIS_SQL}))::int AS ${d}`));
   return `
   SELECT count(*)::int AS toplam,
-         (count(*) FILTER (WHERE (data->>'olusturma') COLLATE "C" BETWEEN $2 AND $4))::int AS son24,
-         (count(*) FILTER (WHERE data->'${yol}'->>'durum' = 'gonderilemedi'
-            AND NOT ${PENCEREDEN_ESKI_SQL}))::int AS gonderilemedi,
-         (count(*) FILTER (WHERE data->'${yol}'->>'durum' = 'yapilandirilmamis'
-            AND NOT ${PENCEREDEN_ESKI_SQL}))::int AS yapilandirilmamis,
-         (count(*) FILTER (WHERE data->'${yol}'->>'durum' = 'bekliyor'
-            AND NOT COALESCE((data->>'olusturma') COLLATE "C" BETWEEN $3 AND $4, false)
-            AND NOT ${PENCEREDEN_ESKI_SQL}))::int AS bekleyen,
-         (count(*) FILTER (WHERE data->'${yol}'->>'durum' IN ('gonderilemedi', 'yapilandirilmamis', 'bekliyor')
-            AND ${PENCEREDEN_ESKI_SQL}))::int AS eski_gitmeyen
+         (count(*) FILTER (WHERE (data->>'${yas}') COLLATE "C" BETWEEN $2 AND $4))::int AS son24,
+         ${kirmiziSutunlari.join(',\n         ')},
+         (count(*) FILTER (WHERE data->'${yol}'->>'durum' IN (${GITMEYEN_DURUMLAR.map(d => `'${d}'`).join(', ')})
+            AND ${eski}))::int AS eski_gitmeyen
     FROM docs WHERE coll = $1`;
 }
 const MAGAZA_TALEP_SAYIM_SQL = magazaTalepSayimSql('bildirim');
+/** (2b) Revize bildiriminin sayımı: aynı üretici, aynı beş parametre; yaş `icerikZamani`. */
+const MAGAZA_REVIZE_SAYIM_SQL = magazaTalepSayimSql('bildirimRevize');
 
 /**
  * Hayalet kiracı sorgusu. Kiracı kimliği = `companyId`, o yoksa kullanıcının kendi
@@ -260,6 +313,26 @@ function sayimHucresi(satir: unknown, ad: string): number | null {
 }
 const sayiYaz = (n: number | null): string => (n === null ? '—' : String(n));
 
+/**
+ * Sayım satırının (iki yolun da AYNI dört sütunu) hükmü ve metni — ilk bildirim ile revize bildirimi AYNI kuraldan geçer
+ * (kopya kural yok). `eski_gitmeyen` kırmızı YAPMAZ (pencereden eski satır bilgidir) ama okunamazsa sayım okunamamıştır.
+ * Kapalı kipte `yapilandirilmamis` beklenen durumdur (bilgi); `gonderilemedi` / `bekleyen` kapalıyken de kırmızıdır
+ * (yazılıyorsa gerçek arıza). Okunamayan hücre sıfır SAYILMAZ («—»).
+ */
+function gitmeyenBildirimOzeti(satir: unknown, kapali: boolean): { okunamadi: boolean; gitmeyen: boolean; metin: string } {
+  const gonderilemedi = sayimHucresi(satir, 'gonderilemedi');
+  const yapilandirilmamis = sayimHucresi(satir, 'yapilandirilmamis');
+  const bekleyen = sayimHucresi(satir, 'bekleyen');
+  const eskiGitmeyen = sayimHucresi(satir, 'eski_gitmeyen');
+  return {
+    okunamadi: [gonderilemedi, yapilandirilmamis, bekleyen, eskiGitmeyen].some(n => n === null),
+    gitmeyen: [gonderilemedi, kapali ? 0 : yapilandirilmamis, bekleyen].some(n => n !== null && n > 0),
+    metin: `gönderilemedi ${sayiYaz(gonderilemedi)}, yapılandırılmamış ${sayiYaz(yapilandirilmamis)}${kapali ? ' (kapalı kip, bilgi)' : ''}`
+      + `, ${MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS / 60_000} dk+ bekleyen ${sayiYaz(bekleyen)}`
+      + `, ${MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS / GUN_MS} günden eski gitmeyen ${sayiYaz(eskiGitmeyen)} (bilgi)`,
+  };
+}
+
 /** `soz` süre içinde bitmezse `SURE_DOLDU`. Geç gelen ret yakalanmamış kalmaz (`race` dinliyor). */
 async function sureSinirli<T>(soz: Promise<T>, ms: number): Promise<T | typeof SURE_DOLDU> {
   let zamanlayici: ReturnType<typeof setTimeout> | undefined;
@@ -306,10 +379,20 @@ export const MAGAZA_PANEL_SAYAC_ETIKETLERI: Readonly<Record<string, string>> = {
   kalemTeslimErp: 'kalem teslim (ERP)', kalemTeslimErp409: 'kalem teslim 409 (ERP)',
   etiketBasildi: 'etiket basıldı', etiketBasildi404: 'etiket 404', etiketBasildi409: 'etiket 409',
   bildirimGonder: 'elle bildirim', bildirimGonder409: 'elle bildirim 409',
+  // Dilim 2b (§ 10.7): revize bildirimi AYRI anahtarlarda (ilk bildirim sayaçlarına karışmaz) + içerik / silme / elle talep.
+  // `revizeBildirimIstenemedi` kuyruğa ekleme hatası DEĞİLDİR (o durumda isteyici süreç içi gönderime düşer ve «istendi»
+  // sayılır): isteyicinin sözleşmesine aykırı REDDETTİĞİ çağrıdır — sıfırdan büyükse bildirim hiç başlatılmamıştır.
+  bildirimGonderRevize: 'elle revize bildirimi', bildirimGonderRevize409: 'elle revize bildirimi 409',
+  revizeBildirimIstendi: 'revize bildirimi istendi', revizeBildirimIstenemedi: 'revize bildirimi isteği BAŞARISIZ (isteyici reddetti)',
+  icerik: 'içerik yazımı', icerikDegisiklikYok: 'içerik (değişiklik yok)', icerik409: 'içerik 409', icerik400: 'içerik 400',
+  icerik503: 'içerik 503 (ürün KDV oranı okunamadı)', icerik429: 'içerik uçları 429',
+  silPanel: 'silme (panel)', silPanel409: 'silme 409 (panel)', silErp: 'silme (ERP)', silErp409: 'silme 409 (ERP)',
+  geriAl: 'geri alma', geriAl409: 'geri alma 409',
+  elleTalep: 'elle talep', elleTalepCakisti: 'elle talep numara çakışması (503)',
   cikisUidsiz: 'ERP çıkışında panel iptali atlandı (oturum çerezi yok)',
   r401: 'panel 401', r403: 'panel 403', r404: 'panel 404', r429: 'panel 429', r500: 'panel 500', r503: 'panel 503',
 };
-export const MAGAZA_TAKIP_SAYAC_ETIKETLERI: Readonly<Record<string, string>> = { bulundu: 'bulundu', bulunamadi: 'bulunamadı' };
+export const MAGAZA_TAKIP_SAYAC_ETIKETLERI: Readonly<Record<string, string>> = { bulundu: 'bulundu', bulunamadi: 'bulunamadı', silindi: 'silinmiş' };
 
 /**
  * Süreç içi sayaç nesnesinin bilgi metni (saf): sıfırdan büyük ve OKUNAMAYAN (`—`) sayaçlar tek tek, sıfır olanlar
@@ -414,37 +497,41 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
   }
 
   // (b) Sayım. Kırmızı penceresindeki (son 7 gün ya da yaşı okunamayan) üç gitmeyen sayısından biri > 0 ise kırmızı;
-  // pencereden eski gitmeyenler yalnız bilgi. Okunamayan sayı (bilgi sütunu dâhil) da kırmızıdır.
+  // pencereden eski gitmeyenler yalnız bilgi. Okunamayan sayı (bilgi sütunu dâhil) da kırmızıdır. İKİ alan AYRI sorguyla
+  // ve AYRI parçada sayılır (ilk bildirim · revize bildirimi); biri düşerse öbürü yine yazılır. Parametreler ORTAKTIR
+  // (tek «şimdi»): iki sayım aynı anın eşikleriyle ölçülür.
   if (havuz) {
+    const simdi = Date.now();
+    const kapali = kip === 'kapali';
+    const parametreler = [
+      MAGAZA_TALEP_KOLEKSIYONU,
+      new Date(simdi - GUN_MS).toISOString(),
+      new Date(simdi - MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS).toISOString(),
+      new Date(simdi + SAAT_TOLERANSI_MS).toISOString(),
+      new Date(simdi - MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS).toISOString(),
+    ];
     try {
-      const simdi = Date.now();
-      const { rows } = await havuz.query(MAGAZA_TALEP_SAYIM_SQL, [
-        MAGAZA_TALEP_KOLEKSIYONU,
-        new Date(simdi - GUN_MS).toISOString(),
-        new Date(simdi - MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS).toISOString(),
-        new Date(simdi + SAAT_TOLERANSI_MS).toISOString(),
-        new Date(simdi - MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS).toISOString(),
-      ]);
+      const { rows } = await havuz.query(MAGAZA_TALEP_SAYIM_SQL, parametreler);
       const satir: unknown = rows[0];
       const toplam = sayimHucresi(satir, 'toplam');
       const son24 = sayimHucresi(satir, 'son24');
-      const gonderilemedi = sayimHucresi(satir, 'gonderilemedi');
-      const yapilandirilmamis = sayimHucresi(satir, 'yapilandirilmamis');
-      const bekleyen = sayimHucresi(satir, 'bekleyen');
-      const eskiGitmeyen = sayimHucresi(satir, 'eski_gitmeyen');
-      const okunamadi = [toplam, son24, gonderilemedi, yapilandirilmamis, bekleyen, eskiGitmeyen].some(n => n === null);
-      // `eskiGitmeyen` BİLEREK bu dizide yok: pencereden eski satır kırmızı yapmaz. Kapalı kipte `yapilandirilmamis`
-      // beklenen durumdur (bilgi); `gonderilemedi` / `bekleyen` kapalıyken de kırmızı (yazılıyorsa gerçek arıza).
-      const kapali = kip === 'kapali';
-      const gitmeyen = [gonderilemedi, kapali ? 0 : yapilandirilmamis, bekleyen].some(n => n !== null && n > 0);
-      parcalar.push({ ok: !okunamadi && !gitmeyen,
-        metin: `${sayiYaz(toplam)} talep, son 24 saatte ${sayiYaz(son24)}`
-          + ` — bildirim: gönderilemedi ${sayiYaz(gonderilemedi)}, yapılandırılmamış ${sayiYaz(yapilandirilmamis)}${kapali ? ' (kapalı kip, bilgi)' : ''}`
-          + `, ${MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS / 60_000} dk+ bekleyen ${sayiYaz(bekleyen)}`
-          + `, ${MAGAZA_BILDIRIM_KIRMIZI_PENCERESI_MS / GUN_MS} günden eski gitmeyen ${sayiYaz(eskiGitmeyen)} (bilgi)`
+      const ozet = gitmeyenBildirimOzeti(satir, kapali);
+      const okunamadi = ozet.okunamadi || toplam === null || son24 === null;
+      parcalar.push({ ok: !okunamadi && !ozet.gitmeyen,
+        metin: `${sayiYaz(toplam)} talep, son 24 saatte ${sayiYaz(son24)} — bildirim: ${ozet.metin}`
           + (okunamadi ? ' (SAYIM OKUNAMADI)' : '') });
     } catch (e) {
       parcalar.push({ ok: false, metin: `sayım yapılamadı (${hataKodu(e)})` });
+    }
+    // Revize bildirimi (dilim 2b): aynı dört sütun, aynı hüküm; yaş `icerikZamani`. `toplam` / `son24` bu parçada yazılmaz
+    // (ilk parçada talep sayısı zaten var; revize sayısı ayrı bir sayım değildir).
+    try {
+      const { rows } = await havuz.query(MAGAZA_REVIZE_SAYIM_SQL, parametreler);
+      const ozet = gitmeyenBildirimOzeti(rows[0], kapali);
+      parcalar.push({ ok: !ozet.okunamadi && !ozet.gitmeyen,
+        metin: `revize bildirimi: ${ozet.metin}` + (ozet.okunamadi ? ' (REVİZE SAYIMI OKUNAMADI)' : '') });
+    } catch (e) {
+      parcalar.push({ ok: false, metin: `revize bildirimi sayımı yapılamadı (${hataKodu(e)})` });
     }
   }
 
@@ -456,6 +543,18 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
       else parcalar.push({ ok: true, metin: acikTalepMetni(acik, Date.now()) });
     } catch (e) {
       parcalar.push({ ok: false, metin: `açık talep sayımı yapılamadı (${hataKodu(e)})` });
+    }
+    // Silinmiş talepler (dilim 2b): açık sayımdan DÜŞEN taleplerin izi — son 30 günde silinip hâlâ silinmiş duranlar.
+    // BİLGİ (eşik yok); okunamayan sayım kırmızıdır. Silinme zamanı okunamayan satır pencereye girmez, ayrıca sayılır.
+    try {
+      const silinmis = await magazaSilinmisSayimi(havuz, Date.now());
+      if (silinmis === null) parcalar.push({ ok: false, metin: 'silinmiş talep sayımı OKUNAMADI' });
+      else {
+        parcalar.push({ ok: true,
+          metin: `silinmiş: ${silinmis.pencerede} (son ${MAGAZA_SILINMIS_PENCERESI_GUN} gün)${silinmis.tarihsiz > 0 ? `, silinme zamanı okunamayan ${silinmis.tarihsiz}` : ''}` });
+      }
+    } catch (e) {
+      parcalar.push({ ok: false, metin: `silinmiş talep sayımı yapılamadı (${hataKodu(e)})` });
     }
   }
 
@@ -479,7 +578,8 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
   }
 
   // Panel + ERP uç sayaçları (panel oturumu, yetki kodu, aşama / kalem teslim / etiket yazımları, elle bildirim, panel
-  // retleri, ERP çıkışında uid'siz iptal atlaması) ve takip sorgusu sayaçları: AYRI okuyucular, AYRI parçalar. İkisi de
+  // retleri, ERP çıkışında uid'siz iptal atlaması; dilim 2b: içerik, silme / geri alma, elle talep, revize bildirimi isteği
+  // ve elle yeniden gönderimi) ve takip sorgusu sayaçları (dilim 2b: + silinmiş): AYRI okuyucular, AYRI parçalar. İkisi de
   // yalnız BİLGİDİR (eşik yok); okuyucu fırlatırsa ya da sayaç nesnesi dönmezse kırmızı.
   const sayacParcasi = (ad: string, oku: () => unknown, etiketler: Readonly<Record<string, string>>): void => {
     try {

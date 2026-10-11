@@ -4,13 +4,19 @@
  *
  * Sorgunun ANLAMI (hangi satır açık sayılır, en eski hangisi, biçimsiz tarih nereye düşer) gerçek motorda sınanır:
  * `magazaDurum.pglite.test.ts` «açık talep sayımı» bloğu (gerçek motor testleri TEK dosyada toplanır — V10).
+ *
+ * Dilim 2b (§ 10.7): SİLİNMİŞ talep sayımının saf yarısı da burada (`magazaSilinmisSayimi`); gerçek motordaki anlamı
+ * (`silindi` nesne / JSON null / yok; pencere; biçimsiz silinme zamanı) `magazaSayim.pglite.test.ts`'te.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { join } from 'node:path';
 import { kodSatirlari, oku, SRC_KOK } from '../../test/kaynakTarama';
 import { MAGAZA_ACIK_ASAMALAR, MAGAZA_TALEP_ASAMALARI, MAGAZA_UTC_ZAMAN_DESENI } from '../../lib/magazaTalep';
-import { MAGAZA_ACIK_SQL } from './magazaDurum';
-import { MAGAZA_ACIK_SAYIM_SQL, magazaAcikSayimi, magazaAcikSayiminiCoz, magazaYasMetni } from './magazaAcikSayim';
+import { MAGAZA_ACIK_SQL, MAGAZA_SILINMIS_SQL } from './magazaDurum';
+import {
+  MAGAZA_ACIK_SAYIM_SQL, MAGAZA_SILINMIS_PENCERESI_GUN, MAGAZA_SILINMIS_SAYIM_SQL,
+  magazaAcikSayimi, magazaAcikSayiminiCoz, magazaSilinmisSayimi, magazaSilinmisSayiminiCoz, magazaYasMetni,
+} from './magazaAcikSayim';
 
 const SATIR = { acik: 7, asama_yeni: 2, asama_teyit: 1, asama_hazirlaniyor: 3, asama_sevk: 1, asama_bilinmiyor: 0, tarihsiz: 0, en_eski: '2026-10-05T09:00:00.000Z' };
 
@@ -139,5 +145,74 @@ describe('MAGAZA_ACIK_SAYIM_SQL — kaynak çitleri', () => {
     const kaynak = oku(join(SRC_KOK, 'server', 'kanal', 'magazaAcikSayim.ts'));
     const hedefler = [...kaynak.matchAll(/^\s*import\s+(?!type\s)[^;]*?from\s+['"]([^'"]+)['"]/gm)].map(e => e[1]);
     expect(hedefler.sort()).toEqual(['../../lib/magazaTalep.js', './magazaDurum.js']);
+  });
+});
+
+// ── Dilim 2b (§ 10.7): silinmiş talep sayımı ─────────────────────────────────────────────────────────────────────────
+describe('magazaSilinmisSayimi — «silinmiş: N (son 30 gün)» (saf yarı)', () => {
+  const SIMDI = Date.parse('2026-10-31T09:00:00.000Z');
+
+  it('satır çözücü: iki sayı; fazladan sütun (silen kişi, müşteri) sayıma geçmez', () => {
+    expect(magazaSilinmisSayiminiCoz({ pencerede: 4, tarihsiz: 1 })).toEqual({ pencerede: 4, tarihsiz: 1 });
+    const sonuc = magazaSilinmisSayiminiCoz({ pencerede: 0, tarihsiz: 0, kim: 'AHMET YILMAZ', kanal: 'erp' });
+    expect(sonuc).toEqual({ pencerede: 0, tarihsiz: 0 });
+    expect(JSON.stringify(sonuc)).not.toMatch(/AHMET|kanal/);
+  });
+
+  it.each([
+    ['satır yok', undefined], ['null', null], ['dizi', [{ pencerede: 1, tarihsiz: 0 }]], ['dizge', 'x'],
+    ['pencerede eksik', { tarihsiz: 0 }], ['tarihsiz eksik', { pencerede: 1 }],
+    ['metin sayı (sıfır SAYILMAZ)', { pencerede: '1', tarihsiz: 0 }], ['eksi', { pencerede: -1, tarihsiz: 0 }],
+    ['kesirli', { pencerede: 1, tarihsiz: 0.5 }], ['NaN', { pencerede: Number.NaN, tarihsiz: 0 }], ['null hücre', { pencerede: 1, tarihsiz: null }],
+  ] as const)('okunamayan satır `null` döner — uydurma sıfır yok (%s)', (_ad, satir) => {
+    expect(magazaSilinmisSayiminiCoz(satir)).toBeNull();
+  });
+
+  it('okuyucu: TEK sorgu; parametreler koleksiyon + pencerenin başı (şimdi − 30 gün, `toISOString()`); ilk satır çözülür', async () => {
+    const query = vi.fn(async () => ({ rows: [{ pencerede: 3, tarihsiz: 0 }, { pencerede: 99, tarihsiz: 99 }] }));
+    expect(await magazaSilinmisSayimi({ query }, SIMDI)).toEqual({ pencerede: 3, tarihsiz: 0 });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledWith(MAGAZA_SILINMIS_SAYIM_SQL, ['magazaTalepleri', '2026-10-01T09:00:00.000Z']);
+    expect(MAGAZA_SILINMIS_PENCERESI_GUN).toBe(30);
+  });
+
+  it('satır dönmezse / `rows` dizi değilse `null`; sorgu hatası FIRLATILIR (çağıran yalnız kodu yazar)', async () => {
+    expect(await magazaSilinmisSayimi({ query: async () => ({ rows: [] }) }, SIMDI)).toBeNull();
+    const bozuk: unknown = { rows: null };
+    expect(await magazaSilinmisSayimi({ query: async () => bozuk as { rows: unknown[] } }, SIMDI)).toBeNull();
+    const hata = Object.assign(new Error('x'), { code: '57014' });
+    await expect(magazaSilinmisSayimi({ query: async () => { throw hata; } }, SIMDI)).rejects.toBe(hata);
+  });
+});
+
+describe('MAGAZA_SILINMIS_SAYIM_SQL — kaynak çitleri', () => {
+  const tekSatir = MAGAZA_SILINMIS_SAYIM_SQL.replace(/\s+/g, ' ');
+  const bicimli = `(data->'silindi'->>'zaman') COLLATE "C" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$'`;
+
+  it('evren SİLİNMİŞ talepler: ölçüt her yerdeki AYNI sabit (`MAGAZA_SILINMIS_SQL`, `jsonb_typeof … = \'object\'`); `IS NULL` YOK (JSON null ile yokluğu karıştırırdı)', () => {
+    expect(MAGAZA_SILINMIS_SQL).toBe(`jsonb_typeof(data->'silindi') = 'object'`);
+    expect(tekSatir.endsWith(`FROM docs WHERE coll = $1 AND ${MAGAZA_SILINMIS_SQL}`)).toBe(true);
+    expect(tekSatir).not.toContain('${');
+    expect(tekSatir).not.toMatch(/IS (NOT )?NULL/);
+    // Ölçüt modülde yeniden YAZILMADI: `jsonb_typeof(data->'silindi')` kaynakta yalnız magazaDurum.ts'te.
+    const kod = kodSatirlari(join(SRC_KOK, 'server', 'kanal', 'magazaAcikSayim.ts')).map(k => k.kod).join('\n');
+    expect(kod).not.toContain('jsonb_typeof');
+    expect(kod).toContain('${MAGAZA_SILINMIS_SQL}');
+  });
+
+  it('iki sütun, iki parametre; yaş `silindi.zaman` METNİYLE ve yalnız biçimli değerde; biçimsiz / eksik zaman `tarihsiz`', () => {
+    expect([...tekSatir.matchAll(/::int AS ([a-z_]+)/g)].map(e => e[1])).toEqual(['pencerede', 'tarihsiz']);
+    expect(tekSatir).toContain(`(count(*) FILTER (WHERE COALESCE(${bicimli} AND (data->'silindi'->>'zaman') COLLATE "C" >= $2, false)))::int AS pencerede`);
+    expect(tekSatir).toContain(`(count(*) FILTER (WHERE NOT COALESCE(${bicimli}, false)))::int AS tarihsiz`);
+    expect([...new Set(tekSatir.match(/\$\d+/g))].sort()).toEqual(['$1', '$2']);
+    for (const yasak of ['timestamptz', 'updated_at', 'olusturma', 'GROUP BY', `'kim'`, `'kanal'`, 'musteri']) expect(tekSatir, yasak).not.toContain(yasak);
+  });
+
+  it('biçim deseni açık sayımındaki desenle AYNI metin (tek sabit: iki sorgu aynı zamana farklı hüküm vermez)', () => {
+    const desen = (sql: string): string[] => [...new Set([...sql.matchAll(/~ '([^']+)'/g)].map(e => e[1]))];
+    expect(desen(MAGAZA_SILINMIS_SAYIM_SQL)).toEqual(desen(MAGAZA_ACIK_SAYIM_SQL));
+    expect(desen(MAGAZA_SILINMIS_SAYIM_SQL)).toHaveLength(1);
+    const kod = kodSatirlari(join(SRC_KOK, 'server', 'kanal', 'magazaAcikSayim.ts')).map(k => k.kod).join('\n');
+    expect(kod.match(/\[0-9\]\{4\}-/g)).toHaveLength(1);   // desen literali modülde TEK kez yazılı
   });
 });

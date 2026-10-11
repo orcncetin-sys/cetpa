@@ -216,3 +216,33 @@ Görev Zamanlayıcı, Windows Update ve PG gösterimi OS dilimine bağlı kalır
 - ERP'den çıkış (`Çıkış yap`) o kullanıcının bütün site paneli oturumlarını da kapatır. Rolü düşen, firması askıya alınan ya da MFA'yı sonradan açan kullanıcının panel oturumu beklemeden düşer.
 - Hizmet yeniden başlarsa: verilmiş ama henüz kullanılmamış bağlanma kodları (60 sn ömürlü) düşer — kullanıcı panelden yeniden «ERP ile giriş yap» der; açık panel oturumları (8 saat) YAŞAR; süreç içi sayaçlar sıfırlanır.
 - «Yeniden gönder» (ERP → Mağaza Talepleri, gitmeyen bildirim rozeti) talebi yeniden kuyruğa alır; bekçinin gitmeyen bildirim sayımı talebin KAYIT saatinden ölçmeye devam eder (elle gönderim kırmızıyı tek başına söndürmez, bildirim gerçekten gidince söner).
+
+## [14] Mağaza dilim 2b — içerik düzenleme, elle talep, yumuşak silme, revize bildirimi (2026-10-11)
+
+### Yayın
+- Kilit dosyası DEĞİŞMEDİ (yeni bağımlılık yok): yayın hızlı yoldan gider, [13]'teki kesinti bu yayında yok.
+- Yeni ortam ayarı YOK. Revize bildirimi ilk bildirimle AYNI posta ayarını kullanır ([12]); `MAGAZA_BILDIRIM=kapali` ikisini de kapatır.
+- İkinci kuyruk `magaza-talep-revize-bildirimi` açılışta kendiliğinden oluşur. Açılış günlüğündeki `pg-boss ready ✓ (kuyruklar: …)` satırında İKİ mağaza kuyruğu da görünmeli; revize kuyruğu yoksa revize bildirimi kuyruksuz (süreç içi, yeniden denemesiz) gider.
+- Sıra: ERP dilim 2b canlı + `scripts/verify-deploy.sh post` geçti → mağaza `panel.js` 2b ekini AYNI GÜN yayınlar. Arada: teyit yazılmış talepte eski panelin kalem kutusu 400 alır ve liste yenilenir (kutu geri döner); teyit yazılmamış taleplerde eski panel tam çalışır.
+
+### Yayından sonra doğrulama
+- `scripts/verify-deploy.sh post` — [13]'teki sondalara ek (hiçbiri kayıt açmaz, içerik yazmaz, talep silmez, e-posta göndermez):
+  - üç yeni ERP ucu (`POST /api/magaza-talepleri`, `…/:id/icerik`, `…/:id/sil`): bozuk JSON → 400 / 500 ve geçerli `{}` kimliksiz → 401 (404 = canlıda hâlâ dilim 2a);
+  - `POST /api/magaza-talepleri/:id/bildirim-gonder?tur=revize` kimliksiz → 401 (400 = sorgu kimlik kapısından önce ayrıştırılıyor, sıra bozuk);
+  - belirteçsiz `POST /api/magaza/panel/siparisler/:id/sil` → 401.
+- Sonda ile ÜRETİLEMEYEN tek yanıt takip ucunun `404 silindi`sidir (canlıda yapay silinmiş kayıt açılmaz). İlk gerçek silmeden sonra elle: mağaza takip sayfasında o talebin no + telefonu → «Talebiniz silinmiş»; ERP'de geri alınınca aynı sorgu talebi yeniden bulur. Hiç var olmayan talep no «bulunamadı» demeye devam eder.
+- `scripts/ops-istek.sh /api/ops/summary`:
+  - `magazaBildirim.sayim.revize` — son 7 günde REVİZE edilen taleplerin revize bildirimi (`durum`, `hataSinifi`); ilk bildirim sayıları (`sayim.durum`) son 7 günde GELEN talepleri sayar, ikisi karışmaz;
+  - `magaza.sayaclar.panel` yeni sayaçlar: `icerik*` (yazım / değişiklik yok / 409 / 400 / 503 / 429), `silPanel*`, `silErp*`, `geriAl*`, `elleTalep*`, `revizeBildirimIstendi` / `revizeBildirimIstenemedi`, `bildirimGonderRevize*`; `magaza.sayaclar.takip.silindi`.
+- İlk gerçek ölçümler (canlıda henüz görülmedi): bir talebin notunu ERP'de düzenle → `iletisim@` kutusuna «Mağaza talebi revize edildi · <talep no>» gelmeli (gövdede yalnız değişen alan adları, revize eden, zaman ve ERP bağlantısı; müşteri bilgisi / kalem / tutar YOK); ERP'den elle talep aç → «Yeni mağaza talebi» postası gelmeli.
+
+### Bekçi (08:30) — `magaza_talep` ayrıntısı on parça
+- [13]'teki sekiz parçaya iki ek: bildirim sayımının ardında «revize bildirimi: gönderilemedi N, yapılandırılmamış M, 10 dk+ bekleyen K, 7 günden eski gitmeyen E (bilgi)»; açık taleplerin ardında «silinmiş: N (son 30 gün)».
+- Kırmızı yapanlara eklenen: gitmeyen REVİZE bildirimi (son 7 günde revize edilen talepte gönderilemedi / yapılandırılmamış / 10 dk+ bekleyen) ve okunamayan revize / silinmiş sayımı. Yaş revizyonun saatinden ölçülür: işçinin yeniden denemeleri ve «Yeniden gönder» kırmızıyı tek başına söndürmez, bildirim gerçekten gidince söner. Kapalı kipte «yapılandırılmamış» iki bildirimde de bilgidir.
+- Bilgi (eşik yok): silinmiş talep sayısı ve yeni sayaçlar. Silinen talep «açık talep» sayısından düşer, geri alınınca döner.
+- Kırmızı revize satırını kapatmanın yolu: ERP → Mağaza Talepleri → talebin «Revize bildirimi» rozetindeki «Yeniden gönder». Silinmiş talepte bu düğme çalışmaz (talep donuktur): gitmeyen bildirimi olan talep silinmişse satır 7 gün sonra kendiliğinden bilgiye düşer, ya da talep geri alınıp yeniden gönderilir.
+
+### Davranış notları
+- Hizmet yeniden başlarsa gitmemiş revize bildirimleri de (yapılandırılmamış / 3 saatten eski bekliyor) teslim sondası geçerse kendiliğinden revize kuyruğuna alınır ([12]'deki kuralın aynısı; günlük satırı `[magaza-bildirim] revize: kaçanlar: …`).
+- Aynı talep art arda revize edilirse ve ilk posta henüz gitmemişse TEK posta gider (değişen alan adları birleşik). İlk posta gittikten sonra gelen revizyon ikinci postayı üretir.
+- Silme ve geri alma yalnız Yönetici rolündedir (ERP ve site paneli); panelden geri alma yoktur. Aşama değişimi, kalem teslim, silme ve geri alma bildirim ÜRETMEZ.

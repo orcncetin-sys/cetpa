@@ -79,12 +79,12 @@ import { formSayisi, girilenAlanYamasi } from '../utils/muhasebe/irsaliyeCalisan
 import { oc } from '../i18n/ortak';
 import { op } from '../i18n/orders';
 import { osc } from '../i18n/onlineSiparis';
-import { isAllowed, APP_ROLES } from '../lib/rbac';
-import { MAGAZA_TALEP_KOLEKSIYONU } from '../lib/magazaTalep';
+import { isAllowed, APP_ROLES, magazaTalepSilmeYetkisi } from '../lib/rbac';
+import { MAGAZA_TALEP_KOLEKSIYONU, magazaUrunKdvOrani } from '../lib/magazaTalep';
 import { useAppStore } from '../store/appStore';
 import { useMagazaTalepleri, useMagazaYeniSayaci, magazaSonGorulenAnahtari, magazaIlkKaynakSekmesi, yeniAsamaSayisi } from '../hooks/useMagazaTalepleri';
 import MagazaTalepleri, { MagazaYeniRozeti } from '../components/siparis/MagazaTalepleri';
-import { magazaTalepDurumuYaz, magazaKalemTeslimYaz, magazaBildirimGonder } from '../services/magazaTalepIstemcisi';
+import { magazaTalepDurumuYaz, magazaKalemTeslimYaz, magazaBildirimGonder, magazaTalepIcerigiYaz, magazaTalepSil, magazaElleTalepAc } from '../services/magazaTalepIstemcisi';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -387,6 +387,9 @@ export default function OrdersPage({
   // Yetki kapısı elle yazılmış rol listesi DEĞİL, rbac'ın okuma kuralı (tek kaynak: Yönetici, Müdür, Satış). `userRole` bu
   // sayfaya düz metin gelir; `APP_ROLES` içinde yoksa `null` olur ve `isAllowed` rolsüz kullanıcıya hiçbir şey vermez.
   const magazaYetkili = isAllowed(APP_ROLES.find(r => r === userRole) ?? null, MAGAZA_TALEP_KOLEKSIYONU, 'read');
+  // Yumuşak silme ve geri alma yalnız Yönetici (dilim 2b, V17) — kural yine rbac'ın saf işlevi, elle rol karşılaştırması değil.
+  // İstemcideki rol yalnız GÖSTERİMDİR («Sil» / «Geri al» düğmeleri çizilsin mi); hüküm sunucuda aynı işlevle verilir.
+  const magazaSilebilir = magazaTalepSilmeYetkisi(APP_ROLES.find(r => r === userRole) ?? null);
   // Abonelik YALNIZ burada ve yalnız yetkili rolde açılır (bileşen kendi aboneliğini açmaz): yetkisiz abonelikte sunucu ne hata
   // ne boş init gönderir — geri çağrı hiç tetiklenmez ve akışın yeni abonelik eklemesi 60 sn ertelenir (hooks/useMagazaTalepleri).
   const magaza = useMagazaTalepleri(magazaYetkili);
@@ -866,7 +869,10 @@ export default function OrdersPage({
                 )}
               </div>
 
-              {/* Bileşen istek ATMAZ: ERP'nin üç yazma yolu (`services/magazaTalepIstemcisi.ts`) buradan nitelik olarak verilir (dilim 2a). */}
+              {/* Bileşen istek ATMAZ: ERP'nin altı yazma yolu (`services/magazaTalepIstemcisi.ts`) buradan nitelik olarak verilir
+                  (dilim 2a: aşama, kalem teslim, bildirim; dilim 2b: içerik, silme / geri alma, elle talep). `onSil` yalnız silebilen
+                  rolde işlevdir — `null` iken bileşen «Sil» / «Geri al» çizmez. `urunKdvOrani` teyit kaleminin KDV oranı varsayılanını
+                  ERP ürün kaydından okur (sunucuyla AYNI saf işlev); ürün listesinin tamamı bileşene geçmez. */}
               {orderSourceTab === 'magaza' && (
                 <MagazaTalepleri
                   talepler={magaza.talepler}
@@ -876,6 +882,10 @@ export default function OrdersPage({
                   onDurumDegistir={magazaTalepDurumuYaz}
                   onKalemTeslim={magazaKalemTeslimYaz}
                   onBildirimGonder={magazaBildirimGonder}
+                  onIcerikKaydet={magazaTalepIcerigiYaz}
+                  onSil={magazaSilebilir ? magazaTalepSil : null}
+                  onElleTalep={magazaElleTalepAc}
+                  urunKdvOrani={sku => magazaUrunKdvOrani(inventory, sku)}
                 />
               )}
               {orderSourceTab !== 'magaza' && <>

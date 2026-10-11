@@ -96,13 +96,22 @@ describe('sınırlayıcılar: sel koruması (iş sınırı DEĞİL), ayrı koval
       expect(govde(ad), ad).toMatch(/keyGenerator: yalnizIpAnahtari,\s+handler: magazaPanel429,/);
       expect(govde(ad), ad).not.toMatch(/skip|message/);
     }
-    // Mağaza için sınırlayıcı sayısı SABİT: talep, takip, panel oturumu, panel, yetki kodu (üç ERP talep ucu `dbLimiter` kovasında).
-    expect(satirNo(/const magaza\w+Limiter = rateLimit\(\{/)).toHaveLength(5);
+    // Mağaza için sınırlayıcı sayısı SABİT: talep, takip, panel oturumu, panel, yetki kodu + (dilim 2b) içerik — üç 2a ERP talep ucu
+    // `dbLimiter` kovasında kalır; panelin silme ucu panel kovasındadır (ayrı kova yok). 5 → 6 bilerek değişen çittir.
+    expect(satirNo(/const magaza\w+Limiter = rateLimit\(\{/)).toHaveLength(6);
   });
   it('yetki kodu (ERP kökeni): 10 / 15 dk, KULLANICI anahtarlı, 429\'u `magazaYetkiKodu429` yazar (`kod: \'sinir\'`)', () => {
     expect(govde('magazaYetkiKoduLimiter')).toMatch(/windowMs: 15 \* 60 \* 1000,\s+max: 10,/);
     expect(govde('magazaYetkiKoduLimiter')).toMatch(/keyGenerator: userOrIpKey,\s+handler: magazaYetkiKodu429,/);
     expect(govde('magazaYetkiKoduLimiter')).not.toMatch(/skip|message/);
+  });
+  it('içerik uçları (dilim 2b, ERP kökeni — elle talep / içerik / silme): 60 / 15 dk, KULLANICI anahtarlı, 429\'u `magazaIcerik429` yazar', () => {
+    expect(govde('magazaIcerikLimiter')).toMatch(/windowMs: 15 \* 60 \* 1000,\s+max: 60,/);
+    expect(govde('magazaIcerikLimiter')).toMatch(/keyGenerator: userOrIpKey,\s+handler: magazaIcerik429,/);
+    expect(govde('magazaIcerikLimiter')).not.toMatch(/skip|message/);
+    // 429 yazıcısı rota modülünden içe aktarılır (sayaç tek modül örneğinde); tanım `magazaErpRoutes` bağlamından ÖNCE.
+    tek(/^import \{ magazaErpRoutes, magazaIcerik429, magazaYetkiKodu429 \} from "\.\/src\/server\/routes\/magazaErpRoutes\.js";$/);
+    expect(tek(/const magazaIcerikLimiter = rateLimit\(\{/)).toBeLessThan(tek(/^\s*magazaErpRoutes\(app, \{\s*$/));
   });
   it('her sınırlayıcı YALNIZ kendi bağlamına verilir (başka yere bağlanırsa istek iki kez sayılır)', () => {
     expect(satirNo(/magazaTalepLimiter/)).toHaveLength(2);   // tanım + zincir bağlamı
@@ -110,6 +119,7 @@ describe('sınırlayıcılar: sel koruması (iş sınırı DEĞİL), ayrı koval
     expect(satirNo(/magazaPanelOturumLimiter/)).toHaveLength(2);   // tanım + panel alt zinciri bağlamı
     expect(satirNo(/magazaPanelLimiter/)).toHaveLength(2);
     expect(satirNo(/magazaYetkiKoduLimiter/)).toHaveLength(2);     // tanım + `magazaErpRoutes` bağlamı
+    expect(satirNo(/magazaIcerikLimiter/)).toHaveLength(2);        // tanım + `magazaErpRoutes` bağlamı
     // Sınırlayıcılar `app.use` ile öneke DEĞİL, yalnız bağlamla verilir.
     expect(satirNo(/app\.use\([^;]*\bmagaza\w*Limiter\b/)).toEqual([]);
   });
@@ -138,7 +148,11 @@ describe('site paneli ve ERP mağaza uçları — bağlama (dilim 2a)', () => {
     expect(erp).toBeGreaterThan(tek(/app\.use\('\/api', apiLimiter\);/));
     // Öbür rota modülleriyle AYNI blok düzeyi (koşul altında değil).
     expect(girinti(erp)).toBe(girinti(tek(/^\s*trackingRoutes\(app, \{/)));
-    expect(kod).toMatch(/magazaErpRoutes\(app, \{\s*requireAuth, requireMfaVerified, dbLimiter, magazaYetkiKoduLimiter,\s*belirtecIptalDenetle: \(belirtec\) => getAuth\(\)\.verifyIdToken\(belirtec, true\),\s*panelKullanicisi: magazaPanelKullanici\.panelKullanicisi, kodDeposu: magazaPanelKodDeposu,\s*getPgPool: \(\) => pgPool, broadcastDocChange, writeAuditLog, bildirimIste: magazaBildirimIste,\s*smtpYapilandirmasi: \(\) => smtpYapilandirmasi\(\), serverTenantId,\s*panelDonus: magazaPanelAnahtari === null \? null : magazaPanelDonusTabani,\s*\}\);/);
+    // Dilim 2b: + `magazaIcerikLimiter` (elle talep / içerik / silme kovası) ve `revizeBildirimiIste` (revize kuyruğunun isteyicisi) —
+    // bağlam BİREBİR yeniden yazıldı. İki bildirim isteyicisi AYRI örneklerdir (ayrı kuyruk, ayrı «hazır» bayrağı).
+    expect(kod).toMatch(/magazaErpRoutes\(app, \{\s*requireAuth, requireMfaVerified, dbLimiter, magazaYetkiKoduLimiter, magazaIcerikLimiter,\s*belirtecIptalDenetle: \(belirtec\) => getAuth\(\)\.verifyIdToken\(belirtec, true\),\s*panelKullanicisi: magazaPanelKullanici\.panelKullanicisi, kodDeposu: magazaPanelKodDeposu,\s*getPgPool: \(\) => pgPool, broadcastDocChange, writeAuditLog, bildirimIste: magazaBildirimIste, revizeBildirimiIste: magazaRevizeBildirimIste,\s*smtpYapilandirmasi: \(\) => smtpYapilandirmasi\(\), serverTenantId,\s*panelDonus: magazaPanelAnahtari === null \? null : magazaPanelDonusTabani,\s*\}\);/);
+    // Revize isteyicisi YALNIZ ERP bağlamına gider: panel alt zinciri ve kimliksiz mağaza zinciri içerik yazmaz, revize bildirimi istemez.
+    expect(satirNo(/revizeBildirimiIste: /)).toEqual([erp + 4]);
   });
   it('`dbLimiter` TANIMI `if (pgPool) {` bloğunun DIŞINDA ve ÖNÜNDE (ERP mağaza uçları aynı kovayı kullanır; modül bloğun dışında kaydolur)', () => {
     const tanim = tek(/^\s*const dbLimiter = rateLimit\(\{\s*$/);
@@ -221,7 +235,8 @@ describe('site paneli ve ERP mağaza uçları — bağlama (dilim 2a)', () => {
 
 describe('bildirim: kuyruk + işçi', () => {
   it('kuyruk listede; işçi YALNIZ kuyruğu oluşturulabildiyse, meta seçenekleriyle ve `batchSize`sız bağlanır; bayrak en SONDA kalkar', () => {
-    expect(kod).toMatch(/const kuyruklar = \[[^\]]*MAGAZA_BILDIRIM_KUYRUGU\] as const;/);
+    // Dilim 2b: revize bildirimi AYRI kuyruktur; ikisi de listede (liste sırası: ilk bildirim, revize).
+    expect(kod).toMatch(/const kuyruklar = \[[^\]]*MAGAZA_BILDIRIM_KUYRUGU, MAGAZA_REVIZE_KUYRUGU\] as const;/);
     expect(kod).toMatch(/if \(olusanKuyruklar\.has\(MAGAZA_BILDIRIM_KUYRUGU\)\) \{\s+try \{\s+await boss\.work\(MAGAZA_BILDIRIM_KUYRUGU, MAGAZA_BILDIRIM_ISCI_SECENEKLERI, magazaBildirimIscisi\(magazaBildirimDeps\)\);\s+magazaBildirimKuyruguHazir = true;\s+\} catch/);
     expect(satirNo(/magazaBildirimKuyruguHazir = true/)).toHaveLength(1);
     // K6 (2026-10-09): kaçan bildirimler YALNIZ işçi bağlandıysa, if-bloğundan SONRA, açılışı beklemeden ve fırlatmadan kuyruğa alınır.
@@ -247,6 +262,37 @@ describe('bildirim: kuyruk + işçi', () => {
   });
   it('bağımlılıklar `initDocsTable` çağrısından ÖNCE tanımlı (işçi modül yüklenirken kaydedilir)', () => {
     expect(tek(/^const magazaBildirimDeps: MagazaBildirimDeps = \{/)).toBeLessThan(tek(/^async function initDocsTable\(/));
+  });
+});
+
+describe('revize bildirimi (dilim 2b, § 10.2 (e)): AYRI kuyruk + AYRI işçi + AYRI bayrak', () => {
+  it('işçi YALNIZ revize kuyruğu oluşturulabildiyse, ilk kuyrukla AYNI meta seçenekleriyle ve `batchSize`sız bağlanır; bayrak en SONDA kalkar', () => {
+    expect(kod).toMatch(/if \(olusanKuyruklar\.has\(MAGAZA_REVIZE_KUYRUGU\)\) \{\s+try \{\s+await boss\.work\(MAGAZA_REVIZE_KUYRUGU, MAGAZA_BILDIRIM_ISCI_SECENEKLERI, magazaRevizeBildirimIscisi\(magazaBildirimDeps\)\);\s+magazaRevizeKuyruguHazir = true;\s+\} catch/);
+    expect(satirNo(/magazaRevizeKuyruguHazir = true/)).toHaveLength(1);
+    expect(satirlar[tek(/boss\.work\(MAGAZA_REVIZE_KUYRUGU/) - 1].kod).not.toMatch(/batchSize/);
+    // İki işçi iki AYRI kuyruğa: revize işçisi ilk kuyruğa, ilk işçi revize kuyruğuna bağlanmaz (çapraz bağlama = yanlış gövdeli posta).
+    expect(satirNo(/boss\.work\(MAGAZA_BILDIRIM_KUYRUGU, [^)]*magazaRevizeBildirimIscisi/)).toEqual([]);
+    expect(satirNo(/boss\.work\(MAGAZA_REVIZE_KUYRUGU, [^)]*magazaBildirimIscisi\(/)).toEqual([]);
+  });
+  it('istek işlevi revize kuyruğunu YALNIZ revize bayrağı kalkmışsa görür (ilk kuyruğun bayrağıyla DEĞİL); modül düzeyinde, `initDocsTable`dan ÖNCE', () => {
+    const iste = tek(/^const magazaRevizeBildirimIste = magazaRevizeBildirimIsteyici\(\(\) => \(magazaRevizeKuyruguHazir \? boss : null\), magazaBildirimDeps\);$/);
+    expect(iste).toBeLessThan(tek(/^async function initDocsTable\(/));
+    tek(/^let magazaRevizeKuyruguHazir = false;$/);
+    // İki bayrak birbirinin yerine kullanılmaz.
+    expect(satirNo(/magazaRevizeBildirimIsteyici\([^)]*magazaBildirimKuyruguHazir/)).toEqual([]);
+    expect(satirNo(/magazaBildirimIsteyici\([^)]*magazaRevizeKuyruguHazir/)).toEqual([]);
+  });
+  it('kaçan revize bildirimleri YALNIZ revize işçisi bağlandıysa, işçi bloğundan SONRA, açılışı beklemeden ve fırlatmadan kuyruğa alınır', () => {
+    const kacan = tek(/^\s*if \(magazaRevizeKuyruguHazir\) void magazaRevizeKacanlariKuyrukla\(magazaBildirimDeps, \(\) => boss\)\.catch\(\(\) => undefined\);$/);
+    expect(kacan).toBeGreaterThan(tek(/magazaRevizeKuyruguHazir = true;/));
+    expect(kacan).toBeLessThan(tek(/console\.log\('pg-boss ready/));
+    expect(satirNo(/magazaRevizeKacanlariKuyrukla\(/)).toEqual([kacan]);
+  });
+  it('«yazıldı ama bağlanmadı»: isteyici ERP rota bağlamına `revizeBildirimiIste` olarak geçer (panel ve dış zincir revize istemez)', () => {
+    // İçerik yazımı (`/icerik`) ve `bildirim-gonder?tur=revize` yalnız ERP uçlarındadır; bağlam alanı bağlanmazsa derlenmez
+    // (`MagazaErpRouteCtx.revizeBildirimiIste` zorunlu) — burada AYNI tanımlayıcının geçtiği kilitlenir (ilk kuyruğun isteyicisi değil).
+    expect(satirNo(/\brevizeBildirimiIste: magazaRevizeBildirimIste\b/)).toHaveLength(1);
+    expect(satirNo(/\brevizeBildirimiIste: magazaBildirimIste\b/)).toEqual([]);
   });
 });
 
