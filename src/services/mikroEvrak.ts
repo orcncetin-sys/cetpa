@@ -8,13 +8,17 @@
  */
 
 import { authFetch } from './authFetch';
-import { enqueueSyncJob, processPendingSyncJobs, type SyncJob } from './syncRetryService';
+import { enqueueSyncJob, processPendingSyncJobs, IsiBirak, type SyncJob } from './syncRetryService';
+import { evrakKapisindanGecer } from '../lib/mikroEvrakKapilari';
+import type { AppRole } from '../lib/rbac';
 
 export interface MikroPushResult {
   success: boolean;
   error?: string | null;
   notConfigured?: boolean;
   data?: unknown;
+  /** Sunucu 403 döndü (rol kapısı / MFA): bu OTURUM gönderemez. Yeniden deneme kuyruğu bunu deneme saymaz. */
+  yetkiYok?: boolean;
 }
 
 /** Retry kuyruğunda saklanan Mikro işinin payload yapısı. */
@@ -41,7 +45,9 @@ async function rawMikroPush(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ method, payload, ...meta }),
   });
-  return r.json() as Promise<MikroPushResult>;
+  const govde = await r.json() as MikroPushResult;
+  // 403 gövdesi `{ error }` taşır (`success` yok) — düğme metni gösterir; kuyruk yürütücüsü ise ayırt edebilmeli.
+  return r.status === 403 ? { ...govde, yetkiYok: true } : govde;
 }
 
 export async function pushMikroEvrak(
@@ -61,17 +67,28 @@ export async function pushMikroEvrak(
   }
 }
 
-/** Kuyruktaki bekleyen Mikro işlerini yeniden çalıştırır (app açılışı + periyodik). */
-export async function processMikroRetries(): Promise<void> {
+/**
+ * Kuyruktaki bekleyen Mikro işlerini yeniden çalıştırır (app açılışı + periyodik).
+ *
+ * `rol` = BU oturumun rolü (2026-10-10, Mikro rol kapıları). Kuyruk kiracı kapsamlıdır: işi kuyruğa koyan değil, uygulaması
+ * açık olan kullanıcı KENDİ kimliğiyle gönderir; `evrak/kaydet` ise yönteme göre rol kapılıdır. İki katman:
+ *   1) sahiplenmeden ÖNCE süzgeç — rolün kapıdan geçemeyeceği iş HİÇ alınmaz (yetkili oturuma kalır);
+ *   2) yine de 403 gelirse (rol istemcide bayat, MFA) iş BIRAKILIR — deneme hakkı yanmaz (IsiBirak).
+ * `rol` verilmezse süzgeç uygulanmaz (yalnız 2. katman).
+ */
+export async function processMikroRetries(rol?: AppRole | null): Promise<void> {
   await processPendingSyncJobs(async (job: SyncJob) => {
     if (job.type !== 'mikro') return; // bu işleyici yalnız Mikro işlerini çalıştırır
     const { method, payload, meta } = job.payload as MikroJobPayload;
     const result = await rawMikroPush(method, payload, meta);
+    if (result.yetkiYok) throw new IsiBirak('Bu oturumun yetkisi bu Mikro işini göndermeye yetmiyor.');
     if (!result.success) {
       // notConfigured kalıcı bir durumdur — tekrar denemenin anlamı yok, ölü işaretle
       throw new Error(result.notConfigured ? 'Mikro yapılandırılmamış' : (result.error || 'Mikro push başarısız'));
     }
-  });
+  }, rol === undefined
+    ? undefined
+    : (job: SyncJob) => job.type !== 'mikro' || evrakKapisindanGecer(rol, (job.payload as MikroJobPayload | undefined)?.method ?? ''));
 }
 
 /**

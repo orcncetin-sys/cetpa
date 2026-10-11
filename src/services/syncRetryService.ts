@@ -39,6 +39,18 @@ function jobRef(id: string) {
   return doc(collection(db, COLLECTION), id);
 }
 
+/**
+ * Yürütücü bunu fırlatırsa iş BIRAKILIR: `queued`'a döner, deneme hakkı YANMAZ (2026-10-10, Mikro rol kapıları).
+ *
+ * NEDEN: kuyruk kiracı kapsamlıdır — işi kuyruğa KOYAN değil, o an uygulaması AÇIK olan kullanıcının tarayıcısı sahiplenir
+ * ve KENDİ kimliğiyle gönderir. Sunucu kapısı o role 403 dönerse bu, işin değil OTURUMUN yetersizliğidir: deneme sayılsaydı
+ * yetkisiz beş tarayıcı meşru gönderimi sessizce `dead` yapardı. Bırakılan işi yetkili bir oturum sonraki turda alır.
+ */
+export class IsiBirak extends Error {}
+
+/** Bırakılan iş bu kadar sonra yeniden uygun olur (zamanlayıcı turu: App.tsx 90 sn). */
+const ISI_BIRAK_BEKLEME_MS = 90_000;
+
 /** Exponential backoff: 30 s * 2^attempts  (30s → 1m → 2m … en fazla ~1 saat).
  *  attempts üst sınırı: büyük değerlerde Infinity'ye taşıp işi kalıcı kuyrukta bırakmasın. */
 function backoffMs(attempts: number): number {
@@ -96,6 +108,8 @@ export async function enqueueSyncJob(
  */
 export async function processPendingSyncJobs(
   executor: (job: SyncJob) => Promise<void>,
+  /** Sahiplenmeden ÖNCE süzgeç: `false` dönen iş bu oturumda HİÇ alınmaz (durumu, deneme sayısı değişmez). */
+  uygunMu?: (job: SyncJob) => boolean,
 ): Promise<void> {
   const now = Date.now();
 
@@ -103,14 +117,16 @@ export async function processPendingSyncJobs(
     collection(db, COLLECTION),
     where('status', '==', 'queued'),
     where('nextRetryAt', '<=', now),
-    limit(20),
   );
 
   const snapshot = await getDocs(q);
 
   if (snapshot.empty) return;
 
-  const jobs = snapshot.docs.map((d) => d.data() as SyncJob);
+  // Tur tavanı (20) rol süzgecinden SONRA uygulanır (2026-10-10 inceleme bulgusu): sorguda `limit(20)` iken bu oturumun
+  // gönderemeyeceği 20 iş pencereyi doldurunca oturum kendi işine HİÇ ulaşamıyordu. Ek maliyet yok: `getDocs` koleksiyonu
+  // zaten tümüyle çeker, `limit` yalnız istemcide keser (dbClient `applyConstraints`).
+  const jobs = snapshot.docs.map((d) => d.data() as SyncJob).filter((job) => !uygunMu || uygunMu(job)).slice(0, 20);
 
   await Promise.allSettled(
     jobs.map(async (job) => {
@@ -134,6 +150,15 @@ export async function processPendingSyncJobs(
           updatedAt: Date.now(),
         });
       } catch (err) {
+        // Oturumun yetkisi yetmedi → işi bırak: `attempts` DEĞİŞMEZ (bkz. IsiBirak).
+        if (err instanceof IsiBirak) {
+          await updateDoc(ref, {
+            status: 'queued',
+            nextRetryAt: Date.now() + ISI_BIRAK_BEKLEME_MS,
+            updatedAt: Date.now(),
+          });
+          return;
+        }
         const errorMessage =
           err instanceof Error ? err.message : String(err);
         const newAttempts = job.attempts + 1;

@@ -362,7 +362,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
       {selectedQuotation && !isEditingQuotation && (
         <QuotationDetail isOpen={!!selectedQuotation} quotation={selectedQuotation} onClose={() => setSelectedQuotation(null)}
           onEdit={(q) => { setSelectedQuotation(q); setIsEditingQuotation(true); }}
-          onConvertToOrder={handleConvertToOrder} t={currentT} />
+          onConvertToOrder={handleConvertToOrder} mikroGonderebilir={icRol} t={currentT} />
       )}
 
       {/* Dealers Tab */}

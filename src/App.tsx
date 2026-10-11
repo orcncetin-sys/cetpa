@@ -1190,11 +1190,12 @@ function AppContent() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    const tick = () => { if (!cancelled) void processMikroRetries().catch(() => {}); };
+    // Rol geçirilir: `evrak/kaydet` yönteme göre rol kapılı — bu oturumun gönderemeyeceği iş sahiplenilmez (mikroEvrak.ts).
+    const tick = () => { if (!cancelled) void processMikroRetries(userRole).catch(() => {}); };
     tick(); // açılışta bir kez
     const timer = setInterval(tick, 90_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [user]);
+  }, [user, userRole]);
 
   // Check if module is accessible by subscription
   const canAccessBySubscription = (tabId: string): boolean => {

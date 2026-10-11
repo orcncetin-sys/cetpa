@@ -21,10 +21,13 @@ interface QuotationDetailProps {
   onClose: () => void;
   onEdit: (q: Quotation) => void;
   onConvertToOrder?: (q: Quotation) => Promise<void>;
+  /** «Mikro'ya Gönder» düğmesi yalnız İÇ rolde (2026-10-10): `POST /api/mikro/evrak/kaydet` rol kapılı — B2B / Bayi'de düğme
+   *  her tıklamada 403 verirdi. Zorunlu prop: çağıran rolü bilerek geçirir (B2BPortal `icRol`). */
+  mikroGonderebilir: boolean;
   t: Record<string, string>;
 }
 
-export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, onConvertToOrder, t }: QuotationDetailProps) {
+export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, onConvertToOrder, mikroGonderebilir, t }: QuotationDetailProps) {
   const [isConverting, setIsConverting] = React.useState(false);
   const [pdfError, setPdfError] = React.useState<string | null>(null);
 
@@ -276,6 +279,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {mikroGonderebilir && (
             <MikroPushButton
               method="VerilenTeklifKaydetV2"
               label="Mikro'ya Gönder"
@@ -293,6 +297,7 @@ export default function QuotationDetail({ isOpen, quotation, onClose, onEdit, on
                 });
               }}
             />
+            )}
             <button onClick={exportToPDF} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-600" title="PDF İndir">
               <Download className="w-5 h-5" />
             </button>

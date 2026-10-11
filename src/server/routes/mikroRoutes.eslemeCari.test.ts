@@ -164,6 +164,72 @@ describe('POST /api/mikro/cari/listesi — okuma arızası uyarısı', () => {
   });
 });
 
+// 2026-10-10 inceleme bulgusu (Mikro rol kapısı): arama dalı iç personel kapısında (`cariListesiKapisi`), tam import
+// `leads` yazma kapısında. `{ nameSearch: '%' }` LIKE jokeri olduğu için HER cariyle eşleşiyor ve 50 sayfa çekiyordu —
+// tek karakterle tam importun kapısı iç personel kapısına düşüyordu. Fark artık metne değil SATIR SAYISINA bağlı:
+// arama tek sayfa (en çok 200 cari) çeker ve jokerler köşeli parantezle düz karaktere döner.
+describe('POST /api/mikro/cari/listesi — arama dalı TEK sayfa, LIKE jokerleri düz karakter', () => {
+  /** Mikro her sayfayı DOLU (200 satır) döner: döngüyü yalnız sayfa tavanı durdurur. */
+  function doluSayfalar() {
+    vi.mocked(mikroPost).mockImplementation((async (metot: string, govde: { Index: number }) => {
+      if (metot !== 'CariListesiV2') return { ok: false, data: null };
+      const cari = Array.from({ length: 200 }, (_, i) => ({ cari_kod: `C${govde.Index}-${i}`, cari_unvan1: `ŞİRİN İNŞAAT ${govde.Index}-${i}`, cari_hareket_tipi: 0 }));
+      return { ok: true, data: { result: [{ Data: { CariListesi: cari } }] } };
+    }) as unknown as typeof mikroPost);
+  }
+  const cagrilar = () => vi.mocked(mikroPost).mock.calls.map(c => c[1] as { WhereStr: string; Index: number; Size: string });
+  // Çağrı sayısı iddia ediliyor: önceki testlerin çağrı geçmişi (dosya düzeyinde `restoreAllMocks` `vi.fn` geçmişini silmez) karışmasın.
+  beforeEach(() => { vi.mocked(mikroPost).mockClear(); });
+
+  it("`{ nameSearch: '%' }` → Mikro TAM 1 kez çağrılır, joker düz karakter (`[%]`), en çok 200 cari yazılır ve yanıt kesildiğini söyler", async () => {
+    doluSayfalar();
+    const res = await d.cagir('POST', '/api/mikro/cari/listesi', { nameSearch: '%' });
+    expect(mikroPost).toHaveBeenCalledTimes(1);
+    expect(cagrilar()).toMatchObject([{ WhereStr: "cari_unvan1 LIKE '%[%]%'", Index: 0, Size: '200' }]);
+    expect(d.koleksiyon('leads')).toHaveLength(200);
+    expect(govdesi(res)).toMatchObject({ success: true, count: 200, created: 200, truncated: true, limit: 200 });
+    // Arama sınırı «veri eksik» alarmı DEĞİLDİR: açılış tanısı (`acilisTani.ts`) syncLog özetinde «TAVANINA ÇARPTI» arar;
+    // 200 eşleşmeli her arama tam importun tavan uyarısıyla aynı işareti basarsa gerçek eksik veri gölgelenir.
+    const ozet = String(d.syncLog.mock.calls.at(-1)?.[2]);
+    expect(ozet).toContain('arama ilk 200 eşleşmeyle sınırlandı');
+    expect(ozet).not.toContain('TAVANINA');
+  });
+
+  it("üç joker (`%`, `_`, `[`) köşeli parantezle, tek tırnak çiftlenerek kaçırılır; düz metin AYNEN geçer — hepsi tek sayfa", async () => {
+    doluSayfalar();
+    for (const nameSearch of ["a%'[_", '_', 'yapı']) await d.cagir('POST', '/api/mikro/cari/listesi', { nameSearch });
+    expect(cagrilar().map(c => c.WhereStr)).toEqual([
+      "cari_unvan1 LIKE '%a[%]''[[][_]%'",
+      "cari_unvan1 LIKE '%[_]%'",
+      "cari_unvan1 LIKE '%yapı%'",
+    ]);
+    expect(cagrilar().map(c => c.Index)).toEqual([0, 0, 0]);
+  });
+
+  it('`{}` (tam import, `leads` yazma kapılı dal) DEĞİŞMEDİ: sayfalama sürer, 50 sayfa / 10.000 cari tavanında durur', async () => {
+    doluSayfalar();
+    const res = await d.cagir('POST', '/api/mikro/cari/listesi', {});
+    expect(mikroPost).toHaveBeenCalledTimes(50);
+    expect(cagrilar().map(c => c.Index)).toEqual(Array.from({ length: 50 }, (_, i) => i));
+    expect(new Set(cagrilar().map(c => c.WhereStr))).toEqual(new Set(["cari_baglanti_tipi=0 and cari_lastup_date > '2000/01/01'"]));
+    expect(govdesi(res)).toMatchObject({ success: true, count: 10_000, truncated: true, limit: 10_000 });
+    expect(String(d.syncLog.mock.calls.at(-1)?.[2])).toContain('SAYFA TAVANINA ÇARPTI, veri eksik');
+  });
+
+  it('sayfa dolu değilse tam import da erken biter (dolu, dolu, kısa → 3 çağrı); kesilme bildirilmez', async () => {
+    vi.mocked(mikroPost).mockImplementation((async (metot: string, govde: { Index: number }) => {
+      if (metot !== 'CariListesiV2') return { ok: false, data: null };
+      const adet = govde.Index < 2 ? 200 : 5;
+      const cari = Array.from({ length: adet }, (_, i) => ({ cari_kod: `C${govde.Index}-${i}`, cari_unvan1: `ŞİRİN İNŞAAT ${govde.Index}-${i}`, cari_hareket_tipi: 0 }));
+      return { ok: true, data: { result: [{ Data: { CariListesi: cari } }] } };
+    }) as unknown as typeof mikroPost);
+    const res = await d.cagir('POST', '/api/mikro/cari/listesi', {});
+    expect(mikroPost).toHaveBeenCalledTimes(3);
+    expect(govdesi(res)).toMatchObject({ success: true, count: 405 });
+    expect('truncated' in govdesi(res)).toBe(false);
+  });
+});
+
 describe('POST /api/mikro/pull/bakiye — toplu sıfırlama kapısı', () => {
   it('bakiye HİÇBİR satırda okunamazsa 502 döner ve TEK BİR yazım bile yapılmaz (aksi hâlde tüm bakiyeler sıfırlanırdı)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

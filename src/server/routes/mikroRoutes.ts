@@ -16,7 +16,7 @@
  *
  * ICERIDE KALAN (olculdu - yalniz bu rotalar kullaniyor): SQL import motoru
  * (mikroSqlImportCalistir, makeMikroSqlImport, makeMikroListImport,
- * SQL_IMPORT_TANIMLARI), MIKRO_PUSH_WHITELIST, firstArrayIn. (stok-miktar'in
+ * SQL_IMPORT_TANIMLARI), firstArrayIn (evrak beyaz listesi artık src/lib/mikroEvrakKapilari.ts). (stok-miktar'in
  * eski surec-ici kilit bayragi 2026-09-24'te src/server/mikro/arkaPlanIsi.ts
  * surec-geneli kilidine tasindi — 15 import ucu (stok, cari, stok-miktar, 12 SQL
  * fabrika; 4 cagri yeri) o yardimciya baglanir.)
@@ -29,7 +29,7 @@
  * blogundan kapanis `});`ine kadar hesaplaniyor.
  */
 import type { AdminDbLike, AdminDocRef, DocDaralt } from '../adminDbTypes.js';
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, Response, NextFunction } from 'express';
 import { FaturaKaydetSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema, type Sema } from '../schemas.js';
 import { zamanla, isGunu } from '../zamanla.js';
 import { opsJetonuGecerli } from '../opsJeton.js';
@@ -57,6 +57,7 @@ import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
 import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
 import { EXTERNAL_ROLES, type AppRole } from '../../lib/rbac.js';
 import { mikroIsAdi } from '../../lib/mikroIsAdi.js';
+import { MIKRO_EVRAK_KAPILARI, evrakYontemi } from '../../lib/mikroEvrakKapilari.js';
 import { arkaPlanIsiBaslat, arkaPlanOnKontrol, arkaPlanYaziciAdi, arkaPlanIsiKosan, bakimKilidiMesaji, type ArkaPlanBagimlilik, type BaslatSonucu } from '../mikro/arkaPlanIsi.js';
 import { araligiTopla, ALT_STOK, ALT_CARI, type SayfaSayaclari } from '../mikro/adaptifSayfalama.js';
 import { bilinenSayi } from '../../utils/para.js';
@@ -166,6 +167,46 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   };
   const YABANCI_BELGE = { success: false, error: 'Kayıt bulunamadı.' } as const;   // varlığı sızdırmamak için 'yabanci' ve 'yok' aynı yanıt
 
+  // ── ROL KAPILARI (2026-10-10) ────────────────────────────────────────────────
+  // KURAL: bu dosyadaki HER `/api/mikro/*` kaydı kimlikten SONRA bir rol kapısı taşır — `C.requireStaff`,
+  // `C.requireCollectionAccess(…)` ya da aşağıdaki gövdeye bağlı üç kapıdan biri. Tek istisna ops jetonu kapılı yedi tanı
+  // ucudur (zincirleri boş, ilk satırları `opsJetonuGecerli`). Zincir sırası: kimlik → MFA → ROL KAPISI → hız sınırı →
+  // işleyici. `requireAuth` yalnız «oturum açmış» der (dış rol dâhil); `requireMfaVerified` MFA kurmamış hesabı geçirir —
+  // ikisi de rol kapısı DEĞİLDİR. Kapının koleksiyonu = ucun Cetpa'daki EŞDEĞER işleminin kuralı (rbac.ts); bir ince kapı
+  // yalnız ucu çağıran ekranı bugün gören her rol o kapıdan geçiyorsa konur, yoksa uç `requireStaff`'ta kalır.
+  // `requireAdmin` BİLEREK kullanılmaz: süper yöneticiyi geçirmez, sahip hesabı ise Ayarlar'ı rolünden bağımsız görür.
+  // Kapısız yeni uç eklenirse çit kırılır: mikroRoutes.rolKapisi.test.ts.
+
+  /** `cari/kaydet` hedef koleksiyonu. Kapı ve işleyici AYNI ayıklayıcıyı kullanır — ayrışırlarsa kapı `leads`'e bakarken
+   *  işleyici `suppliers`'a yazar. Beyaz liste: tanınmayan değer `leads`. */
+  const cariHedefKoleksiyonu = (govde: unknown): 'leads' | 'suppliers' =>
+    (govde as { collection?: unknown } | undefined)?.collection === 'suppliers' ? 'suppliers' : 'leads';
+  /** Eşdeğer işlemin kapısı: müşteri → `leads` yazma, tedarikçi → `suppliers` yazma (rbac.ts). Sabit `leads` yazma kapısı
+   *  Satın Alma'yı sessizce kilitlerdi (yeni tedarikçi Cetpa'da açılır, Mikro'ya hiç gitmez). Mikro tarafında cari havuzu
+   *  tektir: etkin kapı iki kuralın BİRLEŞİMİDİR; gövdedeki `collection` yalnız Cetpa damgasının hedefini belirler. */
+  const cariHedefKapisi = (req: Request, res: Response, next: NextFunction) =>
+    C.requireCollectionAccess(cariHedefKoleksiyonu(req.body), 'write')(req, res, next);
+
+  /** `cari/listesi` arama metni — kapı ve işleyici ortak (boş = TAM cari importu, dolu = ada göre arama). */
+  const cariAramaMetni = (govde: unknown): string => {
+    const m = (govde as { nameSearch?: unknown } | undefined)?.nameSearch;
+    return typeof m === 'string' ? m.trim().slice(0, 100) : '';
+  };
+  /** Arama metni yoksa uç 10.000 cariye kadar `leads` upsert eder = `import/cari` ile aynı işlem → `leads` yazma kapısı.
+   *  Arama dalı iç personelde kalır: Satın Alma ve CRM'deki «Mikro'da ara» kutularını `leads` yazamayan roller de görüyor
+   *  (ince kapı onları kilitlerdi — karar bekliyor). Arama dalı istek başına en çok 200 cari upsert eder: işleyici aramada
+   *  TEK sayfa çeker ve LIKE jokerlerini (`%`, `_`, `[`) düz karaktere çevirir — yoksa `%` araması tam importun `leads` yazma
+   *  kapısını iç personel kapısına düşürürdü (2026-10-10 inceleme bulgusu). */
+  const cariListesiKapisi = (req: Request, res: Response, next: NextFunction) =>
+    cariAramaMetni(req.body) ? C.requireStaff(req, res, next) : C.requireCollectionAccess('leads', 'write')(req, res, next);
+
+  /** `evrak/kaydet`: kapı YÖNTEME göre (tablo: src/lib/mikroEvrakKapilari.ts). Tanınmayan yöntem iç personel kapısına düşer;
+   *  işleyici onu 400 ile reddeder (dış rol 403'te kalır — beyaz listeyi yoklayamaz). */
+  const evrakYontemKapisi = (req: Request, res: Response, next: NextFunction) => {
+    const kapi = MIKRO_EVRAK_KAPILARI.get(evrakYontemi(req.body));
+    return kapi === undefined || kapi === 'staff' ? C.requireStaff(req, res, next) : C.requireCollectionAccess(kapi[0], kapi[1])(req, res, next);
+  };
+
   // ── Mikro Jump API Routes ────────────────────────────────────────────────────
 
   /** GET /api/mikro/status — is Mikro configured and the FULL API context working?
@@ -173,7 +214,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  surface here instead of silently failing during imports.
    */
   /** GET /api/mikro/tablolar — Mikro tablo aynası: eşleşme kayıtları + canlı satır sayıları. */
-  app.get('/api/mikro/tablolar', C.requireAuth, async (_req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlikti — dış rol dâhil herkes Mikro ayna tablolarının dökümünü okuyordu. Bakım ucu: Yönetici + Müdür (`settings` okuma kuralı).
+  app.get('/api/mikro/tablolar', C.requireAuth, C.requireCollectionAccess('settings', 'read'), async (_req: Request, res: Response) => {
     if (!C.getPgPool()) return res.status(503).json({ success: false, error: 'DATABASE_URL tanımlı değil.' });
     try {
       const { rows: eslesme } = await C.getPgPool().query('SELECT * FROM mikro_tablo_eslesme ORDER BY mikro_tablo');
@@ -265,7 +307,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   });
 
   /** POST /api/mikro/stok/kaydet — push inventory item → Mikro StokKaydetV2 */
-  app.post('/api/mikro/stok/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = eşdeğer işlem (`inventory` yazma).
+  app.post('/api/mikro/stok/kaydet', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('inventory', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { item, firebaseId } = req.body as { item: Record<string, unknown>; firebaseId: string };
@@ -314,7 +357,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   });
 
   /** POST /api/mikro/stok/listesi — pull Mikro StokListesiV2 → Firebase */
-  app.post('/api/mikro/stok/listesi', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Uç `inventory.stockLevel` yazar → `inventory` yazma.
+  app.post('/api/mikro/stok/listesi', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('inventory', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { stokKod = '', ilkTarih = '2020-01-01', size = 100, index = 0 } = req.body || {};
@@ -374,14 +418,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  `collection` (varsayilan 'leads') hangi Firebase koleksiyonuna mikroCariKod
    *  yazilacagini belirler - 'suppliers' icin de kullanilabilir (Satinalma
    *  modulundeki tedarikci-Mikro eslestirme). */
-  app.post('/api/mikro/cari/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı gövdedeki hedefe göre: `leads` ya da `suppliers` yazma.
+  app.post('/api/mikro/cari/kaydet', C.requireAuth, C.requireMfaVerified, cariHedefKapisi, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { lead, firebaseId } = req.body as { lead: Record<string, unknown>; firebaseId: string };
     // Koleksiyon adı ÇALIŞMA ANINDA beyaz listeden: eski `as { collection?: 'leads' | 'suppliers' }` yalnız bir TİP
     // iddiasıydı — istemci `collection: 'settings'` gönderip adminDb ile (RBAC dışı) herhangi bir koleksiyondaki
     // dokümana mikroSynced/mikroCariKod yazdırabiliyordu (2026-09-19).
-    const targetCollection: 'leads' | 'suppliers' = (req.body as { collection?: unknown })?.collection === 'suppliers' ? 'suppliers' : 'leads';
+    const targetCollection = cariHedefKoleksiyonu(req.body);   // rol kapısıyla (cariHedefKapisi) AYNI ayıklayıcı
     if (await belgeSahipligi(targetCollection, firebaseId, await C.reqCompanyId(req)) === 'yabanci') return res.status(404).json(YABANCI_BELGE);
     const t0 = Date.now();
 
@@ -436,7 +481,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  WhereStr'i serbest SQL parcasi kabul ettigi icin (SqlVeriOkuV2/ListesiV2
    *  ortak deseni) dogrudan client whereStr'i arama girdisiyle beslemek
    *  Mikro'nun sorgusuna enjeksiyon acardi. */
-  app.post('/api/mikro/cari/listesi', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Tam import `leads` yazma kapısında, arama iç personelde.
+  app.post('/api/mikro/cari/listesi', C.requireAuth, C.requireMfaVerified, cariListesiKapisi, async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-cari-listesi:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
@@ -450,15 +496,14 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // Artık gece cron'uyla AYNI mantık: tam sayfalama + upsert, eşleme
     // önceliği mikroCariKod → VKN → isim (elle oluşturulmuş kayıtların
     // mikroCariKod'u olmadığı için salt-kod eşleşme onları ikinci kez yaratırdı).
-    const body = req.body || {};
-    const nameSearch = typeof body.nameSearch === 'string' ? body.nameSearch.trim().slice(0, 100) : '';
+    const nameSearch = cariAramaMetni(req.body);   // rol kapısıyla (cariListesiKapisi) AYNI ayıklayıcı
     // Mikro WhereStr serbest SQL parçası kabul eder; istemci whereStr'i ASLA
     // doğrudan geçirilmez (enjeksiyon). nameSearch escape'li LIKE'a çevrilir.
     const whereStr = nameSearch
-      ? `cari_unvan1 LIKE '%${nameSearch.replace(/'/g, "''")}%'`
+      ? `cari_unvan1 LIKE '%${nameSearch.replace(/[[%_]/g, '[$&]').replace(/'/g, "''")}%'`
       : "cari_baglanti_tipi=0 and cari_lastup_date > '2000/01/01'";
     const SAYFA = 200;
-    const MAKS_SAYFA = 50;   // 10.000 cari tavanı; çarparsa yanıtta bildirilir
+    const MAKS_SAYFA = nameSearch ? 1 : 50;   // arama tek sayfa (en çok 200 cari); tam import 10.000 cari tavanı
     const t0 = Date.now();
 
     try {
@@ -535,7 +580,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       if (eslemeOzeti.okumaArizasi.length) console.warn('[cari/listesi] okuma arızası:', eslemeOzeti.not);
 
       const duration = Date.now() - t0;
-      const ozet = `${cariler.length} cari çekildi — ${yeni} yeni, ${guncel} güncellendi${tavanaCarpti ? ' — SAYFA TAVANINA ÇARPTI, veri eksik' : ''}${eslemeOzeti.not ? ` — ${eslemeOzeti.not}` : ''}`;
+      const ozet = `${cariler.length} cari çekildi — ${yeni} yeni, ${guncel} güncellendi${tavanaCarpti ? (nameSearch ? ` — arama ilk ${SAYFA} eşleşmeyle sınırlandı` : ' — SAYFA TAVANINA ÇARPTI, veri eksik') : ''}${eslemeOzeti.not ? ` — ${eslemeOzeti.not}` : ''}`;
       await C.writeSyncLog('CariListesiV2', 'lead', ozet, true, null, null, duration, C.reqActor(req));
       await C.writeAuditLog(C.reqActor(req), 'Mikro Cari Listesi Çekme', ozet);
       res.json({ success: true, count: cariler.length, created: yeni, updated: guncel,
@@ -549,7 +594,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/siparis/kaydet — push order → Mikro SiparisKaydetV2 */
   // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (Mikro'ya satış siparişi + kiracıdaki herhangi bir siparişe damga).
-  app.post('/api/mikro/siparis/kaydet', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): iç personel şartına `orders` yazma eklendi (kural dış rol içerdiği için `requireStaff` KALIR) — uca yalnız siparişi Cetpa'ya yazabilen rol ulaşıyor.
+  app.post('/api/mikro/siparis/kaydet', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.requireCollectionAccess('orders', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     const { order, firebaseId } = req.body as { order: Record<string, unknown>; firebaseId: string };
@@ -655,7 +701,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  ARKA PLAN İŞİ (2026-09-24): yanıt anında `{ started:true, job:'mikroImport-stok' }`; ilerleme/sonuç
    *  `jobs/mikroImport-stok` (created/updated/errors/bozukKayit/zamanAsimiSayfa/zamanAsimiKayit/fiyatliUrun/
    *  note/offset/sonSayfaMs/durationMs/error). Eski `{created,…}` yanıtı istemci şartnamesine devredildi. */
-  app.post('/api/mikro/import/stok', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`inventory` yazma).
+  app.post('/api/mikro/import/stok', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('inventory', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
@@ -950,7 +997,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   /** POST /api/mikro/import/cari — import ALL Mikro cari → Firebase leads.
    *  ARKA PLAN İŞİ (2026-09-24): yanıt anında `{ started:true, job:'mikroImport-cari' }`; ilerleme/sonuç
    *  `jobs/mikroImport-cari` (created/updated/errors/bozukKayit/zamanAsimiSayfa/zamanAsimiKayit/sayfa/sonSayfaMs/note/error). */
-  app.post('/api/mikro/import/cari', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`leads` yazma).
+  app.post('/api/mikro/import/cari', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('leads', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
 
@@ -1622,7 +1670,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     extraBody?:  Record<string, unknown>;         // method'a özel ek parametreler
     postProcess?: (rows: Record<string, unknown>[], companyId: string) => Promise<string | null>;
   }) {
-    app.post(opts.route, C.requireAuth, async (req: Request, res: Response) => {
+    // Rol kapısı (2026-10-10): bu fabrikanın ÇAĞIRANI YOK (ölü kod); çağrıldığı gün MFA'sız ve rolsüz bir import ucu doğmasın
+    // diye zinciri `makeMikroSqlImport` ile aynı.
+    app.post(opts.route, C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess(opts.collection, 'write'), async (req: Request, res: Response) => {
       if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
       if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
       // Kullanıcının uid'i DEĞİL, ait olduğu firmanın id'si (bkz. writeAuditLog
@@ -2774,7 +2824,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  dokümanları siler — elle girilmiş veya düzeltilmiş kayıtlara (source:'mikro')
    *  DOKUNMAZ.
    */
-  app.post('/api/mikro/tamir/ham-satir-temizle', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Uç Cetpa'dan SİLER → `/api/db` silme kuralı (Yönetici + Müdür; kalıp: `siparis/sil`).
+  app.post('/api/mikro/tamir/ham-satir-temizle', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('bankAccounts', 'delete'), async (req: Request, res: Response) => {
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const hedefler = ['bankAccounts', 'kasalar', 'warehouses'];
     const sonuc: Record<string, number> = {};
@@ -3440,7 +3491,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  src/server/mikro/arkaPlanIsi.ts'e ÇIKARILDI — 15 import ucu aynı yardımcıyı kullanır;
    *  doküman id'si/alanları AYNEN (panel paritesi), +companyId/isAdi damgası.
    */
-  app.post('/api/mikro/import/stok-miktar', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`inventory` yazma).
+  app.post('/api/mikro/import/stok-miktar', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('inventory', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     // Kısa devre ÖNCE (HEAD 2582 kuralı): iş zaten koşuyorsa ya da bakım kilidi varsa hiçbir yoklama/sorgu
@@ -3723,7 +3775,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  kullanıcının kendi verisinden okuyoruz. Örnek alanlar da dönüyor ki
    *  DekontKaydetV2 gövdesini onların kullandığı kalıba göre dolduralım.
    */
-  app.get('/api/mikro/cari-hareket/turler', C.requireAuth, C.mikroLimiter, async (_req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlikti. GEÇİCİ `leads` okuma: dekont penceresini bugün gören rollerin tam kümesi (kalıcı kapı `mikroCariHareketler` okuma — karar bekliyor).
+  app.get('/api/mikro/cari-hareket/turler', C.requireAuth, C.requireCollectionAccess('leads', 'read'), C.mikroLimiter, async (_req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     try {
       const { rows, hata } = await mikroSql(
@@ -3776,7 +3829,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  (V17 DekontKaydetV2 zarfı + zorunlu beşli denetimi; 2026-07-30 canlı-doğrulama
    *  notu oraya TAŞINDI).
    */
-  app.post('/api/mikro/cari-hareket/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = eşdeğer işlem (`mikroCariHareketler` yazma).
+  app.post('/api/mikro/cari-hareket/kaydet', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('mikroCariHareketler', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { hareket, aciklama } = req.body as { hareket: Record<string, unknown>; aciklama?: string };
     if (!hareket || typeof hareket !== 'object') return res.status(400).json({ success: false, error: 'hareket alanı zorunlu.' });
@@ -3811,28 +3865,17 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   // V17 Kaydet endpoint'leri için tek kapı. Alan eşlemesi client'taki
   // mikroEvrak.ts eşleyicilerinde yapılır; server yalnızca whitelist'i
   // doğrular, Mikro'ya iletir (payload Mikro objesi İÇİNDE) ve loglar.
-  const MIKRO_PUSH_WHITELIST = new Set([
-    'VerilenTeklifKaydetV2', 'AlinanTeklifKaydetV2',
-    'SayimSonuclariKaydetV2', 'SayimKesinlestirmeV2',
-    'DahiliStokHareketKaydetV2',
-    'PersonelIzinTalepKaydetV2', 'PersonelizinKaydetV2', 'PersonelKaydetV2',
-    'SatinAlmaTalepKaydetV2',
-    'DepolarArasiSiparisKaydetV2',
-    'BakimTalepKaydetV2', 'BakimHareketleriKaydetV2', 'BakimSarfiyatlariKaydetV2', 'BakimSozlesmeKaydetV2',
-    'ServisIsEmriKaydetV2', 'ServisFormuKaydetV2', 'ServisMalzemePlanKaydetV2', 'ServisRotaPlanKaydetV2',
-    'UretimTalepKaydetV2', 'UrunReceteKaydetV2', 'UrunRotaKaydetV2', 'UretimIsEmriOlusturV2', 'UretimRotaPlanKaydetV2',
-    'EtiketBasimKaydetV2',
-    'ZiyaretKaydetV2',
-    'DekontKaydetV2',
-  ]);
+  // Beyaz liste + yöntem başına rol kapısı TEK tabloda: src/lib/mikroEvrakKapilari.ts (kapısız yöntem eklenemez).
 
-  app.post('/api/mikro/evrak/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı yönteme göre (src/lib/mikroEvrakKapilari.ts).
+  app.post('/api/mikro/evrak/kaydet', C.requireAuth, C.requireMfaVerified, evrakYontemKapisi, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-    const { method, payload, entityType, entityId } = req.body as {
-      method: string; payload: Record<string, unknown>; entityType?: string; entityId?: string;
+    const { method: hamYontem, payload, entityType, entityId } = req.body as {
+      method?: unknown; payload: Record<string, unknown>; entityType?: string; entityId?: string;
     };
-    if (!method || !MIKRO_PUSH_WHITELIST.has(method)) {
-      return res.status(400).json({ success: false, error: `Geçersiz veya izinsiz method: ${method}` });
+    const method = evrakYontemi(req.body);   // rol kapısıyla (evrakYontemKapisi) AYNI ayıklayıcı
+    if (!MIKRO_EVRAK_KAPILARI.has(method)) {
+      return res.status(400).json({ success: false, error: `Geçersiz veya izinsiz method: ${String(hamYontem)}` });
     }
     if (!payload || typeof payload !== 'object') {
       return res.status(400).json({ success: false, error: 'payload zorunlu.' });
@@ -3858,7 +3901,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  Yalnızca Mikro'nun kabul ettiği fişlerin id'leri syncedIds olarak döner.
    *  Gövde tek kaynakta: server/mikro/govdeMuhasebe.ts → yevmiyeGovdesi
    */
-  app.post('/api/mikro/yevmiye/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = eşdeğer işlem (`journalEntries` yazma).
+  app.post('/api/mikro/yevmiye/kaydet', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('journalEntries', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { entries } = req.body as { entries: Record<string, unknown>[] };
     if (!Array.isArray(entries) || entries.length === 0) {
@@ -3904,7 +3948,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  Gövde tek kaynakta: server/mikro/govdeMuhasebe.ts → `tahsilatGovdesi`
    *  ("alan eşlemesi V17 örneğinden — DENEYSEL" notu oraya TAŞINDI).
    */
-  app.post('/api/mikro/tahsilat/kaydet', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Mikro işlemi KASA hareketidir (tediye de yazar) → `kasaHareketleri` yazma; `tahsilatOdemeleri` yazma Satış'ı geçirirdi.
+  app.post('/api/mikro/tahsilat/kaydet', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('kasaHareketleri', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { tahsilat } = req.body as { tahsilat: Record<string, unknown> };
     if (!tahsilat || typeof tahsilat !== 'object') {
@@ -3942,7 +3987,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  NOT: Mikro test ortamında 'MikroApiLoginForSelect' SQL kullanıcısı eksikse
    *  401 döner — Mikro destek tenant DB'de tanımlayınca çalışır.
    */
-  app.post('/api/mikro/import/faturalar', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`mikroFaturalar` yazma).
+  app.post('/api/mikro/import/faturalar', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('mikroFaturalar', 'write'), async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
@@ -4023,7 +4069,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   // ⚠️ Bu bir TÜRETME'dir. Tevkifat, iade, devreden KDV ve ÖTV/OİV beyannamede
   // ayrıca işlenir — bu özet onları KAPSAMAZ. Beyan öncesi Mikro'nun kendi KDV
   // raporuyla karşılaştırılmalıdır; yanıt ve kayıt bunu açıkça söyler.
-  app.post('/api/mikro/pull/kdv', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`taxSummary` yazma).
+  app.post('/api/mikro/pull/kdv', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('taxSummary', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -4102,7 +4149,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   });
 
   // ── Personel ───────────────────────────────────────────────────────────
-  app.post('/api/mikro/pull/personel', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. GEÇİCİ `employees` okuma: Ayarlar kartını ve İK ekranını bugün gören rollerin tam kümesi (kalıcı kapı `employees` yazma — karar bekliyor).
+  app.post('/api/mikro/pull/personel', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('employees', 'read'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     try {
@@ -4207,7 +4255,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   });
 
   // ── Uretim Receteleri (BOM) ────────────────────────────────────────────────
-  app.post('/api/mikro/pull/uretim-receteleri', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `bom` yazma kapısı Üretim ekranını gören Kalite rolünü kilitlerdi — karar bekliyor.
+  app.post('/api/mikro/pull/uretim-receteleri', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     
     try {
@@ -4499,7 +4548,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   });
 
   // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu.
-  app.post('/api/mikro/import/faturadan-siparis', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): iç personel şartına `orders` yazma eklendi (kural dış rol içerdiği için `requireStaff` KALIR) — uç `orders` yazar; çağıran yalnız Ayarlar paneli.
+  app.post('/api/mikro/import/faturadan-siparis', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.requireCollectionAccess('orders', 'write'), C.mikroLimiter, async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-import:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     const t0 = Date.now();
     try {
@@ -4746,7 +4796,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/ebelge/gelen — GİB'den gelen e-faturaları listele → eBelgeler
    *  Body: { ilkTarih?: 'YYYY-MM-DD', sonTarih?: 'YYYY-MM-DD', vkn?: string } */
-  app.post('/api/mikro/ebelge/gelen', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `eBelgeler` yazma kapısı e-Belge Merkezi'ni gören Satış / Lojistik'i kilitlerdi — karar bekliyor.
+  app.post('/api/mikro/ebelge/gelen', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -4786,7 +4837,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  V17'de giden belge listesi metodu YOK; EBELGE_EVRAK_HAREKETLERI tablosundan
    *  SQL ile çekilir. Kolonlar çalışma anında keşfedilir, tahmin edilmez.
    *  Body: { ilkTarih?, sonTarih? } */
-  app.post('/api/mikro/ebelge/giden', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `eBelgeler` yazma kapısı e-Belge Merkezi'ni gören Satış / Lojistik'i kilitlerdi — karar bekliyor.
+  app.post('/api/mikro/ebelge/giden', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -4839,7 +4891,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/ebelge/eirsaliye — e-irsaliye listesi → eBelgeler
    *  Body: { ilkTarih?, sonTarih?, yon?: 'gelen'|'giden' }  (EIrsaliyeTipi 0=giden, 1=gelen) */
-  app.post('/api/mikro/ebelge/eirsaliye', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `eBelgeler` yazma kapısı e-Belge Merkezi'ni gören Satış / Lojistik'i kilitlerdi — karar bekliyor.
+  app.post('/api/mikro/ebelge/eirsaliye', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -4876,7 +4929,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/ebelge/durum — GİB durum sorgusu (EBelgeDurumSorgulamaV2)
    *  Body: { uuid: string, tur?: 'e-fatura'|'e-arsiv', yon?: 'gelen'|'giden' } */
-  app.post('/api/mikro/ebelge/durum', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Uç `eBelgeler` yazar → `eBelgeler` yazma.
+  app.post('/api/mikro/ebelge/durum', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('eBelgeler', 'write'), C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const uuid = String(req.body?.uuid ?? '').trim();
     if (!/^[0-9a-fA-F-]{36}$/.test(uuid)) return res.status(400).json({ success: false, error: 'Geçerli bir UUID gerekli.' });
@@ -4920,7 +4974,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** GET /api/mikro/ebelge/mukellef/:vkn — VKN e-fatura mükellefi mi?
    *  Fatura kesilirken e-fatura mı e-arşiv mi seçileceğini belirler. */
-  app.get('/api/mikro/ebelge/mukellef/:vkn', C.requireAuth, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlikti — dış rol Cetpa'nın Mikro kimliğiyle mükellef sorgulayabiliyordu.
+  app.get('/api/mikro/ebelge/mukellef/:vkn', C.requireAuth, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const vkn = String(req.params.vkn ?? '').replace(/\D/g, '');
     if (vkn.length !== 10 && vkn.length !== 11) {
@@ -4963,7 +5018,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  Body: { uuid?: string, faturaGuid?: string }
    *  uuid → GelenFaturaPdfV2 (gelen), faturaGuid → FaturaPdfV2 (giden).
    *  Not: uygulamanın jsPDF çıktısı resmi nüsha DEĞİLDİR; bu uç gerçek olanı verir. */
-  app.post('/api/mikro/ebelge/pdf', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `eBelgeler` okuma kapısı Fatura Detayı'nı gören Lojistik / Satın Alma'yı kilitlerdi — karar bekliyor.
+  app.post('/api/mikro/ebelge/pdf', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const uuid = String(req.body?.uuid ?? '').trim();
     const guid = String(req.body?.faturaGuid ?? '').trim();
@@ -4992,7 +5048,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  gönderirken veya arşivlerken istenen budur.
    *  Spec: EFaturaTipi 0=gönderilen 1=gelen · EBelgeTipi 0=EFatura 1=EArsiv 2=EIrsaliye
    */
-  app.post('/api/mikro/ebelge/xml', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `eBelgeler` okuma kapısı Fatura Detayı'nı gören Lojistik / Satın Alma'yı kilitlerdi — karar bekliyor.
+  app.post('/api/mikro/ebelge/xml', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const uuid = String(req.body?.uuid ?? '').trim();
     if (!/^[0-9a-fA-F-]{36}$/.test(uuid)) return res.status(400).json({ success: false, error: 'Geçerli bir UUID gerekli.' });
@@ -5018,7 +5075,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   /** POST /api/mikro/ebelge/earsiv-iptal — e-arşiv faturası iptali (EArsivIptalV2)
    *  Body: { uuid, iptalAciklamasi, iptalTarihi?, faturaSilinsin? }
    *  Yasal işlem — MFA istenir. */
-  app.post('/api/mikro/ebelge/earsiv-iptal', C.requireAuth, C.requireMfaVerified, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Yasal işlem (GİB) → fatura yazma kapısı (`eBelgeler` yazma).
+  app.post('/api/mikro/ebelge/earsiv-iptal', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('eBelgeler', 'write'), C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const uuid = String(req.body?.uuid ?? '').trim();
     const aciklama = String(req.body?.iptalAciklamasi ?? '').trim();
@@ -5060,7 +5118,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   // Body: { faturaGuid: string, firebaseId?: string }   (ret için: aciklama?: string)
   // Endpoint'ler Mikro destek tarafından 2026-06-11'de onaylandı.
 
-  app.post('/api/mikro/gelen-fatura/kabul', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Yasal işlem (GİB) → fatura yazma kapısı (`mikroFaturalar` yazma).
+  app.post('/api/mikro/gelen-fatura/kabul', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('mikroFaturalar', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const parsed = C.validate(GelenFaturaActionSchema, req.body, res);
     if (!parsed) return;
@@ -5091,7 +5150,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     }
   });
 
-  app.post('/api/mikro/gelen-fatura/ret', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Yasal işlem (GİB) → fatura yazma kapısı (`mikroFaturalar` yazma).
+  app.post('/api/mikro/gelen-fatura/ret', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('mikroFaturalar', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const parsed = C.validate(GelenFaturaActionSchema, req.body, res);
     if (!parsed) return;
@@ -5426,7 +5486,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 // anında KİMLİKSİZ bir PII sızıntısına dönüşecekti. Kalıcı karşılığı zaten var:
 // POST /api/mikro/pull/personel (requireAuth + requireMfaVerified).
 
-app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+// Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`cariBalances` yazma).
+app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('cariBalances', 'write'), async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-pull-bakiye:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
@@ -5546,7 +5607,8 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
   // SADECE BOŞ ALANLARI DOLDURUR — elle düzeltilmiş bir city/address varsa
   // ÜZERİNE YAZMAZ (EKLE, YERİNE KOYMA ilkesi; bu alan için "ekleme" = eksik
   // olanı doldurmak).
-  app.post('/api/mikro/pull/cari-adres', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`leads` yazma).
+  app.post('/api/mikro/pull/cari-adres', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('leads', 'write'), async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-pull-cari-adres:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
@@ -5641,7 +5703,8 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, async (r
   // Kolon adları TAHMİN EDİLMİYOR: INFORMATION_SCHEMA'dan okunup regex ile
   // eşleştiriliyor (mikroKolonlar/kolonBul). Eşleşme bulunamazsa hangi kolonun
   // bulunamadığını söyleyip 502 döner — sessizce boş/yanlış mizan yazmaz.
-  app.post('/api/mikro/pull/mizan', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`accountingPeriods` yazma).
+  app.post('/api/mikro/pull/mizan', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('accountingPeriods', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
