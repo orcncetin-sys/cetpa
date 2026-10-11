@@ -61,6 +61,7 @@ const BEKLENEN: Record<string, Kapi> = {
   [`GET ${P}/iskonto-tutarsizlik`]: 'ops',
   [`GET ${P}/birim-sapmasi`]: 'ops',
   [`GET ${P}/ebelge-durum-tani`]: 'ops',
+  [`GET ${P}/seri-ozet`]: 'ops',
   [`GET ${P}/matrah-tani`]: 'ops',
   [`GET ${P}/fatura-tani`]: 'ops',
   [`GET ${P}/ebelge-tani`]: 'ops',
@@ -369,9 +370,9 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
   const yazili = (): Kayit[] => K().filter(k => !k.fabrika);
   const fabrika = (): Kayit[] => K().filter(k => k.fabrika);
 
-  it('Ç1 — 49 kayıt (47 yazılı yol + 2 fabrika); `app` yalnız kayıt satırlarında ve imzada geçer (takma ad / devretme / app.route yok)', () => {
-    expect(K()).toHaveLength(49);
-    expect(yazili()).toHaveLength(47);
+  it('Ç1 — 50 kayıt (48 yazılı yol + 2 fabrika); `app` yalnız kayıt satırlarında ve imzada geçer (takma ad / devretme / app.route yok)', () => {
+    expect(K()).toHaveLength(50);
+    expect(yazili()).toHaveLength(48);
     expect(fabrika()).toHaveLength(2);
     const appGecen = kod.filter(s => /\bapp\b/.test(s.kod));
     expect(appGecen.map(s => s.kod).filter(k => !KAYIT.test(k))).toEqual(['export function mikroRoutes(app: Express, C: MikroRouteCtx): void {']);
@@ -379,7 +380,7 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
     expect(mikroSatir.filter(k => /\bapp\.(put|patch|delete|all|use|route)\(/.test(k))).toEqual([]);
   });
 
-  it('Ç2 — yazılı 47 yol + 13 fabrika rotası = BEKLENEN anahtar kümesi (60); fabrika tanımları rota ↔ koleksiyon eşli, ölü fabrika çağrılmıyor', () => {
+  it('Ç2 — yazılı 48 yol + 13 fabrika rotası = BEKLENEN anahtar kümesi (61); fabrika tanımları rota ↔ koleksiyon eşli, ölü fabrika çağrılmıyor', () => {
     const cagri = kod.filter(s => s.kod === 'makeMikroSqlImport({').map(s => s.n);
     const rota = kod.flatMap(s => { const m = /^route: '(\/api\/mikro\/[a-z/-]+)',/.exec(s.kod); return m ? [{ n: s.n, yol: m[1] }] : []; });
     const koleksiyon = kod.flatMap(s => { const m = /^collection: '([A-Za-z]+)',/.exec(s.kod); return m ? [{ n: s.n, ad: m[1] }] : []; });
@@ -398,7 +399,7 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
     const kaynaktaki = [...yazili().map(k => `${k.yontem} ${k.yol}`), ...rota.map(r => `POST ${r.yol}`)];
     expect(new Set(kaynaktaki).size).toBe(kaynaktaki.length);
     expect(sirali(kaynaktaki)).toEqual(sirali(Object.keys(BEKLENEN)));
-    expect(Object.keys(BEKLENEN)).toHaveLength(60);
+    expect(Object.keys(BEKLENEN)).toHaveLength(61);
   });
 
   it('Ç3 / Ç4 / Ç5 — ops dışındaki her kayıt: kimlik → [MFA] → ROL KAPISI → [hız sınırı]; kapı metni BEKLENEN etiketiyle aynı', () => {
@@ -428,8 +429,8 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
     expect(BASLIK.test("app.post('/api/mikro/yeni', C.requireAuth, C.requireStaff, async (req: Request, res: Response) => {")).toBe(true);
   });
 
-  it('Ç6 — istisna listesi ADIYLA: 7 ops ucu ara katmansız ve ilk satırı ops jetonu kapısı; liste dışı ara katmansız kayıt yok', () => {
-    const OPS = ['sema-kesif', 'iskonto-tutarsizlik', 'birim-sapmasi', 'ebelge-durum-tani', 'matrah-tani', 'fatura-tani', 'ebelge-tani'];
+  it('Ç6 — istisna listesi ADIYLA: 8 ops ucu ara katmansız ve ilk satırı ops jetonu kapısı; liste dışı ara katmansız kayıt yok', () => {
+    const OPS = ['sema-kesif', 'iskonto-tutarsizlik', 'birim-sapmasi', 'ebelge-durum-tani', 'seri-ozet', 'matrah-tani', 'fatura-tani', 'ebelge-tani'];
     expect(sirali(Object.keys(BEKLENEN).filter(opsMu))).toEqual(sirali(OPS.map(a => `GET ${P}/${a}`)));
     const arakatmansiz = yazili().filter(k => k.halkalar.length === 0);
     expect(sirali(arakatmansiz.map(k => `${k.yontem} ${k.yol}`))).toEqual(sirali(OPS.map(a => `GET ${P}/${a}`)));
@@ -742,14 +743,14 @@ const kodlar = async (anahtarlar: string[], o: Parameters<typeof istek>[1]): Pro
 const hepsi = (anahtarlar: string[], kod: number): Record<string, number> => Object.fromEntries(anahtarlar.map(a => [a, kod]));
 
 describe('davranış — gerçek express + üretim zinciri (Mikro\'ya hiç gidilmez)', () => {
-  it('D0 — kayıtlı rota kümesi = BEKLENEN (60): takma adla, devrederek ya da yeni fabrikayla eklenen uç burada kırılır', () => {
+  it('D0 — kayıtlı rota kümesi = BEKLENEN (61): takma adla, devrederek ya da yeni fabrikayla eklenen uç burada kırılır', () => {
     expect(sirali(Object.keys(d.app.zincirler))).toEqual(sirali(Object.keys(BEKLENEN)));
     expect(KAPILI).toHaveLength(53);
     const dagilim = (on: (k: Kapi) => boolean) => Object.values(BEKLENEN).filter(on).length;
     expect({
       ops: dagilim(k => k === 'ops'), staff: dagilim(k => k === 'staff'), staffArtiInce: dagilim(k => k === 'staff+orders:write'),
       govde: dagilim(k => k.startsWith('govde:')), ince: dagilim(k => /^[A-Za-z]+:(read|write|delete)$/.test(k)),
-    }).toEqual({ ops: 7, staff: 10, staffArtiInce: 2, govde: 3, ince: 38 });
+    }).toEqual({ ops: 8, staff: 10, staffArtiInce: 2, govde: 3, ince: 38 });
   });
 
   it('D1 — kimliksiz istek: 53 kapılı ucun hepsi 401', async () => {
@@ -837,9 +838,9 @@ describe('davranış — gerçek express + üretim zinciri (Mikro\'ya hiç gidil
     expect(await gecen(`GET ${P}/tablolar`)).toEqual(sirali(['Admin', 'Manager']));
   });
 
-  it('D7 — 7 ops ucu: jetonsuz ve yanlış jetonlu istek 401, kimlik başlığından BAĞIMSIZ; Mikro\'ya gidilmez', async () => {
+  it('D7 — 8 ops ucu: jetonsuz ve yanlış jetonlu istek 401, kimlik başlığından BAĞIMSIZ; Mikro\'ya gidilmez', async () => {
     const OPS = Object.keys(BEKLENEN).filter(opsMu);
-    expect(OPS).toHaveLength(7);
+    expect(OPS).toHaveLength(8);
     vi.mocked(mikroSql).mockClear();
     vi.mocked(mikroPost).mockClear();
     expect(await kodlar(OPS, {})).toEqual(hepsi(OPS, 401));

@@ -71,6 +71,12 @@ import { yetimRaporu, guidBicimli, guidAnahtari, type CetpaFatura } from '../mik
 import { gibDurumTara, taramaNotu, type TaramaFaturasi } from '../mikro/gibDurumTarama.js';
 import { gibDurumCoz, gibRedMi, gibReddedildi, faturaEttn } from '../../lib/gibDurum.js';
 import { durumDenemesiOzeti, ettnGecerli, hucreleriKes, type DurumDenemesi } from '../mikro/ebelgeDurumTani.js';
+import {
+  CETPA_FATURA_SORGUSU, CETPA_SIPARIS_SORGUSU, SATIR_BAGI, chaPlani, sthPlani, seriGecerli,
+  serilerSorgusu, eBelgeSorgusu, sonBasliklarSorgusu, satirOzetiSorgusu,
+  serilerBicimle, eBelgeBicimle, sonBasliklarBicimle, cetpaFaturaOzeti, cetpaSiparisOzeti,
+  type SorguPlani, type SthPlani,
+} from '../mikro/seriOzet.js';
 import { zamanAsimiMi } from '../mikro/adaptifSayfalama.js';
 // Varlık eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeVarlik.ts
 // (demirbaş / maliyet merkezi / personel / üretim reçetesi import gövdeleri)
@@ -169,7 +175,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   // ── ROL KAPILARI (2026-10-10) ────────────────────────────────────────────────
   // KURAL: bu dosyadaki HER `/api/mikro/*` kaydı kimlikten SONRA bir rol kapısı taşır — `C.requireStaff`,
-  // `C.requireCollectionAccess(…)` ya da aşağıdaki gövdeye bağlı üç kapıdan biri. Tek istisna ops jetonu kapılı yedi tanı
+  // `C.requireCollectionAccess(…)` ya da aşağıdaki gövdeye bağlı üç kapıdan biri. Tek istisna ops jetonu kapılı sekiz tanı
   // ucudur (zincirleri boş, ilk satırları `opsJetonuGecerli`). Zincir sırası: kimlik → MFA → ROL KAPISI → hız sınırı →
   // işleyici. `requireAuth` yalnız «oturum açmış» der (dış rol dâhil); `requireMfaVerified` MFA kurmamış hesabı geçirir —
   // ikisi de rol kapısı DEĞİLDİR. Kapının koleksiyonu = ucun Cetpa'daki EŞDEĞER işleminin kuralı (rbac.ts); bir ince kapı
@@ -2458,6 +2464,180 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     } catch (e) {
       console.error('[mikro/ebelge-durum-tani]', e);
       res.status(500).json({ success: false, error: 'Tanı üretilemedi.' });
+    }
+  });
+
+  /** GET /api/mikro/seri-ozet[?seri=S] — «Q serisi» işinin ADIM 0'ı: evrak SERİSİ dağılımının ÖLÇÜMÜ (mikro/seriOzet.ts).
+   *
+   *  Kullanıcı: Cetpa'da faturasız satış, Mikro'da evrak serisi «Q» olan bir satış faturası kaydıdır. Seri ayarı, yazım ve
+   *  raporlar bu ucun CANLI çıktısından SONRA yazılacak (şartname `.wf/SARTNAME-q-serisi-v2.md` Q1-7, Y14, T8). Bu uç kural
+   *  YAZMAZ — ölçer; beş bölüm döner:
+   *    (1) `seriler`: TÜM seriler için seri × evrak tipi × cinsi × yön → adet, toplam, en eski / en yeni tarih, iptal adedi
+   *        (fatura koşulu ÖNCEDEN uygulanmaz; 'F' ve boş serinin gerçek kullanımı da burada — Q2-6);
+   *    (2) `eBelge`: istenen seride e-belge kodları × ETTN var / yok × iptal → adet;
+   *    (3) `sonBasliklar`: istenen serinin 20 başlığı — «son 20 kayıt» DEĞİL: fatura koşuluna uyanlar ÖNCE, sonra tarih / sıra
+   *        (yeniden eskiye); uygulanan kural yanıtta `siralama` — + fatura koşuluna uyan her başlığın stok hareket satır özeti (koşul dışı başlıkta özet YOK, satırlar
+   *        `bagDisiSatirlar`'da: evrak tipi + adet + iptal adedi; aynı özeti paylaşan ikiz başlık `satirOzetiPaylasanBaslik` ile işaretli) (Σ tutar, Σ vergi, vergi
+   *        işaretçisi ve depo dağılımı — Açık sorular 1: mevcut Q faturaları KDV'li mi);
+   *    (4) `cetpa.mikroFaturalar`: Cetpa'daki aynı serili fatura kopyası adedi (kiracı kırılımıyla);
+   *    (5) `cetpa.siparisler`: o seriden türemiş MF siparişleri ve `faturali` değer dağılımı (Q6-4 onarımının kapsamı).
+   *  Kolon adları çalışma anında şemadan (mikroKolonlar) GERÇEK yazımıyla; şemada olmayan ad `eksikKolonlar`'da, ona bağlı
+   *  bölüm `atlandi` ile döner — sessiz sıfır yok. Her bölüm kendi hatasını taşır (`hata`): biri düşerse diğerleri yine döner;
+   *  şema okunamazsa (boş liste ≠ «kolon yok») üç Mikro bölümü `hata` ile döner, `eksikKolonlar` DOLDURULMAZ. Aynı jeton kapısı
+   *  (yalnız başlıkta); salt okuma — Mikro'ya yalnız SELECT (SqlVeriOkuV2), Cetpa'ya yalnız SELECT. Kiracı süzgeci YOK (ops
+   *  düzeyi ölçüm). Süre: bütçe İSTEĞİN BAŞINDAN 100 sn (IIS/ARR ~120 sn'de 502 verir ve tek `res.json` ile giden yanıtın
+   *  tamamı kaybolur), okuma başına ≤ 20 sn ve KALAN süreyle sınırlı; süre dolunca kalan okumalar «süre bütçesi doldu» ile
+   *  döner. Cetpa (PG) okumaları Mikro okumalarıyla EŞ ZAMANLI koşar (Mikro bütçeyi yerse PG bölümleri kaybolmasın). Şema:
+   *  mikroKolonlar seçenek almaz (genel 30 sn, 10 dk önbellek) — her şema okuması KALAN süreyle yarıştırılır. İlk okuma
+   *  bütçenin başını yiyebilir (≤ 30 sn); sondaki (STOK_HAREKETLERI, başlıklardan SONRA) bütçeyi aşamaz: süre dolarsa satır
+   *  özeti «süre bütçesi doldu — şema okuması tamamlanmadı» ile döner, tablo `semaOkunamadi`'ya EKLENMEZ (okunamadı değil,
+   *  yarıda kesildi; arka plandaki okuma sürer, başarırsa önbelleği doldurur). */
+  app.get('/api/mikro/seri-ozet', async (req: Request, res: Response) => {
+    if (!opsJetonuGecerli(req, res)) return;
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    // `seri` verilmezse 'Q' varsayılır — ayar Adım 1a'da gelince `settings/mikro`'dan okunacak.
+    const seri = req.query.seri === undefined ? 'Q' : req.query.seri;
+    if (!seriGecerli(seri)) {
+      return res.status(400).json({ success: false, error: 'seri yalnız İngilizce harf ve rakamdan oluşabilir (1-20 karakter).' });
+    }
+    const TOPLAM_MS = 100000, OKUMA_MS = 20000, istekT0 = Date.now();
+    const kalan = () => TOPLAM_MS - (Date.now() - istekT0);
+    const sureler: Record<string, number> = {};
+    const hataMetni = (e: unknown) => (e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+    type Okuma = { rows: Record<string, unknown>[]; hata: string | null };
+    // Her okuma kendi hatasını taşır (fırlayan zaman aşımı dâhil): biri düşerse ölçümün geri kalanı kaybolmasın.
+    const mikroOku = async (sql: string, adim: string): Promise<Okuma> => {
+      if (kalan() < 5000) return { rows: [], hata: 'süre bütçesi doldu — okunmadı' };
+      const a0 = Date.now();
+      try { return await mikroSql(sql, { zamanAsimiMs: Math.min(OKUMA_MS, kalan()) }); }
+      catch (e) { return { rows: [], hata: hataMetni(e) }; }
+      finally { sureler[adim] = Date.now() - a0; }
+    };
+    // PG havuzu zaman aşımsız kurulu — tıkalıyken istek ARR sınırına kadar asılı kalmasın (fatura-tani kalıbı).
+    const pool = C.getPgPool?.();
+    const pgOku = async (sorgu: { sql: string; params: string[] }, adim: string): Promise<Okuma> => {
+      if (!pool) return { rows: [], hata: 'DATABASE_URL tanımlı değil — Cetpa tarafı okunamadı' };
+      if (kalan() < 5000) return { rows: [], hata: 'süre bütçesi doldu — okunmadı' };
+      const a0 = Date.now(), sure = Math.max(1000, Math.min(OKUMA_MS, kalan()));
+      let sayac: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const { rows } = await Promise.race([
+          pool.query(sorgu.sql, sorgu.params) as Promise<{ rows: Record<string, unknown>[] }>,
+          new Promise<never>((_, reddet) => { sayac = setTimeout(() => reddet(new Error(`Cetpa (PG) ${Math.round(sure / 1000)} sn içinde yanıt vermedi`)), sure); }),
+        ]);
+        return { rows, hata: null };
+      } catch (e) { return { rows: [], hata: hataMetni(e) }; }
+      finally { clearTimeout(sayac); sureler[adim] = Date.now() - a0; }
+    };
+    // Bölüm sonucu: okuma hatası → { hata }; biçimleyici fırlatırsa (beklenmeyen satır biçimi) yine yalnız o bölüm düşer.
+    const bolumYap = <T extends object>(okuma: Okuma, bicimle: (rows: Record<string, unknown>[]) => T): T | { hata: string } => {
+      if (okuma.hata) return { hata: okuma.hata };
+      try { return bicimle(okuma.rows); } catch (e) { return { hata: hataMetni(e) }; }
+    };
+    try {
+      // (4) + (5) Cetpa tarafı — Mikro okumalarıyla eş zamanlı; pgOku fırlatmaz.
+      const cetpaSozu = Promise.all([pgOku(CETPA_FATURA_SORGUSU, 'pgFaturaMs'), pgOku(CETPA_SIPARIS_SORGUSU, 'pgSiparisMs')]);
+
+      const eksik = new Set<string>();
+      const semaOkunamadi: string[] = [];
+      // Şema okuması da hatasını taşır. BOŞ liste "kolon yok" DEMEK DEĞİLDİR (mikroKolonlar SQL hatasını yutup [] döner).
+      const semaOku = async (tablo: string, adim: string): Promise<{ kolonlar: string[]; hata: string | null }> => {
+        if (kalan() < 5000) return { kolonlar: [], hata: 'süre bütçesi doldu — şema okunmadı' };
+        const a0 = Date.now();
+        let kolonlar: string[] = [], neden = 'INFORMATION_SCHEMA yanıtı boş/hatalı';
+        // mikroKolonlar seçenek almaz (genel 30 sn): KALAN süreyle yarıştırılır — sondaki şema okuması bütçeyi ARR sınırına taşımasın.
+        let sayac: ReturnType<typeof setTimeout> | undefined, sureDoldu = false;
+        try {
+          kolonlar = await Promise.race([
+            mikroKolonlar(tablo),
+            new Promise<string[]>(coz => { sayac = setTimeout(() => { sureDoldu = true; coz([]); }, Math.max(0, kalan())); }),
+          ]);
+        } catch (e) { neden = hataMetni(e); }
+        finally { clearTimeout(sayac); }
+        sureler[adim] = Date.now() - a0;
+        if (kolonlar.length) return { kolonlar, hata: null };
+        if (sureDoldu) return { kolonlar: [], hata: 'süre bütçesi doldu — şema okuması tamamlanmadı' };
+        semaOkunamadi.push(tablo);
+        return { kolonlar: [], hata: `Mikro şeması okunamadı (${tablo}: ${neden}) — kolon adlarını DEĞİŞTİRMEYİN.` };
+      };
+      const sorguCalistir = async <T extends object>(plan: SorguPlani, adim: string, bicimle: (rows: Record<string, unknown>[]) => T) => {
+        if ('atlandi' in plan) return { atlandi: plan.atlandi };
+        const sonuc = bolumYap(await mikroOku(plan.sql, adim), bicimle);
+        return 'hata' in sonuc || !Object.keys(plan.atlananAlanlar).length ? sonuc : { ...sonuc, atlananAlanlar: plan.atlananAlanlar };
+      };
+
+      let seriler: object, eBelge: object, sonBasliklar: object;
+      // (3)'ün alt okuması: başlıklar dönse de satırlar okunamamış olabilir — nedeni burada, `hataliBolumler`'e de girer.
+      let satirDurumu: object | null = null;
+      const cha = await semaOku('CARI_HESAP_HAREKETLERI', 'chaSemaMs');
+      if (cha.hata) {
+        seriler = eBelge = sonBasliklar = { hata: cha.hata };
+      } else {
+        const plan = chaPlani(cha.kolonlar);
+        for (const k of plan.eksik) eksik.add(k);
+        // (1) Tüm seriler.
+        seriler = await sorguCalistir(serilerSorgusu(plan), 'serilerMs', rows => ({ satirlar: serilerBicimle(rows) }));
+        // (2) İstenen seride e-belge kodları × ETTN × iptal.
+        eBelge = await sorguCalistir(eBelgeSorgusu(plan, seri), 'eBelgeMs', rows => ({ satirlar: eBelgeBicimle(rows) }));
+        // (3) Son başlıklar + stok hareket satır özeti. Başlık okuması düşerse satırlar hiç sorulmaz.
+        const baslikPlani = sonBasliklarSorgusu(plan, seri);
+        if ('atlandi' in baslikPlani) {
+          sonBasliklar = { atlandi: baslikPlani.atlandi };
+        } else {
+          const basliklar = await mikroOku(baslikPlani.sql, 'basliklarMs');
+          if (basliklar.hata) {
+            sonBasliklar = { hata: basliklar.hata };
+          } else {
+            satirDurumu = { atlandi: 'seride başlık yok — satırlar sorulmadı' };
+            let satirlar: { gruplar: Record<string, unknown>[]; plan: SthPlani } | null = null;
+            if (basliklar.rows.length) {
+              const sth = await semaOku('STOK_HAREKETLERI', 'sthSemaMs');
+              if (sth.hata) {
+                satirDurumu = { hata: sth.hata };
+              } else {
+                const satirPlani = sthPlani(sth.kolonlar);
+                for (const k of satirPlani.eksik) eksik.add(k);
+                const sorgu = satirOzetiSorgusu(satirPlani, seri, basliklar.rows.map(r => r.sira));
+                if ('atlandi' in sorgu) {
+                  satirDurumu = { atlandi: sorgu.atlandi };
+                } else {
+                  const okunan = await mikroOku(sorgu.sql, 'satirlarMs');
+                  if (okunan.hata) satirDurumu = { hata: okunan.hata };
+                  else {
+                    satirlar = { gruplar: okunan.rows, plan: satirPlani };
+                    satirDurumu = { okundu: true, grupSayisi: okunan.rows.length, bag: SATIR_BAGI,
+                      ...(Object.keys(sorgu.atlananAlanlar).length ? { atlananAlanlar: sorgu.atlananAlanlar } : {}) };
+                  }
+                }
+              }
+            }
+            const ozet = bolumYap(basliklar, rows => ({ satirlar: sonBasliklarBicimle(rows, plan, satirlar) }));
+            sonBasliklar = 'hata' in ozet ? ozet : {
+              ...ozet, satirOzeti: satirDurumu, ...(baslikPlani.siralama ? { siralama: baslikPlani.siralama } : {}),
+              ...(Object.keys(baslikPlani.atlananAlanlar).length ? { atlananAlanlar: baslikPlani.atlananAlanlar } : {}),
+            };
+          }
+        }
+      }
+
+      const [pgFatura, pgSiparis] = await cetpaSozu;
+      const cetpa = {
+        mikroFaturalar: bolumYap(pgFatura, rows => cetpaFaturaOzeti(rows, seri)),
+        siparisler: bolumYap(pgSiparis, rows => cetpaSiparisOzeti(rows, seri)),
+      };
+      const bolumler: Record<string, object> = {
+        seriler, eBelge, sonBasliklar, ...(satirDurumu ? { 'sonBasliklar.satirOzeti': satirDurumu } : {}),
+        'cetpa.mikroFaturalar': cetpa.mikroFaturalar, 'cetpa.siparisler': cetpa.siparisler,
+      };
+      res.json({
+        success: true, seri, sureMs: Date.now() - istekT0, sureler,
+        eksikKolonlar: [...eksik].sort(), semaOkunamadi,
+        hataliBolumler: Object.keys(bolumler).filter(ad => 'hata' in bolumler[ad]),
+        seriler, eBelge, sonBasliklar, cetpa,
+      });
+    } catch (e) {
+      console.error('[mikro/seri-ozet]', e);
+      res.status(500).json({ success: false, error: 'Ölçüm üretilemedi.' });
     }
   });
 
