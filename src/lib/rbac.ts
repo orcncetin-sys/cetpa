@@ -28,6 +28,12 @@ export const EXTERNAL_ROLES: AppRole[] = ['B2B', 'Dealer'];
  */
 export const APP_ROLES: readonly AppRole[] = [...STAFF_ROLES, ...EXTERNAL_ROLES];
 
+/** Değer bir uygulama rolü mü? Prop'tan `string` gelen rolü `AppRole`'e TİP DÖNÜŞÜMÜ (`as`) olmadan daraltır; tanınmayan
+ *  değer ve `null` → false (kapı soruları kapalı başarısızlıkla `null` alır). İlk çağıranlar: PurchasingModule, CRMPage. */
+export function rolMu(v: unknown): v is AppRole {
+  return typeof v === 'string' && APP_ROLES.some(r => r === v);
+}
+
 /** Yalnız Admin/Manager'ın okuyup yazabileceği hassas koleksiyonlar. */
 export const ADMIN_ONLY_COLLECTIONS = new Set(['users', 'settings', 'invites', 'subscriptions', 'paymentHistory', 'backupConfigs']);
 /** Append-only: yalnız ekleme (POST). Güncelleme/silme kimseye yok. */

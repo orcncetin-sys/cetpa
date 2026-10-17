@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getMikroStatus, syncInventoryItemToMikro, syncLeadToMikro, mikroImportBaslat } from './mikroService';
+import { getMikroStatus, syncInventoryItemToMikro, syncLeadToMikro, mikroImportBaslat, araMikroCari, cariAramaHataMetni } from './mikroService';
 
 // Mock firebase auth
 vi.mock('../firebase', () => ({
@@ -144,5 +144,42 @@ describe('mikroImportBaslat', () => {
   it('import rotası olmayan yol (pull/personel) → reject, fetch ÇAĞRILMAZ', async () => {
     await expect(mikroImportBaslat('/api/mikro/pull/personel')).rejects.toThrow(/import rotası değil/);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+// Salt okuyan cari arama sarmalayıcısı (şartname `.wf/SARTNAME-mikro-cari-arama.md` C7, § 7 H8). Bileşen testleri
+// (PurchasingModule.rol / CRMPage.mikroCariBagla) ekran metnini sınar; burada sarmalayıcının SÖZLEŞMESİ: tanınmayan satır
+// ekrana girmez, başarı biçimi tanınmazsa hata dalı (sessiz boş liste değil), ağ hatasında durum `null`.
+describe('araMikroCari / cariAramaHataMetni', () => {
+  const yanit = (ok: boolean, status: number, govde: unknown) => ({ ok, status, json: () => Promise.resolve(govde) });
+
+  it('`{ metin }` gövdesiyle POST atar; kodu ya da unvanı dize olmayan satır sonuca GİRMEZ, geçerli satır aynen gelir', async () => {
+    mockFetch.mockResolvedValueOnce(yanit(true, 200, { success: true, sinirli: false, data: [
+      { cari_kod: '320.01.001', cari_unvan1: 'ÖRNEK YAPI', cari_vdaire_no: '1234567890' },
+      { cari_unvan1: 'KODSUZ' },
+      { cari_kod: '320.01.002', cari_unvan1: 42 },
+      null,
+    ] }));
+    const sonuc = await araMikroCari('örnek');
+    expect(sonuc).toEqual({ success: true, sinirli: false, data: [{ cari_kod: '320.01.001', cari_unvan1: 'ÖRNEK YAPI', cari_vdaire_no: '1234567890' }] });
+    const [url, init] = mockFetch.mock.calls[0];
+    expect([url, init.method, JSON.parse(init.body)]).toEqual(['/api/mikro/cari/ara', 'POST', { metin: 'örnek' }]);
+  });
+
+  it('başarı biçimi tanınmazsa (`sinirli` yok / `data` dizi değil) hata dalı — boş sonuç gibi gösterilmez', async () => {
+    mockFetch.mockResolvedValueOnce(yanit(true, 200, { success: true, data: [] }));
+    const a = await araMikroCari('örnek');
+    expect(a).toEqual({ success: false, durum: 200 });
+    if (a.success) throw new Error('hata dalı bekleniyordu');
+    expect(cariAramaHataMetni(a, true)).toBe("Mikro'ya ulaşılamadı: HTTP 200");
+    mockFetch.mockResolvedValueOnce(yanit(true, 200, { success: true, sinirli: false, data: 'yok' }));
+    expect(await araMikroCari('örnek')).toEqual({ success: false, durum: 200 });
+  });
+
+  it('ağ hatası → `durum: null`, iletiyle; iletisiz ağ hatasında ekran metni «—» (ekranda `undefined` yok)', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Failed to fetch'));
+    const a = await araMikroCari('örnek');
+    expect(a).toEqual({ success: false, durum: null, error: 'Failed to fetch' });
+    expect(cariAramaHataMetni({ success: false, durum: null }, true)).toBe("Mikro'ya ulaşılamadı: —");
   });
 });

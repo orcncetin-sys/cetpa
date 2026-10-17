@@ -32,8 +32,12 @@ export type { UcKapisi } from './ucKapisiCekirdegi';
 
 export const MIKRO_UC_KAPILARI = {
   // K1 — arama DÂHİL iki dal da `leads`'e yazar (arama istek başına en çok 200 cari upsert eder) → yazma kapısı.
-  //      Kilitlenen: Satın Alma, Lojistik, Muhasebe. İki «Mikro'da ara» kutusu salt okuyan arama ucu gelene kadar çizilmez (H3).
+  //      Kilitlenen: Satın Alma, Lojistik, Muhasebe. Arama artık `cari/ara`'da (aşağıdaki satır); bu ucun istemcide çağıranı yok (H3).
   'POST /api/mikro/cari/listesi': ['leads', 'write'],
+  // A1 (şartname mikro-cari-arama, 2026-10-17) — salt OKUR (yazım yok) → okuma kapısı (İ2). Mikro cari havuzu tektir: `leads`
+  //      okuma kümesi iki kutunun yazma kümesini kapsar. İki «Mikro'da ara» kutusu (Satın Alma tedarikçi seçimi, CRM aday ayrıntısı)
+  //      bu satırı sorar VE sonraki adımın yazma iznini ister (tedarikçi / aday yazımı — İ3). Yeni uç: kilitlenen yok.
+  'POST /api/mikro/cari/ara': ['leads', 'read'],
   // K2 — yalnız okur (Mikro'daki cari hareket türleri) → okuma kapısı. Kilitlenen: Satış, Satın Alma.
   'GET /api/mikro/cari-hareket/turler': ['mikroCariHareketler', 'read'],
   // K4 — `employees`'e yazar. Kilitlenen: Müdür, Muhasebe.

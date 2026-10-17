@@ -161,19 +161,80 @@ export async function syncLeadToMikro(
   return apiPost<MikroCariSyncResult>('/api/mikro/cari/kaydet', { lead, firebaseId });
 }
 
+/** `POST /api/mikro/cari/listesi` yanıtı — uç cari LİSTESİ DÖNDÜRMEZ, yalnız sayaçları (`data` alanı YOK; eski
+ *  `MikroListResult<MikroCariItem>` iddiası karşılıksızdı ve iki «Mikro'da ara» kutusunu sonuçsuz bırakmıştı). */
+export interface MikroCariListesiSonucu extends MikroSyncResult {
+  count?: number;
+  created?: number;
+  updated?: number;
+  truncated?: boolean;
+  limit?: number;
+}
+
 /**
- * Pull cari list from Mikro (CariListesiV2) and mirror to Firebase.
- * Pass `nameSearch` for a safe (server-escaped) unvan/name search — do not
- * try to build a custom `whereStr` from user input, the server rejects that
- * in favor of nameSearch to avoid injecting into Mikro's own query.
+ * Pull cari list from Mikro (CariListesiV2) and mirror to Firebase (TAM import: uç her cariyi `leads`'e upsert eder).
+ * Arama için `araMikroCari` (salt okuyan `cari/ara` ucu): `nameSearch` seçeneği bu sarmalayıcıdan KALDIRILDI (2026-10-17 —
+ * çağıranı yoktu; arama dalı her aramada 200 cariye kadar `leads` yazıyordu, ölü yol yeniden kullanılmasın). İstemci
+ * `whereStr`'i sunucuda YOK SAYILIR (Mikro sorgusuna enjeksiyon).
  */
 export async function pullCariFromMikro(options?: {
   whereStr?: string;
-  nameSearch?: string;
   size?: number;
   index?: number;
-}): Promise<MikroListResult<MikroCariItem>> {
-  return apiPost<MikroListResult<MikroCariItem>>('/api/mikro/cari/listesi', options ?? {});
+}): Promise<MikroCariListesiSonucu> {
+  return apiPost<MikroCariListesiSonucu>('/api/mikro/cari/listesi', options ?? {});
+}
+
+// ── Cari arama (salt okur — `POST /api/mikro/cari/ara`, şartname mikro-cari-arama A1) ─────────────────────────────────────
+
+/** Arama ucunun sonucu. Başarıda `data` en çok 20 satır (her satırda yalnız Mikro'nun döndürdüğü alanlar: `cari_kod` ve
+ *  `cari_unvan1` her zaman, öbür dört alan Mikro'da doluysa); `sinirli` = Mikro'da daha fazla eşleşme var. Hata dalında
+ *  `durum` HTTP durum kodu (ağ hatasında `null`), `error` sunucunun iletisi (boşsa alan YOK). */
+export type MikroCariAramaSonucu =
+  | { success: true; data: MikroCariItem[]; sinirli: boolean }
+  | { success: false; durum: number | null; error?: string; notConfigured?: boolean };
+export type MikroCariAramaHatasi = Extract<MikroCariAramaSonucu, { success: false }>;
+
+/** Metin uca gidecek kadar uzun mu — sunucu kuralıyla aynı (kırpılmış hâli en az iki karakter). Kısa metinde «Ara» pasiftir,
+ *  istek ATILMAZ. */
+export const cariAramaMetniYeterli = (metin: string): boolean => metin.trim().length >= 2;
+
+const cariAramaSatiriMi = (v: unknown): v is MikroCariItem =>
+  !!v && typeof v === 'object' && typeof (v as { cari_kod?: unknown }).cari_kod === 'string'
+  && typeof (v as { cari_unvan1?: unknown }).cari_unvan1 === 'string';
+
+/** Mikro cari kartlarında ad / kod / VKN araması — YAZMAZ. Sonucu kullanan bileşen (tedarikçi içe aktarma, adayı bağlama)
+ *  sonraki adımı kendi yetkisiyle yazar. Çağırmadan ÖNCE kapı sorulur: `ucKapisindanGecer(rol, 'POST /api/mikro/cari/ara')`. */
+export async function araMikroCari(metin: string): Promise<MikroCariAramaSonucu> {
+  let res: Response;
+  try {
+    res = await fetch('/api/mikro/cari/ara', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeader()) },
+      body: JSON.stringify({ metin }),
+    });
+  } catch (e) {
+    return { success: false, durum: null, error: e instanceof Error ? e.message : String(e) };
+  }
+  const govde: unknown = await res.json().catch(() => null);
+  const g: Record<string, unknown> = govde && typeof govde === 'object' && !Array.isArray(govde) ? { ...govde } : {};
+  if (res.ok && g.success === true && Array.isArray(g.data) && typeof g.sinirli === 'boolean') {
+    return { success: true, data: g.data.filter(cariAramaSatiriMi), sinirli: g.sinirli };
+  }
+  return {
+    success: false, durum: res.status,
+    ...(typeof g.error === 'string' && g.error.trim() ? { error: g.error } : {}),
+    ...(g.notConfigured === true ? { notConfigured: true } : {}),
+  };
+}
+
+/** Hata dalının EKRAN metni — iki kutunun ortak kuralı (H8): yapılandırılmamış → kendi metni; gövde doğrulaması (400) → sunucunun
+ *  iletisi olduğu gibi; diğerleri «Mikro'ya ulaşılamadı: <ileti>», ileti yoksa `HTTP <durum>` (ekranda `undefined` görünmez). */
+export function cariAramaHataMetni(h: MikroCariAramaHatasi, tr: boolean): string {
+  if (h.notConfigured) return tr ? 'Mikro bağlantısı yapılandırılmamış.' : 'Mikro connection is not configured.';
+  const neden = h.error ?? (h.durum !== null ? `HTTP ${h.durum}` : '—');
+  if (h.durum === 400) return neden;
+  return tr ? `Mikro'ya ulaşılamadı: ${neden}` : `Could not reach Mikro: ${neden}`;
 }
 
 /**

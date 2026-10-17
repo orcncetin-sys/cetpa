@@ -30,13 +30,13 @@
  */
 import type { AdminDbLike, AdminDocRef, DocDaralt } from '../adminDbTypes.js';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { FaturaKaydetSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema, type Sema } from '../schemas.js';
+import { FaturaKaydetSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema, MikroCariAraGovdesi, type Sema } from '../schemas.js';
 import { zamanla, isGunu } from '../zamanla.js';
 import { opsJetonuGecerli } from '../opsJeton.js';
 import { findKey, kolonSec } from '../../lib/mikroKolon.js';
 import {
   MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, detectMikroGatewayBlock, v17MetoduKullanilabilir,
-  getMikroCreds, mikroBugun, mikroData, mikroHata, mikroKolonlar, mikroPost,
+  getMikroCreds, mikroBugun, mikroData, mikroHata, mikroKolonlar, mikroLikeKacisi, mikroPost,
   mikroSatirlar, mikroSql, mikroStokMiktari, listeZamanAsimiMs,
   mikroVergiOranlari, sqlTarih, kolonBul, sqlTanimlayici,
 } from '../mikroClient.js';
@@ -497,7 +497,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  ortak deseni) dogrudan client whereStr'i arama girdisiyle beslemek
    *  Mikro'nun sorgusuna enjeksiyon acardi. */
   // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı.
-  // Karar turu (2026-10-11, K1): İ1 — iki dal da (tam import ve arama) `leads`'e yazar → tek sabit `leads` yazma kapısı; kilitlenen: Satın Alma, Lojistik, Muhasebe (bilerek). Salt okuyan arama ucu ayrı iş.
+  // Karar turu (2026-10-11, K1): İ1 — iki dal da (tam import ve arama) `leads`'e yazar → tek sabit `leads` yazma kapısı; kilitlenen: Satın Alma, Lojistik, Muhasebe (bilerek). Arama artık `cari/ara`'da (salt okur, aşağıda); bu ucun arama dalının istemcide çağıranı yok.
   app.post('/api/mikro/cari/listesi', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('leads', 'write'), async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-cari-listesi:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
@@ -514,9 +514,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // mikroCariKod'u olmadığı için salt-kod eşleşme onları ikinci kez yaratırdı).
     const nameSearch = cariAramaMetni(req.body);   // kapı gövdeye bağlı değil (K1): iki dal da `leads` yazma kapısının arkasında
     // Mikro WhereStr serbest SQL parçası kabul eder; istemci whereStr'i ASLA
-    // doğrudan geçirilmez (enjeksiyon). nameSearch escape'li LIKE'a çevrilir.
+    // doğrudan geçirilmez (enjeksiyon). nameSearch escape'li LIKE'a çevrilir — kaçış TEK işlevden (`mikroLikeKacisi`,
+    // `cari/ara` ile ortak; 2026-10-17'den beri tırnak benzerlerini de `_` jokerine çevirir).
     const whereStr = nameSearch
-      ? `cari_unvan1 LIKE '%${nameSearch.replace(/[[%_]/g, '[$&]').replace(/'/g, "''")}%'`
+      ? `cari_unvan1 LIKE '%${mikroLikeKacisi(nameSearch)}%'`
       : "cari_baglanti_tipi=0 and cari_lastup_date > '2000/01/01'";
     const SAYFA = 200;
     const MAKS_SAYFA = nameSearch ? 1 : 50;   // arama tek sayfa (en çok 200 cari); tam import 10.000 cari tavanı
@@ -605,6 +606,83 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     } catch (err) {
       console.error('Mikro CariListesiV2 hatası:', err);
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── Salt okuyan Mikro cari araması (şartname `.wf/SARTNAME-mikro-cari-arama.md` A1, 2026-10-17) ─────────────────────────
+  /** CariListesiV2'den istenen ve yanıta giren ALTI kolon — hepsi canlıdaki `cari/listesi` FieldName'inde var. WhereStr'de
+   *  yalnız `cari_kod`, `cari_unvan1`, `cari_unvan2`, `cari_vdaire_no` kullanılır (`cari_kod` canlıda WHERE'de kullanıldı —
+   *  scripts/luca-dekont-aktar.ts; `cari_unvan2` WHERE'de canlıda ÖLÇÜLMEDİ, § 5 / H11: hata zarfı dönerse ad dalı bozuktur).
+   *  Müşteri / tedarikçi ayrımı (`cari_baglanti_tipi`) anlamı ölçülmeden süzgece GİRMEZ (§ 6). */
+  const CARI_ARAMA_KOLONLARI = ['cari_kod', 'cari_unvan1', 'cari_unvan2', 'cari_vdaire_no', 'cari_EMail', 'cari_CepTel'] as const;
+  type CariAramaSatiri = Partial<Record<(typeof CARI_ARAMA_KOLONLARI)[number], string>> & { cari_kod: string; cari_unvan1: string };
+  /** Ekranda gösterilen en çok sonuç. Mikro'dan BİR fazlası istenir: 21. satır yalnız taşmayı yoklar, yanıta girmez (H7). */
+  const CARI_ARAMA_SINIRI = 20;
+  /** WhereStr. Boşluk / nokta / tire atılınca YALNIZ rakam ve 10–11 hane → VKN / TCKN dalı (kart unvanı ticari adla uyuşmayabilir;
+   *  kod genelde VKN'nin aynısıdır — H5). Aksi hâlde üç kolonda LIKE (parantezli: sonradan eklenecek koşul OR'u bölmesin).
+   *  Rakamlar `\d` ile sınanmış ASCII'dir — dalda kaçış gerekmez; ad dalı TEK kaçış işlevinden geçer (`mikroLikeKacisi`). */
+  const cariAramaKosulu = (metin: string): string => {
+    const rakamlar = metin.replace(/[\s.-]/g, '');
+    if (/^\d{10,11}$/.test(rakamlar)) return `(cari_vdaire_no = '${rakamlar}' OR cari_kod = '${rakamlar}')`;
+    const x = mikroLikeKacisi(metin);
+    return `(cari_unvan1 LIKE '%${x}%' OR cari_unvan2 LIKE '%${x}%' OR cari_kod LIKE '%${x}%')`;
+  };
+  /** Mikro satırından yanıt satırı: yalnız altı kolon; dize olmayan / boş değer YOK sayılır (boş dize uydurulmaz). Kodu ya da
+   *  unvanı olmayan satır atlanır — ne bağlanabilir ne içe aktarılabilir (istemci tipi `MikroCariItem` ikisini zorunlu sayar). */
+  const cariAramaSatiri = (ham: unknown): CariAramaSatiri | null => {
+    if (!ham || typeof ham !== 'object') return null;
+    const kaynak = ham as Record<string, unknown>;
+    const alanlar: Partial<Record<(typeof CARI_ARAMA_KOLONLARI)[number], string>> = {};
+    for (const kolon of CARI_ARAMA_KOLONLARI) {
+      const deger = kaynak[kolon];
+      if (typeof deger === 'string' && deger.trim()) alanlar[kolon] = deger.trim();
+    }
+    const { cari_kod, cari_unvan1 } = alanlar;
+    return cari_kod && cari_unvan1 ? { ...alanlar, cari_kod, cari_unvan1 } : null;
+  };
+
+  /** POST /api/mikro/cari/ara — Mikro cari kartlarında ad / kod / VKN araması. YAZMAZ (C5): `leads`, `suppliers`, Mikro aynası
+   *  (`mirrorMikroCariler`), `syncLog`, denetim kaydı ve bakım kilidi YOK; günlüğe arama metni ve sonuç yazılmaz. Sonraki adımı
+   *  (tedarikçi içe aktarma, adayı bağlama) istemci kendi yetkisiyle `/api/db` üzerinden yazar.
+   *  Yanıt: `{ success: true, data, sinirli }`; hata: gövde 400 (iletisiyle), yapılandırılmamış 503 `{ success:false, notConfigured:true }`,
+   *  Mikro reddi 502 (HTTP 200 + `IsError` ve zarfsız yanıt da RET'tir — «sonuç yok» sayılmaz, H6), istisna 500 (20 sn zaman aşımı
+   *  Türkçe iletiyle). */
+  // Kapı (İ2 — yalnız OKUR): `leads` okuma — Mikro cari havuzu tektir (müşteri ve tedarikçi aynı listede). `leads` okuma kümesi iki
+  // kutunun yazma kümesini (`suppliers` yazma, `leads` yazma) KAPSAR; çit: mikroRoutes.rolKapisi.test.ts Ç18. Geçen: Yönetici, Müdür,
+  // Satış, Muhasebe, Satın Alma. Hız sınırı server.ts `/api/mikro/cari` öneki (mikroLimiter); kimlik yüzeyi izin listesinde YOK.
+  app.post('/api/mikro/cari/ara', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('leads', 'read'), async (req: Request, res: Response) => {
+    const govde = MikroCariAraGovdesi.safeParse(req.body);
+    if (!govde.success) return res.status(400).json({ success: false, error: govde.error.issues[0]?.message ?? 'Geçersiz istek gövdesi.' });
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    try {
+      // Süre kapısı çağrıya özel 20 sn (seri-ozet'in `mikroOku`'su paylaşılan bir kapı değil — § 7); Mikro bağlamı gövdenin
+      // KÖKÜNDE (liste metodu kalıbı, `inMikro = false`).
+      const { ok, data } = await mikroPost('CariListesiV2', {
+        FieldName: CARI_ARAMA_KOLONLARI.join(','),
+        WhereStr:  cariAramaKosulu(govde.data.metin),
+        Sort:      'cari_unvan1',
+        Size:      String(CARI_ARAMA_SINIRI + 1),
+        Index:     0,
+      }, false, { zamanAsimiMs: 20000 });
+      // Başarı ölçütü tam import kalıbı (`import/cari` getir): HTTP hatası / düz metin → ret; zarf yok ya da `IsError` → ret.
+      if (!ok || typeof data === 'string') return res.status(502).json({ success: false, error: mikroHata(data) });
+      const r0 = ((data as Record<string, unknown> | null)?.result as Record<string, unknown>[] | undefined)?.[0];
+      if (!r0 || r0.IsError) return res.status(502).json({ success: false, error: mikroHata(data) });
+      // Liste alanı YOKSA boş sonuç (tam import paritesi); alan var ama dizi değilse tanınmayan yanıt — boş sonuç gibi gösterilmez.
+      const liste: unknown = mikroData(data).CariListesi ?? [];
+      if (!Array.isArray(liste)) return res.status(502).json({ success: false, error: 'Mikro yanıtında cari listesi tanınmadı.' });
+      const satirlar = liste.map(cariAramaSatiri).filter((s): s is CariAramaSatiri => s !== null);
+      res.json({ success: true, data: satirlar.slice(0, CARI_ARAMA_SINIRI), sinirli: liste.length > CARI_ARAMA_SINIRI });
+    } catch (err) {
+      // 20 sn süre kapısı (`AbortSignal.timeout` → DOMException name='TimeoutError'): çalışma zamanının İngilizce iletisi
+      // («The operation was aborted due to timeout») ekrana gitmez; kullanıcıya ne yapacağı Türkçe söylenir (inceleme 1).
+      if (zamanAsimiMi(err)) {
+        console.error('Mikro cari araması zaman aşımı (20 sn)');
+        return res.status(500).json({ success: false, error: 'Mikro 20 saniyede yanıt vermedi; aramayı daraltıp yeniden deneyin.' });
+      }
+      const ileti = err instanceof Error ? err.message : String(err);
+      console.error('Mikro cari araması hatası:', ileti);   // yalnız ileti — istek gövdesi (arama metni) günlüğe girmez
+      res.status(500).json({ success: false, error: ileti });
     }
   });
 

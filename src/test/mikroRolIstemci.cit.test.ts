@@ -12,11 +12,14 @@
  *         geçmez. (Anahtar tipi `MikroKapiliUc` olduğu için yanlış yazılan anahtar zaten derlenmez.)
  *   Ç-İ3  K1 / H3: `cari/listesi` ucunun istemcide ÇAĞIRANI YOK — iki sarmalayıcının (`pullCariFromMikro`, `fullCariSync`)
  *         çağıranı kalmadı; yol yalnız sarmalayıcının kendi dosyasında geçer.
- *   Ç-İ4  K1 / H3: iki «Mikro'da ara» kutusunun kodu (durum, işleyici, metin) Satın Alma'da ve CRM'de yok; CRM'deki
- *         açıklama cümlesi duruyor.
+ *   Ç-İ4  CRM aday ayrıntısındaki açıklama cümlesi ve Satın Alma'da tedarikçi seçiminin öbür iki yolu duruyor. (Karar turunda
+ *         «iki kutunun kodu yok» çitiydi; kutular salt okuyan `cari/ara` ucuyla GERİ GELDİ — şartname mikro-cari-arama § 7 H3 —
+ *         kapı sorusu artık Ç-İ7'de.)
  *   Ç-İ5  K2: dekont penceresi (tür listesini okuyan tek yüzey) yalnız kapılı düğmeden açılır ve o düğmeyi gören her rol
  *         tür listesi ucunun kapısından da geçer.
  *   Ç-İ6  Adresi parçalardan kuran çağrı (şablon dizesi / birleştirme) Ç-İ1'den KAÇAR; bilinen tek örnek adıyla yazılı.
+ *   Ç-İ7  A1 / H3: `cari/ara` sarmalayıcısını (`araMikroCari`) çağıran dosyalar ADIYLA; her biri kapıyı ortak tablodan sorar.
+ *         Ç-İ1 / Ç-İ2 YOLU arar: sarmalayıcıyı çağırıp kapı anahtarını hiç yazmayan yeni bir dosya onlara görünmezdi.
  *
  * Davranış tarafı bileşen / kanca testlerinde: `MikroSyncPanel.test.tsx`, `useMikroPersonel.test.ts`,
  * `useMikroUretimReceteleri.test.ts`, `HRModule.rol.test.tsx`, `TahsilatModule.rol.test.tsx`, `PurchasingModule.rol.test.tsx`.
@@ -65,8 +68,8 @@ const MUSTERILER_SEKMESI = 'src/components/accounting/MusterilerTab.tsx';
 const ISTISNA: Record<string, { yollar: MikroKapiliUc[]; gerekce: string }> = {
   [TABLO]: { yollar: ANAHTARLAR, gerekce: 'tablonun kendisi' },
   [SARMALAYICI]: {
-    yollar: ['POST /api/mikro/cari/listesi'],
-    gerekce: 'ince sarmalayıcı (rol bilmez); iki sarmalayıcının da çağıranı yok — Ç-İ3',
+    yollar: ['POST /api/mikro/cari/listesi', 'POST /api/mikro/cari/ara'],
+    gerekce: 'ince sarmalayıcı; `cari/listesi` çağıranı yok — Ç-İ3; `cari/ara` çağıranları kapıyı sorar — Ç-İ7',
   },
   [DEKONT_PENCERESI]: {
     yollar: ['GET /api/mikro/cari-hareket/turler'],
@@ -98,6 +101,9 @@ describe('Ç-İ1 / Ç-İ2 — Mikro uç yolunu çağıran her istemci dosyası k
       'src/hooks/useMikroPersonel.ts': ['POST /api/mikro/pull/personel'],
       'src/hooks/useMikroUretimReceteleri.ts': ['POST /api/mikro/pull/uretim-receteleri'],
       'src/components/TahsilatModule.tsx': ['POST /api/mikro/tahsilat/kaydet'],
+      // A1: iki «Mikro'da ara» kutusu — kapı sorusundaki anahtar yolu taşır (çağrı sarmalayıcıdan; Ç-İ7).
+      'src/components/PurchasingModule.tsx': ['POST /api/mikro/cari/ara'],
+      'src/pages/CRMPage.tsx': ['POST /api/mikro/cari/ara'],
     });
   });
 
@@ -140,17 +146,11 @@ describe('Ç-İ3 — K1 / H3: `cari/listesi` ucunun istemcide çağıranı yok',
   });
 });
 
-describe("Ç-İ4 — K1 / H3: iki «Mikro'da ara» kutusunun kodu kaldırıldı", () => {
-  const SATIN_ALMA = 'src/components/PurchasingModule.tsx';
-  const CRM = 'src/pages/CRMPage.tsx';
-  /** Kutuların durumu, işleyicileri ve metinleri (TR + EN). Kod satırında bir tanesi bile kalmamalı. */
-  const KUTU = /mikroSearch|mikroLink|handleSearchMikroSupplier|handleImportMikroSupplier|searchMikroForLead|linkLeadToMikroCari|MikroCariItem|Search Mikro|Mikro\\?'da (?:firma adıyla ara|aranıyor|bulunamadı|")|Mikro sonuçları/i;
+const SATIN_ALMA = 'src/components/PurchasingModule.tsx';
+const CRM = 'src/pages/CRMPage.tsx';
 
-  it.each([SATIN_ALMA, CRM])('%s — kutunun durumu / işleyicisi / metni kod satırında yok', ad => {
-    expect(dosya(ad).kod.map((k, i) => ({ satir: i + 1, kod: k.trim() })).filter(s => KUTU.test(s.kod))).toEqual([]);
-  });
-
-  it('CRM — aday ayrıntısındaki açıklama cümlesi DURUYOR (kutu gitti, neden görünmediği yazıyor)', () => {
+describe('Ç-İ4 — aday ayrıntısının açıklama cümlesi ve tedarikçi seçiminin öbür yolları duruyor (kutular Ç-İ7\'de)', () => {
+  it('CRM — aday ayrıntısındaki açıklama cümlesi DURUYOR (kutu yalnız yazabilen rolde; öbür rolde neden görünmediği yazıyor)', () => {
     const kod = dosya(CRM).kod.join('\n');
     expect(kod.split("Bu aday Mikro\\'ya bağlı değil — cari ekstre/bakiye görünmüyor.").length - 1).toBe(1);
     expect(kod.split("This lead isn\\'t linked to Mikro — no account statement/balance.").length - 1).toBe(1);
@@ -162,15 +162,30 @@ describe("Ç-İ4 — K1 / H3: iki «Mikro'da ara» kutusunun kodu kaldırıldı"
     expect(kod.includes('onClick={() => void handleCreateLocalSupplier()}'), '«Yeni tedarikçi oluştur» düğmesi').toBe(true);
   });
 
-  it('desen canlı: eski kutunun satırlarını yakalıyor', () => {
-    for (const eski of [
-      'const [mikroSearchResults, setMikroSearchResults] = useState<MikroCariItem[] | null>(null);',
-      "? (currentLanguage === 'tr' ? 'Mikro\\'da aranıyor…' : 'Searching Mikro…')",
-      "placeholder={currentLanguage === 'tr' ? 'Mikro\\'da firma adıyla ara...' : 'Search Mikro by company name...'}",
-      '{mikroLinkResults && (',
-      'setMikroSearchResults(null);',
-    ]) expect(KUTU.test(eski), eski).toBe(true);
-    expect(KUTU.test("{/* Mikro'da İPTAL edilen faturalar */}")).toBe(false);
+});
+
+describe('Ç-İ7 — A1 / H3: `cari/ara` sarmalayıcısının çağıranları adıyla; her biri kapıyı ortak tablodan sorar', () => {
+  const ARA = 'POST /api/mikro/cari/ara';
+
+  it('`araMikroCari`yi kod satırında geçiren dosyalar TAM OLARAK: sarmalayıcı, Satın Alma, CRM', () => {
+    expect(gecenDosyalar(/\baraMikroCari\b/)).toEqual([CRM, SATIN_ALMA, SARMALAYICI].sort());
+    expect(dosya(SARMALAYICI).kod.join('\n').includes('export async function araMikroCari(')).toBe(true);
+  });
+
+  it.each([SATIN_ALMA, CRM])('%s — ortak tablodan içe aktarır, `cari/ara` anahtarını taşır, `ucKapisindanGecer(` çağırır', ad => {
+    const d = dosya(ad);
+    const metin = d.kod.join('\n');
+    expect(tabloyuIceAktarir(d), 'lib/mikroUcKapilari içe aktarımı').toBe(true);
+    expect(metin.includes(`'${ARA}'`), `'${ARA}' anahtarı`).toBe(true);
+    // Soru AYNI satırda bu uçla sorulur (içe aktarıp başka ucun kapısını sormak geçmez).
+    const soru = d.kod.filter(k => k.includes('ucKapisindanGecer(') && k.includes(`'${ARA}'`));
+    expect(soru, 'kapı sorusu').toHaveLength(1);
+    // Yolun bileşendeki TEK geçişi kapı sorusudur: uca yalnız sarmalayıcıdan ulaşılır (doğrudan `fetch` yok).
+    expect(d.kod.filter(k => yolDeseni(ARA).test(k))).toEqual(soru);
+  });
+
+  it('yol istemcide yalnız tabloda, sarmalayıcıda ve kapıyı soran iki bileşende geçer', () => {
+    expect(gecenDosyalar(yolDeseni(ARA))).toEqual([CRM, SATIN_ALMA, TABLO, SARMALAYICI].sort());
   });
 });
 

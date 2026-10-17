@@ -85,6 +85,20 @@ export const GelenFaturaActionSchema = z.object({
   aciklama:    z.string().optional(),
 });
 
+/**
+ * `POST /api/mikro/cari/ara` gövdesi (şartname `.wf/SARTNAME-mikro-cari-arama.md` C1). `.strict()`: tanınmayan alan 400 (eski
+ * `nameSearch` / `whereStr` alanları bu uca giremez). Metin KIRPILIR, kırpılmış hâli 2–100 karakter; fazlası 400 (kesilmez —
+ * kesilmiş arama başka bir şeyi bulurdu). İletiler kullanıcıya gösterilir (rota ilk sorunun iletisini döner; ortak `validate()`
+ * yardımcısının genel iletisi ekranda «neden» demiyordu). Arama metni POST gövdesindedir: kişi adı olabilir (şahıs firması),
+ * sorgu dizesi erişim günlüklerine düşer.
+ */
+export const MikroCariAraGovdesi = z.object({
+  metin: z.string({ error: 'Arama metni yazı olmalı.' })
+    .trim()
+    .min(2, { error: 'En az iki karakter yazın.' })
+    .max(100, { error: 'Arama metni en çok 100 karakter olabilir.' }),
+}, { error: 'Geçersiz istek gövdesi.' }).strict();
+
 // AI chat şeması
 export const AiChatSchema = z.object({
   message:    z.string().min(1).max(4000),

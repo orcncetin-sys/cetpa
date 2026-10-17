@@ -20,7 +20,7 @@ import { db, auth, storage } from '../firebase';
 import SatisAjaniPanel from '../components/SatisAjaniPanel';
 import {
   doc, addDoc, updateDoc, deleteDoc,
-  collection, serverTimestamp, Timestamp, onSnapshot, query,
+  collection, serverTimestamp, Timestamp, onSnapshot, query, where, getDocs,
 } from '../lib/dbClient';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { clsx, type ClassValue } from 'clsx';
@@ -39,6 +39,10 @@ import { exportLeadsCSV } from '../utils/export';
 import { formatCurrency, formatInCurrency, paraYaz, tlYaz, kisaTutar } from '../utils/currency';
 import { scoreLead } from '../services/geminiService';
 import { pushMikroEvrak, ziyaretPayload } from '../services/mikroEvrak';
+import { araMikroCari, cariAramaHataMetni, cariAramaMetniYeterli, type MikroCariItem } from '../services/mikroService';
+import { ucKapisindanGecer } from '../lib/mikroUcKapilari';
+import { isAllowed, rolMu } from '../lib/rbac';
+import { useAppStore } from '../store/appStore';
 import AIInlineNudge from '../components/AIInlineNudge';
 import ModuleHeader from '../components/ModuleHeader';
 import AccountingModule from '../components/AccountingModule';
@@ -173,12 +177,35 @@ export default function CRMPage({
   const [leadNoteText, setLeadNoteText] = useState('');
   const leadNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showLeadFunnel, setShowLeadFunnel] = useState(false);
-  // Müşteri adaylarının çoğu mikroCariKod'suz (2026-08-17 bildirimi: "mikroya bağlı değil"). Aday ayrıntısındaki
-  // tek tek «Mikro'da ara + bağla» kutusu KALDIRILDI (karar turu 2026-10-11 — K1 / H3): kutu
-  // `POST /api/mikro/cari/listesi` ucunu çağırıyordu; o uç arama sonucunu DÖNDÜRMEZ (yalnız sayaç), her aramada en
-  // çok 200 cariyi `leads`'e yazar ve artık `leads` yazma kapısı ister — «Ara» kapıdan geçen rolde de sonuçsuz ve
-  // sessizdi. Salt okuyan Mikro cari arama ucu (şartname § 6 A1) gelene kadar kutu HİÇBİR rolde çizilmez; aday
-  // ayrıntısındaki açıklama cümlesi kalır. Bağlama akışı git geçmişinde: `a01a254`.
+  // Müşteri adaylarının çoğu mikroCariKod'suz (2026-08-17 bildirimi: "mikroya bağlı değil") — toplu otomatik eşleştirme yanlış
+  // cariyi bağlama riski taşıdığından aday ayrıntısında tek tek «Mikro'da ara + Bağla» akışı var.
+  // Kutu GERİ GELDİ (şartname `.wf/SARTNAME-mikro-cari-arama.md` C9 + § 7 H1 / H2, 2026-10-17): karar turunda (2026-10-11, K1 / H3)
+  // kaldırılmıştı — çağırdığı `cari/listesi` ucu sonuç DÖNDÜRMÜYOR, her aramada 200 cariye kadar `leads` yazıyordu. Artık salt
+  // okuyan `POST /api/mikro/cari/ara` (`araMikroCari`) çağrılır; «Bağla» bu ekranın kendi `leads` yazımıdır. Kutu yalnız rol arama
+  // ucunun kapısından geçer VE `leads` yazarsa çizilir (İ3): Muhasebe ve Satın Alma uca geçer ama adayı yazamaz → kutu yok, çağrı
+  // yok. Rol PROP'tan (`userRole`), `rolMu` korumasıyla daraltılır.
+  const kapiRolu = rolMu(userRole) ? userRole : null;
+  const mikroBaglanabilir = ucKapisindanGecer(kapiRolu, 'POST /api/mikro/cari/ara') && isAllowed(kapiRolu, 'leads', 'write');
+  // App'in aday dinleyicisiyle AYNI kiracı kimliği (App.tsx: `storeCompanyId ?? user.uid`).
+  const depoKiraci = useAppStore(s => s.companyId);
+  const kiraciKimligi = depoKiraci ?? user?.uid ?? null;
+  const [mikroAramaMetni, setMikroAramaMetni] = useState('');
+  /** `null` = arama yapılmadı; dizi = son aramanın sonucu. `undefined` OLAMAZ. */
+  const [mikroAdaySonuclari, setMikroAdaySonuclari] = useState<MikroCariItem[] | null>(null);
+  const [mikroAdaySinirli, setMikroAdaySinirli] = useState(false);
+  const [mikroAdayAraniyor, setMikroAdayAraniyor] = useState(false);
+  const [mikroAdayUyari, setMikroAdayUyari] = useState<string | null>(null);
+  const [mikroBaglaniyor, setMikroBaglaniyor] = useState<string | null>(null);
+  /** İstek sırası (inceleme 1): aday değişince, metin değişince ve her yeni aramada artar; yanıt geldiğinde sırası güncel değilse
+   *  sonuç / uyarı / «aranıyor» durumuna YAZILMAZ — A adayının uçuştaki araması B'ye geçildikten sonra B'nin kutusuna «Bağla»
+   *  düğmeleri basmasın (B'nin ekranında A için aranmış cari bağlanabilirdi). */
+  const mikroAramaSirasi = useRef(0);
+  // Başka bir adaya geçilince önceki adayın araması ekranda kalmasın (uçuştaki yanıt da yazılmasın).
+  useEffect(() => {
+    mikroAramaSirasi.current++;
+    setMikroAdayAraniyor(false);
+    setMikroAramaMetni(''); setMikroAdaySonuclari(null); setMikroAdaySinirli(false); setMikroAdayUyari(null);
+  }, [selectedLead?.id]);
   const [rescoreLeadId, setRescoreLeadId] = useState<string|null>(null);
   const [p515Dismissed, setP515Dismissed] = useState(false);
   const [p544QuickStatus, setP544QuickStatus] = useState<string|null>(null);
@@ -356,6 +383,60 @@ export default function CRMPage({
       logAuditAction(currentT.lead_deletion, `${targetLead?.name || leadId} ${currentT.lead_deleted}`);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `leads/${leadId}`);
+    }
+  };
+
+  const mikroAdayAra = async () => {
+    const metin = mikroAramaMetni.trim();
+    if (mikroAdayAraniyor || !mikroBaglanabilir || !cariAramaMetniYeterli(metin)) return;
+    const sira = ++mikroAramaSirasi.current;
+    setMikroAdayAraniyor(true);
+    setMikroAdaySonuclari(null); setMikroAdaySinirli(false); setMikroAdayUyari(null);
+    try {
+      const sonuc = await araMikroCari(metin);
+      if (sira !== mikroAramaSirasi.current) return;   // aday ya da metin bu arada değişti: bayat yanıt
+      if (sonuc.success) { setMikroAdaySonuclari(sonuc.data); setMikroAdaySinirli(sonuc.sinirli); }
+      else setMikroAdayUyari(cariAramaHataMetni(sonuc, currentLanguage === 'tr'));
+    } finally {
+      if (sira === mikroAramaSirasi.current) setMikroAdayAraniyor(false);
+    }
+  };
+
+  const adayiMikroCariyeBagla = async (c: MikroCariItem) => {
+    if (!selectedLead || !mikroBaglanabilir) return;
+    const tr = currentLanguage === 'tr';
+    if (!kiraciKimligi) {
+      setMikroAdayUyari(tr ? 'Bağlanamadı: firma kimliği çözülemedi.' : 'Linking failed: company id could not be resolved.');
+      return;
+    }
+    setMikroBaglaniyor(c.cari_kod);
+    setMikroAdayUyari(null);
+    try {
+      // MÜKERRER BAĞ DENETİMİ (§ 7 H1) bellekteki aday listesiyle YAPILMAZ: Satış'ın listesi kendine atananlarla süzülü (App
+      // leadsQuery) ve `isMusteri` kayıtlarını içermez; gece importu ise kiracının BÜTÜN kayıtlarında ilk kodu seçer (`leadByKod`)
+      // → ikinci bağ YANLIŞ kaydı güncelletirdi. Hedefli sorgu sunucunun kiracı kümesinden okur — Satış'ta da başka satışçıya
+      // atanmış kaydı döndürür (ölçüm: server/mikroCariArama.zincir.test.ts H1). Uyarıda kaydın ADI YAZILMAZ (Satış onu görmeyebilir).
+      let baskaKayitVar: boolean;
+      try {
+        const bagli = await getDocs(query(collection(db, 'leads'), where('companyId', '==', kiraciKimligi), where('mikroCariKod', '==', c.cari_kod)));
+        baskaKayitVar = bagli.docs.some(d => d.id !== selectedLead.id);
+      } catch (e) {
+        const neden = e instanceof Error ? e.message : String(e);
+        setMikroAdayUyari(tr ? `Bağlanamadı: mevcut bağlar denetlenemedi (${neden}).` : `Linking failed: existing links could not be checked (${neden}).`);
+        return;
+      }
+      if (baskaKayitVar) {
+        setMikroAdayUyari(tr ? 'Bu cari başka bir kayda bağlı.' : 'This Mikro account is already linked to another record.');
+        return;
+      }
+      await updateDoc(doc(db, 'leads', selectedLead.id), { mikroCariKod: c.cari_kod, updatedAt: serverTimestamp() });
+      setSelectedLead({ ...selectedLead, mikroCariKod: c.cari_kod });
+      setMikroAdaySonuclari(null); setMikroAdaySinirli(false); setMikroAramaMetni('');
+      toast(tr ? `Mikro cari "${c.cari_unvan1}" bağlandı.` : `Linked to Mikro account "${c.cari_unvan1}".`, 'success');
+    } catch {
+      toast(tr ? 'Bağlanamadı.' : 'Linking failed.', 'error');
+    } finally {
+      setMikroBaglaniyor(null);
     }
   };
 
@@ -3509,13 +3590,71 @@ export default function CRMPage({
                         : (
                           <div className="space-y-3">
                             <CariEkstrePanel currentLanguage={currentLanguage} leadId={selectedLead.id} customerName={selectedLead.name} />
-                            {/* Mikro'ya bağlı değil — 2026-08-17 bildirimi. Buradaki «Mikro'da ara + bağla» kutusu
-                                karar turunda (2026-10-11, K1 / H3) kaldırıldı: çağırdığı uç sonuç döndürmüyordu.
-                                Salt okuyan arama ucu (A1) gelene kadar yalnız açıklama kalır. */}
+                            {/* Mikro'ya bağlı değil — 2026-08-17 bildirimi. Tek tek «Mikro'da ara + Bağla» kutusu (H2: YALNIZ bu dal —
+                                `mikroCariKod`, `code`, `taxNo` üçü de boş; kodlu / VKN'li aday bu turun dışında). Salt okuyan `cari/ara`
+                                ucunu çağırır; kutu rol arama kapısından geçip `leads` yazabiliyorsa çizilir, aksi hâlde yalnız açıklama. */}
                             <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 space-y-2">
                               <p className="text-xs font-semibold text-amber-800">
                                 {currentLanguage === 'tr' ? 'Bu aday Mikro\'ya bağlı değil — cari ekstre/bakiye görünmüyor.' : 'This lead isn\'t linked to Mikro — no account statement/balance.'}
                               </p>
+                              {mikroBaglanabilir && (
+                                <>
+                                  <div className="flex gap-2">
+                                    <input
+                                      value={mikroAramaMetni}
+                                      maxLength={100}
+                                      onChange={e => {
+                                        mikroAramaSirasi.current++;   // uçuştaki arama eski metnindir — yanıtı yazılmaz
+                                        setMikroAdayAraniyor(false);
+                                        setMikroAramaMetni(e.target.value); setMikroAdaySonuclari(null); setMikroAdaySinirli(false); setMikroAdayUyari(null);
+                                      }}
+                                      onKeyDown={e => { if (e.key === 'Enter') void mikroAdayAra(); }}
+                                      placeholder={currentLanguage === 'tr' ? 'Mikro\'da firma adı, cari kod ya da VKN ile ara...' : 'Search Mikro by name, account code or tax no...'}
+                                      className="apple-input flex-1 text-sm py-1.5"
+                                    />
+                                    <button
+                                      onClick={() => void mikroAdayAra()}
+                                      disabled={mikroAdayAraniyor || !cariAramaMetniYeterli(mikroAramaMetni)}
+                                      className="apple-button-secondary text-xs px-3 py-1.5 disabled:opacity-50 shrink-0"
+                                    >
+                                      {mikroAdayAraniyor ? oc(currentLanguage).araniyor : (currentLanguage === 'tr' ? 'Ara' : 'Search')}
+                                    </button>
+                                  </div>
+                                  {!cariAramaMetniYeterli(mikroAramaMetni) && (
+                                    <p className="text-[11px] text-amber-700">{currentLanguage === 'tr' ? 'En az iki karakter yazın.' : 'Type at least two characters.'}</p>
+                                  )}
+                                  {mikroAdayUyari && (
+                                    <p role="alert" className="text-xs font-semibold text-red-700">{mikroAdayUyari}</p>
+                                  )}
+                                  {mikroAdaySonuclari && (
+                                    mikroAdaySonuclari.length === 0 ? (
+                                      <p className="text-xs text-amber-700">{currentLanguage === 'tr' ? 'Eşleşme bulunamadı.' : 'No matches found.'}</p>
+                                    ) : (
+                                      <div className="space-y-1 max-h-48 overflow-y-auto">
+                                        {mikroAdaySonuclari.map(c => (
+                                          <div key={c.cari_kod} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 text-xs">
+                                            <div className="min-w-0">
+                                              <p className="font-semibold text-gray-800 truncate">{c.cari_unvan1}</p>
+                                              <p className="text-[10px] text-gray-400">{c.cari_kod}{c.cari_vdaire_no ? ` · VKN ${c.cari_vdaire_no}` : ''}</p>
+                                            </div>
+                                            <button
+                                              onClick={() => void adayiMikroCariyeBagla(c)}
+                                              disabled={mikroBaglaniyor !== null}
+                                              aria-label={currentLanguage === 'tr' ? `${c.cari_unvan1} carisine bağla` : `Link to ${c.cari_unvan1}`}
+                                              className="apple-button-primary text-[11px] px-2.5 py-1 shrink-0 disabled:opacity-50"
+                                            >
+                                              {mikroBaglaniyor === c.cari_kod ? '...' : (currentLanguage === 'tr' ? 'Bağla' : 'Link')}
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )
+                                  )}
+                                  {mikroAdaySonuclari && mikroAdaySinirli && (
+                                    <p className="text-xs text-amber-700">{currentLanguage === 'tr' ? 'İlk 20 sonuç gösteriliyor, aramayı daraltın.' : 'Showing the first 20 results — narrow your search.'}</p>
+                                  )}
+                                </>
+                              )}
                             </div>
                           </div>
                         );

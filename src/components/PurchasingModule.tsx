@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShoppingCart, Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, Package, Truck, DollarSign, X, Eye, TrendingUp, FileDown } from 'lucide-react';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, serverTimestamp, incrementField } from '../lib/dbClient';
@@ -15,7 +15,10 @@ import { eslesir } from '../utils/arama';
 import { exportPurchaseOrderPDF, exportGoodsReceiptPDF } from '../utils/pdf';
 import { InventoryItem, Order, Supplier } from '../types';
 import { submitApprovalRequest } from './ApprovalQueue';
-import { syncSupplierToMikro } from '../services/mikroService';
+import { araMikroCari, cariAramaHataMetni, cariAramaMetniYeterli, syncSupplierToMikro, type MikroCariItem } from '../services/mikroService';
+import { ucKapisindanGecer } from '../lib/mikroUcKapilari';
+import { isAllowed, rolMu } from '../lib/rbac';
+import { isimAnahtari } from '../lib/isimAnahtari';
 import { useMikroSiparisler } from '../hooks/useMikroSiparisler';
 import { kurCevir, paraYaz } from '../utils/currency';
 import { toplaBilinen, ekranTutari, sayiSirala } from '../utils/para';
@@ -58,6 +61,9 @@ interface PurchaseOrder {
   expectedDate?: string | { toDate?: () => Date };
   createdAt: string | number | Date | { toDate?: () => Date };
   notes?: string;
+  /** Kayıtta tedarikçi bağı (`suppliers` id'si) — yeni / güncellenen siparişte yazılır; eski siparişte YOK, bağsızsa `null`. */
+  supplierId?: string | null;
+  mikroCariKod?: string | null;
 }
 
 interface PurchasingModuleProps {
@@ -125,20 +131,34 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   });
   const [productSearch, setProductSearch] = useState('');
 
-  // Tedarikçi: yerel 'suppliers' koleksiyonundan oto-tamamlama + yeni tedarikçi oluşturma. Müşteri (CRM) tarafındaki
-  // aynı mikroCariKod deseniyle tutarlı olması için suppliers koleksiyonuna mikroCariKod eklendi.
+  // Tedarikçi: yerel 'suppliers' koleksiyonundan oto-tamamlama + yeni tedarikçi oluşturma + «Mikro'da ara» ile içe aktarma.
+  // Müşteri (CRM) tarafındaki aynı mikroCariKod deseniyle tutarlı olması için suppliers koleksiyonuna mikroCariKod eklendi.
   //
-  // «Mikro'da ara» kutusu KALDIRILDI (karar turu 2026-10-11 — K1 / H3): kutu `POST /api/mikro/cari/listesi` ucunu
-  // çağırıyordu; o uç arama sonucunu DÖNDÜRMEZ (yalnız sayaç), her aramada en çok 200 cariyi MÜŞTERİ havuzuna (`leads`)
-  // yazar ve artık `leads` yazma kapısı ister. Kutu kapıdan geçen rolde de sonuç göstermiyordu; başarılı yanıtta
-  // sonuç listesi `undefined` kalıyor, açılır liste yeniden açılınca `undefined.length` okunuyordu. Salt okuyan Mikro
-  // cari arama ucu (şartname § 6 A1) gelene kadar kutu HİÇBİR rolde çizilmez. Tedarikçi seçimi üç yolla sürer: serbest
-  // metin, kayıtlı tedarikçi listesi, «Yeni tedarikçi oluştur». İçe aktarma akışı (VKN / cari kod / ad ile mükerrer
-  // önleme) git geçmişinde: `a01a254`.
+  // «Mikro'da ara» kutusu GERİ GELDİ (şartname `.wf/SARTNAME-mikro-cari-arama.md` C8, 2026-10-17): karar turunda (2026-10-11,
+  // K1 / H3) kaldırılmıştı — çağırdığı `cari/listesi` ucu sonuç DÖNDÜRMÜYOR, her aramada 200 cariye kadar `leads` yazıyordu.
+  // Artık salt okuyan `POST /api/mikro/cari/ara` (`araMikroCari`) çağrılır; içe aktarma bu ekranın kendi `suppliers` yazımıdır.
+  // Kutu yalnız İKİ koşul birlikteyken çizilir (İ3 — ölü düğme yok): rol arama ucunun kapısından geçer VE `suppliers` yazar
+  // (sonraki adım tedarikçi yazımıdır). Muhasebe uca geçer ama tedarikçi yazamaz → kutu yok, çağrı yok. Rol PROP'tan
+  // (`userRole`), `rolMu` korumasıyla daraltılır; tanınmayan değer kapalı başarısızlıktır.
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
   const [supplierActionLoading, setSupplierActionLoading] = useState(false);
+  const kapiRolu = rolMu(userRole) ? userRole : null;
+  const mikroAranabilir = ucKapisindanGecer(kapiRolu, 'POST /api/mikro/cari/ara') && isAllowed(kapiRolu, 'suppliers', 'write');
+  /** `null` = arama yapılmadı (ya da metin değişti); dizi = son aramanın sonucu. `undefined` OLAMAZ. */
+  const [mikroSonuclari, setMikroSonuclari] = useState<MikroCariItem[] | null>(null);
+  const [mikroSinirli, setMikroSinirli] = useState(false);
+  const [mikroAraniyor, setMikroAraniyor] = useState(false);
+  const [mikroHataMetni, setMikroHataMetni] = useState<string | null>(null);
+  /** İstek sırası (inceleme 1): her sıfırlama (metin değişti, tedarikçi seçildi, pencere kapandı) ve her yeni arama sayacı artırır;
+   *  yanıt geldiğinde sırası güncel değilse SONUÇ / HATA / «aranıyor» durumuna YAZILMAZ — uçuştaki «kaya» yanıtı, metin «kayalar»
+   *  olduktan sonra sıfırlanmış kutuya bayat sonuç basmasın. */
+  const mikroAramaSirasi = useRef(0);
+  const mikroAramaSifirla = () => {
+    mikroAramaSirasi.current++;
+    setMikroAraniyor(false); setMikroSonuclari(null); setMikroSinirli(false); setMikroHataMetni(null);
+  };
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'suppliers'), snap => {
@@ -154,27 +174,151 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
   // Öneri listesi Türkçe-duyarlı arar (utils/arama.eslesir): "istanbul" yazan
   // "İSTANBUL YAPI"yı bulmalı — düz toLowerCase 'İ'yi i+U+0307'ye çevirip
   // eşleşmeyi kaçırıyor, kullanıcı tedarikçiyi mükerrer açıyordu (code-review).
-  // exactSupplierMatch/dedup EŞİTLİK kıyasları bilerek toLowerCase kaldı:
-  // katla ASCII'ye indirger, 'Şişli'yle 'SISLI'yı AYNI kayıt sayardı.
+  // Tam ad EŞİTLİĞİ (liste kapanır mı, «yeni tedarikçi» mevcut kaydı mı seçer) `eslesir` katlamasıyla YAPILMAZ: katla ASCII'ye
+  // indirger, 'Şişli'yle 'SISLI'yı AYNI kayıt sayardı. Eşitlik `isimAnahtari` ile (Türkçe locale, katlama YOK — inceleme 2, İ2-1):
+  // İ1-3'ten beri aynı adlı İKİ tedarikçi bilerek olabilir — elle açılan 'Kaya Yapı' ile Mikro'dan içe aktarılan 'KAYA YAPI'
+  // (VKN'leri farklı). Eski `toLowerCase` bu ikiliyi aynı ad SAYMIYORDU ('yapı' ≠ 'yapi'; 'İ' → i + birleşik nokta), birden çok
+  // eşleşme denetimi asıl ikilide hiç tetiklenmezdi; tek eşleşmede de ilk kaydı seçiyordu. Şimdi: TEK eşleşme → eski davranış (liste
+  // kapanır); BİRDEN ÇOK → liste AÇIK, eşleşenler VKN'leriyle seçilebilir, hiçbiri kendiliğinden seçilmez, yeni kopya açılmaz.
+  // (Şartname H13 bu eşitliği işin dışında tutmuştu; İ2-1 onu bu işe aldı.)
   const matchingSuppliers = supplierQuery
     ? suppliers.filter(s => eslesir(newOrder.supplier ?? '', s.name))
     : [];
-  const exactSupplierMatch = supplierQuery
-    ? suppliers.find(s => (s.name ?? '').toLowerCase() === supplierQuery)
-    : undefined;
+  const supplierAnahtari = isimAnahtari(newOrder.supplier);
+  const tamAdEslesenler = supplierAnahtari ? suppliers.filter(s => isimAnahtari(s.name) === supplierAnahtari) : [];
+  const exactSupplierMatch = tamAdEslesenler.length === 1 ? tamAdEslesenler[0] : undefined;
+  const adBelirsiz = tamAdEslesenler.length > 1;
+  /** Siparişe yazılacak tedarikçi bağı (inceleme 3 — İ3-1). Önce açık seçim (`selectedSupplierId`: listeden seçildi, Mikro'dan içe
+   *  aktarıldı, yeni açıldı ya da düzenlenen siparişin kayıtlı bağı); yoksa tam ad `isimAnahtari` ile TEK kayda eşleşiyorsa o kayıt —
+   *  düzenleme yolunun kuralı (`siparisTedarikciBagi`). Birden çok eşleşmede bağ YOK (kullanıcı listeden seçer). Eskiden tam ad
+   *  yazılınca liste kapanıyor (tek eşleşme) ama `selectedSupplierId` boş kaldığı için sipariş `supplierId: null` ile yazılıyordu;
+   *  `isimAnahtari`'na geçiş bunu BÜYÜK harfli yazıma da yaymıştı. Yeşil onay göstergesi, «Siparişi Oluştur» ve «Güncelle» bu TEK
+   *  değeri okur: gösterge «bağlı» derken yazım bağsız gitmesin. */
+  const seciliTedarikciId = selectedSupplierId ?? exactSupplierMatch?.id ?? null;
+  /** Tedarikçi açılır listesi çizili mi — çizim koşulu ve girdideki Enter (Mikro araması) AYNI koşulu okur. */
+  const tedarikciListesiAcik = !viewingOrder && supplierDropdownOpen && !!supplierQuery && !exactSupplierMatch;
+
+  /** Düzenlenen siparişin tedarikçi bağı (inceleme 2 — İ2-1). Önce siparişte KAYITLI `supplierId`: İ1-3'ten beri aynı adlı iki
+   *  tedarikçi olabilir ve ada göre bulmak «Güncelle»de siparişin `supplierId` / `mikroCariKod`'unu ÖBÜR kayda geçirirdi. Kayıtlı
+   *  bağ listede yoksa (kayıt silinmiş ya da liste henüz gelmemiş) de bağ KORUNUR — ada göre başka kayda geçilmez. Ad yalnız bağ hiç
+   *  yoksa (eski sipariş) ve `isimAnahtari` ile TEK kayda eşleşiyorsa kullanılır; birden çok eşleşmede seçim boş (kullanıcı seçer). */
+  const siparisTedarikciBagi = (order: PurchaseOrder): string | null => {
+    if (order.supplierId) return order.supplierId;
+    const anahtar = isimAnahtari(order.supplier);
+    const eslesenler = anahtar ? suppliers.filter(s => isimAnahtari(s.name) === anahtar) : [];
+    return eslesenler.length === 1 ? eslesenler[0].id : null;
+  };
+
+  // Klavye yolu (inceleme 2 — İ2-2): odak kutunun İÇİNDE başka öğeye geçiyorsa (`relatedTarget` kutuda: Tab ile kayıtlı tedarikçi,
+  // «Mikro'da ara», Mikro sonuç düğmesi) kapatma zamanlayıcısı KURULMAZ. Zamanlayıcı girdide değil kutu kapsayıcısında kurulur ki
+  // odak kutudan bir DÜĞMEDEN çıkınca da liste kapansın. Odak 150 ms içinde GİRDİYE dönerse bekleyen kapatma iptal edilir.
+  const tedarikciGirdisiRef = useRef<HTMLInputElement>(null);
+  const tedarikciKapatma = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tedarikciKapatmayiIptalEt = () => {
+    if (tedarikciKapatma.current !== null) { clearTimeout(tedarikciKapatma.current); tedarikciKapatma.current = null; }
+  };
+  useEffect(() => tedarikciKapatmayiIptalEt, []);
+  const tedarikciKutusuOdakKaybi = (e: React.FocusEvent<HTMLDivElement>) => {
+    const hedef = e.relatedTarget;
+    if (hedef instanceof Node && e.currentTarget.contains(hedef)) return;
+    tedarikciKapatmayiIptalEt();
+    tedarikciKapatma.current = setTimeout(() => { tedarikciKapatma.current = null; setSupplierDropdownOpen(false); }, 150);
+  };
 
   const handleSelectSupplier = (s: Supplier) => {
     setNewOrder(prev => ({ ...prev, supplier: s.name }));
     setSelectedSupplierId(s.id);
     setSupplierDropdownOpen(false);
+    mikroAramaSifirla();
+  };
+
+  const handleMikroAra = async () => {
+    const metin = (newOrder.supplier ?? '').trim();
+    if (mikroAraniyor || !mikroAranabilir || !cariAramaMetniYeterli(metin)) return;
+    // Arama klavyeyle düğmeden başlatıldıysa odak girdiye döner (İ2-2): düğme sonuç gelince DOM'dan kalkar ve odak sayfanın başına
+    // düşerdi; girdiden Tab sonuç düğmelerine ulaşır. Fareyle tıklamada odak zaten girdide (düğmenin `onMouseDown` preventDefault'u).
+    tedarikciGirdisiRef.current?.focus();
+    mikroAramaSifirla();
+    const sira = ++mikroAramaSirasi.current;
+    setMikroAraniyor(true);
+    try {
+      const sonuc = await araMikroCari(metin);
+      if (sira !== mikroAramaSirasi.current) return;   // kutu bu arada sıfırlandı (metin değişti / tedarikçi seçildi): bayat yanıt
+      if (sonuc.success) { setMikroSonuclari(sonuc.data); setMikroSinirli(sonuc.sinirli); }
+      else setMikroHataMetni(cariAramaHataMetni(sonuc, currentLanguage === 'tr'));
+    } finally {
+      if (sira === mikroAramaSirasi.current) {
+        setMikroAraniyor(false);
+        // Liste açık kalsın (sonuç / hata görünsün). Düğmenin `onMouseDown` preventDefault'u girdinin odağını korur — odak kaybı
+        // (kutunun `onBlur`'u → 150 ms sonra liste kapanır) hızlı yanıtı silemez.
+        setSupplierDropdownOpen(true);
+      }
+    }
+  };
+
+  // VKN karşılaştırması rakam dışı karakterleri (boşluk / tire / nokta) yok sayar — Mikro ve yerel kayıt aynı numarayı farklı
+  // biçimlendirebilir.
+  const yalnizRakam = (v?: string) => (v ?? '').replace(/\D/g, '');
+
+  const handleMikroIceAktar = async (c: MikroCariItem) => {
+    if (!mikroAranabilir) return;
+    setSupplierActionLoading(true);
+    try {
+      // Mükerrer önleme SIRAYLA: VKN → mikroCariKod → ad. Ad eşitliği `isimAnahtari` ile (Türkçe locale): Mikro unvanı BÜYÜK gelir
+      // ('İSTANBUL YAPI'), elle açılan tedarikçi karışık ('İstanbul Yapı') — `toLowerCase` 'İ'yi i + birleşik noktaya çevirip
+      // ikisini ayrı kayıt sayardı (her içe aktarımda mükerrer tedarikçi). Yerel `exactSupplierMatch` bu işin dışında (H13).
+      // Ad eşleşmesi YALNIZ kimliği ÇELİŞMEYEN kayıtta (inceleme 1, kullanıcı kararı): kaydın VKN'si dolu ve Mikro'nunkinden farklıysa
+      // ya da kayıt BAŞKA bir cariye bağlıysa aynı ad başka firmadır — yeni tedarikçi açılır (eski kayda Mikro VKN'si / kodu yazılmaz).
+      const vkn = yalnizRakam(c.cari_vdaire_no);
+      const unvan = isimAnahtari(c.cari_unvan1);
+      const existing = (vkn ? suppliers.find(s => yalnizRakam(s.taxNo) === vkn) : undefined)
+        ?? suppliers.find(s => !!s.mikroCariKod && s.mikroCariKod === c.cari_kod)
+        ?? (unvan ? suppliers.find(s => isimAnahtari(s.name) === unvan
+          && !(vkn && yalnizRakam(s.taxNo) && yalnizRakam(s.taxNo) !== vkn)
+          && !(s.mikroCariKod && s.mikroCariKod !== c.cari_kod)) : undefined);
+
+      let targetId: string;
+      if (existing) {
+        // Var olan tedarikçide YALNIZ BOŞ alan doldurulur; Mikro'da boş olan alan yazılmaz (boş dize uydurulmaz). Kayıt başka
+        // bir cariye bağlıysa bağı DEĞİŞMEZ.
+        const yama: Record<string, string> = {};
+        if (!existing.email && c.cari_EMail) yama.email = c.cari_EMail;
+        if (!existing.phone && c.cari_CepTel) yama.phone = c.cari_CepTel;
+        if (!existing.taxNo && c.cari_vdaire_no) yama.taxNo = c.cari_vdaire_no;
+        if (!existing.mikroCariKod) yama.mikroCariKod = c.cari_kod;
+        if (Object.keys(yama).length > 0) await updateDoc(doc(db, 'suppliers', existing.id), yama);
+        targetId = existing.id;
+      } else {
+        const docRef = await addDoc(collection(db, 'suppliers'), {
+          name: c.cari_unvan1,
+          mikroCariKod: c.cari_kod,
+          ...(c.cari_EMail ? { email: c.cari_EMail } : {}),
+          ...(c.cari_CepTel ? { phone: c.cari_CepTel } : {}),
+          ...(c.cari_vdaire_no ? { taxNo: c.cari_vdaire_no } : {}),
+          createdAt: serverTimestamp(),
+        });
+        targetId = docRef.id;
+      }
+      setNewOrder(prev => ({ ...prev, supplier: existing?.name || c.cari_unvan1 }));
+      setSelectedSupplierId(targetId);
+      setSupplierDropdownOpen(false);
+      mikroAramaSifirla();
+    } catch (error) {
+      logFirestoreError(error as Error, OperationType.WRITE, 'suppliers');
+      setMikroHataMetni(currentLanguage === 'tr' ? 'Tedarikçi kaydedilemedi.' : 'Supplier could not be saved.');
+    } finally {
+      setSupplierActionLoading(false);
+    }
   };
 
   const handleCreateLocalSupplier = async () => {
     if (!supplierQuery) return;
     setSupplierActionLoading(true);
     try {
-      // Isim zaten kayitliysa yeni kopya acma - mevcut olani sec.
-      const existing = suppliers.find(s => (s.name ?? '').toLowerCase() === supplierQuery);
+      // Ad zaten kayıtlıysa (TEK kayıt) yeni kopya açılmaz — mevcut olan seçilir. Aynı adlı BİRDEN ÇOK kayıtta (İ1-3) bu düğme hiç
+      // ÇİZİLMEZ (yerine «listeden seçin» notu — inceleme 2, İ2-1): hiçbiri kendiliğinden seçilmez, yeni kopya da açılmaz; eskiden
+      // burada ilk eşleşen seçiliyordu.
+      const existing = exactSupplierMatch;
       if (existing) {
         handleSelectSupplier(existing);
         return;
@@ -185,6 +329,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       });
       setSelectedSupplierId(docRef.id);
       setSupplierDropdownOpen(false);
+      mikroAramaSifirla();
       // Yeni tedarikciyi hemen Mikro'ya da kaydetmeyi dene - basarisiz olursa
       // sessizce yerel kalir, kullanici istediginde daha sonra tekrar dener.
       void syncSupplierToMikro({ name: newOrder.supplier.trim() }, docRef.id);
@@ -260,14 +405,15 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       const poDocRef = doc(collection(db, 'purchaseOrders'));
       const orderNumber = `PO-${poDocRef.id.slice(0, 8).toUpperCase()}`;
 
-      const linkedSupplier = selectedSupplierId ? suppliers.find(s => s.id === selectedSupplierId) : undefined;
+      const bagliTedarikciId = seciliTedarikciId;
+      const linkedSupplier = bagliTedarikciId ? suppliers.find(s => s.id === bagliTedarikciId) : undefined;
 
       if (isPrivileged) {
         // Admin/Manager/Purchasing → create directly
         await setDoc(poDocRef, {
           orderNumber,
           supplier: newOrder.supplier,
-          supplierId: selectedSupplierId || null,
+          supplierId: bagliTedarikciId,
           mikroCariKod: linkedSupplier?.mikroCariKod || null,
           items: newOrder.items,
           status: 'Taslak',
@@ -311,6 +457,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       setIsAddingOrder(false);
       setNewOrder({ supplier: '', items: [], notes: '', expectedDate: format(new Date(), 'yyyy-MM-dd') });
       setSelectedSupplierId(null);
+      mikroAramaSifirla();
     } catch (error) {
       console.error('Error adding purchase order:', error);
       showValidationError(currentLanguage === 'tr' ? 'Hata oluştu. Tekrar deneyin.' : 'Error occurred. Please try again.');
@@ -329,11 +476,17 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
     }
 
     try {
-      const linkedSupplier = selectedSupplierId ? suppliers.find(s => s.id === selectedSupplierId) : undefined;
+      // Bağ, yeni siparişle AYNI türetilmiş değerden (İ3-1): form ortak, yeşil onay göstergesi düzenlemede de bu değeri gösterir.
+      const bagliTedarikciId = seciliTedarikciId;
+      const linkedSupplier = bagliTedarikciId ? suppliers.find(s => s.id === bagliTedarikciId) : undefined;
+      // Bağlı kayıt listede yoksa ve bağ siparişin KENDİ bağıysa (silinmiş / henüz gelmemiş kayıt — İ2-1) siparişin cari kodu korunur;
+      // bağ değiştiyse ya da kalktıysa yeni bağın kodu (yoksa `null`) yazılır.
+      const kendiBagi = !!bagliTedarikciId && bagliTedarikciId === editingOrder.supplierId;
+      const mikroCariKod = linkedSupplier ? (linkedSupplier.mikroCariKod || null) : (kendiBagi ? (editingOrder.mikroCariKod || null) : null);
       await updateDoc(doc(db, 'purchaseOrders', editingOrder.id), {
         supplier: newOrder.supplier,
-        supplierId: selectedSupplierId || null,
-        mikroCariKod: linkedSupplier?.mikroCariKod || null,
+        supplierId: bagliTedarikciId,
+        mikroCariKod,
         items: newOrder.items,
         totalAmount: calculateTotal(newOrder.items),
         expectedDate: newOrder.expectedDate,
@@ -343,6 +496,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
       setEditingOrder(null);
       setNewOrder({ supplier: '', items: [], notes: '', expectedDate: format(new Date(), 'yyyy-MM-dd') });
       setSelectedSupplierId(null);
+      mikroAramaSifirla();
     } catch (error) {
       console.error('Error updating purchase order:', error);
     }
@@ -801,8 +955,8 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                             expectedDate: typeof order.expectedDate === 'string' ? order.expectedDate : (order.expectedDate && typeof order.expectedDate === 'object' && 'toDate' in order.expectedDate && typeof order.expectedDate.toDate === 'function' ? format(order.expectedDate.toDate(), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'))
                           });
                           setEditingOrder(order);
-                          const match = suppliers.find(s => (s.name ?? '').toLowerCase() === (order.supplier ?? '').trim().toLowerCase());
-                          setSelectedSupplierId(match?.id ?? null);
+                          setSelectedSupplierId(siparisTedarikciBagi(order));
+                          mikroAramaSifirla();
                         }}
                         className="p-2 hover:bg-gray-100 rounded-xl text-gray-500 transition-all"
                         title={oc(currentLanguage).duzenle}
@@ -871,6 +1025,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                     setViewingOrder(null);
                     setNewOrder({ supplier: '', items: [], notes: '', expectedDate: format(new Date(), 'yyyy-MM-dd') });
       setSelectedSupplierId(null);
+      mikroAramaSifirla();
                   }}
                   className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-400 hover:text-gray-600"
                 >
@@ -881,32 +1036,45 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
               <div className="flex-1 overflow-y-auto p-8 space-y-8">
                 {/* Supplier & Date */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2 relative">
+                  <div
+                    className="space-y-2 relative"
+                    data-tedarikci-kutusu
+                    onBlur={tedarikciKutusuOdakKaybi}
+                  >
                     <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider ml-1">{t.supplier}</label>
                     <div className="relative">
                       <input
+                        ref={tedarikciGirdisiRef}
                         type="text"
                         placeholder={currentLanguage === 'tr' ? 'Tedarikçi adı girin veya arayın...' : 'Enter or search supplier...'}
                         value={viewingOrder ? viewingOrder.supplier : newOrder.supplier}
                         onChange={e => {
                           setNewOrder(prev => ({ ...prev, supplier: e.target.value }));
                           setSelectedSupplierId(null);
+                          mikroAramaSifirla();
                           setSupplierDropdownOpen(true);
                         }}
-                        onFocus={() => setSupplierDropdownOpen(true)}
-                        onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 150)}
+                        onFocus={() => { tedarikciKapatmayiIptalEt(); setSupplierDropdownOpen(true); }}
+                        onKeyDown={e => {
+                          // Enter = «Mikro'da ara» (İ2-2), yalnız düğme çizili ve basılabilirken; aksi hâlde tuş olduğu gibi kalır.
+                          if (e.key !== 'Enter') return;
+                          if (!tedarikciListesiAcik || !mikroAranabilir || mikroSonuclari !== null || mikroAraniyor) return;
+                          if (!cariAramaMetniYeterli(newOrder.supplier ?? '')) return;
+                          e.preventDefault();
+                          void handleMikroAra();
+                        }}
                         disabled={!!viewingOrder}
                         className={cn(
                           "apple-input w-full",
                           !!validationError && !(newOrder.supplier ?? '').trim() && "ring-2 ring-red-400"
                         )}
                       />
-                      {!viewingOrder && selectedSupplierId && (
+                      {!viewingOrder && seciliTedarikciId && (
                         <CheckCircle className="w-4 h-4 text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2" />
                       )}
                     </div>
 
-                    {!viewingOrder && supplierDropdownOpen && supplierQuery && !exactSupplierMatch && (
+                    {tedarikciListesiAcik && (
                       <div className="absolute z-10 mt-1 w-full bg-white border border-gray-100 rounded-2xl shadow-lg p-2 space-y-1 max-h-72 overflow-y-auto">
                         {matchingSuppliers.length > 0 && (
                           <div className="space-y-1 mb-2">
@@ -917,21 +1085,82 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                                 onClick={() => handleSelectSupplier(s)}
                                 className="w-full text-left px-3 py-2 rounded-xl hover:bg-gray-50 text-sm flex items-center justify-between"
                               >
-                                <span>{s.name}</span>
+                                {/* VKN (varsa) aynı adlı kayıtları ayırt ettirir (İ2-1). */}
+                                <span>{s.name}{s.taxNo && <span className="text-gray-400 text-xs"> · VKN {s.taxNo}</span>}</span>
                                 {s.mikroCariKod && <span className="text-[9px] text-emerald-600 font-bold">Mikro</span>}
                               </button>
                             ))}
                           </div>
                         )}
 
-                        <button
-                          onClick={() => void handleCreateLocalSupplier()}
-                          disabled={supplierActionLoading}
-                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-brand/5 text-sm text-brand font-medium flex items-center gap-2 disabled:opacity-40 border-t border-gray-50 pt-2.5"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          {currentLanguage === 'tr' ? `Yeni tedarikçi oluştur: "${newOrder.supplier}"` : `Create new supplier: "${newOrder.supplier}"`}
-                        </button>
+                        {mikroAranabilir && (
+                          <div className="space-y-1 mb-2">
+                            {mikroSonuclari === null && (
+                              <>
+                                <button
+                                  // Odak girdide kalsın: aksi hâlde girdinin `onBlur`'u 150 ms sonra listeyi kapatır ve hızlı gelen yanıtı
+                                  // (503 / 400 / 429 iletisi, sonuç) siler (inceleme 1).
+                                  onMouseDown={e => e.preventDefault()}
+                                  onClick={() => void handleMikroAra()}
+                                  disabled={mikroAraniyor || !cariAramaMetniYeterli(newOrder.supplier ?? '')}
+                                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-blue-50 text-sm text-blue-600 font-medium flex items-center gap-2 disabled:opacity-40"
+                                >
+                                  <Search className="w-3.5 h-3.5" />
+                                  {mikroAraniyor
+                                    ? (currentLanguage === 'tr' ? 'Mikro\'da aranıyor…' : 'Searching Mikro…')
+                                    : (currentLanguage === 'tr' ? `Mikro'da "${(newOrder.supplier ?? '').trim()}" ara` : `Search Mikro for "${(newOrder.supplier ?? '').trim()}"`)}
+                                </button>
+                                {!cariAramaMetniYeterli(newOrder.supplier ?? '') && (
+                                  <p className="text-xs text-gray-400 px-3">{currentLanguage === 'tr' ? 'En az iki karakter yazın.' : 'Type at least two characters.'}</p>
+                                )}
+                              </>
+                            )}
+                            {mikroHataMetni && (
+                              <p role="alert" className="text-xs text-red-600 px-3 py-1.5">{mikroHataMetni}</p>
+                            )}
+                            {mikroSonuclari !== null && mikroSonuclari.length > 0 && (
+                              <>
+                                <p className="text-[9px] font-bold text-gray-400 uppercase px-2">{currentLanguage === 'tr' ? 'Mikro sonuçları' : 'Mikro results'}</p>
+                                {mikroSonuclari.map(c => (
+                                  <button
+                                    key={c.cari_kod}
+                                    onMouseDown={e => e.preventDefault()}   // odak girdide: kayıt hatası iletisi liste kapanınca silinmesin
+                                    onClick={() => void handleMikroIceAktar(c)}
+                                    disabled={supplierActionLoading}
+                                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-emerald-50 text-sm flex items-center justify-between disabled:opacity-40"
+                                  >
+                                    <span>{c.cari_unvan1} <span className="text-gray-400 text-xs">({c.cari_kod}{c.cari_vdaire_no ? ` · VKN ${c.cari_vdaire_no}` : ''})</span></span>
+                                    <span className="text-[9px] text-emerald-600 font-bold">{oc(currentLanguage).ice_aktar}</span>
+                                  </button>
+                                ))}
+                              </>
+                            )}
+                            {mikroSonuclari !== null && mikroSonuclari.length === 0 && (
+                              <p className="text-xs text-gray-400 px-3 py-1.5">{currentLanguage === 'tr' ? 'Mikro\'da bulunamadı.' : 'Not found in Mikro.'}</p>
+                            )}
+                            {mikroSonuclari !== null && mikroSinirli && (
+                              <p className="text-xs text-amber-700 px-3 py-1.5">{currentLanguage === 'tr' ? 'İlk 20 sonuç gösteriliyor, aramayı daraltın.' : 'Showing the first 20 results — narrow your search.'}</p>
+                            )}
+                          </div>
+                        )}
+
+                        {adBelirsiz ? (
+                          // Aynı adlı birden çok kayıt (İ2-1): yeni kopya açılmaz, hiçbiri kendiliğinden seçilmez.
+                          <p className="text-xs text-amber-700 px-3 py-2 border-t border-gray-50 pt-2.5">
+                            {currentLanguage === 'tr'
+                              ? 'Bu adla birden çok tedarikçi kayıtlı — VKN\'ye bakarak listeden seçin.'
+                              : 'Several suppliers share this name — pick one from the list by tax number.'}
+                          </p>
+                        ) : (
+                          <button
+                            onClick={() => void handleCreateLocalSupplier()}
+                            disabled={supplierActionLoading}
+                            className="w-full text-left px-3 py-2 rounded-xl hover:bg-brand/5 text-sm text-brand font-medium flex items-center gap-2 disabled:opacity-40 border-t border-gray-50 pt-2.5"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            {currentLanguage === 'tr' ? `Yeni tedarikçi oluştur: "${newOrder.supplier}"` : `Create new supplier: "${newOrder.supplier}"`}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1106,6 +1335,7 @@ export default function PurchasingModule({ currentLanguage, isAuthenticated, use
                     setViewingOrder(null);
                     setNewOrder({ supplier: '', items: [], notes: '', expectedDate: format(new Date(), 'yyyy-MM-dd') });
       setSelectedSupplierId(null);
+      mikroAramaSifirla();
                   }}
                   className="apple-button-secondary"
                 >

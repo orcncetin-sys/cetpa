@@ -411,6 +411,17 @@ export function sqlTanimlayici(v: unknown): string | null {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(s) ? s : null;
 }
 
+/** Kullanıcı metnini `LIKE '%…%'` kalıbına gömmeden önceki kaçış — TEK işlev (`cari/listesi` araması ve `cari/ara`).
+ *  CariListesiV2'nin WhereStr'i serbest SQL parçasıdır (Mikro kendi sorgusuna ekler): LIKE jokerleri ve köşeli parantez T-SQL
+ *  kaçışıyla düz karaktere (`%` → `[%]`, `_` → `[_]`, `[` → `[[]`), tek tırnak ikilenerek dizenin içinde kalır.
+ *  Tırnak BENZERLERİ (U+2018 ‘, U+2019 ’, U+02BC ʼ, U+02B9 ʹ, U+02C8 ˈ, U+2032 ′, U+FF07 ＇) LIKE tek karakter jokeri `_`'ye
+ *  çevrilir (şartname mikro-cari-arama § 7 H12; U+02C8 ve U+2032 inceleme 1'de eklendi). Mikro'nun WhereStr'i Unicode'dan
+ *  ANSI'ye best-fit dönüşümle çevirip çevirmediği ÖLÇÜLMEDİ — çevirirse benzer, kaçışsız düz tırnağa döner ve dizeyi kapatırdı. `_` iki yazımı da bulur (akıllı kesme işaretiyle yazılan arama düz tırnaklı
+ *  unvanı da). SIRA ÖNEMLİ: benzerin `_`'si kaçıştan SONRA konur (önce konsaydı `[_]` olur, joker olmazdı). */
+export function mikroLikeKacisi(metin: string): string {
+  return metin.replace(/[[%_]/g, '[$&]').replace(/'/g, "''").replace(/[\u2018\u2019\u02BC\u02B9\u02C8\u2032\uFF07]/g, '_');
+}
+
 /** mikroPost/mikroSql seçeneği. `zamanAsimiMs`: bu çağrıya ÖZEL `AbortSignal.timeout` (ms). */
 export interface MikroPostSecenek { zamanAsimiMs?: number }
 

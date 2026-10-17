@@ -231,6 +231,16 @@ describe('POST /api/mikro/cari/listesi — arama dalı TEK sayfa, LIKE jokerleri
     expect(cagrilar().map(c => c.Index)).toEqual([0, 0, 0]);
   });
 
+  it('kaçış TEK işlevden (`mikroLikeKacisi`, `cari/ara` ile ortak — şartname mikro-cari-arama C3 / § 7 H12): tırnak benzerleri bu uçta da `_` jokeri olur', async () => {
+    doluSayfalar();
+    // U+02BC (değiştirici kesme işareti) ve U+2019 (sağ tek tırnak): Mikro WhereStr'i ANSI'ye best-fit çevirirse düz tırnağa dönerdi.
+    for (const nameSearch of ['Ahmetʼin', 'O’Neil Yapı']) await d.cagir('POST', '/api/mikro/cari/listesi', { nameSearch });
+    expect(cagrilar().map(c => c.WhereStr)).toEqual([
+      "cari_unvan1 LIKE '%Ahmet_in%'",
+      "cari_unvan1 LIKE '%O_Neil Yapı%'",
+    ]);
+  });
+
   it('`{}` (tam import, `leads` yazma kapılı dal) DEĞİŞMEDİ: sayfalama sürer, 50 sayfa / 10.000 cari tavanında durur', async () => {
     doluSayfalar();
     const res = await d.cagir('POST', '/api/mikro/cari/listesi', {});
