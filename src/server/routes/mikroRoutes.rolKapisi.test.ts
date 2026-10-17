@@ -578,7 +578,7 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
     ]);
   });
 
-  it('Ç9 — politika değişmezi: her ince kapı kuralı AÇIK tanımlı, dış rol ve rolsüz hesap GEÇEMEZ (kuralı dış rol içeren kapı YALNIZ iç personel şartıyla çiftli)', () => {
+  it('Ç9 — politika değişmezi: her ince kapı kuralı AÇIK tanımlı, dış rol ve rolsüz hesap GEÇEMEZ (iç personel şartıyla çiftli kapılar — `orders` / `quotations` yazma — derinlemesine savunma olarak çiftli KALIR)', () => {
     const etiketler = new Set<string>([
       ...KAPILI.map(a => BEKLENEN[a]), 'leads:write', 'suppliers:write', ...Object.values(EVRAK_BEKLENEN), ...Object.values(UC_TABLOSU_BEKLENEN),
     ]);
@@ -591,19 +591,21 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
       expect(hasExplicitRule(k) || ADMIN_ONLY_COLLECTIONS.has(k), `${etiket}: kuralsız koleksiyon (yalnız Admin geçer = sessiz kilit)`).toBe(true);
       expect(isAllowed(null, k, e), `${etiket}: rolsüz hesap geçiyor`).toBe(false);
       if (icRol) {
-        // Kural dış rol içerir → TEK BAŞINA kapı olamaz. Çiftleme yalnız GEREKTİĞİNDE yazılır (gereksiz çift, kuralın dış role
-        // açıldığı izlenimi verir): uç düzeyinde Ç5 `requireStaff` + `orders` yazma çiftini, yöntem düzeyinde tablo `icRolVe`'yi ister.
-        expect(EXTERNAL_ROLES.some(r => isAllowed(r, k, e)), `${etiket}: kural dış rol içermiyor — çiftleme gereksiz`).toBe(true);
+        // 2026-10-11 (dış rol kapanışı, D1) — YENİDEN SABİTLENDİ: bu kurallar (`orders`, `quotations` yazma) eskiden dış rol
+        // İÇERİYORDU ve tek başına kapı olamıyordu; çiftleme bu yüzden yazılmıştı. Tablodan dış rol çıktı: kural artık dış rolü
+        // GEÇİRMEZ, çiftleme yine KALIR (tablo bir gün yeniden açılırsa Mikro'ya yazan uç kendiliğinden açılmasın).
+        expect(EXTERNAL_ROLES.filter(r => isAllowed(r, k, e)), `${etiket}: dış rol kuraldan geçiyor (D1)`).toEqual([]);
         ciftli.push(etiket);
         continue;
       }
       expect(EXTERNAL_ROLES.filter(r => isAllowed(r, k, e)), `${etiket}: dış rol geçiyor`).toEqual([]);
     }
     expect(sirali(ciftli)).toEqual(['staff+orders:write', 'staff+quotations:write']);
-    // H4: teklif yöntemi tabloda İKİ koşulu birlikte taşır; düz `quotations` yazma ikilisi tabloda HİÇBİR yöntemde yok
-    // (kural B2B / Bayi'yi geçirir — düz yazılırsa ilk turda kapanan açık yeniden açılır).
+    // H4: teklif yöntemi tabloda İKİ koşulu birlikte taşır; düz `quotations` yazma ikilisi tabloda HİÇBİR yöntemde yok.
+    // Kural eskiden B2B / Bayi'yi geçiriyordu (düz yazılsa ilk turda kapanan açık yeniden açılırdı); D1'den beri geçirmiyor,
+    // çift yine durur (derinlemesine savunma).
     expect(MIKRO_EVRAK_KAPILARI.get('VerilenTeklifKaydetV2')).toEqual({ icRolVe: ['quotations', 'write'] });
-    expect(sirali(EXTERNAL_ROLES.filter(r => isAllowed(r, 'quotations', 'write')))).toEqual(sirali(EXTERNAL_ROLES));
+    expect(EXTERNAL_ROLES.filter(r => isAllowed(r, 'quotations', 'write'))).toEqual([]);   // D1
     for (const [yontem, kapi] of MIKRO_EVRAK_KAPILARI) {
       if (kapi !== 'staff' && !('icRolVe' in kapi)) expect(EXTERNAL_ROLES.filter(r => isAllowed(r, kapi[0], kapi[1])), `${yontem}: düz ikili dış rol içeriyor`).toEqual([]);
       // Ortak tablodan soran istemci de dış rolü HİÇBİR yöntemde geçirmez (tanınmayan yöntem dâhil).

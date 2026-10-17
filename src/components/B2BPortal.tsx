@@ -1,3 +1,4 @@
+// Dış rol ERP kabuğunu görmez (2026-10-11); dış role dönük dallar Faz 4 ölü kod listesinde (şartname dış-rol-kapanışı D7 — bu turda SİLİNMEDİ).
 /**
  * B2BPortal — extracted from App.tsx
  * Handles quotations, dealers, and price lists for B2B/dealer users.

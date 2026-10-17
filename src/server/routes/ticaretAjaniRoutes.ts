@@ -46,6 +46,13 @@ import type { GoogleGenAI } from '@google/genai';
 export interface TicaretAjaniCtx {
   requireAuth: unknown;
   requireMfaVerified: unknown;
+  /**
+   * Yalnız iç personel (2026-10-11, şartname «dış rol kapanışı» D13). İki ajan yalnız `requireAuth` taşıyordu: satış ajanı
+   * `cariKod` ile kiracı kolonu OLMAYAN Mikro aynasını okur — hesap açan yabancı ve dış rol herhangi bir carinin satış
+   * geçmişinden üretilen özeti alıyor, satın alma ajanı kritik stokları ve son alış tedarikçilerini veriyordu; her çağrı
+   * ücretli model çağrısıdır. Tek boğaz `requireAuth`'ta; bu, boğaz sökülse de kapalı kalsın diye uçların KENDİ kapısı.
+   */
+  requireStaff: unknown;
   reqCompanyId: (req: Request) => Promise<string>;
   reqActor: (req: Request) => { uid: string; email: string };
   writeAuditLog: (actor: { uid: string; email: string }, action: string, details: string) => Promise<unknown>;
@@ -177,7 +184,7 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
   };
 
   /** POST /api/ai/satis-ajani — Body: { cariKod: string } */
-  app.post('/api/ai/satis-ajani', C.requireAuth as never, C.requireMfaVerified as never, async (req: Request, res: Response) => {
+  app.post('/api/ai/satis-ajani', C.requireAuth as never, C.requireStaff as never, C.requireMfaVerified as never, async (req: Request, res: Response) => {
     const cariKod = String((req.body as { cariKod?: string } | undefined)?.cariKod ?? '').trim();
     if (!cariKod) return res.status(400).json({ success: false, error: 'cariKod gerekli.' });
     const pool = C.getPgPool();
@@ -248,7 +255,7 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
   });
 
   /** POST /api/ai/satinalma-ajani — Body: {} */
-  app.post('/api/ai/satinalma-ajani', C.requireAuth as never, C.requireMfaVerified as never, async (req: Request, res: Response) => {
+  app.post('/api/ai/satinalma-ajani', C.requireAuth as never, C.requireStaff as never, C.requireMfaVerified as never, async (req: Request, res: Response) => {
     const pool = C.getPgPool();
     try {
       const cid = await C.reqCompanyId(req);

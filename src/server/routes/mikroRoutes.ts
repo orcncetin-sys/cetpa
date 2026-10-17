@@ -56,6 +56,7 @@ import {
 import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
 import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
 import { EXTERNAL_ROLES, type AppRole } from '../../lib/rbac.js';
+import { rolluKiracilar } from '../kiraciOrtami.js';
 import { mikroIsAdi } from '../../lib/mikroIsAdi.js';
 import { MIKRO_EVRAK_KAPILARI, evrakKapiKosullari, evrakYontemi } from '../../lib/mikroEvrakKapilari.js';
 import { arkaPlanIsiBaslat, arkaPlanOnKontrol, arkaPlanYaziciAdi, arkaPlanIsiKosan, bakimKilidiMesaji, type ArkaPlanBagimlilik, type BaslatSonucu } from '../mikro/arkaPlanIsi.js';
@@ -3585,12 +3586,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       if (process.env.MIKRO_CRON_COMPANY_ID) return process.env.MIKRO_CRON_COMPANY_ID;
       if (!C.getAdminDb()) return '';
       const snap = await C.getAdminDb().collection('users').get();
-      // Set<string> ACIKCA: C.getAdminDb() baglamda `any` oldugu icin snap.docs da
-      // any oluyor ve `new Set(any)` TypeScript'te Set<unknown> cikariyor.
-      const cids = new Set<string>(snap.docs.map((d: { data: () => Record<string, unknown>; id: string }) =>
-        (d.data().companyId as string) || d.id));
-      if (cids.size === 1) return [...cids][0];
-      console.error(`Mikro SQL senkron: ${cids.size} tenant var ve MIKRO_CRON_COMPANY_ID tanımsız → atlandı.`);
+      // Kiracı kümesi `serverTenantId` (server.ts) ve `cronCompanyId` (crons.ts) ile AYNI saf yardımcıdan
+      // (kiraciOrtami.rolluKiracilar; 2026-10-11, şartname «dış rol kapanışı» D12): yalnız rolü `APP_ROLES` üyesi olan `users`
+      // belgeleri sayılır. Bu ÜÇÜNCÜ kopyaydı ve her belgeyi sayıyordu — giriş ekranından hesap açan yabancının rolsüz belgesi
+      // ikinci kiracı sayılıp gece SQL senkronunu «hedef kiracı belirsiz» diye atlatıyordu (öbür iki kopya düzeltilmiş, bu kalmıştı).
+      const kiracilar = rolluKiracilar(snap.docs.map((d: { data: () => Record<string, unknown>; id: string }) => ({ id: d.id, veri: d.data() })));
+      if (kiracilar.length === 1) return kiracilar[0];
+      console.error(`Mikro SQL senkron: ${kiracilar.length} tenant var ve MIKRO_CRON_COMPANY_ID tanımsız → atlandı.`);
       return '';
     };
 

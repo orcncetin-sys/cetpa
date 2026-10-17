@@ -13,7 +13,7 @@
  * (probe hep null kalirdi) - tam olarak bu projede daha once yasanan
  * "sessiz olu kod" sinifi.
  */
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, RequestHandler, Response } from 'express';
 // ThinkingLevel/Type Google SDK'nin KENDI enum'lari; server.ts'e bagimlilik
 // degil, dogrudan pakete import edilir (dongu yok).
 import { ThinkingLevel, Type } from '@google/genai';
@@ -26,6 +26,13 @@ export interface AiRouteCtx {
   requireAuth: any;
   requireMfaVerified: any;
   requireAdmin: any;
+  /**
+   * Yalnız iç personel (2026-10-11, şartname «dış rol kapanışı» D13). Üretim uçları (generate / chat / demand-forecast) yalnız
+   * `requireAuth` taşıyordu: anahtar kiracıdan bağımsız çözülür (`settings/aiConfig` → ortam → Vertex), yani giriş ekranından
+   * hesap açan yabancı ve dış rol firmanın ücretli yapay zekâ kotasını serbest istem + istediği modelle harcayabiliyordu.
+   * Tek boğaz `requireAuth`'ta; bu, boğaz sökülse de kapalı kalsın diye uçların KENDİ kapısı. İç roller arası daraltma YOK.
+   */
+  requireStaff: RequestHandler;
   validate: <T>(sema: Sema<T>, veri: unknown, res: Response) => T | null;
   /** GERÇEK tip (2026-09-03): eskiden `Promise<any>` idi ve `geminiDene` generic'i
    *  T'yi çözemeyip yanıtları `unknown` yapıyordu — CLAUDE.md "yaklaşık tip yazma". */
@@ -81,7 +88,7 @@ export function aiRoutes(app: Express, C: AiRouteCtx): void {
    * Returns: { text: string }
    * Used by: geminiService.ts (lead scoring, dashboard analysis, FMEA, 8D)
    */
-  app.post('/api/ai/generate', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  app.post('/api/ai/generate', C.requireAuth, C.requireStaff, C.requireMfaVerified, async (req: Request, res: Response) => {
     const client = await C.resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const { prompt, model, systemInstruction, thinkingLevel, jsonSchema } = req.body as {
@@ -113,7 +120,7 @@ export function aiRoutes(app: Express, C: AiRouteCtx): void {
    * Returns: { text: string }
    * Used by: AIChat.tsx
    */
-  app.post('/api/ai/chat', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  app.post('/api/ai/chat', C.requireAuth, C.requireStaff, C.requireMfaVerified, async (req: Request, res: Response) => {
     const client = await C.resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const chatValidated = C.validate(AiChatSchema, { message: req.body?.message, context: req.body?.systemInstruction, language: req.body?.language }, res);
@@ -150,7 +157,7 @@ export function aiRoutes(app: Express, C: AiRouteCtx): void {
    * Calls Gemini server-side with structured JSON schema and returns ForecastData.
    * Protected by Firebase Auth (requireAuth).
    */
-  app.post('/api/ai/demand-forecast', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  app.post('/api/ai/demand-forecast', C.requireAuth, C.requireStaff, C.requireMfaVerified, async (req: Request, res: Response) => {
     const client = await C.resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const {

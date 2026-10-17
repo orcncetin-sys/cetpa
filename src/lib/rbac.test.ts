@@ -38,19 +38,43 @@ describe('isAllowed — RBAC politikası', () => {
     expect(isAllowed('Manager', 'subscriptions', 'read')).toBe(true);
   });
 
-  it('B2B/Dealer sipariş yazabilir, diğerlerinde yalnız okuyabilir', () => {
-    expect(isAllowed('B2B', 'inventory', 'read')).toBe(true);
-    expect(isAllowed('B2B', 'inventory', 'write')).toBe(false);
-    expect(isAllowed('Dealer', 'orders', 'write')).toBe(true);
-    expect(isAllowed('Dealer', 'orders', 'delete')).toBe(false);
+  // 2026-10-11 (dış rol kapanışı, D1) — YENİDEN SABİTLENDİ. Eski beklenti: «B2B / Bayi sipariş yazar, stok kartını ve fiyat listesini
+  // okur». O kural stok kartını alış maliyeti ve tedarikçisiyle, kiracının BÜTÜN müşterilerinin tekliflerini dış role açıyordu.
+  // Tam çit (dış rol × HER koleksiyon × her işlem) rbac.disRol.degismez.test.ts'te; burada eski örneklerin YENİ değeri duruyor.
+  it('B2B / Bayi ERP verisinde HİÇBİR şey okuyamaz, yazamaz, silemez (eskiden okunan / yazılan koleksiyonlar dâhil)', () => {
+    for (const rol of ['B2B', 'Dealer'] as const) {
+      for (const coll of ['inventory', 'orders', 'quotations', 'priceLists', 'priceOverrides', 'recurringOrders', 'commissionRules', 'cpqQuotes', 'documentTemplates']) {
+        for (const op of ['read', 'write', 'delete'] as const) {
+          expect(isAllowed(rol, coll, op), `${rol} ${coll} ${op}`).toBe(false);
+        }
+      }
+    }
   });
 
-  it('B2B/Dealer fiyat listesi/override YAZAMAZ (kendine indirim açığı kapalı)', () => {
-    // Fiyatları okuyabilir ama değiştiremez — aksi halde kendine indirim tanımlar
-    expect(isAllowed('B2B', 'priceLists', 'read')).toBe(true);
-    expect(isAllowed('B2B', 'priceLists', 'write')).toBe(false);
-    expect(isAllowed('Dealer', 'priceLists', 'write')).toBe(false);
-    expect(isAllowed('B2B', 'priceOverrides', 'write')).toBe(false);
+  it('dış rol: kuralsız koleksiyon yedeği, kullanıcı kapsamlı koleksiyon ve herkese açık form da kapalı; iç rol ve kimliksiz ziyaretçi eskisi gibi', () => {
+    // Yedek dal eskiden dış role OKUMA veriyordu (tabloya yazılmamış her koleksiyon bayiye açıktı).
+    expect(isAllowed('Dealer', 'olmayan_koleksiyon', 'read')).toBe(false);
+    expect(isAllowed('Sales', 'olmayan_koleksiyon', 'read')).toBe(true);
+    expect(isAllowed('Sales', 'olmayan_koleksiyon', 'write')).toBe(false);
+    // Kullanıcı kapsamlı: akış bu işlevle karar verir — dış role açık kalsaydı etiketsiz bildirimler akıştan okunurdu.
+    expect(isAllowed('B2B', 'notifications', 'read')).toBe(false);
+    expect(isAllowed('B2B', 'userPrefs', 'write')).toBe(false);
+    expect(isAllowed('Quality', 'notifications', 'read')).toBe(true);
+    expect(isAllowed('HR', 'userPrefs', 'write')).toBe(true);
+    // Herkese açık form: kimliksiz ziyaretçi (rol null) yazar; dış ROL taşıyan hesap tablodan izin alamaz.
+    expect(isAllowed(null, 'demoRequests', 'write')).toBe(true);
+    expect(isAllowed('Sales', 'demoRequests', 'write')).toBe(true);
+    expect(isAllowed('Dealer', 'demoRequests', 'write')).toBe(false);
+  });
+
+  it('rol alanındaki GEÇERSİZ değer (sayı, uydurma dizge) hiçbir koleksiyonu açmaz — kullanıcı kapsamlı olanı da', () => {
+    // `/increment` ile `role: 1` yazılabiliyordu ve «null olmayan her rol» kullanıcı kapsamlı dalı açıyordu (tarama 2026-10-11, bulgu 27).
+    for (const cop of [1, 'Accountant', 'admin', true] as unknown[]) {
+      const rol = cop as Parameters<typeof isAllowed>[0];
+      for (const coll of ['notifications', 'userPrefs', 'aiConsents', 'userOnboarding', 'inventory', 'olmayan_koleksiyon', 'users']) {
+        expect(isAllowed(rol, coll, 'read'), `${String(cop)} ${coll}`).toBe(false);
+      }
+    }
   });
 
   it('append-only koleksiyonlar: yazma var, okuma yalnız Admin, güncelleme/silme yok', () => {

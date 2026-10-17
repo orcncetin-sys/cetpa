@@ -16,6 +16,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import DocumentDesigner from '../components/DocumentDesigner';
 import SuperAdminPanel from '../components/SuperAdminPanel';
+import MfaSifirlaDugmesi from '../components/MfaSifirlaDugmesi';
 import { authFetch } from '../services/authFetch';
 import { UserRole, type LucaConfig, type MikroConfig } from '../types';
 import type { Lead, Order, InventoryItem, InventoryMovement, Employee } from '../types';
@@ -404,6 +405,21 @@ export default function AdminPage({
                           <div><span className="text-gray-400 font-bold uppercase block">{currentLanguage==='tr'?'Ad':'Name'}</span><span className="text-gray-600">{(u.displayName as string)||'—'}</span></div>
                           <div><span className="text-gray-400 font-bold uppercase block">{oc(currentLanguage).durum}</span><span className="text-gray-600">{(u.status as string)||'—'}</span></div>
                           <div><span className="text-gray-400 font-bold uppercase block">{oc(currentLanguage).firma}</span><span className="font-mono text-gray-600 break-all">{(u.companyId as string)||'—'}</span></div>
+                        </div>
+                        {/* 2FA sıfırlama (2026-10-11, şartname dış-rol-kapanışı D10): telefonunu kaybeden kullanıcının kurtarma yolu.
+                            Kim görür kararı bileşende (sunucu kapısıyla aynı kural: yalnız Yönetici / süper yönetici, kendi satırı değil);
+                            görmeyen için boş kalan sarmalayıcı yer kaplamaz. Çit: components/MfaSifirlaDugmesi.test.tsx. */}
+                        <div className="mt-3 empty:hidden">
+                          <MfaSifirlaDugmesi
+                            hedefUid={u.id as string}
+                            hedefAd={(u.email as string) || (u.displayName as string) || (u.id as string)}
+                            cagiranUid={user?.uid}
+                            cagiranRol={userRole}
+                            superAdmin={isSuperAdmin}
+                            dil={currentLanguage}
+                            openConfirm={openConfirm}
+                            toast={toast}
+                          />
                         </div>
                       </td>
                     </tr>

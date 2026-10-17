@@ -38,6 +38,7 @@ import { isimAnahtari, firmaAnahtari } from '../lib/isimAnahtari.js';
 import { toplaBilinen, donemKarsilastir } from '../utils/para.js';
 import { siparisTutari, siparisIptalMi } from '../utils/siparis.js';
 import { bakimKilidiVar, yaziciOlarakCalistir, type SqlCalistirici } from './bakimKilidi.js';
+import { rolluKiracilar } from './kiraciOrtami.js';
 
 
 export interface CronDeps {
@@ -95,13 +96,12 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
     const db = deps().getAdminDb();
     if (!db) return '';
     const snap = await db.collection('users').get();
-    // Set<string> ACIKCA: `getAdminDb()` DI'da `any` oldugu icin `snap.docs`
-    // da any oluyor ve `new Set(any)` TypeScript'te Set<unknown> cikariyor.
-    // server.ts'te adminDb'nin gercek tipi vardi, bu cikarim sorunu yoktu.
-    const cids = new Set<string>(snap.docs.map((d: { data: () => Record<string, unknown>; id: string }) =>
-      (d.data().companyId as string) || d.id));
-    if (cids.size === 1) return [...cids][0];
-    console.error(`Mikro cron: ${cids.size} tenant bulundu ve MIKRO_CRON_COMPANY_ID tanımlı değil → senkron atlandı.`);
+    // Kiracı kümesi `serverTenantId` (server.ts) ile AYNI saf yardımcıdan (kiraciOrtami.rolluKiracilar, 2026-10-11): yalnız rolü
+    // `APP_ROLES` üyesi olan `users` belgeleri sayılır — giriş ekranından hesap açan yabancının rolsüz belgesi ikinci kiracı
+    // sayılıp saatlik + gece Mikro işlerini «belirsiz» diye atlatıyordu. Eski kopya her belgeyi sayıyordu.
+    const kiracilar = rolluKiracilar(snap.docs.map((d: { data: () => Record<string, unknown>; id: string }) => ({ id: d.id, veri: d.data() })));
+    if (kiracilar.length === 1) return kiracilar[0];
+    console.error(`Mikro cron: ${kiracilar.length} tenant bulundu ve MIKRO_CRON_COMPANY_ID tanımlı değil → senkron atlandı.`);
     return '';
   };
 

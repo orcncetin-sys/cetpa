@@ -188,10 +188,11 @@ describe('site paneli ve ERP mağaza uçları — bağlama (dilim 2a)', () => {
     expect(tek(/^ {2}if \(ev\.coll === 'companyStatus'\) magazaPanelKullanici\.temizle\(\);$/)).toBe(dinleyici + 3);
     expect(satirNo(/magazaPanelKullanici\.temizle\(/)).toHaveLength(1);
     // `mfa_secrets` yazımı `docs` olayı ÜRETMEZ: `mfaStatusCache.delete(` geçen her satır panel önbelleğini de düşürür.
+    // Dört yazan: kayıt başlat, kayıt doğrula, kapat + Yönetici sıfırlaması (`mfaKaydiniSil`, 2026-10-11 — şartname «dış rol kapanışı» D10).
     const mfa = satirlar.filter(s => /mfaStatusCache\.delete\(/.test(s.kod));
-    expect(mfa).toHaveLength(3);
+    expect(mfa).toHaveLength(4);
     for (const s of mfa) expect(s.kod, `server.ts:${s.n}`).toMatch(/mfaStatusCache\.delete\((r\.uid|uid)\); magazaPanelKullanici\.dusur\(\1\);/);
-    expect(satirNo(/magazaPanelKullanici\.dusur\(/)).toHaveLength(4);
+    expect(satirNo(/magazaPanelKullanici\.dusur\(/)).toHaveLength(5);
   });
   it('ERP çıkış işleyicisi panel iptalini ÇEREZDEN okunan kimlikle çağırır — refresh token iptalinden BAĞIMSIZ ve ondan ÖNCE', () => {
     const rota = tek(/app\.post\('\/api\/db\/session\/logout', dbLimiter, async \(req: Request, res: Response\) => \{/);

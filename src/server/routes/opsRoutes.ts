@@ -20,6 +20,7 @@ import path from 'path';
 import fs from 'fs';
 import { opsJetonuGecerli } from '../opsJeton.js';
 import { auditSirSayimi, ayarOzeti } from '../sirTani.js';
+import { kullaniciSayimi } from '../kullaniciSayimi.js';
 import { kartFiyatDurumu, stokFiyatOzeti } from '../stokFiyatTani.js';
 import { geceOzeti, koleksiyonOlculeri, senkronSatiri } from '../acilisTani.js';
 import { broadcastDocChange } from '../pgShim.js';
@@ -167,7 +168,10 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
    *     bu sayıya göre verilecek; auditLog append-only, silmek/değiştirmek kullanıcı kararı);
    *   • `kiraci`: kaç kiracı var ve oturumsuz sunucu bağlamının kiracısı çözülüyor mu (aşama 2: global ayarları sahip
    *     kiracıya daraltmanın ön koşulu);
-   *   • `siparisKaynaklari`: siparişlerin `source` dağılımı (çevrim içi mağaza siparişi var mı).
+   *   • `siparisKaynaklari`: siparişlerin `source` dağılımı (çevrim içi mağaza siparişi var mı);
+   *   • `kullanici` (2026-10-11, şartname «dış rol kapanışı» D6): `{ toplam, rolsuz, disRol: { B2B, Dealer }, disRolSonGiris }` —
+   *     canlıda rolsüz / dış rol hesabı var mı. Yalnız SAYI ve en yeni dış rol giriş zamanı; ad / e-posta / kimlik YOK
+   *     (sorgu yalnız `role` ve `lastLogin` alanlarını seçer; sayım `kullaniciSayimi.ts`).
    * Token: X-Ops-Token (scripts/ops-istek.sh).
    */
   app.get('/api/ops/sir-tani', async (req: Request, res: Response) => {
@@ -180,6 +184,8 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
       const toplam = await pool.query("SELECT count(*)::int AS n FROM docs WHERE coll = 'auditLog'");
       const kiraci = await pool.query("SELECT count(DISTINCT COALESCE(NULLIF(data->>'companyId', ''), id))::int AS n FROM docs WHERE coll = 'users'");
       const kaynak = await pool.query("SELECT COALESCE(NULLIF(data->>'source', ''), '(boş)') AS kaynak, count(*)::int AS n FROM docs WHERE coll = 'orders' GROUP BY 1 ORDER BY 2 DESC");
+      // YALNIZ iki alan seçilir: kişi verisi (ad, e-posta, kimlik) sorgudan hiç çıkmaz.
+      const kullanici = await pool.query("SELECT data->'role' AS rol, data->'lastLogin' AS giris FROM docs WHERE coll = 'users'");
       const sahip = C.serverTenantId ? await C.serverTenantId() : '';
       res.json({
         success: true,
@@ -191,6 +197,7 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
           sahipOrtamdan: !!(process.env.SERVER_TENANT_COMPANY_ID || process.env.MIKRO_CRON_COMPANY_ID),
         },
         siparisKaynaklari: Object.fromEntries(kaynak.rows.map(r => [String(r.kaynak), Number(r.n)])),
+        kullanici: kullaniciSayimi(kullanici.rows.map(r => ({ rol: r.rol, sonGiris: r.giris }))),
       });
     } catch (e) {
       console.error('[/api/ops/sir-tani]', e instanceof Error ? e.message : String(e));

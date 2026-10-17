@@ -39,7 +39,7 @@ import {
 } from "./src/server/opsWatchdog.js";
 import {
   type AppRole, type DbOp, ADMIN_ROLES, STAFF_ROLES, APPEND_ONLY_COLLECTIONS, PUBLIC_WRITE_COLLECTIONS,
-  isAllowed, isSelfDocAccess, blocksRoleEscalation, APP_ROLES } from "./src/lib/rbac.js";
+  isAllowed, isSelfDocAccess, blocksRoleEscalation, APP_ROLES, yoneticiRoluneDokunabilir, YONETICI_GEREKLI_YANITI } from "./src/lib/rbac.js";
 import {
   TENANT_COLLECTIONS as TENANT_COLLECTION_LIST,
   USER_SCOPED_COLLECTIONS as USER_SCOPED_COLLECTION_LIST,
@@ -50,6 +50,7 @@ import {
 } from "./src/lib/collections.js";
 import { kiraciWhere, kiraciDamgala, baskasininSahipKaydiMi, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, siparisGorebilir, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
 import { rolIcinMaskele, maskeyiGeriYukle, farkDegeriMaskele, ayarAdresAlaniDegisti } from './src/lib/sirMaske.js';
+import { kimlikYuzeyiKarari, KIMLIK_YUZEYI_RETLERI, ROL_OKUNAMADI_YANITI } from './src/lib/kimlikYuzeyi.js';
 import { izinliTaban, genelHttpsTaban, genelAdresMi, TabanAdresHatasi, LUCA_TABAN, IYZICO_TABAN } from './src/lib/guvenliTaban.js';
 import { shopifyRoutes, shopifyIsiIsle } from './src/server/routes/shopifyRoutes.js';
 import { BAGLANTI_KOLEKSIYONU, baglantiKaydi } from './src/server/kanal/shopifyBaglanti.js';
@@ -94,7 +95,7 @@ import {
   MAGAZA_REVIZE_KUYRUGU, magazaRevizeBildirimIscisi, magazaRevizeBildirimIsteyici, magazaRevizeKacanlariKuyrukla,
 } from "./src/server/kanal/magazaBildirim.js";
 import { smtpYapilandirmasi } from "./src/server/smtpPosta.js";
-import { ortamdanKiraci } from "./src/server/kiraciOrtami.js";
+import { ortamdanKiraci, taramadanKiraci } from "./src/server/kiraciOrtami.js";
 import { DOCS_INDEKS_DDL, DOCS_TABLOSU_DDL } from "./src/server/docsSema.js";
 
 dotenv.config();
@@ -242,10 +243,50 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
         return;
       }
     }
+    // TEK BOĞAZ (2026-10-11): iç rolü olmayan hesap yalnız izin listesindeki uca geçer — ayrıntı hemen aşağıda.
+    if (!(await kimlikYuzeyindenGecer(req, res, decoded.uid))) return;
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token.' });
   }
+}
+
+/**
+ * TEK BOĞAZ — `requireAuth`'un son adımı (2026-10-11, şartname «dış rol kapanışı» D4′).
+ *
+ * `requireAuth` eskiden yalnız «belirteç geçerli» demekti: giriş ekranından hesap açan yabancı (ROLSÜZ hesap) ve dış rol (B2B,
+ * Bayi) rol kapısı taşımayan 37 uca ulaşıyordu (tarama 2026-10-11: tedarikçi kimliği, satış geçmişi, ücretli yapay zekâ kotası,
+ * makbuz yükleme, LUCA / Shopify uçları). Kapanış uç başına değil BURADA: belirteç doğrulandıktan ve askı denetiminden sonra
+ *   süper yönetici → geçer · rolü `STAFF_ROLES` üyesi → geçer · aksi hâlde yalnız `ROLSUZ_IZINLI_YOLLAR` geçer,
+ *   kalanı `403 { error, code: 'ROL_YOK' | 'DIS_ROL' }`.
+ * Karar saf işlevde (`src/lib/kimlikYuzeyi.ts` — izin listesi ve testleri orada); burada yalnız isteğin kimliği çözülür.
+ * Yeni `requireAuth`'lu uç kendiliğinden kapsanır (kapı zincirin başında). İç roller ve süper yönetici için hiçbir ucun
+ * davranışı değişmez; kimliksiz geçen yol (herkese açık form yazımı) `requireAuth`'un başında döner, buraya gelmez.
+ *
+ *  • YÖNTEM `req.method`'dur: `X-Cetpa-Method` tüneli onu yönlendirmeden ÖNCE yeniden yazar (startServer), yani bu Express'in
+ *    rotayı seçtiği GERÇEK yöntemdir — `POST` + `X-Cetpa-Method: DELETE` burada `DELETE` görünür, izin listesini aşamaz.
+ *  • YOL `req.originalUrl`'dir (ham hedef): karşılaştırma karakteri karakterine, normalleştirme YOK (gerekçe modül başlığında).
+ *  • Rol OKUNAMAZSA ret değil 503: `getUserRole` hatayı yutup `null` döndürür — o okuyucuyla veritabanı arızasında iç personel
+ *    «rolsüz» görünür ve 403 alırdı. Bu kapı hatayı yutmayan `rolOkuKati`'yi kullanır. Süper yöneticide rol hiç okunmaz.
+ *  • FIRLATMAZ: `requireAuth`'un `try`'ı içinde çağrılır; fırlatsaydı «Invalid or expired token» (401) olarak görünürdü.
+ * `true` → çağıran `next()` der. `false` → yanıt YAZILDI (403 / 503); çağıran yalnız döner.
+ */
+async function kimlikYuzeyindenGecer(req: Request, res: Response, uid: string): Promise<boolean> {
+  const superAdmin = isSuperAdmin(req);
+  let rol: unknown = null;
+  if (!superAdmin) {
+    try {
+      rol = await rolOkuKati(uid);
+    } catch (e) {
+      console.error('[kimlik yüzeyi] rol okunamadı:', (e as Error)?.message || e);
+      res.status(503).json(ROL_OKUNAMADI_YANITI);
+      return false;
+    }
+  }
+  const karar = kimlikYuzeyiKarari({ superAdmin, rol, yontem: req.method, hedef: req.originalUrl, uid });
+  if (karar.gecer) return true;
+  res.status(403).json(KIMLIK_YUZEYI_RETLERI[karar.kod]);
+  return false;
 }
 
 /** Actor info extracted from an authenticated request — for audit logging. */
@@ -317,6 +358,23 @@ async function getUserRole(uid: string): Promise<AppRole | null> {
     if (role) roleCache.set(uid, { role, exp: Date.now() + 60_000 });
     return role;
   } catch { return null; }
+}
+/**
+ * `getUserRole`'un hatayı YUTMAYAN ikizi — yalnız tek boğaz (`kimlikYuzeyindenGecer`) çağırır. Veritabanı hazır değilse ya da
+ * okuma başarısızsa FIRLATIR (çağıran 503 döner): `getUserRole` o durumda `null` döndürür ve «rol yok» ile «rol okunamadı»
+ * ayırt edilemez — tek boğazda bu, arıza anında bütün personeli reddetmek olurdu. Başarılı okuma `getUserRole` ile AYNI
+ * önbelleği (`roleCache`, 60 sn; `users` belgesi değişince düşer) ve AYNI kuralı kullanır: boş rol önbelleğe yazılmaz.
+ * İkisi birlikte değişmeli (çitler: lib/kimlikYuzeyi.test.ts «rolOkuKati: hata yakalamaz…» — ortak satırlar birebir;
+ * server/kimlikYuzeyi.zincir.test.ts «önbellek paylaşımı» — gerçek zincirde).
+ */
+async function rolOkuKati(uid: string): Promise<AppRole | null> {
+  const cached = roleCache.get(uid);
+  if (cached && cached.exp > Date.now()) return cached.role;
+  if (!adminDb) throw new Error('veritabanı hazır değil');
+  const snap = await adminDb.collection('users').doc(uid).get();
+  const role = (snap.exists ? (snap.data()?.role as AppRole) : null) || null;
+  if (role) roleCache.set(uid, { role, exp: Date.now() + 60_000 });
+  return role;
 }
 
 /** Admin/Manager zorunlu middleware — /api/admin/* için. */
@@ -743,6 +801,20 @@ async function userHasMfa(uid: string): Promise<boolean> {
   } catch { return false; }
 }
 
+/**
+ * Bir kullanıcının iki adımlı doğrulama KAYDINI siler (Yönetici sıfırlaması — `POST /api/admin/users/:uid/mfa-sifirla`,
+ * epostaRoutes.ts; şartname «dış rol kapanışı» D10). `true` = kayıt vardı ve silindi, `false` = kayıt yoktu,
+ * `null` = bu kurulumda iki adımlı doğrulama tablosu yok (PostgreSQL bağlı değil). Hata YUTULMAZ (çağıran 500 döner).
+ * İki önbellek de düşer: `mfaStatusCache` (yoksa `requireMfaVerified` 60 sn boyunca eski «açık» durumunu görür ve kullanıcı
+ * yeniden kayıt başlatamaz) ve mağaza paneli kullanıcı okuyucusu (MFA durumunu KENDİ önbelleğinden okur).
+ */
+async function mfaKaydiniSil(uid: string): Promise<boolean | null> {
+  if (!pgPool) return null;
+  const r = await pgPool.query('DELETE FROM mfa_secrets WHERE uid = $1', [uid]);
+  mfaStatusCache.delete(uid); magazaPanelKullanici.dusur(uid);
+  return typeof r.rowCount === 'number' && r.rowCount > 0;
+}
+
 /** Çerez başlığından ada göre değer okur (modül düzeyi — startServer dışındaki
  *  middleware'ler de kullanabilsin). Bozuk yüzde kaçışı (`oturum=%`) = çerez YOK: `decodeURIComponent` fırlatır ve
  *  çağıranların çoğu (akış işleyicisi, MFA kapıları) bunu try DIŞINDA okur — fırlasaydı uçtan 500 çıkardı. */
@@ -955,8 +1027,10 @@ async function serverTenantId(): Promise<string> {
   if (!adminDb) return '';
   try {
     const snap = await adminDb.collection('users').get();
-    const cids = new Set(snap.docs.map(d => (d.data().companyId as string) || d.id));
-    if (cids.size === 1) return [...cids][0];
+    // Yalnız rolü `APP_ROLES` üyesi olan belgeler sayılır (2026-10-11, D12 — kiraciOrtami.rolluKiracilar; crons.ts `cronCompanyId`
+    // AYNI yardımcıyı çağırır): giriş ekranından hesap açan yabancının rolsüz `users` belgesi ikinci kiracı sayılıp mağaza
+    // sipariş talebi ucunu, site panelini ve haftalık raporu 503'e / atlamaya düşürüyordu.
+    return taramadanKiraci(snap.docs.map(d => ({ id: d.id, veri: d.data() })));
   } catch { /* düş */ }
   return '';
 }
@@ -1597,7 +1671,12 @@ async function startServer() {
     });
 
     // Kayıt 1. adım: secret üret (pending), otpauth URL döner.
-    app.post('/api/mfa/enroll/start', dbLimiter, requireAuth, async (req: Request, res: Response) => {
+    // `requireMfaVerified` (2026-10-11, şartname «dış rol kapanışı» D10): bu uç mevcut kaydı `enabled = false` + yeni gizli anahtarla
+    // EZER; kapısızken yalnız parolayı (birinci adımı) bilen biri çağırıp kullanıcının iki adımlı doğrulamasını kapatabiliyor,
+    // `enroll/verify` ile kendi telefonunu bağlayabiliyordu. Kapı yalnız «açık + bu oturum doğrulanmamış» durumunu keser: ilk
+    // kayıt (kayıt yok / beklemede) ve kodla doğrulanmış oturumda cihaz değiştirme AYNEN çalışır. Cihazını kaybeden kullanıcı
+    // artık kendi kendine sıfırlayamaz → Yönetici sıfırlar: `POST /api/admin/users/:uid/mfa-sifirla` (epostaRoutes.ts).
+    app.post('/api/mfa/enroll/start', dbLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
       const r = req as Request & { uid: string; userEmail?: string };
       try {
         const secret = totpSecret();
@@ -2018,6 +2097,24 @@ async function startServer() {
       res.status(403).json({ error: `Bağlantı adresi (${alan}) yalnız Yönetici tarafından değiştirilebilir.` });
       return true;
     };
+    // YÖNETİCİ KAYDI (şartname «dış rol kapanışı» D11 — «Yönetici rolüne yalnız Yönetici dokunur»): hedef `users` belgesinin ÖNCEKİ
+    // rolü `Admin` ise yazma ve silme yalnız Yönetici'ye ya da süper yöneticiye açık; aksi hâlde `YONETICI_GEREKLI_YANITI` (403 —
+    // `/api/admin/users` ve davet uçlarıyla AYNI gövde). `users` yazabilen tek Yönetici-dışı iç rol Müdür'dür (`ADMIN_ONLY_COLLECTIONS`):
+    // rol / durum / kiracı alanları zaten sabitleniyordu (`pinProtectedUserFields`), ama PUT belgeyi baştan yazdığı için ad, e-posta
+    // ve diğer alanlar silinebiliyor, PATCH / koşullu yazma / artırma değiştirebiliyordu (2026-10-17 ölçümü; silme aynı gün kapandı).
+    // Kendi belgesi istisnası `isSelfDocAccess` ile AYNI kuraldır (oturum açılışı senkronu; silme istisnaya girmez).
+    // ÇAĞRI YERİ: dört yazma yolunda (PUT, PATCH, `/cas`, `/increment`) ve silmede SAHİPLİK denetiminden SONRA — başka kiracıdaki
+    // belgenin varlığı / rolü bu yanıttan sızmasın. `X-Cetpa-Method` tüneli yöntemi yönlendirmeden önce yazar: aynı rotalar.
+    const yoneticiKaydiYazimEngeli = async (
+      req: Request, res: Response, coll: string, realId: string, before: Record<string, unknown> | undefined, op: 'write' | 'delete',
+    ): Promise<boolean> => {
+      if (coll !== 'users') return false;
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (isSelfDocAccess(coll, realId, uid, op)) return false;
+      if (yoneticiRoluneDokunabilir(await getUserRole(uid), isSuperAdmin(req), before?.role)) return false;
+      res.status(403).json(YONETICI_GEREKLI_YANITI);
+      return true;
+    };
 
     app.get('/api/db/:coll', dbLimiter, requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
       const coll = String(req.params.coll);
@@ -2141,6 +2238,7 @@ async function startServer() {
           if (rows.length && !gorunur) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
           // Tam değiştirme başkasının SAHİP damgalı kaydına yazamaz — Yönetici dâhil (sahip devredilmez; gövde önceki sahibe düşerdi).
           if (baskasininSahipKaydiMi(coll, before, (req as Request & { uid?: string }).uid || '')) { res.status(403).json({ error: 'Bu kayıt başka bir kullanıcıya ait.' }); return; }
+          if (await yoneticiKaydiYazimEngeli(req, res, coll, realId, before, 'write')) return;   // `users` sahiplikDenetimli: bu blok hep koşar
           // P4-2: maskeli (***REDACTED***) gelen gizli alan gerçek sırrı EZMEZ ve SİLMEZ — önceki değer geri konur (derin).
           incoming = maskeyiGeriYukle(coll, ham, before);
           if (await ayarYazimiEngeli(req, res, coll, incoming, before)) return;
@@ -2184,6 +2282,7 @@ async function startServer() {
         const gorunur = rows.length > 0 && await ownsDoc(req, coll, before, realId);
         if (await ayrilmisKimlikEngeli(req, res, coll, realId, gorunur)) return;   // sahiplik yanıtından ÖNCE (varlık sızmasın)
         if (rows.length && !gorunur) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+        if (await yoneticiKaydiYazimEngeli(req, res, coll, realId, before, 'write')) return;
         // P4-2: maskeli gelen gizli alan gerçek sırrı EZMEZ ve SİLMEZ — önceki değer geri konur (derin; lib/sirMaske).
         const patch = maskeyiGeriYukle(coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>, before);
         if (await ayarYazimiEngeli(req, res, coll, patch, before)) return;
@@ -2222,6 +2321,11 @@ async function startServer() {
         if (sahiplikDenetimli(coll)) {
           if (existing.length && !(await ownsDoc(req, coll, prevData, realId))) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
         }
+        // Yönetici'nin `users` belgesini yalnız Yönetici (ya da süper yönetici) siler — Müdür silemez (şartname «dış rol
+        // kapanışı» D11; `DELETE /api/admin/users/:uid` ile AYNI kural ve AYNI gövde; yazma yollarıyla AYNI yardımcı). Sahiplikten
+        // SONRA: başka kiracıdaki belgenin rolü bu yanıttan sızmaz. İstemcinin toplu yazımı (`writeBatch`) sunucuda ayrı bir uç
+        // değildir — her silme bu rotadan geçer.
+        if (await yoneticiKaydiYazimEngeli(req, res, coll, realId, prevData, 'delete')) return;
         await docsDb.query('DELETE FROM docs WHERE coll = $1 AND id = $2', [coll, realId]);
         { const a = await settingsRealId(req, coll, id);
           broadcastDocChange(coll, 'delete', id, prevData, ayarKapsami(coll, a.perCompany, a.cid)); }   // kiracı/kullanıcı ETİKETİ için; içerik olaya iliştirilmez
@@ -2246,6 +2350,16 @@ async function startServer() {
       if (typeof field !== 'string' || !/^[A-Za-z0-9_]{1,40}$/.test(field) || typeof delta !== 'number' || !Number.isFinite(delta)) {
         return res.status(400).json({ error: 'field (alfasayısal) ve delta (sayı) gerekli.' });
       }
+      // `users` BELGESİ (2026-10-11, şartname «dış rol kapanışı» D9): POST / PUT / PATCH / cas yollarındaki rol yükseltme
+      // (`guardRoleEscalation`) ve korunan alan (`pinProtectedUserFields`) kapılarının İKİSİ de bu yolda yoktu — rolü olmayan hesap
+      // kendi belgesinde `role` alanını sayıya çevirebiliyor (o değer «rolü var» sayılıp kullanıcı kapsamlı koleksiyonları ve
+      // kiracı taramasını etkiliyordu), `status` her hesapça sayıya çevrilebiliyordu. Artırmada «önceki değere sabitle» anlamsızdır:
+      // korunan alanlar (`PROTECTED_USER_FIELDS`: companyId / role / status) HİÇ KİMSE için artırılamaz — hiçbiri sayaç değil,
+      // Yönetici için de meşru kullanımı yok. Aşağıdaki sahiplik denetiminden ÖNCE durur ki üçü de aynı yanıtı (403) alsın.
+      if (coll === 'users') {
+        if (await guardRoleEscalation(req, res, coll, id, { [field]: delta })) return;
+        if ((PROTECTED_USER_FIELDS as readonly string[]).includes(field)) return res.status(403).json({ error: 'Bu alan artırılamaz.' });
+      }
       // SAHİPLİK ALANLARI artırılamaz (2026-10-02): `companyId` / `userId` / satır sahibi alanı sayıya çevrilirse doküman
       // sahipsizleşir ya da başka bir kapsamın "etiketsiz" kaydı gibi görünür.
       if (SAHIPLIK_ALANLARI.has(field)) return res.status(400).json({ error: 'Bu alan artırılamaz.' });
@@ -2257,6 +2371,7 @@ async function startServer() {
         if (sahiplikDenetimli(coll) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>, id))) {
           return sahipsizYanit(req, res, coll);
         }
+        if (await yoneticiKaydiYazimEngeli(req, res, coll, id, rows[0].data as Record<string, unknown>, 'write')) return;
         const floor = typeof min === 'number' && Number.isFinite(min) ? min : -1e18;
         const upd = await docsDb.query(
           `UPDATE docs SET data = jsonb_set(data, ARRAY[$3],
@@ -2294,6 +2409,7 @@ async function startServer() {
         if (sahiplikDenetimli(coll) && !(await ownsDoc(req, coll, rows[0].data as Record<string, unknown>, id))) {
           return sahipsizYanit(req, res, coll);
         }
+        if (await yoneticiKaydiYazimEngeli(req, res, coll, id, rows[0].data as Record<string, unknown>, 'write')) return;
         // KİRACI SINIRI (2026-08-25 denetimi): CAS'in `set` gövdesi POST/PUT/PATCH
         // gibi keyfi alan yazar, ama o üçünün aksine `pinProtectedUserFields`ten
         // GEÇMİYORDU. Üstteki `guardRoleEscalation` yalnız 'role' alanına bakar
@@ -2697,7 +2813,11 @@ async function startServer() {
     },
   });
 
-  app.post('/api/upload/tahsilat', requireAuth, requireMfaVerified, (req: Request, res: Response) => {
+  // requireStaff (2026-10-11, şartname «dış rol kapanışı» D13 — tek boğaz `requireAuth`'ta; bu, boğaz sökülse de kapalı kalsın
+  // diye ucun KENDİ kapısı): yalnız `requireAuth`'tu — hesap açan herkes 10 MB'lık dosyaları sunucu diskine yazabiliyordu (kota /
+  // temizlik yok; dolu disk PostgreSQL + uygulama + Mikro'yu birlikte durdurur). Kapı `multer`'dan ÖNCE koşar: reddedilen istek
+  // diske dokunmaz. İç roller arasında daraltma YOK.
+  app.post('/api/upload/tahsilat', requireAuth, requireStaff, requireMfaVerified, (req: Request, res: Response) => {
     makbuzUpload.single('file')(req, res, (err) => {
       if (err) return res.status(400).json({ success: false, error: err instanceof Error ? err.message : String(err) });
       const f = (req as Request & { file?: { filename: string } }).file;
@@ -2871,7 +2991,9 @@ async function startServer() {
   };
 
   /** Ürün kartındaki "Tedarikçi: Belirtilmemiş" boşluğunu veriden doldurur. */
-  app.get('/api/inventory/son-alis-tedarikci', requireAuth, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-11, D13): yalnız `requireAuth`'tu — kaynak Mikro aynasıdır ve kiracı kolonu yoktur; hesap açan herkes
+  // stok koduyla o malın son alındığı tedarikçinin cari kodunu, unvanını ve alış tarihini okuyabiliyordu.
+  app.get('/api/inventory/son-alis-tedarikci', requireAuth, requireStaff, async (req: Request, res: Response) => {
     const stokKod = String(req.query.stokKod ?? '').trim();
     if (!stokKod) return res.status(400).json({ success: false, error: 'stokKod gerekli' });
     try {
@@ -2882,7 +3004,9 @@ async function startServer() {
     }
   });
 
-  app.post('/api/inventory/auto-reorder', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-11, D13): yalnız `requireAuth`'tu — dış rol (B2B / Bayi) /api/db'de hiç yetkisi olmayan `purchaseOrders`'a
+  // bu uçtan toplu taslak SAS yazabiliyor, yanıtta kritik ürün adlarını alıyordu.
+  app.post('/api/inventory/auto-reorder', requireAuth, requireStaff, requireMfaVerified, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     try {
       // Kiracı izolasyonu: yalnız çağıranın firmasının (veya etiketsiz legacy)
@@ -3098,7 +3222,9 @@ async function startServer() {
   /** POST /api/sku-mapping/auto-match — envanter SKU'larını Shopify ürünleriyle
    *  normalize ederek eşleştirir, skuMappings koleksiyonuna yazar.
    */
-  app.post('/api/sku-mapping/auto-match', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  // requireStaff (2026-10-11, D13): yalnız `requireAuth`'tu — her çağrı ortam düzeyindeki Shopify belirteciyle ürün listesi çeker;
+  // dış rol çağırınca gerçek kiracının bütün `skuMappings` belgeleri yeniden yazılıyor, elle eşleşmeler eziliyordu.
+  app.post('/api/sku-mapping/auto-match', requireAuth, requireStaff, requireMfaVerified, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
     const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -4343,6 +4469,8 @@ async function startServer() {
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, requireStaff,
     authLimiter, reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp, validate,
     getResendKey, sendEmail,
+    // «Yönetici rolüne yalnız Yönetici dokunur» (D11) ve iki adımlı doğrulama sıfırlama ucu (D10) — ayrıntı modülde.
+    getUserRole, isSuperAdmin, mfaSifirla: mfaKaydiniSil,
     authYonetimi: {
       createUser: (d) => getAuth().createUser(d),
       deleteUser: (uid) => getAuth().deleteUser(uid),
@@ -4364,7 +4492,7 @@ async function startServer() {
   });
 
   aiRoutes(app, {
-    requireAuth, requireMfaVerified, requireAdmin, validate,
+    requireAuth, requireMfaVerified, requireAdmin, requireStaff, validate,
     resolveGeminiClient, resolveGeminiModel, safeAiError, geminiKeySource,
     // Modul, server.ts'teki `let aiHealthProbe`a YAZAR (bekci onu okuyor).
     setAiHealthProbe: (fn) => { aiHealthProbe = fn; },
@@ -4373,7 +4501,7 @@ async function startServer() {
   // Claude ticaret ajanları (commerce-agents blueprint uyarlaması, 2026-09-01).
   // ANTHROPIC_API_KEY yoksa uçlar 503 döner — otomatik harcama yok.
   ticaretAjaniRoutes(app, {
-    requireAuth, requireMfaVerified, reqCompanyId, reqActor, writeAuditLog,
+    requireAuth, requireMfaVerified, requireStaff, reqCompanyId, reqActor, writeAuditLog,
     loadCompanyDocs, getPgPool: () => pgPool,
     resolveGeminiClient, resolveGeminiModel,
   });

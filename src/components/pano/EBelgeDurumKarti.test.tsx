@@ -101,7 +101,10 @@ describe('Pano «E-Belge» kartı — sekmeye erişen rolde çizilir, kilitli ro
     expect(APP.slice(cagri, kapanis + 1).filter(k => k.startsWith('canAccess='))).toEqual(['canAccess={canAccess}']);
     const govde = APP.indexOf('const canAccess = (tab: string) => {');
     expect(govde).toBeGreaterThan(0);
-    expect(APP.slice(govde + 1, govde + 4)).toEqual([
+    // Dış rol kapanışı (D5, 2026-10-17 birleşmesi): gövdenin ilk satırı dış rolü her sekmeden geri çevirir; kartın rol kümesi
+    // bundan etkilenmez (`ebelge` satırında dış rol yok), kural iç roller için aynen «tam ∪ salt okunur».
+    expect(APP.slice(govde + 1, govde + 5)).toEqual([
+      'if (disRol) return false;',
       'const perms = TAB_PERMISSIONS[tab];',
       'if (!perms) return true;',
       'return perms.full.includes(userRole) || perms.readonly.includes(userRole);',

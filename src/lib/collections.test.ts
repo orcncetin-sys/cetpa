@@ -101,17 +101,15 @@ describe('RBAC — sessiz 403 koruması', () => {
     expect(isAllowed('Sales', 'syncJobs', 'write')).toBe(true);
   });
 
-  it('dış rollerin (B2B/Dealer) yazma yüzeyi TAM OLARAK B2B portalının ihtiyacı kadar', () => {
-    // B2B/Dealer müşteri rolleridir: portalda sipariş verir ve teklif ister —
-    // bu üçü BİLEREK açıktır. Test "hiç yazamaz" demiyor (o yanlış olurdu),
-    // yüzeyin TAM olarak bu olduğunu sabitliyor: dördüncü bir koleksiyona
-    // kazayla yazma izni verilirse (ör. inventory, payrolls, priceLists)
-    // müşteri kendi fiyatını/stoğunu düzenleyebilir hale gelir ve bu test kırılır.
-    const IZINLI = ['orders', 'quotations', 'recurringOrders'];
-    const yazabilen = TENANT_COLLECTIONS
-      .filter(c => isAllowed('B2B', c, 'write') || isAllowed('Dealer', c, 'write'))
-      .sort();
-    expect(yazabilen, `Dış rol yazma yüzeyi değişti: ${yazabilen.join(', ')}`).toEqual([...IZINLI].sort());
+  it('dış rollerin (B2B/Dealer) TENANT koleksiyonlarında yazma VE okuma yüzeyi BOŞ', () => {
+    // 2026-10-11 (dış rol kapanışı, D1) — YENİDEN SABİTLENDİ. Eski beklenti «yazma yüzeyi tam olarak orders, quotations,
+    // recurringOrders» idi (B2B portalı ERP'nin içindeydi). Satır süzgeci yalnız `orders`'taydı: bayi başka müşterinin teklifini
+    // değiştirebiliyor, stok kartını maliyetiyle okuyabiliyordu. Bayi ekranı artık ERP'nin dışında; dış rol hiçbir kiracı
+    // koleksiyonuna dokunmaz. Bütün koleksiyon sınıflarını kapsayan çit: rbac.disRol.degismez.test.ts.
+    const yazabilen = TENANT_COLLECTIONS.filter(c => isAllowed('B2B', c, 'write') || isAllowed('Dealer', c, 'write'));
+    const okuyabilen = TENANT_COLLECTIONS.filter(c => isAllowed('B2B', c, 'read') || isAllowed('Dealer', c, 'read'));
+    expect(yazabilen, `Dış rol yazma yüzeyi açıldı: ${yazabilen.join(', ')}`).toEqual([]);
+    expect(okuyabilen, `Dış rol okuma yüzeyi açıldı: ${okuyabilen.join(', ')}`).toEqual([]);
   });
 
   it('hassas koleksiyonları Admin olmayan personel okuyamaz', () => {

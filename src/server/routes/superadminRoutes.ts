@@ -15,6 +15,7 @@
  * dalina gidip cetpa-staging'de (port 5174) dogrulandi, sonra main'e alindi.
  */
 import { resendGonderici } from '../eposta.js';
+import { davetKoduUret } from '../davetKodu.js';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import type { Express, Request, Response } from 'express';
 
@@ -411,7 +412,9 @@ export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
       return res.status(400).json({ success: false, error: `Geçersiz rol. Geçerli roller: ${C.APP_ROLES.join(', ')}` });
     }
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
-    const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    // Davet kodu güvenli rastgele kaynaktan (2026-10-11, şartname «dış rol kapanışı» D11): `/api/admin/invite` ile AYNI üreteç
+    // (davetKodu.ts). Burada `Math.random().toString(36)` × 2 kalmıştı — ilk düzeltme yalnız öbür uca uygulanmıştı.
+    const token = davetKoduUret();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     try {
       await C.getAdminDb().collection('invites').doc(token).set({ companyId: cid, email, role, token, expiresAt, createdAt: C.pgServerTimestamp(), used: false, invitedBySuperAdmin: C.reqActor(req).email });

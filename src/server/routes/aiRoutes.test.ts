@@ -29,7 +29,7 @@ function sahteApp() {
 function sahteCtx(setAiHealthProbe: (fn: () => Promise<{ ok: boolean; detail: string }>) => void) {
   const gecir = () => (_req: unknown, _res: unknown, next: () => void) => next();
   return {
-    requireAuth: gecir(), requireMfaVerified: gecir(), requireAdmin: gecir(),
+    requireAuth: gecir(), requireMfaVerified: gecir(), requireAdmin: gecir(), requireStaff: gecir(),
     validate: <T,>() => null as T | null,
     resolveGeminiClient: async () => null,
     resolveGeminiModel: (r?: string) => r ?? 'gemini-flash-latest',

@@ -11,10 +11,18 @@
  *     akar: `/api/db`'nin altı yazma yolu (oluşturma, PUT, PATCH, silme, atomik artırma, koşullu yazma), iki okuma yolu
  *     (liste, tek okuma) ve akış olayının etiketi (pgShim). Gerçek `/api/db` zinciri testi yazılamadığı için (rotalar
  *     `startServer` kapanışında) bağlantının TEK kanıtı bu çittir.
+ *
+ * 2026-10-11 (dış rol kapanışı, D3): kural tablosundan dış rol çıktı ve `requireAuth` iç rolü olmayan hesabı izin listesi dışında
+ * geri çeviriyor — dış rol `orders`'a artık HİÇ ulaşmıyor («Bayi kendi siparişini görür» beklentisi gerçek zincirde 403 olarak
+ * yeniden sabitlendi: kimlikYuzeyi.zincir.test.ts, T2). Süzgeç SÖKÜLMEDİ: buradaki çitlerin hepsi aynen duruyor. Tabloya
+ * yanlışlıkla dış rol geri eklenirse ya da boğaz gevşerse dış rol yine yalnız kendi satırını görür (derinlemesine savunma).
  */
 import { describe, it, expect } from 'vitest';
 import { join } from 'path';
 import { SRC_KOK as SRC, kaynakDosyalari, kodSatirlari, gorece } from '../test/kaynakTarama';
+import { DIS_ROL_SATIR_ALANI, DIS_ROL_YAZAMAZ } from '../lib/collections';
+import { EXTERNAL_ROLES, STAFF_ROLES, isAllowed } from '../lib/rbac';
+import { satirAlani, satirGorunur } from '../lib/tenantErisim';
 
 const SERVER = join(SRC, '..', 'server.ts');
 const satirlar = (yol: string, desen: RegExp) => kodSatirlari(yol).filter(({ kod }) => desen.test(kod.trimEnd()));
@@ -59,6 +67,23 @@ describe('satır süzgeci üç yolda da bağlı', () => {
     // her bağlantıda yeniden gönderilir.
     tek(SERVER, /if \(satirAlani\(r\.coll, streamRole\) !== null\) gonderilenSatirlar\.add\(`\$\{r\.coll\}\/\$\{r\.id\}`\);/);
     tek(SERVER, /const satirliColls = colls\.filter\(c => satirAlani\(c, streamRole\) !== null\);/);
+  });
+});
+
+describe('D3 — süzgeç ikinci kat olarak duruyor; birinci kat (kural tablosu) dış role kapalı', () => {
+  it('süzgeçli HER koleksiyon dış role tabloda kapalı (okuma / yazma / silme) — ama süzgeç kuralı role göre hâlâ ETKİN', () => {
+    expect([...DIS_ROL_SATIR_ALANI.keys()]).toContain('orders');
+    for (const [coll, alan] of DIS_ROL_SATIR_ALANI) {
+      for (const rol of EXTERNAL_ROLES) {
+        for (const op of ['read', 'write', 'delete'] as const) expect(isAllowed(rol, coll, op), `${rol} ${coll} ${op}`).toBe(false);   // birinci kat
+        expect(satirAlani(coll, rol), `${rol} ${coll}`).toBe(alan);                                                                    // ikinci kat sökülmedi
+        expect(satirGorunur(coll, rol, { uid: 'u1', cid: 'A' }, { companyId: 'A', [alan]: 'u2' })).toBe(false);
+        expect(satirGorunur(coll, rol, { uid: 'u1', cid: 'A' }, { companyId: 'A', [alan]: 'u1' })).toBe(true);
+      }
+      expect(satirAlani(coll, null), `rolsüz ${coll}`).toBe(alan);
+      for (const rol of STAFF_ROLES) expect(satirAlani(coll, rol), `${rol} ${coll}`).toBeNull();                                        // iç rol süzgeçsiz
+      expect(DIS_ROL_YAZAMAZ.has(coll) ? (DIS_ROL_YAZAMAZ.get(coll) ?? []).length > 0 : true).toBe(true);
+    }
   });
 });
 

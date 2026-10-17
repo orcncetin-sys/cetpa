@@ -1,9 +1,18 @@
 /**
- * epostaRoutes.ts - E-POSTA ve DAVET uclari (6 rota).
+ * epostaRoutes.ts - E-POSTA, DAVET ve KULLANICI YÖNETİMİ uçları.
  *
  *   /api/email/status · send · order-notification · bulk-campaign
  *   /api/admin/invite    - davet olusturur VE davet postasini gonderir
  *   /api/invites/redeem  - daveti kabul eder
+ *   /api/admin/users (POST) · /api/admin/users/:uid (DELETE) — elle hesap açma / silme
+ *   /api/admin/users/:uid/mfa-sifirla (POST) — iki adımlı doğrulamayı Yönetici sıfırlar (2026-10-11)
+ *
+ * YÖNETİCİ ROLÜNE YALNIZ YÖNETİCİ DOKUNUR (2026-10-11, şartname «dış rol kapanışı» D11): `requireAdmin` Yönetici + Müdür
+ * demektir ve uçlar istenen / hedef rolün `Admin` olup olmadığına bakmıyordu — Müdür kendine Yönetici rollü ikinci bir hesap
+ * açabiliyor (ya da davet edebiliyor), Yönetici'nin hesabını silebiliyordu. Kural tek saf işlevde: lib/rbac
+ * `yoneticiRoluneDokunabilir`; ret gövdesi tek sabitte: lib/rbac `YONETICI_GEREKLI_YANITI`. Müdür'ün diğer rollerdeki
+ * kullanıcı yönetimi DEĞİŞMEDİ. /api/db'de rol YAZIMI zaten yalnız Yönetici'ye açıktı (`blocksRoleEscalation`); SİLME ise
+ * açıktı (Müdür `DELETE /api/db/users/<Yönetici>`) — 2026-10-17'den beri o yol da aynı işlev ve aynı gövdeyle kapılı (server.ts).
  *
  * NEDEN AYNI DOSYA: davet uclari ilk bakista "yabanci" gorunuyor (farkli yol
  * oneki) ama isleri e-postanin ta kendisi — `admin/invite` bir davet postasi
@@ -16,12 +25,13 @@
  * server.ts'ten AYRILDI (2026-08-26). Onceki rota gruplariyla AYNI desen.
  */
 import type { Express, Request, Response } from 'express';
+import { davetKoduUret } from '../davetKodu.js';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import type { Sema } from '../schemas.js';
 import { EmailSendSchema } from '../schemas.js';
 // Yaprak moduller — dongu yok.
 import { resendGonderici, escapeHtml, isValidEmail } from '../eposta.js';
-import { APP_ROLES } from '../../lib/rbac.js';
+import { APP_ROLES, YONETICI_GEREKLI_YANITI, yalnizYoneticiMi, yoneticiRoluneDokunabilir, type AppRole } from '../../lib/rbac.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface EpostaRouteCtx {
@@ -47,9 +57,22 @@ export interface EpostaRouteCtx {
   };
   sendEmail: (to: string, subject: string, html: string, fromOverride?: string, replyTo?: string)
     => Promise<{ id?: string; error?: string }>;
+  /** Çağıranın rolü (60 sn önbellek; `requireAuth` + `requireAdmin` az önce okuduğu için sıcaktır). D10 / D11 kapıları için. */
+  getUserRole: (uid: string) => Promise<AppRole | null>;
+  /** Doğrulanmış e-postası süper yönetici listesinde mi (SaaS operatörü). */
+  isSuperAdmin: (req: Request) => boolean;
+  /**
+   * İki adımlı doğrulama kaydını siler + önbellekleri düşürür (server.ts `mfaKaydiniSil` — tablo ve önbellek orada kaldı).
+   * `true` = kayıt vardı, `false` = yoktu, `null` = bu kurulumda tablo yok (PostgreSQL bağlı değil). Hata fırlatır (yutmaz).
+   */
+  mfaSifirla: (uid: string) => Promise<boolean | null>;
 }
 
 export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
+  /** Çağıran, `ilgiliRol` rolünü verebilir / o roldeki hesabı silebilir mi (D11)? Yalnız `Admin` için Yönetici / süper yönetici arar. */
+  const yoneticiyeDokunabilir = async (req: Request, ilgiliRol: unknown): Promise<boolean> =>
+    yoneticiRoluneDokunabilir(await C.getUserRole(C.reqActor(req).uid), C.isSuperAdmin(req), ilgiliRol);
+
   // GET /api/email/status
   // requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
   app.get('/api/email/status', C.requireAuth, C.requireStaff, async (_req: Request, res: Response) => {
@@ -219,6 +242,8 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
     if (!(APP_ROLES as readonly string[]).includes(role)) {
       res.status(400).json({ success: false, error: `Geçersiz rol. Geçerli roller: ${APP_ROLES.join(', ')}` }); return;
     }
+    // Yönetici rollü hesabı yalnız Yönetici (ya da süper yönetici) açar — hesap AÇILMADAN önce (D11).
+    if (!(await yoneticiyeDokunabilir(req, role))) { res.status(403).json(YONETICI_GEREKLI_YANITI); return; }
     try {
       // Rastgele parola — kimseye gösterilmez; kullanıcı linkle kendininkini koyar.
       const geciciParola = Array.from(crypto.getRandomValues(new Uint8Array(24)), b => 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'[b % 55]).join('');
@@ -251,7 +276,7 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
     if (uid === C.reqActor(req).uid) { res.status(400).json({ success: false, error: 'Kendi hesabınızı silemezsiniz.' }); return; }
     // Kiracı sınırı: yalnız kendi firmasının kullanıcısını silebilir.
     const docSnap = await C.getAdminDb().collection('users').doc(uid).get();
-    const veri = (docSnap?.exists ? docSnap.data() : null) as { companyId?: string } | null;
+    const veri = (docSnap?.exists ? docSnap.data() : null) as { companyId?: string; role?: unknown } | null;
     // users dokümanı YOKSA hangi firmaya ait olduğu BİLİNEMEZ — silme reddedilir.
     // (Aksi hâlde kiracı kontrolü atlanır ve bir Admin, BAŞKA firmanın yetim
     // Auth hesabını uid tahmin ederek silebilirdi.)
@@ -260,6 +285,8 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
     if (veri.companyId && veri.companyId !== cid) {
       res.status(403).json({ success: false, error: 'Bu kullanıcı başka bir firmaya ait.' }); return;
     }
+    // Yönetici'nin hesabını yalnız Yönetici (ya da süper yönetici) siler — Müdür silemez (D11).
+    if (!(await yoneticiyeDokunabilir(req, veri.role))) { res.status(403).json(YONETICI_GEREKLI_YANITI); return; }
     try {
       try { await C.authYonetimi.deleteUser(uid); }
       catch (e) {
@@ -274,15 +301,68 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
     }
   });
 
+  // ── İki adımlı doğrulamayı Yönetici sıfırlar (2026-10-11, şartname «dış rol kapanışı» D10) ─────────────────────────────
+  // POST /api/admin/users/:uid/mfa-sifirla — gövde okunmaz.
+  //
+  // NEDEN VAR: `POST /api/mfa/enroll/start` artık `requireMfaVerified` taşıyor (ikinci adım girilmeden doğrulama
+  // sıfırlanamasın diye). Yan etkisi: telefonunu kaybeden kullanıcı kendi kendine sıfırlayamaz — `mfa_secrets`'e dokunan başka
+  // yol yoktu, kurtarma elle SQL olurdu. Bu uç o kurtarma yoludur: kaydı SİLER; kullanıcı bir sonraki girişte kodsuz girer ve
+  // isterse yeniden kaydolur.
+  //
+  // KAPI: YALNIZ Yönetici (rol `Admin`) ya da süper yönetici — Müdür DEĞİL. `requireAdmin` Müdür'ü de geçirdiği için KULLANILMADI
+  // (aksi hâlde Müdür, Yönetici'nin ikinci adımını kapatıp parolasını bildiği hesaba girebilirdi). `requireMfaVerified`: çağıranın
+  // KENDİ ikinci adımı doğrulanmış olmalı (yalnız parolası sızmış Yönetici hesabı başkasının doğrulamasını kapatamaz).
+  // KENDİ HESABI İÇİN DEĞİL (400): kendi doğrulamasını kapatmanın yolu kod isteyen `/api/mfa/disable`'dır.
+  // KİRACI SINIRI: hedefin kiracısı çağıranınkiyle AYNI olmalı. Hedefin kiracısı `getUserCompanyId` ile aynı kuraldır
+  // (`companyId` alanı, yoksa kendi kimliği) — alanı olmayan belge «herkesin» SAYILMAZ. Süper yönetici (SaaS operatörü)
+  // kiracılar arası çalışır: bir firmanın TEK Yönetici'si telefonunu kaybederse başka kurtarıcı yoktur.
+  app.post('/api/admin/users/:uid/mfa-sifirla', C.authLimiter, C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+    const cagiran = C.reqActor(req);
+    const superAdmin = C.isSuperAdmin(req);
+    if (!yalnizYoneticiMi(await C.getUserRole(cagiran.uid), superAdmin)) {
+      res.status(403).json({ success: false, error: 'İki faktörlü doğrulamayı (2FA) yalnız Yönetici sıfırlayabilir.', code: 'YONETICI_GEREKLI' }); return;
+    }
+    const hedef = String(req.params.uid || '');
+    if (!hedef) { res.status(400).json({ success: false, error: 'uid gerekli' }); return; }
+    if (hedef === cagiran.uid) {
+      res.status(400).json({ success: false, error: 'Kendi iki faktörlü doğrulamanızı buradan sıfırlayamazsınız. Güvenlik (2FA) ekranından kodunuzla kapatın.' }); return;
+    }
+    try {
+      const snap = await C.getAdminDb().collection('users').doc(hedef).get();
+      const veri = (snap?.exists ? snap.data() : null) as { companyId?: unknown; email?: unknown } | null;
+      // users belgesi YOKSA hangi firmaya ait olduğu BİLİNEMEZ — sıfırlama reddedilir (silme ucuyla aynı kural).
+      if (!veri) { res.status(404).json({ success: false, error: 'Kullanıcı kaydı bulunamadı.' }); return; }
+      if (!superAdmin) {
+        const hedefKiraci = typeof veri.companyId === 'string' && veri.companyId !== '' ? veri.companyId : hedef;
+        if (hedefKiraci !== await C.reqCompanyId(req)) {
+          res.status(403).json({ success: false, error: 'Bu kullanıcı başka bir firmaya ait.' }); return;
+        }
+      }
+      const kayitVardi = await C.mfaSifirla(hedef);
+      if (kayitVardi === null) { res.status(503).json({ success: false, error: 'İki faktörlü doğrulama bu kurulumda kullanılamıyor.' }); return; }
+      const kim = typeof veri.email === 'string' && veri.email !== '' ? `${veri.email} (${hedef})` : hedef;
+      await C.writeAuditLog(cagiran, 'İki faktörlü doğrulama sıfırlandı', `${kim}${kayitVardi ? '' : ' — kayıt yoktu'}`);
+      res.json({ success: true, kayitVardi });
+    } catch (e) {
+      console.error('[admin/mfa-sifirla]', e instanceof Error ? e.message : String(e));
+      res.status(500).json({ success: false, error: 'İki faktörlü doğrulama sıfırlanamadı.' });
+    }
+  });
+
   app.post('/api/admin/invite', C.authLimiter, C.requireAuth, C.requireMfaVerified, C.requireAdmin, async (req: Request, res: Response) => {
     const { email, role = 'Sales' } = req.body as { email: string; role?: string };
     if (!email || !isValidEmail(email)) return res.status(400).json({ success: false, error: 'Geçerli e-posta gerekli.' });
     if (!(APP_ROLES as readonly string[]).includes(role)) {
       return res.status(400).json({ success: false, error: `Geçersiz rol. Geçerli roller: ${APP_ROLES.join(', ')}` });
     }
+    // Yönetici rollü daveti yalnız Yönetici (ya da süper yönetici) açar — davet YAZILMADAN önce (D11).
+    if (!(await yoneticiyeDokunabilir(req, role))) return res.status(403).json(YONETICI_GEREKLI_YANITI);
 
-    // Generate a random token
-    const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    // Davet kodu: işletim sisteminin güvenli rastgele kaynağından 32 bayt → 64 onaltılık hane (2026-10-11). Eskiden
+    // `Math.random().toString(36)` × 2 idi: aynı üreteç belge kimliklerini de üretir ve o kimlikler istemciye döner (kimliksiz
+    // form yazımı) — üreteç durumu çıkarılırsa sonraki davet kodları tahmin edilebilirdi. Kod aynı zamanda `invites` belge kimliğidir.
+    // Üreteç TEK yerde (davetKodu.ts): süper yöneticinin kiracı daveti (superadminRoutes.ts) AYNI işlevi çağırır.
+    const token = davetKoduUret();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
 
     // Store invite in Firestore (if admin available)

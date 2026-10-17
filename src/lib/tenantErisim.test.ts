@@ -328,11 +328,17 @@ describe('dış rol satır süzgeci — orders (2026-10-02)', () => {
     expect(siparisGorebilir('Dealer', k, BASKASININ)).toBe(false);
     expect(siparisGorebilir('B2B', k, ETIKETSIZ)).toBe(false);
   });
-  it('BİLİNÇLİ AÇIK listesi: dış rolün YAZABİLDİĞİ her TENANT koleksiyonu ya süzgeçli ya da burada adıyla yazılı', () => {
-    // Yeni bir koleksiyon dış role yazmaya açılırsa bu test kırılır: ya DIS_ROL_SATIR_ALANI'na eklenir ya da buraya gerekçesiyle.
-    const BILINEN_ACIK = new Set(['quotations', 'recurringOrders']);   // satır süzgeci yok — ayrı görev (2026-10-02 keşfi)
+  it('BİLİNÇLİ AÇIK listesi BOŞ: dış rolün YAZABİLDİĞİ, satır süzgeci olmayan TENANT koleksiyonu yok', () => {
+    // 2026-10-11 (dış rol kapanışı, D1) — YENİDEN SABİTLENDİ. Eskiden `quotations` ve `recurringOrders` «bilinen açık» diye burada
+    // adıyla duruyordu (satır süzgeci yok, dış rol yazıyor): bayi başka müşterinin teklifini değiştirebiliyordu. Kural tablosundan
+    // dış rol çıktı; liste boşaldı ve BOŞ kalmalı. Satır süzgecinin kendisi (yukarıdaki testler) derinlemesine savunma olarak
+    // DURUYOR: tabloya yanlışlıkla dış rol geri eklenirse `orders` yine yalnız kendi satırını gösterir.
     const acik = TENANT_COLLECTIONS.filter(c => EXTERNAL_ROLES.some(r => isAllowed(r, c, 'write')) && !DIS_ROL_SATIR_ALANI.has(c));
-    expect(acik.filter(c => !BILINEN_ACIK.has(c))).toEqual([]);
+    expect(acik).toEqual([]);
+    // Süzgeçli koleksiyon da dış role kapalı — süzgeç ikinci kattır, birincisi kural tablosu.
+    for (const coll of DIS_ROL_SATIR_ALANI.keys()) {
+      for (const r of EXTERNAL_ROLES) for (const op of ['read', 'write', 'delete'] as const) expect(isAllowed(r, coll, op), `${r} ${coll} ${op}`).toBe(false);
+    }
   });
 });
 

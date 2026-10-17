@@ -288,6 +288,7 @@ import { publicPageKey, type PublicPageKey } from './lib/publicPaths';
 import { MAGAZA_PANEL_BAGLAN_YOLU } from './lib/magazaPanelBaglan';
 import { TOP_LEVEL_TABS } from './lib/topLevelTabs';
 import { cikisIstegiGonder } from './lib/oturumCikisi';
+import DisRolEkrani, { disRolMu, disRolEkraniGosterilir, veriSekmesi } from './components/DisRolEkrani';
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -297,12 +298,15 @@ function cn(...inputs: ClassValue[]) {
 // --- Types ---
 // --- Permission Matrix ---
 // 'full' = full read+write access, 'readonly' = read-only view
+// DIŞ ROL (B2B / Bayi) bu tabloda YER ALMAZ (2026-10-11, şartname dış-rol-kapanışı D5): dış rol ERP kabuğunu görmez,
+// `canAccess` ona her sekmede `false` döner. Çit: components/DisRolEkrani.uygulama.test.tsx.
 const TAB_PERMISSIONS: Record<string, { full: UserRole[]; readonly: UserRole[] }> = {
-  dashboard:     { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales, UserRole.Logistics, UserRole.Accounting, UserRole.HR, UserRole.Purchasing, UserRole.B2B, UserRole.Dealer], readonly: [] },
+  dashboard:     { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales, UserRole.Logistics, UserRole.Accounting, UserRole.HR, UserRole.Purchasing], readonly: [] },
   crm:           { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales], readonly: [UserRole.Accounting, UserRole.Purchasing] },
   orders:        { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales], readonly: [UserRole.Accounting, UserRole.Purchasing] },
   // Online Siparişler: `orders` ile AYNI roller (şartname online-siparis §4). Bu satır ŞART — kayıtsız sekme `canAccess`te
-  // "bilinmeyen sekme: izin ver" dalına düşer ve B2B / Dealer dâhil HERKESE açılır. Değişmez: onlineSiparisKaydi.degismez.test.ts.
+  // "bilinmeyen sekme: izin ver" dalına düşer ve her İÇ role açılır (dış rol 2026-10-11'den beri hiçbir sekmeyi görmez).
+  // Değişmez: onlineSiparisKaydi.degismez.test.ts.
   'online-siparisler': { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales], readonly: [UserRole.Accounting, UserRole.Purchasing] },
   inventory:     { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics, UserRole.Purchasing], readonly: [UserRole.Accounting, UserRole.Sales] },
   lojistik:      { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics, UserRole.Purchasing], readonly: [UserRole.Accounting, UserRole.Sales] },
@@ -313,7 +317,7 @@ const TAB_PERMISSIONS: Record<string, { full: UserRole[]; readonly: UserRole[] }
   proje:         { full: [UserRole.Admin, UserRole.Manager], readonly: [UserRole.Sales, UserRole.Logistics, UserRole.Purchasing] },
   kalite:        { full: [UserRole.Admin, UserRole.Manager], readonly: [UserRole.Logistics, UserRole.Purchasing] },
   production:    { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics], readonly: [UserRole.Purchasing, UserRole.Quality] },
-  b2b:           { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales, UserRole.B2B, UserRole.Dealer], readonly: [UserRole.Accounting] },
+  b2b:           { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales], readonly: [UserRole.Accounting] },
   risk:          { full: [UserRole.Admin, UserRole.Manager, UserRole.Accounting, UserRole.Purchasing], readonly: [UserRole.Sales, UserRole.Logistics] },
   reports:       { full: [UserRole.Admin, UserRole.Manager, UserRole.Accounting], readonly: [UserRole.Sales, UserRole.Logistics, UserRole.HR, UserRole.Purchasing] },
   integrations:  { full: [UserRole.Admin], readonly: [UserRole.Manager] },
@@ -707,6 +711,10 @@ function AppContent() {
   // 2FA: kullanıcının 2FA'sı açık ama bu oturum doğrulanmamışsa challenge sürülür.
   const [mfaChallenge, setMfaChallenge] = useState(false);
   const [showMfaSettings, setShowMfaSettings] = useState(false);
+  // DİKKAT (2026-10-11, dış rol kapanışı): başlangıç değeri `Sales`. Rol OKUNAMAZSA (aşağıda `mfaPending` dalı) bu değer
+  // kalır; dış rol kapısı (`disRol`) o oturumda rolü bilemez. Bu «okunamayınca Sales» davranışı AYRI düzeltmedir, kullanıcı
+  // onayı bekliyor; bu turda BİLEREK değiştirilmedi (veriyi sunucu kapatır). ÇIKIŞTA (`handleLogout` + oturum dinleyicisinin
+  // `!u` dalı) rol bu başlangıç değerine döner: aynı sekmedeki önceki oturumun rolü sonraki girişe TAŞINMAZ.
   const [userRole, setUserRole] = useState<UserRole>(UserRole.Sales);
   // Kullanıcının users/{uid} kaydında role alanı boşsa eskiden sessizce
   // 'Sales'e düşülüyordu — kullanıcı gerçek rolünün ne olduğunu hiç fark
@@ -717,13 +725,24 @@ function AppContent() {
   // Davet uygulanamadiysa "rol atanmamis" ekraninda GERCEK sebebi goster.
   const [inviteError, setInviteError] = useState<string | null>(null);
 
+  // ── Dış rol (B2B / Bayi) kapısı — şartname dış-rol-kapanışı D5 (2026-10-11) ─────────────────────────────────────────
+  // Dış rol ERP kabuğunu GÖRMEZ (aşağıda Render: tek sayfa `DisRolEkrani`) ve ERP verisi İSTEMEZ: veri dinleyicileri, akış
+  // bağlantısı, rapor özeti ve Mikro yeniden deneme zamanlayıcısı bu bayrakla başlamaz. Üyelik TEK yerden sorulur
+  // (`disRolMu` → rbac.ts `EXTERNAL_ROLES`); yeni dış rol koşulu rol adıyla YAZILMAZ. Ana veri efektindeki eski
+  // `UserRole.Dealer` sipariş sorgusu dalı artık ulaşılmaz (ölü yüzey — B2BPortal'daki dallarla birlikte Faz 4 listesinde).
+  // YENİ VERİ EFEKTİ YAZARKEN: oturum koşulunun yanına `|| disRol` ekle (ör. `if (!user || disRol) return;`) ve bağımlılık
+  // dizisine `disRol` yaz. Unutulursa `DisRolEkrani.uygulama.test.tsx` kırmızıya döner (dış rolde izin dışı istek / dinleyici).
+  const disRol = disRolMu(userRole);
+
   // Permission helpers
   const canAccess = (tab: string) => {
+    if (disRol) return false; // dış rol: tabloda olsun olmasın HİÇBİR sekme
     const perms = TAB_PERMISSIONS[tab];
     if (!perms) return true; // unknown tabs: default allow
     return perms.full.includes(userRole) || perms.readonly.includes(userRole);
   };
   const hasFullAccess = (tab: string) => {
+    if (disRol) return false; // göremediği sekmede tam yetkisi de olamaz (kayıtsız sekme dalı dış role açılmasın)
     const perms = TAB_PERMISSIONS[tab];
     if (!perms) return true;
     return perms.full.includes(userRole);
@@ -736,6 +755,10 @@ function AppContent() {
     const hash = window.location.hash.replace('#', '');
     return path || hash || 'dashboard';
   });
+  // SEKME kapılı veri dinleyicilerine giden sekme (`useSekmeVerileri`, stok sayım oturumu): oturum yokken ve dış rolde BOŞ.
+  // Bu dinleyicilerin kendi oturum koşulu yok; `activeTab` doğrudan verilseydi rol okunmadan ÖNCE abone olurlardı
+  // (`user` ile rol aynı anda yazılır — oturum dinleyicisinin sonu).
+  const veriSekme = veriSekmesi({ oturumVar: !!user, rol: userRole, sekme: activeTab });
   // URL ↔ activeTab bidirectional sync (React Router)
   useRouteSync({ activeTab, setActiveTab });
   const konum = useLocation();
@@ -801,12 +824,12 @@ function AppContent() {
   // Boş dizi yüzünden giriş tamamlandıktan sonra BİR DAHA denenmiyordu; hata da
   // yutulduğu için özet sessizce hiç yüklenmiyordu (konsolda 401 olarak görünür).
   useEffect(() => {
-    if (!user) return;
+    if (!user || disRol) return;
     authFetch('/api/reports/summary')
       .then(r => r.ok ? r.json() : null)
       .then((d: typeof summaryData) => { if (d) setSummaryData(d); })
       .catch(() => {});
-  }, [user]);
+  }, [user, disRol]);
 
   // ── System health state ────────────────────────────────────────────────────
   const [healthData, setHealthData] = useState<{
@@ -1022,13 +1045,13 @@ function AppContent() {
   interface CommissionRuleApp { id: string; tier: string; targetAmount: number; commissionRate: number; bonusRate: number; period: 'monthly' | 'quarterly'; }
 
   useEffect(() => {
-    if (!user || activeTab !== 'crm') return; // yalnızca CRM lead detayında kullanılır
+    if (!user || disRol || activeTab !== 'crm') return; // yalnızca CRM lead detayında kullanılır
     const unsub = onSnapshot(collection(db, 'commissionRules'), snap => {
       setCommissionRules(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRuleApp))));
     });
     return () => unsub();
    
-  }, [user, activeTab]);
+  }, [user, activeTab, disRol]);
 
   // ── Phase 29: Supplier Directory ──────────────────────────────────────────
 
@@ -1039,13 +1062,13 @@ function AppContent() {
   const [newSupplier, setNewSupplier] = useState<Partial<Supplier>>({});
 
   useEffect(() => {
-    if (!user || !['satin-alma', 'muhasebe', 'lojistik'].includes(activeTab)) return;
+    if (!user || disRol || !['satin-alma', 'muhasebe', 'lojistik'].includes(activeTab)) return;
     const unsub = onSnapshot(collection(db, 'suppliers'), snap => {
       setSuppliers(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier))));
     }, err => console.error('suppliers:', err));
     return () => unsub();
    
-  }, [user, activeTab]);
+  }, [user, activeTab, disRol]);
 
   const [vknLookupLoading, setVknLookupLoading] = useState(false);
   const [vknLookupMsg, setVknLookupMsg] = useState<{text: string; ok: boolean} | null>(null);
@@ -1144,7 +1167,7 @@ function AppContent() {
 
   // Load subscription from Firestore
   useEffect(() => {
-    if (!user) { setUserSubscription(null); setSubscriptionLoaded(false); setPaymentHistory([]); return; }
+    if (!user || disRol) { setUserSubscription(null); setSubscriptionLoaded(false); setPaymentHistory([]); return; }
 
     // Owner/admin accounts get a permanent enterprise subscription — no Firestore doc needed
     if (ADMIN_EMAILS.includes(user.email ?? '')) {
@@ -1184,7 +1207,7 @@ function AppContent() {
     );
 
     return () => { unsub(); unsubPayments(); };
-  }, [user]);
+  }, [user, disRol]);
 
   // ── Mikro retry kuyruğu: başarısız push'lar geçici hatada kuyruğa girer;
   //    burada açılışta + 90 sn'de bir bekleyenler yeniden denenir (exponential backoff) ──
@@ -1192,6 +1215,7 @@ function AppContent() {
   // yöntem kapısından geçtiği işi alır (lib/kuyrukSahipligi). Zamanlayıcı kuyruğu yürütemeyen oturumda HİÇ kurulmaz: dış rolde
   // ve rolü atanmamış hesapta (`roleMissing` — o durumda `userRole` varsayılan değerinde kalır, ona güvenilmez) eskiden her
   // 90 saniyede `GET /api/db/syncJobs` 403 alıp yutuluyordu; 2FA doğrulanmadan da koşmaz (istek 403 alır, rol henüz çözülmemiştir).
+  // Dış rol de burada durur (dış rol kapanışı D5): `kuyrukYurutebilir` yalnız iç role «evet» der — ayrı `disRol` koşulu gerekmez.
   useEffect(() => {
     const kimlik = { uid: user?.uid, rol: roleMissing ? null : userRole };
     if (mfaChallenge || !kuyrukYurutebilir(kimlik)) return;
@@ -1424,12 +1448,12 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    if (!user || !userRole) return;
+    if (!user || !userRole || disRol) return;
     const unsubNotifications = onSnapshot(query(collection(db, 'notifications'), where('userId', '==', user.uid), limit(10)), (snap) => {
       setNotifications(sortByCreatedAt(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'notifications', auth.currentUser?.uid));
     return () => unsubNotifications();
-  }, [user, userRole]);
+  }, [user, userRole, disRol]);
 
   useEffect(() => {
     if (!user || userRole !== 'Admin') return;
@@ -1690,14 +1714,14 @@ function AppContent() {
   // yazma saveSupplierRating ile (SatinAlmaPage'e prop olarak geçiliyor).
   const [p567Ratings, setP567Ratings] = useState<Record<string, Record<string,number>>>({});
   useEffect(() => {
-    if (!user) return;
+    if (!user || disRol) return;
     const unsub = onSnapshot(collection(db, 'supplierRatings'), snap => {
       const next: Record<string, Record<string, number>> = {};
       snap.docs.forEach(d => { next[d.id] = (d.data() as { ratings?: Record<string, number> }).ratings ?? {}; });
       setP567Ratings(next);
     }, () => {});
     return unsub;
-  }, [user]);
+  }, [user, disRol]);
   const saveSupplierRating = (supplierId: string, criteriaKey: string, score: number) => {
     setDoc(doc(db, 'supplierRatings', supplierId), {
       ratings: { ...(p567Ratings[supplierId] || {}), [criteriaKey]: score },
@@ -1758,14 +1782,14 @@ function AppContent() {
       p570DocVarRef.current = false;
       setP570Targets({ revenue: null, orders: null, avgOrderVal: null, leadConv: null });
     }
-    if (!cid) return;
+    if (!cid || disRol) return;
     const unsub = onSnapshot(doc(db, 'reportTargets', `kpiHedefleri_${cid}`), snap => {
       p570LoadedRef.current = true;
       p570DocVarRef.current = snap.exists();
       if (snap.exists()) setP570Targets(prev => ({ ...prev, ...(snap.data() as Partial<typeof prev>) }));
     }, () => {});
     return unsub;
-  }, [storeCompanyId, user]);
+  }, [storeCompanyId, user, disRol]);
   const p570SaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!p570LoadedRef.current) return; // ilk yükleme tamamlanmadan geri-yazma yapma
@@ -1954,7 +1978,7 @@ function AppContent() {
     p547BankAccounts, p547FixedAssets, p548Masraflar, p549Iadeler, p552Records, p554Bins, aracKonumlari, p573Rules, p579Batches, p587Checks, p588Consign, p591Schedules, p608Quotes, p612Budgets, p625BudgetData, p627Risks, p636Calculated, p636Payrolls, p638MatchResults, webhookConfigs, dashVergiDeadlines,
     // Setter'lar: alt bilesenlere prop olarak geciyorlar
     setP547BankAccounts, setP547FixedAssets, setP548Masraflar, setP549Iadeler, setP552Records, setP554Bins, setP573Rules, setP579Batches, setP587Checks, setP588Consign, setP591Schedules, setP608Quotes, setP612Budgets, setP625BudgetData, setP627Risks, setP636Calculated, setP636Payrolls, setP638MatchResults, setWebhookConfigs,
-  } = useSekmeVerileri({ user, activeTab, muhasebeTab, lojistikTab, purchasingSubTab, p625BudgetYear });
+  } = useSekmeVerileri({ user, activeTab: veriSekme, muhasebeTab, lojistikTab, purchasingSubTab, p625BudgetYear });
 
   const [p625EditMonth, setP625EditMonth] = useState<number|null>(null);
   // ── Phase 626: Müşteri Ödeme Analizi ─────────────────────────────────────
@@ -2012,7 +2036,7 @@ function AppContent() {
   const [aiConsentExpanded, setAiConsentExpanded] = useState<'aydinlatma' | 'kosullar' | null>(null);
 
   useEffect(() => {
-    if (!user) { setAiConsentChecked(false); setAiConsentGiven(false); return; }
+    if (!user || disRol) { setAiConsentChecked(false); setAiConsentGiven(false); return; }
     (async () => {
       try {
         const snap = await getDoc(doc(db, 'aiConsents', user.uid));
@@ -2025,7 +2049,7 @@ function AppContent() {
         setAiConsentChecked(true);
       }
     })();
-  }, [user]);
+  }, [user, disRol]);
 
   // Mikro'nun kendi AI modul deseninde oldugu gibi kullanim denenmeden ONCE
   // proaktif olarak goster (KVKK modaliyla ayni gecikme deseni - ust uste
@@ -2168,7 +2192,7 @@ function AppContent() {
 
   // ── Phase 584: Devam eden sayım oturumu — reload'da kaldığı yerden (tek-seferlik) ──
   useEffect(() => {
-    if (activeTab !== 'inventory' || p584Active) return;
+    if (veriSekme !== 'inventory' || p584Active) return;
     void (async () => {
       try {
         const snap = await getDocs(collection(db, 'stockCountSessions'));
@@ -2179,7 +2203,7 @@ function AppContent() {
         }
       } catch { /* çevrimdışı vb. — sessiz geç */ }
     })();
-  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [veriSekme]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Phase 625: Gelir/Gider bütçe — KALICI (revExpBudgets, ay-bazlı doc) ───
 
@@ -2324,6 +2348,14 @@ function AppContent() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       let resolvedCompanyId: string | null = null;
+      // Oturum KAPANDI (`handleLogout` dışından da gelebilir: başka sekmeden çıkış, belirteç iptali): rol açılış varsayılanına
+      // döner — aynı sekmede rolü yazılmayan sonraki giriş (rolsüz hesap, kendi belgesi okunamayan oturum) önceki oturumun
+      // rolünü (ör. Dealer) DEVRALMASIN. Açılıştaki «okunamayınca Sales» davranışı DEĞİŞMEDİ: taze sekmeyle aynı başlangıç.
+      if (!u) {
+        setUserRole(UserRole.Sales);
+        storeSetRole(UserRole.Sales);
+        setRoleMissing(false);
+      }
       // Profil senkronu ne olursa olsun açılışı KİLİTLEMESİN — aşağıdaki
       // setIsAuthReady(true) her koşulda çalışmalı (yoksa spinner'da donar).
       try {
@@ -2357,6 +2389,10 @@ function AppContent() {
         } catch (error) {
           // If MFA is pending, GET /api/db/users/:id returns 403 and getDoc throws.
           // We provide a dummy snapshot so the app can boot and show the MFA challenge modal.
+          // DİKKAT (2026-10-11, dış rol kapanışı): bu dalda rol YAZILMAZ — `userRole` eski değerinde kalır (açılışta ve çıkıştan
+          // sonra `Sales`; dinleyici arada `null` görmeden hesap değişirse önceki rol kalır — arayüzde giriş ekranı yalnız
+          // oturumsuzken çizildiği için bu yol bugün yok).
+          // Dış rol kapısı bu oturumda rolü bilemez; ayrı düzeltme, kullanıcı onayı bekliyor — bu turda BİLEREK dokunulmadı.
           mfaPending = true;
           userSnap = { exists: () => false, data: () => ({}) } as unknown as Awaited<ReturnType<typeof getDoc>>;
         }
@@ -2643,12 +2679,18 @@ function AppContent() {
     storeSetCompanyId(null);
     resetStream(); // SSE bağlantısı + bellekteki kiracı verisini temizle
     resetLazyCollections(); // tembel koleksiyon kapıları da başa alınsın
+    // Rol de açılış varsayılanına döner: aynı sekmede rolü yazılmayan sonraki giriş önceki rolü (ör. Dealer) devralmasın
+    // (oturum dinleyicisinin `!u` dalıyla aynı üç satır — orası `handleLogout` dışından gelen çıkışları kapsar).
+    setUserRole(UserRole.Sales);
+    storeSetRole(UserRole.Sales);
+    setRoleMissing(false);
   };
 
   // --- Data Fetching ---
   useEffect(() => {
     if (!isAuthReady || !user || !userRole) return;
     if (mfaChallenge) return; // 2FA doğrulanana kadar tenant verisi yüklenmez
+    if (disRol) return; // dış rol (B2B / Bayi): ERP verisi dinlenmez, akış bağlantısı açılmaz (şartname dış-rol-kapanışı D5)
 
     // Data is scoped by companyId (= uid of the account owner).
     // Documents without a companyId field are legacy/test data and are excluded.
@@ -2852,11 +2894,11 @@ function AppContent() {
       unsubTargets();
       unsubBudgets();
     };
-  }, [user, userRole, isAuthReady, storeCompanyId, mfaChallenge]);
+  }, [user, userRole, isAuthReady, storeCompanyId, mfaChallenge, disRol]);
 
   // ── auditLog: yalnızca Admin > Denetim Kaydı açıkken dinle ────────────────
   useEffect(() => {
-    if (!user || activeTab !== 'admin') return;
+    if (!user || disRol || activeTab !== 'admin') return;
     const companyId = storeCompanyId ?? user.uid;
     const unsub = onSnapshot(
       query(collection(db, 'auditLog'), where('companyId', '==', companyId), orderBy('timestamp', 'desc'), limit(100)),
@@ -2865,11 +2907,11 @@ function AppContent() {
     );
     return () => unsub();
 
-  }, [user, activeTab, storeCompanyId]);
+  }, [user, activeTab, storeCompanyId, disRol]);
 
   // ── Phase extended collections — Firestore subscriptions ─────────────────
   useEffect(() => {
-    if (!user) return;
+    if (!user || disRol) return;
     const u: (() => void)[] = [];
     // Bkz. lazyCollections.ts — modül-özel koleksiyonlar ilgili sekme açılana
     // kadar dinlenmez. Tüm dinleyicilerin AYNI kararı vermesi için ortak kapı.
@@ -2893,7 +2935,7 @@ function AppContent() {
     sub('intercompanyTxns',(d) => setP643Txns(d as typeof p643Txns));
 
     return () => u.forEach(fn => fn());
-  }, [user?.uid, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.uid, activeTab, disRol]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Customer Risk Scoring — writes to customerRisks collection ──────────
   useEffect(() => {
@@ -3748,6 +3790,13 @@ function AppContent() {
       <Clock className="animate-spin text-brand" />
     </div>
   );
+
+  // ─── Dış rol (B2B / Bayi): ERP kabuğu ÇİZİLMEZ — tek sayfa (şartname dış-rol-kapanışı D5) ───
+  // Karşılama sayfasından, giriş sonrası kapılardan (mağaza paneli onayı, kurulum, fiyatlandırma) ve kabuktan ÖNCE: dış rol
+  // hesabı oturum açıkken bunların hiçbirine ulaşmaz. Herkese açık sayfalar ve sipariş takibi yukarıda, etkilenmez.
+  if (disRolEkraniGosterilir({ oturumVar: !!user, rol: userRole, ikiAdimBekliyor: mfaChallenge })) {
+    return <DisRolEkrani dil={currentLanguage} onCikis={handleLogout} />;
+  }
 
   // --- Entrance Logic: Landing vs Login vs App ---
   // OTURUMLU kullanıcı bir UYGULAMA yoluna geldiyse (ör. /dashboard, /crm)

@@ -106,20 +106,24 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   magazaTalepleri: { read: ['Admin', 'Manager', 'Sales'], write: [] },
   leads: { read: ['Admin', 'Manager', 'Sales', 'Accounting', 'Purchasing'], write: ['Admin', 'Manager', 'Sales'] },
   customers: { read: ['Admin', 'Manager', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
-  orders: { read: ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'Purchasing', 'B2B', 'Dealer'], write: ['Admin', 'Manager', 'Sales', 'Logistics', 'B2B', 'Dealer'] },
-  recurringOrders: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Dealer', 'Accounting', 'Logistics'], write: ['Admin', 'Manager', 'Sales', 'B2B'] },
-  // Güvenlik: B2B/Dealer dış rolleri fiyat listesi/override YAZAMAZ (kendine indirim verme açığı). Yalnız okur.
-  priceLists: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Dealer', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
-  priceOverrides: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
-  quotations: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Dealer', 'Accounting'], write: ['Admin', 'Manager', 'Sales', 'B2B', 'Dealer'] },
+  // DIŞ ROL YOK (2026-10-11, şartname «dış rol kapanışı» D1): bu satırların altısında (orders, recurringOrders, priceLists,
+  // priceOverrides, quotations, commissionRules) ve aşağıda inventory / documentTemplates / cpqQuotes'ta B2B ve Bayi vardı. Sunucuda
+  // satır süzgeci yalnız `orders`'taydı: dış rol stok kartını alış maliyeti ve tedarikçisiyle, kiracının BÜTÜN müşterilerinin
+  // tekliflerini, fiyat listelerini ve komisyon kurallarını okuyor, herhangi bir teklifi değiştirebiliyordu. Tabloya dış rol
+  // GERİ EKLENMEZ (çit: rbac.disRol.degismez.test.ts); bayi ekranı ERP'nin dışında, kendi uçlarıyla çalışır.
+  orders: { read: ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'Purchasing'], write: ['Admin', 'Manager', 'Sales', 'Logistics'] },
+  recurringOrders: { read: ['Admin', 'Manager', 'Sales', 'Accounting', 'Logistics'], write: ['Admin', 'Manager', 'Sales'] },
+  priceLists: { read: ['Admin', 'Manager', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
+  priceOverrides: { read: ['Admin', 'Manager', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
+  quotations: { read: ['Admin', 'Manager', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
   campaigns: { read: ['Admin', 'Manager', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
   returns: { read: ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting', 'Purchasing'], write: ['Admin', 'Manager', 'Sales', 'Logistics'] },
   customerRisks: { read: ['Admin', 'Manager', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
-  commissionRules: { read: ['Admin', 'Manager', 'Sales', 'Dealer', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
+  commissionRules: { read: ['Admin', 'Manager', 'Sales', 'Accounting'], write: ['Admin', 'Manager', 'Sales'] },
   supportTickets: { read: ['Admin', 'Manager', 'Sales', 'Logistics', 'Accounting'], write: ['Admin', 'Manager', 'Sales', 'Logistics'] },
 
   // Lojistik, Depo, Üretim (Logistics / Warehouse)
-  inventory: { read: [...STAFF_ROLES, 'B2B', 'Dealer'], write: ['Admin', 'Manager', 'Logistics', 'Purchasing'] }, // Warehouse combined into Logistics
+  inventory: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics', 'Purchasing'] }, // Warehouse combined into Logistics
   warehouseItems: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
   transfers: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
   waybills: { read: ['Admin', 'Manager', 'Logistics', 'Accounting'], write: ['Admin', 'Manager', 'Logistics'] },
@@ -251,11 +255,10 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   assemblyMeetings: { read: ['Admin', 'Manager', 'Corporate', 'Legal'], write: ['Admin', 'Corporate'] },
 
   // Ortak (Genel)
-  // documentTemplates: B2B/Dealer da OKUR (2026-09-04). Şablon PDF üretiminde okunuyor ve
-  // B2B Portalı'ndaki teklif PDF'ini MÜŞTERİ indiriyor. Yalnız STAFF okuyabilseydi müşteri
-  // 403 alıp varsayılana düşerdi — Admin'in girdiği başlık/renk/IBAN tam da müşteriye giden
-  // nüshada uygulanmazdı. Sızıntı yok: şablonun her alanı zaten o belgeye basılıyor.
-  documentTemplates: { read: [...STAFF_ROLES, ...EXTERNAL_ROLES], write: ['Admin', 'Manager', 'Sales', 'Accounting'] },
+  // documentTemplates: 2026-09-04'te B2B / Bayi de okuyordu (B2B Portalı'ndaki teklif PDF'ini müşteri indirsin diye). Dış rol
+  // kapanışıyla (2026-10-11, D1) dış rol ERP'de hiçbir koleksiyonu okumaz; B2B Portalı'nın dış role dönük dalları ölü yüzeydir
+  // (şartname D7 — bu turda silinmedi, Faz 4 ölü kod listesinde).
+  documentTemplates: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales', 'Accounting'] },
   workflowTasks: { read: [...STAFF_ROLES], write: [...STAFF_ROLES] },
   approvalRequests: { read: ['Admin', 'Manager', 'HR', 'Accounting', 'Sales', 'Logistics', 'Purchasing'], write: ['Admin', 'Manager', 'HR', 'Accounting'] },
 
@@ -332,7 +335,7 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   resources: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Logistics'] },
 
   // ── CPQ / Satış araçları ──
-  cpqQuotes: { read: ['Admin', 'Manager', 'Sales', 'B2B', 'Dealer'], write: ['Admin', 'Manager', 'Sales'] },
+  cpqQuotes: { read: ['Admin', 'Manager', 'Sales'], write: ['Admin', 'Manager', 'Sales'] },
   cpqTemplates: { read: ['Admin', 'Manager', 'Sales'], write: ['Admin', 'Manager', 'Sales'] },
   skuMappings: { read: [...STAFF_ROLES], write: ['Admin', 'Manager', 'Sales', 'Logistics'] },
   territories: { read: ['Admin', 'Manager', 'Sales'], write: ['Admin', 'Manager', 'Sales'] },
@@ -373,7 +376,33 @@ export function hasExplicitRule(coll: string): boolean {
   return coll in COLLECTION_PERMISSIONS;
 }
 
+/**
+ * Açık kuralı olan koleksiyonların ADLARI (tablonun anahtarları) — değişmez testleri koleksiyon evrenini buradan türetir
+ * (rbac.disRol.degismez.test.ts: «dış rol × HER koleksiyon × her işlem = false»). Yeni satır eklenince çit kendiliğinden kapsar.
+ */
+export const KURALLI_KOLEKSIYONLAR: readonly string[] = Object.freeze(Object.keys(COLLECTION_PERMISSIONS));
+
+/**
+ * Bir koleksiyonun tablodaki rol listeleri (KOPYA; kuralı yoksa null). YALNIZ çitler içindir — yetki kararı için `isAllowed`
+ * çağrılır (Yönetici kısa yolu, sunucu-yazar, salt-ekleme ve silme kuralları tabloda değil oradadır).
+ * NEDEN VAR: `isAllowed` dış rolü en başta reddeder; tabloya yanlışlıkla dış rol geri eklenirse `isAllowed` bunu göstermez —
+ * çit satırın KENDİSİNE bakar ki ikinci kat (erken ret) sökülse de tablo temiz kalsın.
+ */
+export function kuralRolleri(coll: string): { read: readonly AppRole[]; write: readonly AppRole[] } | null {
+  if (!(coll in COLLECTION_PERMISSIONS)) return null;
+  const k = COLLECTION_PERMISSIONS[coll];
+  return { read: [...k.read], write: [...k.write] };
+}
+
 export function isAllowed(role: AppRole | null, coll: string, op: DbOp): boolean {
+  // DIŞ ROL (B2B, Bayi): HİÇBİR koleksiyonda HİÇBİR işlem (2026-10-11, şartname «dış rol kapanışı» D1). EN BAŞTA durur ki
+  // aşağıdaki hiçbir dal — halka açık form, kullanıcı kapsamlı koleksiyon, kuralsız koleksiyon yedeği, tablo satırı — dış role
+  // izin veremesin. Akış (`/api/db/stream`) kimliği `requireAuth`'tan geçirmeden bu işlevle karar verir: burada açık kalan her
+  // hücre akıştan okunurdu (ör. `notifications` içindeki etiketsiz, sipariş metni taşıyan bildirimler).
+  // TEK istisna bu işlevde DEĞİL: kişinin kendi `users/<uid>` belgesi (`isSelfDocAccess` — oturum açılışı), o AYNEN duruyor.
+  // Çit: rbac.disRol.degismez.test.ts (EXTERNAL_ROLES × her koleksiyon × okuma / yazma / silme).
+  if (role !== null && EXTERNAL_ROLES.includes(role)) return false;
+
   // Halka açık koleksiyonlara dışarıdan veri eklenebilir (örn: Landing page). Okumak için Admin gerekir.
   if (PUBLIC_WRITE_COLLECTIONS.has(coll) && op === 'write') return true;
 
@@ -403,7 +432,8 @@ export function isAllowed(role: AppRole | null, coll: string, op: DbOp): boolean
   }
 
   // Kullanıcı-kapsamlı koleksiyonlar (userPrefs, notifications, aiConsents,
-  // userOnboarding): kişinin KENDİ verisi — her doğrulanmış rol okur/yazar.
+  // userOnboarding): kişinin KENDİ verisi — her İÇ rol okur/yazar (2026-10-11'e kadar «null olmayan her rol»: rol alanına
+  // yazılmış geçersiz bir değer — ör. `/increment` ile sayı — bu dalı açıyordu; artık yalnız bilinen iç rol. Dış rol yukarıda döndü).
   // Sahiplik burada değil sunucuda zorlanır (injectTenant userId'yi damgalar,
   // tenantWhere yalnız kendi kayıtlarını döndürür, ownsDoc yabancıyı reddeder).
   //
@@ -422,12 +452,10 @@ export function isAllowed(role: AppRole | null, coll: string, op: DbOp): boolean
   // yarın "aiConsents append-only olsun" denildiğinde kuralın gerçekten
   // uygulanacak olması.) Artık AÇIK kurallar önce, bu ise VARSAYILAN olarak
   // en sonda.
-  if (USER_SCOPED_COLLECTIONS.includes(coll)) return true;
+  if (USER_SCOPED_COLLECTIONS.includes(coll)) return STAFF_ROLES.includes(role);
 
-  // Eğer açıkça tanımlanmamış bir koleksiyon ise (güvenlik için fallback):
-  // Staff rolleri okuyabilir, B2B/Dealer sadece okuyabilir.
-  if (EXTERNAL_ROLES.includes(role)) return op === 'read';
-
+  // Açık kuralı OLMAYAN koleksiyon (yedek dal): yalnız iç rol, yalnız OKUR. Dış role okuma da YOK (2026-10-11, D1) — eskiden
+  // `EXTERNAL_ROLES → op === 'read'` idi: tabloya yazılmamış her koleksiyon (demoRequests, partnerApplications, …) bayiye açıktı.
   // Tanımsız yeni koleksiyonlarda yazma işlemlerini varsayılan olarak engelle (Zero Trust)
   // Sadece okumaya izin ver. Write işlemi gerekiyorsa COLLECTION_PERMISSIONS'a eklenmelidir.
   if (STAFF_ROLES.includes(role)) {
@@ -448,3 +476,42 @@ export function blocksRoleEscalation(coll: string, role: AppRole | null, body: R
   if (!('role' in body)) return false;
   return role !== 'Admin';
 }
+
+/**
+ * YALNIZ Yönetici (rol `Admin`) ya da süper yönetici — Müdür DEĞİL.
+ *
+ * NEDEN AYRI İŞLEV (2026-10-11, şartname «dış rol kapanışı» D10 / D11): `requireAdmin` = `ADMIN_ROLES` = Yönetici + Müdür.
+ * Kullanıcı yönetimi uçları (`/api/admin/*`) o kapıyla korunuyordu ve hedefin / istenen rolün `Admin` olup olmadığına
+ * bakmıyordu: Müdür kendine Yönetici rollü ikinci bir hesap açabiliyor, Yönetici'nin hesabını silebiliyordu. /api/db'de rol
+ * YAZIMI zaten yasaktı (`blocksRoleEscalation`: rol yazımı yalnız Yönetici) ama SİLME açıktı: Müdür, Yönetici'nin `users`
+ * belgesini `DELETE /api/db/users/<uid>` ile silebiliyordu (2026-10-17 inceleme bulgusu) — o yol da artık
+ * `yoneticiRoluneDokunabilir` ile kapılı ve aynı reddi (`YONETICI_GEREKLI_YANITI`) verir. Aynı gün YAZMA yolları da (PUT / PATCH /
+ * `/cas` / `/increment`): Müdür, Yönetici'nin belgesini baştan yazıp ad / e-posta gibi alanları silebiliyordu — server.ts
+ * `yoneticiKaydiYazimEngeli` (silmeyle ortak yardımcı; kişinin kendi belgesi `isSelfDocAccess` istisnasıyla serbest).
+ * İki adımlı doğrulama sıfırlama ucu (`POST /api/admin/users/:uid/mfa-sifirla`) da bu kapıyı kullanır.
+ */
+export function yalnizYoneticiMi(cagiranRol: AppRole | null, superAdmin: boolean): boolean {
+  return superAdmin === true || cagiranRol === 'Admin';
+}
+
+/**
+ * «Yönetici rolüne yalnız Yönetici dokunur»: çağıran, `ilgiliRol` rolünü VEREBİLİR (hesap açma, davet) / o roldeki hesabı
+ * SİLEBİLİR mi? `ilgiliRol` `Admin` değilse karar bu işlevin değil çağıran ucun kendi kapısınındır (`requireAdmin`) — `true`
+ * döner; Müdür'ün diğer rollerdeki kullanıcı yönetimi DEĞİŞMEZ. `ilgiliRol` ham değerdir (gövdeden / belgeden): tam olarak
+ * `'Admin'` dizgisi aranır, çünkü rolü okuyan her yer (`getUserRole`, `isAllowed`) de tam eşleşmeyle karar verir.
+ */
+export function yoneticiRoluneDokunabilir(cagiranRol: AppRole | null, superAdmin: boolean, ilgiliRol: unknown): boolean {
+  if (ilgiliRol !== 'Admin') return true;
+  return yalnizYoneticiMi(cagiranRol, superAdmin);
+}
+
+/**
+ * `yoneticiRoluneDokunabilir` reddinin TEK gövdesi (HTTP 403). Kullananlar: `/api/admin/users` (POST, DELETE),
+ * `/api/admin/invite` (epostaRoutes) ve `/api/db/users/:id` silme + yazma yolları (server.ts `yoneticiKaydiYazimEngeli`). İstemci `code` alanından tanır; metin ve kod
+ * tek yerde durur ki uçlar arasında ayrışmasın.
+ */
+export const YONETICI_GEREKLI_YANITI = {
+  success: false,
+  error: 'Yönetici rolündeki hesaplarla ilgili işlemleri yalnız Yönetici yapabilir.',
+  code: 'YONETICI_GEREKLI',
+} as const;

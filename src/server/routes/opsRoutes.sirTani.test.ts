@@ -1,4 +1,7 @@
-/** opsRoutes.sirTani.test.ts — settings / auditLog sır ölçüm ucu (2026-10-02): jeton, DEĞER dönmez, yalnız sayım. */
+/**
+ * opsRoutes.sirTani.test.ts — settings / auditLog sır ölçüm ucu (2026-10-02): jeton, DEĞER dönmez, yalnız sayım.
+ * + `kullanici` bloğu (2026-10-11, şartname «dış rol kapanışı» D6 / T5): rolsüz ve dış rol hesap SAYISI; kişi verisi dönmez.
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Express } from 'express';
 import { opsRoutes, type OpsRouteCtx } from './opsRoutes';
@@ -15,6 +18,7 @@ function sahteApp() {
 }
 const gecir = () => (_r: unknown, _s: unknown, next: () => void) => next();
 const SIR = 'cok-gizli-anahtar-123';
+const kullaniciSorgulari: string[] = [];
 const sorgu = async (sql: string) => {
   if (sql.includes("coll = 'settings'")) return { rows: [
     { id: 'luca', data: { apiKey: SIR, companyId: 'LUCA-FIRMA', baseUrl: 'https://api.luca.com.tr' } },
@@ -25,6 +29,19 @@ const sorgu = async (sql: string) => {
     { data: { details: 'leads/x güncellendi', diff: { name: { from: 'a', to: 'b' } }, timestamp: '2026-09-02T10:00:00.000Z' } },
   ] };
   if (sql.includes("coll = 'auditLog'")) return { rows: [{ n: 40 }] };
+  // `kullanici` sorgusu: uç YALNIZ `role` ve `lastLogin` seçer. Sahte havuz bilerek FAZLASINI döndürür (kimlik, e-posta, ad) —
+  // sorgu bir gün genişletilse bile yanıtın kişi verisi taşımadığı aşağıda sınanır.
+  if (sql.includes("coll = 'users'") && sql.includes("data->'role'")) {
+    kullaniciSorgulari.push(sql);
+    return { rows: [
+      { rol: 'Admin', giris: { _seconds: 1_760_000_000, _nanoseconds: 0 }, id: 'uid-sahip-1', email: 'sahip@example.test', name: 'Sahip Kişi' },
+      { rol: 'Dealer', giris: '2026-03-01T10:00:00.000Z', id: 'uid-bayi-1', email: 'bayi@example.test', name: 'Şirin Yapı' },
+      { rol: 'Dealer', giris: { _seconds: 1_700_000_000, _nanoseconds: 0 }, id: 'uid-bayi-2', email: 'bayi2@example.test', name: 'İkinci Bayi' },
+      { rol: 'B2B', giris: null, id: 'uid-b2b-1', email: 'b2b@example.test', name: 'Kurumsal Müşteri' },
+      { rol: null, giris: '2026-10-11T09:00:00.000Z', id: 'uid-yabanci-1', email: 'yabanci@example.test', name: 'Yabancı' },
+      { rol: 1, giris: null, id: 'uid-yabanci-2', email: 'cop@example.test', name: 'Geçersiz Rol' },
+    ] };
+  }
   if (sql.includes("coll = 'users'")) return { rows: [{ n: 1 }] };
   if (sql.includes("coll = 'orders'")) return { rows: [{ kaynak: 'mikro_import', n: 700 }, { kaynak: '(boş)', n: 12 }] };
   throw new Error(`beklenmeyen sorgu: ${sql}`);
@@ -65,6 +82,36 @@ describe('GET /api/ops/sir-tani', () => {
       kiraci: { sayi: 1, sahipCozuluyor: true },
       siparisKaynaklari: { mikro_import: 700, '(boş)': 12 },
     });
+  });
+  it('`kullanici`: toplam, rolsüz, dış rol başına sayı ve en yeni dış rol girişi — yalnız sayı ve zaman', async () => {
+    const r = await calistir('gizli-abc');
+    expect(r.kod).toBe(200);
+    expect((r.govde as { kullanici: unknown }).kullanici).toEqual({
+      toplam: 6, rolsuz: 2, disRol: { B2B: 1, Dealer: 2 }, disRolSonGiris: '2026-03-01T10:00:00.000Z',
+    });
+  });
+  it('`kullanici`: yanıtta e-posta / ad / kimlik deseni YOK (havuz fazladan alan döndürse de)', async () => {
+    const r = await calistir('gizli-abc');
+    const metin = JSON.stringify((r.govde as { kullanici: unknown }).kullanici);
+    expect(metin).not.toMatch(/@/);
+    expect(metin).not.toMatch(/[^\s@"]+@[^\s@"]+\.[^\s@"]+/);
+    for (const yasak of ['example', 'uid-', 'Sahip', 'Şirin', 'Bayi', 'Kurumsal', 'Yabancı', 'Geçersiz']) expect(metin).not.toContain(yasak);
+    // Bütün yanıtta da e-posta deseni yok (öbür bloklar zaten değer taşımıyor).
+    expect(JSON.stringify(r.govde)).not.toMatch(/[^\s@"]+@[^\s@"]+\.[^\s@"]+/);
+  });
+  it('`kullanici` sorgusu YALNIZ `role` ve `lastLogin` alanlarını seçer (kişi verisi veritabanından hiç çıkmaz)', async () => {
+    kullaniciSorgulari.length = 0;
+    await calistir('gizli-abc');
+    expect(kullaniciSorgulari).toEqual(["SELECT data->'role' AS rol, data->'lastLogin' AS giris FROM docs WHERE coll = 'users'"]);
+  });
+  it('`kullanici`: jetonsuz / yanlış jetonla 401 — blok da gövde de dönmez; sorgu KOŞMAZ', async () => {
+    kullaniciSorgulari.length = 0;
+    for (const jeton of [undefined, 'yanlis', '']) {
+      const r = await calistir(jeton);
+      expect([jeton, r.kod]).toEqual([jeton, 401]);
+      expect(JSON.stringify(r.govde)).not.toContain('kullanici');
+    }
+    expect(kullaniciSorgulari).toEqual([]);
   });
   it('sahip kiracı çözülemiyorsa bunu söyler; pg havuzu yoksa 503', async () => {
     const r = await calistir('gizli-abc', { ...C, serverTenantId: async () => '' });
