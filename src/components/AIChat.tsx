@@ -108,13 +108,17 @@ export default function AIChat({ businessContext, currentLanguage = 'tr' }: AICh
         <MessageSquare size={24} />
       </button>
 
+      {/* Pencere `z-[69]`: kullanıcının açtığı pencere «yeni sürüm» şeridinin (YeniSurumSeridi.tsx `z-[65]`) ÜSTÜNDE; sayfa
+          modallarının (`z-[70]` DrillDown, AccountingModule `z-[80]`) ve modal katmanının (`z-[100]`) ALTINDA (yeni sürüm
+          şartnamesi, inceleme 2 Y5 + inceleme 3: `z-[70]` sohbeti açık modalın üstüne çıkarıyordu). Açma düğmesi `z-50` kalır: şeridin `pb-24`
+          alt boşluğu onu açıkta bırakır. Değer YeniSurumSeridi.test.tsx'te sabit. */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed bottom-24 right-6 w-96 h-[550px] bg-white rounded-3xl shadow-2xl border border-gray-100 flex flex-col z-50 overflow-hidden"
+            className="fixed bottom-24 right-6 w-96 h-[550px] bg-white rounded-3xl shadow-2xl border border-gray-100 flex flex-col z-[69] overflow-hidden"
           >
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <div className="flex items-center gap-2 font-bold text-gray-800">

@@ -2,11 +2,14 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
+import {surumEklentisi} from './src/derleme/surumEklentisi';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
-    plugins: [react(), tailwindcss()],
+    // surumEklentisi: «yeni sürüm var, yenile» bildiriminin sürüm kimliği — index.html'e meta + çıktı dizinine surum.json
+    // (src/derleme/surumEklentisi.ts başlığı; çıkarılırsa bildirim sessizce kapanır, surumEklentisi.test.ts kırmızıya döner).
+    plugins: [react(), tailwindcss(), surumEklentisi()],
     define: {
       // GEMINI_API_KEY is intentionally NOT injected here — it lives server-side only.
       // Client components must call /api/ai/* proxy routes instead.

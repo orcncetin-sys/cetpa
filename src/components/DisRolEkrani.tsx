@@ -71,9 +71,11 @@ export default function DisRolEkrani({ dil, onCikis }: DisRolEkraniProps) {
   };
 
   return (
+    // `pb-48 sm:pb-4`: dar ekranda «Yeni sürüm yayında» şeridi (YeniSurumSeridi, `fixed`, alttan ~178 px) kartın düğmelerini
+    // örtmesin; 640 px ve üstünde şerit tek satıra iner (yayin-16 birleşme incelemesi).
     <main
       lang={dil}
-      className="min-h-screen flex items-center justify-center p-4 font-avenir"
+      className="min-h-screen flex items-center justify-center p-4 pb-48 sm:pb-4 font-avenir"
       style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}
     >
       <div className="apple-card max-w-md w-full p-8 space-y-4 text-center">

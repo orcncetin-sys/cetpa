@@ -575,6 +575,46 @@ else
     fi
     rm -f "$IDOSYA"
   fi
+
+  # 9) «YENİ SÜRÜM VAR» UCU: sunucunun sürüm kimliği = yayındaki istemci paketinin kimliği (şartname yeni-sürüm-bildirimi S2)
+  #
+  # `GET /api/surum` kimliksizdir: 200 + `Cache-Control: no-store` + gövde YALNIZ `{"surum":"<16 onaltılık>"}`. Kimlik, aynı
+  # yayının index.html'indeki `<meta name="cetpa-surum">` ile AYNI olmalı (8. adımda indirilen sayfa). Ayrışırsa sunucu başka
+  # derlemenin surum.json'unu okuyor (dist.new / dist karışıklığı): açık sekmeler ya hiç uyarılmaz ya da yanlış uyarılır.
+  # `{"surum":null}` = derlemede surum.json üretilmemiş (derleme eklentisi vite.config.ts'ten çıkmış) — şerit sessizce kapalı.
+  # Ana betikte `/api/surum` metni yoksa şerit istemciye bağlanmamış («yazıldı ama bağlanmadı» sondası). Yalnız GET; kayıt yazmaz.
+  SMETA=$(printf '%s' "$ISAYFA" | grep -oE '<meta name="cetpa-surum" content="[0-9a-f]{16}"' | head -n 1 | grep -oE '[0-9a-f]{16}')
+  SDOSYA=$(mktemp "${TMPDIR:-/tmp}/verify-surum.XXXXXX")
+  SBASLIK=$(curl -s --max-time 20 -D - -o "$SDOSYA" "$BASE_URL/api/surum" 2>/dev/null | tr -d '\r')
+  SGOVDE=$(cat "$SDOSYA" 2>/dev/null)
+  rm -f "$SDOSYA"
+  SKOD=$(printf '%s\n' "$SBASLIK" | awk '/^HTTP\//{k=$2} END{print k}')
+  SCC=$(printf '%s\n' "$SBASLIK" | grep -i '^cache-control:' | tail -n 1 | sed 's/^[^:]*:[[:space:]]*//')
+  SSURUM=$(printf '%s' "$SGOVDE" | grep -E '^\{"surum":"[0-9a-f]{16}"\}$' | grep -oE '[0-9a-f]{16}')
+  if [ "$SKOD" = "429" ]; then
+    fail "sürüm ucu sondası ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)"
+  elif [ "$SKOD" != "200" ]; then
+    fail "sürüm ucu: GET /api/surum beklenen 200, gelen '${SKOD:-yanıt yok}' (rota kayıtlı değil ya da bir kimlik kapısının arkasında)"
+  elif [ "$SCC" != "no-store" ]; then
+    fail "sürüm ucu: Cache-Control 'no-store' değil ('${SCC:-yok}') — eski yanıt saklanırsa açık sekmeler yeni sürümü göremez"
+  elif [ -z "$SSURUM" ]; then
+    fail "sürüm ucu: gövde '{\"surum\":\"<16 onaltılık>\"}' biçiminde değil: ${SGOVDE:-boş} (null = derlemede surum.json yok)"
+  elif [ -z "$SMETA" ]; then
+    fail "sürüm ucu: GET / yanıtında <meta name=\"cetpa-surum\"> yok — istemci paketi kimliksiz, şerit kapalı"
+  elif [ "$SSURUM" != "$SMETA" ]; then
+    fail "sürüm ucu AYRIŞIYOR: sunucu $SSURUM, istemci paketi $SMETA — sunucu başka derlemenin surum.json'unu okuyor (dist / dist.new)"
+  else
+    SBETIK=$(mktemp "${TMPDIR:-/tmp}/verify-surum-betik.XXXXXX")
+    SBKOD=$(curl -s --compressed --max-time 40 -o "$SBETIK" -w '%{http_code}' "$BASE_URL$IBETIK" 2>/dev/null)
+    if [ -z "$IBETIK" ] || [ "$SBKOD" != "200" ]; then
+      fail "sürüm ucu: kimlik aynı ($SSURUM) ama ana betik indirilemedi (${IBETIK:-adres yok} -> ${SBKOD:-yanıt yok}) — şeridin bağı ÖLÇÜLEMEDİ"
+    elif grep -q '/api/surum' "$SBETIK"; then
+      pass "sürüm ucu: 200 + no-store, sunucu = istemci paketi ($SSURUM); ana betik /api/surum'u soruyor (şerit bağlı)"
+    else
+      fail "sürüm ucu: kimlik aynı ($SSURUM) ama ana betikte /api/surum YOK — «yeni sürüm» şeridi istemciye bağlanmamış"
+    fi
+    rm -f "$SBETIK"
+  fi
 fi
 
 echo

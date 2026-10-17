@@ -48,6 +48,8 @@ describe('her sınırlayıcı anahtar üreticisini AÇIKÇA seçer — doğru ol
     // Mağaza dilim 2b (2026-10-10): ERP kökenindeki elle talep / içerik / silme uçları kimliklidir — kullanıcı anahtarı
     // (bu uçlar e-posta bildirimi üretir; aynı ofis tek kovaya girmesin, tek kullanıcı da kutuyu dolduramasın).
     magazaIcerikLimiter: 'userOrIpKey',
+    // «Yeni sürüm var» denetimi (2026-10-17): kimliksiz uç, istemci çerezsiz sorar — yalnız IP (bir ofisin sekmeleri tek kova).
+    surumLimiter: 'yalnizIpAnahtari',
   };
   it('server.ts\'teki rateLimit çağrıları tabloyla BİREBİR (yeni sınırlayıcı eklenince bu tablo bilinçli güncellenir)', () => {
     const olculen = Object.fromEntries(sinirlayicilar().map(s => [s.ad, s.govde.match(/keyGenerator: (\w+)/)?.[1] ?? '(YOK — varsayılan üretici)']));
@@ -115,6 +117,7 @@ describe('tavanlar ve tek sayım', () => {
     expect(govde('authLimiter')).toMatch(/windowMs: 15 \* 60 \* 1000,\s+max: 20,/);
     expect(govde('webhookLimiter')).toMatch(/windowMs: 60 \* 1000,\s+max: 1200,/);
     expect(govde('hitLimiter')).toMatch(/windowMs: 60 \* 1000, max: 120,/);
+    expect(govde('surumLimiter')).toMatch(/windowMs: 60 \* 1000,\s+max: 120,/);
     expect(govde('app.use(/api)')).toMatch(/windowMs: 60 \* 1000,\s+max: 6000,/);
   });
   it('Mikro sınırlayıcısı istek başına BİR KEZ sayar', () => {
@@ -144,6 +147,13 @@ describe('bağlama YERİ ve `skip`', () => {
   });
   it('sipariş takibi kendi sınırlayıcısıyla bağlı', () => {
     tek(/app\.get\('\/api\/track\/:orderId', trackLimiter, /);
+  });
+  it('sürüm ucu KENDİ sınırlayıcısıyla, genel sınırlayıcıdan ÖNCE bağlı (arkasına kayarsa sekmeler genel kimliksiz kovayı doldurur)', () => {
+    const baglama = tek(/surumRoutes\(app, \{ surumLimiter, surumDosyasi: /);
+    expect(baglama).toBeGreaterThan(tek(/const surumLimiter = rateLimit\(\{/));
+    expect(baglama).toBeLessThan(tek(/app\.use\('\/api', apiLimiter\);/));
+    const modul = kodSatirlari(join(SRC_KOK, 'server', 'routes', 'surumRoutes.ts'));
+    expect(modul.filter(s => /app\.get\(SURUM_UCU, C\.surumLimiter, /.test(s.kod))).toHaveLength(1);
   });
   it('akış rotası işaretini KENDİ zincirinde, sınırlayıcıdan ÖNCE koyar (çerez / `?token=` yalnız işaretli istekte kimliktir)', () => {
     tek(/app\.get\('\/api\/db\/stream', akisIstegiIsaretle, dbLimiter, /);

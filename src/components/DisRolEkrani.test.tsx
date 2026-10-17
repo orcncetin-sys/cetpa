@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import DisRolEkrani, { disRolEkraniGosterilir, disRolMu, veriSekmesi } from './DisRolEkrani';
+import ProfilYuklenemediEkrani from './ProfilYuklenemediEkrani';
 import { DIS_ROL, disRolMetni } from '../i18n/disRol';
 import { APP_ROLES, EXTERNAL_ROLES, STAFF_ROLES } from '../lib/rbac';
 import { kodSatirlari, SRC_KOK } from '../test/kaynakTarama';
@@ -173,5 +174,22 @@ describe('DisRolEkrani.tsx kaynağı — bileşende rol adı yazılmaz, metin s�
     expect(kod).toMatch(/import \{ disRolMetni \} from '\.\.\/i18n\/disRol';/);
     for (const metin of [...Object.values(DIS_ROL.tr), ...Object.values(DIS_ROL.en)]) expect(kod.includes(metin), metin).toBe(false);
     expect(kod).not.toMatch(/toUpperCase\(|toLocaleUpperCase\(|\buppercase\b/);
+  });
+});
+
+describe('tam sayfa ekranlar «Yeni sürüm yayında» şeridine yer bırakır (yayin-16 birleşme incelemesi)', () => {
+  // Şerit (`YeniSurumSeridi`, `fixed`) dar ekranda alttan ~178 px yükseliyor; `pb-48` (192 px) kartın düğmelerini (Çıkış,
+  // Yeniden dene) şeridin üstünde tutar. 640 px ve üstünde şerit tek satıra iner → `sm:pb-4`. jsdom yerleşim hesaplamaz:
+  // geometri tarayıcıda ölçüldü, burada sınıf sabitlenir.
+  it.each([
+    ['DisRolEkrani', () => render(<DisRolEkrani dil="tr" onCikis={() => {}} />)],
+    ['ProfilYuklenemediEkrani', () => render(<ProfilYuklenemediEkrani dil="tr" onYenidenDene={() => {}} suruyor={false} onCikis={() => {}} />)],
+  ])('%s kökü `pb-48 sm:pb-4` taşır', (_ad, ciz) => {
+    const { container } = ciz();
+    const kok = container.querySelector('main');
+    expect(kok).not.toBeNull();
+    const siniflar = (kok?.className ?? '').split(/\s+/);
+    expect(siniflar).toContain('pb-48');
+    expect(siniflar).toContain('sm:pb-4');
   });
 });

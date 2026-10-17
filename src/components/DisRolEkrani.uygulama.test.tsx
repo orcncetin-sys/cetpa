@@ -73,6 +73,8 @@ const durum = vi.hoisted(() => ({
   dinleyiciler: [] as string[],
   /** «Profiliniz yüklenemedi.» sayfasının App'ten aldığı SON özellikler (sayfa GERÇEK çizilir; yalnız özellikler okunur — İ2-a). */
   profilEkrani: null as { onYenidenDene: () => void } | null,
+  /** `GET /api/surum` yanıtındaki sürüm («yeni sürüm» şeridi sınamaları). */
+  sunucuSurumu: null as string | null,
 }));
 
 vi.mock('firebase/auth', () => ({
@@ -152,6 +154,7 @@ function sahteFetch(girdi: RequestInfo | URL, init?: RequestInit): Promise<Respo
     return Promise.resolve(yanit({ data: { ...(durum.rol === undefined ? {} : { role: durum.rol }), companyId: 'sirket-1', name: 'Deneme Kullanıcı' } }));
   }
   if (yol === '/api/superadmin/me') return Promise.resolve(yanit({ isSuperAdmin: false }));
+  if (yol === '/api/surum') return Promise.resolve(yanit({ surum: durum.sunucuSurumu }));
   if (yol === '/api/settings/exchange-rates') return Promise.resolve(yanit({ rates: { USD: 40, EUR: 45 } }));
   if (yol.startsWith('/api/db/') && yontem === 'GET' && yol.split('/').length === 4) return Promise.resolve(yanit({ docs: [] }));
   return Promise.resolve(yanit({}));
@@ -190,6 +193,7 @@ beforeEach(() => {
   durum.yanitlar = {}; durum.kalici = {}; durum.askiyaAl = new Set(); durum.askida = {}; durum.silinen = [];
   durum.hesap = durum.kullanici; durum.yuklendi = false; durum.oturumDinleyicisi = null; durum.cikisSayisi = 0; durum.dinleyiciler = [];
   durum.profilEkrani = null;
+  durum.sunucuSurumu = null;
   sessionStorage.clear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-11T09:00:00+03:00'));
@@ -261,6 +265,7 @@ const izinli = (): readonly string[] => [
   'GET /api/superadmin/me',
   'GET /api/settings/exchange-rates',   // kimlik istemez (giriş sayfasında da çağrılır)
   'POST /api/hit',                      // kimlik istemez (sayfa sayacı)
+  'GET /api/surum',                     // kimlik istemez («yeni sürüm» şeridi; 5 dk'da bir — 2 sn'lik açılış ölçümünde görünmez)
 ];
 const izinDisi = () => { const izin = izinli(); return [...new Set(istekler.map(i => `${i.yontem} ${i.yol}`))].filter(i => !izin.includes(i)).sort(); };
 const akisKoleksiyonlari = () => akislar.flatMap(u => decodeURIComponent(u.split('colls=')[1]?.split('&')[0] ?? '').split(','));
@@ -1006,5 +1011,100 @@ describe('App.tsx kaynağı — dış rol kapısı bağlı', () => {
     expect(say(/useSekmeVerileri\(\{ user: veriOturumu, activeTab: veriSekme, /)).toBe(1);
     expect(say(/useSekmeVerileri\(/)).toBe(1);
     expect(say(/if \(veriSekme !== 'inventory' \|\| p584Active\) return;/)).toBe(1);
+  });
+});
+
+// ── «Yeni sürüm yayında» şeridi GERÇEK App'te (şartname `.wf/SARTNAME-yeni-surum-bildirimi.md` S3: giriş ekranında ve dış rol
+// sayfasında da çalışır) ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// Şerit App kökünde, hata sınırının dışında (`App` → `<YeniSurumSeridi />`). Gömülü kimlik `index.html` meta'sıdır (derleme
+// eklentisi); sınamada elle konur — öbür sınamalarda meta YOKTUR, şerit denetimi hiç başlamaz (istek / zamanlayıcı yok).
+describe('«yeni sürüm» şeridi: her sayfada (oturumsuz karşılama ve giriş ekranı, dış rol sayfası, kabuk)', () => {
+  const GOMULU = 'aaaaaaaaaaaaaaaa';
+  const YENI = 'bbbbbbbbbbbbbbbb';
+  const METIN_YENI = 'Yeni sürüm yayında. Kaydedilmemiş işiniz yoksa yenileyin.';
+  let seritDeposu: typeof import('../lib/yeniSurum').seritDeposu;
+  let surumDenetimAraligi = 0;
+  beforeAll(async () => {
+    const m = await import('../lib/yeniSurum');
+    seritDeposu = m.seritDeposu;
+    surumDenetimAraligi = m.SURUM_DENETIM_ARALIGI_MS;
+  });
+  beforeEach(() => {
+    const meta = document.createElement('meta');
+    meta.setAttribute('name', 'cetpa-surum');
+    meta.setAttribute('content', GOMULU);
+    document.head.appendChild(meta);
+    durum.sunucuSurumu = YENI;
+  });
+  afterEach(() => {
+    document.head.querySelectorAll('meta[name="cetpa-surum"]').forEach(m => m.remove());
+    seritDeposu.gizle();
+  });
+  const bes = () => act(async () => { await vi.advanceTimersByTimeAsync(surumDenetimAraligi); });
+  const surumIstegi = () => istekler.filter(i => i.yol === '/api/surum').map(i => i.yontem);
+  const seritMetni = (kap: HTMLElement) => kap.querySelector('[role="status"][aria-live="polite"]')?.textContent ?? '';
+
+  it.each([
+    ['oturumsuz karşılama', null, '/'],
+    ['oturumsuz giriş ekranı', null, MAGAZA_PANEL_BAGLAN_YOLU],
+    ...EXTERNAL_ROLES.map(r => [`dış rol ${r} sayfası`, r, '/dashboard'] as const),
+    ['iç rol kabuğu', 'Sales', '/dashboard'],
+  ] as const)('%s: 5 dk sonra sorar, farklı sürümde şerit çıkar', async (_ad, rol, yol) => {
+    durum.rol = rol ?? undefined;
+    const { container } = await (async () => {
+      if (rol !== null) return ac(rol, yol);
+      durum.hesap = null; durum.yuklendi = false;
+      istekler = [];
+      window.history.pushState({}, '', yol);
+      tazele();
+      const sonuc = render(<BrowserRouter><App /></BrowserRouter>);
+      await bekle();
+      return sonuc;
+    })();
+    if (rol === null && yol === MAGAZA_PANEL_BAGLAN_YOLU) expect(container.querySelector('input[type="password"]')).not.toBeNull();   // gerçekten giriş ekranı
+    if (rol !== null && rol !== 'Sales') expect(bayiBasligi(container)).not.toBeNull();
+    expect(surumIstegi()).toEqual([]);                             // açılışta sorulmaz
+    expect(seritMetni(container)).toBe('');
+    await bes();
+    expect(surumIstegi()).toEqual(['GET']);
+    expect(seritMetni(container)).toContain(METIN_YENI);
+    if (rol !== null && rol !== 'Sales') expect(izinDisi()).toEqual([]);   // dış rolde şerit izin dışı istek açmaz
+  }, 120_000);
+
+  it('aynı sürüm → şerit yok; şerit kapatılınca aynı sürüm için bir daha çıkmaz', async () => {
+    durum.sunucuSurumu = GOMULU;
+    const { container, getByRole } = await ac(EXTERNAL_ROLES[0], '/dashboard');
+    await bes();
+    expect(surumIstegi()).toEqual(['GET']);
+    expect(seritMetni(container)).toBe('');
+    durum.sunucuSurumu = YENI;
+    await bes();
+    expect(seritMetni(container)).toContain(METIN_YENI);
+    fireEvent.click(getByRole('button', { name: 'Bildirimi kapat' }));
+    await bes();
+    expect(surumIstegi()).toEqual(['GET', 'GET', 'GET']);
+    expect(seritMetni(container)).toBe('');
+  }, 120_000);
+});
+
+describe('kendiliğinden yenileme YOK (S4): eksik parça hatası sayfayı yenilemez', () => {
+  it('TabErrorBoundary eksik parçada zamanlayıcıyla yenilemez; yenileme yalnız düğmede', () => {
+    const satirlar = kodSatirlari(join(SRC_KOK, 'App.tsx')).map(s => s.kod);
+    const bas = satirlar.findIndex(s => s.includes('class TabErrorBoundary extends React.Component<'));
+    const son = satirlar.findIndex((s, i) => i > bas && /^\}$/.test(s));        // sınıfın kapanışı (sütun 0)
+    expect(bas).toBeGreaterThan(-1);
+    expect(son).toBeGreaterThan(bas);
+    const govde = satirlar.slice(bas, son).join('\n');
+    expect(govde).not.toMatch(/setTimeout\(\(\) => window\.location\.reload\(\)/);
+    expect(govde).not.toMatch(/cetpa_chunk_reload/);
+    expect(govde).toMatch(/if \(isChunkError\) this\.parcaHatasindanYenile\(\);/);
+    // `componentDidCatch` yalnız günlüğe yazar.
+    const yakala = govde.slice(govde.indexOf('componentDidCatch(error: Error) {'), govde.indexOf('private parcaHatasindanYenile() {'));
+    expect(yakala).not.toMatch(/reload|sessionStorage|serviceWorker|caches/);
+  });
+  it('şerit App kökünde, hata sınırının DIŞINDA tek kez bağlı («yazıldı ama bağlanmadı» çiti)', () => {
+    const kod = kodSatirlari(join(SRC_KOK, 'App.tsx')).map(s => s.kod).join('\n');
+    expect(kod.match(/<YeniSurumSeridi \/>/g)).toHaveLength(1);
+    expect(kod).toMatch(/<\/ErrorBoundary>\n\s+<YeniSurumSeridi \/>\n\s+<\/>/);
   });
 });

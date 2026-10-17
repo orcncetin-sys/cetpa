@@ -194,6 +194,7 @@ const PUBLIC_PAGES: Record<PublicPageKey, React.LazyExoticComponent<React.Compon
 };
 import { confirmAction, setConfirmLanguage } from './lib/confirm';
 import GlobalConfirm from './components/GlobalConfirm';
+import YeniSurumSeridi from './components/YeniSurumSeridi';
 import { confirmDelete } from './lib/confirm';
 import { MUHASEBE_MENU, type MuhasebeTarget } from './lib/muhasebeMenu';
 import MuhasebeMenuBar from './components/MuhasebeMenuBar';
@@ -452,21 +453,22 @@ class TabErrorBoundary extends React.Component<
   }
   componentDidCatch(error: Error) {
     console.error(`[TabErrorBoundary:${this.props.tabName}]`, error);
-    // Stale chunk / deploy cache hatası → sayfayı bir kez otomatik yenile (döngü koruması).
-    const msg = error?.message || '';
-    const isChunkError = /dynamically imported module|Loading chunk|Importing a module script failed|Failed to fetch/i.test(msg);
-    if (isChunkError) {
-      const key = 'cetpa_chunk_reload';
-      if (!sessionStorage.getItem(key)) {
-        sessionStorage.setItem(key, '1');
-        // SW cache'ini temizleyip tam yeniden yükle
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
-          if (window.caches) caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {});
-        }
-        setTimeout(() => window.location.reload(), 300);
-      }
+    // Eksik parça (yayından sonra silinmiş eski `/assets/…`) burada KENDİLİĞİNDEN YENİLENMEZ (şartname yeni-sürüm-bildirimi S4,
+    // 2026-10-17): eskiden 300 ms sonra sayfa kendiliğinden yenileniyordu — kullanıcının açık formu / taslağı uyarısız gidiyordu.
+    // Artık yenilemeyi kullanıcı yapar: aşağıdaki «Sayfayı Yenile» düğmesi ve ekranın altındaki şerit («Bu sayfa için yenileme
+    // gerekiyor» — Vite'ın `vite:preloadError` olayından, src/lib/yeniSurum.ts).
+  }
+  /** Eksik parça hatasında «Sayfayı Yenile»: hizmet çalışanı kaydı ve önbellekler temizlenir, sonra sayfa yenilenir
+   *  (eskiden kendiliğinden yapılan kurtarma — artık yalnız kullanıcının tıklamasıyla). */
+  private parcaHatasindanYenile() {
+    const yenile = () => window.location.reload();
+    const temizlik: Promise<unknown>[] = [];
+    if ('serviceWorker' in navigator) {
+      temizlik.push(navigator.serviceWorker.getRegistrations().then(rs => Promise.all(rs.map(r => r.unregister()))));
     }
+    if (window.caches) temizlik.push(caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))));
+    // Temizlik asılı kalsa da yenileme 1 sn'den fazla beklemez.
+    void Promise.race([Promise.allSettled(temizlik), new Promise(r => setTimeout(r, 1000))]).then(yenile);
   }
   render() {
     if (this.state.hasError) {
@@ -490,7 +492,7 @@ class TabErrorBoundary extends React.Component<
           </div>
           <button
             onClick={() => {
-              if (isChunkError) { sessionStorage.removeItem('cetpa_chunk_reload'); window.location.reload(); }
+              if (isChunkError) this.parcaHatasindanYenile();
               else this.setState({ hasError: false, errorMsg: '' });
             }}
             className="apple-button-secondary px-6 py-2 text-sm font-semibold"
@@ -660,13 +662,18 @@ function hesapBuGiristeAcildi(u: Pick<User, 'metadata'>, simdi: number): boolean
 }
 
 export default function App() {
+  // «Yeni sürüm yayında» şeridi hata sınırının DIŞINDA: her sayfada (giriş ekranı, dış rol sayfası dâhil) aynı şerit, uygulama
+  // içeriği çökse de kalır (şartname yeni-sürüm-bildirimi S3; src/components/YeniSurumSeridi.tsx).
   return (
-    <ErrorBoundary>
-      <ToastProvider>
-        <AppContent />
-        <GlobalConfirm />
-      </ToastProvider>
-    </ErrorBoundary>
+    <>
+      <ErrorBoundary>
+        <ToastProvider>
+          <AppContent />
+          <GlobalConfirm />
+        </ToastProvider>
+      </ErrorBoundary>
+      <YeniSurumSeridi />
+    </>
   );
 }
 

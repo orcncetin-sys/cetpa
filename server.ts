@@ -10,6 +10,8 @@ import {
 import { trackingRoutes } from "./src/server/routes/trackingRoutes.js";
 import { opsRoutes } from "./src/server/routes/opsRoutes.js";
 import { trafikRoutes } from './src/server/routes/trafikRoutes.js';
+import { surumRoutes } from './src/server/routes/surumRoutes.js';
+import { SURUM_DOSYASI } from './src/lib/surumKimligi.js';
 import { dynamicsRoutes } from "./src/server/routes/dynamicsRoutes.js";
 import { epostaRoutes } from "./src/server/routes/epostaRoutes.js";
 import { kanalRoutes } from "./src/server/routes/kanalRoutes.js";
@@ -2631,6 +2633,21 @@ async function startServer() {
     apiLimiter, talepSinirlayici: magazaTalepLimiter, durumSinirlayici: magazaDurumLimiter, panelZinciri: magazaPanel,
     getPgPool: () => pgPool, serverTenantId, broadcastDocChange, bildirimIste: magazaBildirimIste,
   }));
+
+  // ── «Yeni sürüm var, yenile» bildirimi: GET /api/surum (kimliksiz; ayrıntı surumRoutes.ts başlığı) ──────────────────────────
+  // Genel sınırlayıcıdan ÖNCE ve KENDİ kovasıyla: açık her sekme 5 dakikada bir (ve yeniden görünür olduğunda, en çok dakikada bir)
+  // sorar; bir ofisin bütün sekmeleri aynı dış IP'dendir. Genel kimliksiz kovada (IP başına 300 / 15 dk) sayılsaydı aynı IP'nin
+  // kur / takip / form isteklerini 429'a düşürebilirdi. Yalnız IP: uç kimlik taşımaz (istemci çerezsiz sorar). GET; gövde yok.
+  // Dosya, statik bölümün verdiği `dist/` ile AYNI dizinden okunur (derleme eklentisi yazar: src/derleme/surumEklentisi.ts).
+  const surumLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: yalnizIpAnahtari,
+    message: { error: 'Too many requests, please try again later.' },
+  });
+  surumRoutes(app, { surumLimiter, surumDosyasi: path.join(process.cwd(), 'dist', SURUM_DOSYASI) });
 
   // Apply general limiter to every /api/… route
   app.use('/api', apiLimiter);

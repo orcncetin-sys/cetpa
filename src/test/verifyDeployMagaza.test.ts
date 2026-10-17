@@ -1,7 +1,8 @@
 // @vitest-environment node
 /**
  * scripts/verify-deploy.sh `post` — mağaza dilim 2a sondaları UÇTAN UCA (şartname § 7 «Yayın sonrası sondalar» 1-9) +
- * dilim 2b sondaları (§ 10.8 «Sondalar»: üç yeni ERP ucu iki listede, `bildirim-gonder?tur=revize`, panel silme ucu).
+ * dilim 2b sondaları (§ 10.8 «Sondalar»: üç yeni ERP ucu iki listede, `bildirim-gonder?tur=revize`, panel silme ucu) +
+ * «yeni sürüm» sondası (9; `.wf/SARTNAME-yeni-surum-bildirimi.md` S2) — aynı düzeneği kullandığı için bu dosyada.
  *
  * Betiğin `post` kipi GERÇEKTEN koşturulur (`bash scripts/verify-deploy.sh post`); `BASE_URL` bu dosyanın açtığı YEREL bir
  * sunucuyu gösterir (`listen(0)`), `gh` ve `git` PATH'e konan sahteleriyle değiştirilir. Canlıya / GitHub'a istek YOK.
@@ -47,6 +48,9 @@ const REVIZE_UCU = `/api/magaza-talepleri/${KIMLIK}/bildirim-gonder?tur=revize`;
 const PANEL_SONDALARI = ['liste', 'oturum', 'kalem teslim', 'etiket basıldı', 'silme'];
 const TAKIP_GOVDESI = '{"no":"T000000-AAAA","telefon":"0000000000"}';
 const ANA_BETIK = '/assets/index-AbC_12-x9.js';
+/** «Yeni sürüm» sondası (9): yayındaki paketin kimliği — index.html meta'sı ve `GET /api/surum` aynı değeri taşır. */
+const SURUM = '0123456789abcdef';
+const ANA_SAYFA = `<!doctype html><html><head><script type="module" crossorigin src="${ANA_BETIK}"></script><meta name="cetpa-surum" content="${SURUM}"></head><body></body></html>`;
 
 // ── Sahte gh / git: `post` kipinin CI ve aralık adımları yeşil geçsin (o adımların kendi testi verifyDeployCi.test.ts) ──
 const HEDEF = 'aaaaaaa1111111111111111111111111111111aa';
@@ -84,8 +88,9 @@ function saglikli(i: Istek): Yanit {
   const izinli = koken === KOKEN;
   if (i.yol === '/api/health') return json(200, { status: 'ok', postgres: true, uptime: 5 }, { 'ratelimit-remaining': String(kalanHak--) });
   if (i.yol === '/api/ops/runtime') return json(401, { error: 'Invalid or expired token.' });
-  if (i.yol === '/') return { kod: 200, govde: `<!doctype html><html><head><script type="module" crossorigin src="${ANA_BETIK}"></script></head><body></body></html>`, basliklar: { 'content-type': 'text/html; charset=utf-8' } };
-  if (i.yol === ANA_BETIK) return { kod: 200, govde: 'const yollar=["/siparisler","/magaza-panel-baglan"];export{yollar};', basliklar: { 'content-type': 'text/javascript' } };
+  if (i.yol === '/') return { kod: 200, govde: ANA_SAYFA, basliklar: { 'content-type': 'text/html; charset=utf-8' } };
+  if (i.yol === ANA_BETIK) return { kod: 200, govde: 'const yollar=["/siparisler","/magaza-panel-baglan"],s="/api/surum";export{yollar,s};', basliklar: { 'content-type': 'text/javascript' } };
+  if (i.yol === '/api/surum' && i.yontem === 'GET') return json(200, { surum: SURUM }, { 'cache-control': 'no-store' });
   // Site paneli alt zinciri: köken kapısı (kendi başlıkları) → [oturum] → belirteç kapısı (her şeye 401).
   if (i.yol.startsWith('/api/magaza/panel/')) {
     if (!izinli) return json(403, { ok: false });
@@ -332,7 +337,8 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     expect(iceren(k.fail, 'dış zinciri ön uçuşu', 'Authorization YOK')).toHaveLength(1);
     expect(iceren(k.fail, 'MAĞAZA ERP UCU KAYITLI DEĞİL', `${eksikUc} -> 404`)).toHaveLength(1);
     expect(iceren(k.fail, 'istemci derlemesi sondası ÖLÇÜLEMEDİ', 'ana betik indirilemedi', '502')).toHaveLength(1);
-    expect(k.fail).toHaveLength(6);
+    expect(iceren(k.fail, 'sürüm ucu: kimlik aynı', 'ana betik indirilemedi', '502', 'ÖLÇÜLEMEDİ')).toHaveLength(1);   // 9: aynı arızanın kendi satırı
+    expect(k.fail).toHaveLength(7);
     // Arızasız kalan komşu sondalar yeşil kaldı (bir arıza öbürünü boyamaz).
     for (const ad of ['liste', 'oturum', 'etiket basıldı', 'silme']) expect(iceren(k.pass, `site paneli ${ad}`), ad).toHaveLength(1);
     for (const uc of ERP_UCLARI.slice(0, 3)) expect(iceren(k.pass, 'mağaza ERP ucu kayıtlı', uc), uc).toHaveLength(1);
@@ -353,7 +359,8 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     expect(iceren(k.fail, 'site paneli oturum', 'beklenen 401, gelen 500')).toHaveLength(1);
     expect(iceren(k.fail, 'mağaza ERP ucu sondası beklenmedik yanıt: 400', acikUc)).toHaveLength(1);
     expect(iceren(k.fail, 'istemci derlemesi sondası ÖLÇÜLEMEDİ', 'ana betik adresi')).toHaveLength(1);
-    expect(k.fail).toHaveLength(4);
+    expect(iceren(k.fail, 'sürüm ucu', 'cetpa-surum', 'yok')).toHaveLength(1);                                         // 9: bakım sayfası paket kimliği taşımaz
+    expect(k.fail).toHaveLength(5);
   });
 
   it('yanlış ALARM üretmeyen biçimler: başlık değeri sırası «POST, GET» (yalnız ilk sözcüğe bakılsaydı düşerdi), küçük harf başlık adı, betik yolun yanında başka metin taşıyor → PASS', async () => {
@@ -361,7 +368,7 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
       if (i.yontem === 'OPTIONS' && i.yol === '/api/magaza/panel/siparisler' && i.basliklar.origin === KOKEN) {
         return { kod: 204, basliklar: { 'access-control-allow-origin': KOKEN, 'access-control-allow-methods': 'POST, GET', 'access-control-allow-headers': 'content-type, authorization' } };
       }
-      if (i.yol === ANA_BETIK) return { kod: 200, govde: `${'x'.repeat(300_000)};const p="/magaza-panel-baglan#meydan";${'y'.repeat(1000)}`, basliklar: { 'content-type': 'text/javascript' } };
+      if (i.yol === ANA_BETIK) return { kod: 200, govde: `${'x'.repeat(300_000)};const p="/magaza-panel-baglan#meydan",s="/api/surum";${'y'.repeat(1000)}`, basliklar: { 'content-type': 'text/javascript' } };
       return null;
     });
     expect(k.fail, k.cikti).toEqual([]);
@@ -375,7 +382,8 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     const k = await post((i): Yanit | null => (i.yol === ANA_BETIK ? { kod: 200, govde: sayfa, basliklar: { 'content-type': 'text/html' } } : null));
     expect(k.kod).toBe(1);
     expect(iceren(k.fail, 'İSTEMCİ DERLEMESİNDE /magaza-panel-baglan YOK')).toHaveLength(1);
-    expect(k.fail).toHaveLength(1);
+    expect(iceren(k.fail, 'sürüm ucu', 'ana betikte /api/surum YOK')).toHaveLength(1);                                   // 9: yedek HTML şeridin bağını da taşımaz
+    expect(k.fail).toHaveLength(2);
     expect(istekler.filter(i => i.yol.startsWith('/magaza-panel-baglan'))).toEqual([]);
   });
 
@@ -388,6 +396,60 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     expect(iceren(k.fail, 'takip ucu ÖLÇÜLEMEDİ: 429')).toHaveLength(1);
     expect(iceren(k.fail, 'site paneli', 'ÖLÇÜLEMEDİ: 429')).toHaveLength(PANEL_SONDALARI.length);
     expect(k.fail).toHaveLength(6);
+  });
+});
+
+// ── 9) «Yeni sürüm var» sondası (şartname `.wf/SARTNAME-yeni-surum-bildirimi.md` S2): aynı düzenek, aynı sahte sunucu ──────────
+describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — «yeni sürüm» sondası (9): sunucu kimliği = istemci paketi', { timeout: 60_000 }, () => {
+  const surumYaniti = (y: Yanit) => (i: Istek): Yanit | null => (i.yol === '/api/surum' ? y : null);
+  const tekFail = (k: Kosu, ...parcalar: string[]) => {
+    expect(k.kod).toBe(1);
+    expect(k.fail, k.cikti).toHaveLength(1);
+    expect(iceren(k.fail, 'sürüm ucu', ...parcalar), k.cikti).toHaveLength(1);
+  };
+
+  it('sağlıklı: PASS (200 + no-store + kimlik meta ile aynı + ana betik /api/surum\'u soruyor); sonda kimlik / çerez taşımaz, yalnız GET', async () => {
+    const k = await post();
+    expect(k.fail, k.cikti).toEqual([]);
+    expect(iceren(k.pass, 'sürüm ucu', '200 + no-store', SURUM, 'şerit bağlı')).toHaveLength(1);
+    const sonda = istekler.filter(i => i.yol === '/api/surum');
+    expect(sonda.map(i => i.yontem)).toEqual(['GET']);
+    for (const i of sonda) { expect(i.basliklar.authorization).toBeUndefined(); expect(i.basliklar.cookie).toBeUndefined(); }
+  });
+
+  it('sunucu BAŞKA derlemenin kimliğini veriyor (dist / dist.new karışıklığı) → FAIL «AYRIŞIYOR»', async () => {
+    tekFail(await post(surumYaniti(json(200, { surum: 'fedcba9876543210' }, { 'cache-control': 'no-store' }))), 'AYRIŞIYOR', 'fedcba9876543210', SURUM);
+  });
+
+  it('`{ surum: null }` (derlemede surum.json yok) → FAIL ve nedenini söyler', async () => {
+    tekFail(await post(surumYaniti(json(200, { surum: null }, { 'cache-control': 'no-store' }))), 'biçiminde değil', 'null = derlemede surum.json yok');
+  });
+
+  it('`Cache-Control: no-store` yok → FAIL', async () => {
+    tekFail(await post(surumYaniti(json(200, { surum: SURUM }, { 'cache-control': 'public, max-age=0' }))), "Cache-Control 'no-store' değil", 'public, max-age=0');
+  });
+
+  it('gövdede fazladan alan (ortam / commit bilgisi sızıyor) → FAIL', async () => {
+    tekFail(await post(surumYaniti(json(200, { surum: SURUM, ortam: 'production' }, { 'cache-control': 'no-store' }))), 'biçiminde değil', 'ortam');
+  });
+
+  it('uç kimlik kapısının arkasında (401) ya da kayıtlı değil (404) → FAIL «beklenen 200»', async () => {
+    tekFail(await post(surumYaniti(json(401, { error: 'Missing Authorization header.' }))), 'beklenen 200', "'401'");
+    tekFail(await post(surumYaniti(json(404, { error: 'Not found' }))), 'beklenen 200', "'404'");
+  });
+
+  it('429 → ÖLÇÜLEMEDİ (bozuk denmez)', async () => {
+    tekFail(await post(surumYaniti(json(429, { error: 'Too many requests' }))), 'ÖLÇÜLEMEDİ: 429');
+  });
+
+  it('index.html paket kimliği taşımıyor (derleme eklentisi yok) → FAIL', async () => {
+    const sayfa = ANA_SAYFA.replace(/<meta name="cetpa-surum"[^>]*>/, '');
+    tekFail(await post((i): Yanit | null => (i.yol === '/' ? { kod: 200, govde: sayfa, basliklar: { 'content-type': 'text/html' } } : null)), 'cetpa-surum', 'yok');
+  });
+
+  it('ana betik /api/surum\'u sormuyor (şerit istemciye bağlanmamış) → FAIL', async () => {
+    tekFail(await post((i): Yanit | null => (i.yol === ANA_BETIK ? { kod: 200, govde: 'const yollar=["/siparisler","/magaza-panel-baglan"];export{yollar};', basliklar: { 'content-type': 'text/javascript' } } : null)),
+      'ana betikte /api/surum YOK', 'bağlanmamış');
   });
 });
 
