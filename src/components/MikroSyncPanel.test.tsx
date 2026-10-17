@@ -17,6 +17,9 @@ import { yayinla, sifirla, koleksiyonAyarla } from '../hooks/useArkaPlanIsi.test
 import { tumunuCekSifirla } from '../hooks/useTumunuCek';
 import { auth } from '../firebase';
 import * as servis from '../services/mikroService';
+import { APP_ROLES, type AppRole } from '../lib/rbac';
+import { ucKapisindanGecer } from '../lib/mikroUcKapilari';
+import { kodSatirlari } from '../test/kaynakTarama';
 
 const durum = vi.hoisted(() => ({ rol: 'Admin' }));
 
@@ -25,9 +28,12 @@ vi.mock('../services/mikroService', () => ({
   getMikroStatus: vi.fn(() => Promise.resolve({ configured: true, connected: true, mode: 'local' })),
   mikroImportBaslat: vi.fn(),
 }));
+// Kuyruk kartı (`MikroKuyrukKarti`, K10) panelin içinde çizilir ve durumunu bu servisten okur: boş kuyruk → kart çizilmez.
+// Kartın kendi davranışı MikroKuyrukKarti.test.tsx'te (gerçek servislerle).
 vi.mock('../services/syncRetryService', () => ({
-  getSyncQueueStats: vi.fn(() => Promise.resolve({ queued: 0, dead: 0, lastSuccess: null })),
+  getSyncQueueStats: vi.fn(() => Promise.resolve({ gonderilebilir: 0, rolYetmiyor: 0, baskasinin: 0, kapatilabilir: 0, dead: 0, temizlenebilir: 0, lastSuccess: null })),
   clearDeadJobs: vi.fn(),
+  takilanIsleriKapat: vi.fn(),
 }));
 vi.mock('../services/mikroEvrak', () => ({ processMikroRetries: vi.fn() }));
 vi.mock('../store/appStore', () => ({
@@ -378,5 +384,114 @@ describe('MikroSyncPanel — Tümünü Çek: faturadan sipariş stok hareketleri
     const faturadanSiparis = olaylar.indexOf('/api/mikro/import/faturadan-siparis');
     expect(stokHareket).toBeGreaterThanOrEqual(0);
     expect(faturadanSiparis).toBeGreaterThan(stokHareket);
+  });
+});
+
+// Karar turu 2026-10-11 (K4 / K5 / H5, İ3 «ölü düğme yok»): personel ucu `employees`, reçete ucu `bom` yazma kapısı aldı.
+// Kapı bulgusu (istemci 3, engelleyici): kart listesi ile «Tümünü Çek» adımları TEK tablodan beslenir — yalnız kartı
+// gizlemek yetmez, Müdür'ün her «Tümünü Çek»i personel ucunu çağırır ve özete «Personel: Bu veri için yetkiniz yok.»
+// yazardı. Süzgeç tabloda durur; kart da adım da aynı listeyi okur.
+describe('MikroSyncPanel — rol kapısı: «Personel» ve «Üretim Reçeteleri» kartı + Tümünü Çek adımı (K4 / K5 / H5)', () => {
+  const PERSONEL_UCU = '/api/mikro/pull/personel';
+  const RECETE_UCU = '/api/mikro/pull/uretim-receteleri';
+  /** Şartname § 10.1 «Geçen roller» — ELLE. Kapı genişler ya da daralırsa test BİLEREK kırılır. */
+  const PERSONEL_GECEN: AppRole[] = ['Admin', 'HR'];
+  const RECETE_GECEN: AppRole[] = ['Admin', 'Manager', 'Logistics', 'Purchasing'];
+
+  /** Arka plan adımları hızla hatalı biter; senkron uçlar çağrılan adresi kaydedip başarı döner. */
+  function agiKur(): string[] {
+    const cagrilar: string[] = [];
+    baslat.mockImplementation(() => Promise.resolve({ success: false, error: 'X' }));
+    vi.stubGlobal('fetch', vi.fn((u: string) => {
+      cagrilar.push(String(u));
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
+    }));
+    return cagrilar;
+  }
+  async function tumunuCek(): Promise<string> {
+    fireEvent.click(screen.getByRole('button', { name: /Tümünü Çek/ }));
+    return (await screen.findByRole('status', { name: 'Tümünü Çek özeti' })).textContent ?? '';
+  }
+
+  it.each([...APP_ROLES])('%s — kart yalnız ucun kapısından geçen rolde çizilir; adım da aynı listeden gelir', async rol => {
+    const personel = PERSONEL_GECEN.includes(rol);
+    const recete = RECETE_GECEN.includes(rol);
+    expect(ucKapisindanGecer(rol, 'POST /api/mikro/pull/personel'), 'elle yazılan küme ortak tabloyla aynı').toBe(personel);
+    expect(ucKapisindanGecer(rol, 'POST /api/mikro/pull/uretim-receteleri'), 'elle yazılan küme ortak tabloyla aynı').toBe(recete);
+
+    durum.rol = rol;
+    const cagrilar = agiKur();
+    await cizVeBekle();
+    expect(screen.queryByText('Personel') !== null, 'Personel kartı').toBe(personel);
+    expect(screen.queryByText('Üretim Reçeteleri') !== null, 'Üretim Reçeteleri kartı').toBe(recete);
+    // Kapısı olmayan senkron kartlar her rolde yerinde (süzgeç yalnız `kapi` taşıyan satırı düşürür).
+    expect(screen.getByText('Cari Adresleri')).toBeInTheDocument();
+    expect(screen.getByText('Faturadan Sipariş Türet')).toBeInTheDocument();
+    expect(screen.getAllByRole('group')).toHaveLength(16);
+
+    cagrilar.length = 0;
+    const ozet = await tumunuCek();
+    expect(cagrilar.includes(PERSONEL_UCU), 'Tümünü Çek personel ucunu çağırdı mı').toBe(personel);
+    expect(cagrilar.includes(RECETE_UCU), 'Tümünü Çek reçete ucunu çağırdı mı').toBe(recete);
+    // 6 kapısız senkron adım (GİB durumları, faturadan sipariş, cari adres, bakiye, mizan, KDV) + geçen kapılı adımlar.
+    expect(ozet).toContain(`${6 + (personel ? 1 : 0) + (recete ? 1 : 0)} adım tamam`);
+    expect(ozet).toContain('16 adım hatalı');
+  });
+
+  it('Müdür (K4 — bilerek kilitlendi): «Personel» kartı YOK, Tümünü Çek personel ucuna istek ATMAZ ve özette «Personel» adımı yok', async () => {
+    durum.rol = 'Manager';
+    const cagrilar: string[] = [];
+    baslat.mockImplementation(() => Promise.resolve({ success: false, error: 'X' }));
+    // İstek atılsaydı sunucu 403 gövdesi dönerdi ve özet «Personel: Bu veri için yetkiniz yok.» yazardı (eski arıza).
+    vi.stubGlobal('fetch', vi.fn((u: string) => {
+      cagrilar.push(String(u));
+      return Promise.resolve(String(u) === PERSONEL_UCU
+        ? { ok: false, json: () => Promise.resolve({ error: 'Bu veri için yetkiniz yok.' }) }
+        : { ok: true, json: () => Promise.resolve({ success: true }) });
+    }));
+    await cizVeBekle();
+    expect(screen.queryByText('Personel')).toBeNull();
+    expect(screen.getByText('Üretim Reçeteleri')).toBeInTheDocument();
+    cagrilar.length = 0;
+    const ozet = await tumunuCek();
+    expect(cagrilar).not.toContain(PERSONEL_UCU);
+    expect(cagrilar).toContain(RECETE_UCU);
+    expect(ozet).not.toContain('Personel');
+    expect(ozet).not.toContain('yetkiniz yok');
+    expect(ozet).toContain('7 adım tamam');
+  });
+
+  it('Yönetici: iki kart da var, kartın «Çek» düğmesi ucunu çağırır', async () => {
+    const cagrilar = agiKur();
+    await cizVeBekle();
+    cagrilar.length = 0;
+    for (const [baslik, uc] of [['Personel', PERSONEL_UCU], ['Üretim Reçeteleri', RECETE_UCU]] as const) {
+      // PullCard: başlık (h5) → başlık satırı → kart kutusu; kartın tek düğmesi «Çek».
+      const kart = screen.getByText(baslik).parentElement?.parentElement;
+      if (!kart) throw new Error(`${baslik} kartı bulunamadı`);
+      fireEvent.click(within(kart).getByRole('button', { name: 'Çek' }));
+      await act(bekleMikro);
+      expect(cagrilar, baslik).toContain(uc);
+    }
+  });
+
+  it('statik bağ: süzgeç TABLODA (çizimde değil); kapı anahtarları ortak tablodan; panelde kopya rol listesi yok', () => {
+    const kod = kodSatirlari(join(__dirname, 'MikroSyncPanel.tsx')).map(s => s.kod);
+    const kodSay = (m: string) => kod.join('\n').split(m).length - 1;
+    expect(kodSay("kapi: 'POST /api/mikro/pull/personel'")).toBe(1);
+    expect(kodSay("kapi: 'POST /api/mikro/pull/uretim-receteleri'")).toBe(1);
+    // Kapı anahtarı, çağrılan adresle AYNI satırda ve aynı uç için (satır başka ucun kapısına bağlanamaz).
+    expect(kod.filter(k => k.includes(`route: '${PERSONEL_UCU}'`) && k.includes(`kapi: 'POST ${PERSONEL_UCU}'`))).toHaveLength(1);
+    expect(kod.filter(k => k.includes(`route: '${RECETE_UCU}'`) && k.includes(`kapi: 'POST ${RECETE_UCU}'`))).toHaveLength(1);
+    expect(kodSay('const extraPullDefs = tumPullDefs.filter(d => !d.kapi || ucKapisindanGecer(userRole, d.kapi));')).toBe(1);
+    // Ham tablo yalnız tanımda ve süzgeçte geçer: kart döngüsü de adım listesi de SÜZÜLMÜŞ listeyi okur.
+    expect(kodSay('tumPullDefs')).toBe(2);
+    expect(kodSay('extraPullDefs.map(def =>')).toBe(1);
+    expect(kodSay('extraPullDefs.filter(d =>')).toBe(2);
+    expect(kodSay("from '../lib/mikroUcKapilari'")).toBe(1);
+    // Kapılı iki ucun adresi tabloda birer kez (`route`); başka yerden — süzgeci atlayan — çağrı yok.
+    // (`kapi` anahtarı 'POST …' ile başladığı için tırnaklı adres aramasına girmez.)
+    expect(kodSay(`'${PERSONEL_UCU}'`)).toBe(1);
+    expect(kodSay(`'${RECETE_UCU}'`)).toBe(1);
   });
 });

@@ -39,7 +39,6 @@ import { exportLeadsCSV } from '../utils/export';
 import { formatCurrency, formatInCurrency, paraYaz, tlYaz, kisaTutar } from '../utils/currency';
 import { scoreLead } from '../services/geminiService';
 import { pushMikroEvrak, ziyaretPayload } from '../services/mikroEvrak';
-import { pullCariFromMikro, type MikroCariItem } from '../services/mikroService';
 import AIInlineNudge from '../components/AIInlineNudge';
 import ModuleHeader from '../components/ModuleHeader';
 import AccountingModule from '../components/AccountingModule';
@@ -174,14 +173,12 @@ export default function CRMPage({
   const [leadNoteText, setLeadNoteText] = useState('');
   const leadNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showLeadFunnel, setShowLeadFunnel] = useState(false);
-  // Müşteri adaylarının çoğu mikroCariKod'suz (2026-08-17 bildirimi: "mikroya
-  // bağlı değil") — bulk otomatik eşleştirme yanlış cari'yi bağlama riski
-  // taşıdığından, PurchasingModule'deki güvenli desenle aynı tek-tek ara+
-  // onayla akışı burada da uygulandı.
-  const [mikroLinkQuery, setMikroLinkQuery] = useState('');
-  const [mikroLinkResults, setMikroLinkResults] = useState<MikroCariItem[] | null>(null);
-  const [mikroLinkSearching, setMikroLinkSearching] = useState(false);
-  const [mikroLinkBusy, setMikroLinkBusy] = useState<string | null>(null);
+  // Müşteri adaylarının çoğu mikroCariKod'suz (2026-08-17 bildirimi: "mikroya bağlı değil"). Aday ayrıntısındaki
+  // tek tek «Mikro'da ara + bağla» kutusu KALDIRILDI (karar turu 2026-10-11 — K1 / H3): kutu
+  // `POST /api/mikro/cari/listesi` ucunu çağırıyordu; o uç arama sonucunu DÖNDÜRMEZ (yalnız sayaç), her aramada en
+  // çok 200 cariyi `leads`'e yazar ve artık `leads` yazma kapısı ister — «Ara» kapıdan geçen rolde de sonuçsuz ve
+  // sessizdi. Salt okuyan Mikro cari arama ucu (şartname § 6 A1) gelene kadar kutu HİÇBİR rolde çizilmez; aday
+  // ayrıntısındaki açıklama cümlesi kalır. Bağlama akışı git geçmişinde: `a01a254`.
   const [rescoreLeadId, setRescoreLeadId] = useState<string|null>(null);
   const [p515Dismissed, setP515Dismissed] = useState(false);
   const [p544QuickStatus, setP544QuickStatus] = useState<string|null>(null);
@@ -359,33 +356,6 @@ export default function CRMPage({
       logAuditAction(currentT.lead_deletion, `${targetLead?.name || leadId} ${currentT.lead_deleted}`);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `leads/${leadId}`);
-    }
-  };
-
-  const searchMikroForLead = async () => {
-    if (!mikroLinkQuery.trim()) return;
-    setMikroLinkSearching(true);
-    setMikroLinkResults(null);
-    try {
-      const result = await pullCariFromMikro({ nameSearch: mikroLinkQuery.trim(), size: 10 });
-      setMikroLinkResults(result.success ? result.data : []);
-    } finally {
-      setMikroLinkSearching(false);
-    }
-  };
-
-  const linkLeadToMikroCari = async (c: MikroCariItem) => {
-    if (!selectedLead) return;
-    setMikroLinkBusy(c.cari_kod);
-    try {
-      await updateDoc(doc(db, 'leads', selectedLead.id), { mikroCariKod: c.cari_kod, updatedAt: serverTimestamp() });
-      setSelectedLead({ ...selectedLead, mikroCariKod: c.cari_kod } as unknown as Lead);
-      setMikroLinkResults(null); setMikroLinkQuery('');
-      toast(currentLanguage === 'tr' ? `Mikro cari "${c.cari_unvan1}" bağlandı.` : `Linked to Mikro cari "${c.cari_unvan1}".`, 'success');
-    } catch {
-      toast(currentLanguage === 'tr' ? 'Bağlanamadı.' : 'Linking failed.', 'error');
-    } finally {
-      setMikroLinkBusy(null);
     }
   };
 
@@ -3539,45 +3509,13 @@ export default function CRMPage({
                         : (
                           <div className="space-y-3">
                             <CariEkstrePanel currentLanguage={currentLanguage} leadId={selectedLead.id} customerName={selectedLead.name} />
-                            {/* Mikro'ya bağlı değil — 2026-08-17 bildirimi. Bulk otomatik
-                                eşleştirme yanlış cari bağlama riski taşıdığından, tek-tek
-                                ara+onayla akışı (PurchasingModule'deki tedarikçi eşleştirme
-                                deseniyle aynı). */}
+                            {/* Mikro'ya bağlı değil — 2026-08-17 bildirimi. Buradaki «Mikro'da ara + bağla» kutusu
+                                karar turunda (2026-10-11, K1 / H3) kaldırıldı: çağırdığı uç sonuç döndürmüyordu.
+                                Salt okuyan arama ucu (A1) gelene kadar yalnız açıklama kalır. */}
                             <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 space-y-2">
                               <p className="text-xs font-semibold text-amber-800">
                                 {currentLanguage === 'tr' ? 'Bu aday Mikro\'ya bağlı değil — cari ekstre/bakiye görünmüyor.' : 'This lead isn\'t linked to Mikro — no account statement/balance.'}
                               </p>
-                              <div className="flex gap-2">
-                                <input
-                                  value={mikroLinkQuery}
-                                  onChange={e => setMikroLinkQuery(e.target.value)}
-                                  onKeyDown={e => e.key === 'Enter' && void searchMikroForLead()}
-                                  placeholder={currentLanguage === 'tr' ? 'Mikro\'da firma adıyla ara...' : 'Search Mikro by company name...'}
-                                  className="apple-input flex-1 text-sm py-1.5"
-                                />
-                                <button onClick={() => void searchMikroForLead()} disabled={mikroLinkSearching || !mikroLinkQuery.trim()} className="apple-button-secondary text-xs px-3 py-1.5 disabled:opacity-50 shrink-0">
-                                  {mikroLinkSearching ? (oc(currentLanguage).araniyor) : (currentLanguage === 'tr' ? 'Ara' : 'Search')}
-                                </button>
-                              </div>
-                              {mikroLinkResults && (
-                                mikroLinkResults.length === 0 ? (
-                                  <p className="text-xs text-amber-700">{currentLanguage === 'tr' ? 'Eşleşme bulunamadı.' : 'No matches found.'}</p>
-                                ) : (
-                                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                                    {mikroLinkResults.map(c => (
-                                      <div key={c.cari_kod} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 text-xs">
-                                        <div className="min-w-0">
-                                          <p className="font-semibold text-gray-800 truncate">{c.cari_unvan1}</p>
-                                          <p className="text-[10px] text-gray-400">{c.cari_kod}{c.cari_vdaire_no ? ` · VKN ${c.cari_vdaire_no}` : ''}</p>
-                                        </div>
-                                        <button onClick={() => void linkLeadToMikroCari(c)} disabled={mikroLinkBusy === c.cari_kod} className="apple-button-primary text-[11px] px-2.5 py-1 shrink-0 disabled:opacity-50">
-                                          {mikroLinkBusy === c.cari_kod ? '...' : (currentLanguage === 'tr' ? 'Bağla' : 'Link')}
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )
-                              )}
                             </div>
                           </div>
                         );

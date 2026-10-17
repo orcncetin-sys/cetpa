@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isAllowed, isSelfDocAccess, blocksRoleEscalation } from './rbac';
+import { APP_ROLES, hasExplicitRule, isAllowed, isSelfDocAccess, blocksRoleEscalation } from './rbac';
 
 describe('isAllowed — RBAC politikası', () => {
   it('Admin her koleksiyonda her işlemi yapabilir', () => {
@@ -69,6 +69,39 @@ describe('isAllowed — RBAC politikası', () => {
   it('B2B append-only koleksiyona ne okuyabilir ne yazabilir', () => {
     expect(isAllowed('B2B', 'auditLog', 'write')).toBe(false);
     expect(isAllowed('B2B', 'auditLog', 'read')).toBe(false);
+  });
+});
+
+// Karar turu 2026-10-11 (şartname mikro-rol-kapisi § 10.4, H2 / İ5 — «alış belgesi muhasebenindir»). Kullanıcı kararı:
+// tedarikçi fatura numarasını Satış, Satın Alma ve Lojistik GÖRMEZ. `eBelgeler` gelen e-faturaları da taşır (belge no,
+// gönderen unvan, VKN, tutar, ham Mikro satırı) — Satış bu koleksiyonu okuyabiliyordu; PDF / XML kapısı tek başına kapatmaz.
+describe('eBelgeler — okuma yalnız Yönetici, Müdür, Muhasebe (H2 / İ5)', () => {
+  const okuyan = (koleksiyon: string) => APP_ROLES.filter(r => isAllowed(r, koleksiyon, 'read')).sort();
+
+  it('okuma kümesi tam olarak Admin, Manager, Accounting — `mikroFaturalar` okuma kümesiyle AYNI', () => {
+    expect(okuyan('eBelgeler')).toEqual(['Accounting', 'Admin', 'Manager']);
+    expect(okuyan('eBelgeler')).toEqual(okuyan('mikroFaturalar'));
+  });
+
+  it.each(['Sales', 'Purchasing', 'Logistics'] as const)('%s gelen e-fatura listesini OKUYAMAZ, yazamaz, silemez', (rol) => {
+    expect(isAllowed(rol, 'eBelgeler', 'read')).toBe(false);
+    expect(isAllowed(rol, 'eBelgeler', 'write')).toBe(false);
+    expect(isAllowed(rol, 'eBelgeler', 'delete')).toBe(false);
+  });
+
+  it.each(['Admin', 'Manager', 'Accounting'] as const)('%s okur ve yazar (kimse kazara kilitlenmedi)', (rol) => {
+    expect(isAllowed(rol, 'eBelgeler', 'read')).toBe(true);
+    expect(isAllowed(rol, 'eBelgeler', 'write')).toBe(true);
+  });
+
+  it('diğer iç roller, dış roller ve rolsüz hesap okuyamaz; yazabilen her rol okur', () => {
+    for (const rol of ['HR', 'Legal', 'Corporate', 'Quality', 'B2B', 'Dealer'] as const) expect(isAllowed(rol, 'eBelgeler', 'read'), rol).toBe(false);
+    expect(isAllowed(null, 'eBelgeler', 'read')).toBe(false);
+    expect(APP_ROLES.filter(r => isAllowed(r, 'eBelgeler', 'write') && !isAllowed(r, 'eBelgeler', 'read'))).toEqual([]);
+  });
+
+  it('kural AÇIK tanımlı (kuralsız koleksiyon varsayılana düşer — okuma iç ve dış rollerin tamamına açılırdı)', () => {
+    expect(hasExplicitRule('eBelgeler')).toBe(true);
   });
 });
 

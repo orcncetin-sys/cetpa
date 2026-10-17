@@ -149,6 +149,26 @@ export const DIS_ROL_YAZAMAZ: ReadonlyMap<string, readonly string[]> = new Map([
   ['orders', ['trendyolOrderNo', 'hepsiburadaOrderId', 'shopifyOrderId']],
 ]);
 
+/**
+ * SAHİP SATIR SÜZGECİ (K10, 2026-10-11): koleksiyon → «kaydı OLUŞTURAN kullanıcı» alanı. Bu koleksiyonlarda kayıt SAHİBİNİNDİR:
+ *   • alanı SUNUCU damgalar — oluşturmada oturumun kullanıcısı; istemcinin gönderdiği değer yok sayılır (sessizce ezilir);
+ *   • alan güncellemeyle DEĞİŞMEZ (Yönetici de başkasının kaydını kendine alamaz);
+ *   • kaydı yalnız sahibi ve Yönetici (rol `Admin`) GÖRÜR / değiştirir / siler — okuma = yazma kuralı, canlı akış dâhil;
+ *   • damgasız (kuraldan önce yazılmış) kayıt yalnız Yönetici'ye görünür; Yönetici dokununca sahibi olur.
+ * DIS_ROL_SATIR_ALANI'ndan farkı: süzgeç İÇ rollere de uygulanır (Müdür dâhil); muaf tek rol Yönetici'dir.
+ *
+ * NEDEN (`syncJobs` — yeniden deneme kuyruğu): kuyruğa yazabilen her iç rol, `{ type: 'mikro', payload: { method: 'DekontKaydetV2' … } }`
+ * yazıp işi YETKİLİ bir rolün açık oturumuna çalıştırtabiliyordu (yürütücü işi KENDİ kimliğiyle gönderir) — yöntem başına rol
+ * kapısı kuyruktan aşılıyordu. Kuyruk gövdesi ayrıca rolün başka yoldan okuyamadığı veriyi taşır (izin talebi, dekont tutarı):
+ * okuma da sahibe daraldı. Hedef mimari kuyruğun sunucuya taşınmasıdır (ayrı iş); bu ara çözümdür.
+ *
+ * Her anahtar TENANT koleksiyonu olmalı ve DIS_ROL_SATIR_ALANI ile kesişmemeli (collections.test). Kural tek yerde:
+ * lib/tenantErisim (`satirAlani`, `kiraciDamgala`); istemci yürütücüsü ve bekçi lib/kuyrukSahipligi'nden okur.
+ */
+export const SAHIP_SATIR_ALANI: ReadonlyMap<string, string> = new Map([
+  ['syncJobs', 'sahipUid'],
+]);
+
 export const USER_SCOPED_COLLECTIONS: readonly string[] = [
   'notifications', 'userPrefs', 'userOnboarding', 'aiConsents',
 ];

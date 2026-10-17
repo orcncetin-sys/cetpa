@@ -217,7 +217,12 @@ const COLLECTION_PERMISSIONS: Record<string, { read: AppRole[], write: AppRole[]
   checks: { read: ['Admin', 'Accounting', 'Manager'], write: ['Admin', 'Accounting'] },
   budgets: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
   invoices: { read: ['Admin', 'Manager', 'Accounting', 'Sales'], write: ['Admin', 'Manager', 'Accounting'] },
-  eBelgeler: { read: ['Admin', 'Manager', 'Accounting', 'Sales'], write: ['Admin', 'Manager', 'Accounting'] },
+  // e-Belge Merkezi kayıtları. OKUMA = `mikroFaturalar` okuma kümesi (karar turu 2026-10-11, H2 / İ5 — «alış belgesi
+  // muhasebenindir»): koleksiyon GELEN e-faturaları da taşır (tedarikçi fatura numarası, gönderen unvan, VKN, tutar, ham
+  // Mikro satırı). Satış bu kümeden ÇIKARILDI — kullanıcı kararı: tedarikçi fatura numarasını Satış / Satın Alma / Lojistik
+  // görmez. Satır süzgeci (yalnız giden satırları ver) reddedildi: `yon` damgası güvenilmez (import ucu damgalar, sonraki
+  // import ezebilir). Sekme (`App.tsx` TAB_PERMISSIONS.ebelge) aynı kümeyle açılır. Çit: rbac.test.ts + mikroRoutes.rolKapisi.test.ts.
+  eBelgeler: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Manager', 'Accounting'] },
   sabitKiymetler: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Accounting'] },
   maliyetMerkezleri: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Accounting', 'Manager'] },
   maliyetKalemleri: { read: ['Admin', 'Manager', 'Accounting'], write: ['Admin', 'Accounting', 'Manager'] },

@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
+import { useAppStore } from '../store/appStore';
+import { ucKapisindanGecer } from '../lib/mikroUcKapilari';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot,
   query, serverTimestamp
@@ -281,6 +283,9 @@ function SortHeader({
 
 export default function TahsilatModule({ currentLanguage, isAuthenticated }: TahsilatModuleProps) {
   const t = T[currentLanguage] as typeof T['tr'];
+  // Karar turu 2026-10-11 (K9, İ3): ödeme kaydındaki sessiz Mikro tahsilat gönderimi, rol tahsilat ucunun sunucudaki
+  // kapısından geçemiyorsa HİÇ yapılmaz. Soru ortak tablodan sorulur (`lib/mikroUcKapilari.ts`); rol adı yazılmaz.
+  const mikroTahsilatGonderebilir = ucKapisindanGecer(useAppStore(s => s.userRole), 'POST /api/mikro/tahsilat/kaydet');
 
   // Data — elle girilen kayıtlar (Cetpa'nın kendi defteri)
   const [kayitlarLocal, setKayitlar] = useState<TahsilatKaydi[]>([]);
@@ -633,7 +638,7 @@ export default function TahsilatModule({ currentLanguage, isAuthenticated }: Tah
 
       // Tahsilatı Mikro'ya da gönder (kasa tahsilat — deneysel eşleme, syncLog'da izlenir)
       const mikroCari = (paymentKaydi as unknown as { mikroCariKod?: string; cariKod?: string });
-      if (mikroCari.mikroCariKod || mikroCari.cariKod) {
+      if ((mikroCari.mikroCariKod || mikroCari.cariKod) && mikroTahsilatGonderebilir) {
         authFetch('/api/mikro/tahsilat/kaydet', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

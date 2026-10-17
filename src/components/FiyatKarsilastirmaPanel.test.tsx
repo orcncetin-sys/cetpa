@@ -9,6 +9,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import FiyatKarsilastirmaPanel from './FiyatKarsilastirmaPanel';
 import type { MikroFatura } from '../hooks/useMikroFaturalar';
+import { useAppStore } from '../store/appStore';
+import { UserRole } from '../types';
 
 const authFetch = vi.fn();
 vi.mock('../services/authFetch', () => ({ authFetch: (...a: unknown[]) => authFetch(...a) }));
@@ -50,7 +52,10 @@ const cizdir = (mikroFaturalar: MikroFatura[] = []) => render(
   <FiyatKarsilastirmaPanel currentLanguage="tr" userRole="Admin" fmtKpi={v => `₺${v.toFixed(2)}`} mikroFaturalar={mikroFaturalar} />,
 );
 
-beforeEach(() => { authFetch.mockReset(); yonlendir(); });
+// Rol DEPODAN da okunur (karar turu 2026-10-11, H11): açılan Fatura Detayı penceresi başlıksız notunu ve indirme düğmelerini
+// depo rolüne göre çizer. Uygulamada depo ile `userRole` niteliği HER ZAMAN birlikte yazılır (App.tsx) — düzenek de öyle kurar;
+// yoksa pencere deponun varsayılan rolüyle (Satış) çizilir ve «rolünüze açık değil» notu çıkar.
+beforeEach(() => { authFetch.mockReset(); yonlendir(); useAppStore.setState({ userRole: UserRole.Admin }); });
 
 describe('Fiyat Karşılaştırma — evrak düğmesi fatura başlığı YOKKEN de açar', () => {
   it('İşlem Detayı: fatura anahtarlı satır düğme, faturayı açar (kalemler Mikro\'dan); irsaliye satırı düz metin', async () => {
@@ -64,6 +69,29 @@ describe('Fiyat Karşılaştırma — evrak düğmesi fatura başlığı YOKKEN 
     const kalemIstegi = authFetch.mock.calls.find(c => c[0] === '/api/mikro/fatura/kalemler');
     expect(kalemIstegi).toBeTruthy();
     expect(JSON.parse(String((kalemIstegi?.[1] as { body?: string } | undefined)?.body))).toEqual({ seri: '', sira: '410', yon: 'gelen' });
+  });
+
+  // H11: bu yüzeyden açılan pencere de başlığı OKUYAMAYAN rolde çekim penceresini değil YETKİYİ söyler; alış belgesinin
+  // PDF / XML düğmesi o rolde çizilmez (İ5). Kalemler yine Mikro'dan gelir (istek atılır).
+  it.each([UserRole.Purchasing, UserRole.Logistics, UserRole.Sales])('başlığı okuyamayan rol %s: pencere «rolünüze açık değil» der, indirme düğmesi YOK', async (rol) => {
+    useAppStore.setState({ userRole: rol });
+    cizdir();
+    fireEvent.click(await screen.findByText(satir.ad));
+    fireEvent.click(await screen.findByRole('button', { name: '410' }));
+    expect(await screen.findByText(/Fatura başlık bilgisi rolünüze açık değil/)).toBeTruthy();
+    expect(screen.queryByText(/Fatura başlığı Cetpa'da yok/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'PDF' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'XML' })).toBeNull();
+    expect(authFetch.mock.calls.some(c => c[0] === '/api/mikro/fatura/kalemler')).toBe(true);
+  });
+
+  it('başlığı okuyabilen rolde (düzeneğin rolü) aynı pencerede PDF / XML düğmeleri ÇİZİLİR', async () => {
+    cizdir();
+    fireEvent.click(await screen.findByText(satir.ad));
+    fireEvent.click(await screen.findByRole('button', { name: '410' }));
+    expect(await screen.findByText(/Fatura başlığı Cetpa'da yok/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'PDF' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'XML' })).toBeTruthy();
   });
 });
 

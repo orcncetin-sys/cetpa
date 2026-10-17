@@ -19,10 +19,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   TENANT_COLLECTIONS, USER_SCOPED_COLLECTIONS, SERVER_ONLY_COLLECTIONS,
-  DELIBERATELY_UNSCOPED_COLLECTIONS,
+  DELIBERATELY_UNSCOPED_COLLECTIONS, DIS_ROL_SATIR_ALANI, DIS_ROL_YAZAMAZ, SAHIP_SATIR_ALANI,
 } from './collections';
 import {
-  isAllowed, hasExplicitRule, STAFF_ROLES, ADMIN_ONLY_COLLECTIONS, APPEND_ONLY_COLLECTIONS,
+  isAllowed, hasExplicitRule, STAFF_ROLES, EXTERNAL_ROLES, ADMIN_ONLY_COLLECTIONS, APPEND_ONLY_COLLECTIONS,
   PUBLIC_WRITE_COLLECTIONS, type AppRole,
 } from './rbac';
 
@@ -51,6 +51,30 @@ describe('koleksiyon sınıflandırması', () => {
   it('SERVER_ONLY koleksiyonlar TENANT listesinde DEĞİL (aksi halde /api/db\'ye sızar)', () => {
     const sizinti = SERVER_ONLY_COLLECTIONS.filter(c => TENANT_COLLECTIONS.includes(c));
     expect(sizinti).toEqual([]);
+  });
+});
+
+// K10 (2026-10-11) — SAHİP satır süzgeci: kayıt yalnız sahibinin ve Yönetici'nin (kural: lib/tenantErisim; tablo değişmezleri burada).
+describe('satır süzgeci haritaları — SAHIP_SATIR_ALANI / DIS_ROL_SATIR_ALANI', () => {
+  it('sahip haritası: yeniden deneme kuyruğu (`syncJobs`) → `sahipUid`; her anahtar TENANT', () => {
+    expect([...SAHIP_SATIR_ALANI.entries()]).toEqual([['syncJobs', 'sahipUid']]);
+    const sinifsiz = [...SAHIP_SATIR_ALANI.keys()].filter(c => !TENANT_COLLECTIONS.includes(c));
+    expect(sinifsiz, `TENANT olmayan sahip süzgeçli koleksiyon (kiracı etiketi damgalanmaz): ${sinifsiz.join(', ')}`).toEqual([]);
+  });
+  it('iki harita KESİŞMEZ: bir koleksiyon ya dış rol süzgeçli ya sahip süzgeçli (kesişirse hangi alanın geçerli olduğu belirsizleşir)', () => {
+    expect([...SAHIP_SATIR_ALANI.keys()].filter(c => DIS_ROL_SATIR_ALANI.has(c))).toEqual([]);
+    expect([...SAHIP_SATIR_ALANI.keys()].filter(c => DIS_ROL_YAZAMAZ.has(c))).toEqual([]);
+  });
+  it('sahip alanı başka bir kapsam alanıyla çakışmaz (`companyId` / `userId` / dış rol alanı)', () => {
+    const kapsam = new Set(['companyId', 'userId', ...DIS_ROL_SATIR_ALANI.values()]);
+    expect([...SAHIP_SATIR_ALANI.values()].filter(a => kapsam.has(a))).toEqual([]);
+  });
+  it('sahip süzgeçli koleksiyonun açık erişim kuralı var; yazma kümesinde DIŞ ROL yok (kuyruğa yalnız iç roller yazar)', () => {
+    for (const c of SAHIP_SATIR_ALANI.keys()) {
+      expect(hasExplicitRule(c), c).toBe(true);
+      expect(EXTERNAL_ROLES.filter(r => isAllowed(r, c, 'write') || isAllowed(r, c, 'read')), c).toEqual([]);
+      expect(STAFF_ROLES.filter(r => !isAllowed(r, c, 'write')), `${c}: kendi işini kuyruğa koyamayan iç rol`).toEqual([]);
+    }
   });
 });
 

@@ -11,6 +11,12 @@
  * UUID yoksa e-belge çekilemez: fatura Mikro'da kesilmiş ama GİB'e
  * gönderilmemiş (ya da kağıt fatura) olabilir. O durumda düğmeler yerine
  * sebebi yazılır — sessizce boş buton göstermek yanıltıcı olur.
+ *
+ * ROL (karar turu 2026-10-11 — K7 / H1, H11, İ3, İ5): pencere rolü KÜRESEL DEPODAN okur (açan dört yüzey rol geçirmez;
+ * yeni açan da unutamaz). PDF / XML düğmeleri, rolün sunucudaki indirme kapısından (`lib/mikroUcKapilari`) geçemediği
+ * yerde ÇİZİLMEZ — eskiden her rolde çiziliydi, yalnız veriyle kapalıydı (ölü düğme). Kapı İKİ YÖNDE de aynıdır; faturanın
+ * yönü koşula GİRMEZ. Başlıksız açılışın amber notu, başlığı okuyamayan rolde çekim penceresini değil yetkiyi söyler.
+ * Belge No / Tarih satırları role göre DEĞİŞMEZ (başlığı okuyamayan rolde Belge No veri katmanından zaten gelmez → '—').
  */
 import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { X, Download, FileCode, Loader2, AlertTriangle, Package } from 'lucide-react';
@@ -22,6 +28,9 @@ import { kalemleriCoz, kalemSaglamasi, birimFiyatOndaligi, satirMasrafi } from '
 import { bilinenSayi } from '../utils/para';
 import { faturaTarihMetni } from '../utils/muhasebe/faturaUstBilgisi';
 import { oc } from '../i18n/ortak';
+import { useAppStore } from '../store/appStore';
+import { ucKapisindanGecer } from '../lib/mikroUcKapilari';
+import { isAllowed } from '../lib/rbac';
 
 export interface MikroFaturaDetayVerisi {
   id: string;
@@ -67,6 +76,14 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
   const tr = currentLanguage === 'tr';
   const [indiriliyor, setIndiriliyor] = useState<'xml' | 'pdf' | null>(null);
   const [hata, setHata] = useState<string | null>(null);
+
+  // Rol kapıları — soru sunucunun okuduğu AYNI tablodan; bileşende rol adı yazılmaz. Her düğme KENDİ ucunu sorar
+  // (bugün iki uç aynı kapıda; biri değişirse düğmesi onu izler). Yön koşula girmez (H1).
+  const rol = useAppStore(s => s.userRole);
+  const pdfIndirebilir = ucKapisindanGecer(rol, 'POST /api/mikro/ebelge/pdf');
+  const xmlIndirebilir = ucKapisindanGecer(rol, 'POST /api/mikro/ebelge/xml');
+  // H11: fatura BAŞLIĞI `mikroFaturalar`'dan gelir; okuyamayan rolde başlık «yüklenmemiş» değil, role KAPALIDIR.
+  const baslikOkuyabilir = isAllowed(rol, 'mikroFaturalar', 'read');
 
   /** Fatura KALEMLERİ (satırları) — Mikro Jump'ta fatura açılınca görülenin karşılığı.
    *  Başlık CARI_HESAP_HAREKETLERI'nde, satırlar STOK_HAREKETLERI'nde durur; sunucu
@@ -251,9 +268,10 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
 
         <div className="p-5 overflow-y-auto flex-1 min-h-0">
           {/* Üst bilgi (2026-10-10 kullanıcı isteği): Fatura No · Belge No · Tarih, gövdenin EN ÜSTÜNDE. Üçü de HER ZAMAN çizilir —
-              boş / bilinmeyen '—' (gizlenmez; başlıksız açılışta aşağıdaki amber not «yüklenmedi»yi söyler, başlıklıda '—' =
-              Mikro'da boş). Fatura no başlık altındaki mono metinde de DURUR. Tarih eskiden cari kodunun altında HAM basılıyordu
-              ('2026-08-31'); buraya taşındı, yinelenmez. Etiketler ortak sözlükten — satır içi çift yazılmaz (ortak değişmez testi). */}
+              boş / bilinmeyen '—' (gizlenmez; başlıksız açılışta aşağıdaki amber not sebebi söyler — «yüklenmedi» ya da, başlığı
+              okuyamayan rolde, «rolünüze açık değil»; başlıklıda '—' = Mikro'da boş). Fatura no başlık altındaki mono metinde de
+              DURUR. Tarih eskiden cari kodunun altında HAM basılıyordu ('2026-08-31'); buraya taşındı, yinelenmez. Etiketler ortak
+              sözlükten — satır içi çift yazılmaz (ortak değişmez testi). */}
           {satir(oc(tr).fatura_no, fatura.faturaNo || '—')}
           {satir(oc(tr).belge_no, fatura.belgeNo?.trim() || '—')}
           {satir(oc(tr).tarih, faturaTarihMetni(fatura.tarih))}
@@ -280,11 +298,17 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
           {/* Toplam Mikro'nunki KALIR (cari borç o rakamla); kayıt KDV ile tutarsızsa KDV ile tutarlı toplam yanında. */}
           {satir(oc(tr).toplam, bilinenSayi(fatura.tutar) ? tl(fatura.tutar) : '—',
             saglama?.mikroKaydiTutarsiz && !ortakAnahtar ? (tr ? `KDV ile tutarlı toplam ${tl(saglama.kalemToplami)}` : `VAT-consistent total ${tl(saglama.kalemToplami)}`) : undefined)}
+          {/* H11 (2026-10-11): başlığı OKUYABİLEN rolde bugünkü metin (çekim penceresi); OKUYAMAYAN rolde sebep yetkidir —
+              «Faturaları Çek» demek o role yapamayacağı bir işi önerirdi. */}
           {fatura.baslikYok && (
             <p className="text-[11px] text-amber-600 mt-1">
-              {tr
-                ? 'Fatura başlığı Cetpa\'da yok ("Faturaları Çek" bu tarihi kapsamamış olabilir) — toplam/KDV bilinmiyor; kalemler doğrudan Mikro\'dan.'
-                : 'Invoice header not in Cetpa (the invoice pull may not cover this date) — totals/VAT unknown; lines are read directly from Mikro.'}
+              {baslikOkuyabilir
+                ? (tr
+                  ? 'Fatura başlığı Cetpa\'da yok ("Faturaları Çek" bu tarihi kapsamamış olabilir) — toplam/KDV bilinmiyor; kalemler doğrudan Mikro\'dan.'
+                  : 'Invoice header not in Cetpa (the invoice pull may not cover this date) — totals/VAT unknown; lines are read directly from Mikro.')
+                : (tr
+                  ? 'Fatura başlık bilgisi rolünüze açık değil — belge no, toplam ve KDV gösterilmez; kalemler doğrudan Mikro\'dan.'
+                  : 'Invoice header details are not available to your role — document no, total and VAT are not shown; lines are read directly from Mikro.')}
             </p>
           )}
 
@@ -460,7 +484,8 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
             </div>
           )}
 
-          {!fatura.uuid && !fatura.baslikYok && (
+          {/* Not indirme düğmelerini açıklar — düğmesi çizilmeyen rolde (kapıdan geçemiyor) not da çizilmez. */}
+          {(pdfIndirebilir || xmlIndirebilir) && !fatura.uuid && !fatura.baslikYok && (
             <div className="mt-3 text-xs text-amber-800 bg-amber-50 rounded-xl px-3 py-2">
               {tr
                 ? 'Bu faturanın GİB belge kimliği (UUID) yok — e-belge olarak gönderilmemiş olabilir. XML çekilemez; PDF Mikro belge numarasıyla denenir.'
@@ -471,24 +496,29 @@ export default function MikroFaturaDetay({ fatura, currentLanguage, onClose }: P
 
         <div className="flex items-center justify-end gap-2 p-5 border-t border-gray-100 flex-shrink-0">
           <button onClick={onClose} className="apple-button-secondary px-4 py-2 text-sm">{oc(tr).kapat}</button>
-          <button
-            onClick={() => void indir('pdf')}
-            disabled={!!indiriliyor || (fatura.baslikYok === true && !fatura.uuid)}
-            title={fatura.baslikYok && !fatura.uuid ? (tr ? "Fatura başlığı Cetpa'da yok — belge kimliği bilinmiyor, PDF çekilemez (önce \"Faturaları Çek\")" : 'Invoice header not in Cetpa — document id unknown, PDF unavailable') : undefined}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-          >
-            {indiriliyor === 'pdf' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-            PDF
-          </button>
-          <button
-            onClick={() => void indir('xml')}
-            disabled={!!indiriliyor || !fatura.uuid}
-            title={!fatura.uuid ? (tr ? 'UUID yok — XML çekilemez' : 'No UUID') : (tr ? 'XML — belgenin yasal aslı' : 'XML — legal original')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {indiriliyor === 'xml' ? <Loader2 size={14} className="animate-spin" /> : <FileCode size={14} />}
-            XML
-          </button>
+          {/* İ3 — ölü düğme yok: rol indirme kapısından geçemiyorsa düğme ÇİZİLMEZ (istek de atılmaz; servis aynı soruyu kendisi de sorar). */}
+          {pdfIndirebilir && (
+            <button
+              onClick={() => void indir('pdf')}
+              disabled={!!indiriliyor || (fatura.baslikYok === true && !fatura.uuid)}
+              title={fatura.baslikYok && !fatura.uuid ? (tr ? "Fatura başlığı Cetpa'da yok — belge kimliği bilinmiyor, PDF çekilemez (önce \"Faturaları Çek\")" : 'Invoice header not in Cetpa — document id unknown, PDF unavailable') : undefined}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {indiriliyor === 'pdf' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              PDF
+            </button>
+          )}
+          {xmlIndirebilir && (
+            <button
+              onClick={() => void indir('xml')}
+              disabled={!!indiriliyor || !fatura.uuid}
+              title={!fatura.uuid ? (tr ? 'UUID yok — XML çekilemez' : 'No UUID') : (tr ? 'XML — belgenin yasal aslı' : 'XML — legal original')}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {indiriliyor === 'xml' ? <Loader2 size={14} className="animate-spin" /> : <FileCode size={14} />}
+              XML
+            </button>
+          )}
         </div>
       </div>
     </div>

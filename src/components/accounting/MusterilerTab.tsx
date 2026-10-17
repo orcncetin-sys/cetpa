@@ -8,6 +8,8 @@ import { SortHeader, exportCSV, type AccountingT } from './shared';
 import CariEkstrePanel from '../CariEkstrePanel';
 import { oc } from '../../i18n/ortak';
 import { ac } from '../../i18n/accounting';
+import { evrakKapisindanGecer } from '../../lib/mikroEvrakKapilari';
+import { useAppStore } from '../../store/appStore';
 
 /**
  * `creditLimit` / `balance` null = BİLİNMİYOR (0 DEĞİL) — 2026-09-18 delta turu.
@@ -57,6 +59,12 @@ export default function MusterilerTab({
   customerForm, setCustomerForm, saveCustomer, deleteCustomer,
   ekstreMusteri, setEkstreMusteri,
 }: MusterilerTabProps) {
+  // K3-a / K2 (karar turu 2026-10-11 — İ3 «ölü düğme yok»): satırdaki «Mikro» (dekont) düğmesi yalnız dekontun
+  // `evrak/kaydet` yöntem kapısından GEÇEN rolde çizilir. Sekme CRM → Müşteriler'den de açılır; orada dekont yazamayan
+  // roller düğmeyi görüp pencereyi açıyor, «Kaydet» 403 dönüyordu. Soru sunucu kapısının okuduğu AYNI tablodan sorulur;
+  // rol depodan (bu sekmenin rol niteliği yok — üç açan yüzeye dokunmadan en küçük yol; sınırlar: MikroPushButton başlığı).
+  // Dekont penceresi (açılışta `cari-hareket/turler`'i okur) YALNIZ bu düğmeden açılır: düğme gizlenince o çağrı da yapılmaz.
+  const dekontGirebilir = evrakKapisindanGecer(useAppStore(s => s.userRole), 'DekontKaydetV2');
   return (
     <>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -171,7 +179,7 @@ export default function MusterilerTab({
                           const cariKod = (c as unknown as { mikroCariKod?: string; code?: string }).mikroCariKod
                             ?? (c as unknown as { code?: string }).code
                             ?? c.taxNo;
-                          if (!cariKod) return null; // cari kod yoksa Mikro'ya gidemez
+                          if (!cariKod || !dekontGirebilir) return null; // cari kod yoksa Mikro'ya gidemez; rol kapıdan geçemiyorsa düğme çizilmez
                           return (
                             <button
                               onClick={() => setDekontHedef({ cariKod, ad: c.name, bakiye: bakiyeSayisi(c.balance), id: c.id })}

@@ -36,6 +36,9 @@ import {
   MAGAZA_TALEP_KOLEKSIYONU, MAGAZA_BILDIRIM_BEKLEME_SINIRI_MS, MAGAZA_BILDIRIM_HATA_SINIFLARI,
   type MagazaBildirimDurumu, type MagazaBildirimHataSinifi,
 } from '../lib/magazaTalep.js';
+// Yeniden deneme kuyruğunun sahiplik kuralı (K10) — saf modül; istemci yürütücüsüyle AYNI kaynak.
+import { KUYRUK_KOLEKSIYONU, bekleyenIsSinifi, isSahibi, type KuyrukIsi } from '../lib/kuyrukSahipligi.js';
+import { APP_ROLES, type AppRole } from '../lib/rbac.js';
 import fs from 'fs';
 import path from 'path';
 import tls from 'tls';
@@ -723,22 +726,58 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
 
   // 4) Mikro retry kuyruğu — işlemci yalnız bir kullanıcı login'ken çalışır;
   //    24 saatten eski queued iş = kuyruk tıkalı, ölü iş birikimi = temizlik gerek.
+  //    K10 (2026-10-11): iş SAHİBİNİNDİR — yalnız kuyruğa KOYAN kullanıcının oturumu yeniden dener. Bekleyen işin iki sınıfı
+  //    AYRI sayılır, çünkü ikisi de kendiliğinden çözülmez:
+  //      • damgasız eski iş (sahip damgası yok — kuraldan önce yazılmış): yalnız Yönetici oturumu çalıştırır;
+  //      • sahibi gönderemeyen iş (sahibinin BUGÜNKÜ rolü yöntemin kapısından geçmiyor, hesabı / rolü yok ya da iş kimliği
+  //        sahibini taşımıyor): hiçbir oturum çalıştırmaz — Yönetici Ayarlar → Mikro'daki kuyruk kartından kapatır.
+  //    Sınıf kuralı istemci yürütücüsüyle AYNI işlevde (lib/kuyrukSahipligi.bekleyenIsSinifi). Geçti / kaldı koşulu DEĞİŞMEDİ.
   try {
     const db = deps().getAdminDb();
     if (!db) add('retry_queue', false, 'deps().getAdminDb() yok');
     else {
-      const snap = await db.collection('syncJobs').get();
-      let queued = 0, dead = 0, stuck = 0;
+      const snap = await db.collection(KUYRUK_KOLEKSIYONU).get();
+      let queued = 0, dead = 0, stuck = 0, yarimKalan = 0, sahipsiz = 0, sahibiGonderemez = 0;
+      const bekleyenler: KuyrukIsi[] = [];
       for (const d of snap.docs) {
         const j = d.data() as Record<string, unknown>;
         if (j.status === 'dead') dead++;
         else if (j.status === 'queued' || j.status === 'in-progress') {
           queued++;
           const created = opsToMs(j.createdAt);
-          if (created && hoursAgo(created) > 24) stuck++;
+          const takili = !!created && hoursAgo(created) > 24;
+          if (takili) stuck++;
+          // Sınıf sayımı ve «Yönetici çıkışı» ipucu YALNIZ `queued` işten: yürütücü, kuyruk kartı ve «Takılanları Kapat» yalnız
+          // `queued` işe dokunur. Gönderimde yarım kalan (`in-progress`, 24s+) iş ayrı adla sayılır — panelde çıkışı yok.
+          if (j.status === 'queued') bekleyenler.push({ ...j, id: d.id });   // kimlik BELGEDEN (gövdedeki `id` alanı istemci yazımıdır)
+          else if (takili) yarimKalan++;
         }
       }
-      add('retry_queue', stuck === 0 && dead <= 10, `bekleyen ${queued} (24s+ takılı ${stuck}), ölü ${dead}`);
+      // Sahip sınıfı AYRI bir denemede: kullanıcı kaydı okunamazsa sayım (ve geçti / kaldı kararı) yine raporlanır — sınıf
+      // «okunamadı» yazılır, uydurma sayı basılmaz.
+      let sinifMetni: string;
+      try {
+        // Sahiplerin bugünkü rolü: kullanıcı başına TEK okuma (kuyruk kısa; iş sayısı kadar değil, sahip sayısı kadar sorgu).
+        const roller = new Map<string, AppRole | null>();
+        for (const uid of new Set(bekleyenler.map(isSahibi).filter((u): u is string => u !== null))) {
+          const kullanici = await db.collection('users').doc(uid).get();
+          const rol = kullanici.exists ? kullanici.data()?.role : null;
+          roller.set(uid, APP_ROLES.find(r => r === rol) ?? null);
+        }
+        for (const j of bekleyenler) {
+          const sahip = isSahibi(j);
+          const sinif = bekleyenIsSinifi(j, sahip === null ? null : roller.get(sahip));
+          if (sinif === 'sahipsiz') sahipsiz++;
+          else if (sinif === 'sahibiGonderemez') sahibiGonderemez++;
+        }
+        sinifMetni = `damgasız eski ${sahipsiz}, sahibi gönderemeyen ${sahibiGonderemez}`;
+      } catch (e) {
+        sinifMetni = `sahip sınıfı okunamadı: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      add('retry_queue', stuck === 0 && dead <= 10,
+        `bekleyen ${queued} (24s+ takılı ${stuck}; ${sinifMetni}${yarimKalan > 0 ? `, gönderimde yarım kalan ${yarimKalan}` : ''}), ölü ${dead}` +
+        (sahipsiz + sahibiGonderemez > 0 ? ' — damgasız eski işi Yönetici oturumu gönderir; sahibi gönderemeyen işi Yönetici Ayarlar → Mikro kuyruk kartından kapatır' : '') +
+        (yarimKalan > 0 ? ' — gönderimde yarım kalan işi kuyruk kartı saymaz, kapatmaz (panelde çıkışı yok)' : ''));
     }
   } catch (e) { add('retry_queue', false, e instanceof Error ? e.message : String(e)); }
 

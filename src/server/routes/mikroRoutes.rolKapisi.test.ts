@@ -10,7 +10,11 @@
  *   Ç — kaynak çiti: her kayıt rol kapısı taşır ya da ADIYLA istisnadır; kapısız yeni uç eklenince KIRILIR.
  *   D — davranış: gerçek express + ÜRETİM zinciri (halkalar ve sıraları mikroRoutes'tan gelir); işleyicinin yerine nöbetçi
  *       konur, Mikro'ya ve veritabanına hiç gidilmez. Kapılar server.ts gövdelerinin İKİZİDİR (Ç11 gövdeleri kilitler).
- *   K — kilit değişmezi (Ç13 / Ç14): hiçbir ince kapı, ucu çağıran ekranı BUGÜN gören bir iç rolü kilitlemez.
+ *   K — kilit değişmezi (Ç13 / Ç14 / D10). İlk tur (2026-10-10) kimseyi kilitlemedi. KARAR TURU (2026-10-11, şartname § 10)
+ *       BİLEREK kilitler; değişmez artık «ÖLÜ DÜĞME YOK»: düğmeyi / çağrıyı gören her rol kapıdan geçer (`EKRANI_GOREN`),
+ *       kilitlenen roller ADIYLA tablodadır (`KARAR_KILIDI`) ve o rollerde düğme çizilmez, çağrı yapılmaz (İ3).
+ *   O — ortak tablo (Ç16, evrak tablosu): istemci «bu rol geçer mi» sorusunu sunucunun kapısıyla AYNI tablodan sorar
+ *       (`src/lib/mikroUcKapilari.ts`, `src/lib/mikroEvrakKapilari.ts`); tablo ↔ BEKLENEN ↔ rota satırı zinciri burada kilitlenir.
  *
  * TABLOLAR ELLE YAZILIR (rbac.ts'ten TÜRETİLMEZ): kural ya da ekran değişince bu test BİLİNÇLİ güncellenir.
  */
@@ -24,8 +28,10 @@ import { mikroPost, mikroSql } from '../mikroClient.js';
 import {
   ADMIN_ONLY_COLLECTIONS, APP_ROLES, EXTERNAL_ROLES, STAFF_ROLES, hasExplicitRule, isAllowed, type AppRole, type DbOp,
 } from '../../lib/rbac.js';
-import { MIKRO_EVRAK_KAPILARI, evrakKapisindanGecer, evrakYontemi } from '../../lib/mikroEvrakKapilari.js';
-import { SRC_KOK, gorece, kaynakDosyalari, kodSatirlari } from '../../test/kaynakTarama';
+import { MIKRO_EVRAK_KAPILARI, evrakKapiKosullari, evrakKapisindanGecer, evrakYontemi, type EvrakKapisi } from '../../lib/mikroEvrakKapilari.js';
+import * as ucKapilariModulu from '../../lib/mikroUcKapilari.js';
+import { MIKRO_UC_KAPILARI, ucKapisindanGecer, type MikroKapiliUc } from '../../lib/mikroUcKapilari.js';
+import { SRC_KOK, gorece, kaynakDosyalari, kodSatirlari, oku } from '../../test/kaynakTarama';
 
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
 vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS' }));
@@ -51,10 +57,11 @@ vi.mock('../mikroClient.js', async (orig) => {
 // TABLOLAR
 // ════════════════════════════════════════════════════════════════════════════
 
-type Kapi = 'ops' | 'staff' | 'staff+orders:write' | 'govde:cari' | 'govde:cariListesi' | 'govde:evrak' | `${string}:${DbOp}`;
+type Kapi = 'ops' | 'staff' | 'staff+orders:write' | 'govde:cari' | 'govde:evrak' | `${string}:${DbOp}`;
 
 const P = '/api/mikro';
-/** mikroRoutes.ts'teki HER kayıt (13 fabrika ucu dâhil). Yeni uç buraya BİLİNÇLİ girer — kapısıyla birlikte. */
+/** mikroRoutes.ts'teki HER kayıt (13 fabrika ucu dâhil). Yeni uç buraya BİLİNÇLİ girer — kapısıyla birlikte.
+ *  `// K#` = karar turunda (2026-10-11, şartname § 10.1 + § 10.4 hükümleri) kapısı değişen uç. */
 const BEKLENEN: Record<string, Kapi> = {
   // ── İstisna: ops jetonu kapılı tanı uçları (zincir boş; ilk satır opsJetonuGecerli) ──
   [`GET ${P}/sema-kesif`]: 'ops',
@@ -69,21 +76,21 @@ const BEKLENEN: Record<string, Kapi> = {
   [`GET ${P}/status`]: 'staff',
   [`POST ${P}/fatura/kalemler`]: 'staff',
   [`POST ${P}/fatura/kaydet`]: 'staff',
-  [`POST ${P}/pull/uretim-receteleri`]: 'staff',
-  [`POST ${P}/ebelge/gelen`]: 'staff',
-  [`POST ${P}/ebelge/giden`]: 'staff',
-  [`POST ${P}/ebelge/eirsaliye`]: 'staff',
   [`GET ${P}/ebelge/mukellef/:vkn`]: 'staff',
-  [`POST ${P}/ebelge/pdf`]: 'staff',
-  [`POST ${P}/ebelge/xml`]: 'staff',
   // ── İç personel + ince kapı (kural dış rol içerdiği için ikisi birlikte) ──
   [`POST ${P}/siparis/kaydet`]: 'staff+orders:write',
   [`POST ${P}/import/faturadan-siparis`]: 'staff+orders:write',
   // ── Gövdeye bağlı ──
   [`POST ${P}/cari/kaydet`]: 'govde:cari',
-  [`POST ${P}/cari/listesi`]: 'govde:cariListesi',
   [`POST ${P}/evrak/kaydet`]: 'govde:evrak',
   // ── Sabit ince kapı ──
+  [`POST ${P}/cari/listesi`]: 'leads:write',                       // K1 — arama dâhil iki dal da (gövdeye bağlı kapı kalktı)
+  [`POST ${P}/pull/uretim-receteleri`]: 'bom:write',               // K5
+  [`POST ${P}/ebelge/gelen`]: 'eBelgeler:write',                   // K6
+  [`POST ${P}/ebelge/giden`]: 'eBelgeler:write',                   // K6
+  [`POST ${P}/ebelge/eirsaliye`]: 'eBelgeler:write',               // K6
+  [`POST ${P}/ebelge/pdf`]: 'mikroFaturalar:read',                 // K7 / H1 — iki yönde de tek sabit kapı
+  [`POST ${P}/ebelge/xml`]: 'mikroFaturalar:read',                 // K7 / H1
   [`GET ${P}/tablolar`]: 'settings:read',
   [`POST ${P}/stok/kaydet`]: 'inventory:write',
   [`POST ${P}/stok/listesi`]: 'inventory:write',
@@ -108,14 +115,14 @@ const BEKLENEN: Record<string, Kapi> = {
   [`POST ${P}/import/faturalar`]: 'mikroFaturalar:write',
   [`POST ${P}/gelen-fatura/kabul`]: 'mikroFaturalar:write',
   [`POST ${P}/gelen-fatura/ret`]: 'mikroFaturalar:write',
-  [`POST ${P}/tamir/ham-satir-temizle`]: 'bankAccounts:delete',
-  [`GET ${P}/cari-hareket/turler`]: 'leads:read',
+  [`POST ${P}/tamir/ham-satir-temizle`]: 'bankAccounts:delete',    // K8 — DEĞİŞMEDİ
+  [`GET ${P}/cari-hareket/turler`]: 'mikroCariHareketler:read',    // K2
   [`GET ${P}/cari-hareket/:cariKod`]: 'mikroCariHareketler:read',
   [`POST ${P}/cari-hareket/kaydet`]: 'mikroCariHareketler:write',
   [`POST ${P}/yevmiye/kaydet`]: 'journalEntries:write',
-  [`POST ${P}/tahsilat/kaydet`]: 'kasaHareketleri:write',
+  [`POST ${P}/tahsilat/kaydet`]: 'kasaHareketleri:write',          // K9 — DEĞİŞMEDİ (Satış'a tahsilat gönderimi açılmaz)
   [`POST ${P}/pull/kdv`]: 'taxSummary:write',
-  [`POST ${P}/pull/personel`]: 'employees:read',
+  [`POST ${P}/pull/personel`]: 'employees:write',                  // K4
   [`POST ${P}/pull/bakiye`]: 'cariBalances:write',
   [`POST ${P}/pull/mizan`]: 'accountingPeriods:write',
   [`POST ${P}/siparis/sil`]: 'orders:delete',
@@ -132,10 +139,10 @@ const GECEN: Record<string, AppRole[]> = {
   'settings:read': ['Admin', 'Manager'],
   'inventory:write': ['Admin', 'Manager', 'Logistics', 'Purchasing'],
   'leads:write': ['Admin', 'Manager', 'Sales'],
-  'leads:read': ['Admin', 'Manager', 'Sales', 'Accounting', 'Purchasing'],
   'suppliers:write': ['Admin', 'Manager', 'Purchasing'],
   'mikroSiparisler:write': ['Admin', 'Manager'],
   'mikroFaturalar:write': ['Admin', 'Manager', 'Accounting'],
+  'mikroFaturalar:read': ['Admin', 'Manager', 'Accounting'],
   'mikroIptalFaturalar:write': ['Admin', 'Manager', 'Accounting'],
   'mikroCariHareketler:write': ['Admin', 'Manager', 'Accounting'],
   'mikroCariHareketler:read': ['Admin', 'Manager', 'Accounting'],
@@ -152,7 +159,8 @@ const GECEN: Record<string, AppRole[]> = {
   'journalEntries:write': ['Admin', 'Accounting'],
   'kasaHareketleri:write': ['Admin', 'Manager', 'Accounting'],
   'taxSummary:write': ['Admin', 'Manager', 'Accounting'],
-  'employees:read': ['Admin', 'Manager', 'HR', 'Accounting'],
+  'employees:write': ['Admin', 'HR'],
+  'bom:write': ['Admin', 'Manager', 'Logistics', 'Purchasing'],
   'cariBalances:write': ['Admin', 'Manager', 'Accounting'],
   'accountingPeriods:write': ['Admin', 'Manager', 'Accounting'],
   'orders:delete': ['Admin', 'Manager'],
@@ -163,14 +171,19 @@ const GECEN: Record<string, AppRole[]> = {
   'purchaseOrders:write': ['Admin', 'Manager', 'Purchasing'],
   'stockCountSessions:write': ['Admin', 'Manager', 'Logistics'],
   'leaveRequests:write': ['Admin', 'Manager', 'HR'],
-  'employees:write': ['Admin', 'HR'],
   'isEmirleri:write': ['Admin', 'Manager', 'Logistics'],
   'routingTemplates:write': ['Admin', 'Manager', 'Logistics', 'Quality'],
+  'wmsCycleCounts:write': ['Admin', 'Manager', 'Logistics'],
+  'productionOrders:write': ['Admin', 'Manager', 'Logistics', 'Quality'],
+  'transfers:write': ['Admin', 'Manager', 'Logistics'],
+  // İç personel + `quotations` yazma (H4): kural B2B / Bayi'yi de geçirir → dış roller iç personel şartında kalır.
+  'staff+quotations:write': ['Admin', 'Manager', 'Sales'],
 };
 
-/** `evrak/kaydet` yöntemi → kapı etiketi. ELLE yazılır; kaynak tabloyla (src/lib/mikroEvrakKapilari.ts) eşitliği sınanır. */
+/** `evrak/kaydet` yöntemi → kapı etiketi. ELLE yazılır; kaynak tabloyla (src/lib/mikroEvrakKapilari.ts) eşitliği sınanır.
+ *  `// K3-x` = karar turunda (şartname § 10.1) `'staff'`tan ince kapıya inen 11 yöntem + dekont. */
 const EVRAK_BEKLENEN: Record<string, string> = {
-  DekontKaydetV2: 'leads:read',
+  DekontKaydetV2: 'mikroCariHareketler:write',                   // K3-a
   ZiyaretKaydetV2: 'leads:write',
   ServisIsEmriKaydetV2: 'servisTalepleri:write',
   ServisFormuKaydetV2: 'servisTalepleri:write',
@@ -185,17 +198,31 @@ const EVRAK_BEKLENEN: Record<string, string> = {
   BakimSozlesmeKaydetV2: 'isEmirleri:write',
   UrunRotaKaydetV2: 'routingTemplates:write',
   UretimRotaPlanKaydetV2: 'routingTemplates:write',
-  VerilenTeklifKaydetV2: 'staff',
-  DahiliStokHareketKaydetV2: 'staff',
-  SayimSonuclariKaydetV2: 'staff',
-  EtiketBasimKaydetV2: 'staff',
-  PersonelIzinTalepKaydetV2: 'staff',
-  UrunReceteKaydetV2: 'staff',
-  UretimTalepKaydetV2: 'staff',
-  UretimIsEmriOlusturV2: 'staff',
-  SatinAlmaTalepKaydetV2: 'staff',
-  BakimTalepKaydetV2: 'staff',
-  DepolarArasiSiparisKaydetV2: 'staff',
+  VerilenTeklifKaydetV2: 'staff+quotations:write',               // K3-b / H4 — iç rol VE kural (düz `quotations:write` YAZILMAZ)
+  DahiliStokHareketKaydetV2: 'inventoryMovements:write',         // K3-c
+  SayimSonuclariKaydetV2: 'wmsCycleCounts:write',                // K3-d
+  EtiketBasimKaydetV2: 'staff',                                  // K3-e — KALIR (eşdeğer koleksiyon yok)
+  PersonelIzinTalepKaydetV2: 'leaveRequests:write',              // K3-f
+  UrunReceteKaydetV2: 'bom:write',                               // K3-g
+  UretimTalepKaydetV2: 'productionOrders:write',                 // K3-h
+  UretimIsEmriOlusturV2: 'productionOrders:write',               // K3-h
+  SatinAlmaTalepKaydetV2: 'purchaseOrders:write',                // K3-i
+  BakimTalepKaydetV2: 'isEmirleri:write',                        // K3-j
+  DepolarArasiSiparisKaydetV2: 'transfers:write',                // K3-k
+};
+
+/** Ortak uç tablosu (src/lib/mikroUcKapilari.ts) → kapı etiketi. ELLE yazılır; Ç16 hem tabloyla hem BEKLENEN'le eşitliğini sınar. */
+const UC_TABLOSU_BEKLENEN: Record<string, string> = {
+  [`POST ${P}/cari/listesi`]: 'leads:write',                       // K1
+  [`GET ${P}/cari-hareket/turler`]: 'mikroCariHareketler:read',    // K2
+  [`POST ${P}/pull/personel`]: 'employees:write',                  // K4
+  [`POST ${P}/pull/uretim-receteleri`]: 'bom:write',               // K5
+  [`POST ${P}/ebelge/gelen`]: 'eBelgeler:write',                   // K6
+  [`POST ${P}/ebelge/giden`]: 'eBelgeler:write',
+  [`POST ${P}/ebelge/eirsaliye`]: 'eBelgeler:write',
+  [`POST ${P}/ebelge/pdf`]: 'mikroFaturalar:read',                 // K7 / H1
+  [`POST ${P}/ebelge/xml`]: 'mikroFaturalar:read',
+  [`POST ${P}/tahsilat/kaydet`]: 'kasaHareketleri:write',          // K9
 };
 
 const gecenRoller = (etiket: string): AppRole[] => {
@@ -206,17 +233,24 @@ const gecenRoller = (etiket: string): AppRole[] => {
 const sirali = (a: readonly string[]): string[] => [...a].sort();
 const opsMu = (anahtar: string): boolean => BEKLENEN[anahtar] === 'ops';
 const KAPILI = Object.keys(BEKLENEN).filter(a => !opsMu(a));
+// MFA halkası isteğe bağlı DEĞİL: MFA'sız uçlar ADIYLA sayılır (Ç3 iki yönlü kilitler — listeye uç eklemek de çıkarmak da bu satırı değiştirir).
+const MFASIZ = new Set<string>([
+  'GET /api/mikro/tablolar',
+  'GET /api/mikro/status',
+  'POST /api/mikro/fatura/kalemler',
+  'GET /api/mikro/cari-hareket/turler',
+  'GET /api/mikro/cari-hareket/:cariKod',
+  'GET /api/mikro/ebelge/mukellef/:vkn',
+]);
 
-// ── R2: ekranı gören roller (kilit değişmezi) ─────────────────────────────────
+// ── İ3: düğmeyi / çağrıyı gören roller (ölü düğme değişmezi) ─────────────────
 // Sekmeyi gören İÇ roller (App.tsx TAB_PERMISSIONS, tam + salt okunur). Elle yazılır.
 const AYARLAR: AppRole[] = ['Admin', 'Manager'];                                                   // settings — Mikro paneli (Ç14)
 const MUHASEBE: AppRole[] = ['Admin', 'Accounting', 'Manager'];
 const CRM: AppRole[] = ['Admin', 'Manager', 'Sales', 'Accounting', 'Purchasing'];                  // crm, orders
 const STOK: AppRole[] = ['Admin', 'Manager', 'Logistics', 'Purchasing', 'Accounting', 'Sales'];    // inventory, lojistik
 const SATIN_ALMA: AppRole[] = ['Admin', 'Manager', 'Logistics', 'Purchasing', 'Accounting'];
-const IK: AppRole[] = ['Admin', 'Manager', 'HR', 'Accounting'];
-const URETIM: AppRole[] = ['Admin', 'Manager', 'Logistics', 'Purchasing', 'Quality'];
-const EBELGE: AppRole[] = ['Admin', 'Accounting', 'Manager', 'Sales', 'Logistics'];
+const EBELGE: AppRole[] = ['Admin', 'Accounting', 'Manager'];                                      // H2: Satış ve Lojistik sekmeyi kaybetti (Ç17)
 const birlesim = (...kumeler: AppRole[][]): AppRole[] => [...new Set(kumeler.flat())];
 
 /** Ayarlar → Mikro panelinden çağrılan uçlar (MikroSyncPanel kartları ve düğmeleri). */
@@ -227,57 +261,85 @@ const AYARLAR_PANELI = [
   'import/kasa', 'import/odeme-plan', 'import/depo', 'import/barkod', 'import/fiyat', 'import/demirbas', 'import/maliyet-merkezi',
 ];
 /**
- * R2: ucu çağıran ekranı / düğmeyi BUGÜN gören İÇ roller. Elle yazılır; ekran başka role açılınca BİLİNÇLİ güncellenir.
- * Gövdeye bağlı uçlar DAL başına ayrı anahtar taşır (`#…`). «Önce Cetpa'ya yazan» çağıranlarda küme, o yazımı
- * başarabilen rollerdir (yazım 403'te fırlatır, Mikro çağrısına ulaşılmaz).
+ * İ3 (karar turu 2026-10-11): ucu çağıran DÜĞMEYİ gören / sessiz çağrıyı YAPAN iç roller — karar turundan SONRA.
+ * Ekranı görüp kapıdan geçemeyen rol burada YOKTUR: o rolde düğme çizilmez, çağrı yapılmaz (kilitlenenler `KARAR_KILIDI`'nda).
+ * Elle yazılır; ekran başka role açılınca BİLİNÇLİ güncellenir. Gövdeye bağlı uçlar DAL başına ayrı anahtar taşır (`#…`).
+ * «Önce Cetpa'ya yazan» çağıranlarda küme, o yazımı başarabilen rollerdir (yazım 403'te fırlatır, Mikro çağrısına ulaşılmaz).
  */
 const EKRANI_GOREN: Record<string, AppRole[]> = {
   ...Object.fromEntries(AYARLAR_PANELI.map(u => [`POST ${P}/${u}`, AYARLAR])),
   [`GET ${P}/status`]: birlesim(AYARLAR, EBELGE),
   [`POST ${P}/cari/kaydet#leads`]: ['Admin', 'Manager', 'Sales'],            // sipariş penceresi: `orders` yazıp `leads` okuyabilen
   [`POST ${P}/cari/kaydet#suppliers`]: ['Admin', 'Manager', 'Purchasing'],   // Satın Alma: `suppliers` yazımından sonra
-  [`POST ${P}/cari/listesi#ara`]: birlesim(SATIN_ALMA, CRM),                 // iki «Mikro'da ara» kutusu
   [`POST ${P}/siparis/kaydet`]: ['Admin', 'Manager', 'Sales'],               // sipariş yazımından sonra, müşteri seçiliyken
   [`POST ${P}/fatura/kalemler`]: birlesim(MUHASEBE, CRM, SATIN_ALMA, STOK),  // Fatura Detayı penceresi
   [`POST ${P}/fatura/kaydet`]: birlesim(CRM, STOK),                          // Siparişler ekranı (orders + lojistik sekmeleri)
-  [`GET ${P}/cari-hareket/turler`]: birlesim(MUHASEBE, CRM),                 // dekont penceresi (Muhasebe + CRM → Müşteriler)
+  [`GET ${P}/cari-hareket/turler`]: ['Admin', 'Manager', 'Accounting'],      // K2 — dekont penceresi açılışı (pencereyi açan düğme: K3-a)
   [`GET ${P}/cari-hareket/:cariKod`]: birlesim(MUHASEBE, CRM, SATIN_ALMA),   // cari ekstre paneli
-  [`POST ${P}/tahsilat/kaydet`]: ['Admin', 'Accounting'],                    // Muhasebe → Tahsilat, yalnız tam yetkili
-  [`POST ${P}/pull/personel`]: birlesim(AYARLAR, IK),                        // Ayarlar kartı + İK ekranı açılışı
-  [`POST ${P}/pull/uretim-receteleri`]: birlesim(AYARLAR, URETIM),           // Ayarlar kartı + Üretim ekranı açılışı
+  [`POST ${P}/tahsilat/kaydet`]: ['Admin', 'Accounting'],                    // K9 — Muhasebe → Tahsilat, yalnız tam yetkili
+  [`POST ${P}/pull/personel`]: ['Admin', 'HR'],                              // K4 / H5 — Ayarlar kartı + «Tümünü Çek» adımı + İK düğmesi + İK ekranı açılışı
+  [`POST ${P}/pull/uretim-receteleri`]: ['Admin', 'Manager', 'Logistics', 'Purchasing'],   // K5 — Ayarlar kartı + Üretim ekranı açılışı
   [`POST ${P}/siparis/sil`]: ['Admin', 'Manager'],                           // sil düğmesi `orders` silme kuralına bağlı
-  [`POST ${P}/ebelge/gelen`]: EBELGE,
+  [`POST ${P}/ebelge/gelen`]: EBELGE,                                        // K6 — e-Belge Merkezi «çek» düğmeleri
   [`POST ${P}/ebelge/giden`]: EBELGE,
   [`POST ${P}/ebelge/eirsaliye`]: EBELGE,
-  [`POST ${P}/ebelge/pdf`]: birlesim(EBELGE, MUHASEBE, CRM, SATIN_ALMA, STOK),
-  [`POST ${P}/ebelge/xml`]: birlesim(EBELGE, MUHASEBE, CRM, SATIN_ALMA, STOK),
+  [`POST ${P}/ebelge/pdf`]: ['Admin', 'Manager', 'Accounting'],              // K7 / H1 — Fatura Detayı + e-Belge Merkezi indirme düğmeleri
+  [`POST ${P}/ebelge/xml`]: ['Admin', 'Manager', 'Accounting'],
   [`POST ${P}/irsaliye/kaydet`]: ['Admin', 'Manager', 'Logistics'],          // düğme `shipments` yazma kuralına bağlı
-  // ── evrak/kaydet: çağıranı olan 14 yöntem ──
-  [`POST ${P}/evrak/kaydet#VerilenTeklifKaydetV2`]: ['Admin', 'Manager', 'Sales', 'Accounting'],   // B2B Portalı; dış rolde düğme GİZLİ (Ç15)
-  [`POST ${P}/evrak/kaydet#DekontKaydetV2`]: birlesim(MUHASEBE, CRM),
-  [`POST ${P}/evrak/kaydet#DahiliStokHareketKaydetV2`]: ['Admin', 'Manager', 'Logistics', 'Purchasing', 'Accounting'],
-  [`POST ${P}/evrak/kaydet#SayimSonuclariKaydetV2`]: ['Admin', 'Manager', 'Logistics'],            // `wmsCycleCounts` yazımından sonra
-  [`POST ${P}/evrak/kaydet#EtiketBasimKaydetV2`]: STOK,                                            // etiket penceresi Stok ekranından açılır
-  [`POST ${P}/evrak/kaydet#PersonelIzinTalepKaydetV2`]: IK,
-  [`POST ${P}/evrak/kaydet#UrunReceteKaydetV2`]: URETIM,
-  [`POST ${P}/evrak/kaydet#UretimTalepKaydetV2`]: birlesim(URETIM, ['Accounting']),               // + mrp (productionOrders okuyan)
-  [`POST ${P}/evrak/kaydet#UretimIsEmriOlusturV2`]: URETIM,
-  [`POST ${P}/evrak/kaydet#SatinAlmaTalepKaydetV2`]: birlesim(SATIN_ALMA, ['Quality']),            // + mrp
-  [`POST ${P}/evrak/kaydet#ServisIsEmriKaydetV2`]: ['Admin', 'Manager', 'Sales', 'Logistics'],     // servis sekmesi
-  [`POST ${P}/evrak/kaydet#BakimTalepKaydetV2`]: ['Admin', 'Manager', 'Logistics', 'Purchasing'],  // bakim sekmesi
-  [`POST ${P}/evrak/kaydet#DepolarArasiSiparisKaydetV2`]: birlesim(STOK, MUHASEBE),
-  [`POST ${P}/evrak/kaydet#ZiyaretKaydetV2`]: ['Admin', 'Manager', 'Sales'],                       // `leads` yazımından sonra
+  // ── evrak/kaydet: çağıranı olan 14 yöntem (düğmelerin tek bileşeni MikroPushButton kendini yöntem kapısına göre çizer — H7) ──
+  [`POST ${P}/evrak/kaydet#VerilenTeklifKaydetV2`]: ['Admin', 'Manager', 'Sales'],                       // K3-b — B2B Portalı; dış rolde düğme GİZLİ (Ç15)
+  [`POST ${P}/evrak/kaydet#DekontKaydetV2`]: ['Admin', 'Manager', 'Accounting'],                         // K3-a — Müşteriler sekmesi «Mikro» düğmesi
+  [`POST ${P}/evrak/kaydet#DahiliStokHareketKaydetV2`]: ['Admin', 'Manager', 'Logistics', 'Purchasing'], // K3-c
+  [`POST ${P}/evrak/kaydet#SayimSonuclariKaydetV2`]: ['Admin', 'Manager', 'Logistics'],                  // K3-d — `wmsCycleCounts` yazımından sonra (sessiz çağrı)
+  [`POST ${P}/evrak/kaydet#EtiketBasimKaydetV2`]: STOK,                                                  // K3-e — etiket penceresi Stok ekranından açılır
+  [`POST ${P}/evrak/kaydet#PersonelIzinTalepKaydetV2`]: ['Admin', 'Manager', 'HR'],                      // K3-f
+  [`POST ${P}/evrak/kaydet#UrunReceteKaydetV2`]: ['Admin', 'Manager', 'Logistics', 'Purchasing'],        // K3-g
+  [`POST ${P}/evrak/kaydet#UretimTalepKaydetV2`]: ['Admin', 'Manager', 'Logistics', 'Quality'],          // K3-h — Üretim + MRP
+  [`POST ${P}/evrak/kaydet#UretimIsEmriOlusturV2`]: ['Admin', 'Manager', 'Logistics', 'Quality'],        // K3-h
+  [`POST ${P}/evrak/kaydet#SatinAlmaTalepKaydetV2`]: ['Admin', 'Manager', 'Purchasing'],                 // K3-i — Satın Alma + MRP
+  [`POST ${P}/evrak/kaydet#ServisIsEmriKaydetV2`]: ['Admin', 'Manager', 'Sales', 'Logistics'],           // servis sekmesi
+  [`POST ${P}/evrak/kaydet#BakimTalepKaydetV2`]: ['Admin', 'Manager', 'Logistics'],                      // K3-j — bakim sekmesi
+  [`POST ${P}/evrak/kaydet#DepolarArasiSiparisKaydetV2`]: ['Admin', 'Manager', 'Logistics'],             // K3-k
+  [`POST ${P}/evrak/kaydet#ZiyaretKaydetV2`]: ['Admin', 'Manager', 'Sales'],                             // `leads` yazımından sonra
 };
-/** İstemcide çağıranı OLMAYAN uçlar / gövde dalları — kilitlenecek kimse yok. Çağıran eklenince `EKRANI_GOREN`'e taşınır. */
+/** İstemcide çağıranı OLMAYAN uçlar / gövde dalları — kilitlenecek kimse yok. Çağıran eklenince `EKRANI_GOREN`'e taşınır.
+ *  `cari/listesi` (K1 / H3): iki «Mikro'da ara» kutusu salt okuyan arama ucu gelene kadar HİÇBİR rolde çizilmez. */
 const CAGIRANI_YOK: string[] = [
-  `GET ${P}/tablolar`, `POST ${P}/stok/kaydet`, `POST ${P}/stok/listesi`, `POST ${P}/cari/listesi#tam`,
+  `GET ${P}/tablolar`, `POST ${P}/stok/kaydet`, `POST ${P}/stok/listesi`, `POST ${P}/cari/listesi`,
   `POST ${P}/cari-hareket/kaydet`, `POST ${P}/yevmiye/kaydet`, `POST ${P}/import/faturalar`, `POST ${P}/ebelge/durum`,
   `GET ${P}/ebelge/mukellef/:vkn`, `POST ${P}/ebelge/earsiv-iptal`,
   ...['AlinanTeklifKaydetV2', 'SayimKesinlestirmeV2', 'PersonelizinKaydetV2', 'PersonelKaydetV2', 'BakimHareketleriKaydetV2',
     'BakimSarfiyatlariKaydetV2', 'BakimSozlesmeKaydetV2', 'ServisFormuKaydetV2', 'ServisMalzemePlanKaydetV2', 'ServisRotaPlanKaydetV2',
     'UrunRotaKaydetV2', 'UretimRotaPlanKaydetV2'].map(y => `POST ${P}/evrak/kaydet#${y}`),
 ];
-/** Bu işten ÖNCE de var olan kilitler — ADIYLA. Bu iş yeni kilit EKLEMEZ; buraya satır eklemek kullanıcı kararıdır.
+/**
+ * KİLİTLENENLER TABLOSU — karar turunun (2026-10-11) BİLEREK kilitlediği iç roller: şartname § 10.1 «Kilitlenen» sütunu,
+ * § 10.4 hükümleriyle (H1: PDF / XML'de Satış iki yönde de kilitli). ELLE yazılır, K numarasıyla.
+ * Bu roller ucun düğmesini ilk turda görüyordu; artık düğme çizilmez / çağrı yapılmaz (İ3) ve doğrudan istek 403 alır (D10).
+ * Satır eklemek ya da çıkarmak KULLANICI KARARIDIR (kapı genişlerse Ç13 «kilitli rol geçiyor» diye kırılır).
+ */
+const KARAR_KILIDI: Record<string, AppRole[]> = {
+  [`POST ${P}/cari/listesi`]: ['Purchasing', 'Logistics', 'Accounting'],                                   // K1
+  [`GET ${P}/cari-hareket/turler`]: ['Sales', 'Purchasing'],                                               // K2
+  [`POST ${P}/evrak/kaydet#DekontKaydetV2`]: ['Sales', 'Purchasing'],                                      // K3-a
+  [`POST ${P}/evrak/kaydet#VerilenTeklifKaydetV2`]: ['Accounting'],                                        // K3-b (B2B / Bayi ilk turda kapandı)
+  [`POST ${P}/evrak/kaydet#DahiliStokHareketKaydetV2`]: ['Accounting'],                                    // K3-c
+  [`POST ${P}/evrak/kaydet#PersonelIzinTalepKaydetV2`]: ['Accounting'],                                    // K3-f
+  [`POST ${P}/evrak/kaydet#UrunReceteKaydetV2`]: ['Quality'],                                              // K3-g
+  [`POST ${P}/evrak/kaydet#UretimTalepKaydetV2`]: ['Purchasing', 'Accounting'],                            // K3-h
+  [`POST ${P}/evrak/kaydet#UretimIsEmriOlusturV2`]: ['Purchasing', 'Accounting'],                          // K3-h
+  [`POST ${P}/evrak/kaydet#SatinAlmaTalepKaydetV2`]: ['Logistics', 'Accounting', 'Quality'],               // K3-i
+  [`POST ${P}/evrak/kaydet#BakimTalepKaydetV2`]: ['Purchasing'],                                           // K3-j
+  [`POST ${P}/evrak/kaydet#DepolarArasiSiparisKaydetV2`]: ['Purchasing', 'Accounting', 'Sales'],           // K3-k
+  [`POST ${P}/pull/personel`]: ['Manager', 'Accounting'],                                                  // K4
+  [`POST ${P}/pull/uretim-receteleri`]: ['Quality'],                                                       // K5
+  [`POST ${P}/ebelge/gelen`]: ['Sales', 'Logistics'],                                                      // K6
+  [`POST ${P}/ebelge/giden`]: ['Sales', 'Logistics'],
+  [`POST ${P}/ebelge/eirsaliye`]: ['Sales', 'Logistics'],
+  [`POST ${P}/ebelge/pdf`]: ['Sales', 'Logistics', 'Purchasing'],                                          // K7 / H1
+  [`POST ${P}/ebelge/xml`]: ['Sales', 'Logistics', 'Purchasing'],
+};
+/** Karar turundan ÖNCE de var olan kilitler — ADIYLA. Buraya satır eklemek kullanıcı kararıdır.
  *  Cari ekstre paneli Satış / Satın Alma / Lojistik'te boş kalıyor (uç 2026-08'den beri `mikroCariHareketler` okuma kapılı). */
 const BILINEN_KILIT: Record<string, AppRole[]> = {
   [`GET ${P}/cari-hareket/:cariKod`]: ['Sales', 'Purchasing', 'Logistics'],
@@ -286,15 +348,22 @@ const BILINEN_KILIT: Record<string, AppRole[]> = {
 const DAL_KAPISI: Record<string, string> = {
   [`POST ${P}/cari/kaydet#leads`]: 'leads:write',
   [`POST ${P}/cari/kaydet#suppliers`]: 'suppliers:write',
-  [`POST ${P}/cari/listesi#ara`]: 'staff',
-  [`POST ${P}/cari/listesi#tam`]: 'leads:write',
   ...Object.fromEntries(Object.entries(EVRAK_BEKLENEN).map(([y, k]) => [`POST ${P}/evrak/kaydet#${y}`, k])),
 };
 /** Gövdesiz / boş gövdeli istekte gövdeye bağlı kapının düştüğü dal (D1–D3 matrisi boş gövdeyle koşar). */
-const BOS_GOVDE_DALI: Record<string, string> = { 'govde:cari': 'leads:write', 'govde:cariListesi': 'leads:write', 'govde:evrak': 'staff' };
+const BOS_GOVDE_DALI: Record<string, string> = { 'govde:cari': 'leads:write', 'govde:evrak': 'staff' };
 const etkinEtiket = (anahtar: string): string => {
   const k = BEKLENEN[anahtar];
   return BOS_GOVDE_DALI[k] ?? k;
+};
+/** Uç ya da gövde dalı (`…#dal`) anahtarının etkin kapı etiketi. */
+const dalEtiketi = (anahtar: string): string => DAL_KAPISI[anahtar] ?? BEKLENEN[anahtar];
+/** Kapı etiketinin iki koşulu: `staff` = iç personel; `k:e` = koleksiyon kuralı; `staff+k:e` = ikisi birlikte. */
+const etiketKosullari = (etiket: string): { icRol: boolean; kural: [string, DbOp] | null } => {
+  if (etiket === 'staff') return { icRol: true, kural: null };
+  const m = /^(staff\+)?([A-Za-z]+):(read|write|delete)$/.exec(etiket);
+  if (!m) throw new Error(`tanınmayan kapı etiketi: ${etiket}`);
+  return { icRol: !!m[1], kural: [m[2], m[3] as DbOp] };
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -309,11 +378,11 @@ const adet = (satirlar: string[], tam: string): number => satirlar.filter(k => k
 const mikroSatir = kod.map(s => s.kod);
 
 const KAYIT = /\bapp\.(get|post|put|patch|delete|all|use|route)\(/;
-const HALKA = String.raw`C\.requireAuth|C\.requireMfaVerified|C\.requireStaff|C\.mikroLimiter|cariHedefKapisi|cariListesiKapisi|evrakYontemKapisi|C\.requireCollectionAccess\((?:'[A-Za-z]+'|opts\.collection), '(?:read|write|delete)'\)`;
+const HALKA = String.raw`C\.requireAuth|C\.requireMfaVerified|C\.requireStaff|C\.mikroLimiter|cariHedefKapisi|evrakYontemKapisi|C\.requireCollectionAccess\((?:'[A-Za-z]+'|opts\.collection), '(?:read|write|delete)'\)`;
 /** BAŞTAN SONA çapalı: tanınmayan halka, adlandırılmış işleyici, `async function`, değişkenli yol → eşleşmez. */
 const BASLIK = new RegExp(String.raw`^app\.(get|post)\((?:'(\/api\/mikro\/[A-Za-z0-9/:-]+)'|(opts\.route))((?:, (?:${HALKA}))*), async \(_?req: Request, res: Response\) => \{$`);
 const HALKA_AYIR = new RegExp(`, (${HALKA})`, 'g');
-const ROL_HALKASI = /^(?:C\.requireStaff|cariHedefKapisi|cariListesiKapisi|evrakYontemKapisi|C\.requireCollectionAccess\(.+\))$/;
+const ROL_HALKASI = /^(?:C\.requireStaff|cariHedefKapisi|evrakYontemKapisi|C\.requireCollectionAccess\(.+\))$/;
 
 interface Kayit { n: number; baslik: string; yontem: string; yol: string | null; fabrika: boolean; halkalar: string[]; sonraki: string }
 /** Her kayıt satırından `=> {` ile biten satıra kadar birleştirilmiş başlık. Başlık bir sonraki kayıt satırını AŞAMAZ. */
@@ -356,7 +425,6 @@ function etiketCikar(k: Kayit): string {
   if (h.length !== 1) throw new Error(`${k.baslik}: ${h.length} rol halkası`);
   if (h[0] === 'C.requireStaff') return 'staff';
   if (h[0] === 'cariHedefKapisi') return 'govde:cari';
-  if (h[0] === 'cariListesiKapisi') return 'govde:cariListesi';
   if (h[0] === 'evrakYontemKapisi') return 'govde:evrak';
   const m = ince(h[0]);
   if (!m) throw new Error(`${k.baslik}: tanınmayan rol halkası ${h[0]}`);
@@ -407,7 +475,11 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
       const anahtar = `${k.yontem} ${k.yol}`;
       if (opsMu(anahtar)) continue;
       expect(etiketCikar(k), anahtar).toBe(BEKLENEN[anahtar]);
+      // MFA halkası isteğe bağlı DEĞİL: MFASIZ dışındaki her kayıtta ikinci halka MFA'dır.
+      expect(k.halkalar[1] === 'C.requireMfaVerified', `${anahtar} — MFA halkası`).toBe(!MFASIZ.has(anahtar));
     }
+    // Liste bayatlamasın: MFASIZ'daki her anahtar BEKLENEN'de bulunur.
+    expect([...MFASIZ].filter(a => !(a in BEKLENEN))).toEqual([]);
     // İki fabrika kaydı (canlı SQL fabrikası + çağıranı olmayan ölü fabrika) AYNI zinciri taşır.
     for (const k of fabrika()) {
       expect(k.halkalar, `fabrika :${k.n}`).toEqual(['C.requireAuth', 'C.requireMfaVerified', "C.requireCollectionAccess(opts.collection, 'write')"]);
@@ -427,6 +499,9 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
     expect(BASLIK.test("app.post('/api/mikro/yeni', C.requireAuth, ozelKapi, async (req: Request, res: Response) => {")).toBe(false);
     expect(BASLIK.test('app.post(yol, C.requireAuth, C.requireStaff, async (req: Request, res: Response) => {')).toBe(false);
     expect(BASLIK.test("app.post('/api/mikro/yeni', C.requireAuth, C.requireStaff, async (req: Request, res: Response) => {")).toBe(true);
+    // K1: gövdeye bağlı `cariListesiKapisi` KALKTI — geri gelirse başlık tanınmaz (arama dalı yeniden iç personele düşmesin).
+    expect(BASLIK.test("app.post('/api/mikro/cari/listesi', C.requireAuth, C.requireMfaVerified, cariListesiKapisi, async (req: Request, res: Response) => {")).toBe(false);
+    expect(mikroSatir.filter(k => /cariListesiKapisi/.test(k))).toEqual([]);
   });
 
   it('Ç6 — istisna listesi ADIYLA: 8 ops ucu ara katmansız ve ilk satırı ops jetonu kapısı; liste dışı ara katmansız kayıt yok', () => {
@@ -440,21 +515,31 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
     }
   });
 
-  it('Ç7 — gövdeye bağlı üç kapı tam metin; işleyiciler kapıyla AYNI ayıklayıcıyı kullanır; ayrı beyaz liste yok', () => {
+  it('Ç7 — gövdeye bağlı iki kapı tam metin; işleyiciler kapıyla AYNI ayıklayıcıyı kullanır; ayrı beyaz liste yok', () => {
     const TEK = [
       "(govde as { collection?: unknown } | undefined)?.collection === 'suppliers' ? 'suppliers' : 'leads';",
       "C.requireCollectionAccess(cariHedefKoleksiyonu(req.body), 'write')(req, res, next);",
       'const targetCollection = cariHedefKoleksiyonu(req.body);',
       "return typeof m === 'string' ? m.trim().slice(0, 100) : '';",
-      "cariAramaMetni(req.body) ? C.requireStaff(req, res, next) : C.requireCollectionAccess('leads', 'write')(req, res, next);",
       'const nameSearch = cariAramaMetni(req.body);',
-      'const kapi = MIKRO_EVRAK_KAPILARI.get(evrakYontemi(req.body));',
-      "return kapi === undefined || kapi === 'staff' ? C.requireStaff(req, res, next) : C.requireCollectionAccess(kapi[0], kapi[1])(req, res, next);",
+      // evrak/kaydet: koşullar ortak tablodan çözülür — iç personel şartı ÖNCE, koleksiyon kuralı SONRA (H4).
+      'const { icRol, kural } = evrakKapiKosullari(MIKRO_EVRAK_KAPILARI.get(evrakYontemi(req.body)));',
+      'const kuralKapisi = (hata?: unknown): void => {',
+      'if (hata || !kural) { next(hata); return; }',
+      'Promise.resolve(C.requireCollectionAccess(kural[0], kural[1])(req, res, next)).catch(next);',
+      'return icRol ? C.requireStaff(req, res, kuralKapisi) : kuralKapisi();',
       'const method = evrakYontemi(req.body);',
       'if (!MIKRO_EVRAK_KAPILARI.has(method)) {',
       'const { ok, data, status } = await mikroPost(method, payload, true);',
     ];
     for (const satir of TEK) expect(adet(mikroSatir, satir), satir).toBe(1);
+    // K1: arama metni kapıya GİRMEZ — ayıklayıcının tek çağıranı işleyicidir (kapı sabit `leads` yazma; Ç3 / Ç4 rota satırını kilitler).
+    expect(mikroSatir.filter(k => /cariAramaMetni\(/.test(k))).toEqual(['const nameSearch = cariAramaMetni(req.body);']);
+    // Evrak tablosunu kapı ve işleyici DIŞINDA okuyan yok (kapıyı atlayan ikinci yol doğmasın).
+    expect(mikroSatir.filter(k => /MIKRO_EVRAK_KAPILARI|evrakKapiKosullari/.test(k) && !k.startsWith('import '))).toEqual([
+      'const { icRol, kural } = evrakKapiKosullari(MIKRO_EVRAK_KAPILARI.get(evrakYontemi(req.body)));',
+      'if (!MIKRO_EVRAK_KAPILARI.has(method)) {',
+    ]);
     expect(mikroSatir.filter(k => /MIKRO_PUSH_WHITELIST|\.nameSearch\b.*\.trim\(|req\.body.*\.method\b/.test(k) && !k.startsWith('const { method: hamYontem'))).toEqual([]);
     // Yönetici ara katmanı bu dosyada KULLANILMAZ: süper yöneticiyi geçirmez (sahip hesabı Ayarlar'ı rolünden bağımsız görür).
     expect(mikroSatir.filter(k => /requireAdmin/.test(k))).toEqual([]);
@@ -493,31 +578,50 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
     ]);
   });
 
-  it('Ç9 — politika değişmezi: her ince kapı kuralı AÇIK tanımlı, dış rol ve rolsüz hesap GEÇEMEZ (tek istisna requireStaff ile çiftli orders yazma)', () => {
+  it('Ç9 — politika değişmezi: her ince kapı kuralı AÇIK tanımlı, dış rol ve rolsüz hesap GEÇEMEZ (kuralı dış rol içeren kapı YALNIZ iç personel şartıyla çiftli)', () => {
     const etiketler = new Set<string>([
-      ...KAPILI.map(a => BEKLENEN[a]), 'leads:write', 'suppliers:write', ...Object.values(EVRAK_BEKLENEN),
+      ...KAPILI.map(a => BEKLENEN[a]), 'leads:write', 'suppliers:write', ...Object.values(EVRAK_BEKLENEN), ...Object.values(UC_TABLOSU_BEKLENEN),
     ]);
+    const ciftli: string[] = [];
     for (const etiket of etiketler) {
       if (etiket === 'staff' || etiket.startsWith('govde:')) continue;
-      if (etiket === 'staff+orders:write') {
-        // Kural dış rol içerir → TEK BAŞINA kapı olamaz; Ç5 onu yalnız requireStaff ile çiftli kabul eder.
-        expect(EXTERNAL_ROLES.some(r => isAllowed(r, 'orders', 'write'))).toBe(true);
+      const { icRol, kural } = etiketKosullari(etiket);
+      if (!kural) throw new Error(`${etiket}: kuralsız etiket`);
+      const [k, e] = kural;
+      expect(hasExplicitRule(k) || ADMIN_ONLY_COLLECTIONS.has(k), `${etiket}: kuralsız koleksiyon (yalnız Admin geçer = sessiz kilit)`).toBe(true);
+      expect(isAllowed(null, k, e), `${etiket}: rolsüz hesap geçiyor`).toBe(false);
+      if (icRol) {
+        // Kural dış rol içerir → TEK BAŞINA kapı olamaz. Çiftleme yalnız GEREKTİĞİNDE yazılır (gereksiz çift, kuralın dış role
+        // açıldığı izlenimi verir): uç düzeyinde Ç5 `requireStaff` + `orders` yazma çiftini, yöntem düzeyinde tablo `icRolVe`'yi ister.
+        expect(EXTERNAL_ROLES.some(r => isAllowed(r, k, e)), `${etiket}: kural dış rol içermiyor — çiftleme gereksiz`).toBe(true);
+        ciftli.push(etiket);
         continue;
       }
-      const [k, e] = etiket.split(':') as [string, DbOp];
-      expect(hasExplicitRule(k) || ADMIN_ONLY_COLLECTIONS.has(k), `${etiket}: kuralsız koleksiyon (yalnız Admin geçer = sessiz kilit)`).toBe(true);
       expect(EXTERNAL_ROLES.filter(r => isAllowed(r, k, e)), `${etiket}: dış rol geçiyor`).toEqual([]);
-      expect(isAllowed(null, k, e), `${etiket}: rolsüz hesap geçiyor`).toBe(false);
+    }
+    expect(sirali(ciftli)).toEqual(['staff+orders:write', 'staff+quotations:write']);
+    // H4: teklif yöntemi tabloda İKİ koşulu birlikte taşır; düz `quotations` yazma ikilisi tabloda HİÇBİR yöntemde yok
+    // (kural B2B / Bayi'yi geçirir — düz yazılırsa ilk turda kapanan açık yeniden açılır).
+    expect(MIKRO_EVRAK_KAPILARI.get('VerilenTeklifKaydetV2')).toEqual({ icRolVe: ['quotations', 'write'] });
+    expect(sirali(EXTERNAL_ROLES.filter(r => isAllowed(r, 'quotations', 'write')))).toEqual(sirali(EXTERNAL_ROLES));
+    for (const [yontem, kapi] of MIKRO_EVRAK_KAPILARI) {
+      if (kapi !== 'staff' && !('icRolVe' in kapi)) expect(EXTERNAL_ROLES.filter(r => isAllowed(r, kapi[0], kapi[1])), `${yontem}: düz ikili dış rol içeriyor`).toEqual([]);
+      // Ortak tablodan soran istemci de dış rolü HİÇBİR yöntemde geçirmez (tanınmayan yöntem dâhil).
+      expect(EXTERNAL_ROLES.filter(r => evrakKapisindanGecer(r, yontem)), `${yontem}: dış rol istemci süzgecinden geçiyor`).toEqual([]);
+    }
+    expect(EXTERNAL_ROLES.filter(r => evrakKapisindanGecer(r, 'BilinmeyenV2'))).toEqual([]);
+    for (const uc of Object.keys(MIKRO_UC_KAPILARI) as MikroKapiliUc[]) {
+      expect(EXTERNAL_ROLES.filter(r => ucKapisindanGecer(r, uc)), `${uc}: dış rol ortak uç tablosundan geçiyor`).toEqual([]);
     }
   });
 
   it('Ç10 — elle yazılan GECEN tablosu gerçek kuralla aynı', () => {
     expect(sirali(GECEN.staff)).toEqual(sirali(STAFF_ROLES));
-    expect(sirali(GECEN['staff+orders:write'])).toEqual(sirali(STAFF_ROLES.filter(r => isAllowed(r, 'orders', 'write'))));
     for (const [etiket, roller] of Object.entries(GECEN)) {
-      if (etiket === 'staff' || etiket === 'staff+orders:write') continue;
-      const [k, e] = etiket.split(':') as [string, DbOp];
-      expect(sirali(roller), etiket).toEqual(sirali(APP_ROLES.filter(r => isAllowed(r, k, e))));
+      // Sunucu zincirinin anlamı: iç personel şartı (varsa) VE koleksiyon kuralı (varsa).
+      const { icRol, kural } = etiketKosullari(etiket);
+      const gercek = APP_ROLES.filter(r => (!icRol || STAFF_ROLES.includes(r)) && (!kural || isAllowed(r, kural[0], kural[1])));
+      expect(sirali(roller), etiket).toEqual(sirali(gercek));
     }
     // Tabloda kullanılmayan satır yok (bayat kapı birikmesin).
     const kullanilan = new Set<string>([...KAPILI.map(etkinEtiket), ...Object.values(DAL_KAPISI)]);
@@ -566,35 +670,76 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
     ]);
   });
 
-  it('evrak tablosu — kaynak tablo elle yazılan beklenenle aynı: 26 yöntem = 15 ince + 11 iç personel; miras anahtar beyaz listede değil', () => {
-    const kaynak = Object.fromEntries([...MIKRO_EVRAK_KAPILARI].map(([y, k]) => [y, k === 'staff' ? 'staff' : `${k[0]}:${k[1]}`]));
+  it('evrak tablosu — kaynak tablo elle yazılan beklenenle aynı: 26 yöntem = 24 ince + 1 iç personel VE ince + 1 yalnız iç personel; miras anahtar beyaz listede değil', () => {
+    // Etiket tablonun HAM biçiminden üretilir (üretim çözücüsü `evrakKapiKosullari` aşağıda ayrıca sınanır).
+    const kaynakEtiketi = (k: EvrakKapisi): string => (k === 'staff' ? 'staff' : 'icRolVe' in k ? `staff+${k.icRolVe[0]}:${k.icRolVe[1]}` : `${k[0]}:${k[1]}`);
+    const kaynak = Object.fromEntries([...MIKRO_EVRAK_KAPILARI].map(([y, k]) => [y, kaynakEtiketi(k)]));
     expect(kaynak).toEqual(EVRAK_BEKLENEN);
-    expect(Object.values(EVRAK_BEKLENEN).filter(k => k === 'staff')).toHaveLength(11);
-    expect(Object.values(EVRAK_BEKLENEN).filter(k => k !== 'staff')).toHaveLength(15);
+    expect(Object.keys(EVRAK_BEKLENEN)).toHaveLength(26);
+    // K3-e: `'staff'` YALNIZ etiket basımında kalır (eşdeğer Cetpa koleksiyonu yok); diğer 25 yöntemin koleksiyon kuralı var.
+    expect(Object.entries(EVRAK_BEKLENEN).filter(([, k]) => k === 'staff').map(([y]) => y)).toEqual(['EtiketBasimKaydetV2']);
+    expect(Object.entries(EVRAK_BEKLENEN).filter(([, k]) => k.startsWith('staff+')).map(([y]) => y)).toEqual(['VerilenTeklifKaydetV2']);
+    // İ1: 25 kuralın hepsi YAZMA kuralıdır (uç Mikro'ya yazar).
+    expect(Object.values(EVRAK_BEKLENEN).filter(k => k !== 'staff' && !k.endsWith(':write'))).toEqual([]);
     for (const ad of ['constructor', 'toString', 'hasOwnProperty', '__proto__', '']) expect(MIKRO_EVRAK_KAPILARI.has(ad), ad).toBe(false);
     expect(evrakYontemi(undefined)).toBe('');
     expect(evrakYontemi(null)).toBe('');
     expect(evrakYontemi({ method: 5 })).toBe('');
     expect(evrakYontemi({ method: ['DekontKaydetV2'] })).toBe('');
     expect(evrakYontemi({ method: 'DekontKaydetV2' })).toBe('DekontKaydetV2');
-    // İstemci süzgeci (yeniden deneme kuyruğu) sunucu kapısıyla aynı kararı verir.
+    // Kapı çözücüsü — sunucu kapısı ile istemci süzgecinin ORTAK adımı: tanınmayan yöntem `'staff'` sayılır.
+    expect(evrakKapiKosullari(undefined)).toEqual({ icRol: true, kural: null });
+    expect(evrakKapiKosullari('staff')).toEqual({ icRol: true, kural: null });
+    expect(evrakKapiKosullari(['leads', 'write'])).toEqual({ icRol: false, kural: ['leads', 'write'] });
+    expect(evrakKapiKosullari({ icRolVe: ['quotations', 'write'] })).toEqual({ icRol: true, kural: ['quotations', 'write'] });
+    // İstemci süzgeci (düğme, sessiz çağrı, yeniden deneme kuyruğu) sunucu kapısıyla aynı kararı verir.
     for (const [yontem, etiket] of Object.entries(EVRAK_BEKLENEN)) {
       for (const rol of APP_ROLES) expect(evrakKapisindanGecer(rol, yontem), `${yontem} × ${rol}`).toBe(gecenRoller(etiket).includes(rol));
       expect(evrakKapisindanGecer(null, yontem)).toBe(false);
+      expect(evrakKapisindanGecer(undefined, yontem)).toBe(false);
     }
     expect(APP_ROLES.filter(r => evrakKapisindanGecer(r, 'BilinmeyenV2'))).toEqual(STAFF_ROLES);
   });
+
+  it('Ç16 — ortak uç tablosu (src/lib/mikroUcKapilari.ts) = elle yazılan beklenen = rota satırındaki kapı; istemci süzgeci sunucu kapısıyla aynı kararı verir', () => {
+    const kaynak = Object.fromEntries(Object.entries(MIKRO_UC_KAPILARI).map(([a, k]) => [a, `${k[0]}:${k[1]}`]));
+    expect(kaynak).toEqual(UC_TABLOSU_BEKLENEN);
+    expect(Object.keys(UC_TABLOSU_BEKLENEN)).toHaveLength(10);
+    // Anahtarlar BEKLENEN anahtarlarıyla BİREBİR; kapı etiketi aynı. Ç3 / Ç4 rota metnini BEKLENEN'e, bu çit BEKLENEN'i tabloya bağlar.
+    for (const [anahtar, etiket] of Object.entries(UC_TABLOSU_BEKLENEN)) {
+      expect(BEKLENEN[anahtar], `${anahtar}: BEKLENEN'de yok ya da kapısı farklı`).toBe(etiket);
+      // Tablo yalnız SABİT ince kapılı ucu taşır: gövdeye bağlı ya da iç personel çiftli kapı tek ikiliyle anlatılamaz.
+      expect(etiketKosullari(etiket).icRol, `${anahtar}: iç personel çiftli kapı ortak uç tablosuna yazılamaz`).toBe(false);
+    }
+    // Karar turunda kapısı değişen HER uç tabloda (istemci koşulu sorabilsin); K9 kapısı değişmeden tabloda.
+    const kararUclari = Object.keys(KARAR_KILIDI).filter(a => !a.includes('#'));
+    expect(kararUclari.filter(a => !(a in UC_TABLOSU_BEKLENEN)), 'kilitleyen ama ortak tabloda olmayan uç = istemci koşulu soramaz').toEqual([]);
+    expect(sirali(Object.keys(UC_TABLOSU_BEKLENEN).filter(a => !kararUclari.includes(a)))).toEqual([`POST ${P}/tahsilat/kaydet`]);
+    for (const [anahtar, etiket] of Object.entries(UC_TABLOSU_BEKLENEN)) {
+      const uc = anahtar as MikroKapiliUc;
+      for (const rol of APP_ROLES) expect(ucKapisindanGecer(rol, uc), `${anahtar} × ${rol}`).toBe(gecenRoller(etiket).includes(rol));
+      expect(ucKapisindanGecer(null, uc)).toBe(false);
+      expect(ucKapisindanGecer(undefined, uc)).toBe(false);
+    }
+    // Tip dışı çağrı (tabloda olmayan anahtar, miras anahtar) kapalı başarısızlıktır — fırlatmaz, geçirmez.
+    for (const ad of [`POST ${P}/yevmiye/kaydet`, 'constructor', 'toString', '__proto__', '']) {
+      expect(APP_ROLES.filter(r => ucKapisindanGecer(r, ad as MikroKapiliUc)), `'${ad}'`).toEqual([]);
+    }
+    // H1 / H6: PDF ve XML İKİ sabit satırdır — yöne bağlı ikinci tablo / yardımcı (`EBELGE_INDIRME_KAPISI`, `eBelgeIndirebilir`) YAZILMAZ.
+    expect(sirali(Object.keys(ucKapilariModulu))).toEqual(['MIKRO_UC_KAPILARI', 'ucKapisindanGecer']);
+    expect(MIKRO_UC_KAPILARI[`POST ${P}/ebelge/pdf`]).toEqual(['mikroFaturalar', 'read']);
+    expect(MIKRO_UC_KAPILARI[`POST ${P}/ebelge/xml`]).toEqual(['mikroFaturalar', 'read']);
+  });
 });
 
-describe('kilit değişmezi (R2) — hiçbir kapı, ucu çağıran ekranı bugün gören bir iç rolü kilitlemez', () => {
-  /** Kapılı her uç; gövdeye bağlı üç uç dallarına açılır. */
+describe('kilit değişmezi (İ3) — ÖLÜ DÜĞME YOK: düğmeyi / çağrıyı gören her rol kapıdan geçer; kilitlenenler adıyla tabloda', () => {
+  /** Kapılı her uç; gövdeye bağlı iki uç dallarına açılır. */
   const TUM_DALLAR = [
     ...KAPILI.filter(a => !BEKLENEN[a].startsWith('govde:')),
     ...Object.keys(DAL_KAPISI),
   ];
-  const dalEtiketi = (anahtar: string): string => DAL_KAPISI[anahtar] ?? BEKLENEN[anahtar];
 
-  it('Ç13 — her uç / dal ya EKRANI_GOREN\'de ya CAGIRANI_YOK\'ta; görenlerin hepsi kapıdan geçer (bilinen eski kilitler adıyla)', () => {
+  it('Ç13 — ölü düğme yok: her uç / dal ya EKRANI_GOREN\'de ya CAGIRANI_YOK\'ta; görenlerin HEPSİ kapıdan geçer (bilinen eski kilitler adıyla)', () => {
     const gorulen = Object.keys(EKRANI_GOREN);
     expect(gorulen.filter(a => CAGIRANI_YOK.includes(a)), 'iki tabloda birden').toEqual([]);
     expect(new Set(CAGIRANI_YOK).size).toBe(CAGIRANI_YOK.length);
@@ -605,11 +750,42 @@ describe('kilit değişmezi (R2) — hiçbir kapı, ucu çağıran ekranı bugü
       const gecen = gecenRoller(dalEtiketi(anahtar));
       const kilitlenen = gorenler.filter(r => !gecen.includes(r));
       if (sirali(kilitlenen).join() !== sirali(BILINEN_KILIT[anahtar] ?? []).join()) {
-        kilitler.push(`${anahtar} [${dalEtiketi(anahtar)}] → KİLİTLENEN: ${kilitlenen.join(', ') || '—'} (bilinen: ${(BILINEN_KILIT[anahtar] ?? []).join(', ') || '—'})`);
+        kilitler.push(`${anahtar} [${dalEtiketi(anahtar)}] → ÖLÜ DÜĞME: ${kilitlenen.join(', ') || '—'} (bilinen: ${(BILINEN_KILIT[anahtar] ?? []).join(', ') || '—'})`);
       }
     }
     expect(kilitler).toEqual([]);
     expect(Object.keys(BILINEN_KILIT).filter(a => !(a in EKRANI_GOREN))).toEqual([]);
+    // Bilinen eski kilit listesi karar turunda BÜYÜMEDİ (tek satır; yeni kilit buraya değil KARAR_KILIDI'na yazılır).
+    expect(BILINEN_KILIT).toEqual({ [`GET ${P}/cari-hareket/:cariKod`]: ['Sales', 'Purchasing', 'Logistics'] });
+  });
+
+  it('Ç13 — kilitlenenler tablosu (§ 10.1): KARAR_KILIDI\'ndaki her rol GERÇEKTEN kilitli, düğmeyi görenler arasında DEĞİL ve ortak tablo ona «geçemez» der', () => {
+    expect(Object.keys(KARAR_KILIDI).filter(a => !TUM_DALLAR.includes(a)), 'tabloda uç / dal olmayan anahtar').toEqual([]);
+    for (const [anahtar, kilitli] of Object.entries(KARAR_KILIDI)) {
+      expect(kilitli.length, `${anahtar}: boş satır`).toBeGreaterThan(0);
+      expect(new Set(kilitli).size, `${anahtar}: yinelenen rol`).toBe(kilitli.length);
+      expect(kilitli.filter(r => !STAFF_ROLES.includes(r)), `${anahtar}: tabloya yalnız iç rol yazılır (dış rol ilk turda kapandı)`).toEqual([]);
+      const gecen = gecenRoller(dalEtiketi(anahtar));
+      // GEVŞETME çiti: kapı genişler de kilitli rol geçmeye başlarsa burada kırılır — karar BİLİNÇLİ güncellenir.
+      expect(kilitli.filter(r => gecen.includes(r)), `${anahtar}: kilitli rol kapıdan geçiyor`).toEqual([]);
+      // İ3: kilitli rol düğmeyi GÖRMEZ (görseydi ölü düğme olurdu). Çağıranı kalmayan uçta (K1 / H3) gören zaten yok.
+      const gorenler = EKRANI_GOREN[anahtar] ?? [];
+      expect(kilitli.filter(r => gorenler.includes(r)), `${anahtar}: kilitli rol düğmeyi görüyor`).toEqual([]);
+      if (!(anahtar in EKRANI_GOREN)) expect(CAGIRANI_YOK, anahtar).toContain(anahtar);
+      // İ4: istemcinin soracağı ORTAK tablo bu anahtarı tanır ve kilitli role «geçemez», görene «geçer» der.
+      const [uc, yontem] = anahtar.split('#');
+      const sor = (r: AppRole): boolean => {
+        if (yontem) { expect(uc).toBe(`POST ${P}/evrak/kaydet`); expect(MIKRO_EVRAK_KAPILARI.has(yontem), yontem).toBe(true); return evrakKapisindanGecer(r, yontem); }
+        expect(uc in MIKRO_UC_KAPILARI, `${uc}: ortak uç tablosunda yok`).toBe(true);
+        return ucKapisindanGecer(r, uc as MikroKapiliUc);
+      };
+      expect(kilitli.filter(sor), `${anahtar}: ortak tablo kilitli rolü geçiriyor`).toEqual([]);
+      expect(gorenler.filter(r => !sor(r)), `${anahtar}: ortak tablo düğmeyi gören rolü geçirmiyor`).toEqual([]);
+    }
+    // Tablonun TAMAMI: 19 satır (K1, K2, K3 × 10 yöntem, K4, K5, K6 × 3, K7 × 2) — kilitleyen yeni kapı buraya adıyla girer.
+    expect(Object.keys(KARAR_KILIDI)).toHaveLength(19);
+    // K3-a ↔ K2: dekont penceresini açabilen (yazma) her rol pencerenin okuduğu tür listesini de okur — pencere yarım açılmaz.
+    expect(gecenRoller('mikroCariHareketler:write').filter(r => !gecenRoller('mikroCariHareketler:read').includes(r))).toEqual([]);
   });
 
   it('Ç13 — değişmez kilidi YAKALAR (Ayarlar paneline Muhasebe eklenirse stok importunda kilitlenir)', () => {
@@ -642,6 +818,29 @@ describe('kilit değişmezi (R2) — hiçbir kapı, ucu çağıran ekranı bugü
     const portal = kodSatirlari(join(SRC_KOK, 'components', 'B2BPortal.tsx')).map(s => s.kod.trim());
     expect(adet(portal, 'const icRol = (STAFF_ROLES as readonly string[]).includes(userRole);')).toBe(1);
     expect(portal.filter(k => k.includes('mikroGonderebilir='))).toEqual(['onConvertToOrder={handleConvertToOrder} mikroGonderebilir={icRol} t={currentT} />']);
+  });
+
+  it('Ç17 — H2 / İ5 veri katmanı: `eBelgeler` okuma = `mikroFaturalar` okuma (Yönetici, Müdür, Muhasebe); e-Belge sekmesi aynı kümeyle açılır, salt okunur rolü YOK', () => {
+    const okuyan = (koleksiyon: string): string[] => sirali(APP_ROLES.filter(r => isAllowed(r, koleksiyon, 'read')));
+    // Koleksiyon GELEN e-faturaları taşır (tedarikçi fatura numarası, gönderen, VKN, tutar): Satış / Lojistik / Satın Alma OKUYAMAZ.
+    expect(okuyan('eBelgeler')).toEqual(sirali(['Admin', 'Manager', 'Accounting']));
+    expect(okuyan('eBelgeler')).toEqual(okuyan('mikroFaturalar'));
+    // Yazabilen her rol okur (çekme düğmesine basan sonucu görebilsin) ve indirme kapısından da geçer (K6 ⊆ K7).
+    expect(gecenRoller('eBelgeler:write').filter(r => !okuyan('eBelgeler').includes(r))).toEqual([]);
+    expect(gecenRoller('eBelgeler:write').filter(r => !gecenRoller('mikroFaturalar:read').includes(r))).toEqual([]);
+    // Sekme: tam yetkili = okuma kümesi, salt okunur küme BOŞ (Satış ve Lojistik sekmeyi kaybetti; ekrandaki liste salt
+    // okunur rolde zaten yüklenmiyordu — açık, koleksiyonun `/api/db` üzerinden okunabilmesiydi).
+    const app = kodSatirlari(join(SRC_KOK, 'App.tsx')).map(s => s.kod.trim());
+    expect(app.filter(k => /^ebelge:\s+\{/.test(k))).toEqual(['ebelge:        { full: [UserRole.Admin, UserRole.Accounting, UserRole.Manager], readonly: [] },']);
+    expect(sirali(EBELGE)).toEqual(okuyan('eBelgeler'));
+    // H2'nin ölçümü: `eBelgeler`'i sunucu dışında okuyan TEK bileşen e-Belge Merkezi. Yeni okuyan eklenirse İ5 o ekran için yeniden düşünülür.
+    // Ham metin ön süzgeci: yorum ayıklama (pahalı) yalnız adı geçiren birkaç dosyada koşar.
+    const gecenDosyalar = kaynakDosyalari(SRC_KOK)
+      .filter(y => !gorece(y).startsWith('src/server/') && oku(y).includes('eBelgeler') && kodSatirlari(y).some(s => /\beBelgeler\b/.test(s.kod)))
+      .map(gorece);
+    expect(sirali(gecenDosyalar)).toEqual([
+      'src/components/EBelgeMerkezi.tsx', 'src/lib/collections.ts', 'src/lib/mikroUcKapilari.ts', 'src/lib/rbac.ts',
+    ]);
   });
 });
 
@@ -750,7 +949,7 @@ describe('davranış — gerçek express + üretim zinciri (Mikro\'ya hiç gidil
     expect({
       ops: dagilim(k => k === 'ops'), staff: dagilim(k => k === 'staff'), staffArtiInce: dagilim(k => k === 'staff+orders:write'),
       govde: dagilim(k => k.startsWith('govde:')), ince: dagilim(k => /^[A-Za-z]+:(read|write|delete)$/.test(k)),
-    }).toEqual({ ops: 8, staff: 10, staffArtiInce: 2, govde: 3, ince: 38 });
+    }).toEqual({ ops: 8, staff: 4, staffArtiInce: 2, govde: 2, ince: 45 });   // karar turu: 6 uç `staff` → ince, `cari/listesi` gövdeye bağlı → ince; Q serisi: `seri-ozet` ops jetonu (7 → 8)
   });
 
   it('D1 — kimliksiz istek: 53 kapılı ucun hepsi 401', async () => {
@@ -786,25 +985,26 @@ describe('davranış — gerçek express + üretim zinciri (Mikro\'ya hiç gidil
     }
   });
 
-  it('D4 — cari/listesi: arama metni yoksa TAM import = leads yazma kapısı; arama iç personele açık', async () => {
+  it('D4 — cari/listesi (K1): kapı gövdeye BAĞLI DEĞİL — tam import da arama da `leads` yazma kapısında (Yönetici, Müdür, Satış)', async () => {
     const uc = `POST ${P}/cari/listesi`;
-    const tamImport = { Admin: 200, Manager: 200, Sales: 200, Purchasing: 403, Logistics: 403, Accounting: 403, HR: 403, B2B: 403, Dealer: 403, rolsuz: 403 };
-    for (const govde of [{}, { nameSearch: '' }, { nameSearch: '   ' }, { nameSearch: 5 }, { whereStr: "cari_unvan1 LIKE '%a%'" }]) {
+    const beklenen = Object.fromEntries(Object.keys(KIMLIKLER).map(k => [k, ['Admin', 'Manager', 'Sales', 'super-rolsuz'].includes(k) ? 200 : 403]));
+    // Tam import gövdeleri + ARAMA gövdeleri (joker ve tek harf dâhil) + gövdesiz POST: sonuç HEPSİNDE aynı.
+    // İlk turda arama dalı iç personele açıktı; iki dal da `leads`'e yazdığı için (arama 200 cariye kadar) kapı tekleşti.
+    const govdeler: unknown[] = [
+      {}, { nameSearch: '' }, { nameSearch: '   ' }, { nameSearch: 5 }, { whereStr: "cari_unvan1 LIKE '%a%'" },
+      { nameSearch: 'yapı' }, { nameSearch: '%' }, { nameSearch: '_' }, { nameSearch: 'a' }, null,
+    ];
+    for (const govde of govdeler) {
       const sonuc: Record<string, number> = {};
-      for (const k of Object.keys(tamImport)) sonuc[k] = (await istek(uc, { kimlik: k, govde })).kod;
-      expect(sonuc, JSON.stringify(govde)).toEqual(tamImport);
+      for (const k of Object.keys(KIMLIKLER)) sonuc[k] = (await istek(uc, { kimlik: k, govde })).kod;
+      expect(sonuc, JSON.stringify(govde)).toEqual(beklenen);
     }
-    // Joker (`%`, `_`) ve tek harf de ARAMA dalıdır: kapı sonucu aynı (iç rol 200, dış rol 403). Bu dalın tam importa
-    // dönüşmesini işleyici engeller: tek sayfa + jokerler düz karakter (mikroRoutes.eslemeCari.test.ts).
-    for (const nameSearch of ['yapı', '%', '_', 'a']) {
-      const arama: Record<string, number> = {};
-      for (const k of Object.keys(KIMLIKLER)) arama[k] = (await istek(uc, { kimlik: k, govde: { nameSearch } })).kod;
-      expect(arama, nameSearch).toEqual({ ...Object.fromEntries(IC.map(r => [r, 200])), 'super-rolsuz': 200, B2B: 403, Dealer: 403, rolsuz: 403 });
-    }
+    // Kilitlenenler (bilerek): arama kutusunu ilk turda gören Satın Alma, Lojistik, Muhasebe — arama gövdesiyle de 403.
+    for (const rol of KARAR_KILIDI[uc]) expect((await istek(uc, { kimlik: rol, govde: { nameSearch: 'yapı' } })).kod, rol).toBe(403);
   });
 
   it('D4 — gövdesiz POST gövdeye bağlı kapıları çökertmez (express `req.body` tanımsız): iç rol geçer, dış rol 403', async () => {
-    for (const uc of [`POST ${P}/cari/kaydet`, `POST ${P}/cari/listesi`, `POST ${P}/evrak/kaydet`]) {
+    for (const uc of [`POST ${P}/cari/kaydet`, `POST ${P}/evrak/kaydet`]) {
       expect((await istek(uc, { kimlik: 'Admin', govde: null })).kod, uc).toBe(200);
       expect((await istek(uc, { kimlik: 'B2B', govde: null })).kod, uc).toBe(403);
       expect((await istek(uc, { kimlik: 'rolsuz', govde: null })).kod, uc).toBe(403);
@@ -812,13 +1012,21 @@ describe('davranış — gerçek express + üretim zinciri (Mikro\'ya hiç gidil
   });
 
   it('D5 — 403 metni kapıya göre (istemcinin ekranda gösterdiği metin)', async () => {
-    expect((await istek(`POST ${P}/ebelge/gelen`, { kimlik: 'B2B' })).govde).toEqual({ error: 'Bu işlem için personel yetkisi gerekir.' });
+    expect((await istek(`GET ${P}/status`, { kimlik: 'B2B' })).govde).toEqual({ error: 'Bu işlem için personel yetkisi gerekir.' });
+    // K6: e-belge çekme artık ince kapıda — dış rol de kilitlenen iç rol de AYNI metni görür.
+    expect((await istek(`POST ${P}/ebelge/gelen`, { kimlik: 'B2B' })).govde).toEqual({ error: 'Bu veri için yetkiniz yok.' });
+    expect((await istek(`POST ${P}/ebelge/gelen`, { kimlik: 'Sales' })).govde).toEqual({ error: 'Bu veri için yetkiniz yok.' });
     expect((await istek(`POST ${P}/yevmiye/kaydet`, { kimlik: 'Sales' })).govde).toEqual({ error: 'Bu veri için yetkiniz yok.' });
     expect((await istek(`POST ${P}/tamir/ham-satir-temizle`, { kimlik: 'Accounting' })).govde).toEqual({ error: 'Bu veri için yetkiniz yok.' });
     expect((await istek(`GET ${P}/tablolar`, { kimlik: 'Dealer' })).govde).toEqual({ error: 'Bu veri için yetkiniz yok.' });
     // İç personel + ince kapı: dış rol İLK halkada (personel), `orders` yazamayan iç rol ikincide durur.
     expect((await istek(`POST ${P}/siparis/kaydet`, { kimlik: 'Dealer' })).govde).toEqual({ error: 'Bu işlem için personel yetkisi gerekir.' });
     expect((await istek(`POST ${P}/siparis/kaydet`, { kimlik: 'HR' })).govde).toEqual({ error: 'Bu veri için yetkiniz yok.' });
+    // H4 — teklif yöntemi aynı çift: dış rol personel halkasında, `quotations` yazamayan iç rol (Muhasebe) kural halkasında durur.
+    const teklif = { method: 'VerilenTeklifKaydetV2', payload: {} };
+    expect((await istek(`POST ${P}/evrak/kaydet`, { kimlik: 'B2B', govde: teklif })).govde).toEqual({ error: 'Bu işlem için personel yetkisi gerekir.' });
+    expect((await istek(`POST ${P}/evrak/kaydet`, { kimlik: 'Dealer', govde: teklif })).govde).toEqual({ error: 'Bu işlem için personel yetkisi gerekir.' });
+    expect((await istek(`POST ${P}/evrak/kaydet`, { kimlik: 'Accounting', govde: teklif })).govde).toEqual({ error: 'Bu veri için yetkiniz yok.' });
   });
 
   it('D6 — kullanıcı kararları KORUNUYOR: Satış e-İrsaliye kesemez; sipariş silme Yönetici + Müdür; fatura her iç role açık; Satış kasa tahsilatı / tediyesi yazamaz', async () => {
@@ -854,6 +1062,11 @@ describe('davranış — gerçek express + üretim zinciri (Mikro\'ya hiç gidil
     expect(await kodlar(KAPILI, { kimlik: 'super-rolsuz' })).toEqual(hepsi(KAPILI, 200));
     expect((await istek(`POST ${P}/cari/kaydet`, { kimlik: 'super-rolsuz', govde: { collection: 'suppliers' } })).kod).toBe(200);
     expect((await istek(`POST ${P}/evrak/kaydet`, { kimlik: 'super-rolsuz', govde: { method: 'PersonelKaydetV2' } })).kod).toBe(200);
+    // Karar turunun kilitleri sahibi de kilitlemez: çiftli teklif kapısı (iki halka) ve K1–K7 uçları.
+    for (const anahtar of Object.keys(KARAR_KILIDI)) {
+      const [uc, yontem] = anahtar.split('#');
+      expect((await istek(uc, { kimlik: 'super-rolsuz', govde: yontem ? { method: yontem, payload: {} } : {} })).kod, anahtar).toBe(200);
+    }
     // Aynı e-posta DOĞRULANMAMIŞSA baypas yok (ön kayıtla ele geçirme).
     KIMLIKLER['super-dogrulanmamis'] = { rol: null, eposta: SUPER_EPOSTA, dogrulanmis: false };
     try {
@@ -871,14 +1084,120 @@ describe('davranış — gerçek express + üretim zinciri (Mikro\'ya hiç gidil
       const gelen = Object.fromEntries(await Promise.all(kimlikler.map(async k => [k, (await istek(uc, { kimlik: k, govde: { method: yontem, payload: {} } })).kod] as const)));
       expect(gelen, yontem).toEqual(beklenen);
     }
-    // Asıl açık: serbest gövdeli dekont artık İK / Hukuk / Kurumsal / Kalite / Lojistik'e KAPALI.
-    for (const rol of ['HR', 'Legal', 'Corporate', 'Quality', 'Logistics']) {
+    // Asıl açık: serbest gövdeli dekont İK / Hukuk / Kurumsal / Kalite / Lojistik'e KAPALI; karar turundan (K3-a) beri
+    // Satış ve Satın Alma'ya da — kapı `cari-hareket/kaydet` ile AYNI (`mikroCariHareketler` yazma).
+    expect(EVRAK_BEKLENEN.DekontKaydetV2).toBe(BEKLENEN[`POST ${P}/cari-hareket/kaydet`]);
+    for (const rol of ['HR', 'Legal', 'Corporate', 'Quality', 'Logistics', 'Sales', 'Purchasing']) {
       expect((await istek(uc, { kimlik: rol, govde: { method: 'DekontKaydetV2', payload: {} } })).kod, rol).toBe(403);
     }
     for (const yontem of ['BilinmeyenV2', 'constructor', 'toString', '']) {
       const gelen = Object.fromEntries(await Promise.all(kimlikler.map(async k => [k, (await istek(uc, { kimlik: k, govde: { method: yontem } })).kod] as const)));
       expect(gelen, `'${yontem}'`).toEqual(Object.fromEntries(kimlikler.map(k => [k, DIS.includes(k) ? 403 : 200])));
     }
+  });
+
+  it('D10 — karar kilitleri gerçek zincirde (§ 10.1, K1–K7): KARAR_KILIDI\'ndaki her rol 403; kapıdan geçen her rol 200; 12 rolün tamamı tabloya göre', async () => {
+    for (const [anahtar, kilitli] of Object.entries(KARAR_KILIDI)) {
+      const [uc, yontem] = anahtar.split('#');
+      const govde = yontem ? { method: yontem, payload: {} } : {};
+      const gecen = gecenRoller(dalEtiketi(anahtar));
+      const sonuc: Record<string, { kod: number; hata?: string }> = Object.fromEntries(await Promise.all(APP_ROLES.map(async r => {
+        const y = await istek(uc, { kimlik: r, govde });
+        return [r, { kod: y.kod, hata: y.govde.error }] as const;
+      })));
+      for (const rol of kilitli) {
+        expect(sonuc[rol].kod, `${anahtar} × ${rol}: kilitli rol`).toBe(403);
+        // Kilitlenen İÇ rol her zaman KURAL halkasında durur (personel halkasını geçer) — ekranda görünecek metin budur.
+        expect(sonuc[rol].hata, `${anahtar} × ${rol}`).toBe('Bu veri için yetkiniz yok.');
+      }
+      for (const rol of gecen) expect(sonuc[rol].kod, `${anahtar} × ${rol}: geçen rol`).toBe(200);
+      expect(Object.fromEntries(APP_ROLES.map(r => [r, sonuc[r].kod])), anahtar).toEqual(Object.fromEntries(APP_ROLES.map(r => [r, gecen.includes(r) ? 200 : 403])));
+      expect((await istek(uc, { kimlik: 'rolsuz', govde })).kod, `${anahtar} × rolsüz`).toBe(403);
+    }
+  });
+
+  it('D11 — K7 / H1: e-belge PDF + XML İKİ YÖNDE de tek sabit kapı (Yönetici, Müdür, Muhasebe); gövdedeki yön beyanı ve kimlik biçimi kapıyı DEĞİŞTİRMEZ', async () => {
+    const KIMLIK = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    const govdeler: unknown[] = [
+      {}, null,
+      { uuid: KIMLIK }, { faturaGuid: KIMLIK }, { uuid: KIMLIK, faturaGuid: KIMLIK },
+      // Yön BEYANI: «giden belge Satış'a açık» dalı YAZILMADI — beyan Satış'ı (ya da kimseyi) geçirmez.
+      { uuid: KIMLIK, yon: 'giden' }, { faturaGuid: KIMLIK, yon: 'giden' }, { uuid: KIMLIK, yon: 'gelen', tur: 'e-fatura' }, { uuid: KIMLIK, yon: 'giden', tur: 'e-arsiv' },
+      // Mikro'nun döndürdüğü süslü parantezli biçim (38 karakter): kapı aynı; işleyici bugün 400 verir (düzeltme ayrı iş).
+      { uuid: `{${KIMLIK}}` }, { faturaGuid: `{${KIMLIK}}`, yon: 'giden' },
+    ];
+    const beklenen = Object.fromEntries(Object.keys(KIMLIKLER).map(k => [k, ['Admin', 'Manager', 'Accounting', 'super-rolsuz'].includes(k) ? 200 : 403]));
+    for (const uc of [`POST ${P}/ebelge/pdf`, `POST ${P}/ebelge/xml`]) {
+      for (const govde of govdeler) {
+        const sonuc = Object.fromEntries(await Promise.all(Object.keys(KIMLIKLER).map(async k => [k, (await istek(uc, { kimlik: k, govde })).kod] as const)));
+        expect(sonuc, `${uc} ${JSON.stringify(govde)}`).toEqual(beklenen);
+      }
+    }
+  });
+
+  it('D12 — evrak/kaydet: kural halkası FIRLATIRSA istek asılı kalmaz, hata express\'e taşınır (500) — çiftli dalda da (personel halkasının `next`\'i içinde)', async () => {
+    const patlak = duzenekKur({
+      kayit: (sahte, C) => mikroRoutes(sahte, {
+        ...C, requireAuth: ikizAuth, requireMfaVerified: ikizMfa, requireStaff: ikizStaff,
+        requireCollectionAccess: (): RequestHandler => async () => { throw new Error('rol okunamadı'); },
+      }),
+    });
+    const app = express();
+    app.use(express.json());
+    const zincir = patlak.app.zincirler[`POST ${P}/evrak/kaydet`] as RequestHandler[];
+    app.post(`${P}/evrak/kaydet`, ...zincir.slice(0, -1), NOBETCI);
+    app.use((hata: unknown, _req: Request, res: Response, _next: NextFunction) => { res.status(500).json({ error: String(hata) }); });
+    const sunucu = http.createServer(app);
+    await new Promise<void>(r => sunucu.listen(0, '127.0.0.1', () => r()));
+    try {
+      const adres = sunucu.address();
+      if (!adres || typeof adres === 'string') throw new Error('test sunucusu dinlemiyor');
+      const gonder = async (kimlik: string, method: string): Promise<Yanit> => {
+        const r = await fetch(`http://127.0.0.1:${adres.port}${P}/evrak/kaydet`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-test-kimlik': kimlik },
+          body: JSON.stringify({ method, payload: {} }), signal: AbortSignal.timeout(3000),   // asılı kalan istek testi düşürür
+        });
+        return { kod: r.status, govde: await r.json() as Yanit['govde'] };
+      };
+      // Çiftli dal (H4): personel halkası geçer, kural halkası onun `next`'i içinde fırlar — express bu sözü kendisi görmez.
+      expect(await gonder('Sales', 'VerilenTeklifKaydetV2')).toEqual({ kod: 500, govde: { error: 'Error: rol okunamadı' } });
+      // Düz dal.
+      expect(await gonder('Accounting', 'DekontKaydetV2')).toEqual({ kod: 500, govde: { error: 'Error: rol okunamadı' } });
+      // Personel halkasında duran istek kural halkasına HİÇ ulaşmaz (403, 500 değil).
+      expect((await gonder('B2B', 'VerilenTeklifKaydetV2')).kod).toBe(403);
+      // Kuralsız dal (yalnız iç personel): kural halkası çağrılmaz.
+      expect((await gonder('HR', 'EtiketBasimKaydetV2')).kod).toBe(200);
+    } finally { await new Promise<void>(r => sunucu.close(() => r())); }
+  });
+});
+
+describe('ebelge/pdf + ebelge/xml işleyicisi — kimlik biçimi (karar turu işleyiciye DOKUNMADI; süslü parantez düzeltmesi ayrı iş)', () => {
+  const KIMLIK = '0f8fad5b-d9cb-469f-a165-70867728950e';
+
+  it('36 karakterlik kimlik Mikro\'ya iletilir: PDF\'te `uuid` → GelenFaturaPdfV2, yalnız `faturaGuid` → FaturaPdfV2; XML\'de yön beyanı `EFaturaTipi` olur', async () => {
+    const duz = duzenekKur();
+    vi.mocked(mikroPost).mockClear();
+    await duz.cagir('POST', `${P}/ebelge/pdf`, { uuid: KIMLIK, faturaGuid: KIMLIK });
+    expect(mikroPost).toHaveBeenLastCalledWith('GelenFaturaPdfV2', { UUID: KIMLIK }, true);
+    await duz.cagir('POST', `${P}/ebelge/pdf`, { faturaGuid: KIMLIK });
+    expect(mikroPost).toHaveBeenLastCalledWith('FaturaPdfV2', { Fatura_Guid: KIMLIK }, true);
+    await duz.cagir('POST', `${P}/ebelge/xml`, { uuid: KIMLIK, yon: 'gelen' });
+    expect(mikroPost).toHaveBeenLastCalledWith('EBelgeXMLV2', { EBelge: { EFaturaTipi: 1, EBelgeTipi: 0, UUID: KIMLIK } }, true);
+    await duz.cagir('POST', `${P}/ebelge/xml`, { uuid: KIMLIK, yon: 'giden', tur: 'e-arsiv' });
+    expect(mikroPost).toHaveBeenLastCalledWith('EBelgeXMLV2', { EBelge: { EFaturaTipi: 0, EBelgeTipi: 1, UUID: KIMLIK } }, true);
+    expect(mikroPost).toHaveBeenCalledTimes(4);
+  });
+
+  it('süslü parantezli (38 karakter) ya da eksik kimlik 400 döner ve Mikro\'ya GİDİLMEZ', async () => {
+    const duz = duzenekKur();
+    vi.mocked(mikroPost).mockClear();
+    for (const govde of [{ uuid: `{${KIMLIK}}` }, { faturaGuid: `{${KIMLIK}}` }, { uuid: 'kisa' }, {}]) {
+      expect((await duz.cagir('POST', `${P}/ebelge/pdf`, govde)).kod, `pdf ${JSON.stringify(govde)}`).toBe(400);
+    }
+    for (const govde of [{ uuid: `{${KIMLIK}}` }, { faturaGuid: KIMLIK }, { uuid: 'kisa' }, {}]) {
+      expect((await duz.cagir('POST', `${P}/ebelge/xml`, govde)).kod, `xml ${JSON.stringify(govde)}`).toBe(400);
+    }
+    expect(mikroPost).not.toHaveBeenCalled();
   });
 });
 

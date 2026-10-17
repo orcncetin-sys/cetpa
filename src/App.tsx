@@ -136,6 +136,7 @@ import { authFetch } from './services/authFetch';
 import { captureInviteFromUrl, redeemPendingInvite, getPendingInvite } from './lib/invite';
 import { syncOrderWithCari } from './services/mikroService';
 import { pushMikroEvrak, processMikroRetries, izinTalepPayload } from './services/mikroEvrak';
+import { kuyrukYurutebilir } from './lib/kuyrukSahipligi';
 import { 
   type Shipment, 
   UserRole, 
@@ -321,7 +322,7 @@ const TAB_PERMISSIONS: Record<string, { full: UserRole[]; readonly: UserRole[] }
   finance:       { full: [UserRole.Admin, UserRole.Accounting, UserRole.Manager], readonly: [UserRole.Sales, UserRole.Logistics, UserRole.Purchasing] },
   analytics:     { full: [UserRole.Admin, UserRole.Manager, UserRole.Accounting, UserRole.Sales], readonly: [UserRole.Logistics, UserRole.HR, UserRole.Purchasing] },
   // New ERP modules
-  ebelge:        { full: [UserRole.Admin, UserRole.Accounting, UserRole.Manager], readonly: [UserRole.Sales, UserRole.Logistics] },
+  ebelge:        { full: [UserRole.Admin, UserRole.Accounting, UserRole.Manager], readonly: [] },   // H2 / İ5 (2026-10-11): Satış ve Lojistik sekmeyi GÖRMEZ — liste gelen e-faturayı (tedarikçi fatura no) taşır; küme = rbac.ts `eBelgeler` okuma. Çit: mikroRoutes.rolKapisi.test.ts
   bakim:         { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics], readonly: [UserRole.Purchasing] },
   servis:        { full: [UserRole.Admin, UserRole.Manager, UserRole.Sales], readonly: [UserRole.Logistics] },
   ihracat:       { full: [UserRole.Admin, UserRole.Manager, UserRole.Logistics, UserRole.Purchasing], readonly: [UserRole.Accounting] },
@@ -1187,15 +1188,19 @@ function AppContent() {
 
   // ── Mikro retry kuyruğu: başarısız push'lar geçici hatada kuyruğa girer;
   //    burada açılışta + 90 sn'de bir bekleyenler yeniden denenir (exponential backoff) ──
+  // K10 (2026-10-11): iş SAHİBİNİNDİR — yürütücüye bu oturumun KİMLİĞİ (kullanıcı + rol) verilir; yalnız kendi işini, rolünün
+  // yöntem kapısından geçtiği işi alır (lib/kuyrukSahipligi). Zamanlayıcı kuyruğu yürütemeyen oturumda HİÇ kurulmaz: dış rolde
+  // ve rolü atanmamış hesapta (`roleMissing` — o durumda `userRole` varsayılan değerinde kalır, ona güvenilmez) eskiden her
+  // 90 saniyede `GET /api/db/syncJobs` 403 alıp yutuluyordu; 2FA doğrulanmadan da koşmaz (istek 403 alır, rol henüz çözülmemiştir).
   useEffect(() => {
-    if (!user) return;
+    const kimlik = { uid: user?.uid, rol: roleMissing ? null : userRole };
+    if (mfaChallenge || !kuyrukYurutebilir(kimlik)) return;
     let cancelled = false;
-    // Rol geçirilir: `evrak/kaydet` yönteme göre rol kapılı — bu oturumun gönderemeyeceği iş sahiplenilmez (mikroEvrak.ts).
-    const tick = () => { if (!cancelled) void processMikroRetries(userRole).catch(() => {}); };
+    const tick = () => { if (!cancelled) void processMikroRetries(kimlik).catch(() => {}); };
     tick(); // açılışta bir kez
     const timer = setInterval(tick, 90_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [user, userRole]);
+  }, [user, userRole, roleMissing, mfaChallenge]);
 
   // Check if module is accessible by subscription
   const canAccessBySubscription = (tabId: string): boolean => {
@@ -5181,6 +5186,7 @@ function AppContent() {
                 toast={toast}
                 fmtKpi={fmtKpi}
                 setActiveTab={setActiveTab}
+                canAccess={canAccess}
                 summaryData={summaryData}
                 monthlyTarget={monthlyTarget}
                 dateRange={dateRange}

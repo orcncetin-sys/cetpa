@@ -1,5 +1,6 @@
 /**
- * mikroEvrakKapilari.ts — `POST /api/mikro/evrak/kaydet` yöntem beyaz listesi + yöntem başına ROL KAPISI (2026-10-10).
+ * mikroEvrakKapilari.ts — `POST /api/mikro/evrak/kaydet` yöntem beyaz listesi + yöntem başına ROL KAPISI (2026-10-10;
+ * karar turu 2026-10-11).
  *
  * NEDEN TABLO: uç, istemcinin kurduğu gövdeyi Mikro'ya OLDUĞU GİBİ iletir (sunucuda gövde kurulmaz). Tek bir «iç personel»
  * kapısı yetmez: aynı Mikro yazımı (`DekontKaydetV2` — cari borç / alacak) `cari-hareket/kaydet`'te muhasebe kapısının
@@ -8,24 +9,32 @@
  * BEYAZ LİSTE BU TABLODAN TÜRER — kapısız yöntem eklenemez. `Map`, düz nesne DEĞİL: `'constructor'` / `'toString'` gibi
  * miras anahtarlar beyaz listeyi geçmesin.
  *
- * KURAL (R2 — «hiçbir meşru kullanıcı kilitlenmez»): yönteme İNCE kapı yalnız o yöntemi çağıran düğmeyi BUGÜN gören her
- * rol kapıdan geçiyorsa (ya da yöntemin istemcide çağıranı yoksa) verilir. Koşulu sağlamayan yöntem `'staff'`ta kalır
- * (dış rol ve rolsüz hesap yine kapanır); ince kapısı kullanıcı kararını bekler. Çit: mikroRoutes.rolKapisi.test.ts.
+ * KURAL (karar turu 2026-10-11, İ1 — «yazan uç yazma kapısı alır»): her yöntem, Cetpa'daki EŞDEĞER koleksiyonun yazma
+ * kuralını ister. Bu, yöntemin düğmesini ilk turda gören bazı iç rolleri BİLEREK kilitler (satırlardaki «kilitlenen»
+ * notları); düğme o rolde ÇİZİLMEZ, sessiz çağrı HİÇ yapılmaz (İ3 — ölü düğme yok). `'staff'` yalnız eşdeğer koleksiyonu
+ * olmayan yöntemde kalır ve gerekçesi satırında yazılıdır. Çit: mikroRoutes.rolKapisi.test.ts.
  *
- * İNCE KAPI KURALI DIŞ ROL İÇEREMEZ (ör. `quotations:write` B2B / Bayi'yi geçirir) — öyle bir kural tek başına kapı olamaz.
+ * DIŞ ROL: düz ikili kuralı DIŞ ROL İÇEREMEZ (çit Ç9). Kuralı dış rol de içeren koleksiyon (`quotations` yazma: B2B / Bayi)
+ * `{ icRolVe: … }` ile yazılır — kapı ÖNCE iç personel şartını, SONRA kuralı arar. Düz yazılırsa ilk turda kapanan açık
+ * (dış rolün Mikro'ya teklif yazması) yeniden açılır (H4).
  *
- * Saf modül: sunucu (kapı + işleyici) ve istemci (yeniden deneme kuyruğu süzgeci) AYNI tabloyu okur.
+ * Saf modül: sunucu (kapı + işleyici) ve istemci (düğme, sessiz çağrı, yeniden deneme kuyruğu süzgeci) AYNI tabloyu okur.
  */
 import { STAFF_ROLES, isAllowed, type AppRole } from './rbac';
 
-/** `'staff'` = yalnız iç personel şartı; ikili = `requireCollectionAccess(koleksiyon, eylem)`. */
-export type EvrakKapisi = 'staff' | readonly [koleksiyon: string, eylem: 'read' | 'write'];
+/** Eşdeğer Cetpa koleksiyonunun kuralı — sunucuda `requireCollectionAccess(koleksiyon, eylem)`. */
+export type EvrakKurali = readonly [koleksiyon: string, eylem: 'read' | 'write'];
+
+/**
+ * `'staff'`            = yalnız iç personel şartı.
+ * ikili                = yalnız koleksiyon kuralı (kural dış rol içeremez — Ç9).
+ * `{ icRolVe: ikili }` = iç personel şartı VE koleksiyon kuralı (kural dış rol içeriyorsa — H4).
+ */
+export type EvrakKapisi = 'staff' | EvrakKurali | { readonly icRolVe: EvrakKurali };
 
 export const MIKRO_EVRAK_KAPILARI: ReadonlyMap<string, EvrakKapisi> = new Map<string, EvrakKapisi>([
-  // ── İnce kapı ──
-  // Dekont: GEÇİCİ `leads:read` — dekont penceresini bugün gören rollerin TAM kümesi (Yönetici, Müdür, Satış, Muhasebe,
-  // Satın Alma). Kalıcı kapı (`mikroCariHareketler:write`) Satış ve Satın Alma'yı kilitler → kullanıcı kararı bekliyor.
-  ['DekontKaydetV2', ['leads', 'read']],
+  // K3-a — cari borç / alacak yazar; `cari-hareket/kaydet` ile AYNI kapı. Kilitlenen: Satış, Satın Alma.
+  ['DekontKaydetV2', ['mikroCariHareketler', 'write']],
   ['ZiyaretKaydetV2', ['leads', 'write']],
   ['ServisIsEmriKaydetV2', ['servisTalepleri', 'write']],
   ['ServisFormuKaydetV2', ['servisTalepleri', 'write']],
@@ -40,18 +49,27 @@ export const MIKRO_EVRAK_KAPILARI: ReadonlyMap<string, EvrakKapisi> = new Map<st
   ['BakimSozlesmeKaydetV2', ['isEmirleri', 'write']],
   ['UrunRotaKaydetV2', ['routingTemplates', 'write']],
   ['UretimRotaPlanKaydetV2', ['routingTemplates', 'write']],
-  // ── Yalnız iç personel (ince kapı, düğmeyi bugün gören bir iç rolü kilitlerdi — karar bekliyor) ──
-  ['VerilenTeklifKaydetV2', 'staff'],
-  ['DahiliStokHareketKaydetV2', 'staff'],
-  ['SayimSonuclariKaydetV2', 'staff'],
+  // K3-b / H4 — `quotations` yazma kuralı B2B / Bayi'yi de geçirir → iç personel şartı İLE BİRLİKTE. Kilitlenen: Muhasebe.
+  ['VerilenTeklifKaydetV2', { icRolVe: ['quotations', 'write'] }],
+  // K3-c — kilitlenen: Muhasebe.
+  ['DahiliStokHareketKaydetV2', ['inventoryMovements', 'write']],
+  // K3-d — sessiz çağrı (sayım kaydından sonra); rol geçemiyorsa yapılmaz.
+  ['SayimSonuclariKaydetV2', ['wmsCycleCounts', 'write']],
+  // K3-e — `'staff'` KALIR: eşdeğer Cetpa koleksiyonu yok; kayıt etiket basım günlüğüdür (stok / cari / muhasebe yazmaz).
   ['EtiketBasimKaydetV2', 'staff'],
-  ['PersonelIzinTalepKaydetV2', 'staff'],
-  ['UrunReceteKaydetV2', 'staff'],
-  ['UretimTalepKaydetV2', 'staff'],
-  ['UretimIsEmriOlusturV2', 'staff'],
-  ['SatinAlmaTalepKaydetV2', 'staff'],
-  ['BakimTalepKaydetV2', 'staff'],
-  ['DepolarArasiSiparisKaydetV2', 'staff'],
+  // K3-f — kilitlenen: Muhasebe.
+  ['PersonelIzinTalepKaydetV2', ['leaveRequests', 'write']],
+  // K3-g — kilitlenen: Kalite.
+  ['UrunReceteKaydetV2', ['bom', 'write']],
+  // K3-h — kilitlenen: Satın Alma, Muhasebe.
+  ['UretimTalepKaydetV2', ['productionOrders', 'write']],
+  ['UretimIsEmriOlusturV2', ['productionOrders', 'write']],
+  // K3-i — kilitlenen: Lojistik, Muhasebe, Kalite.
+  ['SatinAlmaTalepKaydetV2', ['purchaseOrders', 'write']],
+  // K3-j — kilitlenen: Satın Alma.
+  ['BakimTalepKaydetV2', ['isEmirleri', 'write']],
+  // K3-k — kilitlenen: Satın Alma, Muhasebe, Satış.
+  ['DepolarArasiSiparisKaydetV2', ['transfers', 'write']],
 ]);
 
 /** İstek gövdesindeki yöntem adı. Kapı ve işleyici AYNI ayıklayıcıyı kullanır — ayrışırlarsa kapı bir yöntemin kuralına
@@ -61,11 +79,19 @@ export const evrakYontemi = (govde: unknown): string => {
   return typeof m === 'string' ? m : '';
 };
 
-/** Bu rol, yöntemin sunucudaki kapısından geçer mi? İstemci yeniden deneme kuyruğu işi sahiplenmeden ÖNCE sorar
- *  (geçemeyecek rol işi alıp 403'e çarptırmasın). Tanınmayan yöntem `'staff'` sayılır — sunucu kapısıyla aynı. */
+/** Kapının İKİ koşulu — sunucu kapısı ve istemci süzgeci AYNI çözümü kullanır (ayrışırlarsa düğme ile kapı ayrışır).
+ *  Tanınmayan yöntem (`undefined`) `'staff'` sayılır: iç personel işleyiciye ulaşır ve 400 alır, dış rol 403'te kalır. */
+export function evrakKapiKosullari(kapi: EvrakKapisi | undefined): { icRol: boolean; kural: EvrakKurali | null } {
+  if (kapi === undefined || kapi === 'staff') return { icRol: true, kural: null };
+  if ('icRolVe' in kapi) return { icRol: true, kural: kapi.icRolVe };
+  return { icRol: false, kural: kapi };
+}
+
+/** Bu rol, yöntemin sunucudaki kapısından geçer mi? İstemci düğmeyi çizmeden, sessiz çağrıyı yapmadan ve yeniden deneme
+ *  kuyruğundaki işi sahiplenmeden ÖNCE sorar (geçemeyecek rol isteği atıp 403'e çarpmasın). Rolsüz hesap geçemez. */
 export function evrakKapisindanGecer(rol: AppRole | null | undefined, yontem: string): boolean {
   if (!rol) return false;
-  const kapi = MIKRO_EVRAK_KAPILARI.get(yontem);
-  if (kapi === undefined || kapi === 'staff') return STAFF_ROLES.includes(rol);
-  return isAllowed(rol, kapi[0], kapi[1]);
+  const { icRol, kural } = evrakKapiKosullari(MIKRO_EVRAK_KAPILARI.get(yontem));
+  if (icRol && !STAFF_ROLES.includes(rol)) return false;
+  return kural === null || isAllowed(rol, kural[0], kural[1]);
 }

@@ -10,15 +10,20 @@
 import { authFetch } from './authFetch';
 import { enqueueSyncJob, processPendingSyncJobs, IsiBirak, type SyncJob } from './syncRetryService';
 import { evrakKapisindanGecer } from '../lib/mikroEvrakKapilari';
-import type { AppRole } from '../lib/rbac';
+import type { YurutucuKimligi } from '../lib/kuyrukSahipligi';
+import { useAppStore } from '../store/appStore';
 
 export interface MikroPushResult {
   success: boolean;
   error?: string | null;
   notConfigured?: boolean;
   data?: unknown;
-  /** Sunucu 403 döndü (rol kapısı / MFA): bu OTURUM gönderemez. Yeniden deneme kuyruğu bunu deneme saymaz. */
+  /** Bu OTURUM gönderemez: sunucu 403 döndü (rol kapısı / MFA) ya da istek rol süzgecinde hiç atılmadı (`istekAtilmadi`).
+   *  Yeniden deneme kuyruğu bunu deneme saymaz. */
   yetkiYok?: boolean;
+  /** İstek HİÇ ATILMADI: depodaki rol yöntemin kapısından geçemiyor (`pushMikroEvrak` rol süzgeci — H7). Sunucuya da
+   *  yeniden deneme kuyruğuna da gidilmedi. Sunucunun 403'ünden BU alanla ayırt edilir (orada yalnız `yetkiYok` vardır). */
+  istekAtilmadi?: boolean;
 }
 
 /** Retry kuyruğunda saklanan Mikro işinin payload yapısı. */
@@ -50,16 +55,31 @@ async function rawMikroPush(
   return r.status === 403 ? { ...govde, yetkiYok: true } : govde;
 }
 
+/**
+ * Doğrudan gönderim — düğme (`MikroPushButton`), dekont penceresi ve SESSİZ çağıranlar (sayım, izin onayı, ziyaret) buradan geçer.
+ *
+ * ROL SÜZGECİ (karar turu 2026-10-11 — İ3 «ölü düğme / sessiz 403 yok», H7 «tek yerde»): depodaki rol yöntemin kapısından
+ * geçemiyorsa istek HİÇ ATILMAZ ve kuyruğa da GİRMEZ; sonuç `istekAtilmadi` ile döner (fırlatmaz — sessiz çağıranların
+ * `.catch`'i değişmeden çalışır). Soru sunucu kapısının okuduğu AYNI tablodan sorulur (`evrakKapisindanGecer`); rol
+ * `useAppStore.getState()` ile okunur (servis: kanca yok). Süzgeç YALNIZ burada: çağıranlar ayrı ayrı koşul yazmaz, yeni
+ * çağıran da kapsanır. Yeniden deneme yürütücüsü bu işlevi KULLANMAZ (`rawMikroPush` + kendi süzgeci, aşağıda).
+ * Rol istemcide bayatsa (profil senkronu düştü) son söz sunucudadır: 403 → `yetkiYok` (istek atılmıştır, `istekAtilmadi` yok).
+ */
 export async function pushMikroEvrak(
   method: string,
   payload: Record<string, unknown>,
   meta?: { entityType?: string; entityId?: string }
 ): Promise<MikroPushResult> {
+  if (!evrakKapisindanGecer(useAppStore.getState().userRole, method)) {
+    return { success: false, yetkiYok: true, istekAtilmadi: true, error: 'Rolünüz bu işlemi Mikro\'ya gönderemez; istek atılmadı.' };
+  }
   try {
     return await rawMikroPush(method, payload, meta);
   } catch (err) {
     // Ağ/timeout hatası = geçici → retry kuyruğuna ekle (exponential backoff).
     // Mantıksal hatalar (success:false) kuyruğa girmez; onlar tekrar denense de geçmez.
+    // `id` kimliğin TABANIDIR: belge kimliğine kullanıcı `enqueueSyncJob`'da eklenir (K10 — iş sahibinindir; iki kullanıcının
+    // aynı varlık için işi çakışmaz). Sahibi sunucu damgalar; iş yalnız bu kullanıcının oturumunda yeniden denenir.
     const id = `mikro_${method}_${meta?.entityId ?? Date.now()}`;
     const jobPayload: MikroJobPayload = { method, payload, meta };
     void enqueueSyncJob({ id, type: 'mikro', payload: jobPayload, maxAttempts: 5 }).catch(() => {});
@@ -68,15 +88,19 @@ export async function pushMikroEvrak(
 }
 
 /**
- * Kuyruktaki bekleyen Mikro işlerini yeniden çalıştırır (app açılışı + periyodik).
+ * Kuyruktaki bekleyen Mikro işlerini yeniden çalıştırır (app açılışı + periyodik + Ayarlar'daki «Şimdi Dene»).
  *
- * `rol` = BU oturumun rolü (2026-10-10, Mikro rol kapıları). Kuyruk kiracı kapsamlıdır: işi kuyruğa koyan değil, uygulaması
- * açık olan kullanıcı KENDİ kimliğiyle gönderir; `evrak/kaydet` ise yönteme göre rol kapılıdır. İki katman:
- *   1) sahiplenmeden ÖNCE süzgeç — rolün kapıdan geçemeyeceği iş HİÇ alınmaz (yetkili oturuma kalır);
- *   2) yine de 403 gelirse (rol istemcide bayat, MFA) iş BIRAKILIR — deneme hakkı yanmaz (IsiBirak).
- * `rol` verilmezse süzgeç uygulanmaz (yalnız 2. katman).
+ * `kimlik` = BU oturum (kullanıcı + rol) — ZORUNLU (K10, 2026-10-11). İş SAHİBİNİNDİR: yalnız işi kuyruğa KOYAN kullanıcının
+ * oturumu onu yeniden dener ve KENDİ kimliğiyle gönderir (eskiden uygulaması açık olan HERHANGİ bir yetkili oturum alıyordu;
+ * kuyruğa yazabilen her iç rol işini yetkili role çalıştırtabiliyordu). `evrak/kaydet` yönteme göre rol kapılıdır. Katmanlar:
+ *   1) sahiplenmeden ÖNCE süzgeç (`processPendingSyncJobs` → lib/kuyrukSahipligi.isiGonderebilir): başkasının işi ve rolün
+ *      kapıdan geçemeyeceği iş HİÇ alınmaz — Yönetici oturumunda da; damgasız eski işi yalnız Yönetici alır;
+ *   2) yine de 403 gelirse (rol istemcide bayat, 2FA süresi doldu) iş BIRAKILIR — deneme hakkı yanmaz (IsiBirak); aynı sahip
+ *      sonra yeniden dener.
+ * Kimliği / rolü bilinmeyen çağrı HİÇBİR işi almaz (eski «rol verilmezse süzgeç yok» dalı kaldırıldı: «Şimdi Dene» o daldan
+ * süzgeçsiz koşuyordu).
  */
-export async function processMikroRetries(rol?: AppRole | null): Promise<void> {
+export async function processMikroRetries(kimlik: YurutucuKimligi): Promise<void> {
   await processPendingSyncJobs(async (job: SyncJob) => {
     if (job.type !== 'mikro') return; // bu işleyici yalnız Mikro işlerini çalıştırır
     const { method, payload, meta } = job.payload as MikroJobPayload;
@@ -86,9 +110,7 @@ export async function processMikroRetries(rol?: AppRole | null): Promise<void> {
       // notConfigured kalıcı bir durumdur — tekrar denemenin anlamı yok, ölü işaretle
       throw new Error(result.notConfigured ? 'Mikro yapılandırılmamış' : (result.error || 'Mikro push başarısız'));
     }
-  }, rol === undefined
-    ? undefined
-    : (job: SyncJob) => job.type !== 'mikro' || evrakKapisindanGecer(rol, (job.payload as MikroJobPayload | undefined)?.method ?? ''));
+  }, kimlik);
 }
 
 /**

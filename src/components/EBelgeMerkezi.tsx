@@ -18,7 +18,9 @@ import {
   onSnapshot, query, serverTimestamp
 } from '../lib/dbClient';
 import { useDataStore } from '../store/dataStore';
+import { useAppStore } from '../store/appStore';
 import { getMikroStatus } from '../services/mikroService';
+import { ucKapisindanGecer, type MikroKapiliUc } from '../lib/mikroUcKapilari';
 
 interface VknSonuc { durum?: string; vknTckn?: string; unvan?: string; vergiDairesi?: string; il?: string; }
 interface LucaKontor { remaining?: number; limit?: number; used?: number; }
@@ -66,6 +68,18 @@ interface EBelgeMerkeziProps {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const cn = (...classes: unknown[]) => classes.filter(Boolean).join(' ');
+
+// ── Mikro uçları = ortak tablodaki kapı anahtarları (karar turu 2026-10-11 — K6, K7 / H1, İ3, İ4) ─────────────────────
+// Düğmenin KOŞULU ve çağrılan YOL aynı sabitten çıkar (`'YÖNTEM /yol'`): kapı değişince düğme onu izler, biri değişip
+// öbürü kalamaz. Koşul sekme tablosundan (`isAuthenticated` = `hasFullAccess('ebelge')`) DEĞİL, sunucunun okuduğu ortak
+// tablodan sorulur — sekme tablosu ayrışırsa düğme sessizce ölmesin (tıklanır, 403 döner).
+const CEKIM_UCU = {
+  gelen: 'POST /api/mikro/ebelge/gelen',
+  giden: 'POST /api/mikro/ebelge/giden',
+  eirsaliye: 'POST /api/mikro/ebelge/eirsaliye',
+} as const satisfies Record<string, MikroKapiliUc>;
+/** Ortak tablo anahtarının yol parçası (`'POST /api/…'` → `'/api/…'`). */
+const ucYolu = (uc: MikroKapiliUc): string => uc.slice(uc.indexOf(' ') + 1);
 
 function generateBelgeNo(tur: BelgeTur, existingBelgeler: { belgeNo: string; tur: BelgeTur }[]): string {
   const prefix: Record<BelgeTur, string> = {
@@ -142,6 +156,14 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
   const [showModal, setShowModal] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const { toast, show: showToast } = useToast();
+
+  // Rol küresel depodan; bileşende rol adı yazılmaz. Geçemeyen rolde düğme ÇİZİLMEZ, çağrı HİÇ yapılmaz (İ3 — ölü düğme yok).
+  // H2'den sonra sekmeyi yalnız geçen roller görür; bileşen yine KENDİ koşulunu taşır (sekme tablosuna güvenmez).
+  const rol = useAppStore(s => s.userRole);
+  const cekebilir = (uc: MikroKapiliUc) => ucKapisindanGecer(rol, uc);
+  // K7 / H1: indirme kapısı İKİ YÖNDE de aynı — belgenin yönü koşula girmez.
+  const pdfIndirebilir = ucKapisindanGecer(rol, 'POST /api/mikro/ebelge/pdf');
+  const xmlIndirebilir = ucKapisindanGecer(rol, 'POST /api/mikro/ebelge/xml');
 
   // ── VKN Sorgulama + Luca Kontör + Gönderim Bekleyen Faturalar (2026-08-13) ──
   // Muhasebe'deki eski "e-Fatura" sekmesinden buraya taşındı — iki ayrı ekran
@@ -260,14 +282,15 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
 
   /** Sunucu ucunu çağır; başarısızlıkta HATAYI GÖSTER — sessizce "başarılı"
    *  gösterip boş liste bırakmak bu projede tekrar eden bir hataydı. */
-  const cek = async (etiket: string, url: string, body: Record<string, unknown>) => {
+  const cek = async (etiket: string, uc: MikroKapiliUc, body: Record<string, unknown>) => {
     setCekiliyor(etiket);
     try {
       // authFetch ŞART — /api/mikro/ebelge/{gelen,giden,eirsaliye} requireAuth
       // arkasında. Düz fetch olduğu için bu ekranın ÜÇ ÇEKME DÜĞMESİ de
-      // canlıda hiç çalışmamıştı (401). Yakalanamamasının sebebi: url burada
-      // değişken, o yüzden "fetch('/api/..." taramasına takılmıyordu.
-      const r = await authFetch(url, {
+      // canlıda hiç çalışmamıştı (401). Yakalanamamasının sebebi: yol burada
+      // değişken, o yüzden "fetch('/api/..." taramasına takılmıyordu. (Yol artık
+      // ortak tablo anahtarından çıkar — `ucYolu(uc)`; düğmenin koşulu da aynı anahtar.)
+      const r = await authFetch(ucYolu(uc), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ilkTarih: yilBasi, sonTarih: bugun, ...body }),
@@ -288,7 +311,8 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
 
   /** Belgenin RESMİ PDF'ini Mikro'dan al ve indir.
    *  Uygulamanın jsPDF çıktısı resmi nüsha DEĞİLDİR; bu gerçek olanıdır.
-   *  İndirme mantığı ortak serviste (MikroFaturaDetay de aynısını kullanır). */
+   *  İndirme mantığı ortak serviste (MikroFaturaDetay de aynısını kullanır); servis rol kapısını isteği atmadan önce
+   *  KENDİSİ de sorar. PDF isteği yön TAŞIMAZ (H1: kapı yöne bağlı değil). */
   const indirPdf = async (belge: EBelge) => {
     const hata = await eBelgeIndir({
       tur: 'pdf', uuid: belge.uuid, faturaGuid: belge.id,
@@ -648,34 +672,41 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
             </span>
           </span>
           {/* Mikro'dan çekme — gelen ve giden ayrı uçlar (V17'de giden için
-              liste metodu yok, SQL'den gelir; bkz. server.ts /api/mikro/ebelge/*) */}
-          <button
-            onClick={() => cek('Gelen e-Fatura', '/api/mikro/ebelge/gelen', {})}
-            disabled={!!cekiliyor}
-            title="GİB'den gelen e-faturaları çek"
-            className="apple-button-secondary flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50"
-          >
-            <Inbox size={15} />
-            {cekiliyor === 'Gelen e-Fatura' ? 'Çekiliyor…' : 'Gelen'}
-          </button>
-          <button
-            onClick={() => cek('Giden e-Belge', '/api/mikro/ebelge/giden', {})}
-            disabled={!!cekiliyor}
-            title="Mikro'dan giden e-fatura ve e-arşiv belgelerini çek"
-            className="apple-button-secondary flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50"
-          >
-            <Upload size={15} />
-            {cekiliyor === 'Giden e-Belge' ? 'Çekiliyor…' : 'Giden'}
-          </button>
-          <button
-            onClick={() => cek('e-İrsaliye', '/api/mikro/ebelge/eirsaliye', { yon: 'giden' })}
-            disabled={!!cekiliyor}
-            title="e-İrsaliye listesini çek"
-            className="apple-button-secondary flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50"
-          >
-            <RefreshCw size={15} className={cekiliyor === 'e-İrsaliye' ? 'animate-spin' : ''} />
-            e-İrsaliye
-          </button>
+              liste metodu yok, SQL'den gelir; bkz. mikroRoutes.ts /api/mikro/ebelge/*).
+              K6: üç uç `eBelgeler`'e YAZAR → her düğme kendi ucunun kapısından geçen rolde çizilir. */}
+          {cekebilir(CEKIM_UCU.gelen) && (
+            <button
+              onClick={() => cek('Gelen e-Fatura', CEKIM_UCU.gelen, {})}
+              disabled={!!cekiliyor}
+              title="GİB'den gelen e-faturaları çek"
+              className="apple-button-secondary flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50"
+            >
+              <Inbox size={15} />
+              {cekiliyor === 'Gelen e-Fatura' ? 'Çekiliyor…' : 'Gelen'}
+            </button>
+          )}
+          {cekebilir(CEKIM_UCU.giden) && (
+            <button
+              onClick={() => cek('Giden e-Belge', CEKIM_UCU.giden, {})}
+              disabled={!!cekiliyor}
+              title="Mikro'dan giden e-fatura ve e-arşiv belgelerini çek"
+              className="apple-button-secondary flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50"
+            >
+              <Upload size={15} />
+              {cekiliyor === 'Giden e-Belge' ? 'Çekiliyor…' : 'Giden'}
+            </button>
+          )}
+          {cekebilir(CEKIM_UCU.eirsaliye) && (
+            <button
+              onClick={() => cek('e-İrsaliye', CEKIM_UCU.eirsaliye, { yon: 'giden' })}
+              disabled={!!cekiliyor}
+              title="e-İrsaliye listesini çek"
+              className="apple-button-secondary flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50"
+            >
+              <RefreshCw size={15} className={cekiliyor === 'e-İrsaliye' ? 'animate-spin' : ''} />
+              e-İrsaliye
+            </button>
+          )}
           <button onClick={openModal} className="apple-button-primary flex items-center gap-1.5 px-4 py-2 text-sm">
             <Plus size={15} />
             Yeni Belge
@@ -779,7 +810,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-2">
-                          {mikroKaynakli && (belge.uuid || belge.belgeNo) && (
+                          {pdfIndirebilir && mikroKaynakli && (belge.uuid || belge.belgeNo) && (
                             <button
                               onClick={() => void indirPdf(belge)}
                               className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
@@ -788,7 +819,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
                               <Download size={14} />
                             </button>
                           )}
-                          {mikroKaynakli && belge.uuid && (
+                          {xmlIndirebilir && mikroKaynakli && belge.uuid && (
                             <button
                               onClick={() => void indirXml(belge)}
                               className="p-1.5 rounded-lg hover:bg-indigo-50 text-indigo-600 transition-colors"

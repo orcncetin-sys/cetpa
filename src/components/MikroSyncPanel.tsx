@@ -10,13 +10,13 @@ import { tr } from 'date-fns/locale';
 import { getMikroStatus, mikroImportBaslat, MikroStatus } from '../services/mikroService';
 import { mikroIsAdi } from '../lib/mikroIsAdi';
 import { isAllowed } from '../lib/rbac';
+import { ucKapisindanGecer, type MikroKapiliUc } from '../lib/mikroUcKapilari';
 import { useAppStore } from '../store/appStore';
 import { isiBaslatVeBekle, IsZamanAsimiHatasi, BaskaIsKosuyorHatasi, type ArkaPlanIsi } from '../hooks/useArkaPlanIsi';
 import { tumunuCekBaslat, useTumunuCek, SirayiDurdurHatasi, type TumunuCekAdimi } from '../hooks/useTumunuCek';
 import ArkaPlanIsiKarti from './mikro/ArkaPlanIsiKarti';
 import { sayiMetni, sonluSayi } from '../utils/sayiMetni';
-import { getSyncQueueStats, clearDeadJobs } from '../services/syncRetryService';
-import { processMikroRetries } from '../services/mikroEvrak';
+import MikroKuyrukKarti from './MikroKuyrukKarti';
 import { paraYaz } from '../utils/currency';
 import { ayAnahtari } from '../utils/zaman';
 
@@ -89,15 +89,6 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   // Status
   const [status, setStatus] = useState<MikroStatus | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(false);
-
-  // Retry kuyruğu durumu (başarısız push'lar)
-  const [queueStats, setQueueStats] = useState<{ queued: number; dead: number; lastSuccess: number | null } | null>(null);
-  const [queueBusy, setQueueBusy] = useState(false);
-  const refreshQueue = useCallback(async () => {
-    try { const s = await getSyncQueueStats(); setQueueStats({ queued: s.queued, dead: s.dead, lastSuccess: s.lastSuccess }); }
-    catch { /* sessiz */ }
-  }, []);
-  useEffect(() => { void refreshQueue(); }, [refreshQueue]);
 
   // Pull-flow states
   const defaultPeriod = ayAnahtari(new Date()) ?? '';   // YEREL ay (toISOString UTC ayı verirdi: ayın 1'i 00:00-03:00 arası önceki ay) // YYYY-MM
@@ -402,7 +393,12 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
   // 12 SQL ucu da aynı ArkaPlanIsiKarti bileşeni: `arkaPlan` bayrağı → iş adı
   // mikroIsAdi(route), ilerleme jobs/<isAdi>'dan; `key` iş adı DEĞİLDİR ('fatura' ≠ 'fatura-listesi').)
   // 4 senkron uç (arkaPlan yok) PullCard + handleExtraPull ile kalır (bu tur dışı, 502 sınıfında).
-  const extraPullDefs: { key: string; route: string; title: string; desc: string; arkaPlan?: true }[] = [
+  //
+  // ROL KAPISI (karar turu 2026-10-11 — K4 / K5 / H5, İ3, İ4): `kapi` taşıyan satır, ucunun sunucudaki kapısından
+  // geçemeyen rolde LİSTEDEN düşer. Süzgeç TABLODA, çizimde değil: aynı liste hem kartları hem «Tümünü Çek» adımlarını
+  // besler — yalnız kart gizlenseydi «Tümünü Çek» o ucu yine çağırır, özet her koşuda «Personel: Bu veri için
+  // yetkiniz yok.» yazardı. Soru sunucunun kapısına ADIYLA sorulur (`lib/mikroUcKapilari.ts`); burada rol adı yazılmaz.
+  const tumPullDefs: { key: string; route: string; title: string; desc: string; arkaPlan?: true; kapi?: MikroKapiliUc }[] = [
     { key: 'siparis',      route: '/api/mikro/import/siparis', arkaPlan: true,        title: t ? 'Siparişler' : 'Orders',                desc: t ? 'Mikro\'daki satış siparişlerini çek.' : 'Pull sales orders from Mikro.' },
     { key: 'fatura',       route: '/api/mikro/import/fatura-listesi', arkaPlan: true, title: t ? 'Faturalar' : 'Invoices',               desc: t ? 'Mikro\'da kesilen faturaları çek.' : 'Pull invoices issued in Mikro.' },
     // 2026-09-25: iptal edilen faturalar AYRI koleksiyona iner; hiçbir hesap okumaz, yalnız CRM → İptal & İade listesi.
@@ -431,13 +427,16 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
     { key: 'fiyat',        route: '/api/mikro/import/fiyat', arkaPlan: true,          title: t ? 'Satış Fiyatları' : 'Sale Prices',      desc: t ? 'Fiyat listesinden satış fiyatlarını çek ve ürünlere işle (0 TL sorununu çözer).' : 'Pull sale prices from the price list into products.' },
     { key: 'demirbas',     route: '/api/mikro/import/demirbas', arkaPlan: true,       title: t ? 'Demirbaşlar' : 'Fixed Assets',         desc: t ? 'Mikro demirbaş kartlarını çek (Sabit Kıymetler ekranını doldurur).' : 'Pull fixed asset records.' },
     { key: 'maliyet-mrk',  route: '/api/mikro/import/maliyet-merkezi', arkaPlan: true, title: t ? 'Maliyet Merkezleri' : 'Cost Centers', desc: t ? 'Mikro sorumluluk/maliyet merkezlerini çek.' : 'Pull responsibility/cost centers.' },
-    { key: 'personel',     route: '/api/mikro/pull/personel',         title: t ? 'Personel' : 'Employees',               desc: t ? 'Mikro personel kartlarını çek (İK ekranını doldurur).' : 'Pull personnel records into HR.' },
-    { key: 'recete',       route: '/api/mikro/pull/uretim-receteleri', title: t ? 'Üretim Reçeteleri' : 'BOM Recipes',   desc: t ? 'Üretim reçetelerini (BOM) çek (Üretim ekranını doldurur).' : 'Pull production recipes (BOM).' },
+    // K4: personel ucu `employees`'e yazar — Müdür kartı da adımı da görmez. K5: reçete ucu `bom`'a yazar.
+    { key: 'personel',     route: '/api/mikro/pull/personel',         kapi: 'POST /api/mikro/pull/personel',          title: t ? 'Personel' : 'Employees',               desc: t ? 'Mikro personel kartlarını çek (İK ekranını doldurur).' : 'Pull personnel records into HR.' },
+    { key: 'recete',       route: '/api/mikro/pull/uretim-receteleri', kapi: 'POST /api/mikro/pull/uretim-receteleri', title: t ? 'Üretim Reçeteleri' : 'BOM Recipes',   desc: t ? 'Üretim reçetelerini (BOM) çek (Üretim ekranını doldurur).' : 'Pull production recipes (BOM).' },
     // 2026-08-17: yalnız PUSH vardı (leads→Mikro), Mikro'daki cari adresleri
     // hiç geri gelmiyordu — Satış Bölgesi'nin şehir bazlı otomatik atama
     // yapabilmesi için şart (bkz. TerritoryModule cityInTerritory).
     { key: 'cari-adres',   route: '/api/mikro/pull/cari-adres',       title: t ? 'Cari Adresleri' : 'Account Addresses', desc: t ? 'Mikro cari adreslerini çek, yalnız boş şehir/adres alanlarını doldurur (Satış Bölgesi otomatik atama için).' : 'Pull Mikro account addresses, filling only empty city/address fields (feeds Territory auto-assignment).' },
   ];
+  // Kartlar (aşağıdaki döngü) ve «Tümünü Çek» adımları (`handleTumunuCek`) YALNIZ bu süzülmüş listeyi okur.
+  const extraPullDefs = tumPullDefs.filter(d => !d.kapi || ucKapisindanGecer(userRole, d.kapi));
 
   // ── MF sipariş kalemlerini yenile (2026-09-25) ───────────────────────────────
   // Faturadan-sipariş importu artık kalemleri kiracının stok hareketlerinden KDV hariç net + iskonto ile yazıyor (sürüm 2).
@@ -557,39 +556,8 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
         )}
       </div>
 
-      {/* ── Retry Kuyruğu (başarısız push'lar otomatik yeniden denenir) ── */}
-      {queueStats && (queueStats.queued > 0 || queueStats.dead > 0) && (
-        <div className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <RefreshCw className="w-4 h-4 text-amber-500" />
-            <div className="text-sm">
-              <span className="font-semibold text-gray-800">{t ? 'Retry Kuyruğu' : 'Retry Queue'}</span>
-              <span className="text-gray-500 ml-2">
-                {queueStats.queued} {t ? 'bekliyor' : 'queued'}
-                {queueStats.dead > 0 && <span className="text-red-500"> · {queueStats.dead} {t ? 'ölü' : 'dead'}</span>}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={async () => { setQueueBusy(true); try { await processMikroRetries(); } finally { await refreshQueue(); setQueueBusy(false); } }}
-              disabled={queueBusy}
-              className="text-xs font-semibold px-3 py-1.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c] hover:bg-[#1a3a5c]/20 transition-colors disabled:opacity-50"
-            >
-              {queueBusy ? (t ? 'Deneniyor…' : 'Retrying…') : (t ? 'Şimdi Dene' : 'Retry Now')}
-            </button>
-            {queueStats.dead > 0 && (
-              <button
-                onClick={async () => { setQueueBusy(true); try { await clearDeadJobs(); } finally { await refreshQueue(); setQueueBusy(false); } }}
-                disabled={queueBusy}
-                className="text-xs font-semibold px-3 py-1.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50"
-              >
-                {t ? 'Ölüleri Temizle' : 'Clear Dead'}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {/* ── Retry Kuyruğu (başarısız push'lar otomatik yeniden denenir) — kart kendi durumunu okur; iş SAHİBİNİNDİR (K10) ── */}
+      <MikroKuyrukKarti currentLanguage={currentLanguage} />
 
       {/* ── Import Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

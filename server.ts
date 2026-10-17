@@ -46,8 +46,9 @@ import {
   SERVER_ONLY_COLLECTIONS as SERVER_ONLY_COLLECTION_LIST,
   DIS_ROL_SATIR_ALANI,
   DIS_ROL_YAZAMAZ,
+  SAHIP_SATIR_ALANI,
 } from "./src/lib/collections.js";
-import { kiraciWhere, kiraciDamgala, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, siparisGorebilir, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
+import { kiraciWhere, kiraciDamgala, baskasininSahipKaydiMi, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, siparisGorebilir, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
 import { rolIcinMaskele, maskeyiGeriYukle, farkDegeriMaskele, ayarAdresAlaniDegisti } from './src/lib/sirMaske.js';
 import { izinliTaban, genelHttpsTaban, genelAdresMi, TabanAdresHatasi, LUCA_TABAN, IYZICO_TABAN } from './src/lib/guvenliTaban.js';
 import { shopifyRoutes, shopifyIsiIsle } from './src/server/routes/shopifyRoutes.js';
@@ -1946,11 +1947,14 @@ async function startServer() {
     /** Sahiplik / kapsam alanları — atomik artırma bunlara dokunamaz. */
     // + DIS_ROL_YAZAMAZ alanları (2026-10-09): pazar yeri eşleştirme kimlikleri sayıya çevrilemez — dış rol `/increment` ile
     //   damgadan geçmeden bu alanlara sayı yazabiliyordu (eşleşmeyi geçemezdi: pgShim `===`, metin ≠ sayı; yine de kapalı).
-    const SAHIPLIK_ALANLARI = new Set<string>(['companyId', 'userId', ...DIS_ROL_SATIR_ALANI.values(), ...[...DIS_ROL_YAZAMAZ.values()].flat()]);
+    // + SAHIP_SATIR_ALANI alanları (K10, 2026-10-11): kuyruk işinin sahibi (`syncJobs.sahipUid`) sayıya çevrilirse iş «damgasız
+    //   eski iş» sınıfına düşer ve Yönetici oturumuna çalıştırılır. Sahip süzgecinin KENDİSİ buraya bağlı değil: liste, tek okuma,
+    //   altı yazma yolu ve akış aşağıdaki sarmalayıcılardan (tenantErisim.satirAlani / kiraciDamgala / dokumanSahibiMi) okur.
+    const SAHIPLIK_ALANLARI = new Set<string>(['companyId', 'userId', ...DIS_ROL_SATIR_ALANI.values(), ...SAHIP_SATIR_ALANI.values(), ...[...DIS_ROL_YAZAMAZ.values()].flat()]);
     const reqKimlik = (req: Request): KiraciKimligi => {
       const uid = (req as Request & { uid?: string }).uid || '';
-      // `rol` TEMBEL: yalnız satır süzgeçli koleksiyonda (orders — collections.DIS_ROL_SATIR_ALANI) sorulur; `denied()` rolü zaten
-      // okuduğu için önbellek sıcaktır.
+      // `rol` TEMBEL: yalnız satır süzgeçli koleksiyonda (orders — collections.DIS_ROL_SATIR_ALANI; syncJobs — SAHIP_SATIR_ALANI)
+      // sorulur; `denied()` rolü zaten okuduğu için önbellek sıcaktır.
       return { uid, cid: () => getUserCompanyId(uid), superAdmin: isSuperAdmin(req), rol: () => getUserRole(uid) };
     };
     // AYRILMIŞ KİMLİK (2026-10-02): `__` içeren kimlikleri sunucu üretir (`mikrofat__<cid>__<seri>-<sıra>`, `shopify__<özet>`) ve
@@ -2135,6 +2139,8 @@ async function startServer() {
           const gorunur = rows.length > 0 && await ownsDoc(req, coll, before, realId);
           if (await ayrilmisKimlikEngeli(req, res, coll, realId, gorunur)) return;   // sahiplik yanıtından ÖNCE (varlık sızmasın)
           if (rows.length && !gorunur) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
+          // Tam değiştirme başkasının SAHİP damgalı kaydına yazamaz — Yönetici dâhil (sahip devredilmez; gövde önceki sahibe düşerdi).
+          if (baskasininSahipKaydiMi(coll, before, (req as Request & { uid?: string }).uid || '')) { res.status(403).json({ error: 'Bu kayıt başka bir kullanıcıya ait.' }); return; }
           // P4-2: maskeli (***REDACTED***) gelen gizli alan gerçek sırrı EZMEZ ve SİLMEZ — önceki değer geri konur (derin).
           incoming = maskeyiGeriYukle(coll, ham, before);
           if (await ayarYazimiEngeli(req, res, coll, incoming, before)) return;

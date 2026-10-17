@@ -164,10 +164,12 @@ describe('POST /api/mikro/cari/listesi — okuma arızası uyarısı', () => {
   });
 });
 
-// 2026-10-10 inceleme bulgusu (Mikro rol kapısı): arama dalı iç personel kapısında (`cariListesiKapisi`), tam import
-// `leads` yazma kapısında. `{ nameSearch: '%' }` LIKE jokeri olduğu için HER cariyle eşleşiyor ve 50 sayfa çekiyordu —
-// tek karakterle tam importun kapısı iç personel kapısına düşüyordu. Fark artık metne değil SATIR SAYISINA bağlı:
-// arama tek sayfa (en çok 200 cari) çeker ve jokerler köşeli parantezle düz karaktere döner.
+// 2026-10-10 inceleme bulgusu (Mikro rol kapısı): `{ nameSearch: '%' }` LIKE jokeri olduğu için HER cariyle eşleşiyor ve
+// 50 sayfa çekiyordu — o gün arama dalı iç personel kapısındaydı, yani tek karakter tam importun `leads` yazma kapısını iç
+// personel kapısına düşürüyordu. Çözüm: arama tek sayfa (en çok 200 cari) çeker, jokerler köşeli parantezle düz karaktere döner.
+// KARAR TURU (2026-10-11, K1): kapı artık gövdeye BAĞLI DEĞİL — iki dal da tek sabit `leads` yazma kapısında (arama da
+// `leads`'e yazar). Tek sayfa + joker kaçışı KALIR: kapı düşürme riski kalktı, ama «ara» diyen tek istek tam import kadar
+// Mikro yükü ve 10.000 `leads` yazımı üretmesin. Kapının rol matrisi: mikroRoutes.rolKapisi.test.ts (D4, D10).
 describe('POST /api/mikro/cari/listesi — arama dalı TEK sayfa, LIKE jokerleri düz karakter', () => {
   /** Mikro her sayfayı DOLU (200 satır) döner: döngüyü yalnız sayfa tavanı durdurur. */
   function doluSayfalar() {
@@ -180,6 +182,29 @@ describe('POST /api/mikro/cari/listesi — arama dalı TEK sayfa, LIKE jokerleri
   const cagrilar = () => vi.mocked(mikroPost).mock.calls.map(c => c[1] as { WhereStr: string; Index: number; Size: string });
   // Çağrı sayısı iddia ediliyor: önceki testlerin çağrı geçmişi (dosya düzeyinde `restoreAllMocks` `vi.fn` geçmişini silmez) karışmasın.
   beforeEach(() => { vi.mocked(mikroPost).mockClear(); });
+
+  it('K1 — zincirde TEK rol kapısı var: `leads` yazma (arama dalına ayrı iç personel kapısı YOK); sıra kimlik → MFA → kapı → işleyici', () => {
+    const zincir = d.app.zincirler['POST /api/mikro/cari/listesi'] as Array<{ erisimKapisi?: string }>;
+    // Düzenek sabit kapıları ETİKETLER; gövdeye bağlı (etiketsiz) bir kapı zinciri 5 halkaya çıkarır ya da etiketi düşürür.
+    expect(zincir).toHaveLength(4);
+    expect(zincir.map(m => m?.erisimKapisi)).toEqual([undefined, undefined, 'leads:write', undefined]);
+  });
+
+  it('K1 — arama da `leads`\'e YAZAR (kapının yazma kapısı olmasının gerekçesi): eşleşen cariler kiracı damgasıyla upsert edilir', async () => {
+    vi.mocked(mikroPost).mockImplementation((async (metot: string) => {
+      if (metot !== 'CariListesiV2') return { ok: false, data: null };
+      return { ok: true, data: { result: [{ Data: { CariListesi: [
+        { cari_kod: 'C-1', cari_unvan1: 'ŞİRİN YAPI', cari_hareket_tipi: 0 },
+        { cari_kod: 'C-2', cari_unvan1: 'IŞIK YAPI MARKET', cari_hareket_tipi: 0 },
+      ] } }] } };
+    }) as unknown as typeof mikroPost);
+    const res = await d.cagir('POST', '/api/mikro/cari/listesi', { nameSearch: 'yapı' });
+    expect(govdesi(res)).toMatchObject({ success: true, count: 2, created: 2 });
+    expect(d.koleksiyon('leads').map(y => y.data?.mikroCariKod).sort()).toEqual(['C-1', 'C-2']);
+    expect(d.koleksiyon('leads').map(y => y.data?.companyId)).toEqual(['A', 'A']);
+    // Yanıt arama SONUCU taşımaz (yalnız sayaçlar) — uç bir «arama» ucu değil importtur; salt okuyan arama ucu ayrı iş.
+    expect('data' in govdesi(res)).toBe(false);
+  });
 
   it("`{ nameSearch: '%' }` → Mikro TAM 1 kez çağrılır, joker düz karakter (`[%]`), en çok 200 cari yazılır ve yanıt kesildiğini söyler", async () => {
     doluSayfalar();

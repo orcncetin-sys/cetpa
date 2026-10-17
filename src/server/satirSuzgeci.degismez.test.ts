@@ -6,7 +6,11 @@
  *   • süzgecin ÜÇ yolda da bağlı olması (REST kimliği, akış init'i, akış olayı) — yalnız biri bağlanırsa başkasının siparişi
  *     ilk değişiklikte canlı olarak düşer;
  *   • /api/db dışındaki, siparişe dokunan uçların personel kapısı (dış rol süzgeci o uçlardan aşmasın);
- *   • sunucuda `orders`'ı okuyan / yazan YENİ bir yer eklenince testin kırılması (ya `requireStaff` ya `siparisGorebilir`).
+ *   • sunucuda `orders`'ı okuyan / yazan YENİ bir yer eklenince testin kırılması (ya `requireStaff` ya `siparisGorebilir`);
+ *   • K10 (2026-10-11) — SAHİP satır süzgeci (`syncJobs`: yeniden deneme kuyruğunda iş sahibinindir) AYNI sarmalayıcılardan
+ *     akar: `/api/db`'nin altı yazma yolu (oluşturma, PUT, PATCH, silme, atomik artırma, koşullu yazma), iki okuma yolu
+ *     (liste, tek okuma) ve akış olayının etiketi (pgShim). Gerçek `/api/db` zinciri testi yazılamadığı için (rotalar
+ *     `startServer` kapanışında) bağlantının TEK kanıtı bu çittir.
  */
 import { describe, it, expect } from 'vitest';
 import { join } from 'path';
@@ -62,7 +66,59 @@ describe('/api/db kaçakları kapalı', () => {
   it('koşullu yazma (cas) gövdesi damgadan geçer; atomik artırma sahiplik alanına dokunamaz', () => {
     tek(SERVER, /^\s*: await injectTenant\(req, coll, set as Record<string, unknown>, rows\[0\]\.data as Record<string, unknown>\);$/);
     tek(SERVER, /if \(SAHIPLIK_ALANLARI\.has\(field\)\) return res\.status\(400\)/);
-    tek(SERVER, /const SAHIPLIK_ALANLARI = new Set<string>\(\['companyId', 'userId', \.\.\.DIS_ROL_SATIR_ALANI\.values\(\), \.\.\.\[\.\.\.DIS_ROL_YAZAMAZ\.values\(\)\]\.flat\(\)\]\);/);
+    // + SAHIP_SATIR_ALANI (K10): kuyruk işinin sahibi sayıya çevrilirse iş «damgasız eski iş» sınıfına düşer (Yönetici çalıştırır).
+    tek(SERVER, /const SAHIPLIK_ALANLARI = new Set<string>\(\['companyId', 'userId', \.\.\.DIS_ROL_SATIR_ALANI\.values\(\), \.\.\.SAHIP_SATIR_ALANI\.values\(\), \.\.\.\[\.\.\.DIS_ROL_YAZAMAZ\.values\(\)\]\.flat\(\)\]\);/);
+  });
+  // K10 (2026-10-11) — SAHİP satır süzgeci (`syncJobs`: iş sahibinindir). Kural saf modülde (lib/tenantErisim; davranışı
+  // tenantErisim.sahip.test + gerçek motorda tenantErisim.sahip.motor.test). server.ts'e eklenen TEK şey sahip alanının
+  // SAHIPLIK_ALANLARI'na girmesidir; süzgecin kendisi mevcut sarmalayıcılardan akar. Bu yüzden «altı yazma yolu + iki okuma yolu
+  // o sarmalayıcıları çağırıyor» iddiası burada kilitlenir — biri sökülürse başkasının kuyruk işi o yoldan okunur / yazılır.
+  it('sahip süzgeci aynı sarmalayıcılardan akar: altı yazma yolunun ve iki okuma yolunun HEPSİ çitli', () => {
+    // 1) oluşturma (POST): damga — `onceki` YOK (yeni kayıt: sahip = oturum).
+    tek(SERVER, /^\s*let data = await injectTenant\(req, coll, resolveSentinels\(req\.body \?\? \{\}\) as Record<string, unknown>\);$/);
+    // 2-3) PUT / PATCH: sahiplik 403'ü ve mevcut belgeyle damga — yukarıdaki / aşağıdaki testlerde (2'şer satır).
+    expect(satirlar(SERVER, /^\s*if \(rows\.length && !gorunur\) \{ res\.status\(403\)\.json\(\{ error: 'Bu kayıt başka bir firmaya ait\.' \}\); return; \}$/)).toHaveLength(2);
+    expect(satirlar(SERVER, /^\s*data = await injectTenant\(req, coll, data, before\);/)).toHaveLength(2);
+    // 4) silme: sahiplik 403'ü, `sahiplikDenetimli` kapısının HEMEN altında, silme sorgusundan ÖNCE.
+    const sil = tek(SERVER, /^\s*if \(existing\.length && !\(await ownsDoc\(req, coll, prevData, realId\)\)\) \{ res\.status\(403\)\.json\(\{ error: 'Bu kayıt başka bir firmaya ait\.' \}\); return; \}$/);
+    expect(kodSatirlari(SERVER)[sil - 2].kod.trimEnd()).toMatch(/^\s*if \(sahiplikDenetimli\(coll\)\) \{$/);
+    expect(sil).toBeLessThan(tek(SERVER, /^\s*await docsDb\.query\('DELETE FROM docs WHERE coll = \$1 AND id = \$2', \[coll, realId\]\);$/));
+    // 5-6) atomik artırma / koşullu yazma: `sahipsizYanit` (2 dönüş) ve koşullu yazmanın damgası — bu `describe`ın diğer testleri.
+    expect(satirlar(SERVER, /^\s*return sahipsizYanit\(req, res, coll\);$/)).toHaveLength(2);
+    // Okuma = yazma kuralı — liste: SQL eki `tenantWhere`'den; sorgu metni tenantErisim.sahip.motor.test'in koştuğuyla AYNI.
+    const where = tek(SERVER, /^\s*const t = await tenantWhere\(req, coll\);$/);
+    ardindan(SERVER, where, [/^\s*const \{ rows \} = await docsDb\.query\(`SELECT id, data FROM docs WHERE coll = \$1\$\{t\.sql\}`, \[coll, \.\.\.t\.params\]\);$/]);
+    // Okuma = yazma kuralı — tek okuma: görünmeyen iş «yok» ile AYNI yanıt (404).
+    tek(SERVER, /^\s*if \(!rows\.length \|\| !\(await ownsDoc\(req, coll, rows\[0\]\.data as Record<string, unknown>, id\)\)\) \{ res\.status\(404\)\.json\(\{ error: 'Not found\.' \}\); return; \}$/);
+    // Akış olayının etiketi: sahip haritası pgShim'e bağlı (bağlanmazsa olay etiketsiz kalır; sahibi kendi işinin olayını alamaz).
+    const PGSHIM = join(SRC, 'server', 'pgShim.ts');
+    const etiket = tek(PGSHIM, /^\s*const satirAlan = satirSahibiAlani\(coll\);$/);
+    ardindan(PGSHIM, etiket, [/^\s*const satirSahibi = satirAlan && typeof d\[satirAlan\] === 'string' \? d\[satirAlan\] as string : undefined;$/]);
+    expect(say(PGSHIM, /DIS_ROL_SATIR_ALANI/)).toBe(0);         // eski doğrudan okuma kalmadı (yalnız dış rol haritasına bakıyordu)
+  });
+  // İnceleme düzeltmesi (2026-10-17): sahip devredilmediğinden Yönetici'nin başkasının damgalı kuyruk işine PUT ile yazdığı
+  // gövde önceki sahibin okumasına düşerdi. Kural saf yüklemde (tenantErisim.baskasininSahipKaydiMi — davranışı
+  // tenantErisim.sahip.test); burada YALNIZ PUT işleyicisine, sahiplik 403'ünün hemen altına bağlı olduğu kilitlenir.
+  it('PUT: başkasının SAHİP damgalı kaydına tam değiştirme reddedilir — sahiplik 403\'ünün hemen altında, birleştirme / damga / INSERT\'ten önce; PATCH sormaz', () => {
+    const KAPI = /^\s*if \(baskasininSahipKaydiMi\(coll, before, \(req as Request & \{ uid\?: string \}\)\.uid \|\| ''\)\) \{ res\.status\(403\)\.json\(\{ error: 'Bu kayıt başka bir kullanıcıya ait\.' \}\); return; \}$/;
+    const kapi = tek(SERVER, KAPI);
+    const put = tek(SERVER, /^\s*app\.put\('\/api\/db\/:coll\/:id', /);
+    const patch = tek(SERVER, /^\s*app\.patch\('\/api\/db\/:coll\/:id', /);
+    expect(put).toBeLessThan(kapi);
+    expect(kapi).toBeLessThan(patch);
+    const sahiplik = satirlar(SERVER, /^\s*if \(rows\.length && !gorunur\) \{ res\.status\(403\)\.json\(\{ error: 'Bu kayıt başka bir firmaya ait\.' \}\); return; \}$/)
+      .map(s => s.n).filter(n => n > put && n < kapi);
+    expect(sahiplik).toHaveLength(1);
+    // Arada yalnız yorum / boş satır: kapı sahiplik yanıtının HEMEN altında (`before` okunmuş, görünürlük sorulmuş).
+    const kod = kodSatirlari(SERVER);
+    expect(kod.slice(sahiplik[0], kapi - 1).map(s => s.kod.trim()).filter(k => k !== '')).toEqual([]);
+    // Yazmadan önce: birleştirme, damga ve INSERT bu satırın altında.
+    const sonraki = (desen: RegExp) => satirlar(SERVER, desen).map(s => s.n).find(n => n > kapi) ?? Infinity;
+    expect(kapi).toBeLessThan(sonraki(/^\s*data = req\.query\.merge === '1' \? mergeDocData\(before, incoming\) : incoming;$/));
+    expect(sonraki(/^\s*data = req\.query\.merge === '1' \? mergeDocData\(before, incoming\) : incoming;$/)).toBeLessThan(patch);
+    expect(sonraki(/^\s*data = await injectTenant\(req, coll, data, before\);/)).toBeLessThan(patch);
+    // PATCH / koşullu yazma / silme yüklemi SORMAZ (Yönetici'nin kapatma ve temizlik yolları).
+    expect(say(SERVER, /baskasininSahipKaydiMi\(/)).toBe(1);
   });
   it('PUT ve PATCH: dış rol, sunucunun ürettiği biçimde (`__`) kimlikle yeni kayıt açamaz', () => {
     // Kapı "var VE görünür" ile sorulur ve sahiplik yanıtından ÖNCE gelir: "yok" ile "var ama görünmez" aynı yanıtı alır.

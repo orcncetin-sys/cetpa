@@ -8,8 +8,15 @@
  *
  * XML e-belgenin YASAL aslıdır, PDF yalnız görüntüsüdür — mali müşavire
  * gönderim ve arşiv için gereken XML'dir.
+ *
+ * ROL KAPISI (karar turu 2026-10-11 — K7 / H1, İ3, İ5): indirme isteği atılmadan ÖNCE rol, sunucunun kapısını ortak
+ * tablodan sorar (`lib/mikroUcKapilari`). Rol geçemiyorsa istek HİÇ atılmaz (sessiz 403 yok) — çağıran unutsa da.
+ * Kapı İKİ YÖNDE de aynıdır: sunucu belgenin yönünü bilemez, «giden belge Satış'a açık» dalı YOKTUR; bu yüzden kapı
+ * sorusu yön almaz. (`EBelgeIstek.yon` kapı için değil, Mikro'nun XML isteğindeki belge tipi için taşınır.)
  */
 import { authFetch } from './authFetch';
+import { useAppStore } from '../store/appStore';
+import { ucKapisindanGecer, type MikroKapiliUc } from '../lib/mikroUcKapilari';
 
 export type EBelgeTuru = 'xml' | 'pdf';
 
@@ -21,10 +28,21 @@ export interface EBelgeIstek {
   faturaGuid?: string;
   /** XML'de belge tipini seçer (e-fatura/e-arsiv/e-irsaliye). */
   belgeTuru?: string;
+  /** YALNIZ XML gövdesinde Mikro'ya gider (gelen / gönderilen belge seçimi). Rol kapısı yöne BAKMAZ; PDF gövdesine yazılmaz. */
   yon?: 'gelen' | 'giden';
   /** Uzantısız dosya adı. */
   dosyaAdi: string;
 }
+
+/** Türün sunucu ucu = ortak tablodaki kapı anahtarı (`'YÖNTEM /yol'`). Kapı sorusu ve istek yolu AYNI sabitten çıkar —
+ *  biri değişip öbürü kalamaz. */
+const INDIRME_UCU = {
+  pdf: 'POST /api/mikro/ebelge/pdf',
+  xml: 'POST /api/mikro/ebelge/xml',
+} as const satisfies Record<EBelgeTuru, MikroKapiliUc>;
+
+/** Ortak tablo anahtarının yol parçası (`'POST /api/…'` → `'/api/…'`). */
+const ucYolu = (uc: MikroKapiliUc): string => uc.slice(uc.indexOf(' ') + 1);
 
 /** Yanıttaki base64/metin alanını bul — alan adı Mikro sürümüne göre değişir. */
 function uzunAlan(d: unknown, minUzunluk: number): string | undefined {
@@ -53,14 +71,21 @@ function dosyaIndir(blob: Blob, ad: string) {
  *
  * Sunucu "başarılı ama boş" durumunu artık kendisi yakalayıp açıklayıcı hata
  * döndürüyor (SRV GİB yetkisi) — buradaki biçim kontrolü son çare olarak kalır.
+ *
+ * Rol, ucun kapısından geçemiyorsa istek ATILMAZ ve yetki metni döner (rol küresel depodan okunur).
  */
 export async function eBelgeIndir(istek: EBelgeIstek, tr: boolean): Promise<string | null> {
   const { tur } = istek;
+  const uc = INDIRME_UCU[tur];
+  if (!ucKapisindanGecer(useAppStore.getState().userRole, uc)) {
+    return tr ? 'Bu belgeyi indirme yetkiniz yok.' : 'You are not allowed to download this document.';
+  }
   if (tur === 'xml' && !istek.uuid) {
     return tr ? 'Bu belgede UUID yok — XML çekilemez.' : 'No UUID — XML unavailable.';
   }
   try {
-    const url = tur === 'xml' ? '/api/mikro/ebelge/xml' : '/api/mikro/ebelge/pdf';
+    const url = ucYolu(uc);
+    // PDF gövdesi yön TAŞIMAZ (H1: kapı yöne bağlı değil; sunucu yöntemi anahtara göre seçer).
     const govde = tur === 'xml'
       ? { uuid: istek.uuid, tur: istek.belgeTuru ?? 'e-fatura', yon: istek.yon }
       : (istek.uuid ? { uuid: istek.uuid } : { faturaGuid: istek.faturaGuid });

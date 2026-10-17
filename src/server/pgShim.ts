@@ -19,8 +19,7 @@
 import { EventEmitter } from 'events';
 import pg from 'pg';
 import { FieldValue } from 'firebase-admin/firestore';
-import { ayarSahibi } from '../lib/tenantErisim.js';
-import { DIS_ROL_SATIR_ALANI } from '../lib/collections.js';
+import { ayarSahibi, satirSahibiAlani } from '../lib/tenantErisim.js';
 
 export interface PgShimDeps {
   /** `pgServerTimestamp` PG modunda mi Firestore modunda mi oldugunu bilmeli. */
@@ -104,9 +103,11 @@ export function broadcastDocChange(coll: string, type: 'set' | 'delete', id: str
   const cid = kapsam ? kapsam.cid ?? undefined
     : coll === 'settings' ? ayarSahibi(id) ?? undefined
     : (d.companyId as string | undefined);
-  // Dış rol satır süzgeci (collections.DIS_ROL_SATIR_ALANI): akış, olayı sahiplik alanına göre süzer. Etiket silmede de
-  // taşınır (içerik yine iliştirilmez).
-  const satirAlan = DIS_ROL_SATIR_ALANI.get(coll);
+  // Satır süzgeci (collections.DIS_ROL_SATIR_ALANI — dış rol; SAHIP_SATIR_ALANI — kuyruk işi sahibinindir, K10): akış, olayı
+  // sahiplik alanına göre süzer. Alan ROLDEN BAĞIMSIZ okunur (alıcının rolü burada bilinmez; karar akışta —
+  // tenantErisim.akisOlayKarari). Sahip haritası buraya bağlanmazsa olay etiketsiz kalır ve sahibi KENDİ işinin olayını
+  // alamaz (kapalı yönde hata). Etiket silmede de taşınır (içerik yine iliştirilmez).
+  const satirAlan = satirSahibiAlani(coll);
   const satirSahibi = satirAlan && typeof d[satirAlan] === 'string' ? d[satirAlan] as string : undefined;
   dbEvents.emit('change', {
     coll, type, id,

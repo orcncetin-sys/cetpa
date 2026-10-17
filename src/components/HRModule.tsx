@@ -179,16 +179,27 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
     setTimeout(() => setToast(null), 3000);
   };
 
-  const { data: mikroPersoneller, loading: mikroLoading, refetch: fetchMikroPersonel } = useMikroPersonel();
+  // Karar turu 2026-10-11 (K4 / H5, İ3): personel çekme ucunun kapısını KANCA bilir (ortak tablo). Kapıdan geçemeyen
+  // rolde kanca istek atmaz, aşağıdaki «Mikro'dan Senkronize Et» düğmesi de ÇİZİLMEZ (`mikroPersonelCekebilir`).
+  const { loading: mikroLoading, hata: mikroPersonelHata, yetkili: mikroPersonelCekebilir, refetch: fetchMikroPersonel } = useMikroPersonel();
 
   const handleSyncMikro = async () => {
-    if (!mikroPersoneller || mikroPersoneller.length === 0) {
-      await fetchMikroPersonel();
+    // Çekimin SONUCU buradan okunur. Eskiden kanca hatayı (403 dâhil) yutuyor, döngü boş liste üzerinde dönüyor ve
+    // yeşil «0 güncellendi, 0 eklendi» basılıyordu — başarısız çekim başarı gibi görünüyordu.
+    const cekim = await fetchMikroPersonel();
+    if (!cekim.ok) {
+      const metin = cekim.neden === 'yapilandirilmamis'
+        ? (currentLanguage === 'tr' ? 'Mikro yapılandırılmamış.' : 'Mikro is not configured.')
+        : cekim.neden === 'yetki'
+          ? (currentLanguage === 'tr' ? 'Rolünüz Mikro personel çekimini başlatamaz.' : 'Your role cannot start the Mikro personnel pull.')
+          : (currentLanguage === 'tr' ? `Mikro personel çekimi başarısız: ${cekim.hata}` : `Mikro personnel pull failed: ${cekim.hata}`);
+      showToast(metin, 'error');
+      return;
     }
-    // After fetch (or if already fetched), we match employees
+    // Uç personeli sunucuda `employees` koleksiyonuna yazar; satır döndürürse aşağıdaki eşleme de koşar.
     let synced = 0;
     let created = 0;
-    for (const mPer of (mikroPersoneller || [])) {
+    for (const mPer of cekim.data) {
       if (!mPer.mikroPersKod) continue;
       // Match by TC ID or email or name
       const existing = employees.find(e => 
@@ -229,7 +240,16 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
         created++;
       }
     }
-    showToast(currentLanguage === 'tr' ? `${synced} güncellendi, ${created} eklendi.` : `${synced} updated, ${created} created.`);
+    // Sunucunun yazdığı sayı biliniyorsa O söylenir (eski metin, sunucu kaç personel yazarsa yazsın «0 güncellendi,
+    // 0 eklendi» diyordu). Sayı yanıtta yoksa uydurulmaz.
+    const tr = currentLanguage === 'tr';
+    const sunucu = cekim.yazilan !== null
+      ? (tr ? `Mikro'dan ${cekim.yazilan} personel çekildi.` : `${cekim.yazilan} employees pulled from Mikro.`)
+      : (tr ? 'Mikro personel çekimi tamamlandı.' : 'Mikro personnel pull completed.');
+    const yerel = synced + created > 0
+      ? (tr ? ` ${synced} güncellendi, ${created} eklendi.` : ` ${synced} updated, ${created} created.`)
+      : '';
+    showToast(sunucu + yerel);
   };
 
   const t = {
@@ -527,14 +547,17 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                 />
               </div>
               <div className="flex gap-2">
-                <button 
-                  onClick={handleSyncMikro}
-                  disabled={mikroLoading}
-                  className="apple-button-secondary bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold"
-                >
-                  {mikroLoading ? '...' : (currentLanguage === 'tr' ? "Mikro'dan Senkronize Et" : 'Sync from Mikro')}
-                </button>
-                <button 
+                {/* İ3 — ölü düğme yok: personel çekme ucunun kapısından geçemeyen rolde düğme çizilmez. */}
+                {mikroPersonelCekebilir && (
+                  <button
+                    onClick={handleSyncMikro}
+                    disabled={mikroLoading}
+                    className="apple-button-secondary bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold"
+                  >
+                    {mikroLoading ? '...' : (currentLanguage === 'tr' ? "Mikro'dan Senkronize Et" : 'Sync from Mikro')}
+                  </button>
+                )}
+                <button
                   onClick={() => setShowEmployeeModal(true)}
                   className="apple-button-primary"
                 >
@@ -542,6 +565,15 @@ export default function HRModule({ currentLanguage, isAuthenticated, userRole, e
                 </button>
               </div>
             </div>
+
+            {/* Mikro personel çekimi (ekran açılışı ya da düğme) başarısızsa hata burada GÖRÜNÜR — eskiden yalnız konsola yazılıyordu. */}
+            {mikroPersonelCekebilir && mikroPersonelHata && (
+              <p role="status" className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                {currentLanguage === 'tr'
+                  ? `Mikro personel çekimi başarısız (${mikroPersonelHata.replace(/\.$/, '')}). Liste Mikro'daki son değişiklikleri içermeyebilir.`
+                  : `Mikro personnel pull failed (${mikroPersonelHata.replace(/\.$/, '')}). The list may not include the latest changes in Mikro.`}
+              </p>
+            )}
 
             <div className="apple-card overflow-hidden">
               <div className="overflow-x-auto">

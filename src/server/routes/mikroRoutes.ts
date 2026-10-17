@@ -57,7 +57,7 @@ import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
 import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
 import { EXTERNAL_ROLES, type AppRole } from '../../lib/rbac.js';
 import { mikroIsAdi } from '../../lib/mikroIsAdi.js';
-import { MIKRO_EVRAK_KAPILARI, evrakYontemi } from '../../lib/mikroEvrakKapilari.js';
+import { MIKRO_EVRAK_KAPILARI, evrakKapiKosullari, evrakYontemi } from '../../lib/mikroEvrakKapilari.js';
 import { arkaPlanIsiBaslat, arkaPlanOnKontrol, arkaPlanYaziciAdi, arkaPlanIsiKosan, bakimKilidiMesaji, type ArkaPlanBagimlilik, type BaslatSonucu } from '../mikro/arkaPlanIsi.js';
 import { araligiTopla, ALT_STOK, ALT_CARI, type SayfaSayaclari } from '../mikro/adaptifSayfalama.js';
 import { bilinenSayi } from '../../utils/para.js';
@@ -173,13 +173,16 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   };
   const YABANCI_BELGE = { success: false, error: 'Kayıt bulunamadı.' } as const;   // varlığı sızdırmamak için 'yabanci' ve 'yok' aynı yanıt
 
-  // ── ROL KAPILARI (2026-10-10) ────────────────────────────────────────────────
+  // ── ROL KAPILARI (2026-10-10; karar turu 2026-10-11) ─────────────────────────
   // KURAL: bu dosyadaki HER `/api/mikro/*` kaydı kimlikten SONRA bir rol kapısı taşır — `C.requireStaff`,
-  // `C.requireCollectionAccess(…)` ya da aşağıdaki gövdeye bağlı üç kapıdan biri. Tek istisna ops jetonu kapılı sekiz tanı
+  // `C.requireCollectionAccess(…)` ya da aşağıdaki gövdeye bağlı iki kapıdan biri. Tek istisna ops jetonu kapılı sekiz tanı
   // ucudur (zincirleri boş, ilk satırları `opsJetonuGecerli`). Zincir sırası: kimlik → MFA → ROL KAPISI → hız sınırı →
   // işleyici. `requireAuth` yalnız «oturum açmış» der (dış rol dâhil); `requireMfaVerified` MFA kurmamış hesabı geçirir —
-  // ikisi de rol kapısı DEĞİLDİR. Kapının koleksiyonu = ucun Cetpa'daki EŞDEĞER işleminin kuralı (rbac.ts); bir ince kapı
-  // yalnız ucu çağıran ekranı bugün gören her rol o kapıdan geçiyorsa konur, yoksa uç `requireStaff`'ta kalır.
+  // ikisi de rol kapısı DEĞİLDİR. Kapının koleksiyonu = ucun Cetpa'daki EŞDEĞER işleminin kuralı (rbac.ts):
+  //   İ1 — Cetpa'ya ya da Mikro'ya YAZAN uç o koleksiyonun YAZMA kuralını ister;  İ2 — yalnız OKUYAN uç OKUMA kuralını.
+  // Karar turu bazı iç rolleri BİLEREK kilitler (rota satırlarının üstündeki «kilitlenen» notları); o rolde düğme çizilmez,
+  // çağrı hiç yapılmaz (İ3). İstemcinin sorduğu ORTAK tablolar: uç düzeyi `src/lib/mikroUcKapilari.ts`, yöntem düzeyi
+  // `src/lib/mikroEvrakKapilari.ts` (İ4). Rota satırındaki kapı DÜZ METİN kalır; tabloyla eşitliğini çit sınar.
   // `requireAdmin` BİLEREK kullanılmaz: süper yöneticiyi geçirmez, sahip hesabı ise Ayarlar'ı rolünden bağımsız görür.
   // Kapısız yeni uç eklenirse çit kırılır: mikroRoutes.rolKapisi.test.ts.
 
@@ -193,24 +196,29 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   const cariHedefKapisi = (req: Request, res: Response, next: NextFunction) =>
     C.requireCollectionAccess(cariHedefKoleksiyonu(req.body), 'write')(req, res, next);
 
-  /** `cari/listesi` arama metni — kapı ve işleyici ortak (boş = TAM cari importu, dolu = ada göre arama). */
+  /** `cari/listesi` arama metni (boş = TAM cari importu, dolu = ada göre arama). Yalnız İŞLEYİCİ okur: karar turundan
+   *  (2026-10-11, K1) beri kapı gövdeye BAĞLI DEĞİL — iki dal da `leads`'e yazdığı için uç tek sabit `leads` yazma kapısında
+   *  (tam import 10.000 cariye, arama istek başına 200 cariye kadar upsert eder). Arama dalının TEK sayfa çekmesi ve LIKE
+   *  jokerlerini (`%`, `_`, `[`) düz karaktere çevirmesi KALIR: `%` araması artık kapı düşürmez ama tek istekte tam import
+   *  kadar Mikro yükü ve `leads` yazımı üretmesin (2026-10-10 inceleme bulgusu; mikroRoutes.eslemeCari.test.ts). */
   const cariAramaMetni = (govde: unknown): string => {
     const m = (govde as { nameSearch?: unknown } | undefined)?.nameSearch;
     return typeof m === 'string' ? m.trim().slice(0, 100) : '';
   };
-  /** Arama metni yoksa uç 10.000 cariye kadar `leads` upsert eder = `import/cari` ile aynı işlem → `leads` yazma kapısı.
-   *  Arama dalı iç personelde kalır: Satın Alma ve CRM'deki «Mikro'da ara» kutularını `leads` yazamayan roller de görüyor
-   *  (ince kapı onları kilitlerdi — karar bekliyor). Arama dalı istek başına en çok 200 cari upsert eder: işleyici aramada
-   *  TEK sayfa çeker ve LIKE jokerlerini (`%`, `_`, `[`) düz karaktere çevirir — yoksa `%` araması tam importun `leads` yazma
-   *  kapısını iç personel kapısına düşürürdü (2026-10-10 inceleme bulgusu). */
-  const cariListesiKapisi = (req: Request, res: Response, next: NextFunction) =>
-    cariAramaMetni(req.body) ? C.requireStaff(req, res, next) : C.requireCollectionAccess('leads', 'write')(req, res, next);
 
-  /** `evrak/kaydet`: kapı YÖNTEME göre (tablo: src/lib/mikroEvrakKapilari.ts). Tanınmayan yöntem iç personel kapısına düşer;
-   *  işleyici onu 400 ile reddeder (dış rol 403'te kalır — beyaz listeyi yoklayamaz). */
+  /** `evrak/kaydet`: kapı YÖNTEME göre (tablo: src/lib/mikroEvrakKapilari.ts). Koşullar tablodan çözülür: iç personel şartı
+   *  (varsa) ÖNCE, eşdeğer koleksiyonun yazma kuralı (varsa) SONRA — `VerilenTeklifKaydetV2` ikisini BİRLİKTE ister (kuralı
+   *  dış rol de içerir, H4). İstemci aynı çözümü `evrakKapisindanGecer` ile sorar. Tanınmayan yöntem iç personel kapısına
+   *  düşer; işleyici onu 400 ile reddeder (dış rol 403'te kalır — beyaz listeyi yoklayamaz). */
   const evrakYontemKapisi = (req: Request, res: Response, next: NextFunction) => {
-    const kapi = MIKRO_EVRAK_KAPILARI.get(evrakYontemi(req.body));
-    return kapi === undefined || kapi === 'staff' ? C.requireStaff(req, res, next) : C.requireCollectionAccess(kapi[0], kapi[1])(req, res, next);
+    const { icRol, kural } = evrakKapiKosullari(MIKRO_EVRAK_KAPILARI.get(evrakYontemi(req.body)));
+    // Kural halkası, personel halkasının `next`'i olarak da koşar: express o çağrının sözünü GÖRMEZ → reddi elle `next`'e
+    // taşınır (yoksa kural okunurken fırlayan hata isteği yanıtsız asılı bırakır).
+    const kuralKapisi = (hata?: unknown): void => {
+      if (hata || !kural) { next(hata); return; }
+      Promise.resolve(C.requireCollectionAccess(kural[0], kural[1])(req, res, next)).catch(next);
+    };
+    return icRol ? C.requireStaff(req, res, kuralKapisi) : kuralKapisi();
   };
 
   // ── Mikro Jump API Routes ────────────────────────────────────────────────────
@@ -487,8 +495,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  WhereStr'i serbest SQL parcasi kabul ettigi icin (SqlVeriOkuV2/ListesiV2
    *  ortak deseni) dogrudan client whereStr'i arama girdisiyle beslemek
    *  Mikro'nun sorgusuna enjeksiyon acardi. */
-  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Tam import `leads` yazma kapısında, arama iç personelde.
-  app.post('/api/mikro/cari/listesi', C.requireAuth, C.requireMfaVerified, cariListesiKapisi, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı.
+  // Karar turu (2026-10-11, K1): İ1 — iki dal da (tam import ve arama) `leads`'e yazar → tek sabit `leads` yazma kapısı; kilitlenen: Satın Alma, Lojistik, Muhasebe (bilerek). Salt okuyan arama ucu ayrı iş.
+  app.post('/api/mikro/cari/listesi', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('leads', 'write'), async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-cari-listesi:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
@@ -502,7 +511,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // Artık gece cron'uyla AYNI mantık: tam sayfalama + upsert, eşleme
     // önceliği mikroCariKod → VKN → isim (elle oluşturulmuş kayıtların
     // mikroCariKod'u olmadığı için salt-kod eşleşme onları ikinci kez yaratırdı).
-    const nameSearch = cariAramaMetni(req.body);   // rol kapısıyla (cariListesiKapisi) AYNI ayıklayıcı
+    const nameSearch = cariAramaMetni(req.body);   // kapı gövdeye bağlı değil (K1): iki dal da `leads` yazma kapısının arkasında
     // Mikro WhereStr serbest SQL parçası kabul eder; istemci whereStr'i ASLA
     // doğrudan geçirilmez (enjeksiyon). nameSearch escape'li LIKE'a çevrilir.
     const whereStr = nameSearch
@@ -3955,8 +3964,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  kullanıcının kendi verisinden okuyoruz. Örnek alanlar da dönüyor ki
    *  DekontKaydetV2 gövdesini onların kullandığı kalıba göre dolduralım.
    */
-  // Rol kapısı (2026-10-10): yalnız kimlikti. GEÇİCİ `leads` okuma: dekont penceresini bugün gören rollerin tam kümesi (kalıcı kapı `mikroCariHareketler` okuma — karar bekliyor).
-  app.get('/api/mikro/cari-hareket/turler', C.requireAuth, C.requireCollectionAccess('leads', 'read'), C.mikroLimiter, async (_req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlikti.
+  // Karar turu (2026-10-11, K2): İ2 — uç Mikro cari hareketlerini yalnız OKUR → `mikroCariHareketler` okuma kapısı; kilitlenen: Satış, Satın Alma (bilerek). Tek çağıranı dekont penceresi; o pencereyi açan düğme aynı rollerde çizilmez (K3-a).
+  app.get('/api/mikro/cari-hareket/turler', C.requireAuth, C.requireCollectionAccess('mikroCariHareketler', 'read'), C.mikroLimiter, async (_req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     try {
       const { rows, hata } = await mikroSql(
@@ -4129,6 +4139,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  ("alan eşlemesi V17 örneğinden — DENEYSEL" notu oraya TAŞINDI).
    */
   // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Mikro işlemi KASA hareketidir (tediye de yazar) → `kasaHareketleri` yazma; `tahsilatOdemeleri` yazma Satış'ı geçirirdi.
+  // Karar turu (2026-10-11, K9): kapı DEĞİŞMEZ — Satış'a tahsilat gönderimi AÇILMAZ. İstemcideki sessiz çağrı koşulunu ortak tablodan sorar (src/lib/mikroUcKapilari.ts).
   app.post('/api/mikro/tahsilat/kaydet', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('kasaHareketleri', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const { tahsilat } = req.body as { tahsilat: Record<string, unknown> };
@@ -4329,8 +4340,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   });
 
   // ── Personel ───────────────────────────────────────────────────────────
-  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. GEÇİCİ `employees` okuma: Ayarlar kartını ve İK ekranını bugün gören rollerin tam kümesi (kalıcı kapı `employees` yazma — karar bekliyor).
-  app.post('/api/mikro/pull/personel', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('employees', 'read'), async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı.
+  // Karar turu (2026-10-11, K4): İ1 — uç `employees`'e yazar → yazma kapısı; kilitlenen: Müdür, Muhasebe (bilerek). Zamanlanmış işi yok: personel yalnız Yönetici / İK oturumundan tazelenir.
+  app.post('/api/mikro/pull/personel', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('employees', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
 
     try {
@@ -4435,8 +4447,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   });
 
   // ── Uretim Receteleri (BOM) ────────────────────────────────────────────────
-  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `bom` yazma kapısı Üretim ekranını gören Kalite rolünü kilitlerdi — karar bekliyor.
-  app.post('/api/mikro/pull/uretim-receteleri', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı.
+  // Karar turu (2026-10-11, K5): İ1 — uç `bom`'a yazar → yazma kapısı; kilitlenen: Kalite (bilerek).
+  app.post('/api/mikro/pull/uretim-receteleri', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('bom', 'write'), async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     
     try {
@@ -4976,8 +4989,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/ebelge/gelen — GİB'den gelen e-faturaları listele → eBelgeler
    *  Body: { ilkTarih?: 'YYYY-MM-DD', sonTarih?: 'YYYY-MM-DD', vkn?: string } */
-  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `eBelgeler` yazma kapısı e-Belge Merkezi'ni gören Satış / Lojistik'i kilitlerdi — karar bekliyor.
-  app.post('/api/mikro/ebelge/gelen', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı.
+  // Karar turu (2026-10-11, K6): İ1 — uç `eBelgeler`'e yazar → yazma kapısı; kilitlenen: Satış, Lojistik (bilerek — İ5: gelen e-fatura tedarikçi fatura numarasını taşır).
+  app.post('/api/mikro/ebelge/gelen', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('eBelgeler', 'write'), C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -5017,8 +5031,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  V17'de giden belge listesi metodu YOK; EBELGE_EVRAK_HAREKETLERI tablosundan
    *  SQL ile çekilir. Kolonlar çalışma anında keşfedilir, tahmin edilmez.
    *  Body: { ilkTarih?, sonTarih? } */
-  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `eBelgeler` yazma kapısı e-Belge Merkezi'ni gören Satış / Lojistik'i kilitlerdi — karar bekliyor.
-  app.post('/api/mikro/ebelge/giden', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı.
+  // Karar turu (2026-10-11, K6): İ1 — uç `eBelgeler`'e yazar → yazma kapısı; kilitlenen: Satış, Lojistik (bilerek).
+  app.post('/api/mikro/ebelge/giden', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('eBelgeler', 'write'), C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -5071,8 +5086,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
   /** POST /api/mikro/ebelge/eirsaliye — e-irsaliye listesi → eBelgeler
    *  Body: { ilkTarih?, sonTarih?, yon?: 'gelen'|'giden' }  (EIrsaliyeTipi 0=giden, 1=gelen) */
-  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `eBelgeler` yazma kapısı e-Belge Merkezi'ni gören Satış / Lojistik'i kilitlerdi — karar bekliyor.
-  app.post('/api/mikro/ebelge/eirsaliye', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı.
+  // Karar turu (2026-10-11, K6): İ1 — uç `eBelgeler`'e yazar → yazma kapısı; kilitlenen: Satış, Lojistik (bilerek).
+  app.post('/api/mikro/ebelge/eirsaliye', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('eBelgeler', 'write'), C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
@@ -5198,8 +5214,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  Body: { uuid?: string, faturaGuid?: string }
    *  uuid → GelenFaturaPdfV2 (gelen), faturaGuid → FaturaPdfV2 (giden).
    *  Not: uygulamanın jsPDF çıktısı resmi nüsha DEĞİLDİR; bu uç gerçek olanı verir. */
-  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `eBelgeler` okuma kapısı Fatura Detayı'nı gören Lojistik / Satın Alma'yı kilitlerdi — karar bekliyor.
-  app.post('/api/mikro/ebelge/pdf', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı.
+  // Karar turu (2026-10-11, K7 / H1 / İ5): alış belgesi muhasebenindir → İKİ YÖNDE de tek sabit `mikroFaturalar` okuma kapısı; kilitlenen: Satış, Lojistik, Satın Alma (bilerek).
+  // «Giden belge Satış'a açık» dalı BİLEREK yazılmadı: sunucu belgenin yönünü bilemez (bu gövdede yön alanı yok; `uuid` giden belgede de gelir). Doğrulanmış yönle Satış'a satış faturası PDF'i ayrı iş.
+  app.post('/api/mikro/ebelge/pdf', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('mikroFaturalar', 'read'), C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const uuid = String(req.body?.uuid ?? '').trim();
     const guid = String(req.body?.faturaGuid ?? '').trim();
@@ -5228,8 +5246,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  gönderirken veya arşivlerken istenen budur.
    *  Spec: EFaturaTipi 0=gönderilen 1=gelen · EBelgeTipi 0=EFatura 1=EArsiv 2=EIrsaliye
    */
-  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. İç personel: `eBelgeler` okuma kapısı Fatura Detayı'nı gören Lojistik / Satın Alma'yı kilitlerdi — karar bekliyor.
-  app.post('/api/mikro/ebelge/xml', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.mikroLimiter, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı.
+  // Karar turu (2026-10-11, K7 / H1 / İ5): alış belgesi muhasebenindir → İKİ YÖNDE de tek sabit `mikroFaturalar` okuma kapısı; kilitlenen: Satış, Lojistik, Satın Alma (bilerek).
+  // Gövdedeki `yon` istemci BEYANIDIR (Mikro'ya `EFaturaTipi` olarak gider) — kapı kararına GİRMEZ.
+  app.post('/api/mikro/ebelge/xml', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('mikroFaturalar', 'read'), C.mikroLimiter, async (req: Request, res: Response) => {
     if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
     const uuid = String(req.body?.uuid ?? '').trim();
     if (!/^[0-9a-fA-F-]{36}$/.test(uuid)) return res.status(400).json({ success: false, error: 'Geçerli bir UUID gerekli.' });

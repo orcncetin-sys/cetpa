@@ -20,6 +20,7 @@ import {
 import { gunAnahtari, zamanDate, zamanMs, ayAnahtari, tarihYaz, bugunAnahtari } from '../utils/zaman';
 import { siparisDurumEtiketi } from '../utils/durumEtiketi';
 import KurUyarisi from '../components/KurUyarisi';
+import EBelgeDurumKarti from '../components/pano/EBelgeDurumKarti';
 import {
   stokDegeriOzeti, dusukStokKalemleri, stokEsikYaz, enCokSatanlar,
   durumDagilimi, haftaIciIsiHaritasi, sonSevkiyatlar, PANO_DURUMLARI,
@@ -128,6 +129,8 @@ interface Props {
   toast: (msg: string, type?: string) => void;
   fmtKpi: (value: number, format?: 'full' | 'K', decimals?: number) => string;
   setActiveTab: (tab: string) => void;
+  /** Sekme erişimi (App.tsx `canAccess`) — ZORUNLU: panodaki sekme kartları erişilemeyen sekmeye götürmesin. */
+  canAccess: (tab: string) => boolean;
 
   summaryData: SummaryData | null;
   monthlyTarget: number;
@@ -167,7 +170,7 @@ export default function DashboardPage(props: Props) {
   const {
     currentLanguage, currentT, dashT, activeTab, darkMode, kpiCurrency, setKpiCurrency,
     orders, leads, inventory, shipments, filteredOrders, filteredLeads, exchangeRates,
-    user, toast, fmtKpi, setActiveTab,
+    user, toast, fmtKpi, setActiveTab, canAccess,
     summaryData, monthlyTarget, dateRange, setDateRange, dashClock, gibConnected, dashVergiDeadlines,
     recentlyViewed, setRecentlyViewed, quickNote, handleQuickNoteChange,
     shipmentsExpanded, setShipmentsExpanded,
@@ -1337,27 +1340,8 @@ export default function DashboardPage(props: Props) {
               {(() => {
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {/* E-Belge status */}
-                    <button onClick={() => setActiveTab('ebelge')} className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.01] transition-all group flex flex-col min-h-[120px]">
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                          <FileText className="w-3.5 h-3.5 text-indigo-600" />
-                        </div>
-                        <span className="text-xs font-bold text-gray-500 uppercase truncate">{dc(currentLanguage).e_belge}</span>
-                      </div>
-                      <p className="text-xl font-bold text-gray-900 mt-auto">
-                        {gibConnected
-                          ? (dc(currentLanguage).gib_bagli)
-                          : (dc(currentLanguage).gib_bagli_degil)}
-                      </p>
-                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{dc(currentLanguage).e_fatura_e_arsiv_e_irsaliye}</p>
-                      <div className="flex items-center gap-1 mt-1.5">
-                        <span className={`w-1.5 h-1.5 rounded-full ${gibConnected ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`} />
-                        <span className={`text-[10px] font-semibold ${gibConnected ? 'text-green-600' : 'text-red-500'}`}>
-                          {gibConnected ? (oc(currentLanguage).aktif) : (dc(currentLanguage).bagli_degil)}
-                        </span>
-                      </div>
-                    </button>
+                    {/* E-Belge status — sekmeye erişemeyen rolde çizilmez (H2: Satış / Lojistik); koşul bileşende, `canAccess` zorunlu */}
+                    <EBelgeDurumKarti canAccess={canAccess} setActiveTab={setActiveTab} gibConnected={gibConnected} currentLanguage={currentLanguage} />
 
                     {/* Kasa balance */}
                     <button onClick={() => setActiveTab('muhasebe')} className="apple-card p-4 text-left hover:shadow-md hover:scale-[1.01] transition-all group flex flex-col min-h-[120px]">

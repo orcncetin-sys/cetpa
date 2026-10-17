@@ -5,9 +5,14 @@
  * (yalnız `/api/mikro/fatura/kalemler` yanıtı sahte). Veri, kullanıcının ekran görüntüsündeki 359 no'lu faturadır.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import MikroFaturaDetay, { type MikroFaturaDetayVerisi } from './MikroFaturaDetay';
 import { kalemleriCoz } from '../lib/stokFiyat';
+import { eBelgeIndir } from '../services/ebelgeIndir';
+import { useAppStore } from '../store/appStore';
+import { UserRole } from '../types';
+import { APP_ROLES, isAllowed } from '../lib/rbac';
+import { ucKapisindanGecer } from '../lib/mikroUcKapilari';
 
 const authFetch = vi.fn();
 vi.mock('../services/authFetch', () => ({ authFetch: (...a: unknown[]) => authFetch(...a) }));
@@ -34,7 +39,18 @@ async function satirOf(urunAdi: string): Promise<HTMLElement> {
 }
 const hucreler = (satir: HTMLElement) => within(satir).getAllByRole('cell').map(c => c.textContent);
 
-beforeEach(() => authFetch.mockReset());
+/** Depoya yazılabilen bütün roller (enum) — `rbac` rol listesiyle AYNI küme (aşağıda sınanır); döngüler bunu gezer. */
+const TUM_ROLLER = Object.values(UserRole);
+
+// Pencere rolü KÜRESEL DEPODAN okur (karar turu 2026-10-11). Deponun varsayılanı Satış'tır ve Satış indirme kapısından
+// GEÇEMEZ (düğmeler çizilmez, başlıksız not yetkiyi söyler) → bu dosyanın rol dışı bütün iddiaları, başlığı okuyabilen ve
+// indirebilen bir rolde (Muhasebe) koşar; rol davranışı en alttaki iki blokta rol rol sınanır.
+beforeEach(() => {
+  authFetch.mockReset();
+  vi.mocked(eBelgeIndir).mockReset();
+  vi.mocked(eBelgeIndir).mockResolvedValue(null);
+  useAppStore.setState({ userRole: UserRole.Accounting });
+});
 
 describe('MikroFaturaDetay — Net Birim sütunu', () => {
   it('net ÷ miktar basılır; 2 ondalık neti tutmuyorsa tutan en az ondalık', async () => {
@@ -435,5 +451,168 @@ describe('MikroFaturaDetay — üst bilgi: Fatura No · Belge No · Tarih', () =
     expect(baslikSatiri('Invoice No').textContent).toBe('Invoice No420');
     expect(baslikSatiri('Document No').textContent).toBe('Document NoSZN2026000001284');
     expect(baslikSatiri('Date').textContent).toBe('Date31.08.2026');
+  });
+});
+
+// ── Rol kapısı: PDF / XML düğmeleri (karar turu 2026-10-11 — K7 / H1, İ3) ─────────────────────────────────────────────
+// Düğmeler eskiden HER rolde çiziliydi (yalnız veriyle `disabled`): rolün sunucudaki indirme kapısından geçemediği yerde
+// ölü düğmeydi. Artık koşul ortak tablodan (`ucKapisindanGecer`) sorulur ve geçemeyen rolde düğme ÇİZİLMEZ. H1: kapı İKİ
+// YÖNDE de aynı (`mikroFaturalar` okuma) — «giden belge Satış'a açık» dalı YOK; faturanın yönü koşula girmez.
+describe('MikroFaturaDetay — rol kapısı: PDF / XML düğmeleri (K7 / H1, İ3)', () => {
+  const F_UUID: MikroFaturaDetayVerisi = { ...F420, uuid: '11111111-2222-3333-4444-555555555555' };
+  const YONLER = ['gelen', 'giden'] as const;
+  /** § 10.4 H1'in «geçen» ve «kilitlenen» sütunları ELLE — ortak tablo değişirse bu liste bilerek güncellenir. */
+  const GECEN = [UserRole.Admin, UserRole.Manager, UserRole.Accounting];
+  const KILITLI = [UserRole.Sales, UserRole.Purchasing, UserRole.Logistics];
+  const dugme = (ad: 'PDF' | 'XML' | 'Kapat') => screen.queryByRole('button', { name: ad });
+  const ciz = async (rol: UserRole, f: MikroFaturaDetayVerisi) => {
+    useAppStore.setState({ userRole: rol });
+    authFetch.mockReturnValue(yanit([]));
+    const r = render(<MikroFaturaDetay fatura={f} currentLanguage="tr" onClose={() => {}} />);
+    await screen.findByText(/stok satırı yok/);
+    return r;
+  };
+
+  it.each(GECEN.flatMap(rol => YONLER.map(yon => [rol, yon] as const)))('geçen rol %s × %s fatura: PDF ve XML ÇİZİLİR, etkin', async (rol, yon) => {
+    await ciz(rol, { ...F_UUID, yon });
+    expect((dugme('PDF') as HTMLButtonElement | null)?.disabled).toBe(false);
+    expect((dugme('XML') as HTMLButtonElement | null)?.disabled).toBe(false);
+    expect(dugme('Kapat')).not.toBeNull();
+  });
+
+  it.each(KILITLI.flatMap(rol => YONLER.map(yon => [rol, yon] as const)))('kilitli rol %s × %s fatura: PDF ve XML ÇİZİLMEZ («Kapat» kalır), indirme servisi çağrılmaz', async (rol, yon) => {
+    await ciz(rol, { ...F_UUID, yon });
+    expect(dugme('PDF')).toBeNull();
+    expect(dugme('XML')).toBeNull();
+    expect(dugme('Kapat')).not.toBeNull();
+    expect(eBelgeIndir).not.toHaveBeenCalled();
+    // Pencerenin attığı TEK istek kalem çekimidir; e-belge ucuna giden istek yok.
+    expect(authFetch.mock.calls.map(c => c[0])).toEqual(['/api/mikro/fatura/kalemler']);
+  });
+
+  it('12 rolün HEPSİ: düğme çizilir ⇔ ortak tablo o ucu geçirir (bileşende kopya rol listesi yok)', async () => {
+    expect([...TUM_ROLLER].sort()).toEqual([...APP_ROLES].sort());   // enum ↔ rbac rol listesi: 12 rol, eksik / fazla yok
+    for (const rol of TUM_ROLLER) {
+      const { unmount } = await ciz(rol, F_UUID);
+      expect(dugme('PDF') !== null, `PDF × ${rol}`).toBe(ucKapisindanGecer(rol, 'POST /api/mikro/ebelge/pdf'));
+      expect(dugme('XML') !== null, `XML × ${rol}`).toBe(ucKapisindanGecer(rol, 'POST /api/mikro/ebelge/xml'));
+      unmount();
+    }
+    // Döngü boş geçmesin: geçenler tam § 10.4 H1 kümesi (dış roller B2B / Bayi dâhil kalan 9 rol görmez).
+    expect(TUM_ROLLER.filter(r => ucKapisindanGecer(r, 'POST /api/mikro/ebelge/pdf')).sort()).toEqual([...GECEN].sort());
+    expect(TUM_ROLLER.filter(r => ucKapisindanGecer(r, 'POST /api/mikro/ebelge/xml')).sort()).toEqual([...GECEN].sort());
+  });
+
+  it('H1 — Satış × GİDEN fatura: düğme YOK (yöne bağlı ikinci kapı yazılmadı); aynı fatura Muhasebe\'de düğmeli', async () => {
+    const { unmount } = await ciz(UserRole.Sales, { ...F_UUID, yon: 'giden' });
+    expect(dugme('PDF')).toBeNull();
+    expect(dugme('XML')).toBeNull();
+    unmount();
+    await ciz(UserRole.Accounting, { ...F_UUID, yon: 'giden' });
+    expect(dugme('PDF')).not.toBeNull();
+    expect(dugme('XML')).not.toBeNull();
+  });
+
+  it('geçen rolde tıklama ortak servise gider (tür + kimlikler); servisin döndürdüğü hata pencerede basılır', async () => {
+    await ciz(UserRole.Accounting, F_UUID);
+    vi.mocked(eBelgeIndir).mockResolvedValueOnce('Belge alınamadı.');
+    fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
+    expect(await screen.findByText('Belge alınamadı.')).toBeTruthy();
+    expect(eBelgeIndir).toHaveBeenLastCalledWith(expect.objectContaining({ tur: 'pdf', uuid: F_UUID.uuid, faturaGuid: 'f420', dosyaAdi: '420' }), true);
+    fireEvent.click(screen.getByRole('button', { name: 'XML' }));
+    await waitFor(() => expect(eBelgeIndir).toHaveBeenCalledTimes(2));
+    expect(eBelgeIndir).toHaveBeenLastCalledWith(expect.objectContaining({ tur: 'xml', uuid: F_UUID.uuid, belgeTuru: 'e-fatura' }), true);
+    await waitFor(() => expect(screen.queryByText('Belge alınamadı.')).toBeNull());   // yeni deneme eski hatayı siler
+  });
+
+  it('«UUID yok» notu indirme düğmelerini açıklar: geçen rolde VAR (XML kapalı, PDF açık), kilitli rolde düğme de not da YOK', async () => {
+    const { unmount } = await ciz(UserRole.Accounting, F420);
+    expect(screen.getByText(/PDF Mikro belge numarasıyla denenir/)).toBeTruthy();
+    expect((dugme('PDF') as HTMLButtonElement | null)?.disabled).toBe(false);
+    expect((dugme('XML') as HTMLButtonElement | null)?.disabled).toBe(true);
+    unmount();
+    await ciz(UserRole.Purchasing, F420);
+    expect(screen.queryByText(/PDF Mikro belge numarasıyla denenir/)).toBeNull();
+    expect(dugme('PDF')).toBeNull();
+    expect(dugme('XML')).toBeNull();
+  });
+
+  it('oturum rolü değişince pencere izler (depo aboneliği): Muhasebe → Satış düğmeleri kaldırır', async () => {
+    await ciz(UserRole.Accounting, F_UUID);
+    expect(dugme('PDF')).not.toBeNull();
+    useAppStore.setState({ userRole: UserRole.Sales });
+    await waitFor(() => expect(dugme('PDF')).toBeNull());
+    expect(dugme('XML')).toBeNull();
+  });
+});
+
+// ── H11: başlıksız pencerenin amber notu role göre (karar 2026-10-11) ─────────────────────────────────────────────────
+// Başlık `mikroFaturalar`'dan gelir. Okuyamayan rolde (Satış, Satın Alma, Lojistik …) başlık «çekilmemiş» değil, role
+// KAPALIDIR: eski metin o role yapamayacağı işi («Faturaları Çek») öneriyordu. Okuyabilen rolde bugünkü metin KALIR.
+// Belge No / Tarih satırları role göre DEĞİŞMEZ (`yayin-10` davranışı).
+describe('MikroFaturaDetay — H11: başlıksız açılışın amber notu role göre', () => {
+  const BASLIKSIZ: MikroFaturaDetayVerisi = { ...fatura, id: 'hareket|gelen||410', faturaNo: '410', yon: 'gelen', tarih: '', tutar: NaN, kdv: NaN, matrah: NaN, baslikYok: true };
+  const YETKI = /Fatura başlık bilgisi rolünüze açık değil/;
+  const CEKIM = /Fatura başlığı Cetpa'da yok/;
+  const ciz = async (rol: UserRole, f: MikroFaturaDetayVerisi = BASLIKSIZ, dil: 'tr' | 'en' = 'tr') => {
+    useAppStore.setState({ userRole: rol });
+    authFetch.mockReturnValue(yanit([]));
+    const r = render(<MikroFaturaDetay fatura={f} currentLanguage={dil} onClose={() => {}} />);
+    await screen.findByText(dil === 'tr' ? /stok satırı yok/ : /No stock lines/);
+    return r;
+  };
+
+  it.each([UserRole.Sales, UserRole.Purchasing, UserRole.Logistics])('başlığı OKUYAMAYAN rol %s: yetkiyi söyler, «Faturaları Çek» ÖNERMEZ', async (rol) => {
+    await ciz(rol);
+    expect(screen.getByText(YETKI).textContent).toBe("Fatura başlık bilgisi rolünüze açık değil — belge no, toplam ve KDV gösterilmez; kalemler doğrudan Mikro'dan.");
+    expect(screen.queryByText(CEKIM)).toBeNull();
+    expect(screen.queryByText(/Faturaları Çek/)).toBeNull();
+  });
+
+  it.each([UserRole.Admin, UserRole.Manager, UserRole.Accounting])('başlığı OKUYABİLEN rol %s: bugünkü metin KALIR', async (rol) => {
+    await ciz(rol);
+    expect(screen.getByText(CEKIM).textContent).toBe('Fatura başlığı Cetpa\'da yok ("Faturaları Çek" bu tarihi kapsamamış olabilir) — toplam/KDV bilinmiyor; kalemler doğrudan Mikro\'dan.');
+    expect(screen.queryByText(YETKI)).toBeNull();
+  });
+
+  it('12 rolün HEPSİ: metin ⇔ `mikroFaturalar` okuma kuralı (ikisi birden ya da hiçbiri basılmaz)', async () => {
+    const okuyan: UserRole[] = [];
+    for (const rol of TUM_ROLLER) {
+      const { unmount } = await ciz(rol);
+      const okur = isAllowed(rol, 'mikroFaturalar', 'read');
+      if (okur) okuyan.push(rol);
+      expect(screen.queryByText(CEKIM) !== null, `çekim metni × ${rol}`).toBe(okur);
+      expect(screen.queryByText(YETKI) !== null, `yetki metni × ${rol}`).toBe(!okur);
+      unmount();
+    }
+    expect([...okuyan].sort()).toEqual(['Accounting', 'Admin', 'Manager']);
+  });
+
+  it('başlıklı faturada not HİÇBİR rolde yok (not başlıksız açılışa aittir)', async () => {
+    for (const rol of [UserRole.Sales, UserRole.Accounting]) {
+      const { unmount } = await ciz(rol, F420);
+      expect(screen.queryByText(YETKI)).toBeNull();
+      expect(screen.queryByText(CEKIM)).toBeNull();
+      unmount();
+    }
+  });
+
+  it('İngilizce: iki metin de çevrilir', async () => {
+    const { unmount } = await ciz(UserRole.Sales, BASLIKSIZ, 'en');
+    expect(screen.getByText(/not available to your role/).textContent).toBe('Invoice header details are not available to your role — document no, total and VAT are not shown; lines are read directly from Mikro.');
+    expect(screen.queryByText(/Invoice header not in Cetpa/)).toBeNull();
+    unmount();
+    await ciz(UserRole.Accounting, BASLIKSIZ, 'en');
+    expect(screen.getByText(/Invoice header not in Cetpa/)).toBeTruthy();
+    expect(screen.queryByText(/not available to your role/)).toBeNull();
+  });
+
+  it("üst bilgi satırları role göre DEĞİŞMEZ: okuyamayan rolde de üç satır çizilir (başlıksız → Belge No '—', Tarih '—')", async () => {
+    await ciz(UserRole.Sales);
+    expect(baslikSatiri('Fatura No').textContent).toBe('Fatura No410');
+    expect(baslikSatiri('Belge No').textContent).toBe('Belge No—');
+    expect(baslikSatiri('Tarih').textContent).toBe('Tarih—');
+    // Kalem çekimi role bakmadan yapılır (o ucun kapısı ayrı; pencere yalnız indirme düğmelerini ve notu role bağlar).
+    expect(authFetch).toHaveBeenCalledWith('/api/mikro/fatura/kalemler', expect.objectContaining({ body: JSON.stringify({ seri: '', sira: '410', yon: 'gelen' }) }));
   });
 });
