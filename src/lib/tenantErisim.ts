@@ -10,7 +10,7 @@
  * `cid()` GETTER'dır (tembel): USER_SCOPED ve sınıfsız koleksiyonlarda kiracı sorgusu HİÇ
  * yapılmaz — eski davranış korunur (getUserCompanyId 60 sn önbellekli ama ilk çağrı DB'ye gider).
  */
-import { TENANT_COLLECTIONS as TENANT_LIST, USER_SCOPED_COLLECTIONS as USER_SCOPED_LIST, SERVER_ONLY_COLLECTIONS as SERVER_ONLY_LIST, DIS_ROL_SATIR_ALANI, DIS_ROL_YAZAMAZ, SAHIP_SATIR_ALANI } from './collections';
+import { TENANT_COLLECTIONS as TENANT_LIST, USER_SCOPED_COLLECTIONS as USER_SCOPED_LIST, SERVER_ONLY_COLLECTIONS as SERVER_ONLY_LIST, DIS_ROL_SATIR_ALANI, DIS_ROL_YAZAMAZ, SAHIP_SATIR_ALANI, SUNUCU_TURETILEN_ALANLAR } from './collections';
 import { STAFF_ROLES, type AppRole } from './rbac';
 
 const TENANT = new Set<string>(TENANT_LIST);
@@ -231,7 +231,12 @@ export function yasakAlanlariKoru(coll: string, onceki: Record<string, unknown> 
  * companyId'sini her zaman eziyorsa, userId de öyle ezilir. Kod tabanındaki tüm meşru
  * yazmalar zaten kendi uid'sini gönderiyor (App.tsx createNotification vb.).
  */
-export async function kiraciDamgala(coll: string, data: Record<string, unknown>, k: KiraciKimligi, onceki?: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function kiraciDamgala(coll: string, gelen: Record<string, unknown>, k: KiraciKimligi, onceki?: Record<string, unknown>): Promise<Record<string, unknown>> {
+  // SUNUCUNUN TÜRETTİĞİ ALANLAR (collections.SUNUCU_TURETILEN_ALANLAR — e-Fatura gönderim işareti): ROLDEN BAĞIMSIZ, sessizce
+  // düşer. Önceki değer burada geri KONMAZ: PUT / PATCH çakışma dalında YAZIM ANINDAKİ satır değerini SQL korur
+  // (`sunucuAlanKorumaSql`), cas `data || set` ile korur. JS'te okunan `onceki`den geri koymak, SELECT ile yazım arasına düşen
+  // sunucu talebini silerdi (şartname «e-Fatura çift kesim» D3 / SV-4).
+  const data = sunucuAlanlariniDusur(coll, gelen);
   if (TENANT.has(coll)) {
     // SAHİP damgası (K10 — collections.SAHIP_SATIR_ALANI): ROLDEN BAĞIMSIZ, Yönetici oluştururken de damgalanır. Kayıtta sahip
     // VARSA o korunur — devredilemez: yamada / gövdede gelen değer 403 ÜRETMEZ, sessizce ezilir (`companyId` / `userId` ile
@@ -254,6 +259,41 @@ export async function kiraciDamgala(coll: string, data: Record<string, unknown>,
   }
   if (USER_SCOPED.has(coll)) return { ...data, userId: k.uid };
   return data;
+}
+
+/** Sunucunun türettiği alanların adları (yoksa boş). Ad SQL'e gömülür → yalnız `[A-Za-z0-9_]` kabul edilir (fırlatır). */
+export function sunucuTuretilenAlanlar(coll: string): readonly string[] {
+  const alanlar = SUNUCU_TURETILEN_ALANLAR.get(coll) ?? [];
+  for (const a of alanlar) if (!/^[A-Za-z0-9_]+$/.test(a)) throw new Error(`SUNUCU_TURETILEN_ALANLAR: geçersiz alan adı '${a}'`);
+  return alanlar;
+}
+
+/** Yazım gövdesinden sunucunun türettiği alanları düşürür (saf). Nokta yolu birleştirmeden SONRA üst düzey anahtara döner
+ *  (pgShim.mergeDocData), PUT / PATCH bu işleve birleştirilmiş veriyi verir; ham gövde yolu (POST, cas `set`) için nokta
+ *  yollu anahtar (`mikroFaturaGonderimi.durum`) da düşer. */
+export function sunucuAlanlariniDusur(coll: string, data: Record<string, unknown>): Record<string, unknown> {
+  const alanlar = sunucuTuretilenAlanlar(coll);
+  if (alanlar.length === 0) return data;
+  return Object.fromEntries(Object.entries(data).filter(([ad]) => !alanlar.some(a => ad === a || ad.startsWith(`${a}.`))));
+}
+
+/**
+ * `… SET data = <bu ifade>` — sunucunun türettiği alanı YAZIM ANINDA koruyan ifade. `yeni` = yazılacak verinin SQL ifadesi:
+ *   • `EXCLUDED.data` (varsayılan) — `/api/db` PUT ve PATCH'in son yazımı (server.ts) ve pgShim `set`in çakışma dalı
+ *     (`INSERT … ON CONFLICT (coll, id) DO UPDATE SET data = <ifade>`);
+ *   • `$3::jsonb` — pgShim `update` (`UPDATE docs SET data = <ifade> WHERE …`; şartname «e-Fatura çift kesim» Y1).
+ * Sunucunun türettiği alan yoksa ifade `yeni`nin KENDİSİDİR (davranış birebir eski). Varsa gelen veriden alan çıkarılır ve YAZIM
+ * ANINDAKİ satırın (`docs.data` — iki deyimde de güncellenen satırın ESKİ değeri) değeri geri konur — tek ifadede, satır kilidi
+ * altında: oku-değiştir-yaz kalıbının SELECT'i ile yazımı arasına düşen sunucu talebi korunur; araya düşen geri alma / çözüm
+ * işareti sildiyse bayat okumadaki işaret de geri GELMEZ. Satır yoksa (INSERT dalı) ifade koşmaz: `/api/db`'de alan zaten
+ * `kiraciDamgala`'da düşmüştür; pgShim'de sunucunun kendi verisi aynen yazılır. İfade alan listesinden üretilir (kopya metin yok).
+ */
+export function sunucuAlanKorumaSql(coll: string, yeni = 'EXCLUDED.data'): string {
+  const alanlar = sunucuTuretilenAlanlar(coll);
+  if (alanlar.length === 0) return yeni;
+  const cikar = alanlar.map(a => ` - '${a}'`).join('');
+  const koru = alanlar.map(a => ` || CASE WHEN docs.data ? '${a}' THEN jsonb_build_object('${a}', docs.data->'${a}') ELSE '{}'::jsonb END`).join('');
+  return `(${yeni}${cikar})${koru}`;
 }
 
 /**

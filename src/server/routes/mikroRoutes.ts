@@ -30,13 +30,14 @@
  */
 import type { AdminDbLike, AdminDocRef, DocDaralt } from '../adminDbTypes.js';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { FaturaKaydetSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema, MikroCariAraGovdesi, type Sema } from '../schemas.js';
+import { randomUUID } from 'node:crypto';
+import { FaturaKaydetSchema, FaturaSonucSchema, IrsaliyeKaydetSchema, GelenFaturaActionSchema, MikroCariAraGovdesi, type Sema } from '../schemas.js';
 import { zamanla, isGunu } from '../zamanla.js';
 import { opsJetonuGecerli } from '../opsJeton.js';
 import { findKey, kolonSec } from '../../lib/mikroKolon.js';
 import {
   MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, detectMikroGatewayBlock, v17MetoduKullanilabilir,
-  getMikroCreds, mikroBugun, mikroData, mikroHata, mikroKolonlar, mikroLikeKacisi, mikroPost,
+  getMikroCreds, mikroBugun, mikroData, mikroGonderilmediMi, mikroHata, mikroKolonlar, mikroLikeKacisi, mikroPost,
   mikroSatirlar, mikroSql, mikroStokMiktari, listeZamanAsimiMs,
   mikroVergiOranlari, sqlTarih, kolonBul, sqlTanimlayici,
 } from '../mikroClient.js';
@@ -44,7 +45,9 @@ import {
   CHA_COLS, STH_COLS, FIS_COLS, SIP_COLS, mirrorMikroCariler, mirrorMikroInsert,
   mirrorMikroStoklar,
 } from '../mikroMirror.js';
-import { pgServerTimestamp } from '../pgShim.js';
+import { pgServerTimestamp, resolveSentinels } from '../pgShim.js';
+import { faturaGecisiYaz, faturaGuncelIsareti, faturaSonucunuYaz, faturaTalebiniGeriAl, faturaTalepEt, type FaturaBaglami, type FaturaHavuzu, type TalepSonucu } from '../mikro/faturaGonderimi.js';
+import { FATURA_GONDERIM_ALANI } from '../../lib/faturaGonderimi.js';
 import { mikroGovdeHatasiMi } from '../mikro/govdeHatasi.js';
 import { stokGovdesi, cariGovdesi } from '../mikro/govdeStokCari.js';
 import { siparisGovdesi } from '../mikro/govdeSiparis.js';
@@ -151,6 +154,8 @@ export interface MikroRouteCtx {
   getBoss: () => any;
   /** Kullanıcının rolü (server.ts getUserRole) — rota düzeyinde ek yetki kararı için (ör. iç rol şartı). */
   getUserRole: (uid: string) => Promise<AppRole | null>;
+  /** pgShim `broadcastDocChange` — doğrudan SQL yazımlarının (e-Fatura gönderim işareti) RETURNING verisiyle canlı yayını. */
+  broadcastDocChange: (coll: string, type: 'set' | 'delete', id: string, data?: unknown) => void;
 }
 
 export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
@@ -5469,20 +5474,48 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   // ── UCUNCU GRUP (D4 adim 8): e-Fatura / e-Arsiv uclari ────────────────
   // ── Mikro e-Fatura / e-Arşiv ─────────────────────────────────────────────────
   // POST /api/mikro/fatura/kaydet  — push order/invoice to Mikro as e-Fatura or e-Arşiv
-  // Body: { order: Record<string, unknown>, firebaseId: string }
+  // Body: { order: Record<string, unknown>, firebaseId: string }   (`firebaseId` ZORUNLU — şartname «e-Fatura çift kesim» E2)
   //   order must have: mikroCariKod, lineItems[], totalPrice, faturaTipi ('e-fatura'|'e-arsiv'|'ihracat')
   // On success writes back: mikroFaturaNo, ettn, mikroFaturaDate to orders/{firebaseId}
   // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (RESMÎ BELGE — e-Fatura / e-Arşiv kesimi; kardeş irsaliye rotasında rol kapısı vardı, bunda yoktu).
+  //
+  // ÇİFT KESİM KORUMASI (2026-10-17, şartname `.wf/SARTNAME-efatura-cift-kesim.md` § 7): aynı sipariş için İKİ resmî e-Fatura
+  // kesilebiliyordu — rota «zaten faturalandı mı» bakmıyordu. Artık siparişin KENDİ belgesinde sunucu işareti var
+  // (`mikroFaturaGonderimi`, lib/faturaGonderimi; atomik yazımlar server/mikro/faturaGonderimi):
+  //   1. şema + E2 → 2. kimlik bilgisi (503) → 3. gövde (Mikro'ya gidilmeden kurulur; hata 400) → 4. TALEP (D1: tek koşullu
+  //      SQL; tutmazsa Mikro'ya HİÇ istek gitmez — 404 / 400 / 409) → 5. `mikroPost` (stub tekrarı KAPALI) → 6. sonuç (D2):
+  //      başarı → `gonderildi` (numara okunamasa da) · Mikro reddi (200 + IsError) → `reddedildi` (yeniden gönderilebilir) ·
+  //      gönderim BAŞLAMADAN düşen hata (kimlik / belirteç) → işaret GERİ ALINIR · geri kalan her şey (ağ, zaman aşımı, HTTP
+  //      4xx / 5xx, stub, `result: []`, JSON olmayan gövde) → `belirsiz` (kullanıcı Mikro'dan bakıp `fatura/sonuc` ile çözer).
+  // Her yanıt `kod` (istemcinin iletisi bundan seçilir — D9) ve güncel işareti (D8) taşır. Mikro'ya yazan gövde DEĞİŞMEDİ.
   app.post('/api/mikro/fatura/kaydet', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
-    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-    const parsed = C.validate(FaturaKaydetSchema, req.body, res);
-    if (!parsed) return;
+    // (1) Şema + E2. `C.validate` yerine doğrudan: yanıt aynı gövdeye `kod` ekler (gönderim başlamadı → «gönderilmedi» iletisi).
+    const parsed = FaturaKaydetSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, kod: 'FATURA_GONDERILMEDI', error: 'Geçersiz istek gövdesi.', details: parsed.error.flatten() });
+    }
+    // (2) Kimlik bilgisi.
+    if (!(await getMikroCreds())) {
+      return res.status(503).json({ success: false, notConfigured: true, kod: 'FATURA_GONDERILMEDI', error: 'Mikro bağlantısı yapılandırılmamış.' });
+    }
+    // Talep TEK SQL'dir (D1): PostgreSQL yoksa (lokal Firestore yedeği) işaret atomik yazılamaz → resmî belge GÖNDERİLMEZ.
+    const havuz = C.getPgPool() as FaturaHavuzu | null;
+    if (!havuz) {
+      return res.status(503).json({ success: false, kod: 'FATURA_GONDERILMEDI', error: 'Veritabanı (PostgreSQL) bağlı değil — gönderim işareti yazılamadığı için fatura gönderilmedi.' });
+    }
+    const { order, firebaseId } = parsed.data;
+    const actor = C.reqActor(req);
+    const B: FaturaBaglami = {
+      havuz, id: firebaseId, companyId: await C.reqCompanyId(req),
+      yayinla: (id, data) => C.broadcastDocChange('orders', 'set', id, data),
+    };
     // P5-3: fatura Mikro'da olustuktan SONRAKI yerel guncelleme hatasi istegi
     // basarisiz yapmaz (yoksa kullanici tekrar dener -> cift e-Fatura).
     let localUpdateFailed = false;
-    const { order, firebaseId } = parsed;
-    if (await belgeSahipligi('orders', firebaseId, await C.reqCompanyId(req)) === 'yabanci') return res.status(404).json(YABANCI_BELGE);
     const t0 = Date.now();
+
+    // (3) Gövde — Mikro'ya HİÇ gidilmeden, talepten ÖNCE kurulur (işaretten sonraki ağ bütçesi = belirteç + FaturaKaydetV2; D5).
+    let govde: ReturnType<typeof faturaGovdesi>;
     try {
       // Gövde TEK KAYNAKTA: src/server/mikro/govdeFaturaIrsaliye.ts (faturaGovdesi).
       // V17 evrak formatı, cha_ebelge_turu'nun 2026-08-25 düzeltmesi ve onu sabitleyen
@@ -5508,99 +5541,229 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // AÇIK MADDE: fatura satırındaki sth_giris/cikis_depo_no hâlâ 1 (parite). Hiçbir
       // çağıran depo göndermiyor ve throw'a çevirmek e-Fatura kesmeyi (yasal belge)
       // tamamen durdururdu; depo kaynağı çözülünce `{ depoNo }` ile tek satırda bağlanır.
-      const { evrak, satirlar, toplamTutar, faturaDate } = faturaGovdesi(order, {
+      govde = faturaGovdesi(order, {
         vergiTablosu: await mikroVergiOranlari(),
         jumpSurum:    MIKRO_JUMP_SURUM,
         // Siparişte SEVK DEPOSU seçilmişse fatura satırı da o depoya yazılır (2026-09-19). Seçilmemişse gövde
         // pariteye (1) düşer — throw e-Fatura kesmeyi tamamen durdururdu; kullanıcı kararı Açık İşler'de.
         depoNo:       order.depoNo,
       });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId, false, null, errorMsg, Date.now() - t0, actor);
+      if (mikroGovdeHatasiMi(err)) {   // gövde kurulamadı → Mikro'ya HİÇ gidilmedi
+        // Eksik/bilinmeyen alan İSTEMCİ hatasıdır: 500 "sunucu bozuk, tekrar dene"
+        // demek olurdu, oysa tekrar denemek işe yaramaz — kullanıcı eksik alanı
+        // doldurmalı. İstemci (App.tsx handleMikroFatura) iletiyi `kod`dan seçer, `error` metnini gösterir.
+        console.warn('Mikro FaturaKaydetV2 gövdesi kurulamadı:', errorMsg);
+        return res.status(400).json({ success: false, kod: 'FATURA_GONDERILMEDI', error: errorMsg });
+      }
+      return res.status(500).json({ success: false, kod: 'FATURA_GONDERILMEDI', error: errorMsg });
+    }
+    const { evrak, satirlar, toplamTutar, faturaDate } = govde;
 
+    // (4) TALEP (D1). `istekNo` SUNUCUDA üretilir (D13): gövdede gelse de şema onu düşürür.
+    const istekNo = randomUUID();
+    let talep: TalepSonucu;
+    try {
+      talep = await faturaTalepEt(B, { durum: 'gonderiliyor', istekNo, zaman: new Date().toISOString(), kim: actor.email || actor.uid });
+    } catch (err) {
+      console.error('[FaturaKaydetV2] gönderim işareti yazılamadı — Mikro\'ya GİDİLMEDİ:', err);
+      return res.status(500).json({ success: false, kod: 'FATURA_GONDERILMEDI', error: 'Gönderim işareti yazılamadı; fatura gönderilmedi.' });
+    }
+    if (!talep.tamam) return res.status(talep.karar.durum).json(talep.karar.govde);
+    /** Yanıta konan GÜNCEL işaret (D8): her yazımın RETURNING verisinden; yazım TUTMAZSA satır yeniden okunur (`guncelIsaretiAl`) —
+     *  talebin bayat `gonderiliyor`u istemcide o arada çözülmüş işareti ezmesin (inceleme 1, İ1-2). */
+    let isaret: unknown = talep.data[FATURA_GONDERIM_ALANI] ?? null;
+    const guncelIsaretiAl = async (): Promise<void> => {
+      try { isaret = await faturaGuncelIsareti(B); } catch (e) { console.error('[FaturaKaydetV2] güncel işaret okunamadı:', e); }
+    };
+    /** Geçiş 0 satır döndü: sipariş uçuşta silindi, işaret artık bu isteğin değil ya da durumu geçişe kapalı (geç ret / belirsiz
+     *  «Mikro'da var» ile çözülmüş `gonderildi`yi ezmez — İ1-2). Satır YARATILMAZ; Mikro'nun cevabı izsiz kalmasın. */
+    const gecYanit = async (durum: string, duration: number, numara: string | null, ettnNo: string | null): Promise<void> => {
+      console.error(`[FaturaKaydetV2] geç yanıt (${durum}) siparişe yazılamadı — orders/${firebaseId}: sipariş silinmiş, işaret başka bir isteğe ait ya da sonuç o arada çözülmüş`, { istekNo, numara, ettn: ettnNo });
+      await C.writeSyncLog('gec_yanit', 'order', firebaseId, durum === 'gonderildi', numara,
+        `FaturaKaydetV2 yanıtı (${durum}) siparişe yazılamadı: sipariş silinmiş, gönderim işareti başka bir isteğe ait ya da sonuç o arada çözülmüş`, duration, actor,
+        { yontem: 'FaturaKaydetV2', durum, istekNo, ...(numara ? { numara } : {}), ...(ettnNo ? { ettn: ettnNo } : {}) });
+      await guncelIsaretiAl();
+    };
+
+    try {
+      // (5) Mikro. Stub tekrarı KAPALI (D2): `result` anahtarsız 200 «Mikro isteği aldı mı» sorusunu yanıtlamaz — aynı gövdeyi
+      // ikinci kez göndermek ikinci resmî belge olabilir; stub `belirsiz` sayılır.
       // inMikro: V17 evrak kalıbı — payload (evraklar) Mikro objesi İÇİNDE gider.
-      const { ok, data, status } = await mikroPost('FaturaKaydetV2', { evraklar: [evrak] }, true);
+      let yanit: Awaited<ReturnType<typeof mikroPost>>;
+      try {
+        yanit = await mikroPost('FaturaKaydetV2', { evraklar: [evrak] }, true, { stubYenidenDeneme: false });
+      } catch (err) {
+        const duration = Date.now() - t0;
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId, false, null, errorMsg, duration, actor);
+        if (mikroGonderilmediMi(err)) {
+          // Gönderim BAŞLAMADI (kimlik bilgisi / belirteç — `fetch` öncesi): talep geri alınır, yeniden gönderilebilir.
+          // Geri alma yalnız `gonderiliyor` üstüne (İ1-2): o arada «Mikro'da var» ile çözülmüşse işaret kalır, yanıt onu taşır.
+          const geri = await faturaTalebiniGeriAl(B, istekNo).catch((e: unknown) => { console.error('[FaturaKaydetV2] talep geri alınamadı:', e); return null; });
+          if (geri) isaret = geri[FATURA_GONDERIM_ALANI] ?? null; else await guncelIsaretiAl();
+          return res.status(502).json({ success: false, kod: 'FATURA_GONDERILMEDI', error: errorMsg, mikroFaturaGonderimi: isaret, duration });
+        }
+        // `fetch` BAŞLADI (ağ, zaman aşımı, bağlantı reddi — ayırt edilemez): sonuç BİLİNMİYOR.
+        const yazilan = await faturaGecisiYaz(B, istekNo, { durum: 'belirsiz' });
+        if (yazilan) isaret = yazilan[FATURA_GONDERIM_ALANI] ?? null; else await gecYanit('belirsiz', duration, null, null);
+        return res.status(zamanAsimiMi(err) ? 504 : 502).json({ success: false, kod: 'FATURA_SONUCU_BILINMIYOR', error: errorMsg, mikroFaturaGonderimi: isaret, duration });
+      }
+      if (yanit.gonderilmedi) {
+        // İstek ağa HİÇ çıkmadı (V17'de olmayan yöntem — mikroPost'un kendi kısa devresi): talep geri alınır.
+        const geri = await faturaTalebiniGeriAl(B, istekNo).catch((e: unknown) => { console.error('[FaturaKaydetV2] talep geri alınamadı:', e); return null; });
+        if (geri) isaret = geri[FATURA_GONDERIM_ALANI] ?? null; else await guncelIsaretiAl();
+        const errorMsg = mikroHata(yanit.data, 'FaturaKaydetV2 gönderilmedi.');
+        await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId, false, null, errorMsg, Date.now() - t0, actor);
+        return res.status(502).json({ success: false, kod: 'FATURA_GONDERILMEDI', error: errorMsg, mikroFaturaGonderimi: isaret });
+      }
+
+      // (6) Sonuç sınıflandırması (D2).
+      const { ok, data, status } = yanit;
       const duration   = Date.now() - t0;
-      const envelope   = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
-      const r0         = envelope?.[0] as Record<string, unknown> | undefined;
-      const success    = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
+      const envelope   = (data as Record<string, unknown> | null | undefined)?.result;
+      const ilk: unknown = Array.isArray(envelope) ? envelope[0] : undefined;
+      const r0         = ilk && typeof ilk === 'object' && !Array.isArray(ilk) ? ilk as Record<string, unknown> : undefined;
+      // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13). HTTP 4xx / 5xx
+      // da ret DEĞİL (Mikro isteği işleyip işlemediği bilinmiyor): yalnız 200 + `IsError === true` Mikro'nun açık reddidir.
+      const sinif: 'basari' | 'ret' | 'belirsiz' = !ok || !r0 ? 'belirsiz' : r0.IsError === true ? 'ret' : !r0.IsError ? 'basari' : 'belirsiz';
+      const success    = sinif === 'basari';
       const md         = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
       // Numara/ETTN METNE normalize edilir (`as string` yalnız derleme zamanı dökümüydü; sayısal
       // evrak no istemcinin metin kapısında sessizce düşüyordu) — src/server/mikro/belgeNo.ts
       const mikroFaturaNo = belgeNoMetni(md?.faturaNo, md?.FaturaNo, md?.evrakNo, md?.EvrakNo, md?.id);
       const ettn          = belgeNoMetni(md?.ettn, md?.Ettn, md?.uuid);
-      const errorMsg   = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+      const errorMsg   = success ? null : ((r0?.ErrorMessage || `HTTP ${status}${sinif === 'belirsiz' ? ' — Mikro yanıtı sonuç taşımıyor' : ''}`) as string);
 
       // İkiz ölçümü (I2): yanıtın yalnız ANAHTAR yolları — evrak sırası hangi anahtarda, önce ölçülür (tahmin yok).
       // Tanı yardımcısı YASAL BELGE yolunu asla düşürmez: fatura Mikro'da ARTIK VAR — burada fırlayan hata 500 → kullanıcı
       // tekrar dener → ikinci e-Fatura (P5-3 ile aynı sınıf). Çıkarılamazsa işaret yazılır.
       let yanitAnahtarlari: string[];
       try { yanitAnahtarlari = yanitAnahtarYollari(data); } catch { yanitAnahtarlari = ['…(yol çıkarılamadı)']; }
-      await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', success, mikroFaturaNo, errorMsg, duration, C.reqActor(req),
+      await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId, success, mikroFaturaNo, errorMsg, duration, actor,
         { yanitAnahtarlari });
       if (success) {
         if (C.getPgPool()) {
-          const client = await C.getPgPool().connect();
           try {
-            await client.query('BEGIN');
-            await mirrorMikroInsert('mikro_stok_hareketleri',
-              (satirlar as unknown as Record<string, unknown>[]).map(s => ({ ...s, __kaynak: 'fatura_push' })), STH_COLS, client);
-            await mirrorMikroInsert('mikro_cari_hesap_hareketleri',
-              [{ ...evrak, detay: undefined, cha_meblag: toplamTutar, cha_belge_no: mikroFaturaNo, __kaynak: 'fatura_push' }], CHA_COLS, client);
-            await client.query('COMMIT');
-          } catch (dbErr) {
-            await client.query('ROLLBACK');
-            console.error('[FaturaKaydetV2] local db transaction failed:', dbErr);
-            // Invoice is in Mikro, but local DB mirror failed. We can queue a retry if boss is available.
-            if (C.getBoss()) await C.getBoss().send('outbound-webhook', { event: 'fatura_mirror_failed', payload: { mikroFaturaNo } });
-          } finally {
-            client.release();
-          }
-        }
-        if (C.getAdminDb() && firebaseId) {
-          try {
-            await C.getAdminDb().collection('orders').doc(firebaseId).set({
-              companyId: await C.reqCompanyId(req),
-              mikroFaturaNo,
-              ettn,
-              hasInvoice:      true,
-              mikroFaturaDate: faturaDate,
-              mikroSynced:     true,
-              mikroSyncedAt:   pgServerTimestamp(),
-            }, { merge: true });
-          } catch (updErr) {
-            // P5-3 KRITIK: fatura Mikro'da ARTIK VAR. Burada hatayi yukari birakip
-            // 500 donersek kullanici "başarısız" gorup tekrar dener ve AYNI siparis
-            // icin IKINCI bir yasal e-Fatura kesilir. Bu yuzden yerel guncelleme
-            // hatasi istegi basarisiz YAPMAZ: loglanir, telafi kuyruguna alinir ve
-            // yanitta localUpdateFailed ile bildirilir.
-            localUpdateFailed = true;
-            console.error('[FaturaKaydetV2] yerel siparis guncellemesi basarisiz (FATURA MIKRO\'DA OLUSTU):', updErr);
-            if (C.getBoss()) {
-              await C.getBoss().send('outbound-webhook',
-                { event: 'fatura_order_update_failed', payload: { firebaseId, mikroFaturaNo, ettn } },
-              ).catch(() => {});
+            const client = await C.getPgPool().connect();
+            try {
+              await client.query('BEGIN');
+              await mirrorMikroInsert('mikro_stok_hareketleri',
+                (satirlar as unknown as Record<string, unknown>[]).map(s => ({ ...s, __kaynak: 'fatura_push' })), STH_COLS, client);
+              await mirrorMikroInsert('mikro_cari_hesap_hareketleri',
+                [{ ...evrak, detay: undefined, cha_meblag: toplamTutar, cha_belge_no: mikroFaturaNo, __kaynak: 'fatura_push' }], CHA_COLS, client);
+              await client.query('COMMIT');
+            } catch (dbErr) {
+              await client.query('ROLLBACK');
+              console.error('[FaturaKaydetV2] local db transaction failed:', dbErr);
+              // Invoice is in Mikro, but local DB mirror failed. We can queue a retry if boss is available.
+              // ÖLÜ, YENİDEN DENEME İŞİ ELE ALACAK (şartname «e-Fatura çift kesim» SV-5 alt kolu; karar 2026-10-17: bu turda
+              // DOKUNULMAZ): `outbound-webhook` işçisi adressiz olayı ATIYOR (server.ts) — bu telafi kuyruğu bugün hiçbir şey
+              // yapmıyor. Kaldırılması ya da gerçek işçiye bağlanması sunucu tarafı yeniden deneme işinin (ayrı şartname) konusu.
+              if (C.getBoss()) await C.getBoss().send('outbound-webhook', { event: 'fatura_mirror_failed', payload: { mikroFaturaNo } });
+            } finally {
+              client.release();
             }
+          } catch (aynaHatasi) {
+            // Ayna bağlantısı kurulamadı: fatura Mikro'da ARTIK VAR — istek BAŞARISIZ YAPILMAZ (P5-3).
+            console.error('[FaturaKaydetV2] ayna bağlantısı kurulamadı (FATURA MIKRO\'DA OLUŞTU):', aynaHatasi);
           }
         }
+        // D4: başarı yazımı TEK SQL — işaret `gonderildi` (numara okunamasa da) + numara / ETTN / hasInvoice / tarih aynı ifadede,
+        // yalnız işaret hâlâ BU isteğinse. Eski set-merge (pgShim oku-değiştir-yaz) KALDIRILDI: araya düşen yazımı silerdi.
+        try {
+          const yazilan = await faturaGecisiYaz(B, istekNo, { durum: 'gonderildi', ...(mikroFaturaNo ? { numara: mikroFaturaNo } : {}) }, {
+            ...(mikroFaturaNo ? { mikroFaturaNo } : {}),
+            ...(ettn ? { ettn } : {}),
+            hasInvoice:      true,
+            mikroFaturaDate: faturaDate,
+            mikroSynced:     true,
+            mikroSyncedAt:   resolveSentinels(pgServerTimestamp()),
+          });
+          if (yazilan) {
+            isaret = yazilan[FATURA_GONDERIM_ALANI] ?? null;
+          } else {
+            localUpdateFailed = true;
+            await gecYanit('gonderildi', duration, mikroFaturaNo, ettn);
+          }
+        } catch (updErr) {
+          // P5-3 KRITIK: fatura Mikro'da ARTIK VAR. Burada hatayi yukari birakip
+          // 500 donersek kullanici "başarısız" gorup tekrar dener ve AYNI siparis
+          // icin IKINCI bir yasal e-Fatura kesilir. Bu yuzden yerel guncelleme
+          // hatasi istegi basarisiz YAPMAZ: loglanir, telafi kuyruguna alinir ve
+          // yanitta localUpdateFailed ile bildirilir. (İşaret `gonderiliyor` kalır → bayatlayınca `belirsiz` → 409; D5.)
+          // ÖLÜ, YENİDEN DENEME İŞİ ELE ALACAK (SV-5 alt kolu; bu turda DOKUNULMAZ): `outbound-webhook` işçisi bu olayı atıyor —
+          // telafi kuyruğu hiçbir şey yapmıyor; çağrı yerinde bırakıldı (sunucu tarafı yeniden deneme işi kaldırır ya da bağlar).
+          localUpdateFailed = true;
+          console.error('[FaturaKaydetV2] yerel siparis guncellemesi basarisiz (FATURA MIKRO\'DA OLUSTU):', updErr);
+          if (C.getBoss()) {
+            await C.getBoss().send('outbound-webhook',
+              { event: 'fatura_order_update_failed', payload: { firebaseId, mikroFaturaNo, ettn } },
+            ).catch(() => {});
+          }
+        }
+        // `belgeTipiIletildi`: belge tipi (e-Fatura/e-Arşiv) Mikro gövdesine YALNIZ V17 zarfında (`cha_ebelge_turu`) girer.
+        // Ortamda MIKRO_JUMP_SURUM 16 ise seçim Mikro'ya HİÇ gitmez — istemci kullanıcıyı uyarır (sessiz kalmasın).
+        // SINIR (ölçüm 2026-10-02): bu bayrak yalnız alanın GÖVDEYE GİRDİĞİNİ söyler; Mikro'nun türü ona göre belirlediğini
+        // KANITLAMAZ. Canlıda tür `cha_ebelge_Islemturu`'nda duruyor ve `cha_ebelge_turu = 1` olan 6 giden faturanın hepsi GİB'de
+        // e-Fatura çıktı (utils/muhasebe/ebelgeTuru.ts). Cetpa'dan kesilmiş bir e-Arşiv faturası `GET /api/mikro/fatura-tani?sira=N`
+        // ile ölçülene kadar gövde DEĞİŞTİRİLMEDİ (alan adı tahmini olurdu) — Açık İşler.
+        return res.json({ success, mikroFaturaNo, ettn, localUpdateFailed, belgeTipiIletildi: MIKRO_JUMP_SURUM >= 17, error: errorMsg, data, duration, mikroFaturaGonderimi: isaret });
       }
-      // `belgeTipiIletildi`: belge tipi (e-Fatura/e-Arşiv) Mikro gövdesine YALNIZ V17 zarfında (`cha_ebelge_turu`) girer.
-      // Ortamda MIKRO_JUMP_SURUM 16 ise seçim Mikro'ya HİÇ gitmez — istemci kullanıcıyı uyarır (sessiz kalmasın).
-      // SINIR (ölçüm 2026-10-02): bu bayrak yalnız alanın GÖVDEYE GİRDİĞİNİ söyler; Mikro'nun türü ona göre belirlediğini
-      // KANITLAMAZ. Canlıda tür `cha_ebelge_Islemturu`'nda duruyor ve `cha_ebelge_turu = 1` olan 6 giden faturanın hepsi GİB'de
-      // e-Fatura çıktı (utils/muhasebe/ebelgeTuru.ts). Cetpa'dan kesilmiş bir e-Arşiv faturası `GET /api/mikro/fatura-tani?sira=N`
-      // ile ölçülene kadar gövde DEĞİŞTİRİLMEDİ (alan adı tahmini olurdu) — Açık İşler.
-      res.json({ success, mikroFaturaNo, ettn, localUpdateFailed, belgeTipiIletildi: MIKRO_JUMP_SURUM >= 17, error: errorMsg, data, duration });
+      // Ret ya da belirsiz: işaret AYNI kalıpla (istekNo koşullu) yazılır.
+      const durum = sinif === 'ret' ? 'reddedildi' : 'belirsiz';
+      try {
+        const yazilan = await faturaGecisiYaz(B, istekNo, { durum });
+        if (yazilan) isaret = yazilan[FATURA_GONDERIM_ALANI] ?? null; else await gecYanit(durum, duration, null, null);
+      } catch (e) {
+        // Yazılamadı: işaret `gonderiliyor` kalır → bayatlayınca `belirsiz` (yeniden gönderim YOLU KAPALI kalır — güvenli yön).
+        console.error(`[FaturaKaydetV2] '${durum}' işareti yazılamadı:`, e);
+      }
+      if (sinif === 'ret') {
+        return res.json({ success: false, kod: 'FATURA_REDDEDILDI', error: errorMsg, mikroFaturaGonderimi: isaret, data, duration });
+      }
+      return res.status(502).json({ success: false, kod: 'FATURA_SONUCU_BILINMIYOR', error: errorMsg, mikroFaturaGonderimi: isaret, data, duration });
     } catch (err) {
-      const duration = Date.now() - t0;
+      // Talepten SONRA beklenmeyen hata: gönderimin akıbeti bilinmiyor (işaret `gonderiliyor` → bayatlayınca `belirsiz`).
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await C.writeSyncLog('FaturaKaydetV2', 'order', firebaseId || 'unknown', false, null, errorMsg, duration, C.reqActor(req));
-      if (mikroGovdeHatasiMi(err)) {   // gövde kurulamadı → Mikro'ya HİÇ gidilmedi
-        // Eksik/bilinmeyen alan İSTEMCİ hatasıdır: 500 "sunucu bozuk, tekrar dene"
-        // demek olurdu, oysa tekrar denemek işe yaramaz — kullanıcı eksik alanı
-        // doldurmalı. İstemci (App.tsx handleMikroFatura) `error` metnini toast'lar.
-        console.warn('Mikro FaturaKaydetV2 gövdesi kurulamadı:', errorMsg);
-        return res.status(400).json({ success: false, error: errorMsg });
-      }
-      res.status(500).json({ success: false, error: errorMsg });
+      console.error('[FaturaKaydetV2] talepten sonra beklenmeyen hata:', err);
+      if (res.headersSent) return;
+      return res.status(500).json({ success: false, kod: 'FATURA_SONUCU_BILINMIYOR', error: errorMsg, mikroFaturaGonderimi: isaret });
+    }
+  });
+
+  // POST /api/mikro/fatura/sonuc — `belirsiz` (ya da bayat `gonderiliyor`) e-Fatura kaydını ÇÖZER (şartname «e-Fatura çift kesim»
+  // E3 + § 7 D6). Body: { firebaseId, karar: 'mikrodaVar' | 'mikrodaYok', numara? }.
+  //   mikrodaVar → `gonderildi` (numara verilirse işarete ve `mikroFaturaNo`'ya) · mikrodaYok → işaret SİLİNİR (yeniden gönderilebilir).
+  // KAPI = KESİM KAPISI (D6 — E3'teki `invoices:write` YERİNE): yanlış `mikrodaYok` ikinci resmî belgeyi doğurur, yani işlem kesimle
+  // EŞDEĞERDİR; zincir `fatura/kaydet` ile AYNI (kimlik → MFA → iç personel) + kiracı (yabancı / olmayan sipariş 404). Kabul yalnız
+  // `belirsiz` / bayat `gonderiliyor`; koşul tek SQL'in WHERE'inde (iki eşzamanlı `sonuc`'tan biri uygulanır, öteki 409). Denetim
+  // kaydı `writeSyncLog` + oturum (→ auditLog). İstemci `istekNo` göndermez (D13): arka arkaya iki belirsiz denemede ikinci `sonuc`
+  // yenisini çözer — onay metnindeki işaret `zaman`ı bunu görünür kılar (bilinçli kalıntı).
+  app.post('/api/mikro/fatura/sonuc', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
+    const parsed = FaturaSonucSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'Geçersiz istek gövdesi.', details: parsed.error.flatten() });
+    const havuz = C.getPgPool() as FaturaHavuzu | null;
+    if (!havuz) return res.status(503).json({ success: false, error: 'Veritabanı (PostgreSQL) bağlı değil.' });
+    const { firebaseId, karar } = parsed.data;
+    const numara = karar === 'mikrodaVar' ? parsed.data.numara : undefined;
+    const actor = C.reqActor(req);
+    const t0 = Date.now();
+    try {
+      const sonuc = await faturaSonucunuYaz({
+        havuz, id: firebaseId, companyId: await C.reqCompanyId(req),
+        yayinla: (id, data) => C.broadcastDocChange('orders', 'set', id, data),
+      }, karar, numara);
+      if (!sonuc.tamam) return res.status(sonuc.karar.durum).json(sonuc.karar.govde);
+      const isaret = sonuc.data[FATURA_GONDERIM_ALANI] ?? null;
+      await C.writeSyncLog('FaturaSonucCozumu', 'order', firebaseId, true, numara ?? null, null, Date.now() - t0, actor,
+        { karar, ...(numara ? { numara } : {}) });
+      return res.json({ success: true, karar, mikroFaturaGonderimi: isaret, ...(numara ? { numara } : {}) });
+    } catch (err) {
+      console.error('[fatura/sonuc] yazılamadı:', err);
+      return res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
     }
   });
 

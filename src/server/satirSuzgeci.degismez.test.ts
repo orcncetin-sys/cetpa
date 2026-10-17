@@ -92,7 +92,8 @@ describe('/api/db kaçakları kapalı', () => {
     tek(SERVER, /^\s*: await injectTenant\(req, coll, set as Record<string, unknown>, rows\[0\]\.data as Record<string, unknown>\);$/);
     tek(SERVER, /if \(SAHIPLIK_ALANLARI\.has\(field\)\) return res\.status\(400\)/);
     // + SAHIP_SATIR_ALANI (K10): kuyruk işinin sahibi sayıya çevrilirse iş «damgasız eski iş» sınıfına düşer (Yönetici çalıştırır).
-    tek(SERVER, /const SAHIPLIK_ALANLARI = new Set<string>\(\['companyId', 'userId', \.\.\.DIS_ROL_SATIR_ALANI\.values\(\), \.\.\.SAHIP_SATIR_ALANI\.values\(\), \.\.\.\[\.\.\.DIS_ROL_YAZAMAZ\.values\(\)\]\.flat\(\)\]\);/);
+    // + SUNUCU_TURETILEN_ALANLAR (2026-10-17, e-Fatura çift kesim D3): gönderim işareti artırılamaz (davranışı: faturaCiftKesim.zincir T23).
+    tek(SERVER, /const SAHIPLIK_ALANLARI = new Set<string>\(\['companyId', 'userId', \.\.\.DIS_ROL_SATIR_ALANI\.values\(\), \.\.\.SAHIP_SATIR_ALANI\.values\(\), \.\.\.\[\.\.\.DIS_ROL_YAZAMAZ\.values\(\)\]\.flat\(\), \.\.\.\[\.\.\.SUNUCU_TURETILEN_ALANLAR\.keys\(\)\]\.flatMap\(c => sunucuTuretilenAlanlar\(c\)\)\]\);/);
   });
   // K10 (2026-10-11) — SAHİP satır süzgeci (`syncJobs`: iş sahibinindir). Kural saf modülde (lib/tenantErisim; davranışı
   // tenantErisim.sahip.test + gerçek motorda tenantErisim.sahip.motor.test). server.ts'e eklenen TEK şey sahip alanının
@@ -251,7 +252,11 @@ describe('sunucuda `orders` okuyan / yazan yerlerin SAYISI sabit', () => {
     'server.ts': 5,
     'src/server/kanal/shopifyWebhook.ts': 1,
     'src/server/routes/kanalRoutes.ts': 4,
-    'src/server/routes/mikroRoutes.ts': 14,
+    // 14 → 13 + yeni modül 6 (2026-10-17, e-Fatura çift kesim D1 / D4 / D6): fatura rotasının pgShim set-merge yazımı kalktı;
+    // gönderim işaretinin atomik SQL'i (`coll = 'orders'` — talep, yeniden okuma, geçiş, geri alma, iki sonuç) yalnız
+    // `requireStaff` kapılı iki uçtan (fatura/kaydet, fatura/sonuc) çağrılır ve kiracı koşulunu taşır.
+    'src/server/routes/mikroRoutes.ts': 13,
+    'src/server/mikro/faturaGonderimi.ts': 6,
     'src/server/routes/opsRoutes.ts': 1,
     'src/server/routes/paymentRoutes.ts': 2,
     'src/server/routes/reportsRoutes.ts': 1,

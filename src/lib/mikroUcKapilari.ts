@@ -55,6 +55,10 @@ export const MIKRO_UC_KAPILARI = {
   'POST /api/mikro/ebelge/xml': ['mikroFaturalar', 'read'],
   // K9 — kapı DEĞİŞMEDİ (kasa hareketi; Satış'a tahsilat gönderimi açılmaz). Satır, sessiz çağrının koşulu için burada.
   'POST /api/mikro/tahsilat/kaydet': ['kasaHareketleri', 'write'],
+  // e-Fatura çift kesim D6 (2026-10-17) — resmî belge kesimi ve belirsiz kaydın ÇÖZÜMÜ aynı personel kapısındadır: yanlış
+  //      «Mikro'da yok» ikinci resmî belgeyi doğurur, yani çözüm kesimle eşdeğerdir. Kesebilen rol çözebilir (ölü düğme yok).
+  'POST /api/mikro/fatura/kaydet': 'staff',
+  'POST /api/mikro/fatura/sonuc': 'staff',
 } as const satisfies Record<string, UcKapisi>;
 
 /** Ortak tabloda kapısı olan uç — `'YÖNTEM /api/mikro/yol'`. */

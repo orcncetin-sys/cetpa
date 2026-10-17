@@ -49,8 +49,9 @@ import {
   DIS_ROL_SATIR_ALANI,
   DIS_ROL_YAZAMAZ,
   SAHIP_SATIR_ALANI,
+  SUNUCU_TURETILEN_ALANLAR,
 } from "./src/lib/collections.js";
-import { kiraciWhere, kiraciDamgala, baskasininSahipKaydiMi, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, siparisGorebilir, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
+import { kiraciWhere, kiraciDamgala, sunucuAlanKorumaSql, sunucuTuretilenAlanlar, baskasininSahipKaydiMi, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, siparisGorebilir, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
 import { rolIcinMaskele, maskeyiGeriYukle, farkDegeriMaskele, ayarAdresAlaniDegisti } from './src/lib/sirMaske.js';
 import { kimlikYuzeyiKarari, KIMLIK_YUZEYI_RETLERI, ROL_OKUNAMADI_YANITI } from './src/lib/kimlikYuzeyi.js';
 import { izinliTaban, genelHttpsTaban, genelAdresMi, TabanAdresHatasi, LUCA_TABAN, IYZICO_TABAN } from './src/lib/guvenliTaban.js';
@@ -2048,7 +2049,9 @@ async function startServer() {
     // + SAHIP_SATIR_ALANI alanları (K10, 2026-10-11): kuyruk işinin sahibi (`syncJobs.sahipUid`) sayıya çevrilirse iş «damgasız
     //   eski iş» sınıfına düşer ve Yönetici oturumuna çalıştırılır. Sahip süzgecinin KENDİSİ buraya bağlı değil: liste, tek okuma,
     //   altı yazma yolu ve akış aşağıdaki sarmalayıcılardan (tenantErisim.satirAlani / kiraciDamgala / dokumanSahibiMi) okur.
-    const SAHIPLIK_ALANLARI = new Set<string>(['companyId', 'userId', ...DIS_ROL_SATIR_ALANI.values(), ...SAHIP_SATIR_ALANI.values(), ...[...DIS_ROL_YAZAMAZ.values()].flat()]);
+    // + SUNUCU_TURETILEN_ALANLAR (2026-10-17, şartname «e-Fatura çift kesim» D3): e-Fatura gönderim işareti yalnız sunucunundur —
+    //   sayıya çevrilirse «işaret yok» sayılıp ikinci resmî belgenin yolu açılırdı (kural tek yerde: lib/tenantErisim).
+    const SAHIPLIK_ALANLARI = new Set<string>(['companyId', 'userId', ...DIS_ROL_SATIR_ALANI.values(), ...SAHIP_SATIR_ALANI.values(), ...[...DIS_ROL_YAZAMAZ.values()].flat(), ...[...SUNUCU_TURETILEN_ALANLAR.keys()].flatMap(c => sunucuTuretilenAlanlar(c))]);
     const reqKimlik = (req: Request): KiraciKimligi => {
       const uid = (req as Request & { uid?: string }).uid || '';
       // `rol` TEMBEL: yalnız satır süzgeçli koleksiyonda (orders — collections.DIS_ROL_SATIR_ALANI; syncJobs — SAHIP_SATIR_ALANI)
@@ -2284,11 +2287,15 @@ async function startServer() {
         data = await injectTenant(req, coll, data, before); // companyId/userId enjekte; dış rolün yazamadığı alanlar öncekinden korunur
         if (perCompany) data = { ...data, companyId: cid }; // firma-bazlı ayar damgası (sahiplik KİMLİKTEN okunur — bkz. tenantErisim.ayarSahibi)
         if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before, isSuperAdmin(req)); // companyId/role/status escalation engeli
-        await docsDb.query(
+        // SUNUCUNUN TÜRETTİĞİ ALAN (D3, lib/tenantErisim.sunucuAlanKorumaSql): alan `injectTenant`'ta gövdeden düştü; çakışma dalında
+        // YAZIM ANINDAKİ satır değeri SQL'de korunur. Yayın ve yanıt yazılan GERÇEK satırdan (RETURNING): JS verisi işareti
+        // taşımadığından yayın istemcinin canlı listesinden işareti silerdi. Türetilen alanı olmayan koleksiyonda ifade `EXCLUDED.data`.
+        const putYazim = await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
-           ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+           ON CONFLICT (coll, id) DO UPDATE SET data = ${sunucuAlanKorumaSql(coll)}, updated_at = now() RETURNING data`,
           [coll, realId, JSON.stringify(data)],
         );
+        if (sunucuTuretilenAlanlar(coll).length && putYazim.rows[0]?.data) data = putYazim.rows[0].data as Record<string, unknown>;
         if (coll === 'settings' && realId === 'aiConfig') invalidateGeminiKeyCache(); // yeni anahtar anında etkir
         broadcastDocChange(coll, 'set', id, data, ayarKapsami(coll, perCompany, cid)); // orijinal id ile yayınla (client settings/{id} dinler)
         // before yalnızca audited/scoped/merge'de çekildiği için logu bununla sınırla
@@ -2328,11 +2335,13 @@ async function startServer() {
         data = await injectTenant(req, coll, data, before); // companyId/userId enjekte; dış rolün yazamadığı alanlar öncekinden korunur
         if (perCompany) data = { ...data, companyId: cid }; // firma-bazlı ayar damgası (sahiplik KİMLİKTEN okunur)
         if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before, isSuperAdmin(req)); // companyId/role/status escalation engeli
-        await docsDb.query(
+        // SUNUCUNUN TÜRETTİĞİ ALAN (D3): PUT ile AYNI ifade ve AYNI kural (yayın / yanıt yazılan gerçek satırdan).
+        const patchYazim = await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
-           ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+           ON CONFLICT (coll, id) DO UPDATE SET data = ${sunucuAlanKorumaSql(coll)}, updated_at = now() RETURNING data`,
           [coll, realId, JSON.stringify(data)],
         );
+        if (sunucuTuretilenAlanlar(coll).length && patchYazim.rows[0]?.data) data = patchYazim.rows[0].data as Record<string, unknown>;
         if (coll === 'settings' && realId === 'aiConfig') invalidateGeminiKeyCache(); // yeni anahtar anında etkir
         broadcastDocChange(coll, 'set', id, data, ayarKapsami(coll, perCompany, cid)); // orijinal id ile yayınla
         // 'kim neyi değiştirdi' diff'i kaydet (bloklamadan); before her zaman çekildi.
@@ -3169,6 +3178,7 @@ async function startServer() {
     // Sonradan atanan baglantilar GETTER ile (bkz. diger modullerdeki gerekce).
     getAdminDb: adminDbZorunlu, getPgPool: () => pgPool,
     getUserCompanyId, mikroIdCozucuIds, validate, getBoss: () => boss, getUserRole,
+    broadcastDocChange,
   });
 
 

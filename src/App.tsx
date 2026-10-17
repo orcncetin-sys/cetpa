@@ -1,6 +1,6 @@
 import { useSekmeVerileri } from './hooks/useSekmeVerileri';
 import { useShallow } from 'zustand/react/shallow';
-import { zamanMs, zamanDate, ayAnahtari, gunAnahtari, bugunAnahtari } from './utils/zaman';
+import { zamanMs, zamanDate, ayAnahtari, gunAnahtari, bugunAnahtari, tarihSaatYaz } from './utils/zaman';
 import AIChat from './components/AIChat';
 import ModuleHeader from './components/ModuleHeader';
 import MuhasebeGroupNav from './components/MuhasebeGroupNav';
@@ -224,7 +224,11 @@ import { hedefYamasi, hedefleriOku } from './utils/pano/hedefButce';
 import { kisaTutar, paraYaz } from './utils/currency';
 import { irsaliyeIstegi, irsaliyeNedenMetni, irsaliyeYanitMesaji, irsaliyeSonucYamasi, type IrsaliyeYaniti } from './utils/siparisler/irsaliyeGonder';
 import { siparisBelgeTipi, belgeTipiCelisiyor, musteriBelgeTipi } from './utils/siparisler/belgeTipi';
-import { bayatKalemVar, kalemSatirKdv } from './utils/siparisler/faturaDurumu';
+import { bayatKalemVar, kalemSatirKdv, mikroFaturasiKesilmisOlabilir } from './utils/siparisler/faturaDurumu';
+import { faturaSonucMesaji, faturaYanitMesaji, type FaturaYaniti } from './utils/siparisler/faturaGonder';
+import { useBelgeKilidi } from './hooks/useBelgeKilidi';
+import { ucKapisindanGecer } from './lib/mikroUcKapilari';
+import { FATURA_GONDERIM_ALANI, faturaIsareti, type FaturaSonucKarari, type MikroFaturaGonderimi } from './lib/faturaGonderimi';
 import { magazaSiparisiMi } from './utils/siparisler/magazaSiparisi';
 import { teslimatAdresiMetni } from './utils/siparisler/teslimatAdresi';
 import { gorunenSiparisNo } from './utils/siparis';
@@ -3544,33 +3548,27 @@ function AppContent() {
   //      düğmenin koşulu YALNIZ `selectedOrder`a bakıyor ve o nesneyi yayan yazıcılar
   //      (durum onayı, düzenleme kaydı) işareti yerelde silebiliyordu; canlı dinleyici
   //      `orders`ı tazeleyene kadar düğme yeniden etkin oluyordu (2026-09-19 delta).
-  //      Bu kapı sayfanın yerel kopyasından BAĞIMSIZ: `orders` listesi + oturum içi Set.
+  //      Bu kapı sayfanın yerel kopyasından BAĞIMSIZ: `orders` listesi + oturum içi küme.
   //      Kalıcı çözüm SUNUCUDA: rota `mikroPost`tan önce `shipments/{firebaseId}` damgasına
   //      bakıp 409 dönmeli — iki sekme / iki kullanıcı buradan kapatılamaz (`acikSorular`).
-  const eIrsaliyeSurenRef = useRef<Set<string>>(new Set());
-  const eIrsaliyeTamamlananRef = useRef<Set<string>>(new Set());
-  /** Düğmenin görsel kilidi (ref render tetiklemez). id → gönderim sürüyor. */
-  const [eIrsaliyeGonderiliyor, setEIrsaliyeGonderiliyor] = useState<Record<string, boolean>>({});
+  // Kümeler ve kararlar ORTAK kilit modülünde (2026-10-17, şartname «e-Fatura çift kesim» D11): utils/siparisler/belgeKilidi —
+  // e-Fatura AYNI modülü kullanır; burada kopya Set ref YOK. Görsel kilit (`suruyor`) kancanın kendi durumudur.
+  const eIrsaliyeKilidi = useBelgeKilidi();
+  /** Düğmenin görsel kilidi. id → gönderim sürüyor. */
+  const eIrsaliyeGonderiliyor = eIrsaliyeKilidi.suruyor;
 
-  /** Bu sipariş için e-İrsaliye ZATEN kesilmiş mi? Yerel `selectedOrder` kopyasına GÜVENMEZ. */
+  /** Bu sipariş için e-İrsaliye ZATEN kesilmiş mi (canlı liste)? Yerel `selectedOrder` kopyasına GÜVENMEZ; oturum içi
+   *  «tamamlandı» kümesi kilidin kendisinde. GÜNCEL depodan okunur (`useDataStore.getState()`, inceleme 1 İ1-6): işleyici onay
+   *  penceresinin `onConfirm` kapanışından çağrılır — pencereyi açan çizimin `orders`ı, pencere açıkken gelen yayını (başka sekme
+   *  irsaliyeyi kesti) görmezdi. */
   const eIrsaliyeKesilmis = (orderId: string): boolean => {
-    if (eIrsaliyeTamamlananRef.current.has(orderId)) return true;
-    const o = orders.find(x => x.id === orderId);
+    const o = useDataStore.getState().orders.find(x => x.id === orderId);
     return !!o && (o.irsaliyeGonderildi === true || !!o.irsaliyeNo);
   };
 
   /** Kilidi alır; gönderim sürüyorsa ya da belge zaten kesilmişse nedenini döner (çağıran VAZGEÇER). */
-  const eIrsaliyeKilidiAl = (orderId: string): 'alindi' | 'suruyor' | 'kesilmis' => {
-    if (eIrsaliyeSurenRef.current.has(orderId)) return 'suruyor';
-    if (eIrsaliyeKesilmis(orderId)) return 'kesilmis';
-    eIrsaliyeSurenRef.current.add(orderId);
-    setEIrsaliyeGonderiliyor(o => ({ ...o, [orderId]: true }));
-    return 'alindi';
-  };
-  const eIrsaliyeKilidiBirak = (orderId: string) => {
-    eIrsaliyeSurenRef.current.delete(orderId);
-    setEIrsaliyeGonderiliyor(o => { const yeni = { ...o }; delete yeni[orderId]; return yeni; });
-  };
+  const eIrsaliyeKilidiAl = (orderId: string): 'alindi' | 'suruyor' | 'kesilmis' => eIrsaliyeKilidi.kilit.al(orderId, eIrsaliyeKesilmis(orderId));
+  const eIrsaliyeKilidiBirak = (orderId: string) => eIrsaliyeKilidi.kilit.birak(orderId);
 
   /**
    * Başarılı e-İrsaliye sonucunu siparişe yazar. Sunucu numarayı yalnız `shipments/{id}`'ye
@@ -3584,7 +3582,7 @@ function AppContent() {
   const irsaliyeSonucunuYaz = async (orderId: string, d: IrsaliyeYaniti) => {
     const yama = irsaliyeSonucYamasi(d);
     if (!yama) return;
-    eIrsaliyeTamamlananRef.current.add(orderId);
+    eIrsaliyeKilidi.kilit.tamamlandi(orderId);
     await updateDoc(doc(db, 'orders', orderId), yama);
     setSelectedOrder(onceki => (onceki && onceki.id === orderId ? { ...onceki, ...yama } : onceki));
   };
@@ -3778,7 +3776,44 @@ function AppContent() {
   };
 
   // ── e-Fatura: push order to Mikro ────────────────────────────────────────────
+  // ÇİFT KESİM KORUMASI (2026-10-17, şartname `.wf/SARTNAME-efatura-cift-kesim.md` § 7 D6 / D8 / D9 / D11):
+  //   • Uçuş kilidi e-İrsaliye ile ORTAK modülden (utils/siparisler/belgeKilidi). Eski `faturaLoading` ölüydü (setter'sız yerel
+  //     state): düğme yanıt beklerken etkin kalıyor, ikinci tıklama Mikro'da İKİNCİ resmî e-Fatura kesebiliyordu.
+  //   • «Kesilmiş mi» CANLI listeden ve sunucu işaretinden (`mikroFaturasiKesilmisOlabilir`); kesin koruma sunucudadır (koşullu
+  //     talep — Mikro'ya ikinci istek hiç gitmez). İstemci kilidi ikinci isteği ağa çıkarmaz ve kullanıcıyı yanıltmaz.
+  //   • İleti yanıttaki `kod`'dan (`faturaYanitMesaji`); yanıt okunamazsa «kesilmiş OLABİLİR» (e-İrsaliye kalıbı).
+  //   • Her yanıttaki güncel işaret yerel duruma yamanır: yayın gelmeden de uyarı / gizleme doğrudur (D8).
+  const mikroFaturaKilidi = useBelgeKilidi();
+  /** Görsel kilit: id → fatura gönderimi sürüyor (liste ve ayrıntı düğmesi pasif ve «Gönderiliyor…»). */
+  const mikroFaturaGonderiliyor = mikroFaturaKilidi.suruyor;
+  /** İ3: düğme / seçenek yalnız sunucu kapısından geçen rolde çizilir (ortak uç tablosu; kesebilen çözebilir — D6). */
+  const mikroFaturaKesebilir = ucKapisindanGecer(userRole, 'POST /api/mikro/fatura/kaydet');
+  const mikroFaturaSonucuCozebilir = ucKapisindanGecer(userRole, 'POST /api/mikro/fatura/sonuc');
+  /** Canlı listeye göre faturası kesilmiş OLABİLİR mi — yerel `selectedOrder` kopyasına GÜVENMEZ. GÜNCEL depodan okunur
+   *  (inceleme 1, İ1-6): onaydan sonraki yeniden denetim (c) `await confirmAction`'dan SONRA koşar; bu çizimin `orders` kapanışı
+   *  pencere açıkken gelen yayını (başka sekme / kullanıcı faturayı kesti ya da gönderiyor) görmez ve istek giderdi. */
+  const mikroFaturaKesilmis = (orderId: string): boolean =>
+    mikroFaturasiKesilmisOlabilir(useDataStore.getState().orders.find(x => x.id === orderId));
+  /** Yanıttaki güncel işareti `orders` ve `selectedOrder` yerel durumuna İŞLEVSEL güncelleyiciyle yamar (D8; araya giren
+   *  yazımı ezmez). `null` = işaret yok (geri alındı / çözüldü) → anahtar SİLİNİR. */
+  const faturaIsaretiniYama = (orderId: string, isaret: MikroFaturaGonderimi | null, ek: Partial<Order> = {}) => {
+    const yamala = (o: Order): Order => {
+      const kalan: Order = { ...o };
+      delete kalan[FATURA_GONDERIM_ALANI];
+      return { ...kalan, ...ek, ...(isaret ? { [FATURA_GONDERIM_ALANI]: isaret } : {}) };
+    };
+    useDataStore.setState(s => ({ orders: s.orders.map(o => (o.id === orderId ? yamala(o) : o)) }));
+    setSelectedOrder(o => (o && o.id === orderId ? yamala(o) : o));
+  };
+  const faturaKesilmisUyarisi = () => toast(currentLanguage === 'tr'
+    ? 'Bu siparişin faturası kesildi ya da gönderim sonucu bekleniyor — ikinci resmî belge oluşmasın diye gönderilmedi.'
+    : 'This order was already invoiced or its invoice result is pending — not sent again to avoid a duplicate official document.', 'info');
   const handleMikroFatura = async (order: Order) => {
+    if (!mikroFaturaKesebilir) return;   // İ3: bu rolde düğme çizilmez; sunucu da 403 döner
+    // (a) SALT-OKUR denetim: gönderim sürüyorsa ya da fatura kesilmiş OLABİLİRSE onay penceresi AÇILMAZ (kilit alınmaz).
+    const onDurum = mikroFaturaKilidi.kilit.durum(order.id, mikroFaturaKesilmis(order.id));
+    if (onDurum === 'suruyor') return;                     // görsel kilit zaten «Gönderiliyor…» diyor
+    if (onDurum === 'kesilmis') { faturaKesilmisUyarisi(); return; }
     try {
       const lead = leads.find(l => l.id === order.leadId);
       // BELGE TİPİ: sipariş üzerindeki seçim → müşterinin e-Fatura kaydı → bilinmiyorsa GÖNDERME (utils/siparisler/
@@ -3819,57 +3854,131 @@ function AppContent() {
         variant: celiski ? 'warning' : 'default',
       });
       if (!onaylandi) return;
-      const r = await authFetch('/api/mikro/fatura/kaydet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          order: {
-            mikroCariKod: lead?.mikroCariKod || lead?.cariKod || lead?.taxId || order.customerName,
-            customerName: order.customerName,
-            // quantity/price: sunucu FaturaKaydetSchema bunları bekliyor (C15).
-            // kdv: sipariş penceresinin kaleme yazdığı SATIR KDV'si — sunucu onu belgeye aynen yazar (KDV dâhil girilen fiyatta
-            // yazılan toplam korunur; matrahtan yeniden hesaplansa 1 kuruş sapabilirdi). Kalemin oranı sipariş oranından
-            // farklıysa (bayat kalem) istek buraya HİÇ gelmez — yukarıdaki kapı durdurur; kalemde oran yoksa KDV gönderilmez
-            // (hangi orana ait olduğu bilinmez — sunucu güncel orandan hesaplar). Kural: faturaDurumu.kalemSatirKdv.
-            lineItems: (order.lineItems || []).map(l => {
-              const kdv = kalemSatirKdv(l, order.kdvOran);
-              return { name: l.title || l.name || l.sku, sku: l.sku, quantity: l.quantity, price: l.price, ...(kdv !== undefined ? { kdv } : {}) };
-            }),
-            totalPrice: order.totalPrice,
-            faturaTipi: belgeTipi,
-            // Sunucu bunu Mikro gövdesinde ZORUNLU kılar (varsayılan yok):
-            // kdvOran → vergi işaretçisi + sth_vergi. `?? 20` EKLEMEYİN — eksikse
-            // istek 400 döner ve sebebi aşağıdaki toast'ta kullanıcıya söylenir.
-            // 2026-09-19 delta bulgusu: bu satır `?? 20` ile kalmıştı, yani aynı
-            // sipariş irsaliyede 400 alırken faturada %20 KDV ile Mikro defterine
-            // YAZILIYORDU (ürün gerçekte %10'luksa yasal e-Fatura yanlış kesiliyor).
-            kdvOran: order.kdvOran,
-            // Siparişte sevk deposu seçilmişse fatura satırı da o depoya yazılır; yoksa alan JSON'da düşer ve
-            // sunucu pariteye (Mikro varsayılanı) döner — throw e-Fatura kesmeyi durdururdu (karar Açık İşler'de).
-            depoNo: order.depoNo,
-          },
-          firebaseId: order.id,
-        }),
-      });
-      const d = await r.json() as { success: boolean; mikroFaturaNo?: string; notConfigured?: boolean; error?: string; belgeTipiIletildi?: boolean };
-      if (d.success) {
-        toast(`${currentLanguage === 'tr' ? 'Fatura kaydedildi' : 'Invoice recorded'}: ${d.mikroFaturaNo ?? ''}`, 'success');
+      // (c) Onaydan SONRA, istekten hemen önce kilit — yeniden denetler: onay beklerken ikinci tıklama / yayın araya girebilir.
+      const kilit = mikroFaturaKilidi.kilit.al(order.id, mikroFaturaKesilmis(order.id));
+      if (kilit === 'suruyor') return;
+      if (kilit === 'kesilmis') { faturaKesilmisUyarisi(); return; }
+      let durum: number | null = null;
+      let d: FaturaYaniti | null = null;
+      try {
+        // (d) İstek.
+        const r = await authFetch('/api/mikro/fatura/kaydet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            order: {
+              mikroCariKod: lead?.mikroCariKod || lead?.cariKod || lead?.taxId || order.customerName,
+              customerName: order.customerName,
+              // quantity/price: sunucu FaturaKaydetSchema bunları bekliyor (C15).
+              // kdv: sipariş penceresinin kaleme yazdığı SATIR KDV'si — sunucu onu belgeye aynen yazar (KDV dâhil girilen fiyatta
+              // yazılan toplam korunur; matrahtan yeniden hesaplansa 1 kuruş sapabilirdi). Kalemin oranı sipariş oranından
+              // farklıysa (bayat kalem) istek buraya HİÇ gelmez — yukarıdaki kapı durdurur; kalemde oran yoksa KDV gönderilmez
+              // (hangi orana ait olduğu bilinmez — sunucu güncel orandan hesaplar). Kural: faturaDurumu.kalemSatirKdv.
+              lineItems: (order.lineItems || []).map(l => {
+                const kdv = kalemSatirKdv(l, order.kdvOran);
+                return { name: l.title || l.name || l.sku, sku: l.sku, quantity: l.quantity, price: l.price, ...(kdv !== undefined ? { kdv } : {}) };
+              }),
+              totalPrice: order.totalPrice,
+              faturaTipi: belgeTipi,
+              // Sunucu bunu Mikro gövdesinde ZORUNLU kılar (varsayılan yok):
+              // kdvOran → vergi işaretçisi + sth_vergi. `?? 20` EKLEMEYİN — eksikse
+              // istek 400 döner ve sebebi aşağıdaki toast'ta kullanıcıya söylenir.
+              // 2026-09-19 delta bulgusu: bu satır `?? 20` ile kalmıştı, yani aynı
+              // sipariş irsaliyede 400 alırken faturada %20 KDV ile Mikro defterine
+              // YAZILIYORDU (ürün gerçekte %10'luksa yasal e-Fatura yanlış kesiliyor).
+              kdvOran: order.kdvOran,
+              // Siparişte sevk deposu seçilmişse fatura satırı da o depoya yazılır; yoksa alan JSON'da düşer ve
+              // sunucu pariteye (Mikro varsayılanı) döner — throw e-Fatura kesmeyi durdururdu (karar Açık İşler'de).
+              depoNo: order.depoNo,
+            },
+            firebaseId: order.id,
+          }),
+        });
+        durum = r.status;
+        // Gövde okunamazsa (vekilin HTML'i, kopan bağlantı) `null` → «kesilmiş OLABİLİR».
+        d = await r.json().then((j: unknown) => (j && typeof j === 'object' && !Array.isArray(j) ? j as FaturaYaniti : null), () => null);
+        if (d?.success) mikroFaturaKilidi.kilit.tamamlandi(order.id);   // başarı (`localUpdateFailed` dâhil): bu oturumda kapalı
+      } catch {
+        d = null;   // yanıt ALINAMADI: sunucu isteği tamamlamış ve faturayı kesmiş OLABİLİR
+      } finally {
+        mikroFaturaKilidi.kilit.birak(order.id);   // (e) her yolda
+      }
+      // D8: yanıttaki güncel işaret (404'te alan yok → dokunulmaz). Başarıda sunucunun AYNI ifadede yazdığı fatura alanları da
+      // yamanır — `localUpdateFailed`ta sunucu satırı yazmadı: yalnız işaret (talebin `gonderiliyor`u → düğme yine kapalı).
+      if (d && FATURA_GONDERIM_ALANI in d) {
+        faturaIsaretiniYama(order.id, faturaIsareti(d), d.success && !d.localUpdateFailed
+          ? { ...(d.mikroFaturaNo ? { mikroFaturaNo: d.mikroFaturaNo } : {}), hasInvoice: true, mikroSynced: true } : {});
+      }
+      if (d?.success) {
+        // İleti TEK yerden (`faturaYanitMesaji`): «kaydedildi» ya da — sipariş işaretlenemediyse — «YENİDEN GÖNDERMEYİN» (İA-2).
+        const basari = faturaYanitMesaji(durum, d, currentLanguage);
+        toast(basari.metin, basari.tur);
         // Belge tipi Mikro gövdesine yalnız V17 zarfında girer; sunucu ortamı V16 ise seçim Mikro'ya GİTMEDİ — söyle.
         if (d.belgeTipiIletildi === false) toast(currentLanguage === 'tr'
           ? `DİKKAT: belge tipi (${tipAdi(belgeTipi)}) Mikro'ya İLETİLEMEDİ (sunucu Mikro V16 zarfında çalışıyor). Mikro'da belgenin tipini kontrol edin.`
           : `WARNING: the document type (${tipAdi(belgeTipi)}) was NOT passed to Mikro (server runs the V16 envelope). Check the type in Mikro.`, 'error');
-        // Optimistic update — Firestore onSnapshot will sync the real value shortly.
-        // İŞLEVSEL güncelleyici: bu `await` sırasında e-İrsaliye işareti yazılmış olabilir;
-        // kapanıştaki bayat nesneyi yaymak onu yerelde siler (2026-09-19 delta).
-        setSelectedOrder(o => (o && o.id === order.id ? { ...o, mikroFaturaNo: d.mikroFaturaNo, hasInvoice: true } : o));
-      } else if (d.notConfigured) {
-        toast(currentLanguage === 'tr' ? 'Mikro bağlantısı yapılandırılmamış. Ayarlar\'dan girin.' : 'Mikro not configured. Go to Settings.', 'error');
-      } else {
-        toast(d.error || (currentLanguage === 'tr' ? 'Fatura gönderilemedi.' : 'Invoice push failed.'), 'error');
+        return;
       }
+      const m = faturaYanitMesaji(durum, d, currentLanguage);
+      toast(m.metin, m.tur);
     } catch (e) {
+      // Onaydan ÖNCEKİ adımlar (belge tipi, kalem denetimi): istek gitmedi.
       toast(e instanceof Error ? e.message : String(e), 'error');
     }
+  };
+
+  // ── e-Fatura: belirsiz kaydı çöz (D6) ─────────────────────────────────────────
+  // «Mikro'da var» → kesilmiş sayılır; «Mikro'da yok, yeniden gönderilebilir» → işaret silinir. Yanlış «yok» ikinci resmî belgeyi
+  // doğurur: kesimle eşdeğer karar — HER ZAMAN onayla (kullanıcı kuralı «resmî belge HER ZAMAN onayla»), «yok» `danger`.
+  // Onay metni cari, tutar ve işaretin zamanını / kimini taşır: kullanıcı Mikro'da arayabilsin; aynı siparişte arka arkaya iki
+  // belirsiz deneme oluşursa çözülen SON denemedir (istemci `istekNo` göndermez — D13) ve zaman bunu görünür kılar.
+  const handleMikroFaturaSonuc = async (order: Order, karar: FaturaSonucKarari, numara?: string) => {
+    if (!mikroFaturaSonucuCozebilir) return;
+    const tr = currentLanguage === 'tr';
+    const canli = orders.find(x => x.id === order.id) ?? order;
+    const isaret = faturaIsareti(canli);
+    const deneme = isaret
+      ? (tr ? `Gönderim denemesi: ${tarihSaatYaz(isaret.zaman, undefined, currentLanguage)} · ${isaret.kim || '—'}.` : `Attempt: ${tarihSaatYaz(isaret.zaman, undefined, currentLanguage)} · ${isaret.kim || '—'}.`)
+      : '';
+    const ozet = `${canli.customerName} — ${paraYaz(canli.totalPrice)}. ${deneme}`;
+    const no = numara?.trim() ?? '';
+    const onaylandi = await confirmAction(karar === 'mikrodaYok' ? {
+      title: tr ? 'Fatura Mikro\'da yok mu?' : 'Is the invoice missing in Mikro?',
+      message: tr
+        ? `${ozet} Bu siparişin faturasının Mikro'da OLMADIĞINI onaylıyorsunuz: kayıt silinir ve fatura YENİDEN gönderilebilir. Fatura Mikro'da kesilmişse ikinci bir resmî belge oluşur — önce Mikro'da bu cari ve tutarla arayın.`
+        : `${ozet} You confirm the invoice is NOT in Mikro: the record is cleared and the invoice can be sent AGAIN. If it was issued in Mikro, a second official document will be created — search Mikro for this customer and amount first.`,
+      confirmLabel: tr ? 'Mikro\'da yok, yeniden gönderilebilir' : 'Not in Mikro, can be sent again',
+      variant: 'danger',
+    } : {
+      title: tr ? 'Fatura Mikro\'da kesilmiş mi?' : 'Was the invoice issued in Mikro?',
+      message: tr
+        ? `${ozet} Bu siparişin faturasının Mikro'da KESİLDİĞİNİ onaylıyorsunuz${no ? ` (No: ${no})` : ' (numara girilmedi)'}: sipariş faturalanmış sayılır ve yeniden gönderilemez.`
+        : `${ozet} You confirm the invoice WAS issued in Mikro${no ? ` (No: ${no})` : ' (no number entered)'}: the order counts as invoiced and cannot be sent again.`,
+      confirmLabel: tr ? 'Mikro\'da var' : 'It is in Mikro',
+      variant: 'warning',
+    });
+    if (!onaylandi) return;
+    let durum: number | null = null;
+    let d: FaturaYaniti | null = null;
+    try {
+      const r = await authFetch('/api/mikro/fatura/sonuc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ firebaseId: order.id, karar, ...(karar === 'mikrodaVar' && no ? { numara: no } : {}) }),
+      });
+      durum = r.status;
+      d = await r.json().then((j: unknown) => (j && typeof j === 'object' && !Array.isArray(j) ? j as FaturaYaniti : null), () => null);
+    } catch {
+      d = null;
+    }
+    // «Mikro'da var» sunucuda kaydet başarısıyla AYNI fatura alanlarını yazar (İ1-4; server/mikro/faturaGonderimi.sonucVarYamasi):
+    // `hasInvoice`, `mikroSynced`, numara verildiyse `mikroFaturaNo`. Kesim zamanı bilinmediği için yazılmaz (uydurma yok).
+    if (d && FATURA_GONDERIM_ALANI in d) {
+      faturaIsaretiniYama(order.id, faturaIsareti(d), d.success && d.karar === 'mikrodaVar'
+        ? { hasInvoice: true, mikroSynced: true, ...(d.numara ? { mikroFaturaNo: d.numara } : {}) } : {});
+    }
+    const m = faturaSonucMesaji(durum, d, currentLanguage);
+    toast(m.metin, m.tur);
   };
 
   // ── iyzico: generate payment link ─────────────────────────────────────────
@@ -6458,6 +6567,10 @@ function AppContent() {
                 shipments={shipments}
                 setSiparisTohumu={setSiparisTohumu}
                 handleMikroFatura={handleMikroFatura}
+                handleMikroFaturaSonuc={handleMikroFaturaSonuc}
+                mikroFaturaGonderiliyor={mikroFaturaGonderiliyor}
+                mikroFaturaKesebilir={mikroFaturaKesebilir}
+                mikroFaturaSonucuCozebilir={mikroFaturaSonucuCozebilir}
                 handleEIrsaliye={handleEIrsaliye}
                 eIrsaliyeGonderiliyor={eIrsaliyeGonderiliyor}
                 handleIyzicoPaymentLink={handleIyzicoPaymentLink}

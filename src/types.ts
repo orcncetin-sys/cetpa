@@ -1,3 +1,4 @@
+import type { MikroFaturaGonderimi } from './lib/faturaGonderimi';
 export enum UserRole {
   Admin = 'Admin',
   Manager = 'Manager',
@@ -234,6 +235,12 @@ export interface Order {
   mikroFaturaNo?: string;
   mikroFaturaDate?: string;
   ettn?: string;
+  /**
+   * e-Fatura GÖNDERİM İŞARETİ (2026-10-17, şartname «e-Fatura çift kesim» E1). YALNIZ sunucu yazar ve siler (`/api/db` ile
+   * yazılamaz — collections.SUNUCU_TURETILEN_ALANLAR); istemci yalnız okur (düğme, rozet, düzenleme kilidi). Tanım ve bayatlık
+   * türetmesi: lib/faturaGonderimi. Alan yok = Mikro'ya hiç gönderilmedi ya da gönderim geri alındı.
+   */
+  mikroFaturaGonderimi?: MikroFaturaGonderimi;
   irsaliyeNo?: string;
   irsaliyeEttn?: string;
   /**

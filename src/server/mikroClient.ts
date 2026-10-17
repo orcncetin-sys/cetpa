@@ -422,8 +422,28 @@ export function mikroLikeKacisi(metin: string): string {
   return metin.replace(/[[%_]/g, '[$&]').replace(/'/g, "''").replace(/[\u2018\u2019\u02BC\u02B9\u02C8\u2032\uFF07]/g, '_');
 }
 
-/** mikroPost/mikroSql seçeneği. `zamanAsimiMs`: bu çağrıya ÖZEL `AbortSignal.timeout` (ms). */
-export interface MikroPostSecenek { zamanAsimiMs?: number }
+/** mikroPost/mikroSql seçeneği. `zamanAsimiMs`: bu çağrıya ÖZEL `AbortSignal.timeout` (ms).
+ *  `stubYenidenDeneme` (2026-10-17, şartname «e-Fatura çift kesim» D2): `result` anahtarsız 200 (stub) yanıtında belirteci
+ *  tazeleyip AYNI gövdeyi İKİNCİ kez gönderme davranışı. Varsayılan `true` = bugünkü davranış (okuyan uçlar için zararsız).
+ *  RESMÎ BELGE YAZAN çağrı `false` geçer: stub «Mikro isteği aldı mı» sorusunu yanıtlamaz — ikinci gönderim ikinci resmî
+ *  belge olabilir; stub sonuç BİLİNMİYOR sayılır (`FaturaKaydetV2`, mikroRoutes). */
+export interface MikroPostSecenek { zamanAsimiMs?: number; stubYenidenDeneme?: boolean }
+
+/**
+ * «Mikro'ya HİÇ gönderilmedi» işareti (D2): `mikroPost`'un `fetch(url)`'den ÖNCE düşen hataları — kimlik bilgisi yok,
+ * belirteç alınamadı, gövde metne çevrilemedi — bu kümeye girer. Hata nesnesi DEĞİŞTİRİLMEZ (ad, ileti, kimlik aynı): öteki
+ * çağıranlar (adaptif sayfalama `zamanAsimiMi` dâhil) bugünkü davranışı görür; yalnız resmî belge yazan rota sorar.
+ * `fetch` başladıktan sonraki her hata (bağlantı reddi dâhil — ayırt edilemez) bu kümeye GİRMEZ: sonuç bilinmiyor.
+ */
+const gonderilmeyenHatalar = new WeakSet<object>();
+export function mikroGonderilmediMi(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && gonderilmeyenHatalar.has(e);
+}
+const gonderilmediIsaretle = (e: unknown): never => {
+  const hata = typeof e === 'object' && e !== null ? e : new Error(String(e));
+  gonderilmeyenHatalar.add(hata);
+  throw hata;
+};
 
 // ── Liste/sayfa çağrısı zaman aşımı (mikro-import-arkaplan, 2026-09-24; K-A) ──────────────
 // server.ts global `fetch` yaması signal'sız her çağrıya 30 sn koyar. Import sayfaları (500 satır
@@ -561,28 +581,42 @@ export async function mikroPost(
   extraBody: Record<string, unknown>,
   inMikro = false, // true → ekstra alanlar Mikro objesi İÇİNE konur (V17 evrak kalıbı)
   secenek?: MikroPostSecenek, // zamanAsimiMs → bu çağrıya özel signal; yoksa server.ts global 30 sn AYNEN
-): Promise<{ ok: boolean; status: number; data: unknown }> {
+): Promise<{ ok: boolean; status: number; data: unknown; gonderilmedi?: true }> {
   // V17'de OLMAYAN metotları ağa hiç çıkarmadan, anlaşılır hatayla kes.
   // Çağıran kodun "yanıt geldi ama alan yok" durumuna düşüp `?? 0` ile sıfır
   // yazmasını engeller — cari bakiyeleri ve KDV özetini tam olarak bu kırıyordu.
   if (MIKRO_JUMP_SURUM >= 17 && MIKRO_V17_YOK.has(endpoint)) {
     const msg = `${endpoint} Mikro Jump V17'de bulunmuyor. Bu veri için farklı bir yol gerekir (çoğu liste için SqlVeriOkuV2).`;
     console.warn('[mikroPost] atlandı:', msg);
-    return { ok: false, status: 501, data: { result: [{ IsError: true, ErrorMessage: msg }] } };
+    // `gonderilmedi`: istek ağa HİÇ çıkmadı (D2) — zarf Mikro reddine benzese de resmî belge yolu bunu «gönderilmedi» sayar.
+    return { ok: false, status: 501, data: { result: [{ IsError: true, ErrorMessage: msg }] }, gonderilmedi: true };
   }
 
   const creds = await getMikroCreds();
-  if (!creds) throw new Error('Mikro kimlik bilgileri bulunamadı. Ayarlar > Mikro ERP bölümünden girin.');
+  if (!creds) return gonderilmediIsaretle(new Error('Mikro kimlik bilgileri bulunamadı. Ayarlar > Mikro ERP bölümünden girin.'));
 
   const url = `${MIKRO_API_BASE}/${endpoint}`;
+  // Bu `mikroPost` çağrısında `fetch(url)` en az bir kez BAŞLADI mı: stub tekrarının ikinci turunda belirteç düşerse ilk gövde
+  // zaten gitmiştir — o hata «gönderilmedi» işaretlenmez.
+  let gonderimBasladi = false;
 
   const doCall = async (): Promise<{ ok: boolean; status: number; data: unknown }> => {
     // LOKAL modda OIDC token YOK — kimlik yalnız gövdedeki Mikro bağlamıyla taşınır.
     // (Token adımı burada zorunlu tutulursa, IDM erişilemezse API'ye hiç gidilemez.)
-    const token = MIKRO_LOCAL_MODE ? null : await getMikroToken(creds);
-    const body = inMikro
-      ? { Mikro: { ...buildMikroContext(creds), ...extraBody } }
-      : { Mikro: buildMikroContext(creds), ...extraBody };
+    // `fetch(url)`'den ÖNCEKİ her düşüş «gönderilmedi» işaretlenir (D2; hata nesnesi aynen yeniden fırlatılır).
+    let token: string | null;
+    let govdeMetni: string;
+    try {
+      token = MIKRO_LOCAL_MODE ? null : await getMikroToken(creds);
+      const body = inMikro
+        ? { Mikro: { ...buildMikroContext(creds), ...extraBody } }
+        : { Mikro: buildMikroContext(creds), ...extraBody };
+      govdeMetni = JSON.stringify(body);
+    } catch (e) {
+      if (gonderimBasladi) throw e;
+      return gonderilmediIsaretle(e);
+    }
+    gonderimBasladi = true;
     const res = await fetch(url, {
       method:  'POST',
       headers: {
@@ -593,7 +627,7 @@ export async function mikroPost(
         'User-Agent':     'Cetpa-ERP/1.0 (+https://app.cetpa.com.tr)',
         'Accept':         'application/json',
       },
-      body: JSON.stringify(body),
+      body: govdeMetni,
       // Açık `signal` server.ts:76-79 global 30 sn yamasını BU çağrı için devre dışı bırakır
       // (yama yalnız signal'sız init'e dokunur). Zaman aşımı: DOMException name='TimeoutError'
       // → adaptifSayfalama.zamanAsimiMi ayırt eder. Geçersiz/sıfır değer → signal YOK (global kalır).
@@ -619,14 +653,21 @@ export async function mikroPost(
   const isStub = (d: unknown) =>
     !!d && typeof d === 'object' && !('result' in (d as Record<string, unknown>));
   // Lokal modda token yok → yenilemenin anlamı yok (stub başka sebepten gelir).
+  // `stubYenidenDeneme: false` (resmî belge yazan çağrı, D2): AYNI gövde ikinci kez GÖNDERİLMEZ — stub çağırana döner. Belirteç
+  // önbelleği YİNE silinir ve 5 dk damgası YİNE yazılır (inceleme 1, İ1-1): stub'ın olası nedeni geçersizleşmiş belirteçtir;
+  // silinmezse sonraki her çağrı (sonraki fatura dâhil) aynı bayat belirteçle stub almaya devam ederdi. Yalnız tekrar atlanır.
   if (result.ok && isStub(result.data) && !MIKRO_LOCAL_MODE) {
     const cacheKey = `${creds.idmEmail}|${creds.alias}`;
     const lastRefresh = mikroStubRefreshAt.get(cacheKey) ?? 0;
     if (Date.now() - lastRefresh > 5 * 60 * 1000) {
-      console.warn(`Mikro ${endpoint}: stub yanıt — token yenilenip tekrar deneniyor`);
       mikroStubRefreshAt.set(cacheKey, Date.now());
       mikroTokenCacheMap.delete(cacheKey);
-      result = await doCall();
+      if (secenek?.stubYenidenDeneme === false) {
+        console.warn(`Mikro ${endpoint}: stub yanıt — token düşürüldü; resmî belge gövdesi İKİNCİ KEZ GÖNDERİLMEDİ (sonuç bilinmiyor)`);
+      } else {
+        console.warn(`Mikro ${endpoint}: stub yanıt — token yenilenip tekrar deneniyor`);
+        result = await doCall();
+      }
     } else {
       console.warn(`Mikro ${endpoint}: stub yanıt — backoff aktif (5 dk), token YENİLENMEDİ`);
     }

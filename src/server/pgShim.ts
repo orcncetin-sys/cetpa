@@ -19,7 +19,7 @@
 import { EventEmitter } from 'events';
 import pg from 'pg';
 import { FieldValue } from 'firebase-admin/firestore';
-import { ayarSahibi, satirSahibiAlani } from '../lib/tenantErisim.js';
+import { ayarSahibi, satirSahibiAlani, sunucuAlanKorumaSql, sunucuTuretilenAlanlar } from '../lib/tenantErisim.js';
 
 export interface PgShimDeps {
   /** `pgServerTimestamp` PG modunda mi Firestore modunda mi oldugunu bilmeli. */
@@ -224,6 +224,12 @@ export class PgQueryDocSnapshot extends PgDocSnapshot {
   override data(): PgDocData { return super.data() as PgDocData; }
 }
 
+/** `… RETURNING data` sonucundaki yazılan satır (yoksa `null` — sahte havuz satır döndürmeyebilir; çağıran JS verisine düşer). */
+function yazilanSatir(sonuc: { rows?: Array<{ data?: unknown }> } | null | undefined): PgDocData | null {
+  const data = sonuc?.rows?.[0]?.data;
+  return data && typeof data === 'object' && !Array.isArray(data) ? data as PgDocData : null;
+}
+
 export class PgDocRef {
   constructor(private pool: pg.Pool, public coll: string, public id: string) {}
   get path(): string { return `${this.coll}/${this.id}`; }
@@ -232,6 +238,17 @@ export class PgDocRef {
     const data = rows.length ? pgReviveTimestamps(rows[0].data) as PgDocData : undefined;
     return new PgDocSnapshot(this.id, data, this);
   }
+  /**
+   * SUNUCUNUN TÜRETTİĞİ ALAN (2026-10-17, şartname «e-Fatura çift kesim» Y1; collections.SUNUCU_TURETILEN_ALANLAR — bugün
+   * `orders.mikroFaturaGonderimi`): `set(merge)` ve `update` OKU-DEĞİŞTİR-YAZ'dır (SELECT → tam yazım). Sunucu içi sipariş
+   * yazıcıları (Mikro import, e-İrsaliye sonucu, ödeme, durum güncellemeleri…) bu yoldan yazar; e-Fatura talebi (tek koşullu
+   * SQL, server/mikro/faturaGonderimi) SELECT ile yazım ARASINA düşerse tam yazım işareti silerdi → uçuştaki faturaya ikinci
+   * talep geçerdi (bugün de `mikroFaturaNo` için aynı pencere vardı). Yazım ifadesi artık `/api/db` PUT / PATCH ile AYNI
+   * yardımcıdan (tenantErisim.sunucuAlanKorumaSql): çakışma / güncelleme anında satırdaki GÜNCEL değer korunur — JS'te okunan
+   * değerden geri konmaz. Yayın yazılan GERÇEK satırdan (RETURNING): bayat işaretli JS verisi istemcinin canlı listesini
+   * yanıltmasın. Türetilen alanı olmayan koleksiyonda SQL ve yayın birebir eski. Sunucunun KENDİ işaret yazımları doğrudan
+   * SQL'dir (bu sınıftan geçmez). Çit: server/faturaCiftKesim.zincir.test («Y1»).
+   */
   async set(data: PgDocData, opts?: { merge?: boolean }): Promise<void> {
     const incoming = resolveSentinels(data) as PgDocData;
     let final = incoming;
@@ -239,12 +256,13 @@ export class PgDocRef {
       const { rows } = await this.pool.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [this.coll, this.id]);
       final = mergeDocData((rows[0]?.data as PgDocData) ?? {}, incoming);
     }
-    await this.pool.query(
+    const koru = sunucuTuretilenAlanlar(this.coll).length > 0;
+    const yazim = await this.pool.query(
       `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
-       ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+       ON CONFLICT (coll, id) DO UPDATE SET data = ${sunucuAlanKorumaSql(this.coll)}, updated_at = now()${koru ? ' RETURNING data' : ''}`,
       [this.coll, this.id, JSON.stringify(final)],
     );
-    broadcastDocChange(this.coll, 'set', this.id, final);
+    broadcastDocChange(this.coll, 'set', this.id, koru ? yazilanSatir(yazim) ?? final : final);
   }
   /**
    * update = var olan dokümana yama. Doküman YOKSA hiçbir şey yazılmaz (uyarı loglanır).
@@ -262,11 +280,15 @@ export class PgDocRef {
       return;
     }
     const final = mergeDocData(rows[0].data as PgDocData, patch);
-    await this.pool.query(
-      'UPDATE docs SET data = $3, updated_at = now() WHERE coll = $1 AND id = $2',
+    // Sunucunun türettiği alan: `set` ile AYNI kural (yukarıdaki not) — güncelleme anındaki satır değeri korunur.
+    const koru = sunucuTuretilenAlanlar(this.coll).length > 0;
+    const yazim = await this.pool.query(
+      koru
+        ? `UPDATE docs SET data = ${sunucuAlanKorumaSql(this.coll, '$3::jsonb')}, updated_at = now() WHERE coll = $1 AND id = $2 RETURNING data`
+        : 'UPDATE docs SET data = $3, updated_at = now() WHERE coll = $1 AND id = $2',
       [this.coll, this.id, JSON.stringify(final)],
     );
-    broadcastDocChange(this.coll, 'set', this.id, final);
+    broadcastDocChange(this.coll, 'set', this.id, koru ? yazilanSatir(yazim) ?? final : final);
   }
   async delete(): Promise<void> {
     const { rows } = await this.pool.query('DELETE FROM docs WHERE coll = $1 AND id = $2 RETURNING data', [this.coll, this.id]);

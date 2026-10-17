@@ -170,3 +170,98 @@ describe('mikroPost — secenek.zamanAsimiMs → AbortSignal.timeout; seçeneksi
     expect(listeZamanAsimiMs()).toBe(300_000);
   });
 });
+
+// ── e-Fatura çift kesim (2026-10-17, şartname `.wf/SARTNAME-efatura-cift-kesim.md` § 7 D2) ──────────────────────────────
+// BULUT modu (belirteç adımı ve stub tekrarı yalnız orada): `MIKRO_API_URL` sahte bulut adresi, `MIKRO_LOCAL=0`, kimlik bilgisi
+// ortamdan. Modül sabitleri yükleme anında okunur → her sınamada `vi.resetModules` + dinamik içe aktarım (stub geri çekilme
+// haritası da taze). `fetch` sahtesi isteği hiçbir yere göndermez.
+describe('mikroPost — stub tekrarı seçeneği (T22) ve «gönderilmedi» işareti (D2)', () => {
+  const TABAN = 'https://mikro.ornek.test:8094/Api/APIMethods';
+  let cagrilar: string[] = [];
+  let yanitla: (url: string) => Response | Promise<Response> = () => new Response('{}');
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv('MIKRO_API_URL', TABAN);
+    vi.stubEnv('MIKRO_LOCAL', '0');
+    vi.stubEnv('MIKRO_IDM_EMAIL', 'srv@example.test');
+    vi.stubEnv('MIKRO_IDM_PASSWORD', 'sinama');
+    vi.stubEnv('MIKRO_API_KEY', 'anahtar');
+    vi.stubEnv('MIKRO_ALIAS', 'takma');
+    cagrilar = [];
+    yanitla = (url: string) => (url.includes('onlinekullanici') ? new Response(JSON.stringify({ access_token: 't', expires_in: 21600 })) : new Response(JSON.stringify({ Method: 'X' })));
+    vi.stubGlobal('fetch', async (url: string) => { cagrilar.push(url); return yanitla(url); });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+  const yontemCagrisi = (yontem: string): number => cagrilar.filter(u => u === `${TABAN}/${yontem}`).length;
+
+  it('T22 — varsayılan seçenekle stub (başka bir yöntem) → İKİ çağrı (bugünkü davranış aynı); `stubYenidenDeneme: false` → TEK çağrı', async () => {
+    const { mikroPost, initMikroClient } = await import('./mikroClient');
+    initMikroClient({ getAdminDb: () => null });
+    const r = await mikroPost('StokListesiV2', {});
+    expect(yontemCagrisi('StokListesiV2')).toBe(2);
+    expect(r.data).toEqual({ Method: 'X' });
+    vi.resetModules();
+    cagrilar = [];
+    const taze = await import('./mikroClient');
+    taze.initMikroClient({ getAdminDb: () => null });
+    await taze.mikroPost('FaturaKaydetV2', { evraklar: [] }, true, { stubYenidenDeneme: false });
+    expect(yontemCagrisi('FaturaKaydetV2')).toBe(1);
+  });
+
+  it('T22 / İ1-1 — `stubYenidenDeneme: false` stub\'ında da belirteç önbelleği SİLİNİR ve 5 dk damgası yazılır: sonraki çağrı YENİ belirteç ister; FaturaKaydetV2 her çağrıda TEK gönderim', async () => {
+    const { mikroPost, initMikroClient } = await import('./mikroClient');
+    initMikroClient({ getAdminDb: () => null });
+    const belirtecCagrisi = (): number => cagrilar.filter(u => u.includes('onlinekullanici')).length;
+    await mikroPost('FaturaKaydetV2', { evraklar: [] }, true, { stubYenidenDeneme: false });
+    expect([yontemCagrisi('FaturaKaydetV2'), belirtecCagrisi()]).toEqual([1, 1]);
+    // Stub belirteci düşürdü: ikinci fatura çağrısı bayat belirteçle değil, YENİ belirteçle gider — yine TEK gönderim.
+    await mikroPost('FaturaKaydetV2', { evraklar: [] }, true, { stubYenidenDeneme: false });
+    expect([yontemCagrisi('FaturaKaydetV2'), belirtecCagrisi()]).toEqual([2, 2]);
+    // 5 dk damgası ilk stub'da yazıldı: varsayılan seçenekle stub alan başka yöntem TEKRAR ETMEZ (geri çekilme etkin), belirteç
+    // de yeniden üretilmez (kendi kendimize IDM kilidini uzatmayalım).
+    await mikroPost('StokListesiV2', {});
+    expect([yontemCagrisi('StokListesiV2'), belirtecCagrisi()]).toEqual([1, 2]);
+  });
+
+  it('kimlik bilgisi yok / belirteç alınamadı → fırlatır ve `mikroGonderilmediMi` doğru (hata nesnesi ve iletisi AYNI); yöntem çağrısı 0', async () => {
+    const { mikroPost, mikroGonderilmediMi, initMikroClient } = await import('./mikroClient');
+    initMikroClient({ getAdminDb: () => null });
+    yanitla = (url: string) => (url.includes('onlinekullanici') ? new Response('kapalı', { status: 500 }) : new Response('{}'));
+    let hata: unknown = null;
+    try { await mikroPost('FaturaKaydetV2', {}, true, { stubYenidenDeneme: false }); } catch (e) { hata = e; }
+    expect(hata).toBeInstanceOf(Error);
+    expect((hata as Error).message).toMatch(/^Mikro token alınamadı \(500\)/);
+    expect((hata as Error).name).toBe('Error');
+    expect(mikroGonderilmediMi(hata)).toBe(true);
+    expect(yontemCagrisi('FaturaKaydetV2')).toBe(0);
+    vi.stubEnv('MIKRO_IDM_EMAIL', undefined);
+    let hata2: unknown = null;
+    try { await mikroPost('FaturaKaydetV2', {}, true); } catch (e) { hata2 = e; }
+    expect(String((hata2 as Error).message)).toMatch(/kimlik bilgileri bulunamadı/);
+    expect(mikroGonderilmediMi(hata2)).toBe(true);
+  });
+
+  it('`fetch` BAŞLADIKTAN sonraki hata (ağ, zaman aşımı) «gönderilmedi» SAYILMAZ; stub tekrarının ikinci turunda belirteç düşerse de', async () => {
+    const { mikroPost, mikroGonderilmediMi, initMikroClient, mikroTokenCacheMap } = await import('./mikroClient');
+    initMikroClient({ getAdminDb: () => null });
+    yanitla = (url: string) => { if (url.includes('onlinekullanici')) return new Response(JSON.stringify({ access_token: 't', expires_in: 21600 })); throw new TypeError('fetch failed'); };
+    let hata: unknown = null;
+    try { await mikroPost('FaturaKaydetV2', {}, true, { stubYenidenDeneme: false }); } catch (e) { hata = e; }
+    expect(hata).toBeInstanceOf(TypeError);
+    expect(mikroGonderilmediMi(hata)).toBe(false);
+    // Varsayılan yol: ilk gövde gitti (stub), tekrar turunda belirteç alınamıyor → hata «gönderilmedi» DEĞİL.
+    mikroTokenCacheMap.clear();
+    let tur = 0;
+    yanitla = (url: string) => {
+      if (url.includes('onlinekullanici')) { tur++; return tur === 1 ? new Response(JSON.stringify({ access_token: 't', expires_in: 21600 })) : new Response('kapalı', { status: 500 }); }
+      return new Response(JSON.stringify({ Method: 'X' }));
+    };
+    let hata2: unknown = null;
+    try { await mikroPost('SiparisKaydetV2', {}); } catch (e) { hata2 = e; }
+    expect(String((hata2 as Error).message)).toMatch(/token alınamadı/);
+    expect(mikroGonderilmediMi(hata2)).toBe(false);
+    expect(yontemCagrisi('SiparisKaydetV2')).toBe(1);
+  });
+});

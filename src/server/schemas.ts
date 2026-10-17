@@ -27,7 +27,10 @@ export type Sema<T> = z.ZodSchema<T>;
 
 // Fatura kaydetme şeması
 export const FaturaKaydetSchema = z.object({
-  firebaseId: z.string().optional(),
+  // ZORUNLU (2026-10-17, şartname «e-Fatura çift kesim» E2): gönderim işareti siparişin KENDİ belgesine yazılır — kimliksiz istekte
+  // ne «zaten faturalandı mı» sorulabilir ne sonuç siparişe yazılabilirdi. Boş / yalnız boşluk da reddedilir (değer KIRPILMAZ:
+  // kırpılmış kimlik başka belgeye işaret ederdi). Tek istemci çağıranı (App.tsx handleMikroFatura) her istekte `order.id` geçer.
+  firebaseId: z.string().refine(v => v.trim() !== '', { message: 'Sipariş kimliği (firebaseId) zorunludur.' }),
   order: z.object({
     mikroCariKod:  z.string().min(1, 'Cari kod zorunludur.'),
     lineItems:     z.array(z.object({
@@ -48,6 +51,14 @@ export const FaturaKaydetSchema = z.object({
     depoNo:       z.number().int().positive().optional(),
     createdAt:    z.string().optional(),
   }),
+});
+
+// Belirsiz e-Fatura kaydını çözme (şartname «e-Fatura çift kesim» E3 / D6). `numara` yalnız `mikrodaVar`'da kullanılır; boş /
+// yalnız boşluk «verilmedi» sayılır (uydurulmaz), kırpılarak saklanır.
+export const FaturaSonucSchema = z.object({
+  firebaseId: z.string().refine(v => v.trim() !== '', { message: 'Sipariş kimliği (firebaseId) zorunludur.' }),
+  karar: z.enum(['mikrodaVar', 'mikrodaYok']),
+  numara: z.string().max(64).optional().transform(v => (v !== undefined && v.trim() !== '' ? v.trim() : undefined)),
 });
 
 // İrsaliye kaydetme şeması

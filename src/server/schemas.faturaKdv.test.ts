@@ -6,7 +6,8 @@
 import { describe, it, expect } from 'vitest';
 import { FaturaKaydetSchema } from './schemas';
 
-const istek = (kalem: Record<string, unknown>) => ({ order: { mikroCariKod: '120.01.001', lineItems: [{ sku: 'S1', name: 'A', price: 41.675, quantity: 1, ...kalem }], faturaTipi: 'e-arsiv', kdvOran: 20 } });
+// `firebaseId` 2026-10-17'den beri zorunlu (şartname «e-Fatura çift kesim» E2) — bu dosyanın konusu satır KDV'si.
+const istek = (kalem: Record<string, unknown>) => ({ firebaseId: 'sip-1', order: { mikroCariKod: '120.01.001', lineItems: [{ sku: 'S1', name: 'A', price: 41.675, quantity: 1, ...kalem }], faturaTipi: 'e-arsiv', kdvOran: 20 } });
 
 describe('FaturaKaydetSchema — satır KDV tutarı', () => {
   it('kalemin `kdv` alanı korunur', () => {

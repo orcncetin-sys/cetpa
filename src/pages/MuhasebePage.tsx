@@ -33,6 +33,7 @@ import ModuleHeader from '../components/ModuleHeader';
 import type { Order, Employee, Warehouse, Supplier, InventoryItem, Lead } from '../types';
 import { faturaTipiEtiketi } from '../utils/durumEtiketi';
 import { teslimatAdresiMetni } from '../utils/siparisler/teslimatAdresi';
+import { faturaTakipFaturaVar, mikroFaturaDurumMetni } from '../utils/siparisler/faturaDurumu';
 import { zamanDate, zamanMs, gunAnahtari, gunBasi, bugunAnahtari, tarihYaz } from '../utils/zaman';
 import { cariHareketleri, cariOzet, krediLimiti, krediKullanimi, onayBekleyenler } from '../utils/muhasebe/cariEkstreOnay';
 import { butceGercekOzeti } from '../utils/muhasebe/butceGercek';
@@ -2491,15 +2492,20 @@ export default function MuhasebePage(props: Props) {
                   {muhasebeTab === 'fatura-takip' && (() => {
                     const tr564 = currentLanguage === 'tr';
                     const allBillable = orders.filter(o => o.status !== 'Cancelled');
+                    // «Faturası var» TEK yüklemden (D12, 2026-10-17): gönderimi süren / sonucu bilinmeyen e-Fatura «Fatura yok» sayılmaz.
+                    // «Bekliyor» da AYNI yüklemden (inceleme 1, İ1-5): eskiden yalnız `hasInvoice` sayılıyordu — gönderimi süren /
+                    // sonucu bilinmeyen / numarasız kesilen sipariş ne «Fatura Eksik»te ne «Bekliyor»da görünüyor, yalnız «Tümü»nde
+                    // kalıyordu. Süzgeç ve sayaç TEK işlevden.
+                    const bekliyor564 = (o: Order): boolean => faturaTakipFaturaVar(o) && !o.mikroSynced && !o.lucaSynced;
                     const filtered564 = allBillable.filter(o => {
-                      if (p564FaturaFilter === 'missing') return !o.hasInvoice && !o.mikroFaturaNo && !o.lucaFaturaNo;
+                      if (p564FaturaFilter === 'missing') return !faturaTakipFaturaVar(o);
                       if (p564FaturaFilter === 'synced') return o.mikroSynced || o.lucaSynced;
-                      if (p564FaturaFilter === 'pending') return o.hasInvoice && !o.mikroSynced && !o.lucaSynced;
+                      if (p564FaturaFilter === 'pending') return bekliyor564(o);
                       return true;
                     });
-                    const missingCount = allBillable.filter(o => !o.hasInvoice && !o.mikroFaturaNo && !o.lucaFaturaNo).length;
+                    const missingCount = allBillable.filter(o => !faturaTakipFaturaVar(o)).length;
                     const syncedCount = allBillable.filter(o => o.mikroSynced || o.lucaSynced).length;
-                    const pendingCount = allBillable.filter(o => o.hasInvoice && !o.mikroSynced && !o.lucaSynced).length;
+                    const pendingCount = allBillable.filter(bekliyor564).length;
 
                     return (
                       <motion.div key="fatura-takip" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} className="space-y-4">
@@ -2613,7 +2619,8 @@ export default function MuhasebePage(props: Props) {
                                   {filtered564.slice(0,50).map(o => {
                                     const invoiceNo = o.mikroFaturaNo || o.lucaFaturaNo || o.irsaliyeNo || '—';
                                     const isSynced = o.mikroSynced || o.lucaSynced;
-                                    const hasFatura = o.hasInvoice || !!o.mikroFaturaNo || !!o.lucaFaturaNo;
+                                    const hasFatura = faturaTakipFaturaVar(o);
+                                    const gonderimMetni = mikroFaturaDurumMetni(o, currentLanguage);
                                     const dateStr = tarihYaz(o.createdAt ?? o.syncedAt);
                                     return (
                                       <tr key={o.id} onClick={() => setP564DetayId(o.id)} className={`hover:bg-gray-50/50 transition-colors cursor-pointer ${!hasFatura?'bg-red-50/20':''}`}>
@@ -2631,6 +2638,8 @@ export default function MuhasebePage(props: Props) {
                                         <td className="px-3 py-2.5">
                                           {isSynced ? (
                                             <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">✓ {o.lucaSynced?'Luca':o.mikroSynced?'Mikro':'Sync'}</span>
+                                          ) : gonderimMetni ? (
+                                            <span data-fatura-durumu={o.id} className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">{gonderimMetni}</span>
                                           ) : hasFatura ? (
                                             <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ {oc(tr564).bekliyor}</span>
                                           ) : (
@@ -2666,6 +2675,7 @@ export default function MuhasebePage(props: Props) {
                           // belge no = faturadan türetilen siparişin TEKİL eşleşen Mikro başlığından; native siparişte '—'.
                           const ust564 = faturaUstBilgisi(d, mikroFaturalar);
                           const dSynced = d.mikroSynced || d.lucaSynced;
+                          const dGonderimMetni = mikroFaturaDurumMetni(d, currentLanguage);
                           const dAdres = teslimatAdresiMetni(d);   // TAM adres: kalan + il + (yurt dışıysa) ülke; boşsa satır çizilmez
                           // Değer hücresi `min-w-0 break-words`: boşluksuz uzun belge no dar ekranda satırı taşırmasın (ikisi
                           // birlikte gerekir — gerekçe ve ölçüm: MikroFaturaDetay `satir`; iki pencere birlikte değişir).
@@ -2697,9 +2707,13 @@ export default function MuhasebePage(props: Props) {
                                   {d.faturaTipi && satir564(oc(tr564).fatura_turu, faturaTipiEtiketi(d.faturaTipi, currentLanguage))}
                                   {d.ettn && satir564('ETTN', <span className="font-mono text-[11px]">{d.ettn}</span>)}
                                   {d.irsaliyeNo && satir564(mc(tr564).irsaliye_no, d.irsaliyeNo)}
+                                  {/* Gönderim rozeti satırdakiyle AYNI metin ve AYNI sıra (inceleme 1, İ1-5): senkron → gönderim
+                                      durumu (`mikroFaturaDurumMetni`) → «Bekliyor» → «Fatura yok». */}
                                   {satir564(oc(tr564).erp_durumu, dSynced
                                     ? <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">✓ {d.lucaSynced?'Luca':'Mikro'}</span>
-                                    : (d.hasInvoice || d.mikroFaturaNo || d.lucaFaturaNo)
+                                    : dGonderimMetni
+                                      ? <span data-fatura-durumu-ayrinti={d.id} className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">{dGonderimMetni}</span>
+                                    : faturaTakipFaturaVar(d)
                                       ? <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ {oc(tr564).bekliyor}</span>
                                       : <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">✗ {oc(tr564).fatura_yok}</span>)}
                                   {satir564(oc(tr564).siparis_durumu, d.status)}

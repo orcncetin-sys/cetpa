@@ -15,11 +15,11 @@
  * vi.mock blokları burada KALMAK ZORUNDA (vitest hoisting) — tarif: `mikroRoutes.testDuzenegi.ts` `mikroMockTarifi`.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
-import { mikroPost } from '../mikroClient.js';
+import { duzenekKur, pgliteDocs, type Duzenek } from './mikroRoutes.testDuzenegi';
+import { mikroPost, mikroVergiOranlari } from '../mikroClient.js';
 
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
-vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS' }));
+vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS', resolveSentinels: (v: unknown) => v }));
 vi.mock('../mikroMirror.js', () => ({
   CHA_COLS: {}, STH_COLS: {}, FIS_COLS: {}, SIP_COLS: {},
   mirrorMikroCariler: vi.fn(async () => {}), mirrorMikroInsert: vi.fn(async () => {}), mirrorMikroStoklar: vi.fn(async () => {}),
@@ -129,11 +129,18 @@ describe('Mikro\'ya YAZAN rotalar — istemciden gelen firebaseId başka kiracı
 
   it('fatura/kaydet + siparis/kaydet: yabancı `orders` dokümanı → 404, mikroPost çağrılmaz, damga basılmaz', async () => {
     d.snapAyarla('orders', { 'O-B': { customerName: 'Başka Firma', companyId: 'B' } });
-    const f = await d.cagir('POST', '/api/mikro/fatura/kaydet', { ...FATURA, firebaseId: 'O-B' });
+    // e-Fatura (2026-10-17, şartname «e-Fatura çift kesim» D1 / D15): kiracı koşulu gönderim işaretinin TEK SQL talebindedir —
+    // gerçek `docs` tablosu; gövde kurulabilsin diye Mikro vergi tablosu dolu (gövde talepten ÖNCE kurulur).
+    const pg = await pgliteDocs();
+    await pg.belgeKoy('orders', 'O-B', { customerName: 'Başka Firma', companyId: 'B' });
+    d.pgAyarla(pg.sorgu);
+    vi.mocked(mikroVergiOranlari).mockImplementationOnce((async () => new Map([[4, 20]])) as typeof mikroVergiOranlari);
+    const f = await d.cagir('POST', '/api/mikro/fatura/kaydet', { order: { ...FATURA.order, faturaTipi: 'e-fatura' }, firebaseId: 'O-B' });
     const s = await d.cagir('POST', '/api/mikro/siparis/kaydet', { order: { mikroCariKod: '120.01.001' }, firebaseId: 'O-B' });
-    expect([f.kod, s.kod]).toEqual([404, 404]);
+    expect([f.kod, s.kod], JSON.stringify(f.govde)).toEqual([404, 404]);
     expect(vi.mocked(mikroPost)).not.toHaveBeenCalled();
     expect(d.koleksiyon('orders')).toEqual([]);
+    expect(await pg.belgeOku('orders', 'O-B'), 'yabancı siparişe işaret / damga basılmaz').toEqual({ customerName: 'Başka Firma', companyId: 'B' });
   });
 
   it('irsaliye/kaydet: yabancı `shipments` dokümanı → 404; faturasız sevkiyat → 400 — ikisinde de mikroPost çağrılmaz', async () => {

@@ -76,6 +76,7 @@ const BEKLENEN: Record<string, Kapi> = {
   [`GET ${P}/status`]: 'staff',
   [`POST ${P}/fatura/kalemler`]: 'staff',
   [`POST ${P}/fatura/kaydet`]: 'staff',
+  [`POST ${P}/fatura/sonuc`]: 'staff',                              // e-Fatura çift kesim D6 (2026-10-17) — kesim kapısının AYNISI
   [`GET ${P}/ebelge/mukellef/:vkn`]: 'staff',
   // ── İç personel + ince kapı (kural dış rol içerdiği için ikisi birlikte) ──
   [`POST ${P}/siparis/kaydet`]: 'staff+orders:write',
@@ -226,6 +227,8 @@ const UC_TABLOSU_BEKLENEN: Record<string, string> = {
   [`POST ${P}/ebelge/pdf`]: 'mikroFaturalar:read',                 // K7 / H1
   [`POST ${P}/ebelge/xml`]: 'mikroFaturalar:read',
   [`POST ${P}/tahsilat/kaydet`]: 'kasaHareketleri:write',          // K9
+  [`POST ${P}/fatura/kaydet`]: 'staff',                            // e-Fatura çift kesim D6 — personel kapısı tabloda (çekirdek genişletildi)
+  [`POST ${P}/fatura/sonuc`]: 'staff',                             // D6 — kesebilen rol çözebilir (ölü düğme yok)
 };
 
 const gecenRoller = (etiket: string): AppRole[] => {
@@ -277,6 +280,7 @@ const EKRANI_GOREN: Record<string, AppRole[]> = {
   [`POST ${P}/siparis/kaydet`]: ['Admin', 'Manager', 'Sales'],               // sipariş yazımından sonra, müşteri seçiliyken
   [`POST ${P}/fatura/kalemler`]: birlesim(MUHASEBE, CRM, SATIN_ALMA, STOK),  // Fatura Detayı penceresi
   [`POST ${P}/fatura/kaydet`]: birlesim(CRM, STOK),                          // Siparişler ekranı (orders + lojistik sekmeleri)
+  [`POST ${P}/fatura/sonuc`]: birlesim(CRM, STOK),                           // D6 — aynı ekran, kesim düğmesiyle AYNI görünürlük
   [`GET ${P}/cari-hareket/turler`]: ['Admin', 'Manager', 'Accounting'],      // K2 — dekont penceresi açılışı (pencereyi açan düğme: K3-a)
   [`GET ${P}/cari-hareket/:cariKod`]: birlesim(MUHASEBE, CRM, SATIN_ALMA),   // cari ekstre paneli
   [`POST ${P}/tahsilat/kaydet`]: ['Admin', 'Accounting'],                    // K9 — Muhasebe → Tahsilat, yalnız tam yetkili
@@ -445,9 +449,9 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
   const yazili = (): Kayit[] => K().filter(k => !k.fabrika);
   const fabrika = (): Kayit[] => K().filter(k => k.fabrika);
 
-  it('Ç1 — 51 kayıt (49 yazılı yol + 2 fabrika); `app` yalnız kayıt satırlarında ve imzada geçer (takma ad / devretme / app.route yok)', () => {
-    expect(K()).toHaveLength(51);
-    expect(yazili()).toHaveLength(49);
+  it('Ç1 — 52 kayıt (50 yazılı yol + 2 fabrika); `app` yalnız kayıt satırlarında ve imzada geçer (takma ad / devretme / app.route yok)', () => {
+    expect(K()).toHaveLength(52);   // 2026-10-17: `fatura/sonuc` (e-Fatura çift kesim D6) — 51 → 52, ölçülerek
+    expect(yazili()).toHaveLength(50);
     expect(fabrika()).toHaveLength(2);
     const appGecen = kod.filter(s => /\bapp\b/.test(s.kod));
     expect(appGecen.map(s => s.kod).filter(k => !KAYIT.test(k))).toEqual(['export function mikroRoutes(app: Express, C: MikroRouteCtx): void {']);
@@ -455,7 +459,7 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
     expect(mikroSatir.filter(k => /\bapp\.(put|patch|delete|all|use|route)\(/.test(k))).toEqual([]);
   });
 
-  it('Ç2 — yazılı 49 yol + 13 fabrika rotası = BEKLENEN anahtar kümesi (62); fabrika tanımları rota ↔ koleksiyon eşli, ölü fabrika çağrılmıyor', () => {
+  it('Ç2 — yazılı 50 yol + 13 fabrika rotası = BEKLENEN anahtar kümesi (63); fabrika tanımları rota ↔ koleksiyon eşli, ölü fabrika çağrılmıyor', () => {
     const cagri = kod.filter(s => s.kod === 'makeMikroSqlImport({').map(s => s.n);
     const rota = kod.flatMap(s => { const m = /^route: '(\/api\/mikro\/[a-z/-]+)',/.exec(s.kod); return m ? [{ n: s.n, yol: m[1] }] : []; });
     const koleksiyon = kod.flatMap(s => { const m = /^collection: '([A-Za-z]+)',/.exec(s.kod); return m ? [{ n: s.n, ad: m[1] }] : []; });
@@ -474,7 +478,7 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
     const kaynaktaki = [...yazili().map(k => `${k.yontem} ${k.yol}`), ...rota.map(r => `POST ${r.yol}`)];
     expect(new Set(kaynaktaki).size).toBe(kaynaktaki.length);
     expect(sirali(kaynaktaki)).toEqual(sirali(Object.keys(BEKLENEN)));
-    expect(Object.keys(BEKLENEN)).toHaveLength(62);
+    expect(Object.keys(BEKLENEN)).toHaveLength(63);
   });
 
   it('Ç3 / Ç4 / Ç5 — ops dışındaki her kayıt: kimlik → [MFA] → ROL KAPISI → [hız sınırı]; kapı metni BEKLENEN etiketiyle aynı', () => {
@@ -711,20 +715,23 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
   });
 
   it('Ç16 — ortak uç tablosu (src/lib/mikroUcKapilari.ts) = elle yazılan beklenen = rota satırındaki kapı; istemci süzgeci sunucu kapısıyla aynı kararı verir', () => {
-    const kaynak = Object.fromEntries(Object.entries(MIKRO_UC_KAPILARI).map(([a, k]) => [a, `${k[0]}:${k[1]}`]));
+    // `'staff'` satırı (e-Fatura çift kesim D6, 2026-10-17): personel kapısı ortak çekirdekte (`UcKapisi`) ifade edilir.
+    const kaynak = Object.fromEntries(Object.entries(MIKRO_UC_KAPILARI).map(([a, k]) => [a, k === 'staff' ? 'staff' : `${k[0]}:${k[1]}`]));
     expect(kaynak).toEqual(UC_TABLOSU_BEKLENEN);
-    expect(Object.keys(UC_TABLOSU_BEKLENEN)).toHaveLength(11);
+    expect(Object.keys(UC_TABLOSU_BEKLENEN)).toHaveLength(13);
     // Anahtarlar BEKLENEN anahtarlarıyla BİREBİR; kapı etiketi aynı. Ç3 / Ç4 rota metnini BEKLENEN'e, bu çit BEKLENEN'i tabloya bağlar.
     for (const [anahtar, etiket] of Object.entries(UC_TABLOSU_BEKLENEN)) {
       expect(BEKLENEN[anahtar], `${anahtar}: BEKLENEN'de yok ya da kapısı farklı`).toBe(etiket);
-      // Tablo yalnız SABİT ince kapılı ucu taşır: gövdeye bağlı ya da iç personel çiftli kapı tek ikiliyle anlatılamaz.
-      expect(etiketKosullari(etiket).icRol, `${anahtar}: iç personel çiftli kapı ortak uç tablosuna yazılamaz`).toBe(false);
+      // Tablo SABİT kapılı ucu taşır (ince ikili ya da yalnız `staff`): gövdeye bağlı ya da iç personel ÇİFTLİ kapı tek satırla anlatılamaz.
+      if (etiket !== 'staff') expect(etiketKosullari(etiket).icRol, `${anahtar}: iç personel çiftli kapı ortak uç tablosuna yazılamaz`).toBe(false);
     }
     // Karar turunda kapısı değişen HER uç tabloda (istemci koşulu sorabilsin); K9 kapısı değişmeden, A1 (`cari/ara`) yeni uç
     // olarak tabloda — ikisinin de kilitlediği rol yok (KARAR_KILIDI'nda değiller).
     const kararUclari = Object.keys(KARAR_KILIDI).filter(a => !a.includes('#'));
     expect(kararUclari.filter(a => !(a in UC_TABLOSU_BEKLENEN)), 'kilitleyen ama ortak tabloda olmayan uç = istemci koşulu soramaz').toEqual([]);
-    expect(sirali(Object.keys(UC_TABLOSU_BEKLENEN).filter(a => !kararUclari.includes(a)))).toEqual(sirali([`POST ${P}/cari/ara`, `POST ${P}/tahsilat/kaydet`]));
+    expect(sirali(Object.keys(UC_TABLOSU_BEKLENEN).filter(a => !kararUclari.includes(a)))).toEqual(sirali([
+      `POST ${P}/cari/ara`, `POST ${P}/tahsilat/kaydet`, `POST ${P}/fatura/kaydet`, `POST ${P}/fatura/sonuc`,
+    ]));
     for (const [anahtar, etiket] of Object.entries(UC_TABLOSU_BEKLENEN)) {
       const uc = anahtar as MikroKapiliUc;
       for (const rol of APP_ROLES) expect(ucKapisindanGecer(rol, uc), `${anahtar} × ${rol}`).toBe(gecenRoller(etiket).includes(rol));
@@ -969,21 +976,21 @@ const kodlar = async (anahtarlar: string[], o: Parameters<typeof istek>[1]): Pro
 const hepsi = (anahtarlar: string[], kod: number): Record<string, number> => Object.fromEntries(anahtarlar.map(a => [a, kod]));
 
 describe('davranış — gerçek express + üretim zinciri (Mikro\'ya hiç gidilmez)', () => {
-  it('D0 — kayıtlı rota kümesi = BEKLENEN (62): takma adla, devrederek ya da yeni fabrikayla eklenen uç burada kırılır', () => {
+  it('D0 — kayıtlı rota kümesi = BEKLENEN (63): takma adla, devrederek ya da yeni fabrikayla eklenen uç burada kırılır', () => {
     expect(sirali(Object.keys(d.app.zincirler))).toEqual(sirali(Object.keys(BEKLENEN)));
-    expect(KAPILI).toHaveLength(54);
+    expect(KAPILI).toHaveLength(55);
     const dagilim = (on: (k: Kapi) => boolean) => Object.values(BEKLENEN).filter(on).length;
     expect({
       ops: dagilim(k => k === 'ops'), staff: dagilim(k => k === 'staff'), staffArtiInce: dagilim(k => k === 'staff+orders:write'),
       govde: dagilim(k => k.startsWith('govde:')), ince: dagilim(k => /^[A-Za-z]+:(read|write|delete)$/.test(k)),
-    }).toEqual({ ops: 8, staff: 4, staffArtiInce: 2, govde: 2, ince: 46 });   // karar turu: 6 uç `staff` → ince, `cari/listesi` gövdeye bağlı → ince; Q serisi: `seri-ozet` ops jetonu (7 → 8); A1: `cari/ara` ince (45 → 46)
+    }).toEqual({ ops: 8, staff: 5, staffArtiInce: 2, govde: 2, ince: 46 });   // e-Fatura çift kesim D6: `fatura/sonuc` personel (4 → 5)   // karar turu: 6 uç `staff` → ince, `cari/listesi` gövdeye bağlı → ince; Q serisi: `seri-ozet` ops jetonu (7 → 8); A1: `cari/ara` ince (45 → 46)
   });
 
-  it('D1 — kimliksiz istek: 54 kapılı ucun hepsi 401', async () => {
+  it('D1 — kimliksiz istek: 55 kapılı ucun hepsi 401', async () => {
     expect(await kodlar(KAPILI, {})).toEqual(hepsi(KAPILI, 401));
   });
 
-  it.each(DIS)('D2 — %s: 54 kapılı ucun HEPSİ 403 (asıl açık: dış rol ve rolü çözülemeyen hesap)', async (kimlik) => {
+  it.each(DIS)('D2 — %s: 55 kapılı ucun HEPSİ 403 (asıl açık: dış rol ve rolü çözülemeyen hesap)', async (kimlik) => {
     expect(await kodlar(KAPILI, { kimlik })).toEqual(hepsi(KAPILI, 403));
   });
 
@@ -1066,6 +1073,8 @@ describe('davranış — gerçek express + üretim zinciri (Mikro\'ya hiç gidil
     expect((await istek(`POST ${P}/irsaliye/kaydet`, { kimlik: 'Sales' })).kod).toBe(403);
     expect(await gecen(`POST ${P}/siparis/sil`)).toEqual(sirali(['Admin', 'Manager']));
     expect(await gecen(`POST ${P}/fatura/kaydet`)).toEqual(sirali(IC));
+    // e-Fatura çift kesim D6: belirsiz kaydı çözme kapısı = kesim kapısı (kesebilen çözebilir).
+    expect(await gecen(`POST ${P}/fatura/sonuc`)).toEqual(sirali(IC));
     expect((await istek(`POST ${P}/tahsilat/kaydet`, { kimlik: 'Sales' })).kod).toBe(403);
     expect(await gecen(`POST ${P}/tahsilat/kaydet`)).toEqual(sirali(['Admin', 'Manager', 'Accounting']));
     // Yıkıcı / bakım uçları: Yönetici + Müdür.
@@ -1085,7 +1094,7 @@ describe('davranış — gerçek express + üretim zinciri (Mikro\'ya hiç gidil
     expect(mikroPost).not.toHaveBeenCalled();
   });
 
-  it('D8 — süper yönetici (sahip hesabı, rolü boş): 54 kapılı ucun hepsi 200 — hiçbir kapı sahibini kilitlemez', async () => {
+  it('D8 — süper yönetici (sahip hesabı, rolü boş): 55 kapılı ucun hepsi 200 — hiçbir kapı sahibini kilitlemez', async () => {
     expect(await kodlar(KAPILI, { kimlik: 'super-rolsuz' })).toEqual(hepsi(KAPILI, 200));
     expect((await istek(`POST ${P}/cari/kaydet`, { kimlik: 'super-rolsuz', govde: { collection: 'suppliers' } })).kod).toBe(200);
     expect((await istek(`POST ${P}/evrak/kaydet`, { kimlik: 'super-rolsuz', govde: { method: 'PersonelKaydetV2' } })).kod).toBe(200);

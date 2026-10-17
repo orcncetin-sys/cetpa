@@ -3,12 +3,14 @@ const CanliSevkiyatPanel = React.lazy(() => import('../components/CanliSevkiyatP
 import { eslesir } from '../utils/arama';
 import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli } from '../utils/siparis';
 import { irsaliyeIstegi, irsaliyeNedenMetni } from '../utils/siparisler/irsaliyeGonder';
-import { faturaKesilebilir, mikroyaFaturaGonderilebilir } from '../utils/siparisler/faturaDurumu';
+import { faturaKesilebilir, faturaSonucuCozulebilir, mikroFaturaDurumMetni, mikroFaturasiKesilmisOlabilir, mikroyaFaturaGonderilebilir } from '../utils/siparisler/faturaDurumu';
+import type { FaturaSonucKarari } from '../lib/faturaGonderimi';
 import { yerelDegistirilebilir, sevkiyatEngeli, sevkiyatEngeliMetni, yerelDegistirilemezMetni, silmeYolu, mikroSilOnayMetni, mikroSilindiMetni, silmeEngelMetni, silmeHataMetni, siparisNotMetni } from '../utils/siparisler/siparisIslemleri';
 import { mikroSiparisiSil } from '../services/mikroSiparisSil';
 import { useMikroSiparisKalemleri } from '../hooks/useMikroSiparisKalemleri';
 import MikroSiparisKalemleri from '../components/siparis/MikroSiparisKalemleri';
 import OnlineSiparisBilgisi, { OnlineRozeti } from '../components/siparis/OnlineSiparisBilgisi';
+import FaturaSonucuSecenekleri from '../components/siparis/FaturaSonucuSecenekleri';
 import { magazaSiparisiMi } from '../utils/siparisler/magazaSiparisi';
 import { kalemleriMikrodanOkunacak, mikroFaturaKalemleriGetir, mikroKalemTablosu, kayitliKalemTablosu, kayitliMikroKalemleri } from '../services/mikroFaturaKalemleri';
 import { kalemTutari, kalemBirimFiyati, kdvDahilKalemVar } from '../utils/pano/stokSevkiyat';
@@ -216,13 +218,24 @@ interface Props {
   /** "Siparişi kopyala": sipariş penceresini bu tohumla açar (pencere birim fiyatı kalemden yeniden türetir). */
   setSiparisTohumu: (t: { order: Partial<Order>; kalemler: OrderLineItem[] } | null) => void;
   handleMikroFatura: (order: Order) => Promise<void>;
+  /** D6 (e-Fatura çift kesim): belirsiz fatura kaydını çözer — onay penceresi ve istek App.tsx'te (`handleMikroFatura`'nın yanında). */
+  handleMikroFaturaSonuc: (order: Order, karar: FaturaSonucKarari, numara?: string) => Promise<void>;
+  /**
+   * id → e-Fatura gönderimi SÜRÜYOR (App.tsx'teki ORTAK uçuş kilidi — utils/siparisler/belgeKilidi; 2026-10-17, D11). Liste ve
+   * ayrıntı düğmesi bunu okur: pasif + «Gönderiliyor…». Eski sayfa-yerel `faturaLoading` setter'sızdı (kalıcı `{}`) — kilit ÖLÜYDÜ.
+   */
+  mikroFaturaGonderiliyor: Record<string, boolean>;
+  /** Rol, `fatura/kaydet` ucunun sunucu kapısından geçer mi (ortak uç tablosu — İ3: geçemiyorsa düğme çizilmez). */
+  mikroFaturaKesebilir: boolean;
+  /** Rol, `fatura/sonuc` ucunun kapısından geçer mi (D6 — kesim kapısının aynısı: kesebilen çözebilir). */
+  mikroFaturaSonucuCozebilir: boolean;
   handleEIrsaliye: (order: Order) => Promise<void>;
   /**
    * id → e-İrsaliye gönderimi SÜRÜYOR. App.tsx'ten gelir (istek orada atılıyor).
    * Düğme bunu okumazsa yanıt beklerken etkin kalır ve ikinci tıklama Mikro'da İKİNCİ
    * resmî belge üretir. Sayfa-yerel `useState` ile taklit EDİLEMEZ: bu sayfadaki
-   * `faturaLoading` / `iyzicoLinkLoading` setter'sız yerel state, yani kalıcı `{}` —
-   * o düğmelerin "yükleniyor" koruması fiilen ÖLÜ (ayrı açık madde).
+   * `iyzicoLinkLoading` setter'sız yerel state, yani kalıcı `{}` — o düğmenin "yükleniyor"
+   * koruması fiilen ÖLÜ (ayrı açık madde).
    */
   eIrsaliyeGonderiliyor: Record<string, boolean>;
   handleIyzicoPaymentLink: (order: Order) => Promise<void>;
@@ -255,7 +268,8 @@ export default function OrdersPage({
   orders, leads, inventory, exchangeRates, employees,
   userRole, user, kpiCurrency, setKpiCurrency, activeTab, darkMode, warehouses, vehicles, aracKonumlari, konumYazabilir, irsaliyeKesebilir, kullaniciUid, locationStocks, shipments,
   setSiparisTohumu,
-  handleMikroFatura, handleEIrsaliye, eIrsaliyeGonderiliyor, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute, p554Bins,
+  handleMikroFatura, handleMikroFaturaSonuc, mikroFaturaGonderiliyor, mikroFaturaKesebilir, mikroFaturaSonucuCozebilir,
+  handleEIrsaliye, eIrsaliyeGonderiliyor, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute, p554Bins,
   handleToggleOrderPaid, trackView, openConfirm,
   toast, setActiveTab, setSelectedLead, setIsAddingOrder,
   logAuditAction,
@@ -348,8 +362,11 @@ export default function OrdersPage({
   const [magazaCariArama, setMagazaCariArama] = useState('');
   /** Düzenlenen siparişin RESMÎ BELGESİ kesilmiş mi (e-İrsaliye / fatura). Kesilmişse cari bağı, TUTAR ve KDV oranı kilitlenir:
    *  belge o değerlerle kesildi; yerelde değiştirmek Cetpa kaydını belgeden ayırır (2026-10-07 — oran değişikliği artık
-   *  toplamı ve kalemleri de yeniden yazıyor). Ad ve adres düzenlenebilir kalır. */
-  const duzenlenenBelgeKesildi = !!selectedOrder && (selectedOrder.irsaliyeGonderildi === true || !!selectedOrder.irsaliyeNo || !!selectedOrder.mikroFaturaNo);
+   *  toplamı ve kalemleri de yeniden yazıyor). Ad ve adres düzenlenebilir kalır.
+   *  e-Fatura kolu (2026-10-17, şartname «e-Fatura çift kesim» D10): TEK yüklem `mikroFaturasiKesilmisOlabilir`, CANLI listeden —
+   *  numarasız kesilen, gönderimi süren ya da sonucu bilinmeyen faturada da tutar / KDV / cari kilitlenir (eski kural yalnız
+   *  bayat `selectedOrder.mikroFaturaNo`'ya bakıyordu: numara okunamayınca belge kesilmişken tutar değiştirilebiliyordu). */
+  const duzenlenenBelgeKesildi = !!selectedOrder && (selectedOrder.irsaliyeGonderildi === true || !!selectedOrder.irsaliyeNo || mikroFaturasiKesilmisOlabilir(guncelSiparis(selectedOrder)));
   /** Düzenleme formunun KAYDEDİNCE yazacağı tutar, formda görünenden FARKLIYSA (pencereden açılmış kalemli siparişte oran
    *  değişince tutar kalemlerden yeniden hesaplanır) — kullanıcı kaydetmeden önce görsün. Kayıtla AYNI işlev. */
   const duzenlemeTutarOnizleme = (() => {
@@ -369,7 +386,6 @@ export default function OrdersPage({
   const [orderNoteSaved, setOrderNoteSaved] = useState(false);
   const [orderNoteSaving, setOrderNoteSaving] = useState(false);
   const [orderTimeline] = useState<TimelineEntry[]>([]);
-  const [faturaLoading] = useState<Record<string, boolean>>({});
   const [iyzicoLinkLoading] = useState<Record<string, boolean>>({});
   const [returnModal, setReturnModal] = useState<{ open: boolean; order: Order | null }>({ open: false, order: null });
   const [returnReason, setReturnReason] = useState('');
@@ -1627,12 +1643,17 @@ export default function OrdersPage({
                                     {op(currentLanguage).faturasiz}
                                   </span>
                                 )}
-                                {/* Phase 67: Mikro sync badge */}
+                                {/* Phase 67: Mikro sync badge. Gönderim işareti (D12, 2026-10-17): «gönderiliyor / sonucu bilinmiyor / reddetti /
+                                    numarasız kesildi» rozeti; sarı «Mikro'ya gönderilmedi» noktası işaret varken ÇIKMAZ (fatura kesilmiş olabilir). */}
                                 {order.mikroFaturaNo ? (
                                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c] inline-flex items-center gap-0.5 max-w-[120px] truncate" title={`Mikro: ${order.mikroFaturaNo}`}>
                                     ✓ {order.mikroFaturaNo}
                                   </span>
-                                ) : order.faturali ? (
+                                ) : mikroFaturaDurumMetni(order, currentLanguage) ? (
+                                  <span data-fatura-durumu={order.id} className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 inline-flex items-center gap-0.5 max-w-[160px] truncate">
+                                    {mikroFaturaDurumMetni(order, currentLanguage)}
+                                  </span>
+                                ) : order.faturali && !mikroFaturasiKesilmisOlabilir(order) ? (
                                   <span className="text-[9px] text-amber-500 font-medium inline-flex items-center gap-0.5" title={op(currentLanguage).mikro_ya_gonderilmedi}>
                                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
                                     Mikro
@@ -1700,18 +1721,21 @@ export default function OrdersPage({
                                     <CheckCircle2 className="w-3 h-3"/>{op(currentLanguage).faturali}
                                   </span>
                                 )}
-                                {/* Mikro e-Fatura push */}
-                                {mikroyaFaturaGonderilebilir(order) && (
+                                {/* Mikro e-Fatura push. Görünürlük: rol kapısı (İ3) + `mikroyaFaturaGonderilebilir` (işarete de bakar — D5);
+                                    gönderim SÜRERKEN (ortak uçuş kilidi — D11) düğme kalır ama pasif ve «Gönderiliyor…» — talep yayını
+                                    işareti `gonderiliyor` yapınca düğme kaybolmasın, ikinci tıklama da yapılamasın. */}
+                                {mikroFaturaKesebilir && (mikroyaFaturaGonderilebilir(order) || !!mikroFaturaGonderiliyor[order.id]) && (
                                   <button
+                                    data-mikro-fatura-dugmesi={order.id}
                                     onClick={(e) => { e.stopPropagation(); void handleMikroFatura(order); }}
-                                    disabled={!!faturaLoading[order.id]}
+                                    disabled={!!mikroFaturaGonderiliyor[order.id]}
                                     className="text-xs font-bold px-2 py-1 bg-[#1a3a5c]/10 text-[#1a3a5c] hover:bg-[#1a3a5c] hover:text-white rounded-lg transition-all flex items-center gap-1 disabled:opacity-40"
                                     title={op(currentLanguage).mikro_ya_e_fatura_gonder}
                                   >
-                                    {faturaLoading[order.id]
+                                    {mikroFaturaGonderiliyor[order.id]
                                       ? <RefreshCw className="w-3.5 h-3.5 animate-spin"/>
                                       : <FileUp className="w-3.5 h-3.5"/>}
-                                    Mikro
+                                    {mikroFaturaGonderiliyor[order.id] ? op(currentLanguage).gonderiliyor : 'Mikro'}
                                   </button>
                                 )}
                                 {order.mikroFaturaNo && (
@@ -1851,6 +1875,8 @@ export default function OrdersPage({
                           ) : null}
                           {order.mikroFaturaNo ? (
                             <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c]">✓ MKR</span>
+                          ) : mikroFaturaDurumMetni(order, currentLanguage) ? (
+                            <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-amber-50 text-amber-700">{mikroFaturaDurumMetni(order, currentLanguage)}</span>
                           ) : null}
                         </div>
                       </div>
@@ -2185,22 +2211,47 @@ export default function OrdersPage({
                         </button>
                       )}
                       {/* Mikro e-Fatura button in order detail */}
-                      {/* Satirdaki dugmeyle AYNI kaynak (faturaDurumu) — detay penceresi yarim duzeltme kalmasin (code-review 2026-09-24). */}
-                      {mikroyaFaturaGonderilebilir(selectedOrder) && (
-                        <button
-                          onClick={() => void handleMikroFatura(selectedOrder)}
-                          disabled={!!faturaLoading[selectedOrder.id]}
-                          className="bg-[#1a3a5c]/10 hover:bg-[#1a3a5c] text-[#1a3a5c] hover:text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20 transition-colors disabled:opacity-40"
-                        >
-                          {faturaLoading[selectedOrder.id] ? <RefreshCw className="w-4 h-4 animate-spin"/> : <FileUp className="w-4 h-4"/>}
-                          {op(currentLanguage).mikro_ya_fatura}
-                        </button>
-                      )}
-                      {selectedOrder.mikroFaturaNo && (
-                        <span className="bg-[#1a3a5c]/10 text-[#1a3a5c] px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20">
-                          <CheckCircle2 className="w-4 h-4"/> Mikro: {selectedOrder.mikroFaturaNo}
-                        </span>
-                      )}
+                      {/* Satirdaki dugmeyle AYNI kaynak (faturaDurumu) — detay penceresi yarim duzeltme kalmasin (code-review 2026-09-24).
+                          CANLI kayıttan (D8, 2026-10-17): `selectedOrder` bu sayfanın yerel kopyasıdır; işaret yayınla ya da yanıtla
+                          `orders`a gelir — düğme, D6 uyarısı, rozet ve kilit `guncelSiparis` ile canlı listeden okunur. */}
+                      {(() => {
+                        const canli = guncelSiparis(selectedOrder);
+                        const suruyor = !!mikroFaturaGonderiliyor[canli.id];
+                        const durumMetni = mikroFaturaDurumMetni(canli, currentLanguage);
+                        return (<>
+                          {mikroFaturaKesebilir && (mikroyaFaturaGonderilebilir(canli) || suruyor) && (
+                            <button
+                              data-mikro-fatura-dugmesi={canli.id}
+                              onClick={() => void handleMikroFatura(canli)}
+                              disabled={suruyor}
+                              className="bg-[#1a3a5c]/10 hover:bg-[#1a3a5c] text-[#1a3a5c] hover:text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20 transition-colors disabled:opacity-40"
+                            >
+                              {suruyor ? <RefreshCw className="w-4 h-4 animate-spin"/> : <FileUp className="w-4 h-4"/>}
+                              {suruyor ? op(currentLanguage).gonderiliyor : op(currentLanguage).mikro_ya_fatura}
+                            </button>
+                          )}
+                          {/* D6 — sonucu bilinmeyen (ya da gönderimi bayatlamış) fatura: düğme YERİNE uyarı + iki seçenek. Görünürlük
+                              kesim düğmesiyle aynı koşul (kesebilen rol çözebilir); karar App.tsx'te ONAYLA gider. */}
+                          {mikroFaturaSonucuCozebilir && !suruyor && faturaSonucuCozulebilir(canli) && (
+                            <FaturaSonucuSecenekleri
+                              key={canli.id}
+                              siparis={canli}
+                              dil={currentLanguage}
+                              onKarar={(karar, numara) => void handleMikroFaturaSonuc(canli, karar, numara)}
+                            />
+                          )}
+                          {durumMetni && !faturaSonucuCozulebilir(canli) && (
+                            <span data-fatura-durumu={canli.id} className="bg-amber-50 text-amber-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-amber-200">
+                              {durumMetni}
+                            </span>
+                          )}
+                          {canli.mikroFaturaNo && (
+                            <span className="bg-[#1a3a5c]/10 text-[#1a3a5c] px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20">
+                              <CheckCircle2 className="w-4 h-4"/> Mikro: {canli.mikroFaturaNo}
+                            </span>
+                          )}
+                        </>);
+                      })()}
                       {/* e-İrsaliye — sevk edilmiş, irsaliyesi HENÜZ KESİLMEMİŞ siparişte.
                           Gönderilemiyorsa düğme DEVRE DIŞI ve nedeni ipucunda yazar (sessizce
                           çalışmayan düğme yok). Kapı, Shipped otomatiğiyle AYNI tanımdan

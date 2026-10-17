@@ -21,14 +21,14 @@
  * depo numarası alanı YOK (types.ts). Eski sabit `sth_*_depo_no: 1` bu kiracıda
  * HAVALİMANI deposudur (2026-09-05). Sahte kayıt yerine hata — bilinçli, testle kilitli.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { duzenekKur, pgliteDocs, type Duzenek, type PgliteDocs } from './mikroRoutes.testDuzenegi';
 import { mikroPost, mikroVergiOranlari } from '../mikroClient.js';
 import { mirrorMikroInsert } from '../mikroMirror.js';
 
 // ── mikroMockTarifi (mikroRoutes.testDuzenegi.ts) — vitest hoisting yüzünden BURADA olmalı
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
-vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS' }));
+vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS', resolveSentinels: (v: unknown) => v }));
 vi.mock('../mikroMirror.js', () => ({
   CHA_COLS: {}, STH_COLS: {}, FIS_COLS: {}, SIP_COLS: {},
   mirrorMikroCariler: vi.fn(async () => {}), mirrorMikroInsert: vi.fn(async () => {}), mirrorMikroStoklar: vi.fn(async () => {}),
@@ -47,8 +47,15 @@ vi.mock('../mikroClient.js', async (orig) => {
 });
 
 let d: Duzenek;
-beforeEach(() => {
+/** e-Fatura rotası gönderim işaretini doğrudan SQL ile yazar (şartname «e-Fatura çift kesim» D1 / D4): GERÇEK `docs` tablosu. */
+let pg: PgliteDocs;
+beforeAll(async () => { pg = await pgliteDocs(); }, 60_000);
+beforeEach(async () => {
   d = duzenekKur();
+  await pg.temizle();
+  // Faturası kesilecek sipariş (çağıranın kiracısı 'A'); işaretli talep yalnız VAR OLAN satıra yazılır (upsert yok).
+  for (const id of ['ord1', 'ord9']) await pg.belgeKoy('orders', id, { customerName: 'Şirin İnşaat', companyId: 'A' });
+  d.pgAyarla(pg.sorgu);
   vi.mocked(mikroPost).mockReset();
   vi.mocked(mirrorMikroInsert).mockClear();
   vergiTablosuAyarla(new Map([[1, 0], [2, 1], [3, 10], [4, 20]]));
@@ -195,7 +202,8 @@ describe('POST /api/mikro/fatura/kaydet — bilinen sipariş: eski gövdeyle Bİ
 
     expect(res.kod).toBe(200);
     expect(mikroPost).toHaveBeenCalledTimes(1);
-    expect(mikroPost).toHaveBeenCalledWith('FaturaKaydetV2', { evraklar: [EVRAK] }, true);
+    // Gövde BİREBİR aynı; dördüncü argüman stub tekrarını KAPATIR (şartname «e-Fatura çift kesim» D2 — ikinci gönderim yok).
+    expect(mikroPost).toHaveBeenCalledWith('FaturaKaydetV2', { evraklar: [EVRAK] }, true, { stubYenidenDeneme: false });
     expect(res.govde).toMatchObject({ success: true, mikroFaturaNo: 'FTR-000123', ettn: 'E-1111' });
   });
 
@@ -212,14 +220,15 @@ describe('POST /api/mikro/fatura/kaydet — bilinen sipariş: eski gövdeyle Bİ
     basariliYanit({ faturaNo: 'FTR-000123', ettn: 'E-1111' });
     await faturaGonder(SIPARIS);
 
-    expect(d.koleksiyon('orders')).toEqual([{
-      op: 'set', ref: { id: 'ord1', coll: 'orders' },
-      data: {
-        companyId: 'A', mikroFaturaNo: 'FTR-000123', ettn: 'E-1111',
-        hasInvoice: true, mikroFaturaDate: '19.09.2026',
-        mikroSynced: true, mikroSyncedAt: 'TS',
-      },
-    }]);
+    // D4 (2026-10-17): damga TEK SQL ile ve işaretle AYNI ifadede yazılır — pgShim set-merge (oku-değiştir-yaz) YOK.
+    expect(d.koleksiyon('orders')).toEqual([]);
+    expect(await pg.belgeOku('orders', 'ord1')).toMatchObject({
+      customerName: 'Şirin İnşaat',
+      companyId: 'A', mikroFaturaNo: 'FTR-000123', ettn: 'E-1111',
+      hasInvoice: true, mikroFaturaDate: '19.09.2026',
+      mikroSynced: true, mikroSyncedAt: 'TS',
+      mikroFaturaGonderimi: { durum: 'gonderildi', numara: 'FTR-000123' },
+    });
   });
 
   it('createdAt yoksa belge BUGÜN kesilir (eski davranış korunur)', async () => {
@@ -239,8 +248,12 @@ describe('POST /api/mikro/fatura/kaydet — bilinen sipariş: eski gövdeyle Bİ
     const res = await faturaGonder(SIPARIS);
 
     expect(res.kod).toBe(200);
-    expect(res.govde).toMatchObject({ success: false });
+    expect(res.govde).toMatchObject({ success: false, kod: 'FATURA_REDDEDILDI', error: 'Cari bulunamadı' });
     expect(d.koleksiyon('orders'), 'başarısız Mikro yanıtı damgalamaz').toEqual([]);
+    const satir = await pg.belgeOku('orders', 'ord1');
+    expect(satir).not.toHaveProperty('mikroFaturaNo');
+    expect(satir).not.toHaveProperty('hasInvoice');
+    expect(satir?.mikroFaturaGonderimi).toMatchObject({ durum: 'reddedildi' });   // yeniden gönderilebilir (D2)
   });
 });
 

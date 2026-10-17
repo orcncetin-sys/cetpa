@@ -18,6 +18,7 @@
  * olmamalı. Kaza olduğunda ne oluyor: 2026-07-30 denetimi cariBalances /
  * stockDiscrepancies / syncJobs / auditLog'u tam bu durumda buldu.
  */
+import { FATURA_GONDERIM_ALANI } from './faturaGonderimi';
 
 /** İş verisi — `companyId` ile kiracı bazında izole edilir. */
 export const TENANT_COLLECTIONS: readonly string[] = [
@@ -167,6 +168,25 @@ export const DIS_ROL_YAZAMAZ: ReadonlyMap<string, readonly string[]> = new Map([
  */
 export const SAHIP_SATIR_ALANI: ReadonlyMap<string, string> = new Map([
   ['syncJobs', 'sahipUid'],
+]);
+
+/**
+ * SUNUCUNUN TÜRETTİĞİ ALANLAR (2026-10-17, şartname «e-Fatura çift kesim» D3): koleksiyon → yalnız SUNUCUNUN yazıp sildiği
+ * alanlar. `orders.mikroFaturaGonderimi` e-Fatura gönderim işaretidir (lib/faturaGonderimi): çift resmî belge güvenliği ona
+ * dayanır — `/api/db` ile silinse ya da `reddedildi` yazılsa uçuştaki ya da kesilmiş faturanın ikinci kez kesilmesinin yolu
+ * açılırdı. Kural (`SAHIP_SATIR_ALANI` kalıbı): ROLDEN BAĞIMSIZ (Yönetici ve süper yönetici dâhil), SESSİZ (403 yok, alan adı
+ * öğretilmez), önceki değer KALIR:
+ *   • POST — gövdedeki alan düşer;
+ *   • PUT / PUT?merge=1 / PATCH (nokta yolu dâhil) — alan gövdeden düşer, çakışma dalında YAZIM ANINDAKİ satır değeri SQL'de
+ *     korunur (tenantErisim.sunucuAlanKorumaSql; JS'te okunan önceki değerden geri KONMAZ — araya düşen talebi silerdi);
+ *   • cas — `set`'ten düşer (`data || set` o anki değeri korur);   • increment — 400 (server.ts SAHIPLIK_ALANLARI).
+ * Sunucunun kendi yazımları doğrudan SQL'dir, bu süzgeçten geçmez. Alan adları SQL'e gömüldüğü için yalnız `[A-Za-z0-9_]`
+ * (collections.test). `mikroFaturaNo` / `ettn` / `hasInvoice` listeye ALINMAZ (meşru istemci yazıcıları var; çift kesim
+ * güvenliği işarete dayanır). Kural tek yerde: lib/tenantErisim (`kiraciDamgala`, `sunucuAlanKorumaSql`); çit:
+ * server/faturaCiftKesim.zincir.test (T23–T25).
+ */
+export const SUNUCU_TURETILEN_ALANLAR: ReadonlyMap<string, readonly string[]> = new Map([
+  ['orders', [FATURA_GONDERIM_ALANI]],
 ]);
 
 export const USER_SCOPED_COLLECTIONS: readonly string[] = [

@@ -29,7 +29,7 @@ import { arkaPlanIsiBekle } from '../mikro/arkaPlanIsi.js';
  */
 export const mikroMockTarifi = `
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
-vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS' }));
+vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS', resolveSentinels: (v: unknown) => v }));
 vi.mock('../mikroMirror.js', () => ({
   CHA_COLS: {}, STH_COLS: {}, FIS_COLS: {}, SIP_COLS: {},
   mirrorMikroCariler: vi.fn(async () => {}), mirrorMikroInsert: vi.fn(async () => {}), mirrorMikroStoklar: vi.fn(async () => {}),
@@ -129,6 +129,41 @@ export interface Duzenek {
    *  `jobs/<isAdi>`'nin son hâlini döner. Rota `{ started:true, job }` ile ANINDA döndüğü için yazım
    *  iddiaları bundan SONRA yapılır; sabit `setTimeout` yoklaması YOK (hakem 7). */
   isBitisi(isAdi: string): Promise<Record<string, unknown> | null>;
+}
+
+// ── Gerçek SQL: PGlite + `docs` tablosu ──────────────────────────────────────
+/**
+ * Süreç içi PostgreSQL (PGlite) üstünde canlı `docs` tablosu (`DOCS_TABLOSU_DDL` — kopya DDL yok). Doğrudan SQL yazan rotalar
+ * (e-Fatura gönderim işareti — şartname «e-Fatura çift kesim» D1 / D4) burada GERÇEK SQL ile koşar: `d.pgAyarla(h.sorgu)`.
+ * PGlite tembel yüklenir (bu düzeneği kullanan öteki testler WASM'ı yüklemesin).
+ */
+export interface PgliteDocs {
+  sorgu: SahteSorgu;
+  /** `docs` satırını kurar (üzerine yazar). */
+  belgeKoy(coll: string, id: string, data: Record<string, unknown>): Promise<void>;
+  belgeOku(coll: string, id: string): Promise<Record<string, unknown> | undefined>;
+  temizle(): Promise<void>;
+}
+export async function pgliteDocs(): Promise<PgliteDocs> {
+  const { PGlite } = await import('@electric-sql/pglite');
+  const { DOCS_TABLOSU_DDL } = await import('../docsSema.js');
+  const db = new PGlite();
+  await db.exec(DOCS_TABLOSU_DDL);
+  const sorgu: SahteSorgu = async (sql, params) => {
+    const r = await db.query<Record<string, unknown>>(sql, params ?? []);
+    return { rows: r.rows, rowCount: r.affectedRows ?? r.rows.length };
+  };
+  return {
+    sorgu,
+    async belgeKoy(coll, id, data) {
+      await db.query('INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3::jsonb) ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data', [coll, id, JSON.stringify(data)]);
+    },
+    async belgeOku(coll, id) {
+      const r = await db.query<{ data: Record<string, unknown> }>('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id]);
+      return r.rows[0]?.data;
+    },
+    async temizle() { await db.exec('DELETE FROM docs'); },
+  };
 }
 
 // ── Düzenek ──────────────────────────────────────────────────────────────────
@@ -255,7 +290,8 @@ export function duzenekKur(secenek: DuzenekSecenek = {}): Duzenek {
     // Kilit varken `docs`/`opsLocks` sorgusu satır döndürmeli (bakimKilidiVar).
     // Kilit yoksa ve özel sorgu da yoksa havuz YOK — lokal (Firestore fallback) hâli.
     getPgPool: () => {
-      if (pgSorgu) return { query: pgSorgu };
+      // `connect()` e-Fatura ayna işlemi için (BEGIN / COMMIT aynı sorgu işlevine düşer; 2026-10-17).
+      if (pgSorgu) { const q = pgSorgu; return { query: q, connect: async () => ({ query: q, release: () => {} }) }; }
       if (kilit) return { query: async () => ({ rows: [{ data: kilit }] }) };
       return null;
     },
@@ -274,6 +310,8 @@ export function duzenekKur(secenek: DuzenekSecenek = {}): Duzenek {
     },
     getBoss: () => null,
     getUserRole: vi.fn(async () => 'Admin' as const),
+    // Doğrudan SQL yazımlarının yayını (e-Fatura gönderim işareti — şartname «e-Fatura çift kesim» D4).
+    broadcastDocChange: vi.fn(),
   };
 
   (secenek.kayit ?? mikroRoutes)(app as unknown as Express, C);
