@@ -61,6 +61,20 @@
  * DOKUNULMADI: `muhasebe/arYaslandirma.yasKovasi` (sabit 4 yaş kovası) ve
  * `siparisler/tahsilatVade` (vade kovaları) alacak yaşlandırmasının AYRI sözleşmesidir
  * (gelecek tarihli kayıt 0–30 kovasına düşer) — buraya indirilmez.
+ *
+ * ## 6c EKİ (2026-10-17, Faz 3 6/n Genel II) — `yuzdelikler` (ADDITIVE; `kovayaYerlestir` / `siraliDilimler` DOKUNULMADI)
+ * Neden var — src/components/reports/genel/GenelBloklar4.tsx P337 «Sipariş Tutarı Yüzdelik Dilimleri»:
+ *   `orders.map(o => o.totalPrice || 0).filter(v => v > 0)` tutarı bilinmeyeni ₺0'a çevirip SESSİZCE eliyor (kaç sipariş
+ *   dışarıda kaldı söylenmiyor); `vals341[Math.floor((pct / 100) * (vals341.length - 1))]` kopya formül; ortalama elle
+ *   toplanıyor ve hangi kümenin ortalaması olduğu yazmıyor.
+ *   • `siraliDilimler` SARMALAYICISI — eleme / sıralama / sayaç KOPYALANMAZ (tek dilim, `'taban'` → bütün bilinenler).
+ *   • Yöntem PARİTE (orkestratör kararı O6): `sirali[Math.floor((p / 100) * (n - 1))]` — GB4 formülü BİREBİR (klasik
+ *     "nearest-rank" DEĞİLDİR; tanım bu formüldür). 6e `sayiOzeti` medyanı AYRI tanımdır, buraya karışmaz.
+ *   • Dağılım istatistiği sözleşmesi (O6; K23 → "girilmeyen hesaba katılmaz + not"): bilinmeyen değer sıralamaya ve
+ *     `toplam`a GİRMEZ, `bilinmeyen`de SAYILIR — yüzdelikler bilinenlerden YİNE hesaplanır (tek bilinmeyende hepsini '—'
+ *     yapan katı türetme kuralı burada UYGULANMAZ). Ortalama çağıranda `tamTutar(toplam) / bilinen` (ayrı elle toplama YOK).
+ *   • O21: TRY dışı mağaza siparişi buraya verilirse «tutarı bilinmiyor» notunda YANLIŞ nedenle görünür; ayrım ÇAĞIRANDA
+ *     (`siparisler/magazaSiparisi.tryDisiMi`). Bu modül `dovizTutar` / `paraBirimi` OKUMAZ. İptal süzgeci (K2) de çağıranda.
  */
 import { bilinenSayi, sayiSirala, tutarBirlestir, type Tutar } from '../para';
 import { BOS_TUTAR, kovayaEkle } from '../pano/raporVeriKatmani';
@@ -234,4 +248,48 @@ export function siraliDilimler<T>(
   // Üst düzey sayaç TAŞINIR: tek tutarsız sipariş `tamTutar(toplam)`ı NaN yapar (rozet çizilmez).
   const toplam: Tutar = { ...dilimToplami, bilinmeyen: dilimToplami.bilinmeyen + bilinmeyen };
   return { dilimler, toplam, bilinmeyen, kapsamDisi };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Yüzdelikler (6c eki — GenelBloklar4 "Sipariş Tutarı Yüzdelik Dilimleri")
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `liste`nin `degerSec` değerlerinden yüzdelikler — `siraliDilimler` SARMALAYICISI. Yöntem GB4 P337 paritesi:
+ * `sirali[Math.floor((p / 100) * (n - 1))]` (O6). Bilinmeyen değer hesaba KATILMAZ, SAYILIR (O6 / K23 ilkesi);
+ * `sadecePozitif` ile elenen bilinen `<= 0` `kapsamDisi`de. `yuzdeler` içinde `[0, 100]` dışı ya da sonlu olmayan değer
+ * → throw. DEĞİŞMEZ: `bilinen + bilinmeyen + kapsamDisi === liste.length`. Girdi mutasyona uğramaz.
+ * `degerSec` SAF olmalı (iki kez çağrılır: sıralama ve değer okuma).
+ */
+export function yuzdelikler<T>(
+  liste: readonly T[],
+  degerSec: (o: T) => unknown,
+  yuzdeler: readonly number[],
+  secenek?: { sadecePozitif?: boolean },
+): {
+  /** `yuzdeler` ile aynı sıra/uzunluk; sıralamaya giren öğe yoksa HEPSİ null ('₺0 medyan' yok). */
+  degerler: (number | null)[];
+  /** Sıralamaya GİREN öğelerin toplamı (O6). `toplam.bilinen === bilinen`, `toplam.bilinmeyen === 0`:
+   *  bilinmeyenler üst düzey `bilinmeyen` sayacındadır, hesaba KATILMAZ (K23 ilkesi). Ortalama bundan türetilir. */
+  toplam: Tutar;
+  /** Sıralamaya giren (bilinen ve kapsam içi) öğe sayısı. */
+  bilinen: number;
+  /** `degerSec` bilinmeyen — sıralamaya girmez, SAYILIR ("N kayıt bilinmiyor" notu ZORUNLU). */
+  bilinmeyen: number;
+  /** `sadecePozitif` ile elenen bilinen `<= 0`. */
+  kapsamDisi: number;
+} {
+  for (const p of yuzdeler) {
+    if (!Number.isFinite(p) || p < 0 || p > 100) {
+      throw new Error(`yuzdelikler: her yüzde [0, 100] aralığında sonlu sayı olmalı (geldi: ${String(p)})`);
+    }
+  }
+  // Tek dilim + 'taban' → bütün bilinenler ARTAN sırada; eleme ve sayaçlar `siraliDilimler`de TEK yerde.
+  const r = siraliDilimler(liste, degerSec, 1, { bolme: 'taban', sadecePozitif: secenek?.sadecePozitif });
+  const d = r.dilimler[0];
+  const sirali = d.ogeler.map(o => Number(degerSec(o)));
+  const n = sirali.length;
+  const degerler = yuzdeler.map(p => (n === 0 ? null : sirali[Math.floor((p / 100) * (n - 1))]));
+  // `r.toplam` (bilinmeyeni TAŞIYAN) KULLANILMAZ: O6 — bilinmeyen dağılım istatistiğine katılmaz, yalnız sayılır.
+  return { degerler, toplam: d.tutar, bilinen: d.adet, bilinmeyen: r.bilinmeyen, kapsamDisi: r.kapsamDisi };
 }

@@ -597,3 +597,319 @@ describe('kanonik Order dizisi kabul edilir (yapısal tip kontrolü)', () => {
     expect(segmentKarliligi(emirler, tipSegmenti, karHesapla()).segmentler).toHaveLength(2);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6c EKİ (2026-10-17, Faz 3 6/n Genel II) — `odemeYontemiSegmenti` (O3) + `segmentCirosu` 4 parametreli biçim (O10, O22)
+//   GenelBloklar2 P249 «Ödeme Yöntemi»:
+//     `const method = (m.paymentMethod as string) || (m.payment as string) || (oc(currentLanguage).belirtilmemis);`
+//       → `payment` HAYALET alan (yazıcısı yok); anahtar ÇEVRİLMİŞ metin (dil değişince anahtar değişir)
+//     `methodMap[method].rev += o.totalPrice || 0;`                 → tutarı bilinmeyen sipariş ₺0
+//     `totalRev249 > 0 ? Math.round((d.rev / totalRev249) * 100) : 0` → pay KISMİ toplamdan; `: 0` sahte "%0"
+//   GenelBloklar4 P495 «Kategori» / P238 «Şehir»:
+//     `const cat = li.category || 'Other';` + `(li.price || li.unitPrice || 0) * (li.quantity || 1)`
+//       → hayalet kalem alanı, uydurma 'Other' kategorisi, `|| 0` / `|| 1` uydurması
+//     `if (!city) return;`                                           → şehri olmayan sipariş SESSİZCE düşüyor
+// Kural: bilinmeyen sayı 0 DEĞİL bilinmiyordur; anahtarsız kayıt uydurma segment OLMAZ, SAYILIR.
+// O21: TRY dışı mağaza siparişi (`dovizTutar` + `paraBirimi`, `totalPrice` YOK) bu yardımcılara ULAŞMAZ — ayrım ÇAĞIRANDA.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import {
+  odemeYontemiSegmenti,
+  ODEME_YONTEMI_BELIRTILMEMIS,
+  type OdemeYontemliSiparis,
+  type SegmentCiroSecenek,
+} from './musteriAnaliz';
+import { ODEME_YONTEMLERI } from '../siparisler/odemeYontemi';
+import { tryDisiMi } from '../siparisler/magazaSiparisi';
+import { siparisTutari, siparisIptalMi } from '../siparis';
+import { kalemTutari } from './stokSevkiyat';
+import { stokKartiCozucu } from './raporMarj';
+
+/**
+ * O21 ortak fikstürü — TRY dışı çevrim içi mağaza siparişi. Sunucu TRY dışı siparişe `totalPrice` YAZMAZ
+ * (server/kanal/shopifyEsleme tutar yazımı); tutar `dovizTutar` + `paraBirimi`ndedir. Mağaza siparişi `paid: true`
+ * yazar ama `paymentMethod` YAZMAZ.
+ */
+const DOVIZLI: PanoSiparisi = {
+  id: 'shp-1001',
+  source: 'shopify_webhook',
+  paraBirimi: 'EUR',
+  dovizTutar: 50,
+  customerName: 'Kaya Hırdavat',
+  status: 'Delivered',
+  createdAt: new Date(2026, 8, 10),
+  paid: true,
+};
+
+/** Çağıran (bağlama) reçetesi — O21 / ÖN KOŞUL: K2 iptal süzgeci, sonra `tryDisiMi` ayrımı (TEK tanım, kopyalanmaz). */
+function cagiranReceti<T extends PanoSiparisi | KalemliSiparis>(orders: readonly T[]): { tl: T[]; dovizli: number } {
+  const iptalsiz = orders.filter(o => !siparisIptalMi(o));
+  return { tl: iptalsiz.filter(o => !tryDisiMi(o)), dovizli: iptalsiz.filter(tryDisiMi).length };
+}
+
+describe('odemeYontemiSegmenti — 6c eki (O3)', () => {
+  it('fikstür kilidi: DOVIZLI siparişte `totalPrice` alanı YOK (TRY dışı mağaza yazımı)', () => {
+    expect('totalPrice' in DOVIZLI).toBe(false);
+    expect(tryDisiMi(DOVIZLI)).toBe(true);
+  });
+
+  it('1 · listenin HER üyesi AYNEN döner — liste testte de KOPYALANMAZ; sentinel listeye karışmaz', () => {
+    expect(ODEME_YONTEMLERI.length).toBeGreaterThan(0);
+    for (const y of ODEME_YONTEMLERI) expect(odemeYontemiSegmenti({ paymentMethod: y })).toBe(y);
+    expect(ODEME_YONTEMLERI).not.toContain(ODEME_YONTEMI_BELIRTILMEMIS);
+  });
+
+  it('2 · bilinmeyen / boş / listede olmayan → sentinel (büyük-küçük harf toleransı YOK — yazıcı enum yazar)', () => {
+    const bilinmeyenler: OdemeYontemliSiparis[] = [
+      {}, { paymentMethod: null }, { paymentMethod: undefined }, { paymentMethod: '' }, { paymentMethod: '   ' },
+      { paymentMethod: 42 }, { paymentMethod: { tur: 'cash' } }, { paymentMethod: 'havale' }, { paymentMethod: 'Cash' },
+    ];
+    for (const o of bilinmeyenler) expect(odemeYontemiSegmenti(o)).toBe(ODEME_YONTEMI_BELIRTILMEMIS);
+  });
+
+  it('3 · hayalet alanlar (`payment`, `payment_method`) ve serbest metin `shopifyRaw.odemeYontemi` OKUNMAZ', () => {
+    // `OdemeYontemliSiparis` zayıf tiptir: ortak alanı olmayan nesne TS2559 verir — fikstür kesişim tipiyle kurulur.
+    const hayaletler: (OdemeYontemliSiparis & Record<string, unknown>)[] = [
+      { payment: 'cash' },
+      { payment_method: 'check' },
+      { shopifyRaw: { odemeYontemi: 'Kredi Kartı' } },
+      { shopifyRaw: { odemeYontemi: 'cash' } },
+    ];
+    for (const h of hayaletler) expect(odemeYontemiSegmenti(h)).toBe(ODEME_YONTEMI_BELIRTILMEMIS);
+  });
+
+  it("4 · gerçek 'other' kendi satırıdır — «belirtilmemiş» ile BİRLEŞMEZ", () => {
+    expect(odemeYontemiSegmenti({ paymentMethod: 'other' })).toBe('other');
+    expect(odemeYontemiSegmenti({ paymentMethod: 'other' })).not.toBe(ODEME_YONTEMI_BELIRTILMEMIS);
+  });
+
+  it("5 · kırpma: ' cash ' → 'cash'", () => {
+    expect(odemeYontemiSegmenti({ paymentMethod: ' cash ' })).toBe('cash');
+    expect(odemeYontemiSegmenti({ paymentMethod: '\tbank_transfer\n' })).toBe('bank_transfer');
+  });
+
+  it('6 · PARİTE: segmentCirosu ile anahtar / sipariş sayısı / tutar / pay eski `methodMap` ile BİREBİR', () => {
+    const x: PanoSiparisi[] = [
+      sip({ id: 'p1', paymentMethod: 'cash', totalPrice: 4000 }),
+      sip({ id: 'p2', paymentMethod: 'bank_transfer', totalPrice: 3000, customerName: 'Çelik Yapı A.Ş.' }),
+      sip({ id: 'p3', paymentMethod: 'cash', totalPrice: 2000, customerName: 'Ege Beton' }),
+      sip({ id: 'p4', totalPrice: 1000, customerName: 'Deniz İnşaat' }),                    // yöntem girilmemiş
+    ];
+    // GB2 P249'un ESKİ formülü test içinde yeniden yazıldı (anahtar sentinel — eskisi çevrilmiş etiketti).
+    const methodMap: Record<string, { rev: number; count: number }> = {};
+    for (const o of x) {
+      const method = (o.paymentMethod as string) || ODEME_YONTEMI_BELIRTILMEMIS;
+      if (!methodMap[method]) methodMap[method] = { rev: 0, count: 0 };
+      methodMap[method].rev += Number(o.totalPrice) || 0;
+      methodMap[method].count++;
+    }
+    const eski = Object.entries(methodMap).sort(([, a], [, b]) => b.rev - a.rev);
+    const totalRev249 = eski.reduce((t, [, d]) => t + d.rev, 0);
+
+    const r = segmentCirosu(x, odemeYontemiSegmenti);
+    expect(r.segmentler.map(s => s.anahtar)).toEqual(['cash', 'bank_transfer', 'belirtilmemis']);
+    expect(r.segmentler.map(s => s.anahtar)).toEqual(eski.map(([k]) => k));
+    expect(r.segmentler.map(s => s.ciro)).toEqual(eski.map(([, d]) => d.rev));
+    expect(r.segmentler.map(s => s.siparisSayisi)).toEqual(eski.map(([, d]) => d.count));
+    const yuzdeler = r.segmentler.map(s => Math.round(s.yuzde as number));
+    expect(yuzdeler).toEqual([60, 30, 10]);
+    expect(yuzdeler).toEqual(eski.map(([, d]) => Math.round((d.rev / totalRev249) * 100)));
+    expect(yuzdeler.reduce((t, v) => t + v, 0)).toBe(100);
+    expect(r.tutarsiz).toBe(0);
+  });
+
+  it('7 · MUTASYON-AYIRT EDİCİ: tutarı bilinmeyen sipariş ₺0 SAYILMAZ — paylar üretilmez', () => {
+    const r = segmentCirosu([
+      sip({ id: 'q1', paymentMethod: 'cash', totalPrice: 6000 }),
+      sip({ id: 'q2', paymentMethod: 'bank_transfer', totalPrice: undefined }),   // tutarı OKUNAMADI
+    ], odemeYontemiSegmenti);
+    expect(r.yuzdelerGecerli).toBe(false);
+    expect(r.segmentler.every(s => s.yuzde === null)).toBe(true);
+    expect(r.tutarsiz).toBe(1);
+    expect(r.segmentler.find(s => s.anahtar === 'bank_transfer')?.tutarsiz).toBe(1);
+  });
+
+  it('8 · kanonik Order[] kabul edilir (yapısal tip — `as` yok)', () => {
+    const emirler: Order[] = [
+      { id: 'o1', customerName: 'Şirin İnşaat Ltd. Şti.', totalPrice: 1500, status: 'Delivered', customerType: 'B2B', paymentMethod: 'check' },
+      { id: 'o2', customerName: 'Yapı Market A.Ş.', totalPrice: 500, status: 'Pending', customerType: 'Retail' },
+    ];
+    expect(odemeYontemiSegmenti(emirler[0])).toBe('check');
+    expect(segmentCirosu(emirler, odemeYontemiSegmenti).segmentler.map(s => s.anahtar)).toEqual(['check', 'belirtilmemis']);
+  });
+
+  it('9 · O21: TRY dışı mağaza siparişi bu panele ULAŞMAZ (ayrım çağıranda)', () => {
+    const x: PanoSiparisi[] = [
+      sip({ id: 'r1', paymentMethod: 'cash', totalPrice: 6000 }),                               // Şirin İnşaat
+      sip({ id: 'r2', paymentMethod: 'bank_transfer', totalPrice: 4000, customerName: 'Çelik Yapı A.Ş.' }),
+      DOVIZLI,
+    ];
+    // (a) süzgeçsiz — yardımcı `dovizTutar`ı OKUMAZ: kayıt «tutarı bilinmeyen» düşer, 50 EUR TL'ye EKLENMEZ.
+    const a = segmentCirosu(x, odemeYontemiSegmenti);
+    expect(a.segmentler.find(s => s.anahtar === ODEME_YONTEMI_BELIRTILMEMIS)?.tutarsiz).toBe(1);
+    expect(a.yuzdelerGecerli).toBe(false);
+    expect(a.toplam).toBe(10000);
+    // (b) çağıran reçetesiyle — sonuç sayısal, `tutarsiz` 0, `dovizli` 1.
+    const { tl, dovizli } = cagiranReceti(x);
+    const b = segmentCirosu(tl, odemeYontemiSegmenti);
+    expect(b.segmentler.map(s => s.anahtar)).toEqual(['cash', 'bank_transfer']);
+    expect(b.segmentler.map(s => Math.round(s.yuzde as number))).toEqual([60, 40]);
+    expect(b.tutarsiz).toBe(0);
+    expect(dovizli).toBe(1);
+  });
+});
+
+/* ── 1b · segmentCirosu 4 parametreli biçim ───────────────────────────────── */
+
+/**
+ * Kalem — kanonik `OrderLineItem`ın ÇALIŞMA ANI hâli: Mikro türevi ve mağaza kaleminde `price` YOK (types.ts yorumu;
+ * tutar `netTutar` / `total`dadır). Okuyucu TEK: `stokSevkiyat.kalemTutari`.
+ */
+type Kalem = Omit<OrderLineItem, 'price'> & { price?: number };
+/** Kalemli sipariş fikstürü — `lineItems` çalışma anı kalemleri. */
+type KalemliSiparis = Omit<PanoSiparisi, 'lineItems'> & { lineItems?: Kalem[] };
+
+/** Stok kartları — kategori KARTTA durur (O22: kalemin `category`si hayalettir, yazıcısı yok). */
+const KARTLAR = [
+  { id: 'inv-boya', sku: 'BOYA-15', name: 'İÇ CEPHE BOYASI 15LT', category: 'Boya' },
+  { id: 'inv-kimya', sku: 'KIM-25', name: 'SU YALITIM KİMYASALI 25KG', category: 'Yapı Kimyasalı' },
+  { id: 'inv-cim', sku: 'CIM-50', name: 'ÇİMENTO 50KG', category: '   ' },        // kartta kategori GİRİLMEMİŞ
+];
+const kart = stokKartiCozucu(KARTLAR);
+/** Bağlama reçetesinin (O22) test eşi: kartın DOLU kategorisi, yoksa `null` → anahtarsız. */
+const kategori = (li: Kalem): string | null => {
+  const k = kart(li)?.category;
+  return typeof k === 'string' && k.trim() !== '' ? k.trim() : null;
+};
+
+const kalem = (o: Partial<Kalem> & Pick<Kalem, 'id' | 'sku' | 'name'>): Kalem => ({ quantity: 1, ...o });
+const BOYA = (netTutar: number, id = 'k-boya'): Kalem => kalem({ id, sku: 'BOYA-15', name: 'İÇ CEPHE BOYASI 15LT', netTutar });
+const KIMYA = (netTutar: number): Kalem => kalem({ id: 'k-kimya', sku: 'KIM-25', name: 'SU YALITIM KİMYASALI 25KG', netTutar });
+const CIMENTO_KALEM = (price: number, quantity: number): Kalem =>
+  kalem({ id: 'k-cim', sku: 'CIM-50', name: 'ÇİMENTO 50KG', price, quantity });
+
+describe('segmentCirosu — 6c eki: 4 parametreli biçim (O10)', () => {
+  // `segmentCirosu — SAYFA PARİTESİ` bloğunun fikstürünün AYNISI (o blokta yerel tanımlı).
+  const siparisler: PanoSiparisi[] = [
+    sip({ id: 's1', customerType: 'B2B', totalPrice: 60000 }),
+    sip({ id: 's2', customerType: 'B2B', totalPrice: 40000 }),
+    sip({ id: 's3', customerType: 'Dealer', totalPrice: 50000 }),
+    sip({ id: 's4', customerType: 'Retail', totalPrice: 30000 }),
+    sip({ id: 's5', customerType: undefined, totalPrice: 20000 }),
+  ];
+
+  it('1 · PARİTE: `{ tutarSec: siparisTutari }` ile sonuç 3 parametreli biçimle BİREBİR; `anahtarsiz` alanı YOK', () => {
+    const eski = segmentCirosu(siparisler, b2bSegmenti, ['B2B', 'Diger']);
+    const yeni = segmentCirosu(siparisler, b2bSegmenti, ['B2B', 'Diger'], { tutarSec: siparisTutari });
+    expect(yeni).toEqual(eski);
+    expect('anahtarsiz' in eski).toBe(false);
+    expect('anahtarsiz' in yeni).toBe(false);
+    const serbest = segmentCirosu(siparisler, donutSegmenti);
+    expect(segmentCirosu(siparisler, donutSegmenti, undefined, { tutarSec: siparisTutari })).toEqual(serbest);
+  });
+
+  it('2 · KALEM dizisi cast\'siz geçer; `tutarSec` HEM genele HEM segmente uygulanır', () => {
+    // Kanonik OrderLineItem[] de derlenir (3 parametreli biçimde TS2345 «no properties in common» verirdi).
+    const kanonik = segmentCirosu([CIMENTO, DEMIR], k => k.name, undefined, { tutarSec: kalemTutari });
+    expect(kanonik.toplam).toBe(500 * 10 + 1200 * 5);
+
+    const kalemler: Kalem[] = [
+      CIMENTO_KALEM(110, 100),                                                          // native: 110 × 100 = 11.000
+      kalem({ id: 'k-mikro', sku: 'BOYA-15', name: 'İÇ CEPHE BOYASI 15LT', total: 5000 }), // Mikro kalemi: `price` yok
+    ];
+    const r = segmentCirosu(kalemler, k => k.name, undefined, { tutarSec: kalemTutari });
+    expect(r.toplam).toBe(16000);
+    expect(r.tamToplam).toBe(16000);
+    expect(r.yuzdelerGecerli).toBe(true);
+    expect(r.segmentler.map(s => [s.anahtar, s.ciro])).toEqual([['ÇİMENTO 50KG', 11000], ['İÇ CEPHE BOYASI 15LT', 5000]]);
+    expect(r.segmentler.reduce((t, s) => t + (s.yuzde as number), 0)).toBeCloseTo(100, 9);
+  });
+
+  it('3 · anahtarsız kayıt uydurma segment OLMAZ ama paydada KALIR (K21 «Tüm ciro»)', () => {
+    const kalemler: Kalem[] = [BOYA(6000), KIMYA(2000), CIMENTO_KALEM(20, 100)];       // çimento kartında kategori yok
+    const r = segmentCirosu(kalemler, kategori, undefined, { tutarSec: kalemTutari, anahtarsizSay: true });
+    expect(r.segmentler.map(s => s.anahtar)).toEqual(['Boya', 'Yapı Kimyasalı']);
+    expect(r.segmentler.map(s => Math.round(s.yuzde as number))).toEqual([60, 20]);
+    expect(r.anahtarsiz).toEqual({ adet: 1, ciro: 2000, tutarsiz: 0 });
+    expect(r.toplam).toBe(10000);
+    expect(r.enBuyuk?.anahtar).toBe('Boya');
+  });
+
+  it('3b · kartı BULUNAMAYAN kalem de anahtarsız (boş anahtar eşleşmez; uydurma «Other» yok)', () => {
+    const nakliye = kalem({ id: 'k-nak', sku: '', name: 'Nakliye bedeli', price: 750, quantity: 1 });
+    const r = segmentCirosu([BOYA(6000), nakliye], kategori, undefined, { tutarSec: kalemTutari, anahtarsizSay: true });
+    expect(r.segmentler.map(s => s.anahtar)).toEqual(['Boya']);
+    expect(r.anahtarsiz).toEqual({ adet: 1, ciro: 750, tutarsiz: 0 });
+  });
+
+  it('4 · MUTASYON-AYIRT EDİCİ: anahtarsızda tutarı bilinmeyen kayıt ₺0 SAYILMAZ, ÇİFT sayılmaz', () => {
+    const tutarsiz = kalem({ id: 'k-x', sku: 'CIM-50', name: 'ÇİMENTO 50KG', quantity: 3 });   // fiyat / tutar YOK
+    const r = segmentCirosu([BOYA(6000), tutarsiz], kategori, undefined, { tutarSec: kalemTutari, anahtarsizSay: true });
+    expect(r.anahtarsiz?.tutarsiz).toBe(1);
+    expect(r.anahtarsiz?.adet).toBe(1);
+    expect(Number.isNaN(r.anahtarsiz?.ciro)).toBe(true);    // hiç bilineni yok → ekran '—' (₺0 DEĞİL)
+    expect(r.tutarsiz).toBe(1);                              // üst sayaç alt kümeyi ZATEN içerir — 2 DEĞİL
+    expect(r.yuzdelerGecerli).toBe(false);
+    expect(r.segmentler.every(s => s.yuzde === null)).toBe(true);
+  });
+
+  it('4b · MUTASYON-AYIRT EDİCİ: segmentli kaydın bilinmeyeni anahtarsız kümeye ATFEDİLMEZ (alt küme)', () => {
+    // 6c inceleme 1: `anahtarsiz.tutarsiz` YALNIZ anahtarsız kümenin bilinmeyenidir (üst `tutarsiz`'ın alt kümesi). Kural
+    // testsizdi: anahtarsız sayaca genel `tutarsiz` yazan mutasyon yeşil kalıyordu. Boya kartı bulunur (segmentli), tutarı YOK.
+    const boyaTutarsiz = kalem({ id: 'k-boya-x', sku: 'BOYA-15', name: 'İÇ CEPHE BOYASI 15LT' });
+    const r = segmentCirosu([boyaTutarsiz, CIMENTO_KALEM(20, 100)], kategori, undefined, { tutarSec: kalemTutari, anahtarsizSay: true });
+    expect(r.tutarsiz).toBe(1);
+    expect(r.anahtarsiz).toEqual({ adet: 1, ciro: 2000, tutarsiz: 0 });
+  });
+
+  it('5 · bayraksız `null` anahtar → throw (sessiz «null» adlı segment UYDURULMAZ); bayrakla fırlatmaz', () => {
+    const kalemler: Kalem[] = [BOYA(6000)];
+    expect(() => segmentCirosu(kalemler, () => null, undefined, { tutarSec: kalemTutari })).toThrow(/anahtarsizSay/);
+    expect(() => segmentCirosu(kalemler, () => null, undefined, { tutarSec: kalemTutari, anahtarsizSay: true })).not.toThrow();
+    const ozel: SegmentCiroSecenek<Kalem> = { tutarSec: kalemTutari, anahtarsizSay: false };
+    expect(() => segmentCirosu(kalemler, () => null, undefined, ozel)).toThrow();
+  });
+
+  it('6 · hepsi anahtarsız: segment yok, enBuyuk null, paydada yine TÜM ciro', () => {
+    const kalemler: Kalem[] = [CIMENTO_KALEM(20, 100), CIMENTO_KALEM(30, 10)];
+    const r = segmentCirosu(kalemler, kategori, undefined, { tutarSec: kalemTutari, anahtarsizSay: true });
+    expect(r.segmentler).toEqual([]);
+    expect(r.enBuyuk).toBeNull();
+    expect(r.anahtarsiz).toEqual({ adet: 2, ciro: 2300, tutarsiz: 0 });
+    expect(r.toplam).toBe(2300);
+  });
+
+  it('6b · `anahtarlar` verilince anahtarsız sabit sıraya da beklenmedik satıra da GİRMEZ; boş liste', () => {
+    const r = segmentCirosu([BOYA(6000), CIMENTO_KALEM(20, 100)], kategori, ['Yapı Kimyasalı', 'Boya'],
+      { tutarSec: kalemTutari, anahtarsizSay: true });
+    expect(r.segmentler.map(s => [s.anahtar, s.ciro])).toEqual([['Yapı Kimyasalı', 0], ['Boya', 6000]]);
+    expect(r.anahtarsiz?.adet).toBe(1);
+    const bos = segmentCirosu([] as Kalem[], kategori, undefined, { tutarSec: kalemTutari, anahtarsizSay: true });
+    expect(bos).toMatchObject({ segmentler: [], toplam: 0, enBuyuk: null, anahtarsiz: { adet: 0, ciro: 0, tutarsiz: 0 } });
+  });
+
+  it('7 · DEĞİŞMEZ: Σ siparisSayisi + anahtarsiz.adet === n; donuk girdi mutasyona uğramaz', () => {
+    const donuk = Object.freeze([BOYA(6000), KIMYA(2000), CIMENTO_KALEM(20, 100), BOYA(1000, 'k-boya-2')].map(k => Object.freeze(k)));
+    const r = segmentCirosu(donuk, kategori, undefined, { tutarSec: kalemTutari, anahtarsizSay: true });
+    const adet = r.segmentler.reduce((t, s) => t + s.siparisSayisi, 0);
+    expect(adet + (r.anahtarsiz ? r.anahtarsiz.adet : 0)).toBe(donuk.length);
+    expect(r.segmentler.map(s => [s.anahtar, s.siparisSayisi])).toEqual([['Boya', 2], ['Yapı Kimyasalı', 1]]);
+  });
+
+  it('8 · O21 — kalemde birim YOK, ayrım SİPARİŞTE (`flatMap`ten ÖNCE) yapılmalı (belge vakası)', () => {
+    const tlSiparis: KalemliSiparis = {
+      ...sip({ id: 'mf-1' }), totalPrice: 6000, lineItems: [BOYA(6000)],
+    };
+    const dovizliKalemli: KalemliSiparis = {
+      ...DOVIZLI, lineItems: [kalem({ id: 'k-eur', sku: 'BOYA-15', name: 'İÇ CEPHE BOYASI 15LT', netTutar: 50, total: 59 })],
+    };
+    const x: KalemliSiparis[] = [tlSiparis, dovizliKalemli];
+    // (a) süzgeçsiz — `kalemTutari` birimi BİLMEZ, EUR'yu TL sayar: ayrımın neden çağıranda ZORUNLU olduğunu kilitler.
+    const a = segmentCirosu(x.flatMap(o => o.lineItems ?? []), kategori, undefined, { tutarSec: kalemTutari, anahtarsizSay: true });
+    expect(a.toplam).toBe(6050);
+    // (b) çağıran reçetesiyle — `tryDisiMi` sipariş düzeyinde, `flatMap`ten önce.
+    const { tl, dovizli } = cagiranReceti(x);
+    const b = segmentCirosu(tl.flatMap(o => o.lineItems ?? []), kategori, undefined, { tutarSec: kalemTutari, anahtarsizSay: true });
+    expect(b.toplam).toBe(6000);
+    expect(dovizli).toBe(1);
+  });
+});

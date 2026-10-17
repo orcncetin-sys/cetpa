@@ -479,3 +479,264 @@ describe('ceyreklikCiro — 6b eki, GB1 P156 paritesi', () => {
     expect(ceyreklikCiro(donuk, 4, BUGUN, { iptalHaric: true }).satirlar[3].ekran).toBe(20000);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6c EKİ (2026-10-17): `yilAylikCiro` (O7) + `hareketliOrtalama` (O6, O8)
+//   GenelBloklar2 P251 YoY:
+//     her ay için İKİ `orders.filter(…)` — kopya dönem hesabı (`aylikCiro` aynı satırı zaten üretiyor)
+//     `const d = zamanDate(o.createdAt); return d !== null && d.getFullYear() === currYear && d.getMonth() === i;`
+//                                                         → tarihi çözülemeyen kayıt SESSİZCE düşüyor
+//     `.reduce((s, o) => s + (o.totalPrice || 0), 0)`     → tutarı bilinmeyen ₺0
+//   GenelBloklar4 P96 «Rolling 7-Day Avg»:
+//     `dayRev[key] = (dayRev[key] || 0) + o.totalPrice;` → `o.totalPrice` undefined ise gün NaN olur…
+//     `days.slice(i - 6, i + 1).reduce((s, d) => s + (dayRev[d] || 0), 0)` → …ve `NaN || 0` o günün BİLİNEN
+//                                                           cirosunu da SIFIRLAR; ortalama sessizce düşer
+// Kural: tutarı okunamayan sipariş ₺0 değildir; hareketli ortalamada penceresinde bilinmeyen olan NOKTA `null` (O6).
+// O21: TRY dışı mağaza siparişi (`dovizTutar` + `paraBirimi`, `totalPrice` YOK) yardımcıya ULAŞMAZ — ayrım ÇAĞIRANDA.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { yilAylikCiro, hareketliOrtalama, type YilAylikCiro } from './ciroDonem';
+import { zamanDate, gunAnahtari, gunFarki, tarihYaz } from '../zaman';
+import { siparisTutari } from '../siparis';
+import { zamanKovalari } from '../rapor/zamanDagilimi';
+import { tryDisiMi } from '../siparisler/magazaSiparisi';
+import type { Tutar } from '../para';
+
+/** Mağaza alanlarını da taşıyan fikstür siparişi (yalnız O21 vakaları için). */
+type MagazaliSiparis = CiroSiparisi & { paraBirimi?: string; dovizTutar?: number; customerName?: string };
+
+/** O21 ortak fikstürü — TRY dışı mağaza siparişi; sunucu `totalPrice` YAZMAZ (shopifyEsleme TRY dışı yazımı). */
+const dovizli = (createdAt: Date): MagazaliSiparis => ({
+  source: 'shopify_webhook', paraBirimi: 'EUR', dovizTutar: 50, customerName: 'Kaya Hırdavat', status: 'Delivered', createdAt,
+});
+
+/** Çağıran reçetesi (O21): K2 süzgeci + `tryDisiMi` (TEK tanım — kural kopyalanmaz). */
+const tlListesi = (x: readonly MagazaliSiparis[]): { tl: MagazaliSiparis[]; dovizliSayisi: number } => {
+  const iptalsiz = x.filter(o => o.status !== 'Cancelled');
+  return { tl: iptalsiz.filter(o => !tryDisiMi(o)), dovizliSayisi: iptalsiz.filter(tryDisiMi).length };
+};
+
+const yilSiparisleri: CiroSiparisi[] = [
+  s({ createdAt: new Date(2026, 0, 15), totalPrice: 12000 }),                      // Ocak 2026 — Şirin İnşaat ÇİMENTO 50KG
+  s({ createdAt: new Date(2026, 2, 3), totalPrice: 8000 }),                        // Mart 2026 — Çelik Yapı
+  s({ createdAt: new Date(2026, 2, 31, 23, 59), totalPrice: 5000 }),               // Mart — ay SINIRI (son dakika)
+  s({ createdAt: new Date(2026, 3, 1, 0, 0), totalPrice: 2000 }),                  // Nisan — ay SINIRI (ilk an)
+  s({ createdAt: new Date(2026, 8, 5), totalPrice: 7000, status: 'Cancelled' }),   // Eylül — iptal
+  s({ createdAt: new Date(2026, 11, 31, 23, 0), totalPrice: 3000 }),               // Aralık sonu
+  s({ createdAt: new Date(2025, 5, 10), totalPrice: 9000 }),                       // 2025 Haziran
+  s({ createdAt: new Date(2025, 11, 20), totalPrice: 4000 }),                      // 2025 Aralık
+];
+
+describe('yilAylikCiro — 6c eki (O7)', () => {
+  const adetToplami = (r: YilAylikCiro): number => r.aylar.reduce((t, a) => t + a.adet, 0);
+
+  it('1 · SARMALAYICI PARİTESİ: `aylar` ≡ aylikCiro(x, 12, new Date(yil, 11, 1), sec, dil) — iptalHaric true VE false', () => {
+    for (const iptalHaric of [true, false]) {
+      for (const yil of [2026, 2025]) {
+        expect(yilAylikCiro(yilSiparisleri, yil, { iptalHaric }, 'tr').aylar)
+          .toEqual(aylikCiro(yilSiparisleri, 12, new Date(yil, 11, 1), { iptalHaric }, 'tr'));
+      }
+    }
+    expect(yilAylikCiro(yilSiparisleri, 2026, { iptalHaric: true }, 'en').aylar)
+      .toEqual(aylikCiro(yilSiparisleri, 12, new Date(2026, 11, 1), { iptalHaric: true }, 'en'));
+  });
+
+  it('2 · PARİTE (GB2 P251 formülüyle): bilinen + createdAt\'li girdide ay tutarları ve etiketleri BİREBİR', () => {
+    const currYear = 2026;
+    // GB2 P251'in ESKİ formülü test içinde yeniden yazıldı.
+    const eski = Array.from({ length: 12 }, (_, i) => {
+      const label = tarihYaz(new Date(currYear, i, 1), { month: 'short' }, 'tr');
+      const curr = yilSiparisleri.filter(o => {
+        if (o.status === 'Cancelled') return false;
+        const d = zamanDate(o.createdAt); return d !== null && d.getFullYear() === currYear && d.getMonth() === i;
+      }).reduce((t, o) => t + (Number(o.totalPrice) || 0), 0);
+      return { label, curr };
+    });
+    const r = yilAylikCiro(yilSiparisleri, currYear, { iptalHaric: true }, 'tr');
+    expect(r.aylar).toHaveLength(12);
+    expect(r.aylar[0].anahtar).toBe('2026-01');
+    expect(r.aylar[11].anahtar).toBe('2026-12');
+    expect(r.aylar.map(a => a.ekran)).toEqual(eski.map(m => m.curr));
+    expect(r.aylar.map(a => a.etiket)).toEqual(eski.map(m => m.label));
+    expect(r.aylar[2].ekran).toBe(13000);                 // 8.000 + 5.000 (son dakika Mart'ta)
+    expect(r.aylar[3].ekran).toBe(2000);                  // ilk an Nisan'da
+    expect(r.tarihsiz).toBe(0);
+    expect(r.yilDisi).toBe(2);                            // iki 2025 siparişi
+  });
+
+  it('3 · MUTASYON-AYIRT EDİCİ: tutarı bilinmeyen ₺0 SAYILMAZ; YoY türetmesi kapanır', () => {
+    const r = yilAylikCiro([
+      s({ createdAt: new Date(2026, 2, 5), totalPrice: 13000 }),
+      s({ createdAt: new Date(2026, 2, 6) }),                                       // tutarı OKUNAMADI
+    ], 2026, { iptalHaric: true }, 'tr');
+    expect(r.aylar[2].tutar).toEqual({ toplam: 13000, bilinen: 1, bilinmeyen: 1 });
+    expect(r.aylar[2].adet).toBe(2);
+    expect(Number.isNaN(tamTutar(donemToplami(r.aylar)))).toBe(true);
+    // Hiç bileni olmayan ay: ekran NaN ('—'), grafik null (0 DEĞİL).
+    const yalnizTutarsiz = yilAylikCiro([s({ createdAt: new Date(2026, 4, 2) })], 2026);
+    expect(Number.isNaN(yalnizTutarsiz.aylar[4].ekran)).toBe(true);
+    expect(yalnizTutarsiz.aylar[4].grafik).toBeNull();
+  });
+
+  it('4 · tarihsiz / yıl dışı SAYILIR; DEĞİŞMEZ Σ adet + tarihsiz + yilDisi === liste', () => {
+    const liste = [
+      s({ createdAt: new Date(2026, 6, 1), totalPrice: 1000 }),
+      s({ createdAt: 'çöp', totalPrice: 2000 }),                                    // tarihsiz (syncedAt yok)
+      s({ createdAt: new Date(2024, 1, 1), totalPrice: 3000 }),                     // yıl dışı
+    ];
+    const r = yilAylikCiro(liste, 2026, { iptalHaric: true });
+    expect(r.tarihsiz).toBe(1);
+    expect(r.yilDisi).toBe(1);
+    expect(adetToplami(r) + 2).toBe(liste.length);
+    expect(adetToplami(r) + r.tarihsiz + r.yilDisi).toBe(liste.length);
+  });
+
+  it('5 · iptal süzgeci sayaçlara da uygulanır: iptal edilmiş tarihsiz sipariş `tarihsiz`e GİRMEZ', () => {
+    const liste = [
+      s({ createdAt: new Date(2026, 6, 1), totalPrice: 1000 }),
+      s({ createdAt: 'çöp', totalPrice: 2000, status: 'Cancelled' }),
+      s({ createdAt: new Date(2023, 6, 1), totalPrice: 2000, status: 'Cancelled' }),
+    ];
+    expect(yilAylikCiro(liste, 2026, { iptalHaric: true })).toMatchObject({ tarihsiz: 0, yilDisi: 0 });
+    expect(yilAylikCiro(liste, 2026, { iptalHaric: false })).toMatchObject({ tarihsiz: 1, yilDisi: 1 });
+    const r = yilAylikCiro(liste, 2026, { iptalHaric: true });
+    expect(adetToplami(r) + r.tarihsiz + r.yilDisi).toBe(liste.filter(o => o.status !== 'Cancelled').length);
+  });
+
+  it('6 · syncedAt yedeği (bilinçli fark): createdAt yok, syncedAt Mart 2026 → Mart\'a girer', () => {
+    const r = yilAylikCiro([s({ syncedAt: new Date(2026, 2, 14), totalPrice: 4500 })], 2026);
+    expect(r.aylar[2].ekran).toBe(4500);
+    expect(r.tarihsiz).toBe(0);
+  });
+
+  it('7 · geçersiz yıl → throw (iki haneli yıl tuzağı: new Date(26, 11, 1) 1926\'dır)', () => {
+    for (const yil of [2026.5, 26, NaN, 999, 10000, Infinity]) {
+      expect(() => yilAylikCiro(yilSiparisleri, yil)).toThrow(/dört haneli/);
+    }
+  });
+
+  it('8 · boş liste: 12 sıfır ay; donuk girdi mutasyona uğramaz', () => {
+    const bos = yilAylikCiro([], 2026);
+    expect(bos.aylar).toHaveLength(12);
+    expect(bos.aylar.every(a => a.tutar.toplam === 0 && a.tutar.bilinen === 0 && a.tutar.bilinmeyen === 0)).toBe(true);
+    expect(bos).toMatchObject({ tarihsiz: 0, yilDisi: 0 });
+    const donuk = Object.freeze(yilSiparisleri.map(o => Object.freeze({ ...o })));
+    expect(() => yilAylikCiro(donuk, 2026, { iptalHaric: true })).not.toThrow();
+  });
+
+  it('9 · O21: TRY dışı mağaza siparişi TL ay toplamına GİRMEZ (ayrım çağıranda)', () => {
+    const x: MagazaliSiparis[] = [
+      s({ createdAt: new Date(2026, 2, 5), totalPrice: 13000 }),
+      dovizli(new Date(2026, 2, 10)),
+    ];
+    // (a) süzgeçsiz — yardımcı `dovizTutar`ı OKUMAZ: «tutarı bilinmeyen», 50 EUR TL'ye EKLENMEDİ.
+    const a = yilAylikCiro(x, 2026, { iptalHaric: true }, 'tr');
+    expect(a.aylar[2].tutar).toEqual({ toplam: 13000, bilinen: 1, bilinmeyen: 1 });
+    expect(a.aylar[2].adet).toBe(2);
+    expect(Number.isNaN(tamTutar(donemToplami(a.aylar)))).toBe(true);
+    // (b) çağıran reçetesiyle — sayısal, `bilinmeyen` 0, `dovizli` 1.
+    const { tl, dovizliSayisi } = tlListesi(x);
+    const b = yilAylikCiro(x.filter(o => !tryDisiMi(o)), 2026, { iptalHaric: true }, 'tr');
+    expect(b.aylar[2].tutar).toEqual({ toplam: 13000, bilinen: 1, bilinmeyen: 0 });
+    expect(tamTutar(donemToplami(b.aylar))).toBe(13000);
+    expect(dovizliSayisi).toBe(1);
+    expect(adetToplami(b) + b.tarihsiz + b.yilDisi).toBe(tl.length);
+  });
+});
+
+// ── hareketliOrtalama ────────────────────────────────────────────────────────────────────────
+const bilinen = (toplam: number, adet = 1): Tutar => ({ toplam, bilinen: adet, bilinmeyen: 0 });
+const BOS: Tutar = { toplam: 0, bilinen: 0, bilinmeyen: 0 };
+
+describe('hareketliOrtalama — 6c eki (O6)', () => {
+  // 28 günlük ÇİMENTO 50KG ciro serisi (tam TL); bazı günler siparişsiz (meşru ₺0).
+  const seri: Tutar[] = Array.from({ length: 28 }, (_, i) => (i % 5 === 3 ? BOS : bilinen(1000 * ((i % 7) + 1))));
+
+  it('1 · PARİTE (GB4 P96 algoritmasıyla, O8 reçetesi): bilinen girdide 22 nokta eski `sum / 7` ile BİREBİR', () => {
+    // 28 günlük siparişler (BUGUN = 19.09.2026): gün başına 0–2 sipariş, tutarlar bilinen.
+    const siparisler: CiroSiparisi[] = [];
+    for (let i = 0; i < 28; i++) {
+      const gun = new Date(BUGUN.getFullYear(), BUGUN.getMonth(), BUGUN.getDate() - (27 - i), 9 + (i % 8));
+      if (i % 6 !== 2) siparisler.push(s({ createdAt: gun, totalPrice: 2500 + i * 125 }));
+      if (i % 4 === 1) siparisler.push(s({ createdAt: new Date(gun.getTime() + 3600000), totalPrice: 1800 }));
+    }
+    // GB4 P96'nın ESKİ algoritması test içinde yeniden yazıldı (`now` yerine BUGUN).
+    const days = Array.from({ length: 28 }, (_, i) => {
+      const d = new Date(BUGUN);
+      d.setDate(d.getDate() - (27 - i));
+      return gunAnahtari(d) ?? '';
+    });
+    const dayRev: Record<string, number> = {};
+    siparisler.forEach(o => {
+      const key = gunAnahtari(o.createdAt);
+      if (!key) return;
+      dayRev[key] = (dayRev[key] || 0) + Number(o.totalPrice);
+    });
+    const rolling7: number[] = [];
+    for (let i = 6; i < days.length; i++) {
+      const sum = days.slice(i - 6, i + 1).reduce((t, d) => t + (dayRev[d] || 0), 0);
+      rolling7.push(sum / 7);
+    }
+    // O8 reçetesi: zamanKovalari (28 takvim günü) → hareketliOrtalama(…, 7).slice(6)
+    const g = zamanKovalari(siparisler, 28, d => { const f = gunFarki(BUGUN, d); return f === null ? -1 : 27 - f; },
+      { tarihSec: o => o.createdAt, tutarSec: siparisTutari });
+    const ho = hareketliOrtalama(g.kovalar.map(k => k.ciro), 7).slice(6);
+    expect(ho).toHaveLength(22);
+    expect(ho).toEqual(rolling7);
+    expect(g.tarihsiz + g.kapsamDisi).toBe(0);
+  });
+
+  it('2 · ilk `pencere − 1` nokta null; uzunluk = girdi uzunluğu', () => {
+    const ho = hareketliOrtalama(seri, 7);
+    expect(ho).toHaveLength(28);
+    expect(ho.slice(0, 6)).toEqual([null, null, null, null, null, null]);
+    expect(ho.slice(6).every(v => typeof v === 'number')).toBe(true);
+    expect(ho[6]).toBe((seri.slice(0, 7).reduce((t, x) => t + x.toplam, 0)) / 7);
+  });
+
+  it('3 · MUTASYON-AYIRT EDİCİ: bilinmeyen ₺0 SAYILMAZ, günü SIFIRLAMAZ — penceresindeki NOKTA null', () => {
+    const kusurlu = seri.map((t, i) => (i === 9 ? { toplam: 5000, bilinen: 1, bilinmeyen: 1 } : t));
+    const ho = hareketliOrtalama(kusurlu, 7);
+    for (let i = 9; i <= 15; i++) expect(ho[i]).toBeNull();
+    expect(typeof ho[8]).toBe('number');
+    expect(typeof ho[16]).toBe('number');
+    expect(ho[8]).toBe(hareketliOrtalama(seri, 7)[8]);
+  });
+
+  it('4 · siparişsiz gün meşru ₺0 (takvim günü) — nokta 0, null DEĞİL', () => {
+    const ho = hareketliOrtalama(Array.from({ length: 10 }, () => BOS), 7);
+    expect(ho.slice(6)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('5 · geçersiz pencere → throw', () => {
+    for (const p of [0, -3, 2.5, NaN, Infinity]) expect(() => hareketliOrtalama(seri, p)).toThrow(/pencere/);
+  });
+
+  it('6 · boş girdi → []; pencereden kısa girdi → hepsi null; donuk girdi mutasyona uğramaz', () => {
+    expect(hareketliOrtalama([], 7)).toEqual([]);
+    expect(hareketliOrtalama(seri.slice(0, 4), 7)).toEqual([null, null, null, null]);
+    const donuk = Object.freeze(seri.map(t => Object.freeze({ ...t })));
+    expect(() => hareketliOrtalama(donuk, 7)).not.toThrow();
+    expect(hareketliOrtalama(donuk, 1)).toEqual(seri.map(t => t.toplam));
+  });
+
+  it('7 · O21 (bileşik — zamanKovalari + hareketliOrtalama): dövizli sipariş yedi noktayı `null` yapmamalı', () => {
+    const x: MagazaliSiparis[] = Array.from({ length: 28 }, (_, i) =>
+      s({ createdAt: new Date(BUGUN.getFullYear(), BUGUN.getMonth(), BUGUN.getDate() - (27 - i), 11), totalPrice: 3000 + i }));
+    x.push(dovizli(new Date(BUGUN.getFullYear(), BUGUN.getMonth(), BUGUN.getDate() - (27 - 9), 15)));   // 10. gün
+    const kovala28 = (liste: readonly MagazaliSiparis[]) => zamanKovalari(liste, 28,
+      d => { const f = gunFarki(BUGUN, d); return f === null ? -1 : 27 - f; },
+      { tarihSec: o => o.createdAt, tutarSec: siparisTutari });
+    // (a) süzgeçsiz — `dovizTutar` TL'ye eklenmedi, ₺0 sayılmadı: gün «bilinmeyen» → 9..15 null.
+    const ga = kovala28(x);
+    expect(ga.kovalar[9].ciro.bilinmeyen).toBe(1);
+    expect(ga.kovalar[9].ciro.toplam).toBe(3009);
+    const hoa = hareketliOrtalama(ga.kovalar.map(k => k.ciro), 7);
+    for (let i = 9; i <= 15; i++) expect(hoa[i]).toBeNull();
+    // (b) çağıran reçetesiyle — 22 noktanın hepsi sayı.
+    const { tl, dovizliSayisi } = tlListesi(x);
+    const hob = hareketliOrtalama(kovala28(tl).kovalar.map(k => k.ciro), 7).slice(6);
+    expect(hob).toHaveLength(22);
+    expect(hob.every(v => typeof v === 'number')).toBe(true);
+    expect(dovizliSayisi).toBe(1);
+  });
+});

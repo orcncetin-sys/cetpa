@@ -60,6 +60,33 @@
  *   3. Tutar seçici `siparisTutari` (`totalPrice ?? totalAmount`) — sayfanın tek tanımı.
  * K28 (kullanıcı: "Dönem tanımları: parite + adlandırma") — çeyrek penceresi bugünkü tanımı KORUR, yalnız adlandırır.
  * K2 ("İptaller ciroya girsin mi → hayır") — süzgeç `DonemSecenek.iptalHaric` ile ÇAĞIRANDA; varsayılan `aylikCiro` ile aynı.
+ *
+ * ## 6c EKİ (2026-10-17, Faz 3 6/n Genel II) — `yilAylikCiro` + `hareketliOrtalama` (ADDITIVE; yukarıdakiler DOKUNULMADI)
+ * ### `yilAylikCiro` — orkestratör kararı O7: `aylikCiro` SARMALAYICISI (kendi ay döngüsü YAZILMADI)
+ * Neden var — src/components/reports/genel/GenelBloklar2.tsx P251 YoY her ay için İKİ `orders.filter(…)` ile kopya dönem
+ * hesabı kuruyor: `d !== null && d.getFullYear() === currYear && d.getMonth() === i` tarihi çözülemeyen kaydı SESSİZCE
+ * düşürüyor, `.reduce((s, o) => s + (o.totalPrice || 0), 0)` tutarı bilinmeyeni ₺0 sayıyor, `totalPrev > 0 ? … : null`
+ * YoY yüzdesini KISMİ toplamdan türetiyor.
+ *   • Ay satırları `aylikCiro(siparisler, 12, new Date(yil, 11, 1), sec, dil)` çıktısının KENDİSİ (Ocak→Aralık); ay
+ *     eşlemesi, tutar, etiket, `ekran` / `grafik` / `adet` TEK yerde. `tarihsiz` tek süzgeç, `yilDisi` çıkarmadır.
+ *   • DEĞİŞMEZ: `Σ aylar.adet + tarihsiz + yilDisi === iptalSuz(siparisler, sec).length`.
+ *   • `yil` dört haneli TAM SAYI değilse throw (`new Date(26, 11, 1)` 1926'dır; NaN / kesirli yıl 12 boş ay üretirdi).
+ *   • Dönem tanımı DEĞİŞMEZ (GB2 bugün YIL BAŞINDAN BUGÜNE ile ÖNCEKİ YILIN TAMAMINI karşılaştırıyor — adlandırma
+ *     bağlamanın işi, O16). BİLİNÇLİ FARK: tarih `ciroTarihi` (`syncedAt` yedeği) ve tutar `siparisTutari`
+ *     (`totalAmount` yedeği) — modülün tek kuralı (6b `ceyreklikCiro` emsali).
+ * ### `hareketliOrtalama` — O6 / O8
+ * Neden var — GenelBloklar4.tsx P96 «Rolling 7-Day Avg»: `dayRev[key] = (dayRev[key] || 0) + o.totalPrice;` tutarı
+ * olmayan siparişin gününü NaN yapıyor, `reduce((s, d) => s + (dayRev[d] || 0), 0)` o NaN'ı `|| 0` ile SIFIRA çevirip
+ * günün BİLİNEN cirosunu da siliyordu — ortalama sessizce düşüyordu.
+ *   • TÜRETİLEN sayı: penceresinde tutarı bilinmeyen TEK kayıt olan nokta `null` (O6: "penceredeki bir ay/gün
+ *     bilinmiyorsa O NOKTA null"). Kaydı olmayan gün `{0,0,0}` → meşru ₺0. İlk `pencere − 1` nokta `null`.
+ *   • Girdi `Tutar[]` (PLAN'daki `DonemSatiri[]` imzasından BİLİNÇLİ sapma — O8): GB4'ün günlük serisinin kaynağı
+ *     `rapor/zamanDagilimi.zamanKovalari`'dır; `gunlukCiro` KULLANILMAZ (Mikro kaynaklı siparişleri native tarafta
+ *     düşürür, fatura listesi boş verilince o ciro kaybolur). `DonemSatiri` çağıranı `satirlar.map(s => s.tutar)` verir.
+ * ### TRY dışı sipariş (O21) — ayrım ÇAĞIRANDA
+ * Bu modül `dovizTutar` / `paraBirimi` OKUMAZ. TRY dışı mağaza siparişi (`totalPrice` yazılmaz) buraya verilirse «tutarı
+ * bilinmeyen» sayılır ve YoY'yi / yedi hareketli ortalama noktasını '—' yapar; çağıran `siparisler/magazaSiparisi.tryDisiMi`
+ * ile ayırır, `dovizli` sayısını kendi notunda verir.
  */
 import {
   toplaBilinen,
@@ -398,4 +425,63 @@ export function mtdKarsilastir(
   const projeksiyon = ayIlerlemesi > 0 ? Math.round(mtdTam * (100 / ayIlerlemesi)) : mtdTam;
 
   return { buAy, gecenAy, ekran, gecenAyEkran: ekranTutari(gecenAy), yuzde, yon, ayIlerlemesi, projeksiyon };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// YIL × AY pencere (6c eki — GenelBloklar2 YoY; aylikCiro sarmalayıcısı)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface YilAylikCiro {
+  /** Ocak→Aralık, uzunluk HER ZAMAN 12; boş aylar dâhil. `aylikCiro(siparisler, 12, new Date(yil, 11, 1), sec, dil)` çıktısının KENDİSİ (`DonemSatiri[]`). */
+  aylar: DonemSatiri[];
+  /** İptal süzgecinden GEÇEN ama tarihi (`ciroTarihi`) çözülemeyen kayıt — hiçbir aya girmez, SAYILIR. */
+  tarihsiz: number;
+  /** Tarihi çözülen ama başka yıla düşen kayıt. */
+  yilDisi: number;
+}
+
+/**
+ * Bir takvim yılının Ocak→Aralık ay cirosu (GB2 P251 YoY) — O7: `aylikCiro` SARMALAYICISI, kendi ay döngüsü YOK.
+ * Tutarı bilinmeyen sipariş ayın `tutar.bilinmeyen`ine düşer (₺0 DEĞİL) ve `adet`e dâhildir; ayın hiç bilineni yoksa
+ * `ekran` NaN, `grafik` `null`. Tarih modülün TEK kuralı `ciroTarihi` (`createdAt` → `syncedAt`; `orderDate`e DÜŞMEZ).
+ * K2 · İptaller ciroya girsin mi → "hayır". — süzgeç `sec.iptalHaric` ile ÇAĞIRANDA (varsayılan `aylikCiro` ile AYNI);
+ * sayaçlara da AYNI süzgeç uygulanır.
+ */
+export function yilAylikCiro(
+  siparisler: readonly CiroSiparisi[],
+  yil: number,
+  sec: DonemSecenek = { iptalHaric: false },
+  dil: ArayuzDili = 'tr',
+): YilAylikCiro {
+  if (!Number.isInteger(yil) || yil < 1000 || yil > 9999) {
+    throw new Error(`yilAylikCiro: yil dört haneli tam sayı olmalı (geldi: ${String(yil)})`);
+  }
+  // O7: SARMALAYICI — ay kovası kuralı TEK yerde (`aylikCiro`), burada ikinci kez yazılmaz.
+  const aylar = aylikCiro(siparisler, 12, new Date(yil, 11, 1), sec, dil);
+  const liste = iptalSuz(siparisler, sec);
+  const tarihsiz = liste.filter(o => ciroTarihi(o) === null).length;
+  // Sayaçlar ay döngüsü DEĞİLDİR: `aylar` üzerindeki toplam bir ADET toplamıdır (para değil).
+  const yilDisi = liste.length - tarihsiz - aylar.reduce((t, a) => t + a.adet, 0);
+  return { aylar, tarihsiz, yilDisi };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hareketli ortalama (6c eki — GenelBloklar4 "Rolling 7-Day Avg")
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Hareketli ortalama — TÜRETİLEN sayı. Uzunluk = girdi uzunluğu; ilk `pencere − 1` nokta `null`.
+ * Penceresinde tutarı bilinmeyen TEK kayıt olan nokta `null` (O6: "penceredeki bir ay/gün bilinmiyorsa O NOKTA null").
+ * Kaydı olmayan gün `{0,0,0}` → meşru ₺0 (takvim günü). `pencere` pozitif TAM SAYI değilse throw. Girdi mutasyona uğramaz.
+ */
+export function hareketliOrtalama(tutarlar: readonly Tutar[], pencere: number): (number | null)[] {
+  if (!Number.isInteger(pencere) || pencere <= 0) {
+    throw new Error(`hareketliOrtalama: pencere pozitif tam sayı olmalı (geldi: ${String(pencere)})`);
+  }
+  return tutarlar.map((_, i) => {
+    if (i < pencere - 1) return null;
+    // Kopya toplama YOK: pencere toplamı `tutarBirlestir`, türetme kapısı `tamTutar` (tek bilinmeyen → NaN → null).
+    const t = tamTutar(tutarBirlestir(...tutarlar.slice(i - pencere + 1, i + 1)));
+    return Number.isFinite(t) ? t / pencere : null;
+  });
 }

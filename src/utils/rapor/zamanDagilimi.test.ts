@@ -335,3 +335,218 @@ describe('mevsimsellikEndeksi — 6b eki', () => {
     expect(m.olculenAy + m.tutarsizAy + m.verisizAy).toBe(4);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6c EKİ (2026-10-17): `haftaGunIzgarasi` (zamanKovalari SARMALAYICISI) + `aktifGunSerisi` (O17)
+//   GenelBloklar4 P445 ısı haritası:
+//     `const weekAgo = Math.floor((now351 - ts) / (7 * 86400000));` / `if (weekAgo > 7) return;`
+//       → gelecek tarihli kayıt `grid['-1-x']`e yazılıyor: hiç ÇİZİLMİYOR ama ölçeği ve `totalCells`i ŞİŞİRİYOR;
+//         8 haftadan eski kayıt SESSİZCE düşüyor
+//     `grid[key] = (grid[key] || 0) + (o.totalPrice || 0);`  → tutarı bilinmeyen ₺0
+//   GenelBloklar4 P528 «Ciro Süreklilik Serisi»:
+//     `const key = gunAnahtari(o.createdAt); if (!key) return;` → tarihi çözülemeyen kayıt SESSİZCE düşüyor
+//     `let maxStreak = 0, cur = 1; … if (diff === 1) { cur++; maxStreak = Math.max(maxStreak, cur); } else cur = 1;`
+//       → ardışık iki gün yoksa "longest streak 0" — aynı kartta "active days total 3" yazarken
+// O21: TRY dışı mağaza siparişi ısı haritasına ULAŞMAZ (ayrım çağıranda). `aktifGunSerisi` para okumaz — etkilenmez.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { haftaGunIzgarasi, aktifGunSerisi, type HaftaGunSecenek } from './zamanDagilimi';
+import { zamanMs, gunAnahtari, gunFarki } from '../zaman';
+import { tryDisiMi } from '../siparisler/magazaSiparisi';
+
+/** Referans "şimdi": 19 Eylül 2026 Cumartesi 10:30 (yerel). */
+const SIMDI = new Date(2026, 8, 19, 10, 30);
+const GUN_MS = 86400000;
+/** GB4 P445 reçetesi: yalnız `createdAt` (parite) + ciro ZORUNLU. */
+const IZGARA_SEC: HaftaGunSecenek<Siparis> = { tarihSec: o => o.createdAt, tutarSec };
+
+/** Mağaza alanlarını da taşıyan fikstür (O21 vakası). */
+type MagazaliSiparis = Siparis & { readonly source?: string; readonly paraBirimi?: string; readonly dovizTutar?: number; readonly status?: string };
+/** O21 ortak fikstürü — TRY dışı mağaza siparişi; sunucu `totalPrice` YAZMAZ (shopifyEsleme TRY dışı yazımı). */
+const dovizli = (createdAt: Date): MagazaliSiparis =>
+  ({ musteri: 'Kaya Hırdavat', urun: 'İÇ CEPHE BOYASI 15LT', source: 'shopify_webhook', paraBirimi: 'EUR', dovizTutar: 50, status: 'Delivered', createdAt });
+
+describe('haftaGunIzgarasi — 6c eki', () => {
+  const izgaraSiparisleri: Siparis[] = [
+    sip({ createdAt: new Date(2026, 8, 19, 9, 0), totalPrice: 4000 }),     // bugün (Cmt) — h 0
+    sip({ createdAt: new Date(2026, 8, 18, 15, 0), totalPrice: 2500 }),    // dün (Cuma) — h 0
+    sip({ createdAt: new Date(2026, 8, 13, 11, 0), totalPrice: 1200 }),    // Pazar — h 0
+    sip({ createdAt: new Date(2026, 8, 12, 11, 0), totalPrice: 900 }),     // 7 gün önce 11:00 (şimdiden SONRA saat) — h 0
+    sip({ createdAt: new Date(2026, 8, 12, 10, 0), totalPrice: 700 }),     // 7 gün + 30 dk önce — h 1
+    sip({ createdAt: new Date(2026, 8, 9, 14, 0), totalPrice: 3300 }),     // h 1, Çarşamba
+    sip({ createdAt: new Date(2026, 7, 26, 8, 0), totalPrice: 5100 }),     // h 3
+    sip({ createdAt: new Date(2026, 6, 27, 16, 0), totalPrice: 6000 }),    // h 7 (en eski hafta)
+    sip({ createdAt: new Date(2026, 6, 27, 17, 0), totalPrice: 1000 }),    // aynı hücre
+  ];
+
+  it('1 · PARİTE: kapsam içi bilinen girdide hücre tutarları eski `grid` döngüsüyle BİREBİR; 8 × 7', () => {
+    // GB4 P445'in ESKİ döngüsü test içinde yeniden yazıldı (`Date.now()` yerine SIMDI).
+    const now351 = SIMDI.getTime();
+    const grid: Record<string, number> = {};
+    izgaraSiparisleri.forEach(o => {
+      const ts = zamanMs(o.createdAt);
+      if (ts === null) return;
+      const d = new Date(ts);
+      const weekAgo = Math.floor((now351 - ts) / (7 * 86400000));
+      if (weekAgo > 7) return;
+      const key = `${weekAgo}-${d.getDay()}`;
+      grid[key] = (grid[key] || 0) + (Number(o.totalPrice) || 0);
+    });
+    const iz = haftaGunIzgarasi(izgaraSiparisleri, 8, SIMDI, IZGARA_SEC);
+    expect(iz.hucreler).toHaveLength(8);
+    expect(iz.hucreler.every(satir => satir.length === 7)).toBe(true);
+    for (let w = 0; w < 8; w++) {
+      for (let g = 0; g < 7; g++) {
+        expect(iz.hucreler[w][g].ciro.toplam).toBe(grid[`${w}-${g}`] ?? 0);
+      }
+    }
+    expect(iz.hucreler[0][6].ciro.toplam).toBe(4900);   // 4.000 + 900
+    expect(iz.hucreler[0][6].adet).toBe(2);              // bugün + 7 gün önce 11:00 (KAYAN hafta — parite)
+    expect(iz.hucreler[1][6].ciro.toplam).toBe(700);     // tam 7×24 saatten eski → bir önceki hafta
+    expect(iz.hucreler[7][1]).toEqual({ adet: 2, ciro: { toplam: 7000, bilinen: 2, bilinmeyen: 0 } });
+    expect(iz.tarihsiz + iz.kapsamDisi).toBe(0);
+  });
+
+  it('2 · MUTASYON-AYIRT EDİCİ: gelecek tarihli kayıt ölçeği ŞİŞİRMEZ, hiçbir hücreye girmez — SAYILIR', () => {
+    const iz = haftaGunIzgarasi([
+      sip({ createdAt: new Date(SIMDI.getTime() + 3600000), totalPrice: 90000 }),
+      sip({ createdAt: new Date(SIMDI.getTime() + 3 * GUN_MS), totalPrice: 80000 }),
+    ], 8, SIMDI, IZGARA_SEC);
+    expect(iz.kapsamDisi).toBe(2);
+    expect(iz.hucreler.flat().every(h => h.adet === 0)).toBe(true);
+  });
+
+  it('3 · 8 haftadan eski kayıt SAYILIR (sessiz düşme yok); tam 8 × 7 × 24 saat sınırı', () => {
+    expect(haftaGunIzgarasi([sip({ createdAt: new Date(SIMDI.getTime() - 60 * GUN_MS), totalPrice: 1000 })], 8, SIMDI, IZGARA_SEC).kapsamDisi).toBe(1);
+    const sinir = haftaGunIzgarasi([
+      sip({ createdAt: new Date(SIMDI.getTime() - 56 * GUN_MS), totalPrice: 1 }),        // tam 8 hafta → dışarıda
+      sip({ createdAt: new Date(SIMDI.getTime() - 56 * GUN_MS + 1), totalPrice: 2 }),    // 1 ms içeride → h 7
+    ], 8, SIMDI, IZGARA_SEC);
+    expect(sinir.kapsamDisi).toBe(1);
+    expect(sinir.hucreler[7].reduce((t, h) => t + h.adet, 0)).toBe(1);
+  });
+
+  it('4 · MUTASYON-AYIRT EDİCİ: tutarı bilinmeyen ₺0 SAYILMAZ — hücrede `bilinmeyen` olarak durur', () => {
+    const iz = haftaGunIzgarasi([
+      sip({ createdAt: new Date(2026, 8, 16, 9), totalPrice: 4000 }),
+      sip({ createdAt: new Date(2026, 8, 16, 12) }),                                         // tutarı OKUNAMADI
+    ], 8, SIMDI, IZGARA_SEC);
+    expect(iz.hucreler[0][3].ciro).toEqual({ toplam: 4000, bilinen: 1, bilinmeyen: 1 });
+    expect(iz.hucreler[0][3].adet).toBe(2);
+  });
+
+  it('5 · tarihsiz kayıt SAYILIR; `tarihSec` aynen geçer (createdAt yoksa syncedAt\'e düşmez)', () => {
+    const iz = haftaGunIzgarasi([
+      sip({ createdAt: 'çöp', totalPrice: 1000 }),
+      sip({ syncedAt: new Date(2026, 8, 18), totalPrice: 1000 }),
+    ], 8, SIMDI, IZGARA_SEC);
+    expect(iz.tarihsiz).toBe(2);
+    const varsayilan = haftaGunIzgarasi([sip({ syncedAt: new Date(2026, 8, 18, 9), totalPrice: 1000 })], 8, SIMDI, { tutarSec });
+    expect(varsayilan.tarihsiz).toBe(0);
+    expect(varsayilan.hucreler[0][5].ciro.toplam).toBe(1000);
+  });
+
+  it('6 · geçersiz haftaSayisi → throw; DEĞİŞMEZ Σ adet + tarihsiz + kapsamDisi === liste; boş liste', () => {
+    for (const h of [0, 1.5, -2, NaN]) expect(() => haftaGunIzgarasi(izgaraSiparisleri, h, SIMDI, IZGARA_SEC)).toThrow(/haftaSayisi/);
+    const karisik = [
+      ...izgaraSiparisleri,
+      sip({ createdAt: 'çöp', totalPrice: 1 }),
+      sip({ createdAt: new Date(SIMDI.getTime() + GUN_MS), totalPrice: 1 }),
+      sip({ createdAt: new Date(2025, 0, 1), totalPrice: 1 }),
+    ];
+    const iz = haftaGunIzgarasi(karisik, 8, SIMDI, IZGARA_SEC);
+    expect(iz.hucreler.flat().reduce((t, h) => t + h.adet, 0) + iz.tarihsiz + iz.kapsamDisi).toBe(karisik.length);
+    const bos = haftaGunIzgarasi([], 8, SIMDI, IZGARA_SEC);
+    expect(bos.hucreler.flat()).toHaveLength(56);
+    expect(bos.hucreler.flat().every(h => h.adet === 0 && h.ciro.toplam === 0 && h.ciro.bilinen === 0 && h.ciro.bilinmeyen === 0)).toBe(true);
+    expect(() => haftaGunIzgarasi(Object.freeze(izgaraSiparisleri.map(o => Object.freeze({ ...o }))), 8, SIMDI, IZGARA_SEC)).not.toThrow();
+  });
+
+  it('7 · O21: TRY dışı mağaza siparişi hücre cirosuna GİRMEZ (ayrım çağıranda)', () => {
+    const x: MagazaliSiparis[] = [sip({ createdAt: new Date(2026, 8, 16, 9), totalPrice: 4000 }), dovizli(new Date(2026, 8, 16, 14))];
+    // (a) süzgeçsiz — `dovizTutar` OKUNMAZ: «tutarı bilinmeyen», 50 EUR TL'ye EKLENMEDİ, ₺0 sayılmadı.
+    expect(haftaGunIzgarasi(x, 8, SIMDI, IZGARA_SEC).hucreler[0][3].ciro).toEqual({ toplam: 4000, bilinen: 1, bilinmeyen: 1 });
+    // (b) çağıran reçetesiyle (K2 süzgeci + `tryDisiMi` — TEK tanım).
+    const iptalsiz = x.filter(o => o.status !== 'Cancelled');
+    const tl = iptalsiz.filter(o => !tryDisiMi(o));
+    expect(haftaGunIzgarasi(tl, 8, SIMDI, IZGARA_SEC).hucreler[0][3].ciro).toEqual({ toplam: 4000, bilinen: 1, bilinmeyen: 0 });
+    expect(iptalsiz.filter(tryDisiMi).length).toBe(1);
+  });
+});
+
+describe('aktifGunSerisi — 6c eki (O17)', () => {
+  /** SIMDI'den `geri` takvim günü önce, öğlen. */
+  const gun = (geri: number, saat = 12): Date => new Date(2026, 8, 19 - geri, saat);
+  const createdAt = (o: Siparis): unknown => o.createdAt;
+
+  it('1 · PARİTE: eski üç döngünün (mevcut seri / en uzun seri / son 30 gün) yeniden yazımıyla eşit', () => {
+    const x = [sip({ createdAt: gun(0) }), sip({ createdAt: gun(1) }), sip({ createdAt: gun(1, 8) }), sip({ createdAt: gun(2) }), sip({ createdAt: gun(10) })];
+    // GB4 P528'in ESKİ üç döngüsü (`new Date()` / `Date.now()` yerine SIMDI).
+    const daySet = new Set<string>();
+    x.forEach(o => { const key = gunAnahtari(o.createdAt); if (!key) return; daySet.add(key); });
+    const sortedDays = [...daySet].sort();
+    let streak = 0;
+    let checkDate = new Date(SIMDI);
+    for (;;) {
+      const key = gunAnahtari(checkDate) ?? '';
+      if (!daySet.has(key)) break;
+      streak++;
+      checkDate = new Date(checkDate.getTime() - 86400000);
+    }
+    let maxStreak = 0, cur = 1;
+    for (let i = 1; i < sortedDays.length; i++) {
+      const diff = gunFarki(sortedDays[i], sortedDays[i - 1]);
+      if (diff === 1) { cur++; maxStreak = Math.max(maxStreak, cur); } else cur = 1;
+    }
+    const last30: boolean[] = [];
+    for (let i = 29; i >= 0; i--) last30.push(daySet.has(gunAnahtari(new Date(SIMDI.getTime() - i * 86400000)) ?? ''));
+
+    const s = aktifGunSerisi(x, SIMDI, 30, createdAt);
+    expect(s).toMatchObject({ mevcutSeri: 3, enUzunSeri: 3, aktifGun: 4, tarihsiz: 0 });
+    expect([s.mevcutSeri, s.enUzunSeri, s.aktifGun]).toEqual([streak, maxStreak, daySet.size]);
+    expect(s.sonGunler).toHaveLength(30);
+    expect(s.sonGunler[29]).toEqual({ anahtar: '2026-09-19', aktif: true });
+    expect(s.sonGunler[0].anahtar).toBe('2026-08-21');
+    expect(s.sonGunler.map(g => g.aktif)).toEqual(last30);
+  });
+
+  it('2 · bugün aktif değil → mevcutSeri 0 (dün aktif olsa bile — bugünkü tanım)', () => {
+    const s = aktifGunSerisi([sip({ createdAt: gun(1) }), sip({ createdAt: gun(2) })], SIMDI, 30, createdAt);
+    expect(s.mevcutSeri).toBe(0);
+    expect(s.enUzunSeri).toBe(2);
+  });
+
+  it('3 · tarihsiz SAYILIR; aktif günleri etkilemez', () => {
+    const s = aktifGunSerisi([sip({ createdAt: 'çöp' }), sip({ createdAt: gun(0) })], SIMDI, 30, createdAt);
+    expect(s.tarihsiz).toBe(1);
+    expect(s.aktifGun).toBe(1);
+  });
+
+  it('4 · O17 düzeltmesi: ardışık gün yokken en uzun seri 1 (eski kod 0 basıyordu); TEK aktif gün → 1', () => {
+    const aralikli = [sip({ createdAt: gun(0) }), sip({ createdAt: gun(3) }), sip({ createdAt: gun(9) })];
+    expect(aktifGunSerisi(aralikli, SIMDI, 30, createdAt)).toMatchObject({ enUzunSeri: 1, aktifGun: 3, mevcutSeri: 1 });
+    expect(aktifGunSerisi([sip({ createdAt: gun(5) })], SIMDI, 30, createdAt).enUzunSeri).toBe(1);
+  });
+
+  it('5 · ay sınırı: 31 Ağustos + 1 Eylül + 2 Eylül → en uzun seri 3 (takvim günü)', () => {
+    const x = [sip({ createdAt: new Date(2026, 7, 31, 23, 30) }), sip({ createdAt: new Date(2026, 8, 1, 0, 15) }), sip({ createdAt: new Date(2026, 8, 2, 9) })];
+    expect(aktifGunSerisi(x, SIMDI, 30, createdAt).enUzunSeri).toBe(3);
+    // Ay başına sarkan mevcut seri: bugün = 1 Eylül, aktif 1 Eylül + 31 Ağustos → 2.
+    expect(aktifGunSerisi(x, new Date(2026, 8, 1, 18), 7, createdAt).mevcutSeri).toBe(2);
+  });
+
+  it('6 · geçersiz sonGunSayisi → throw; boş liste → sıfırlar + 30 × aktif false', () => {
+    for (const n of [0, -1, 2.5, NaN]) expect(() => aktifGunSerisi([], SIMDI, n)).toThrow(/sonGunSayisi/);
+    const s = aktifGunSerisi([], SIMDI, 30);
+    expect(s).toMatchObject({ mevcutSeri: 0, enUzunSeri: 0, aktifGun: 0, tarihsiz: 0 });
+    expect(s.sonGunler).toHaveLength(30);
+    expect(s.sonGunler.every(g => g.aktif === false)).toBe(true);
+  });
+
+  it('7 · gelecek tarihli gün `aktifGun`e girer (parite); varsayılan tarih `createdAt ?? syncedAt`; geçersiz bugün → throw', () => {
+    const s = aktifGunSerisi([sip({ createdAt: new Date(2026, 8, 25) }), sip({ syncedAt: gun(0) })], SIMDI, 30);
+    expect(s.aktifGun).toBe(2);
+    expect(s.mevcutSeri).toBe(1);
+    expect(aktifGunSerisi([sip({ syncedAt: gun(0) })], SIMDI, 30, createdAt).tarihsiz).toBe(1);
+    expect(() => aktifGunSerisi([], new Date(NaN), 30)).toThrow(/bugun/);
+  });
+});

@@ -309,3 +309,117 @@ describe('siraliDilimler — 6b eki', () => {
     expect(r.dilimler.map(d => d.ogeler.map(o => o.tutar))).toEqual([[150], [300], [900]]);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6c EKİ (2026-10-17): `yuzdelikler` — `siraliDilimler` SARMALAYICISI (O6)
+//   GenelBloklar4 P337 «Sipariş Tutarı Yüzdelik Dilimleri»:
+//     `const vals341 = orders.map(o => o.totalPrice || 0).filter(v => v > 0).sort((a, b) => a - b);`
+//       → tutarı bilinmeyen ₺0'a çevrilip SESSİZCE eleniyor — kaç sipariş dışarıda kaldı söylenmiyor
+//     `const p = (pct: number) => vals341[Math.floor((pct / 100) * (vals341.length - 1))];` → formül doğru ama kopya
+//     `const avg341 = vals341.reduce((s, v) => s + v, 0) / vals341.length;` → elle toplama
+// Kural (O6, K23 kullanıcı ilkesi "girilmeyen hesaba katılmaz + not"): dağılım istatistiğinde bilinmeyen değer hesaba
+// KATILMAZ, bilinenlerden hesaplanır ve SAYILIR ("N kayıt bilinmiyor" notu ZORUNLU).
+// O21: TRY dışı mağaza siparişi bu yardımcıya ULAŞMAZ — ayrım ÇAĞIRANDA.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { yuzdelikler } from './dagilim';
+import { siparisTutari } from '../siparis';
+import { tryDisiMi } from '../siparisler/magazaSiparisi';
+
+const P_LISTESI = [10, 25, 50, 75, 90, 99] as const;
+
+/** GB4 P337'nin ESKİ hesabı test içinde yeniden yazıldı (bilinen pozitif girdide parite ölçüsü). */
+const eskiP337 = (tutarlar: readonly number[]) => {
+  const vals341 = tutarlar.map(v => v || 0).filter(v => v > 0).sort((a, b) => a - b);
+  const p = (pct: number) => vals341[Math.floor((pct / 100) * (vals341.length - 1))];
+  const avg341 = vals341.reduce((t, v) => t + v, 0) / vals341.length;
+  return { dilimler: P_LISTESI.map(p), avg341, adet: vals341.length };
+};
+
+describe('yuzdelikler — 6c eki (O6)', () => {
+  const on = [7000, 2000, 10000, 1000, 5000, 9000, 3000, 6000, 4000, 8000].map(sip);   // Şirin İnşaat, karışık sırada
+
+  it('1 · PARİTE: 10 bilinen pozitif tutar → P10/25/50/75/90/99 eski `p()` ile BİREBİR; floor(0,5 · 4) = 2', () => {
+    const y = yuzdelikler(on, tutarSec, P_LISTESI, { sadecePozitif: true });
+    expect(y.degerler).toEqual(eskiP337(on.map(o => Number(o.tutar))).dilimler);
+    expect(y.degerler).toEqual([1000, 3000, 5000, 7000, 9000, 9000]);
+    const bes = [5000, 10000, 15000, 20000, 25000].map(sip);
+    expect(yuzdelikler(bes, tutarSec, [50]).degerler).toEqual([15000]);
+  });
+
+  it('2 · MUTASYON-AYIRT EDİCİ: bilinmeyen ₺0\'a dönüp SESSİZCE elenmez, SAYILIR — ve yüzdelikler YİNE hesaplanır', () => {
+    const x = [...[1000, 2000, 3000, 4000, 5000].map(sip), sip(undefined), sip('abc')];
+    const y = yuzdelikler(x, tutarSec, P_LISTESI, { sadecePozitif: true });
+    expect(y.bilinmeyen).toBe(2);
+    expect(y.kapsamDisi).toBe(0);
+    expect(y.bilinen).toBe(5);
+    expect(y.degerler.every(v => typeof v === 'number')).toBe(true);
+    expect(y.degerler).toEqual(eskiP337([1000, 2000, 3000, 4000, 5000]).dilimler);
+  });
+
+  it('3 · `toplam` = sıralamaya GİRENLER (bilinmeyen 0); ortalama tamTutar(toplam) / bilinen = eski avg341', () => {
+    const x = [...[1000, 2500, 3000, 4000, 5500].map(sip), sip(undefined), sip(null)];
+    const y = yuzdelikler(x, tutarSec, P_LISTESI, { sadecePozitif: true });
+    expect(y.toplam).toEqual({ toplam: 16000, bilinen: 5, bilinmeyen: 0 });
+    const ort = y.bilinen > 0 ? tamTutar(y.toplam) / y.bilinen : null;
+    expect(ort).toBe(eskiP337([1000, 2500, 3000, 4000, 5500]).avg341);
+    expect(ort).toBe(3200);
+  });
+
+  it('4 · `sadecePozitif`: ₺0 ve −₺500 `kapsamDisi`, toplama GİRMEZ; bayraksız ikisi de sıralamaya girer', () => {
+    const x = [...[1000, 2000, 3000].map(sip), sip(0), sip(-500)];
+    const pozitif = yuzdelikler(x, tutarSec, [10, 50]);
+    expect(pozitif.kapsamDisi).toBe(0);
+    expect(pozitif.degerler[0]).toBe(-500);
+    const y = yuzdelikler(x, tutarSec, [10, 50], { sadecePozitif: true });
+    expect(y.kapsamDisi).toBe(2);
+    expect(y.toplam).toEqual({ toplam: 6000, bilinen: 3, bilinmeyen: 0 });
+    expect(y.degerler).toEqual([1000, 2000]);
+  });
+
+  it('5 · boş / hepsi bilinmeyen → `degerler` hepsi null (₺0 medyan YOK), toplam {0,0,0}', () => {
+    for (const x of [[], [sip(undefined), sip('')]]) {
+      const y = yuzdelikler(x, tutarSec, P_LISTESI, { sadecePozitif: true });
+      expect(y.degerler).toEqual([null, null, null, null, null, null]);
+      expect(y.toplam).toEqual(SIFIR_TUTAR);
+      expect(y.bilinen).toBe(0);
+    }
+  });
+
+  it('6 · uçlar: [0, 100] → [min, max]; tek öğe → her yüzdelik o değer; boş yüzde listesi → []', () => {
+    expect(yuzdelikler(on, tutarSec, [0, 100]).degerler).toEqual([1000, 10000]);
+    expect(yuzdelikler([sip(4200)], tutarSec, P_LISTESI).degerler).toEqual([4200, 4200, 4200, 4200, 4200, 4200]);
+    expect(yuzdelikler(on, tutarSec, []).degerler).toEqual([]);
+  });
+
+  it('7 · geçersiz yüzde → throw', () => {
+    for (const p of [-1, 101, NaN, Infinity]) expect(() => yuzdelikler(on, tutarSec, [50, p])).toThrow(/\[0, 100\] aralığında/);
+  });
+
+  it('8 · DEĞİŞMEZ bilinen + bilinmeyen + kapsamDisi === liste; donuk girdi mutasyona uğramaz, sıra korunur', () => {
+    const donuk = Object.freeze([...on, sip(undefined), sip(0)].map(o => Object.freeze(o)));
+    const y = yuzdelikler(donuk, tutarSec, P_LISTESI, { sadecePozitif: true });
+    expect(y.bilinen + y.bilinmeyen + y.kapsamDisi).toBe(donuk.length);
+    expect(donuk[0].tutar).toBe(7000);
+  });
+
+  it('9 · O21: TRY dışı mağaza siparişi «tutarı bilinmiyor» notuna YANLIŞ nedenle düşmemeli (ayrım çağıranda)', () => {
+    type TutarliSiparis = { musteri: string; totalPrice?: number; source?: string; paraBirimi?: string; dovizTutar?: number; status?: string };
+    const tlSiparis = (totalPrice: number): TutarliSiparis => ({ musteri: 'Şirin İnşaat', totalPrice, status: 'Delivered' });
+    const x: TutarliSiparis[] = [
+      ...[1000, 2000, 3000, 4000, 5000].map(tlSiparis),
+      // TRY dışı mağaza siparişi — sunucu `totalPrice` YAZMAZ (shopifyEsleme TRY dışı yazımı).
+      { musteri: 'Kaya Hırdavat', source: 'shopify_webhook', paraBirimi: 'EUR', dovizTutar: 50, status: 'Delivered' },
+    ];
+    // (a) süzgeçsiz — `dovizTutar` OKUNMAZ: «bilinmeyen» sayılır, ₺0'a dönüp elenmez.
+    const a = yuzdelikler(x, siparisTutari, P_LISTESI, { sadecePozitif: true });
+    expect(a.bilinmeyen).toBe(1);
+    expect(a.kapsamDisi).toBe(0);
+    // (b) çağıran reçetesiyle (K2 süzgeci + `tryDisiMi` — TEK tanım).
+    const iptalsiz = x.filter(o => o.status !== 'Cancelled');
+    const b = yuzdelikler(iptalsiz.filter(o => !tryDisiMi(o)), siparisTutari, P_LISTESI, { sadecePozitif: true });
+    expect(b.bilinmeyen).toBe(0);
+    expect(b.bilinen).toBe(5);
+    expect(iptalsiz.filter(tryDisiMi).length).toBe(1);
+    expect(b.degerler).toEqual(a.degerler);
+  });
+});

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { join } from 'path';
-import { odemeAlindiYamasi, odemeYontemiMi, ODEME_YONTEMLERI } from './odemeYontemi';
+import { odemeAlindiYamasi, odemeYontemiMi, odemeYontemiEtiketi, ODEME_YONTEMLERI, type OdemeYontemi } from './odemeYontemi';
+import { oc } from '../../i18n/ortak';
+import { op } from '../../i18n/orders';
 import { SRC_KOK as SRC, kodSatirlari } from '../../test/kaynakTarama';
 
 describe('odemeAlindiYamasi — SEÇİLEN yöntem yazılır', () => {
@@ -28,5 +30,34 @@ describe('bağlantı (kaynak çiti): pencereden gelen yöntem işleyiciye ULAŞI
     expect(say('components/PaymentMethodModal.tsx', /useState<OdemeYontemi \| null>\(null\)/)).toBe(1);
     expect(say('components/PaymentMethodModal.tsx', /disabled=\{method === null \|\| kaydediliyor\}/)).toBe(1);
     expect(say('components/PaymentMethodModal.tsx', /await onConfirm\(method\)/)).toBe(1);
+  });
+});
+
+// ── 6c inceleme 1 (2026-10-17): `odemeYontemiEtiketi` — enum kodunun EKRAN etiketi ────────────────────────────────────
+// GB2 «Ödeme Yöntemi Dağılımı» ham kodu basıyordu («bank_transfer»; `capitalize` sınıfıyla «Bank_transfer»). KARAR
+// (orkestratör): OrdersPage `pmLabels` rozetiyle AYNI sözlük anahtarları — yeni metin YAZILMAZ: cash → oc.nakit,
+// bank_transfer → op.eft, credit_card → op.kart, check → oc.cek, other → oc.diger. Beklenen metinler sözlükten okunur.
+describe('odemeYontemiEtiketi — OrdersPage rozetiyle aynı sözlük metni', () => {
+  const BEKLENEN = (dil: 'tr' | 'en'): Record<OdemeYontemi, string> => ({
+    cash: oc(dil).nakit, bank_transfer: op(dil).eft, credit_card: op(dil).kart, check: oc(dil).cek, other: oc(dil).diger,
+  });
+
+  it.each(['tr', 'en'] as const)('%s: beş yöntemin her biri sözlük metnini döner; hiçbiri ham anahtar DEĞİL', dil => {
+    for (const y of ODEME_YONTEMLERI) {
+      const etiket = odemeYontemiEtiketi(y, dil);
+      expect(etiket, y).toBe(BEKLENEN(dil)[y]);
+      expect(etiket, y).not.toBe(y);
+      expect(etiket.trim(), y).not.toBe('');
+    }
+  });
+
+  it('TR metinleri: Nakit · EFT · Kart · Çek · Diğer (EN: Cash · Transfer · Card · Check · Other)', () => {
+    expect(ODEME_YONTEMLERI.map(y => odemeYontemiEtiketi(y, 'tr'))).toEqual(['Nakit', 'EFT', 'Kart', 'Çek', 'Diğer']);
+    expect(ODEME_YONTEMLERI.map(y => odemeYontemiEtiketi(y, 'en'))).toEqual(['Cash', 'Transfer', 'Card', 'Check', 'Other']);
+  });
+
+  it('dil daraltması `oc()` ile AYNI: `undefined` → Türkçe, `tr` dışı her metin → İngilizce', () => {
+    expect(odemeYontemiEtiketi('check', undefined)).toBe('Çek');
+    expect(odemeYontemiEtiketi('check', 'de')).toBe('Check');
   });
 });

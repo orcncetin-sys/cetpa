@@ -129,19 +129,21 @@ describe('teslimat adresi — BAĞLANDI çiti (eski okumayı kaldırmak yetmez)'
     expect(crm).toMatch(/const BOLGE_ILLERI = \['İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Antalya', 'Adana'\] as const;/);
   });
 
-  it('`siparisSehri(` çağıranlar ADIYLA sınırlı: `deliveryCity` / `city` okuyan beş rapor bloğu bu işte BAĞLANMADI', () => {
+  it('`siparisSehri(` çağıranlar ADIYLA sınırlı: `deliveryCity` / `city` okuyan dört rapor bloğu bu işte BAĞLANMADI', () => {
     // Satış Bölgesi şehir adları `TR.json` yazımıyla tutulur; il listesiyle eşleme kuralı ayrı iştir (TerritoryModule,
-    // GenelBloklar4, LojistikRapor'un öteki üç bloğu). `paymentRoutes` sunucu tarafıdır (iyzico `city`).
+    // LojistikRapor'un öteki üç bloğu; GenelBloklar4 P238 6c'de bağlandı — O22). `paymentRoutes` sunucu tarafıdır (iyzico `city`).
     const cagiranlar = DOSYALAR.filter(d => kodSatirlari(d).some(s => /\bsiparisSehri\(/.test(s.kod))).map(gorece).sort();
     const IZINLI = [
       'src/components/reports/LojistikRapor.tsx',
       'src/components/reports/crm/CrmBloklar7.tsx',
+      'src/components/reports/genel/GenelBloklar4.tsx',
       'src/server/routes/paymentRoutes.ts',
       'src/utils/siparisler/teslimatAdresi.ts',
     ];
     expect(cagiranlar.filter(d => !IZINLI.includes(d))).toEqual([]);
     expect(cagiranlar).toContain('src/components/reports/LojistikRapor.tsx');
     expect(cagiranlar).toContain('src/components/reports/crm/CrmBloklar7.tsx');
+    expect(cagiranlar).toContain('src/components/reports/genel/GenelBloklar4.tsx');
   });
 
   it('e-İrsaliye: girdi tipi il / ülkeyi taşır, `destination` tam adres metni', () => {

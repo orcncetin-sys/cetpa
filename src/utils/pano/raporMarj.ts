@@ -43,6 +43,18 @@
  *  2. **Maliyeti çözülemeyen sipariş `maliyet` toplamına GİRMEZ, SAYILIR.** Eski kod eksik kalemi
  *     %60 oranı ya da 0 ile doldurduğu için toplam hep "dolu" görünüyordu. `maliyet` artık kısmi
  *     bir EKRAN toplamıdır ve `maliyetTutar.bilinmeyen` ekrana YAZILMALIDIR (DIO/COGS tüketicileri).
+ *
+ * ## 6c EKİ (2026-10-17, Faz 3 6/n Genel II) — `hamMarj` (ADDITIVE; yukarıdaki gövdeler ve `BrutMarjSonucu` DOKUNULMADI)
+ * Neden var — src/components/reports/genel/GenelBloklar4.tsx P22 P&L brüt marj satırı
+ *   `revenue>0?((grossProfit/revenue)*100).toFixed(1):0` hesaplanamayan marjı sahte "0%" basıyor; bağlamada brüt kâr
+ *   `brutMarjHesabi`'ndan gelince `marj` alanı `Math.round`'lu olduğu için 1 ondalıkla BASILAMAZ (yuvarlanmış girdiye
+ *   ondalık). Orkestratör kararı O13: oran HAMDIR, `brutKar / tamTutar(ciroTutar) × 100`; payda marj KAPSAMINDAKİ ciro
+ *   (`ciroTutar`, O12 — kalemsiz Mikro siparişinin cirosu maliyetsiz girmez), başlık cirosu (`toplamCiroTutar`) DEĞİL.
+ *   Sonuç şekli değişmesin diye `BrutMarjSonucu`'na alan EKLENMEDİ, ayrı export yazıldı.
+ *   DEĞİŞMEZ: `hamMarj(s) === null ⇔ s.marj === null`; değilse `Math.round(hamMarj(s)) === s.marj`.
+ *   O23: GB4 P306 «Brüt Kâr Marjı Eğilimi» K14 gereği kalktığı için aylık eğilim yardımcısı YAZILMADI (tüketicisiz kod).
+ *   O21: TRY dışı mağaza siparişinin `marjCirosu` NaN'dir — verilirse marj '—' olur; ayrım `brutMarjHesabi`'ndan ÖNCE,
+ *   ÇAĞIRANDA (`siparisler/magazaSiparisi.tryDisiMi`). K2 iptal süzgeci de çağıranda.
  */
 import { toplaBilinen, ekranTutari, tamTutar, siparisMaliyeti, bilinenSayi, type Tutar } from '../para';
 import { raporSiparisi, type RaporSiparisi } from './raporVeriKatmani';
@@ -249,4 +261,16 @@ export function stokDevirGunu(
   if (!Number.isFinite(cogs) || cogs <= 0 || !Number.isFinite(gunSayisi) || gunSayisi <= 0) return { dio: null, neden: 'maliyetli-siparis-yok' };
   if (!Number.isFinite(stokDegeri)) return { dio: null, neden: 'stok-bilinmiyor' };
   return { dio: Math.round(stokDegeri / (cogs / gunSayisi)), neden: null };
+}
+
+// ── Ham brüt marj (6c eki, O13) ────────────────────────────────────────────────
+
+/**
+ * HAM (yuvarlanmamış) brüt marj yüzdesi — O13. `BrutMarjSonucu.marj` bunun `Math.round`'udur.
+ * null = hesaplanamaz (brüt kâr bilinmiyor YA DA marj kapsamındaki ciro tam bilinmiyor / ≤ 0). Negatif marj (zarar)
+ * BİLİNEN bir değerdir, `null` yapılmaz. Girdi mutasyona uğramaz.
+ */
+export function hamMarj(sonuc: Pick<BrutMarjSonucu, 'brutKar' | 'ciroTutar'>): number | null {
+  const ciroTam = tamTutar(sonuc.ciroTutar);
+  return Number.isFinite(sonuc.brutKar) && Number.isFinite(ciroTam) && ciroTam > 0 ? (sonuc.brutKar / ciroTam) * 100 : null;
 }

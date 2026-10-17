@@ -80,12 +80,45 @@
  *  • `segmentCirosu` / `enIyiMusteriler` → ELEMEZ (Phase 79/106/77 de elemiyordu). Listeyi
  *    çağıran süzer; sayfa bugün `filteredOrders` (Phase 79) ve `orders` (106/77) veriyor.
  *
+ * ## 6c EKİ (2026-10-17, Faz 3 6/n Genel II) — ADDITIVE; yukarıdaki gövdelerin davranışı DEĞİŞMEDİ
+ * ### `odemeYontemiSegmenti` (+ `ODEME_YONTEMI_BELIRTILMEMIS`, `OdemeYontemliSiparis`) — orkestratör kararı O3
+ * Neden var — iki rapor bloğu ödeme yöntemini İKİ ayrı kopyayla segmentliyordu:
+ *   • GenelBloklar2 P249: `(m.paymentMethod as string) || (m.payment as string) || (oc(currentLanguage).belirtilmemis)`
+ *     — `payment` HAYALET alan (kodda yazıcısı yok); anahtar ÇEVRİLMİŞ metin (dil değişince anahtar değişir);
+ *     `methodMap[method].rev += o.totalPrice || 0` tutarı bilinmeyeni ₺0 sayıyor; `totalRev249 > 0 ? … : 0` sahte "%0".
+ *   • GenelBloklar4 P270: `… .paymentMethod || … .payment_method || 'Other'` — `payment_method` HAYALET; `'Other'` ile
+ *     gerçek `'other'` İKİ ayrı satır oluyor; iptal süzgeci de yok. K14 genel kuralı ("aynı işi yapan çift paneller →
+ *     kaldır") gereği bu panel KALKAR, GB2 paneli bu yardımcıya bağlanır — tek tanım burada.
+ * Kural: YALNIZ kodda yazıcısı olan ENUM alan `paymentMethod` okunur (yazıcı `siparisler/odemeYontemi.odemeAlindiYamasi`;
+ * "ödeme geri alındı" yaması `paymentMethod: null` yazar). Tanıma TEK liste `siparisler/odemeYontemi.ODEME_YONTEMLERI`
+ * üzerinden `odemeYontemiMi` ile yapılır — burada ikinci bir yöntem listesi YOKTUR. `shopifyRaw.odemeYontemi` serbest
+ * metindir (enum değil), OKUNMAZ: mağaza siparişi «belirtilmemiş» satırına düşer (parite). "Belirtilmemiş" bir SATIRDIR,
+ * not değil (O3). `status` okumaz — K2 süzgeci çağıranda.
+ * ### `segmentCirosu` 4 parametreli AŞIRI YÜK `{ tutarSec, anahtarsizSay? }` (+ `SegmentCiroSecenek`) — O10, O22
+ * Neden var — GenelBloklar4 P495 kategori paneli KALEM listesini `li.category || 'Other'` + `(li.price || li.unitPrice || 0)
+ * * (li.quantity || 1)` ile elle kovalıyordu (hayalet alan, uydurma kategori, `|| 0` / `|| 1`), payda ilk 7 kategorinin
+ * toplamıydı (K21 ihlali); P238 şehir paneli şehri olmayan siparişi `if (!city) return;` ile SESSİZCE düşürüyordu.
+ *   • Mevcut 3 parametreli imza, kısıtı ve davranışı AYNEN (DashboardPage'in iki çağrısı + `iptalHaric.degismez` metni).
+ *   • 4 parametreli biçimde `O` KISITSIZDIR (kalem de geçer — `OrderLineItem` `SegmentSiparisi` ile ortak alan taşımaz)
+ *     ve `tutarSec` ZORUNLUDUR (kalemin tutarı `stokSevkiyat.kalemTutari`'dır, `siparisTutari` değil). Genel toplam ve
+ *     segment toplamı AYNI seçiciyle okunur (farklı seçici yüzdeleri 100'ün üstüne taşırdı — yarım düzeltme).
+ *   • `anahtarsizSay: true` → `segmentle` `null` dönen kayıt hiçbir segmente girmez, `anahtarsiz`da SAYILIR ve yüzde
+ *     paydasında KALIR. K21 "İlk N" paydası → kullanıcı: "Tüm ciro". Bayraksız `null` → throw (uydurma segment yok).
+ *   • DEĞİŞMEZ: `Σ segmentler.siparisSayisi + (anahtarsiz ? anahtarsiz.adet : 0) === siparisler.length`.
+ *     `anahtarsiz.tutarsiz` üst düzey `tutarsiz`ın ALT KÜMESİDİR — çağıran ikisini TOPLAMAZ.
+ * ### TRY dışı sipariş (O21) — ayrım ÇAĞIRANDA
+ * Bu modül `dovizTutar` / `paraBirimi` OKUMAZ (kur çevrimi yok, sessiz ₺0 yok). TRY dışı mağaza siparişi (`totalPrice`
+ * yazılmaz) buraya verilirse «tutarı bilinmeyen» sayılır; kalem düzeyinde daha kötüsü `kalemTutari` dövizli kalemin
+ * `netTutar`ını TL sanıp toplar (kalemde birim yok). Çağıran `siparisler/magazaSiparisi.tryDisiMi` ile siparişi
+ * `flatMap`'ten ÖNCE ayırır, `dovizli` sayısını kendi notunda verir.
+ *
  * Saf modül: React/DB yok, kullanıcı metni yok (dil ve biçim çağıranda).
  */
 import { toplaBilinen, ekranTutari, tamTutar, sayiSirala } from '../para';
 import { olcekReferansi, cubukOrani, type CubukSatiri } from './cubuk';
 import { siparisTutari, odemeTakipli, type SiparisTutarAlanlari } from '../siparis';
 import type { SiparisKarlilik } from '../siparisler/siparisKarlilik';
+import { odemeYontemiMi, type OdemeYontemi } from '../siparisler/odemeYontemi';
 
 /* ── Yapısal girdi tipleri ────────────────────────────────────────────────────
  * Kanonik `Order`a BAĞLI DEĞİL (bkz. siparis.ts): bazı bileşenler kendi daraltılmış
@@ -108,6 +141,11 @@ export interface TipliSiparis {
   customerType?: unknown;
 }
 
+/** `paymentMethod` okuyan segmentleyicinin girdisi — yapısal (src/types.ts `Order.paymentMethod` uyar). */
+export interface OdemeYontemliSiparis {
+  paymentMethod?: unknown;
+}
+
 /* ── Segment anahtarları ──────────────────────────────────────────────────── */
 
 /**
@@ -128,6 +166,22 @@ export function donutSegmenti(o: TipliSiparis): 'B2B' | 'Dealer' | 'Retail' {
 /** Phase 79'un iki kovası: B2B / B2B olmayan (etiketi sayfa koyar: "Perakende"). */
 export function b2bSegmenti(o: TipliSiparis): 'B2B' | 'Diger' {
   return tipSegmenti(o) === 'B2B' ? 'B2B' : 'Diger';
+}
+
+/** Ödeme yöntemi girilmemiş siparişin segment ANAHTARI. Ekran etiketini SAYFA koyar: `oc(dil).belirtilmemis`. */
+export const ODEME_YONTEMI_BELIRTILMEMIS = 'belirtilmemis';
+
+/**
+ * Siparişin ödeme yöntemi segmenti (6c eki, O3). YALNIZ kodda yazıcısı olan ENUM alan okunur (`paymentMethod`);
+ * `payment` / `payment_method` hayalet alanlardır (yazıcı yok), `shopifyRaw.odemeYontemi` serbest metindir
+ * (enum değil) — ikisi de OKUNMAZ.
+ * Kırpılmış değer `odemeYontemiMi` ile tanınırsa (TEK liste: `utils/siparisler/odemeYontemi.ts` `ODEME_YONTEMLERI`)
+ * AYNEN döner; boş / boşluk / null / metin olmayan / listede OLMAYAN → `ODEME_YONTEMI_BELIRTILMEMIS`.
+ * "Belirtilmemiş" bir SATIRDIR (parite), not değil: payı tüm ciro içinde görünür. Gerçek `'other'` kendi satırıdır.
+ */
+export function odemeYontemiSegmenti(o: OdemeYontemliSiparis): OdemeYontemi | typeof ODEME_YONTEMI_BELIRTILMEMIS {
+  const y: unknown = typeof o.paymentMethod === 'string' ? o.paymentMethod.trim() : o.paymentMethod;
+  return odemeYontemiMi(y) ? y : ODEME_YONTEMI_BELIRTILMEMIS;
 }
 
 /* ── Ortak yardımcılar ────────────────────────────────────────────────────── */
@@ -240,26 +294,74 @@ export interface SegmentCiroSonucu {
   yuzdelerGecerli: boolean;
   /** Halkanın merkezine yazılan en büyük segment; cirosu bilinmiyorsa `null`. */
   enBuyuk: SegmentCiro | null;
+  /**
+   * YALNIZ 4 parametreli biçimde `anahtarsizSay: true` iken VAR (3 parametreli çağrının sonuç şekli DEĞİŞMEZ).
+   * `segmentle`ın `null` döndürdüğü kayıtlar: hiçbir segmente girmez, yüzde paydasında (`tamToplam`) KALIR.
+   * `ciro` EKRAN toplamıdır (`ekranTutari`); `tutarsiz` üst düzey `tutarsiz`ın ALT KÜMESİDİR — ikisi TOPLANMAZ.
+   */
+  anahtarsiz?: { adet: number; ciro: number; tutarsiz: number };
+}
+
+/** `segmentCirosu`'nun 4 parametreli biçiminin seçeneği (6c eki, O10). */
+export interface SegmentCiroSecenek<O> {
+  /** Tutar seçicisi — ZORUNLU; genel toplam VE segment toplamı AYNI seçiciyle okunur. Bilinmeyen → NaN/null/undefined. */
+  tutarSec: (o: O) => unknown;
+  /**
+   * true → `segmentle` `null` dönerse kayıt HİÇBİR segmente girmez, `anahtarsiz`da SAYILIR; genel toplama
+   * (yüzde paydası) GİRER.
+   * K21 "İlk N" paydası → kullanıcı: "Tüm ciro".
+   */
+  anahtarsizSay?: boolean;
 }
 
 /**
  * Phase 79 (`b2bSegmenti`) ve Phase 106 (`donutSegmenti`) için ciro dağılımı.
  * Pay yüzdesi TÜRETMEDİR: tek siparişin tutarı bile bilinmiyorsa hiçbir yüzde üretilmez —
  * eksik bir toplamdan çıkarılan "%100 B2B" sahte kesinliktir.
+ *
+ * (1) MEVCUT biçim — imza, kısıt ve davranış AYNEN.
  */
 export function segmentCirosu<O extends SegmentSiparisi>(
   siparisler: readonly O[],
   segmentle: (o: O) => string,
   anahtarlar?: readonly string[],
+): SegmentCiroSonucu;
+/**
+ * (2) 6c eki (O10) — kısıtsız `O` (sipariş KALEMİ de geçer), `tutarSec` ZORUNLU, segmentleyici `null` dönebilir
+ * (yalnız `anahtarsizSay: true` ile; bayraksız `null` → throw). GenelBloklar4 kategori (kalem) ve şehir panelleri.
+ */
+export function segmentCirosu<O>(
+  siparisler: readonly O[],
+  segmentle: (o: O) => string | null,
+  anahtarlar: readonly string[] | undefined,
+  secenek: SegmentCiroSecenek<O>,
+): SegmentCiroSonucu;
+export function segmentCirosu<O>(
+  siparisler: readonly O[],
+  segmentle: (o: O) => string | null,
+  anahtarlar?: readonly string[],
+  secenek?: SegmentCiroSecenek<O>,
 ): SegmentCiroSonucu {
-  const genel = toplaBilinen(siparisler, siparisTutari);
+  // `secenek` yokken çağrı (1) numaralı aşırı yükten gelir; o biçim `O`'yu `SegmentSiparisi`'ne kısıtlar.
+  // Genel toplam ve segment toplamı AYNI seçiciyi okur (farklı seçici yüzdeleri 100'ün üstüne taşırdı).
+  const sec: (o: O) => unknown = secenek ? secenek.tutarSec : (o => siparisTutari(o as SiparisTutarAlanlari));
+  const genel = toplaBilinen(siparisler, sec);
   const toplam = ekranTutari(genel);
   const tamToplam = tamTutar(genel);
   const yuzdelerGecerli = Number.isFinite(tamToplam) && tamToplam > 0;
 
-  const kovalar = kovala(siparisler, segmentle);
+  // Anahtarsız (`null`) kayıtlar metin kovalarından AYRILIR: `anahtarlar` yolu ve serbest yol yalnız METİN anahtar görür,
+  // `enBuyuk` anahtarsızı ASLA seçmez. Kova sırası (ilk görülme) metin anahtarları için AYNEN korunur.
+  const kovalar = new Map<string, O[]>();
+  let anahtarsizlar: O[] = [];
+  for (const [k, g] of kovala(siparisler, segmentle)) {
+    if (k === null) anahtarsizlar = g; else kovalar.set(k, g);
+  }
+  if (anahtarsizlar.length > 0 && secenek?.anahtarsizSay !== true) {
+    throw new Error('segmentCirosu: segmentle null döndü ama anahtarsizSay verilmedi');
+  }
   const yap = (anahtar: string, grup: readonly O[]): SegmentCiro => {
-    const t = toplaBilinen(grup, siparisTutari);
+    const t = toplaBilinen(grup, sec);
     const ciro = ekranTutari(t);
     return {
       anahtar,
@@ -289,7 +391,13 @@ export function segmentCirosu<O extends SegmentSiparisi>(
   }
   if (enBuyuk !== null && !Number.isFinite(enBuyuk.ciro)) enBuyuk = null;
 
-  return { segmentler, toplam, tamToplam, tutarsiz: genel.bilinmeyen, yuzdelerGecerli, enBuyuk };
+  const sonuc: SegmentCiroSonucu = { segmentler, toplam, tamToplam, tutarsiz: genel.bilinmeyen, yuzdelerGecerli, enBuyuk };
+  // `anahtarsiz` alanı bayrağa göre ya HİÇ konmaz (3 parametreli çağrının sonuç şekli aynen) ya da TAM konur.
+  if (secenek?.anahtarsizSay === true) {
+    const a = toplaBilinen(anahtarsizlar, sec);
+    sonuc.anahtarsiz = { adet: anahtarsizlar.length, ciro: ekranTutari(a), tutarsiz: a.bilinmeyen };
+  }
+  return sonuc;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

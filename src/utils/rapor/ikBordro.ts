@@ -45,6 +45,20 @@
  *     tek dilimdir. Boş adın ekranda nasıl etiketleneceği (bugün 'undefined' dilimi) bağlama
  *     katmanının kararı — yardımcı etiket ÜRETMEZ.
  *
+ * ## 6c eki (2026-10-17, grup "utils-ikbordro") — çalışan (employees) okuma
+ *
+ * `calisanDurumu` (export) · `maasOku` (MODÜL İÇİ, JIT → 6l) · `maasKutlesi` (export).
+ * İlk tüketiciler: GenelBloklar4 P&L paneli (bordro satırı + EBITDA notu), GenelBloklar2 «Özet içgörüler» paneli (aktif çalışan sayısı).
+ * K23 (kullanıcı: "Önerin ok. Sorunun cevabı dediğin gibi olacak."): maaş kütlesi YALNIZ aktif +
+ * maaşı girilmiş; girilmeyen sayılır ("N çalışanın maaşı girilmemiş"); dövizli maaş TL'ye toplanmaz.
+ * Maaş 0 = GİRİLMEMİŞ (yazıcı HRModule.tsx 'salary: 0,' / 'salary: mPer.salary || 0,' / 'Number(e.target.value)' boş maaşı 0 saklıyor; emsal IKRapor.tsx '&& e.salary').
+ * İzinli çalışan kütle DIŞI (orkestratör O11: "K23 lafzı 'yalnız aktif' → dışarıda"; parite: GenelBloklar4 P&L'in eski aktif süzgeci).
+ * `maasiGirilmemis` (=== tutar.bilinmeyen) ve `dovizli` sayaçları EBITDA notunu besler (orkestratör O12:
+ * "EBITDA HESAPLANIR + not ('N çalışanın maaşı girilmemiş; M dövizli bordro dâhil değil')") — EBITDA
+ * yardımcıda HESAPLANMAZ, bağlama katmanındadır.
+ * `aylikBordro` 6c'de YAZILMADI (orkestratör O11 — 6l'ye ertelendi): GB4 `payrolls` almıyor → tüketicisi 6l.
+ * (Kanonik tipler: types.ts `interface Payroll`, `interface Employee`; `BordroKaydi` doc yorumundaki eski satır başvurusu bayattır — tür adıyla aranır.)
+ *
  * ## Dokunulmayanlar
  * `IKPage.tsx:621-635` ve `MuhtasarModule.tsx:98/288` netSalary'yi brütten HESAPLAR (bordro
  * ÜRETİMİ — farklı iş); bu modül DB'ye YAZILMIŞ `netSalary`'yi OKUR. Kopya değildir.
@@ -148,4 +162,108 @@ export function departmanAnahtari(e: { department?: unknown }): string | null {
   if (typeof e.department !== 'string') return null;
   const ad = e.department.trim();
   return ad === '' ? null : ad;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// 6c eki (grup "utils-ikbordro") — çalışan (employees) okuma: calisanDurumu · maasOku · maasKutlesi
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** `employees` dokümanının okunan alanları — yapısal (kanonik `Employee` — src/types.ts `interface Employee`, uyar). */
+export interface CalisanKaydi {
+  status?: unknown;
+  salary?: unknown;
+  salaryCurrency?: unknown;
+}
+
+/** Kanonik durum (src/types.ts `Employee.status`: 'Aktif' | 'Ayrıldı' | 'İzinli') + okunamayan. */
+export type CalisanDurumu = 'aktif' | 'izinli' | 'ayrildi' | 'bilinmiyor';
+
+// Eşleme `Map` ile, düz nesne (`Record`) DEĞİL: `({ aktif: … })['constructor']` prototipten bir
+// FONKSİYON döndürür → 'constructor' durumlu kayıt "bilinen" görünürdü. `Map.get` yalnız kendi
+// anahtarlarını döner. Anahtarlar `trim().toLocaleLowerCase('tr-TR')` biçimindedir.
+const DURUM_ESLEMESI: ReadonlyMap<string, CalisanDurumu> = new Map<string, CalisanDurumu>([
+  ['aktif', 'aktif'],
+  ['ayrıldı', 'ayrildi'],
+  ['izinli', 'izinli'],
+]);
+
+/**
+ * Çalışanın durum ANAHTARI (ekrana BASILMAZ — etiket bağlama katmanında).
+ * `status` metin değilse ya da kanonik üç Türkçe değerden biri değilse `'bilinmiyor'` — varsayılan
+ * 'aktif' YOK. İngilizce 'Active' / 'Inactive' / 'On Leave' ve Mikro'nun ham 'Pasif'i EŞLENMEZ:
+ * `Employee.status` kapalı Türkçe küme, hiçbir yazıcı İngilizce yazmıyor (HRModule.tsx Mikro içe
+ * aktarımı 'Pasif'i 'Ayrıldı'ya çeviriyor); eşleme eklemek bilinmeyeni tahminle doldurmak olur.
+ * Büyük/küçük harf + boşluk toleransı: ' AKTİF ' → 'aktif' (Türkçe kural, `toLocaleLowerCase('tr-TR')`).
+ */
+export function calisanDurumu(e: Pick<CalisanKaydi, 'status'>): CalisanDurumu {
+  if (typeof e.status !== 'string') return 'bilinmiyor';
+  return DURUM_ESLEMESI.get(e.status.trim().toLocaleLowerCase('tr-TR')) ?? 'bilinmiyor';
+}
+
+/**
+ * MODÜL İÇİ (JIT: 6c'de dış tüketicisi yok; IKRapor.tsx'in `baseSalary` / `monthlySalary` arayan maaş okuyucularıyla 6l'de dışa açılır).
+ * Aylık maaş: bilinen, SONLU ve > 0 ise sayı; aksi hâlde `null` (GİRİLMEMİŞ).
+ * Yalnız `salary` okunur (`baseSalary` / `monthlySalary` `Employee`'de YOK — 6l kararı).
+ */
+function maasOku(e: Pick<CalisanKaydi, 'salary'>): number | null {
+  if (!bilinenSayi(e.salary)) return null;
+  const n = Number(e.salary);
+  // 0 = GİRİLMEMİŞ: yazıcı boş maaşı 0 saklıyor (HRModule.tsx form varsayılanı 'salary: 0,' · Mikro içe aktarımı 'salary: mPer.salary || 0,' · form kutusu 'salary: Number(e.target.value)'); emsal IKRapor.tsx '&& e.salary'. Negatif maaş geçersiz → girilmemiş.
+  return n > 0 ? n : null;
+}
+
+/** `maasKutlesi`nin dönüşü — sayaçlar ÇİFT SAYMAZ (her aktif çalışan TAM BİR kovada). */
+export interface MaasKutlesi {
+  /**
+   * Aktif + TL (salaryCurrency boş/TRY) çalışanların aylık maaş toplamı (EKRAN: `ekranTutari(tutar)`).
+   * bilinen = maaşı girilmiş aktif TL çalışan; bilinmeyen = maaşı GİRİLMEMİŞ (boş/0/negatif/metin)
+   * aktif TL çalışan.
+   */
+  tutar: Tutar;
+  /**
+   * O12 "girilmemiş sayısı" — "N çalışanın maaşı girilmemiş" notunun N'i. `tutar.bilinmeyen` ile AYNI
+   * küme (DEĞİŞMEZ `maasiGirilmemis === tutar.bilinmeyen`); bağlama notu BUNDAN basar, ikisini toplamaz.
+   */
+  maasiGirilmemis: number;
+  /** O12 "dövizli sayısı" — aktif ama maaşı yabancı para (salaryCurrency ≠ TRY); TL toplamına GİRMEZ, ayrı sayılır (K23). */
+  dovizli: number;
+  /**
+   * Aktif çalışan sayısı (TL + dövizli; maaşlı + maaşsız).
+   * DEĞİŞMEZ: `aktif === tutar.bilinen + maasiGirilmemis + dovizli`.
+   */
+  aktif: number;
+  /** Durumu okunamayan çalışan (calisanDurumu = 'bilinmiyor') — aktif mi bilinmiyor; toplama girmez, sayılır. */
+  durumBilinmeyen: number;
+}
+
+// K23 (KARARLAR.md) — kullanıcı: "Önerin ok. Sorunun cevabı dediğin gibi olacak."
+// Tek tanım: YALNIZ aktif + maaşı girilmiş; girilmeyen hesaba katılmaz + "N çalışanın maaşı
+// girilmemiş" notu; maaş kütlesi de yalnız aktiflerden. Dövizli bordro TL'ye TOPLANMAZ, ayrı
+// sayılır (PLAN-v2 §3 #20; emsal lojistikKpi.ihracatToplami).
+/**
+ * Aylık maaş kütlesi (GenelBloklar4 P&L bordro satırı + EBITDA notu). Tek geçiş, sıra SABİT:
+ *   1. durum: 'bilinmiyor' → `durumBilinmeyen`; İzinli / Ayrıldı → kütle dışı; Aktif → `aktif`.
+ *   2. döviz: TL değilse → `dovizli` (maaşı girilmemiş dövizli çalışan YALNIZ burada görünür —
+ *      `odenenBordro` / `bordroTrendi` emsali, başlık "Bilinçli farklar" madde 4).
+ *   3. kalan aktif TL çalışanlar `toplaBilinen` + `maasOku` → `tutar`; `maasiGirilmemis` aynı
+ *      değerden atanır (ayrı sayaç döngüsü YOK → çift sayma imkânsız).
+ * Hiç maaş girilmemiş aktif TL kadroda `ekranTutari(tutar)` NaN ('—'); boş listede gerçek 0.
+ * EBITDA burada HESAPLANMAZ (orkestratör O12 — bağlama katmanı). Girdi mutasyona uğramaz.
+ */
+export function maasKutlesi(calisanlar: readonly CalisanKaydi[]): MaasKutlesi {
+  const aktifTl: CalisanKaydi[] = [];
+  let aktif = 0, dovizli = 0, durumBilinmeyen = 0;
+
+  for (const e of calisanlar) {
+    const durum = calisanDurumu(e);
+    if (durum === 'bilinmiyor') { durumBilinmeyen++; continue; }
+    // İzinli çalışan: K23 lafzı 'yalnız aktif' → dışarıda (orkestratör O11; parite: GenelBloklar4 P&L'in eski aktif süzgeci).
+    if (durum !== 'aktif') continue;
+    aktif++;
+    if (!tlKaydi(e.salaryCurrency)) { dovizli++; continue; }
+    aktifTl.push(e);
+  }
+
+  const tutar = toplaBilinen(aktifTl, e => maasOku(e));
+  return { tutar, maasiGirilmemis: tutar.bilinmeyen, dovizli, aktif, durumBilinmeyen };
 }

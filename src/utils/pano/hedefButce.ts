@@ -64,6 +64,18 @@
  *
  * Girdi tipi MİNİMAL ve YAPISAL (`Order`'a bağlı DEĞİL): kanonik tip de, bileşenlerin kendi daraltılmış
  * yerel sipariş tipleri de uyar — yarım düzeltme sınıfı (bkz. siparis.ts başlığı) tekrarlanmasın.
+ *
+ * 6c EKİ (2026-10-17, Faz 3 6/n Genel II) — `donemProjeksiyonu` (ADDITIVE; yukarıdaki gövdeler DOKUNULMADI).
+ *   Neden var — src/components/reports/genel/GenelBloklar2.tsx P225 «Aylık İlerleme»:
+ *   `pace225 = dayOfMonth > 0 ? Math.round((mRevenue225 / dayOfMonth) * daysInMonth) : 0` ay sonu projeksiyonunu
+ *   `(o.totalPrice || 0)` ile kurulmuş KISMİ cirodan türetiyor, `: 0` sahte; aynı hız kuralı adet ve müşteri için iki
+ *   kez daha kopyalanmış. «Yıllık Projeksiyon» `lastWeek * 52` da kısmi haftalık cirodan.
+ *   • Orkestratör kararı O9: `satisHizi` SARMALAYICISI — hız kuralı (`tamTutar` kapısı + `pozitifSayi` bölen kapısı)
+ *     KOPYALANMAZ, yalnız `× toplamGun` eklenir; dönüş NESNE, alan `projeksiyon` (null = hesaplanamaz).
+ *   • Birim çağıranındır: `gecenGun` ve `toplamGun` AYNI birimde (gün YA DA hafta). Yıllık reçete `(sonHafta, 1, 52)`:
+ *     `x / 1 × 52 === x × 52` BİREBİR; `(7, 364)` kayan noktada sapar (`9 / 7 × 364 = 468.00000000000006`).
+ *   • O21: TRY dışı mağaza siparişi `donemCirosu`'na verilirse «tutarı bilinmeyen» sayılır ve projeksiyonu '—' yapar;
+ *     ayrım ÇAĞIRANDA (`siparisler/magazaSiparisi.tryDisiMi`). Bu modül `dovizTutar` / `paraBirimi` OKUMAZ.
  */
 import { toplaBilinen, ekranTutari, tamTutar, type Tutar } from '../para';
 import { siparisTutari } from '../siparis';
@@ -384,4 +396,25 @@ export function hedefleriOku(ham: unknown): AylikHedefler {
     if (h !== null) cikti[ay] = h;
   }
   return cikti;
+}
+
+// ── Dönem projeksiyonu (6c eki) ────────────────────────────────────────────────────────────
+
+export interface DonemProjeksiyonu extends SatisHizi {
+  /** `gunluk × toplamGun`; null = HESAPLANAMAZ (hız yok ya da toplamGun ≤ 0 / okunamaz). Yuvarlama ÇAĞIRANDA. */
+  projeksiyon: number | null;
+  /** Kabul edilen dönem uzunluğu (`gecenGun` ile AYNI birimde); geçersizse null. */
+  toplamGun: number | null;
+}
+
+/**
+ * Dönem sonu projeksiyonu = (ciro / gecenGun) × toplamGun — önce böl, sonra çarp (GB2 P225 sırası).
+ * Hız `satisHizi`'nden gelir (O9 — kopya yok): ciroda tek bilinmeyen kayıt ya da geçersiz `gecenGun` → `gunluk` ve
+ * `projeksiyon` null; geçersiz `toplamGun` → `toplamGun` ve `projeksiyon` null, `gunluk` sayı kalır. Satışsız dönem
+ * (`{0,0,0}`) GERÇEK 0. Fırlatmaz. Parametre adlarındaki "gun" tarihseldir: birim (gün / hafta) çağıranın kararı.
+ */
+export function donemProjeksiyonu(ciro: Tutar, gecenGun: unknown, toplamGun: unknown): DonemProjeksiyonu {
+  const hiz = satisHizi(ciro, gecenGun);
+  const toplam = pozitifSayi(toplamGun) ? Number(toplamGun) : null;
+  return { ...hiz, toplamGun: toplam, projeksiyon: hiz.gunluk !== null && toplam !== null ? hiz.gunluk * toplam : null };
 }

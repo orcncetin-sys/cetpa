@@ -16,6 +16,11 @@
  * extraction deseni: props = tsc "Cannot find name" listesi). Blok içi hiçbir state/hook
  * yoktu; her bileşen yalnız kullandığı ctx alanlarını props olarak alır.
  */
+/*
+ * 6c (2026-10-17) — O5 (orkestratör): K4 kullanıcı kararı ("kimlikle") Cetpa kaydı ile Mikro carisini `leadCariKodu`
+ * haritasıyla TEK müşteri sayar. Harita GenelBloklar3'e geçtiği gibi GenelBloklar2 ve GenelBloklar4'e de geçer; prop
+ * verilmezse `musteriOzeti` iki kimliği BİRLEŞTİRMEZ ve bağ sessizce ölür.
+ */
 import { type ReportsCtx } from './useReportsData';
 import GenelOzet from './genel/GenelOzet';
 import GenelBloklar1 from './genel/GenelBloklar1';
@@ -68,6 +73,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         exchangeRates={ctx.exchangeRates}
         currentLanguage={ctx.currentLanguage}
         fmtAna={ctx.fmtAna}
+        leadCariKodu={ctx.leadCariKodu}
       />
       <GenelBloklar3
         reportsTab={ctx.reportsTab}
@@ -89,6 +95,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         exchangeRates={ctx.exchangeRates}
         currentLanguage={ctx.currentLanguage}
         fmtAna={ctx.fmtAna}
+        leadCariKodu={ctx.leadCariKodu}
       />
       <GenelBloklar5
         reportsTab={ctx.reportsTab}

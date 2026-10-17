@@ -437,3 +437,98 @@ describe('hedefOnDoldur — üç hedef kutusunun TEK ön-doldurma tanımı', () 
     expect(hedefOnDoldur(0.4)).toBe('');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6c EKİ (2026-10-17): `donemProjeksiyonu` — `satisHizi` SARMALAYICISI (O9)
+//   GenelBloklar2 P225 «Aylık İlerleme»:
+//     `mRevenue225 = orders.filter(…).reduce((s, o) => s + (o.totalPrice || 0), 0)`   → KISMİ toplam…
+//     `const pace225 = dayOfMonth > 0 ? Math.round((mRevenue225 / dayOfMonth) * daysInMonth) : 0;`
+//                                       → …ay sonu projeksiyonu KISMİ cirodan; `: 0` sahte; aynı hız kuralı ×3 kopya
+//   GenelBloklar2 «Yıllık Projeksiyon»: `const annualRunRate = lastWeek * 52;` → kısmi haftalık cirodan
+// Kural: projeksiyon TÜRETİLEN sayıdır — ciroda tek bilinmeyen kayıt varsa HESAPLANMAZ (null → '—').
+// O21: TRY dışı mağaza siparişi `donemCirosu`'na ULAŞMAZ — ayrım ÇAĞIRANDA.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { donemProjeksiyonu } from './hedefButce';
+import { tryDisiMi } from '../siparisler/magazaSiparisi';
+
+/** Mağaza alanlarını da taşıyan pano siparişi (O21 vakası). `status` kesişimle metne daralır. */
+type MagazaliPano = PanoSiparis & { status?: string; source?: string; paraBirimi?: string; dovizTutar?: number; customerName?: string };
+
+describe('donemProjeksiyonu — 6c eki (O9)', () => {
+  const ciro = (toplam: number, bilinen: number, bilinmeyen = 0): Tutar => ({ toplam, bilinen, bilinmeyen });
+
+  it('1 · PARİTE (ay sonu, GB2 P225): (ciro / geçen gün) × ay günü — önce böl, sonra çarp', () => {
+    const r = donemProjeksiyonu(ciro(130000, 5), 13, 30);
+    expect(r.projeksiyon).toBe((130000 / 13) * 30);
+    const dayOfMonth = 13, daysInMonth = 30, mRevenue225 = 130000;
+    // GB2 P225'in ESKİ formülü (bilinen girdide):
+    const pace225 = dayOfMonth > 0 ? Math.round((mRevenue225 / dayOfMonth) * daysInMonth) : 0;
+    expect(Math.round(r.projeksiyon as number)).toBe(pace225);
+    expect(r.toplamGun).toBe(30);
+    // Sipariş adedi hızı aynı kalıpla (GB2 P225 ikinci satır): adet bilinen sayıdır.
+    const mOrders225 = 7;
+    const adet = donemProjeksiyonu(toplaBilinen(Array.from({ length: mOrders225 }), () => 1), dayOfMonth, daysInMonth);
+    expect(Math.round(adet.projeksiyon as number)).toBe(Math.round((mOrders225 / dayOfMonth) * daysInMonth));
+  });
+
+  it('2 · PARİTE (yıllık, birim HAFTA): (x, 1, 52) === x × 52 BİREBİR; (7, 364) kayan noktada SAPAR (belge vakası)', () => {
+    expect(donemProjeksiyonu(ciro(9, 1), 1, 52).projeksiyon).toBe(468);
+    expect(donemProjeksiyonu(ciro(9, 1), 1, 52).projeksiyon).toBe(9 * 52);
+    expect(donemProjeksiyonu(ciro(70000, 3), 1, 52).projeksiyon).toBe(3640000);
+    // Reçetenin neden (1, 52) olduğunu kilitler: (9 / 7) × 364 = 468.00000000000006.
+    expect(donemProjeksiyonu(ciro(9, 1), 7, 364).projeksiyon).not.toBe(468);
+  });
+
+  it('3 · MUTASYON-AYIRT EDİCİ: bilinmeyen kayıtlı cirodan projeksiyon ÜRETİLMEZ; ekran kısmi kalır', () => {
+    const r = donemProjeksiyonu(ciro(130000, 5, 1), 13, 30);
+    expect(r.projeksiyon).toBeNull();
+    expect(r.gunluk).toBeNull();
+    expect(r.ekran).toBe(130000);
+    expect(r.bilinmeyen).toBe(1);
+  });
+
+  it('4 · gün kapıları: geçersiz geçen gün → null (eski `: 0` DEĞİL); geçersiz toplam gün → null, hız kalır', () => {
+    for (const g of [0, -1, 'abc', null, undefined, NaN]) {
+      const r = donemProjeksiyonu(ciro(130000, 5), g, 30);
+      expect(r.projeksiyon).toBeNull();
+      expect(r.gunluk).toBeNull();
+      expect(r.gun).toBeNull();
+    }
+    for (const t of [0, NaN, -30, 'otuz', null]) {
+      const r = donemProjeksiyonu(ciro(130000, 5), 13, t);
+      expect(r.projeksiyon).toBeNull();
+      expect(r.toplamGun).toBeNull();
+      expect(r.gunluk).toBe(130000 / 13);
+    }
+  });
+
+  it('5 · satışsız dönem GERÇEK 0 projeksiyon', () => {
+    expect(donemProjeksiyonu(ciro(0, 0), 10, 30).projeksiyon).toBe(0);
+  });
+
+  it('6 · satisHizi ile tutarlılık: miras alanlar AYNEN', () => {
+    for (const [c, g] of [[ciro(130000, 5), 13], [ciro(500, 1, 2), 7], [ciro(0, 0), 0]] as const) {
+      const { gunluk, ekran, bilinmeyen, gun } = donemProjeksiyonu(c, g, 30);
+      expect({ gunluk, ekran, bilinmeyen, gun }).toEqual(satisHizi(c, g));
+    }
+  });
+
+  it('7 · O21 (bileşik — donemCirosu + donemProjeksiyonu): dövizli sipariş projeksiyonu \'—\' yapmamalı', () => {
+    const ayBasi = new Date(2026, 8, 1);
+    const x: MagazaliPano[] = [
+      { totalPrice: 100000, status: 'Delivered', createdAt: new Date(2026, 8, 3) },    // Şirin İnşaat — ÇİMENTO 50KG
+      { totalPrice: 30000, status: 'Shipped', createdAt: new Date(2026, 8, 9) },       // Çelik Yapı — NERVÜRLÜ DEMİR
+      // TRY dışı mağaza siparişi — sunucu `totalPrice` YAZMAZ (shopifyEsleme TRY dışı yazımı).
+      { source: 'shopify_webhook', paraBirimi: 'EUR', dovizTutar: 50, customerName: 'Kaya Hırdavat', status: 'Delivered', createdAt: new Date(2026, 8, 10) },
+    ];
+    // (a) süzgeçsiz — `dovizTutar` OKUNMAZ: «tutarı bilinmeyen» → projeksiyon null, 50 EUR ekrana EKLENMEDİ.
+    const a = donemProjeksiyonu(donemCirosu(x, ayBasi, null, false).ciro, 13, 30);
+    expect(a.bilinmeyen).toBe(1);
+    expect(a.projeksiyon).toBeNull();
+    expect(a.ekran).toBe(130000);
+    // (b) çağıran reçetesiyle (`tryDisiMi` — TEK tanım).
+    const b = donemProjeksiyonu(donemCirosu(x.filter(o => !tryDisiMi(o)), ayBasi, null, false).ciro, 13, 30);
+    expect(b.projeksiyon).toBe((130000 / 13) * 30);
+    expect(x.filter(o => o.status !== 'Cancelled').filter(tryDisiMi).length).toBe(1);
+  });
+});

@@ -74,9 +74,33 @@
  * ## DOKUNULMADI
  * `stokSevkiyat.haftaIciIsiHaritasi` / `IsiHaritasi` / `TarihliSiparis` — imza, gövde ve testleri
  * AYNEN durur (kapalı modül). Onu buna indirmek 6m sonrası ayrı iştir; sapma test 1 ile kilitli.
+ *
+ * ## 6c EKİ (2026-10-17, Faz 3 6/n Genel II) — `haftaGunIzgarasi` + `aktifGunSerisi` (ADDITIVE; yukarıdakiler DOKUNULMADI)
+ * ### `haftaGunIzgarasi` — `zamanKovalari` SARMALAYICISI (hafta × gün CİRO ızgarası)
+ * Neden var — src/components/reports/genel/GenelBloklar4.tsx P445 ısı haritası:
+ *   `weekAgo = Math.floor((now351 - ts) / (7 * 86400000)); if (weekAgo > 7) return;` — gelecek tarihli kayıt (`weekAgo < 0`)
+ *   `grid['-1-x']`e yazılıp hiç ÇİZİLMİYOR ama ölçeği ve dolu hücre sayısını ŞİŞİRİYOR; 8 haftadan eski kayıt SESSİZCE
+ *   düşüyor; `grid[key] = (grid[key] || 0) + (o.totalPrice || 0)` tutarı bilinmeyeni ₺0 sayıyor.
+ *   `stokSevkiyat.haftaIciIsiHaritasi` yalnız 7 kovalı ADET verir — hafta × gün CİRO ızgarası değil, o yüzden yeni export.
+ *   • Hafta KAYAN haftadır (son 7×24 saat — GB4 paritesi); h = 0 içinde bulunulan hafta, g = `getDay()` (0 = Pazar).
+ *     Gelecek tarihli ve `haftaSayisi`'ndan eski kayıt `kapsamDisi`de SAYILIR. `tutarSec` ZORUNLU (ciro ızgarası:
+ *     verilmeseydi `zamanKovalari` ciroyu hiç okumaz, panel sessizce "veri yok" basardı).
+ *   • Yoğunluk / ölçek ÇAĞIRANDA (`pano/cubuk.olcekReferansi` + `cubukOrani`; bilinmeyenli hücre renk ALMAZ). Sütun sırası
+ *     (O17: "8w ago … Now" etiketi ile sıra TERS'ti) bağlamanın işi — yardımcı h = 0 = şimdi döndürür.
+ * ### `aktifGunSerisi` — orkestratör kararı O17 (tek aktif gün = 1)
+ * Neden var — GenelBloklar4.tsx P528 «Ciro Süreklilik Serisi»: `gunAnahtari(o.createdAt); if (!key) return;` tarihi
+ *   çözülemeyen kaydı SESSİZCE düşürüyor; `let maxStreak = 0, cur = 1; … if (diff === 1) { cur++; maxStreak = … }` ardışık
+ *   iki gün yokken "en uzun seri 0" basıyor (aynı kartta "toplam 3 aktif gün" yazarken); gün geri sarma milisaniyeyle.
+ *   • Takvim günüyle geri sarar (`new Date(y, m, g − k)`); sonsuz `while (true)` YOK (döngü aktif gün sayısıyla sınırlı).
+ *   • Para OKUMAZ: tutarı bilinmeyen sipariş de günü aktif sayar (O16 "sipariş varlığından"); TRY dışı sipariş bu
+ *     yardımcıda bozuk veri değildir (O21'den etkilenmez). `aktifGun` gelecek tarihli günü de sayar (parite).
+ * ### TRY dışı sipariş (O21) — ayrım ÇAĞIRANDA
+ * `haftaGunIzgarasi` `dovizTutar` / `paraBirimi` OKUMAZ; TRY dışı mağaza siparişi verilirse hücresi «tutarı bilinmeyen»
+ * olur ve renk almaz. Çağıran `siparisler/magazaSiparisi.tryDisiMi` ile ayırır, `dovizli` sayısını kendi notunda verir.
+ * K2 · İptaller ciroya girsin mi → "hayır". — iki yardımcı da `status` okumaz; süzgeç ÇAĞIRANDA.
  */
 import { tamTutar, type Tutar } from '../para';
-import { zamanDate } from '../zaman';
+import { zamanDate, gunAnahtari, gunFarki } from '../zaman';
 import { BOS_TUTAR, kovayaEkle } from '../pano/raporVeriKatmani';
 import type { TarihliSiparis } from '../pano/stokSevkiyat';
 
@@ -243,4 +267,117 @@ export function mevsimsellikEndeksi(aylar: readonly ZamanKovasi[]): Mevsimsellik
   endeksler.forEach((e, i) => { if (e !== null && e > enBuyuk) { enBuyuk = e; zirve = i; } });
 
   return { endeksler, olculenAy, tutarsizAy, verisizAy, zirve };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hafta × gün ciro ızgarası (6c eki, 2026-10-17 — GenelBloklar4 P445 ısı haritası)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** KAYAN hafta = son 7×24 saat (GB4 P445 paritesi: `Math.floor((now - ts) / (7 * 86400000))`). */
+const HAFTA_MS = 7 * 86400000;
+
+/** `tutarSec` ZORUNLU: bu bir CİRO ızgarasıdır. Verilmeseydi `zamanKovalari` ciroyu HİÇ okumaz, her hücre `BOS_TUTAR` kalır ve panel sessizce "veri yok" basardı. */
+export type HaftaGunSecenek<T> = ZamanKovasiSecenek<T> & { tutarSec: (o: T) => unknown };
+
+export interface HaftaGunIzgarasi {
+  /** `hucreler[h][g]` — h = 0 içinde bulunulan KAYAN hafta (son 7×24 saat), h = haftaSayisi−1 en eski; g = `getDay()` (0 = Pazar). */
+  hucreler: ZamanKovasi[][];
+  tarihsiz: number;
+  /** `haftaSayisi` haftadan eski YA DA `simdi`den SONRA (gelecek tarihli) kayıt — eskiden biri sessizce düşüyor, öbürü ölçeği şişiriyordu. */
+  kapsamDisi: number;
+}
+
+/**
+ * Son `haftaSayisi` KAYAN haftanın hafta × gün ciro ızgarası — `zamanKovalari` SARMALAYICISI (kovalama, tarih çözümü,
+ * tutar ve sayaç kuralı orada TEK yerde). Tutarı bilinmeyen kayıt hücrenin `ciro.bilinmeyen`ine düşer (₺0 DEĞİL) ve
+ * `adet`e dâhildir. DEĞİŞMEZ: `Σ adet + tarihsiz + kapsamDisi === liste.length`. `haftaSayisi` pozitif TAM SAYI değilse throw.
+ */
+export function haftaGunIzgarasi<T extends TarihliSiparis>(
+  liste: readonly T[],
+  haftaSayisi: number,
+  simdi: Date,
+  secenek: HaftaGunSecenek<T>,
+): HaftaGunIzgarasi {
+  if (!Number.isInteger(haftaSayisi) || haftaSayisi <= 0) {
+    throw new Error(`haftaGunIzgarasi: haftaSayisi pozitif tam sayı olmalı (geldi: ${String(haftaSayisi)})`);
+  }
+  const z = zamanKovalari(liste, haftaSayisi * 7, d => {
+    const h = Math.floor((simdi.getTime() - d.getTime()) / HAFTA_MS);
+    // Açık -1 okunurluk içindir: gelecek (h < 0) ve eski (h ≥ haftaSayisi) kayıt `zamanKovalari`'nda `kapsamDisi` sayılır.
+    return h < 0 || h >= haftaSayisi ? -1 : h * 7 + d.getDay();
+  }, secenek);
+  const hucreler = Array.from({ length: haftaSayisi }, (_, h) => z.kovalar.slice(h * 7, h * 7 + 7));
+  return { hucreler, tarihsiz: z.tarihsiz, kapsamDisi: z.kapsamDisi };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aktif gün serisi (6c eki, 2026-10-17 — GenelBloklar4 P528 «Ciro Süreklilik Serisi»; O17)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AktifGunSerisi {
+  /** `bugun`den geriye kesintisiz aktif takvim günü; bugün aktif değilse 0 (bugünkü tanım — parite). */
+  mevcutSeri: number;
+  /** En uzun kesintisiz aktif gün dizisi; aktif gün yoksa 0, en az bir aktif gün varsa ≥ 1 (O17: tek aktif gün = 1). */
+  enUzunSeri: number;
+  /** Farklı aktif gün sayısı — tarihi çözülen TÜM kayıtlar (gelecek tarihli dâhil; `daySet.size` paritesi). */
+  aktifGun: number;
+  /** Son `sonGunSayisi` takvim günü, en eskiden bugüne. */
+  sonGunler: { anahtar: string; aktif: boolean }[];
+  /** Tarihi çözülemeyen kayıt — SAYILIR. */
+  tarihsiz: number;
+}
+
+/**
+ * Siparişlerin aktif (en az bir kaydı olan) takvim günlerinden süreklilik serisi. Gün anahtarı `zaman.gunAnahtari`
+ * (yerel gün); ardışıklık `zaman.gunFarki === 1`. Para OKUMAZ. `sonGunSayisi` pozitif TAM SAYI değilse ya da `bugun`
+ * geçerli bir tarih değilse throw (sessiz boş şerit, bozuk yapılandırmayı "hiç satış yok" diye gösterirdi).
+ */
+export function aktifGunSerisi<T extends TarihliSiparis>(
+  liste: readonly T[],
+  bugun: Date,
+  sonGunSayisi: number,
+  tarihSec: (o: T) => unknown = varsayilanTarih,
+): AktifGunSerisi {
+  if (!Number.isInteger(sonGunSayisi) || sonGunSayisi <= 0) {
+    throw new Error(`aktifGunSerisi: sonGunSayisi pozitif tam sayı olmalı (geldi: ${String(sonGunSayisi)})`);
+  }
+  const y = bugun.getFullYear(), m = bugun.getMonth(), g = bugun.getDate();
+  /** `bugun`den `geri` TAKVİM günü önceki günün anahtarı (milisaniye ile geri sarma YOK). */
+  const takvimGunu = (geri: number): string => {
+    const a = gunAnahtari(new Date(y, m, g - geri));
+    if (a === null) throw new Error('aktifGunSerisi: bugun geçerli bir tarih olmalı');
+    return a;
+  };
+  const bugunAnahtari = takvimGunu(0);
+
+  const gunler = new Set<string>();
+  let tarihsiz = 0;
+  for (const o of liste) {
+    const k = gunAnahtari(tarihSec(o));
+    if (k === null) { tarihsiz += 1; continue; }
+    gunler.add(k);
+  }
+
+  let mevcutSeri = 0;
+  for (let k = 0; k < gunler.size; k++) {
+    if (!gunler.has(k === 0 ? bugunAnahtari : takvimGunu(k))) break;
+    mevcutSeri += 1;
+  }
+
+  // O17: tek aktif gün = 1 (eski `maxStreak = 0` tabanı ardışık gün yokken 0 basıyordu).
+  let enUzunSeri = 0;
+  let zincir = 0;
+  let onceki: string | null = null;
+  for (const k of [...gunler].sort()) {
+    zincir = onceki !== null && gunFarki(k, onceki) === 1 ? zincir + 1 : 1;
+    if (zincir > enUzunSeri) enUzunSeri = zincir;
+    onceki = k;
+  }
+
+  const sonGunler = Array.from({ length: sonGunSayisi }, (_, i) => {
+    const anahtar = takvimGunu(sonGunSayisi - 1 - i);
+    return { anahtar, aktif: gunler.has(anahtar) };
+  });
+
+  return { mevcutSeri, enUzunSeri, aktifGun: gunler.size, sonGunler, tarihsiz };
 }

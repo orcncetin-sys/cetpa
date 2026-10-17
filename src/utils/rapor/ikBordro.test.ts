@@ -18,6 +18,8 @@
 import { describe, it, expect } from 'vitest';
 import { odenenBordro, bordroTrendi, departmanAnahtari } from './ikBordro';
 import { ekranTutari } from '../para';
+import { calisanDurumu, maasKutlesi } from './ikBordro';
+import { tamTutar } from '../para';
 
 // ── Fikstür: Türkçe alanlar, TL, gerçek şekil (types.ts:377 Payroll) ────────────────────────
 const odendi = (netSalary: unknown, ek: Record<string, unknown> = {}) =>
@@ -204,5 +206,207 @@ describe('departmanAnahtari — departman dilimi (useReportsData.ts:102 parite)'
     expect(departmanAnahtari({ department: 42 })).toBeNull();
     expect(departmanAnahtari({ department: {} })).toBeNull();
     expect(departmanAnahtari({})).toBeNull();
+  });
+});
+
+// ══ 6c eki (grup "utils-ikbordro") — çalışan (employees) okuma: calisanDurumu + maasKutlesi ═══════
+// ÖNCE YAZILDI (kırmızı görüldü: `calisanDurumu is not a function` / `maasKutlesi is not a function`).
+// Sahte kesinlik sitesi — GenelBloklar4 P&L paneli bordro satırı:
+//   employees.filter(e=>e.status==='Aktif').reduce((s,e)=>s+(e.salary||0),0)
+// maaşı girilmemiş aktif çalışanı "₺0 biliniyor" sayıyor, `salaryCurrency`yi yok sayıp USD/EUR maaşı
+// TL gibi topluyor, metin saklanmış maaşta `0 + '42000'` metin birleştirmesi yapıyor.
+// K23 (KARARLAR.md) — kullanıcı: "Önerin ok. Sorunun cevabı dediğin gibi olacak."
+// Fikstür: kanonik `Employee` şekli (types.ts `interface Employee`), Türkçe adlar, TL.
+const calisan = (salary: unknown, ek: Record<string, unknown> = {}) =>
+  ({ name: 'Ahmet Demir', department: 'Sevkiyat', status: 'Aktif', salary, salaryCurrency: 'TRY', ...ek });
+
+describe('calisanDurumu — çalışan durumu anahtarı (GenelBloklar2 «Özet içgörüler» / GenelBloklar4 P&L parite)', () => {
+  it('durum-1 · kanonik üç değer; PARİTE: aktif sayısı eski `status === \'Aktif\'` süzgeciyle BİREBİR', () => {
+    expect(calisanDurumu({ status: 'Aktif' })).toBe('aktif');
+    expect(calisanDurumu({ status: 'Ayrıldı' })).toBe('ayrildi');
+    expect(calisanDurumu({ status: 'İzinli' })).toBe('izinli');
+
+    const kadro = [
+      calisan(42000, { name: 'Ahmet Demir' }),
+      calisan(38500, { name: 'Ayşe Yılmaz', department: 'Depo', status: 'Ayrıldı' }),
+      calisan(51000, { name: 'Mehmet Kaya', department: 'Satış', status: 'İzinli' }),
+      calisan(35000, { name: 'Zeynep Arslan', department: 'Depo' }),
+      calisan(60000, { name: 'Emre Çelik', department: 'Satış' }),
+    ];
+    const eski = kadro.filter(e => e.status === 'Aktif').length;
+    expect(kadro.filter(e => calisanDurumu(e) === 'aktif').length).toBe(eski);
+    expect(eski).toBe(3);
+  });
+
+  it('durum-2 · trim + tr-TR küçük harf (mutasyon: `toLowerCase()` → "İ" i + birleşik nokta \\u0307 olur, eşleşmez)', () => {
+    expect(calisanDurumu({ status: ' AKTİF ' })).toBe('aktif');
+    expect(calisanDurumu({ status: 'ayrıldı' })).toBe('ayrildi');
+    expect(calisanDurumu({ status: 'AYRILDI' })).toBe('ayrildi');   // tr-TR: I → ı (dil ayarsız dönüşüm 'ayrildi' verir)
+    expect(calisanDurumu({ status: 'İZİNLİ' })).toBe('izinli');
+  });
+
+  it('durum-3 · okunamayan durum \'bilinmiyor\' — varsayılan \'aktif\' DEĞİL (mutasyon: `?? \'aktif\'`)', () => {
+    for (const status of [undefined, null, '', '   ', 42, 'Active', 'Inactive', 'Pasif']) {
+      expect(calisanDurumu({ status })).toBe('bilinmiyor');
+    }
+    expect(calisanDurumu({})).toBe('bilinmiyor');
+  });
+
+  it('durum-4 · prototip anahtarı tuzağı: \'constructor\' / \'toString\' bilinen durum DEĞİL (mutasyon: Map yerine düz nesne)', () => {
+    expect(calisanDurumu({ status: 'constructor' })).toBe('bilinmiyor');
+    expect(calisanDurumu({ status: 'toString' })).toBe('bilinmiyor');
+    expect(calisanDurumu({ status: '__proto__' })).toBe('bilinmiyor');
+  });
+});
+
+describe('maasKutlesi — aylık maaş kütlesi (GenelBloklar4 P&L bordro satırı + EBITDA notu; K23 / O11 / O12)', () => {
+  // Eski GenelBloklar4 P&L ifadesi — yalnız PARİTE kanıtı için testte satır içi (fikstürde `salary: unknown`).
+  const eskiBordro = (kadro: readonly { status: unknown; salary: unknown }[]) =>
+    kadro.filter(e => e.status === 'Aktif').reduce((s, e) => s + ((e.salary as number) || 0), 0);
+
+  const paritKadrosu = () => [
+    calisan(42000, { name: 'Ahmet Demir' }),
+    calisan(38500, { name: 'Ayşe Yılmaz', department: 'Depo' }),
+    calisan(51000, { name: 'Mehmet Kaya', department: 'Satış' }),
+    calisan(60000, { name: 'Zeynep Arslan', department: 'Depo', status: 'Ayrıldı' }),
+    calisan(35000, { name: 'Emre Çelik', department: 'Satış', status: 'İzinli' }),
+  ];
+
+  it('kütle-5 · PARİTE: eski GenelBloklar4 P&L bordro ifadesiyle BİREBİR (Ayrıldı / İzinli dışarıda)', () => {
+    const kadro = paritKadrosu();
+    const m = maasKutlesi(kadro);
+    expect(m.tutar).toEqual({ toplam: 131500, bilinen: 3, bilinmeyen: 0 });
+    expect(ekranTutari(m.tutar)).toBe(eskiBordro(kadro));
+    expect(m.aktif).toBe(3);
+    expect(m.maasiGirilmemis).toBe(0);
+    expect(m.dovizli).toBe(0);
+    expect(m.durumBilinmeyen).toBe(0);
+  });
+
+  it('kütle-6 · maaşı girilmemiş aktif çalışan ₺0 SAYILMAZ (mutasyon: `e => e.salary || 0` → bilinen 6 / bilinmeyen 0)', () => {
+    const m = maasKutlesi([
+      calisan(42000, { name: 'Ahmet Demir' }),
+      calisan(undefined, { name: 'Ayşe Yılmaz' }),
+      calisan(null, { name: 'Mehmet Kaya' }),
+      calisan('', { name: 'Zeynep Arslan' }),
+      calisan('abc', { name: 'Emre Çelik' }),
+      calisan(NaN, { name: 'Ayşe Yılmaz', department: 'Depo' }),
+    ]);
+    expect(m.tutar).toEqual({ toplam: 42000, bilinen: 1, bilinmeyen: 5 });
+    expect(m.maasiGirilmemis).toBe(5);
+    // TÜRETME kapısı kısmi kütleden sayı üretmez; EKRAN sözleşmesi kısmi toplamı verir (O12: EBITDA buna girer).
+    expect(Number.isNaN(tamTutar(m.tutar))).toBe(true);
+    expect(ekranTutari(m.tutar)).toBe(42000);
+  });
+
+  it('kütle-7 · maaş 0 = GİRİLMEMİŞ (yazıcı varsayılanı); negatif de girilmemiş (mutasyon: `n > 0` kapısı kalkarsa bilinen 3)', () => {
+    const m = maasKutlesi([
+      calisan(42000, { name: 'Ahmet Demir' }),
+      calisan(0, { name: 'Ayşe Yılmaz', department: 'Depo' }),
+      calisan(-5000, { name: 'Mehmet Kaya', department: 'Satış' }),
+    ]);
+    expect(m.tutar).toEqual({ toplam: 42000, bilinen: 1, bilinmeyen: 2 });
+    expect(m.maasiGirilmemis).toBe(2);
+    // 0 eklemek = hariç tutmak: toplam eski ifadeyle aynı, yalnız sayaç değişir.
+    expect(m.tutar.toplam).toBe(eskiBordro([calisan(42000), calisan(0)]));
+  });
+
+  it('kütle-8 · sayısal string bilinendir, METİN BİRLEŞTİRMESİ yok', () => {
+    const kadro = [calisan('42000', { name: 'Ahmet Demir' }), calisan(38500, { name: 'Ayşe Yılmaz' })];
+    const m = maasKutlesi(kadro);
+    expect(m.tutar.toplam).toBe(80500);
+    expect(typeof m.tutar.toplam).toBe('number');
+    // Eski ifade `0 + '42000'` ile metin üretiyordu (bilinçli fark: artık sayı).
+    expect(typeof eskiBordro(kadro)).toBe('string');
+  });
+
+  it('kütle-9 · dövizli maaş TL\'ye TOPLANMAZ, ayrı sayılır — K23 (mutasyon: `tlKaydi` çağrısı kalkarsa toplam 47.500)', () => {
+    const m = maasKutlesi([
+      calisan(42000, { name: 'Ahmet Demir' }),
+      calisan(3000, { name: 'Ayşe Yılmaz', department: 'Satış', salaryCurrency: 'USD' }),
+      calisan(2500, { name: 'Mehmet Kaya', department: 'Satış', salaryCurrency: 'EUR' }),
+    ]);
+    expect(m.tutar.toplam).toBe(42000);
+    expect(m.tutar.bilinen).toBe(1);
+    expect(m.dovizli).toBe(2);
+    expect(m.aktif).toBe(3);
+  });
+
+  it('kütle-10 · boş / eksik / küçük harf para birimi = TRY (mevcut `tlKaydi` sözleşmesi yeniden kullanılıyor)', () => {
+    const m = maasKutlesi([
+      calisan(42000, { name: 'Ahmet Demir', salaryCurrency: undefined }),
+      calisan(38500, { name: 'Ayşe Yılmaz', salaryCurrency: '' }),
+      calisan(51000, { name: 'Mehmet Kaya', salaryCurrency: '  ' }),
+      calisan(35000, { name: 'Zeynep Arslan', salaryCurrency: 'try' }),
+      calisan(30000, { name: 'Emre Çelik', salaryCurrency: null }),
+    ]);
+    expect(m.tutar).toEqual({ toplam: 196500, bilinen: 5, bilinmeyen: 0 });
+    expect(m.dovizli).toBe(0);
+  });
+
+  it('kütle-11 · sayaçlar ÇİFT SAYMAZ + DEĞİŞMEZLER (mutasyon: döviz denetimi maaştan SONRA → maaşsız USD iki sayaçta)', () => {
+    const m = maasKutlesi([
+      calisan(0, { name: 'Ayşe Yılmaz', department: 'Satış', salaryCurrency: 'USD' }),
+      calisan(undefined, { name: 'Mehmet Kaya', department: 'Depo' }),
+      calisan(42000, { name: 'Ahmet Demir' }),
+    ]);
+    expect(m.dovizli).toBe(1);
+    expect(m.maasiGirilmemis).toBe(1);
+    expect(m.tutar.bilinmeyen).toBe(1);
+    expect(m.tutar.bilinen).toBe(1);
+    expect(m.aktif).toBe(3);
+    expect(m.aktif).toBe(m.tutar.bilinen + m.maasiGirilmemis + m.dovizli);
+    expect(m.maasiGirilmemis).toBe(m.tutar.bilinmeyen);
+  });
+
+  it('kütle-12 · yalnız aktif — İzinli / Ayrıldı kütleye GİRMEZ (mutasyon: yalnız `ayrildi` süzülürse İzinli girer)', () => {
+    const m = maasKutlesi([
+      calisan(35000, { name: 'Zeynep Arslan', status: 'İzinli' }),
+      calisan(60000, { name: 'Emre Çelik', status: 'Ayrıldı' }),
+    ]);
+    expect(m.tutar).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 0 });
+    expect(m.aktif).toBe(0);
+    expect(m.durumBilinmeyen).toBe(0);
+    expect(ekranTutari(m.tutar)).toBe(0);
+  });
+
+  it('kütle-13 · durumu okunamayan sayılır, aktif SAYILMAZ (mutasyon: bilinmeyen durum aktif sayılırsa toplam 137.000)', () => {
+    const m = maasKutlesi([
+      calisan(50000, { name: 'Mehmet Kaya', status: undefined }),
+      calisan(45000, { name: 'Ayşe Yılmaz', status: 'Active' }),
+      calisan(42000, { name: 'Ahmet Demir' }),
+    ]);
+    expect(m.tutar.toplam).toBe(42000);
+    expect(m.aktif).toBe(1);
+    expect(m.durumBilinmeyen).toBe(2);
+  });
+
+  it('kütle-14 · hiç maaş girilmemiş kadro ekranda \'—\' verir, ₺0 DEĞİL', () => {
+    const m = maasKutlesi([
+      calisan(0, { name: 'Ahmet Demir' }),
+      calisan(0, { name: 'Ayşe Yılmaz', department: 'Depo' }),
+    ]);
+    expect(Number.isNaN(ekranTutari(m.tutar))).toBe(true);
+    expect(m.tutar.bilinmeyen).toBe(2);
+    expect(m.maasiGirilmemis).toBe(2);
+  });
+
+  it('kütle-15 · boş liste gerçek 0 (NaN değil), tüm sayaçlar 0', () => {
+    const m = maasKutlesi([]);
+    expect(ekranTutari(m.tutar)).toBe(0);
+    expect(m).toEqual({
+      tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 },
+      maasiGirilmemis: 0,
+      dovizli: 0,
+      aktif: 0,
+      durumBilinmeyen: 0,
+    });
+  });
+
+  it('kütle-16 · girdi mutasyona uğramaz (dondurulmuş dizi + öğeler; sonuç PARİTE vakasıyla aynı)', () => {
+    const kadro = Object.freeze(paritKadrosu().map(e => Object.freeze(e)));
+    expect(() => maasKutlesi(kadro)).not.toThrow();
+    expect(maasKutlesi(kadro)).toEqual(maasKutlesi(paritKadrosu()));
+    expect(maasKutlesi(kadro).tutar).toEqual({ toplam: 131500, bilinen: 3, bilinmeyen: 0 });
   });
 });

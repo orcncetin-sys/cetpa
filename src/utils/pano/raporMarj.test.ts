@@ -329,3 +329,97 @@ describe('marjCirosu + sku eşleşmesi — sürüm-2 MF siparişi', () => {
     expect(r.marj).toBe(33);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6c EKİ (2026-10-17): `hamMarj` — HAM (yuvarlanmamış) brüt marj yüzdesi (O13; aylık eğilim yardımcısı O23 ile YAZILMADI — GB4 P306 K14 gereği kalktı)
+//   GenelBloklar4 P22 P&L: `Gross margin: {revenue>0?((grossProfit/revenue)*100).toFixed(1):0}%`
+//     → hesaplanamayan marj sahte "0%" (`: 0`); brüt kâr `brutMarjHesabi`'ndan gelince `BrutMarjSonucu.marj`
+//       `Math.round`'lu olduğu için 1 ondalıkla BASILAMAZ ("yuvarlanmış girdiye ondalık" arızası)
+// Kural: oran `brutKar / tamTutar(ciroTutar) × 100` — payda marj KAPSAMINDAKİ ciro (O12), başlık cirosu değil.
+// O21: TRY dışı mağaza siparişi `brutMarjHesabi`'na ULAŞMAZ — ayrım ÇAĞIRANDA.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { hamMarj, type BrutMarjSonucu } from './raporMarj';
+import { tryDisiMi } from '../siparisler/magazaSiparisi';
+
+/** Şirin İnşaat — ÇİMENTO 50KG siparişi: `adet` torba @ `fiyat`, kalemin KENDİ maliyeti `maliyet`. */
+const cimentoSiparisi = (fiyat: number, adet: number, maliyet: number): MarjSiparisi => ({
+  totalPrice: fiyat * adet,
+  lineItems: [{ inventoryId: 'p1', name: 'ÇİMENTO 50KG', price: fiyat, quantity: adet, costPrice: maliyet }],
+});
+
+describe('hamMarj — 6c eki (O13)', () => {
+  it('1 · PARİTE + DEĞİŞMEZ: ciro ₺1.500, maliyet ₺1.000 → (500 / 1500) × 100; Math.round(ham) === marj', () => {
+    const s = brutMarjHesabi([cimentoSiparisi(150, 10, 100)], cozucu);
+    expect(hamMarj(s)).toBe((500 / 1500) * 100);
+    expect(s.marj).toBe(33);
+    expect(Math.round(hamMarj(s) as number)).toBe(s.marj);
+  });
+
+  it('2 · null kapıları: maliyet çözülemedi → null; kapsamda ciro 0 → null (0 DEĞİL); zarar BİLİNEN değerdir', () => {
+    const maliyetsiz = brutMarjHesabi([{ totalPrice: 4000, lineItems: [{ inventoryId: 'p3', name: 'TUĞLA', price: 4, quantity: 1000 }] }], cozucu);
+    expect(Number.isNaN(maliyetsiz.brutKar)).toBe(true);
+    expect(hamMarj(maliyetsiz)).toBeNull();
+    const kalemsiz = brutMarjHesabi([{ totalPrice: 5000 }], cozucu);         // yalnız kalemsiz (Mikro türevi) sipariş
+    expect(kalemsiz.kapsamDisi).toBe(1);
+    expect(hamMarj(kalemsiz)).toBeNull();
+    const zarar = brutMarjHesabi([cimentoSiparisi(100, 10, 125)], cozucu);   // ciro ₺1.000, maliyet ₺1.250
+    expect(hamMarj(zarar)).toBe(-25);
+    expect(zarar.marj).toBe(-25);
+  });
+
+  it('3 · MUTASYON-AYIRT EDİCİ: yuvarlanmamış — ciro ₺3.000, maliyet ₺2.000 → 33,333… (marj 33)', () => {
+    const s = brutMarjHesabi([cimentoSiparisi(300, 10, 200)], cozucu);
+    expect(hamMarj(s)).toBeCloseTo(100 / 3, 9);
+    expect(hamMarj(s)).not.toBe(33);
+    expect(s.marj).toBe(33);
+  });
+
+  it('3b · DEĞİŞMEZ: hamMarj === null ⇔ marj === null; değilse Math.round(ham) === marj', () => {
+    const vakalar: BrutMarjSonucu[] = [
+      brutMarjHesabi([cimentoSiparisi(150, 10, 100), tamSiparis, tamSiparis2], cozucu),
+      brutMarjHesabi([cimentoSiparisi(99.5, 7, 81.25)], cozucu),
+      brutMarjHesabi([cimentoSiparisi(100, 10, 125)], cozucu),
+      brutMarjHesabi([{ totalPrice: 5000 }], cozucu),
+      brutMarjHesabi([{ totalPrice: undefined, lineItems: [{ inventoryId: 'p1', name: 'ÇİMENTO 50KG', price: 1, quantity: 1 }] }], cozucu),
+      brutMarjHesabi([], cozucu),
+      // 6c inceleme 1: iade ağırlıklı sipariş — ciro −₺1.000 (10 × −₺100), maliyet ₺800 → marj null; ham da null (`ciroTam > 0` kapısı).
+      brutMarjHesabi([cimentoSiparisi(-100, 10, 80)], cozucu),
+    ];
+    for (const s of vakalar) {
+      const h = hamMarj(s);
+      expect(h === null).toBe(s.marj === null);
+      if (h !== null) expect(Math.round(h)).toBe(s.marj);
+    }
+  });
+
+  it('4 · O21: TRY dışı sipariş `brutMarjHesabi`\'na ulaşırsa marj \'—\'; ulaşmamalı (ayrım çağıranda)', () => {
+    type MagazaliMarj = MarjSiparisi & { source?: string; status?: string; paraBirimi?: string; dovizTutar?: number; customerName?: string };
+    const x: MagazaliMarj[] = [
+      { totalPrice: 1500, status: 'Delivered', lineItems: cimentoSiparisi(150, 10, 100).lineItems },   // Şirin İnşaat — TL
+      // TRY dışı mağaza siparişi — sunucu `totalPrice` YAZMAZ (shopifyEsleme TRY dışı yazımı); kalemi maliyetli.
+      { source: 'shopify_webhook', paraBirimi: 'EUR', dovizTutar: 50, customerName: 'Kaya Hırdavat', status: 'Delivered',
+        lineItems: [{ inventoryId: 'p1', name: 'ÇİMENTO 50KG', quantity: 5, costPrice: 100, netTutar: 50 }] },
+    ];
+    // (a) süzgeçsiz — 50 EUR TL ciroya EKLENMEDİ, «tutarı bilinmeyen» → marj hesaplanmaz.
+    const a = brutMarjHesabi(x, cozucu);
+    expect(hamMarj(a)).toBeNull();
+    expect(a.ciroTutar.bilinmeyen).toBe(1);
+    expect(a.ciroTutar.toplam).toBe(1500);
+    // (b) çağıran reçetesiyle (K2 süzgeci + `tryDisiMi` — TEK tanım, sipariş düzeyinde).
+    const iptalsiz = x.filter(o => o.status !== 'Cancelled');
+    const b = brutMarjHesabi(iptalsiz.filter(o => !tryDisiMi(o)), cozucu);
+    expect(hamMarj(b)).toBeCloseTo((500 / 1500) * 100, 9);
+    expect(iptalsiz.filter(tryDisiMi).length).toBe(1);
+  });
+
+  it('5 · yapısal girdi (`Pick` biçimi, düz nesne) kabul edilir; donuk girdi mutasyona uğramaz', () => {
+    const duz = Object.freeze({ brutKar: 500, ciroTutar: Object.freeze({ toplam: 1500, bilinen: 1, bilinmeyen: 0 }) });
+    expect(hamMarj(duz)).toBe((500 / 1500) * 100);
+    expect(hamMarj({ brutKar: 500, ciroTutar: { toplam: 1500, bilinen: 1, bilinmeyen: 1 } })).toBeNull();
+    expect(hamMarj({ brutKar: NaN, ciroTutar: { toplam: 1500, bilinen: 1, bilinmeyen: 0 } })).toBeNull();
+    expect(hamMarj({ brutKar: 0, ciroTutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 } })).toBeNull();
+    // 6c inceleme 1: negatif ciro (iade) — `brutKar / ciro` burada «%20 kâr» üretirdi; kapı `ciroTam > 0`, `!== 0` DEĞİL.
+    expect(hamMarj({ brutKar: -200, ciroTutar: { toplam: -1000, bilinen: 1, bilinmeyen: 0 } })).toBeNull();
+    expect(duz.ciroTutar.toplam).toBe(1500);
+  });
+});
