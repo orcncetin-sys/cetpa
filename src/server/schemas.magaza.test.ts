@@ -95,7 +95,14 @@ describe('YetkiKoduGovdesi / PanelOturumGovdesi (§ 3.2, 3.3)', () => {
     // bloğu, teyit kalemi, `ErpIcerikGovdesi` (dış nesne + `teyit`), `ErpSilGovdesi`, `PanelSilGovdesi`. `ErpElleTalepGovdesi` yeni
     // `z.object(` YAZMAZ: mağaza talebi şemasından `.omit(…)` ile türer (kopya gövde yok).
     expect(satirlar.slice(bas).filter(s => /z\.object\(/.test(s))).toHaveLength(13);
-    expect(satirlar.filter(s => /export const ErpElleTalepGovdesi = /.test(s))).toEqual(['export const ErpElleTalepGovdesi = MagazaSiparisTalebiSchema.omit({ no: true, tarih: true }).strict();']);
+    // (Kuruş kararı 2026-10-17, B1 — bilerek değişen çit) elle talep kalemi kimliksiz talebin kalem nesnesini `.extend` ile
+    // genişletir; yalnız `birimFiyat` kuruşla sınırlanır (yeni `z.object(` yok, kalem gövdesi kopyalanmaz).
+    const elle = satirlar.findIndex(s => /export const ErpElleTalepGovdesi = /.test(s));
+    expect(satirlar.filter(s => /export const ErpElleTalepGovdesi = /.test(s))).toEqual(['export const ErpElleTalepGovdesi = MagazaSiparisTalebiSchema.omit({ no: true, tarih: true }).extend({']);
+    expect(satirlar.slice(elle + 1, elle + 3)).toEqual([
+      '  kalemler: z.array(MagazaTalepKalemSemasi.extend({ birimFiyat: KurusluBirimFiyat.nullable().optional() })).min(1),',
+      '}).strict();',
+    ]);
     // İçe aktarım yine yalnız zod + yaprak sözleşme (2b: KDV kümesi denetimi `magazaKdvOraniMi` oradan gelir, küme burada kopyalanmaz).
     expect(satirlar.filter(s => /from '/.test(s) && /^(import |\} from )/.test(s)).map(s => s.replace(/^.*from /, 'from '))).toEqual([
       "from 'zod';", "from '../lib/magazaTalep.js';", "from '../lib/magazaTalep.js';",

@@ -561,10 +561,13 @@ export default function AdminPage({
               {currentLanguage === 'tr' ? 'Davet Gönder' : 'Send Invite'}
             </button>
           </form>
+          {/* Herkese açık kayıt KAPALI (2026-10-17, şartname «kayıt kapanışı ve kuruş» A1 / A3, İ1-d): davet bağlantısı hesap AÇMAZ.
+              Davetli Google ile girer; şifreyle girecekse hesabı yönetici açar. Davet postasının metniyle tutarlı
+              (`src/server/davetPostasi.ts` `DAVET_POSTASI`). Eski not «e-posta üzerinden kayıt olabilir» kapanmış akışı anlatıyordu. */}
           <p className="text-[10px] text-gray-400 mt-2">
             {currentLanguage === 'tr'
-              ? 'Davet edilen kullanıcı, e-posta üzerinden kayıt olabilir. Rol ataması önceden yapılır.'
-              : 'The invited user can register via email. The role is pre-assigned.'}
+              ? 'Davet edilen kişi postadaki davet bağlantısını açar ve o e-posta adresine bağlı Google hesabıyla giriş yapar; rolü davetle önceden atanır. E-posta ve şifreyle girecekse hesabını yukarıdaki «Kullanıcı Ekle (manuel)» ile açın ve parola belirleme bağlantısını siz iletin.'
+              : 'The invitee opens the invitation link in the email and signs in with the Google account linked to that email address; the role is pre-assigned by the invitation. If they will sign in with email and password, create their account with “Add User (manual)” above and share the password-setup link yourself.'}
           </p>
         </div>
 

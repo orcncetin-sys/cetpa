@@ -16,6 +16,7 @@
  */
 import { resendGonderici } from '../eposta.js';
 import { davetKoduUret } from '../davetKodu.js';
+import { DAVET_POSTASI } from '../davetPostasi.js';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import type { Express, Request, Response } from 'express';
 
@@ -430,9 +431,10 @@ export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
   <div style="max-width:480px;margin:auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
     <div style="background:#ff4000;padding:28px 32px;"><h1 style="color:#fff;margin:0;font-size:22px;font-weight:800;">CETPA'ya Davet Edildiniz</h1></div>
     <div style="padding:28px 32px;">
-      <p style="font-size:14px;color:#1d1d1f;margin:0 0 24px;">CETPA platformuna <strong>${C.escapeHtml(role)}</strong> rolüyle davet edildiniz.</p>
-      <a href="${inviteUrl}" style="display:inline-block;background:#ff4000;color:#fff;padding:14px 28px;border-radius:12px;font-weight:700;font-size:14px;text-decoration:none;">Hesap Oluştur</a>
-      <p style="font-size:11px;color:#86868b;margin:20px 0 0;">Bu bağlantı 7 gün geçerlidir.</p>
+      <p style="font-size:14px;color:#1d1d1f;margin:0 0 24px;">CETPA platformuna <strong>${C.escapeHtml(role)}</strong> rolüyle davet edildiniz. ${DAVET_POSTASI.yonerge}</p>
+      <a href="${inviteUrl}" style="display:inline-block;background:#ff4000;color:#fff;padding:14px 28px;border-radius:12px;font-weight:700;font-size:14px;text-decoration:none;">${DAVET_POSTASI.dugme}</a>
+      <p style="font-size:12px;color:#1d1d1f;margin:20px 0 0;">${DAVET_POSTASI.sifreNotu}</p>
+      <p style="font-size:11px;color:#86868b;margin:12px 0 0;">Bu bağlantı 7 gün geçerlidir.</p>
     </div></div></body></html>`;
       const r = await fetch('https://api.resend.com/emails', {
         method: 'POST',

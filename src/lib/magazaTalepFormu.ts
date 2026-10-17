@@ -32,9 +32,13 @@
  *  • SAYI GİRDİSİ METİNDİR (`type=number` veri kaybı tuzağı). Adet yalnız rakam. Fiyatta ondalık ayraç virgül ya da nokta;
  *    binlik ayraç KABUL EDİLMEZ ve «1.250» gibi BELİRSİZ yazım (nokta + tam üç hane) HATADIR: Türkçe yazımda 1250 demektir,
  *    `Number('1.250')` ise 1,25 okur — sessizce bin kat küçük fiyat yazılırdı.
+ *  • KURUŞ (kullanıcı kararı 2026-10-17, şartname «kayıt kapanışı ve kuruş» B1–B2): birim fiyat EN ÇOK İKİ ONDALIK. «83,3333»,
+ *    «0,001», «1,005» ALAN HATASIDIR (`kurustan-ince`; ekran «Birim fiyat en çok iki ondalık olabilir (kuruş).» der) — kuruşa
+ *    YUVARLANMAZ, gövde üretilmez. Hüküm sunucu şemasıyla AYNI saf işlevden (`magazaKurusluMu`); hüküm DEĞERE bakar, yazıma
+ *    değil: «95,50» ve «1,250» (= 1,25) geçerlidir. Okuyan TEK işlev `magazaFiyatCoz`'dur — önizleme de gövde de oradan.
  */
 import {
-  MAGAZA_MUSTERI_ALANLARI, magazaKdvVarsayilani, magazaTeyitToplamlari,
+  MAGAZA_MUSTERI_ALANLARI, magazaKdvVarsayilani, magazaKurusluMu, magazaFiyatSinirUstu, magazaTeyitToplamlari,
   type MagazaKdvKaynagi, type MagazaKdvOrani, type MagazaTalepKalemi, type MagazaTalepMusteri, type MagazaTeyitKalemi, type MagazaTeyitToplami,
 } from './magazaTalep';
 
@@ -75,6 +79,8 @@ export interface MagazaElleTalepGirdisi {
 // ── Sayı girdisi ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export type MagazaSayiGirdisi = { tur: 'bos' } | { tur: 'sayi'; deger: number } | { tur: 'gecersiz' };
+/** Fiyat girdisi: sayı girdisine ek olarak `kurustan-ince` — okunabilen ama İKİDEN ÇOK ondalıklı değer (B2; değer TAŞINMAZ). */
+export type MagazaFiyatGirdisi = MagazaSayiGirdisi | { tur: 'kurustan-ince' };
 
 /** Adet: yalnız rakam; güvenli tam sayı VE > 0. `12,5`, `1.000`, `abc`, `0`, `-3` → `gecersiz`; boş → `bos`. */
 export function magazaAdetCoz(ham: string): MagazaSayiGirdisi {
@@ -89,17 +95,27 @@ export function magazaAdetCoz(ham: string): MagazaSayiGirdisi {
  * Birim fiyat (KDV hariç): rakamlar + isteğe bağlı TEK ondalık ayraç (virgül ya da nokta). Boş → `bos` (= «fiyat sorulacak»).
  * Binlik ayraç, eksi işaret, üs, boşluk → `gecersiz`. NOKTA + TAM ÜÇ HANE (`1.250`) → `gecersiz`: binlik ayraç mı ondalık mı
  * belirsizdir (dosya başı). Aynı değer virgülle açıktır: `1,250` = 1,25; `1250` = bin iki yüz elli.
+ * Okunan değer İKİDEN ÇOK ondalıklıysa (`magazaKurusluMu` — sunucu şemasıyla AYNI işlev) → `kurustan-ince`: `83,3333`,
+ * `0,001`, `1,005`. Belirsizlik denetimi ÖNCE gelir (`1.005` belirsizdir, kuruş sorusuna hiç gelinmez).
+ * 1 TRİLYON TL (1e14 kuruş) ve üstü → `gecersiz` — kuruş sorusundan ÖNCE (İ1-b, 2026-10-17): o büyüklükte kuruştan ince basamak
+ * ölçülemez (`magazaFiyatSinirUstu` — `magazaKurusluMu` ile AYNI sınır) ve «kuruştan ince» demek yanıltıcı olurdu.
  */
-export function magazaFiyatCoz(ham: string): MagazaSayiGirdisi {
+export function magazaFiyatCoz(ham: string): MagazaFiyatGirdisi {
   const metin = ham.trim();
   if (metin === '') return { tur: 'bos' };
   if (!/^\d+(?:[.,]\d+)?$/.test(metin)) return { tur: 'gecersiz' };
   if (/\.\d{3}$/.test(metin)) return { tur: 'gecersiz' };
   const n = Number(metin.replace(',', '.'));
-  return Number.isFinite(n) && n >= 0 ? { tur: 'sayi', deger: n } : { tur: 'gecersiz' };
+  if (!Number.isFinite(n) || n < 0) return { tur: 'gecersiz' };
+  if (magazaFiyatSinirUstu(n)) return { tur: 'gecersiz' };
+  return magazaKurusluMu(n) ? { tur: 'sayi', deger: n } : { tur: 'kurustan-ince' };
 }
 
-/** Sayı → giriş metni: ondalık ayraç VİRGÜL (formun okuduğu yazım; `magazaFiyatCoz` aynı değeri geri verir). Bilinmeyen → boş. */
+/**
+ * Sayı → giriş metni: ondalık ayraç VİRGÜL (formun okuduğu yazım; en çok iki ondalıklı değerde `magazaFiyatCoz` aynı değeri
+ * geri verir). Kuruştan ince kayıtlı değer (ör. beyandaki 83,3333 — kimliksiz uç onu AYNEN kabul eder, B3) YUVARLANMADAN
+ * basılır: personel görür ve düzeltir, kaydetme alan hatası verir. Bilinmeyen → boş.
+ */
 export function magazaSayiMetni(n: number | null): string {
   return n === null || !Number.isFinite(n) ? '' : String(n).replace('.', ',');
 }
@@ -243,7 +259,7 @@ export function magazaKayitliVarsayilaninKartOrani(
 export interface MagazaTaslakOnizlemesi extends MagazaTeyitToplami {
   /**
    * `tutar` = üç toplam dolu; `fiyat-sorulacak` = en az bir fiyat boş (üçü de `null` — kısmi toplam basılmaz); `okunamadi` =
-   * okunamayan adet / fiyat var (toplam uydurulmaz); `kalem-yok` = satır yok.
+   * okunamayan adet / fiyat ya da kuruştan ince fiyat var (toplam uydurulmaz, kuruşa yuvarlanıp basılmaz); `kalem-yok` = satır yok.
    */
   durum: 'tutar' | 'fiyat-sorulacak' | 'okunamadi' | 'kalem-yok';
 }
@@ -256,7 +272,7 @@ export function magazaTaslakOnizlemesi(kalemler: readonly MagazaKalemTaslagi[], 
   let fiyatsiz = false;
   for (const k of kalemler) {
     const adet = magazaAdetCoz(k.adet), fiyat = magazaFiyatCoz(k.fiyat);
-    if (adet.tur !== 'sayi' || fiyat.tur === 'gecersiz') return { ...bos, durum: 'okunamadi' };
+    if (adet.tur !== 'sayi' || fiyat.tur === 'gecersiz' || fiyat.tur === 'kurustan-ince') return { ...bos, durum: 'okunamadi' };
     if (fiyat.tur === 'bos') fiyatsiz = true;
     girdiler.push({ adet: adet.deger, birimFiyat: fiyat.tur === 'sayi' ? fiyat.deger : null, kdvOrani: magazaTaslakKdv(k, urunKdvOrani).kdvOrani });
   }
@@ -267,8 +283,11 @@ export function magazaTaslakOnizlemesi(kalemler: readonly MagazaKalemTaslagi[], 
 
 // ── Gövde üretimi ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Kalem satırının alan hataları (satırın `yerel` kimliğiyle adreslenir). */
-export interface MagazaKalemHatasi { ad?: true; adet?: 'bos' | 'gecersiz'; fiyat?: true }
+/**
+ * Kalem satırının alan hataları (satırın `yerel` kimliğiyle adreslenir). `fiyat`: `gecersiz` = okunamadı / belirsiz yazım;
+ * `kurustan-ince` = ikiden çok ondalık (B2 — ekran sunucu şemasının metnini basar, `MAGAZA_BIRIM_FIYAT_KURUS_HATASI`).
+ */
+export interface MagazaKalemHatasi { ad?: true; adet?: 'bos' | 'gecersiz'; fiyat?: 'gecersiz' | 'kurustan-ince' }
 
 export interface MagazaFormHatalari {
   /** Müşteri adı boş. */
@@ -302,9 +321,9 @@ function taslakDenetle(t: MagazaFormTaslagi): { hatalar: MagazaFormHatalari; kal
     if (k.ad.trim() === '') h.ad = true;
     const adet = magazaAdetCoz(k.adet), fiyat = magazaFiyatCoz(k.fiyat);
     if (adet.tur !== 'sayi') h.adet = adet.tur;
-    if (fiyat.tur === 'gecersiz') h.fiyat = true;
+    if (fiyat.tur === 'gecersiz' || fiyat.tur === 'kurustan-ince') h.fiyat = fiyat.tur;
     if (Object.keys(h).length > 0) { hatalar.kalemler[k.yerel] = h; continue; }
-    // Buraya gelen satırda adet sayıdır, fiyat sayı ya da boştur (yukarıdaki iki denetim).
+    // Buraya gelen satırda adet sayıdır, fiyat (en çok iki ondalıklı) sayı ya da boştur (yukarıdaki iki denetim).
     if (adet.tur === 'sayi') kalemler.push({ k, adet: adet.deger, birimFiyat: fiyat.tur === 'sayi' ? fiyat.deger : null });
   }
   return { hatalar, kalemler };

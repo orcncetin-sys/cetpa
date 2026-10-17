@@ -417,7 +417,9 @@ describe('kaynak çiti — yürütücü her çağrıda KİMLİKLE koşar; kuyruk
 
   it('zamanlayıcı (K10-10): kimlik oturumdan kurulur, rolü atanmamış hesapta rol YOK sayılır; kuyruğu yürütemeyen oturumda ve 2FA beklerken kurulmaz', () => {
     const app = kod('src/App.tsx').map(s => s.trim());
-    const i = app.indexOf('const kimlik = { uid: user?.uid, rol: roleMissing ? null : userRole };');
+    // 2026-10-17 (şartname «kayıt kapanışı ve kuruş» R1′): kimliğin oturumu veri kapısından (`veriOturumu`) gelir — rol çözülmeden
+    // kimlik boştur, zamanlayıcı kurulmaz. Bu iki satır bilerek değişti.
+    const i = app.indexOf('const kimlik = { uid: veriOturumu?.uid, rol: roleMissing ? null : userRole };');
     expect(i).toBeGreaterThan(0);
     expect(app.slice(i + 1, i + 7)).toEqual([
       'if (mfaChallenge || !kuyrukYurutebilir(kimlik)) return;',
@@ -427,7 +429,7 @@ describe('kaynak çiti — yürütücü her çağrıda KİMLİKLE koşar; kuyruk
       'const timer = setInterval(tick, 90_000);',
       'return () => { cancelled = true; clearInterval(timer); };',
     ]);
-    expect(app[i + 7]).toBe('}, [user, userRole, roleMissing, mfaChallenge]);');
+    expect(app[i + 7]).toBe('}, [veriOturumu, userRole, roleMissing, mfaChallenge]);');
     expect(app[i - 1]).toBe('useEffect(() => {');
   });
 

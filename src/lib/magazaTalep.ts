@@ -326,11 +326,20 @@ export interface MagazaBildirimRevize extends MagazaBildirim {
 }
 
 /**
+ * `fiyat × 100`, kayan nokta kalıntısı 15 anlamlı haneyle TEMİZLENMİŞ (1,005 × 100 = 100,49999999999999 → 100,5; 1,15 × 100 =
+ * 114,99999999999999 → 115). Toplam işlevinin birim kuruşu ve kuruş denetimi (`magazaKurusluMu`) bu TEK adımı paylaşır:
+ * denetimin kabul ettiği fiyatın kuruşu, toplamın yuvarladığı kuruşla aynı tam sayıdır.
+ */
+function temizKurus(fiyat: number): number {
+  return Number((fiyat * 100).toPrecision(15));
+}
+
+/**
  * Teyit toplamları — kuruş formülünün TEK kaynağı (V19; sunucu kayıtlı tutarı, form önizlemeyi bununla üretir):
  *   satirKurus = Math.round(birimFiyat × 100) × adet · araToplamKurus = Σ satirKurus
  *   kdvKurus = Σ Math.round(satirKurus × kdvOrani / 100) (KDV KALEM oranıyla; tek orandan değil) · toplam = ara + kdv
  * Birim fiyatın kuruşa yuvarlanmasında YARIM KURUŞ YUKARI (inceleme 2b, bulgu 2): `birimFiyat × 100` çarpımının kayan nokta
- * kalıntısı yuvarlamadan önce 15 anlamlı haneyle temizlenir (`toPrecision(15)`) — yoksa 1,005 → 100 kuruş, 0,145 → 14 kuruş
+ * kalıntısı yuvarlamadan önce 15 anlamlı haneyle temizlenir (`temizKurus`, `toPrecision(15)`) — yoksa 1,005 → 100 kuruş, 0,145 → 14 kuruş
  * çıkar ve yön fiyata göre değişirdi. İki ondalıklı fiyatta sonuç eskisiyle AYNIDIR (95 → 9.500 kuruş) — birim fiyat 1e15
  * kuruşun (10 trilyon TL) altındayken; üstü üçünü `null` yapar (inceleme 2b ikinci tur: 15 anlamlı hane o büyüklükte kuruşun
  * kendisini yuvarlar, 12.345.678.901.234,56 → …,60 yazılırdı).
@@ -351,7 +360,7 @@ export function magazaTeyitToplamlari(
     // 15 anlamlı hane kuruşu ancak 1e15 kuruşun (10 trilyon TL) ALTINDA tam taşır; üstünde temizlik kuruşun kendisini
     // yuvarlar (12.345.678.901.234,56 → …,60) — o aralıkta tutar yazılmaz.
     if (k.birimFiyat * 100 >= 1e15) return bilinmiyor;
-    const satirKurus = Math.round(Number((k.birimFiyat * 100).toPrecision(15))) * k.adet;
+    const satirKurus = Math.round(temizKurus(k.birimFiyat)) * k.adet;
     // Aynı sınır SATIR tutarı için de geçerli: adet ≥ 2 ile satır 1e15 kuruşu geçerse KDV 1 kuruş kayık çıkabiliyordu.
     if (satirKurus >= 1e15) return bilinmiyor;
     const satirKdvKurus = Math.round(satirKurus * k.kdvOrani / 100);
@@ -361,6 +370,41 @@ export function magazaTeyitToplamlari(
   }
   return { araToplam: araKurus / 100, kdv: kdvKurus / 100, toplam: (araKurus + kdvKurus) / 100 };
 }
+
+/**
+ * Birim fiyat EN ÇOK İKİ ONDALIK mı (kuruş) — kullanıcı kararı 2026-10-17 («kuruştan ince birim fiyat kabul edilsin mi? —
+ * hayır»; şartname «kayıt kapanışı ve kuruş» B1–B3). ERP'nin TEYİT kalemi ve ELLE TALEP kalemi `birimFiyat`'ı bu TEK işlevle
+ * süzülür: sunucu şeması (`src/server/schemas.ts` `ErpIcerikGovdesi` / `ErpElleTalepGovdesi`) ve form
+ * (`magazaTalepFormu.ts` `magazaFiyatCoz` — önizleme de gövde de oradan okur). Kimliksiz talep ucu (dilim 1, müşterinin
+ * BEYANI) bu denetimden GEÇMEZ (B3: mağazanın talebi kaybolmasın); toplamdaki kuruş yuvarlaması savunma olarak kalır.
+ *
+ * KAYAN NOKTA KALINTISINA DAYANIKLI: `n × 100` önce 15 anlamlı haneyle temizlenir — `magazaTeyitToplamlari` ile AYNI adım
+ * (`temizKurus`) — sonra tam sayı mı diye bakılır. 95,1 · 1,15 (× 100 = 114,99999999999999) · 0,1 + 0,2 (= 0,30000000000000004) · 9.999.999,99
+ * KABUL; 83,3333 · 0,001 · 1,005 (yarım kuruş; × 100 = 100,49999999999999 → temizlenince 100,5) · 1,005001 RED. Kabul edilen
+ * fiyatın kuruşu, toplam işlevinin yuvarlayarak bulduğu kuruşla AYNI tam sayıdır: yuvarlama artık hiçbir şeyi değiştirmez.
+ * SINIRLAR: NaN / sonsuz → red. Kuruştan ince basamağı (yarım kuruş dâhil) GÖRMEK için 15 anlamlı hanenin en az BİRİ kuruşun
+ * ALTINDA kalmalıdır: bu ancak 1e14 kuruşun (1 trilyon TL) altında olur — üstünde temizlik kuruşun altını yuvarlar ve kuruştan ince
+ * fiyat «kuruşlu» görünür (1.000.000.000.000,555 × 100 → 100.000.000.000.056 kuruş: KABUL ediliyordu). Sınır bu yüzden 1e14 kuruş
+ * (inceleme 1, İ1-b, 2026-10-17; eskiden 1e15): ≥ 1 trilyon TL → RED. Toplam işlevinin (`magazaTeyitToplamlari`) 1e15 sınırı
+ * DEĞİŞMEDİ — o savunma olarak kalır. 15 anlamlı haneyi aşan basamak kalıntı sayılır. İşaret burada sınanmaz (negatif fiyat şemanın
+ * `nonnegative` kuralıdır; form eksi işareti zaten okumaz).
+ */
+export function magazaKurusluMu(n: number): boolean {
+  if (!Number.isFinite(n) || magazaFiyatSinirUstu(n)) return false;
+  return Number.isInteger(temizKurus(n));
+}
+
+/**
+ * Birim fiyat kuruş denetiminin ÖLÇEBİLDİĞİ aralığın dışında mı: `|n × 100| ≥ 1e14` kuruş (1 trilyon TL; İ1-b, 2026-10-17). TEK kaynak:
+ * `magazaKurusluMu` (bu aralıkta RED) ve form ayrıştırıcısı (`magazaTalepFormu.ts` `magazaFiyatCoz` — bu aralıkta `gecersiz`, kuruş
+ * sorusundan ÖNCE) aynı sınırı buradan okur; formda kuruş çarpımı yazılmaz (formun kaynak çiti).
+ */
+export function magazaFiyatSinirUstu(n: number): boolean {
+  return Math.abs(n * 100) >= 1e14;
+}
+
+/** Kuruştan ince birim fiyatın hata metni — sunucu şemasının iletisi ve formun alan hatası AYNI metin (B1, B2). */
+export const MAGAZA_BIRIM_FIYAT_KURUS_HATASI = 'Birim fiyat en çok iki ondalık olabilir (kuruş).';
 
 /**
  * Ürün kaydının `vatRate`'inden teyit kaleminin BAŞLANGIÇ oranı. Sonlu sayı VE kümede ise o oran (`urun`); `undefined`

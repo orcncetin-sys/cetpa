@@ -16,6 +16,12 @@
  *
  * Kaynağa bakan birkaç çit de var: davranışla GÖRÜLEMEYEN yerler (dış rolde kabuk çizilmediği için `canAccess` ve izin
  * tablosu ekrana yansımaz) ve «yazıldı ama bağlanmadı» bağı.
+ *
+ * 2026-10-17 GENİŞLETME (şartname «kayıt kapanışı ve kuruş» R / R testleri′): rol okunamazsa «Sales»e düşme YOK. Düzenek yol başına
+ * durum kodu DİZİSİ (`durum.yanitlar`: sırayla tüketilir, bitince olağan yanıt), kalıcı ret (`durum.kalici`), yanıtı bekletilen yol
+ * (`durum.askiyaAl` → `birak()`), 403 gövdesinde `mfaRequired` (sunucunun `requireMfaVerified`'ı gibi: doğrulaması açık ve
+ * doğrulanmamış hesapta), değiştirilebilir kimlik (uid / e-posta) ve `deleteUser` sayacı taşır; zaman 15 sn'den uzun ilerletilir
+ * (kendiliğinden yeniden denemeler 1 + 3 + 9 sn). Eski «kendi belgesi okunamıyor → kabuk çizilir» iki testi R1'e göre TERSİNE döndü.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
@@ -34,18 +40,30 @@ const UID = 'uid-deneme-1';
 vi.setConfig({ testTimeout: 60_000 });
 
 interface IkiAdim { enabled: boolean; verified: boolean }
+/** Sahte yanıt: [durum kodu, gövde]. */
+type SahteYanit = [number, unknown];
 const durum = vi.hoisted(() => ({
   /** `users/<uid>` belgesindeki rol; `undefined` = rol alanı yok (rolsüz hesap). */
   rol: 'Sales' as string | undefined,
   ikiAdim: { enabled: false, verified: false } as IkiAdim,
-  /** Kendi `users` belgesinin okuması 403 dönsün mü (iki adımlı doğrulama bekleyen oturum). */
+  /** Kendi `users` belgesinin okuması 403 dönsün mü. Gövdede `mfaRequired` yalnız doğrulaması AÇIK ve doğrulanmamış hesapta (sunucunun
+   *  `requireMfaVerified`'ı gibi); doğrulaması kapalıysa 403'ün nedeni başkadır (R2: yeniden denenir). */
   belgeKapali: false,
   kullanici: {
     uid: 'uid-deneme-1', email: 'deneme@ornek.test', displayName: 'Deneme Kullanıcı', photoURL: '', isAnonymous: false,
     emailVerified: true, tenantId: null, providerData: [], getIdToken: async () => 'belirtec-deneme',
-  },
+  } as { uid: string; email: string; displayName: string; photoURL: string; isAnonymous: boolean; emailVerified: boolean; tenantId: null; providerData: unknown[]; getIdToken: () => Promise<string> },
   /** Tarayıcıda saklı oturumun sahibi (çıkıştan sonra `null`). */
   hesap: null as { uid: string } | null,
+  /** Yol başına durum kodu DİZİSİ (`"<YÖNTEM> <yol>"`): sırayla tüketilir; bitince kalıcı ret ya da olağan yanıt. */
+  yanitlar: {} as Record<string, SahteYanit[]>,
+  /** Yol başına KALICI yanıt (dizi bittikten sonra her çağrıda). */
+  kalici: {} as Record<string, SahteYanit>,
+  /** Yanıtı BEKLETİLEN yollar: istek askıda kalır, sınama `birak()` ile yanıtlar. */
+  askiyaAl: new Set<string>(),
+  askida: {} as Record<string, Array<(r: Response) => void>>,
+  /** `deleteUser` ile silinen kimlik hesapları (uid). */
+  silinen: [] as string[],
   /** Firebase gibi: saklı oturum YÜKLENENE kadar `currentUser` `null`dır; dinleyiciler yükleme bitince ateşlenir. */
   yuklendi: false,
   /** App'in oturum dinleyicisi — aynı sekmede ikinci girişi canlandırmak için saklanır. */
@@ -53,6 +71,8 @@ const durum = vi.hoisted(() => ({
   cikisSayisi: 0,
   /** `onSnapshot` ile abone olunan koleksiyonlar (çağrı sırasıyla). */
   dinleyiciler: [] as string[],
+  /** «Profiliniz yüklenemedi.» sayfasının App'ten aldığı SON özellikler (sayfa GERÇEK çizilir; yalnız özellikler okunur — İ2-a). */
+  profilEkrani: null as { onYenidenDene: () => void } | null,
 }));
 
 vi.mock('firebase/auth', () => ({
@@ -63,6 +83,7 @@ vi.mock('firebase/auth', () => ({
     return () => {};
   },
   signOut: async () => { durum.cikisSayisi += 1; durum.hesap = null; },
+  deleteUser: async (u: { uid: string }) => { durum.silinen.push(u.uid); durum.hesap = null; },
   getRedirectResult: async () => null,
   GoogleAuthProvider: class {},
   signInWithPopup: vi.fn(), signInWithRedirect: vi.fn(), signInWithEmailAndPassword: vi.fn(), createUserWithEmailAndPassword: vi.fn(),
@@ -84,6 +105,15 @@ vi.mock('../lib/dbClient', async (asilAl) => {
   };
   return { ...asil, onSnapshot: say };
 });
+// «Profiliniz yüklenemedi.» sayfası GERÇEK çizilir; sarmal yalnız App'in verdiği özellikleri saklar. Böylece App'in «Yeniden dene»
+// kapısı (`cikisSuruyorRef`, İ2-a) sayfanın kendi pasif düğmesinden BAĞIMSIZ sınanır (düğme pasifken tıklama işleyiciye ulaşmaz).
+vi.mock('./ProfilYuklenemediEkrani', async (asilAl) => {
+  const asil = await asilAl<typeof import('./ProfilYuklenemediEkrani')>();
+  const { createElement } = await import('react');
+  type Ozellikler = Parameters<typeof asil.default>[0];
+  const Sarmal = (p: Ozellikler) => { durum.profilEkrani = p; return createElement(asil.default, p); };
+  return { ...asil, default: Sarmal };
+});
 vi.mock('react', async (asilAl) => {
   // App `React.lazy(…)` yazar (varsayılan dışa aktarım); adlı `lazy` de aynı vekile bağlanır.
   const asil = await asilAl<typeof import('react') & { default: typeof import('react') }>();
@@ -97,6 +127,8 @@ let akislar: string[] = [];
 let araliklar: number[] = [];
 
 const yanit = (govde: unknown, kod = 200): Response => new Response(JSON.stringify(govde), { status: kod, headers: { 'Content-Type': 'application/json' } });
+/** Oturumdaki hesabın kendi `users` belgesinin yolu (uid değiştirilebilir). */
+const kendiYolu = (): string => `/api/db/users/${durum.kullanici.uid}`;
 
 /** Sunucunun yerine geçen en küçük yanıtlayıcı. Yöntem, IIS tünelindeki asıl yöntemdir (`X-Cetpa-Method`). */
 function sahteFetch(girdi: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -105,9 +137,18 @@ function sahteFetch(girdi: RequestInfo | URL, init?: RequestInit): Promise<Respo
   const yontem = (basliklar['X-Cetpa-Method'] ?? init?.method ?? 'GET').toUpperCase();
   const yol = ham.split('?')[0];
   istekler.push({ yontem, yol });
+  const anahtar = `${yontem} ${yol}`;
+  if (durum.askiyaAl.has(anahtar)) {
+    return new Promise<Response>(coz => { (durum.askida[anahtar] ??= []).push(coz); });
+  }
+  const sira = durum.yanitlar[anahtar]?.shift() ?? durum.kalici[anahtar];
+  if (sira) return Promise.resolve(yanit(sira[1], sira[0]));
   if (yol === '/api/mfa/status') return Promise.resolve(yanit(durum.ikiAdim));
-  if (yol === `/api/db/users/${UID}` && yontem === 'GET') {
-    if (durum.belgeKapali) return Promise.resolve(yanit({ error: 'İki adımlı doğrulama gerekli' }, 403));
+  if (yol === kendiYolu() && yontem === 'GET') {
+    if (durum.belgeKapali) {
+      const mfa = durum.ikiAdim.enabled && !durum.ikiAdim.verified;
+      return Promise.resolve(yanit({ error: 'İki adımlı doğrulama gerekli', ...(mfa ? { mfaRequired: true } : {}) }, 403));
+    }
     return Promise.resolve(yanit({ data: { ...(durum.rol === undefined ? {} : { role: durum.rol }), companyId: 'sirket-1', name: 'Deneme Kullanıcı' } }));
   }
   if (yol === '/api/superadmin/me') return Promise.resolve(yanit({ isSuperAdmin: false }));
@@ -145,7 +186,10 @@ beforeAll(async () => {
 beforeEach(() => {
   istekler = []; akislar = []; araliklar = [];
   durum.rol = 'Sales'; durum.ikiAdim = { enabled: false, verified: false }; durum.belgeKapali = false;
+  durum.kullanici = { ...durum.kullanici, uid: UID, email: 'deneme@ornek.test' };
+  durum.yanitlar = {}; durum.kalici = {}; durum.askiyaAl = new Set(); durum.askida = {}; durum.silinen = [];
   durum.hesap = durum.kullanici; durum.yuklendi = false; durum.oturumDinleyicisi = null; durum.cikisSayisi = 0; durum.dinleyiciler = [];
+  durum.profilEkrani = null;
   sessionStorage.clear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-11T09:00:00+03:00'));
@@ -164,17 +208,32 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.resto
 
 /** Akış bağlantısı abonelikten 400 ms sonra açılır; 2 sn her açılış efektini ve o gecikmeyi kapsar. */
 const bekle = () => act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+/** Zamanı verilen kadar ilerletir (kendiliğinden yeniden denemeler 1 + 3 + 9 sn sürer). */
+const ilerlet = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
-/** Uygulamayı verilen rol ve adresle açar; açılış efektleri ve akış gecikmesi tamamlanınca döner. */
-async function ac(rol: string | undefined, yol: string) {
+/** Uygulamayı verilen rol ve adresle açar; açılış efektleri ve akış gecikmesi tamamlanınca (ya da `sure` dolunca) döner. */
+async function ac(rol: string | undefined, yol: string, sure = 2_000) {
   durum.rol = rol;
   durum.hesap = durum.kullanici; durum.yuklendi = false;
   istekler = []; akislar = []; araliklar = []; durum.dinleyiciler = [];
   window.history.pushState({}, '', yol);
   tazele();
   const sonuc = render(<BrowserRouter><App /></BrowserRouter>);
-  await bekle();
+  await ilerlet(sure);
   return sonuc;
+}
+/** Bekletilen yolun askıdaki isteklerini verilen yanıtla sonuçlandırır. */
+async function birak(anahtar: string, kod: number, govde: unknown) {
+  durum.askiyaAl.delete(anahtar);
+  const bekleyen = durum.askida[anahtar] ?? [];
+  durum.askida[anahtar] = [];
+  await act(async () => { for (const coz of bekleyen) coz(yanit(govde, kod)); await vi.advanceTimersByTimeAsync(0); });
+}
+/** Bekletilen yolun askıdaki EN ESKİ isteğini yanıtlar; yol bekletilmeye devam eder (sonraki istekler askıda kalır). */
+async function birakIlk(anahtar: string, kod: number, govde: unknown) {
+  const coz = (durum.askida[anahtar] ?? []).shift();
+  if (!coz) throw new Error(`askıda istek yok: ${anahtar}`);
+  await act(async () => { coz(yanit(govde, kod)); await vi.advanceTimersByTimeAsync(0); });
 }
 /** Açılışı kapatır ve askıdaki zamanlayıcıları boşaltır (sonraki açılışa iş kalmasın). */
 async function kapat() {
@@ -183,9 +242,12 @@ async function kapat() {
 }
 
 const BASLIK = 'Bu hesap bayi hesabıdır';
+const PROFIL_YUKLENEMEDI = 'Profiliniz yüklenemedi.';
 const METIN = 'ERP ekranı bayi hesaplarına kapalıdır. Sipariş ve bilgi için CETPA ile iletişime geçin.';
 const kabukVar = (kap: HTMLElement) => kap.querySelector('nav') !== null || kap.querySelector('aside') !== null;
 const bayiBasligi = (kap: HTMLElement) => [...kap.querySelectorAll('h1')].find(h => h.textContent === BASLIK) ?? null;
+/** Kenar menüsünün «Yönetim» grubu — yalnız Yönetici rolünde çizilir (adla seçici; düzenek canlı testi ölçer). */
+const yoneticiMenusu = (kap: HTMLElement) => [...kap.querySelectorAll('aside button')].some(b => (b.textContent ?? '').trim() === 'Yönetim');
 
 /**
  * Dış rol (ve rolsüz hesap) oturumunda GİDEBİLEN istekler = şartname D4′ izin listesinin istemcinin açılışta kullandığı
@@ -193,14 +255,14 @@ const bayiBasligi = (kap: HTMLElement) => [...kap.querySelectorAll('h1')].find(h
  * Liste bilerek DAR: akış çerezi (`POST /api/db/session`) sunucuda serbesttir ama yalnız akış açılırken atılır — burada
  * görülmesi akışın başladığını gösterir, o yüzden izinli sayılmaz.
  */
-const IZINLI: readonly string[] = [
+const izinli = (): readonly string[] => [
   'GET /api/mfa/status',
-  `GET /api/db/users/${UID}`, `PUT /api/db/users/${UID}`, `PATCH /api/db/users/${UID}`,   // oturum açılışı: kendi belgesi
+  `GET ${kendiYolu()}`, `PUT ${kendiYolu()}`, `PATCH ${kendiYolu()}`,   // oturum açılışı: kendi belgesi
   'GET /api/superadmin/me',
   'GET /api/settings/exchange-rates',   // kimlik istemez (giriş sayfasında da çağrılır)
   'POST /api/hit',                      // kimlik istemez (sayfa sayacı)
 ];
-const izinDisi = () => [...new Set(istekler.map(i => `${i.yontem} ${i.yol}`))].filter(i => !IZINLI.includes(i)).sort();
+const izinDisi = () => { const izin = izinli(); return [...new Set(istekler.map(i => `${i.yontem} ${i.yol}`))].filter(i => !izin.includes(i)).sort(); };
 const akisKoleksiyonlari = () => akislar.flatMap(u => decodeURIComponent(u.split('colls=')[1]?.split('&')[0] ?? '').split(','));
 
 const YOLLAR = ['/', ...[...TOP_LEVEL_TABS].map(s => `/${s}`), MAGAZA_PANEL_BAGLAN_YOLU];
@@ -334,7 +396,7 @@ describe.each(EXTERNAL_ROLES.map(r => [r]))('dış rol %s: ERP kabuğu çizilmez
   });
 });
 
-describe('kapının sınırları: rolsüz hesap ve rolü okunamayan oturum bugünkü gibi (bu turda değişmedi)', () => {
+describe('kapının sınırları: rolsüz hesap «rol atanmamış» ekranında, doğrulaması bekleyen oturum doğrulama penceresinde', () => {
   it('rolsüz hesap bayi sayfasına DÜŞMEZ: «rol atanmamış» uyarısı çizilir', async () => {
     const { container } = await ac(undefined, '/dashboard');
     expect(bayiBasligi(container)).toBeNull();
@@ -344,7 +406,8 @@ describe('kapının sınırları: rolsüz hesap ve rolü okunamayan oturum bugü
   it('bayi oturumundan sonra AYNI sekmede doğrulaması bekleyen giriş: bayi sayfası doğrulama penceresinin yerine geçmez', async () => {
     const { container } = await ac(EXTERNAL_ROLES[0], '/dashboard');
     expect(bayiBasligi(container)).not.toBeNull();
-    // İkinci giriş: iki adımlı doğrulama açık + doğrulanmamış → kendi belgesi 403, rol OKUNAMAZ (eldeki rol öncekinden kalma).
+    // İkinci giriş: iki adımlı doğrulama açık + doğrulanmamış → kendi belgesi 403 `mfaRequired`, rol OKUNAMAZ (eldeki rol öncekinden
+    // kalma; turun başında açılış varsayılanına döner).
     durum.ikiAdim = { enabled: true, verified: false };
     durum.belgeKapali = true;
     durum.dinleyiciler = []; akislar = [];
@@ -413,9 +476,12 @@ describe.each(EXTERNAL_ROLES.map(r => [r]))('dış rol %s → çıkış → ayn�
     await yenidenGir();
     expect(istekler.map(i => `${i.yontem} ${i.yol}`)).toContain(`GET /api/db/users/${UID}`);   // belge gerçekten istendi (403)
     expect(bayiBasligi(container)).toBeNull();
-    // Rol okunamadı: açılış varsayılanı (`Sales`) kalır, taze sekmedeki gibi kabuk çizilir. Bu «okunamayınca Sales» davranışı
-    // ayrı düzeltmedir (kullanıcı onayı bekliyor); o gelince bu satır da değişir.
-    expect(kabukVar(container)).toBe(true);
+    // BİLEREK TERSİNE DÖNDÜ (2026-10-17, şartname R1 — kullanıcı kararı «ok ekle»): eskiden rol okunamayınca açılış varsayılanı
+    // (`Sales`) kalıyor ve kabuk çiziliyordu. Artık rol çözülmeden kabuk ÇİZİLMEZ; denemeler bitince «Profiliniz yüklenemedi.».
+    expect(kabukVar(container)).toBe(false);
+    await ilerlet(15_000);
+    expect(kabukVar(container)).toBe(false);
+    expect(container.textContent).toContain(PROFIL_YUKLENEMEDI);
   });
 
   // Rolsüz oturumdan «Çıkış Yap» düğmesiyle çıkış katmandaki `onClick={handleLogout}` üzerinden yapılır: ikinci çıkış da sınanan
@@ -439,7 +505,434 @@ describe.each(EXTERNAL_ROLES.map(r => [r]))('dış rol %s → çıkış → ayn�
     await yenidenGir();
     expect(istekler.map(i => `${i.yontem} ${i.yol}`)).toContain(`GET /api/db/users/${UID}`);
     expect(sonuc.container.textContent).not.toContain('Hesabınıza rol atanmamış');
-    expect(kabukVar(sonuc.container)).toBe(true);
+    // BİLEREK TERSİNE DÖNDÜ (2026-10-17, şartname R1): rol okunamayan oturumda kabuk çizilmez (eskiden `true` idi).
+    expect(kabukVar(sonuc.container)).toBe(false);
+    await ilerlet(15_000);
+    expect(sonuc.container.textContent).toContain(PROFIL_YUKLENEMEDI);
+    expect(sonuc.container.textContent).not.toContain('Hesabınıza rol atanmamış');
+  });
+});
+
+// ═══ R — rol okunamazsa «Sales»e düşme YOK (şartname «kayıt kapanışı ve kuruş» R1–R6, R1′–R5′; kullanıcı kararı «ok ekle») ═══
+// Belirti (kullanıcı, 2026-10-11): «refresh yiyince rolüm değişiyor … ben adminim normalde». Kendi belgesi okunamayınca, son giriş
+// yazımı düşünce ya da sahip kurulumu reddedilince rol hiç atanmıyor, arayüz Satış rolüyle çiziliyordu. Burada ölçülen: rol çözülmeden
+// kabuk ÇİZİLMEZ ve veri BAŞLAMAZ; okunamayan profil üç kendiliğinden denemeden sonra açıkça söylenir; «Yeniden dene» aynı çözümü koşar.
+const GET_KENDI = () => `GET ${kendiYolu()}`;
+const kendiOkumaSayisi = () => istekler.filter(i => i.yontem === 'GET' && i.yol === kendiYolu()).length;
+const kendiYazimlari = (yontem: string) => istekler.filter(i => i.yontem === yontem && i.yol === kendiYolu()).length;
+const metin = (kap: HTMLElement) => kap.textContent ?? '';
+const SUNUCU_HATASI: SahteYanit = [500, { error: 'Sunucu hatası (sınama)' }];
+const MFA_403: SahteYanit = [403, { error: 'İki faktörlü doğrulama gerekli.', mfaRequired: true }];
+const SAHIP = 'orcncetin@gmail.com';
+
+describe('R — düzenek canlı: adla seçilen «Yönetim» menüsü yalnız Yönetici rolünde var', () => {
+  it('Yönetici → var; Satış → yok (boş ölçüm «menü yok» diye okunmasın)', async () => {
+    const yonetici = await ac('Admin', '/dashboard');
+    expect(yoneticiMenusu(yonetici.container)).toBe(true);
+    await kapat();
+    const satis = await ac('Sales', '/dashboard');
+    expect(kabukVar(satis.container)).toBe(true);
+    expect(yoneticiMenusu(satis.container)).toBe(false);
+  });
+});
+
+describe('R1 / R2 — profil okuması 500: kabuk yok, üç deneme sonra «Profiliniz yüklenemedi.», «Yeniden dene» aynı çözümü koşar', () => {
+  it('500 × 4 sonra 200: menü çizilmez; denemeler bitince ileti; kendiliğinden deneme 4\'te durur; «Yeniden dene» başarıda Yönetici menüsü', async () => {
+    durum.yanitlar[GET_KENDI()] = [SUNUCU_HATASI, SUNUCU_HATASI, SUNUCU_HATASI, SUNUCU_HATASI];
+    const { container, getByRole } = await ac('Admin', '/dashboard');
+    expect(kabukVar(container)).toBe(false);
+    expect(metin(container)).not.toContain(PROFIL_YUKLENEMEDI);           // denemeler sürüyor: yükleniyor görünümü
+    expect(kendiOkumaSayisi()).toBeLessThan(4);
+    await ilerlet(15_000);
+    expect(kendiOkumaSayisi()).toBe(4);                                    // ilk okuma + en çok ÜÇ yeniden deneme (1 / 3 / 9 sn)
+    expect(kabukVar(container)).toBe(false);
+    expect(yoneticiMenusu(container)).toBe(false);
+    expect(metin(container)).toContain(PROFIL_YUKLENEMEDI);
+    expect(getByRole('button', { name: 'Çıkış' })).toBeTruthy();
+    await ilerlet(60_000);
+    expect(kendiOkumaSayisi()).toBe(4);                                    // kendiliğinden başka deneme YOK
+    // R4: her ret günlüğe yalnız DURUM KODUYLA yazılır (e-posta / kimlik yok).
+    const gunluk = vi.mocked(console.error).mock.calls.filter(c => c[0] === '[açılış] profil okunamadı');
+    expect(gunluk.map(c => c.slice(1))).toEqual([[500], [500], [500], [500]]);
+    expect(JSON.stringify(gunluk)).not.toMatch(/deneme@ornek\.test|uid-deneme-1/);
+    fireEvent.click(getByRole('button', { name: 'Yeniden dene' }));
+    await bekle();
+    expect(kendiOkumaSayisi()).toBe(5);
+    expect(metin(container)).not.toContain(PROFIL_YUKLENEMEDI);
+    expect(kabukVar(container)).toBe(true);
+    expect(yoneticiMenusu(container)).toBe(true);
+    expect(durum.dinleyiciler).toContain('orders');                        // veri rol çözülünce başladı
+  });
+
+  it('«Yeniden dene» çözüm sürerken PASİF: ikinci tıklama ikinci okuma başlatmaz', async () => {
+    durum.kalici[GET_KENDI()] = SUNUCU_HATASI;
+    const { container, getByRole } = await ac('Admin', '/dashboard');
+    await ilerlet(15_000);
+    expect(metin(container)).toContain(PROFIL_YUKLENEMEDI);
+    delete durum.kalici[GET_KENDI()];
+    durum.askiyaAl.add(GET_KENDI());
+    fireEvent.click(getByRole('button', { name: 'Yeniden dene' }));
+    await ilerlet(100);
+    const surerken = getByRole('button', { name: 'Deneniyor…' }) as HTMLButtonElement;
+    expect(surerken.disabled).toBe(true);
+    fireEvent.click(surerken);
+    await ilerlet(100);
+    expect(kendiOkumaSayisi()).toBe(5);
+    await birak(GET_KENDI(), 200, { data: { role: 'Admin', companyId: 'sirket-1', name: 'Deneme Kullanıcı' } });
+    await bekle();
+    expect(kendiOkumaSayisi()).toBe(5);
+    expect(yoneticiMenusu(container)).toBe(true);
+  });
+
+  // R1′: «'okunamadi'» durumunda (denemeler bittikten sonra da) veri BAŞLAMAZ — iç rol ve dış rol için ayrı (eski «dış rol + okuma
+  // 500 → iç menü yok» maddesinin YERİNE: rol okunamayınca dış rol diğerlerinden ayırt edilemez; ayırt edici olan istek ölçüsüdür).
+  it.each(['Admin', 'Sales', ...EXTERNAL_ROLES].map((r): [string] => [r]))('%s, okuma 500: izin dışı istek 0, dinleyici 0, akış bağlantısı 0, 90 sn zamanlayıcısı yok', async (rol) => {
+    durum.kalici[GET_KENDI()] = SUNUCU_HATASI;
+    const { container } = await ac(rol, '/dashboard');
+    await ilerlet(15_000);
+    expect(metin(container)).toContain(PROFIL_YUKLENEMEDI);
+    await ilerlet(100_000);                                                // denemeler bittikten SONRA da
+    expect(kabukVar(container)).toBe(false);
+    expect(bayiBasligi(container)).toBeNull();
+    expect(izinDisi()).toEqual([]);
+    expect(istekler.filter(i => i.yol.startsWith('/api/db/') && i.yol !== kendiYolu())).toEqual([]);
+    expect(durum.dinleyiciler).toEqual([]);
+    expect(akislar).toEqual([]);
+    expect(araliklar).not.toContain(90_000);
+    expect(appDeposu.getState().companyId).toBeNull();                    // kiracı bilinmiyor: tahmin (uid) yazılmaz
+  });
+
+  it('R1″ — /admin adresinde Yönetici, okuma 500: adres /admin KALIR; «Yeniden dene» başarıda aktif sekme yönetim (denetim kaydı dinlenir)', async () => {
+    durum.yanitlar[GET_KENDI()] = [SUNUCU_HATASI, SUNUCU_HATASI, SUNUCU_HATASI, SUNUCU_HATASI];
+    const { container, getByRole } = await ac('Admin', '/admin');
+    await ilerlet(15_000);
+    expect(metin(container)).toContain(PROFIL_YUKLENEMEDI);
+    expect(window.location.pathname).toBe('/admin');
+    fireEvent.click(getByRole('button', { name: 'Yeniden dene' }));
+    await bekle();
+    expect(yoneticiMenusu(container)).toBe(true);
+    expect(window.location.pathname).toBe('/admin');
+    expect(durum.dinleyiciler).toContain('auditLog');                      // yalnız `activeTab === 'admin'` iken dinlenir
+  });
+
+  it('«Çıkış»: mevcut çıkış işleyicisi (sunucu çıkışı + oturum kapatma); sayfa kalkar', async () => {
+    durum.kalici[GET_KENDI()] = SUNUCU_HATASI;
+    const { container, getByRole } = await ac('Sales', '/dashboard');
+    await ilerlet(15_000);
+    istekler = [];
+    fireEvent.click(getByRole('button', { name: 'Çıkış' }));
+    await bekle();
+    expect(istekler.filter(i => i.yol === CIKIS_UCU).map(i => i.yontem)).toEqual(['POST']);
+    expect(durum.cikisSayisi).toBe(1);
+    expect(metin(container)).not.toContain(PROFIL_YUKLENEMEDI);
+    expect(kabukVar(container)).toBe(false);
+  });
+});
+
+describe('R2 — 403 `mfaRequired`: doğrulama penceresi; başka ret yeniden denenir', () => {
+  it('`/api/mfa/status` 500 (getMfaStatus «kapalı» der) + okuma 403 `mfaRequired` → doğrulama penceresi; yeniden deneme yok, veri yok', async () => {
+    durum.kalici['GET /api/mfa/status'] = SUNUCU_HATASI;
+    durum.kalici[GET_KENDI()] = MFA_403;
+    const { container } = await ac('Admin', '/dashboard');
+    expect(metin(container)).toContain('İki Faktörlü Doğrulama');
+    expect(kabukVar(container)).toBe(false);
+    await ilerlet(20_000);
+    expect(kendiOkumaSayisi()).toBe(1);
+    expect(metin(container)).toContain('İki Faktörlü Doğrulama');
+    expect(metin(container)).not.toContain(PROFIL_YUKLENEMEDI);
+    expect(izinDisi()).toEqual([]);
+    expect(durum.dinleyiciler).toEqual([]);
+    expect(akislar).toEqual([]);
+    expect(appDeposu.getState().companyId).toBeNull();                    // kiracı bilinmiyor: tahmin (uid) yazılmaz
+  });
+
+  it.each([
+    ['401', [401, { error: 'Invalid or expired session.' }]],
+    ['403 başka neden (mfaRequired yok)', [403, { error: 'Bu firma askıya alınmış.', code: 'COMPANY_SUSPENDED' }]],
+    ['429', [429, { error: 'Çok fazla istek.' }]],
+    ['503 ROL_OKUNAMADI', [503, { error: 'Rol okunamadı.', code: 'ROL_OKUNAMADI' }]],
+  ] as Array<[string, SahteYanit]>)('%s → doğrulama penceresi DEĞİL; üç deneme sonra «Profiliniz yüklenemedi.»', async (_ad, ret) => {
+    durum.kalici[GET_KENDI()] = ret;
+    const { container } = await ac('Admin', '/dashboard');
+    await ilerlet(15_000);
+    expect(kendiOkumaSayisi()).toBe(4);
+    expect(metin(container)).not.toContain('İki Faktörlü Doğrulama');
+    expect(metin(container)).toContain(PROFIL_YUKLENEMEDI);
+    expect(kabukVar(container)).toBe(false);
+  });
+});
+
+describe('R3 — rol son giriş yazımına bağlı DEĞİL', () => {
+  it('okuma başarılı + son giriş yazımı (PATCH) 500 → rol Yönetici, menü çizilir; ret yalnız günlükte (durum kodu)', async () => {
+    durum.kalici[`PATCH ${kendiYolu()}`] = SUNUCU_HATASI;
+    const { container } = await ac('Admin', '/dashboard');
+    expect(kendiYazimlari('PATCH')).toBe(1);
+    expect(kabukVar(container)).toBe(true);
+    expect(yoneticiMenusu(container)).toBe(true);
+    expect(metin(container)).not.toContain(PROFIL_YUKLENEMEDI);
+    const gunluk = vi.mocked(console.error).mock.calls.filter(c => c[0] === '[açılış] son giriş yazılamadı');
+    expect(gunluk.map(c => c.slice(1))).toEqual([[500]]);
+  });
+
+  it('son giriş yazımı YANIT VERMİYOR (askıda): rol yine ÖNCE atanır, menü çizilir', async () => {
+    durum.askiyaAl.add(`PATCH ${kendiYolu()}`);
+    const { container } = await ac('Admin', '/dashboard');
+    expect(kendiYazimlari('PATCH')).toBe(1);
+    expect(yoneticiMenusu(container)).toBe(true);
+  });
+});
+
+describe('R2′ — «kayıt yok» yalnız durum kodu 404: uid\'si «404» içeren hesap kayıtsız sayılmaz', () => {
+  beforeEach(() => { durum.kullanici = { ...durum.kullanici, uid: 'uid-404-deneme' }; });
+
+  it('okuma 500 → üç deneme sonra «Profiliniz yüklenemedi.»; oturum kapatılmaz, hesap silinmez, belge yazılmaz', async () => {
+    durum.kalici[GET_KENDI()] = SUNUCU_HATASI;
+    const { container } = await ac('Admin', '/dashboard');
+    await ilerlet(15_000);
+    expect(metin(container)).toContain(PROFIL_YUKLENEMEDI);
+    expect([durum.cikisSayisi, durum.silinen, kendiYazimlari('PUT'), kendiYazimlari('PATCH')]).toEqual([0, [], 0, 0]);
+  });
+
+  it('okuma 403 `mfaRequired` → doğrulama penceresi; oturum kapatılmaz, hesap silinmez, belge yazılmaz', async () => {
+    durum.kalici[GET_KENDI()] = MFA_403;
+    const { container } = await ac('Admin', '/dashboard');
+    await ilerlet(15_000);
+    expect(metin(container)).toContain('İki Faktörlü Doğrulama');
+    expect([durum.cikisSayisi, durum.silinen, kendiYazimlari('PUT'), kendiYazimlari('PATCH')]).toEqual([0, [], 0, 0]);
+  });
+});
+
+describe('R2″ — tur numarası: kapanmış oturumun açılış turu hiçbir şey yazmaz', () => {
+  it('okuma 500 ve İLK bekleme sürerken dinleyici `null` alır → bekleme bitince oturumsuz sayfa kalır, okuma yeniden çağrılmaz', async () => {
+    durum.kalici[GET_KENDI()] = SUNUCU_HATASI;
+    const { container } = await ac('Admin', '/dashboard', 300);
+    expect(kendiOkumaSayisi()).toBe(1);
+    durum.hesap = null;
+    await act(async () => { await durum.oturumDinleyicisi?.(null); });
+    await ilerlet(20_000);
+    expect(kendiOkumaSayisi()).toBe(1);
+    expect(metin(container)).not.toContain(PROFIL_YUKLENEMEDI);
+    expect(kabukVar(container)).toBe(false);
+    expect(durum.dinleyiciler).toEqual([]);
+  });
+
+  it('okuma askıdayken dinleyici `null` alır, okuma SONRA 200 döner → kapanmış oturum geri açılmaz (kabuk / menü yok)', async () => {
+    durum.askiyaAl.add(GET_KENDI());
+    const { container } = await ac('Admin', '/dashboard');
+    expect(kendiOkumaSayisi()).toBe(1);
+    durum.hesap = null;
+    await act(async () => { await durum.oturumDinleyicisi?.(null); });
+    await birak(GET_KENDI(), 200, { data: { role: 'Admin', companyId: 'sirket-1', name: 'Deneme Kullanıcı' } });
+    await bekle();
+    expect(kabukVar(container)).toBe(false);
+    expect(yoneticiMenusu(container)).toBe(false);
+    expect(durum.dinleyiciler).toEqual([]);
+    expect(akislar).toEqual([]);
+  });
+
+  // EKSİK TESLİM (paket turu, 2026-10-17): aşağıdaki üç sınama tur denetiminin İKİ koşulunu AYRI AYRI ve çıkışın turu bayatlatmasını
+  // ölçer. Önceki sınamalar yalnız ikisinin BİRLİKTE kaldırılmasını yakalıyordu: «yalnız tur numarası» ya da «yalnız hesap eşitliği»
+  // ve «çıkış turu ilerletmez» mutasyonları yeşil kalıyordu.
+  it('kimlikteki hesap DEĞİŞİR (dinleyici henüz ateşlenmedi), askıdaki okuma SONRA 200 döner → tur hiçbir şey yazmaz (`auth.currentUser` eşitliği)', async () => {
+    durum.askiyaAl.add(GET_KENDI());
+    const { container } = await ac('Admin', '/dashboard');
+    expect(kendiOkumaSayisi()).toBe(1);
+    durum.hesap = { ...durum.kullanici, uid: 'uid-baska-hesap' };   // Firebase oturumu başka hesaba geçti
+    await birak(GET_KENDI(), 200, { data: { role: 'Admin', companyId: 'sirket-1', name: 'Deneme Kullanıcı' } });
+    await bekle();
+    expect(kabukVar(container)).toBe(false);
+    expect(yoneticiMenusu(container)).toBe(false);
+    expect(durum.dinleyiciler).toEqual([]);
+    expect(akislar).toEqual([]);
+  });
+
+  it('AYNI hesap çıkıp yeniden girer; ESKİ turun askıdaki okuması 200 Yönetici döner → yazılmaz (tur numarası); yeni turun sonucu (Satış) yazılır', async () => {
+    durum.askiyaAl.add(GET_KENDI());
+    const { container } = await ac('Admin', '/dashboard');
+    expect(kendiOkumaSayisi()).toBe(1);
+    durum.hesap = null;
+    await act(async () => { await durum.oturumDinleyicisi?.(null); });
+    durum.hesap = durum.kullanici;
+    await act(async () => { await durum.oturumDinleyicisi?.(durum.kullanici); });
+    await ilerlet(300);
+    expect(kendiOkumaSayisi()).toBe(2);                                    // yeni turun okuması da askıda
+    await birakIlk(GET_KENDI(), 200, { data: { role: 'Admin', companyId: 'sirket-1', name: 'Deneme Kullanıcı' } });
+    await bekle();
+    expect(kabukVar(container)).toBe(false);                               // yeni tur sürüyor: yükleniyor görünümü
+    expect(yoneticiMenusu(container)).toBe(false);
+    expect(durum.dinleyiciler).toEqual([]);
+    await birak(GET_KENDI(), 200, { data: { role: 'Sales', companyId: 'sirket-1', name: 'Deneme Kullanıcı' } });
+    await bekle();
+    expect(kabukVar(container)).toBe(true);
+    expect(yoneticiMenusu(container)).toBe(false);                         // eski turun Yönetici rolü TAŞINMADI
+    expect(appDeposu.getState().userRole).toBe(UserRole.Sales);
+  });
+
+  it('«Yeniden dene» sürerken «Çıkış»: sunucu çıkışı beklenirken dönen profil okuması kabuğu açmaz (çıkış turu bayatlatır)', async () => {
+    durum.kalici[GET_KENDI()] = SUNUCU_HATASI;
+    const { container, getByRole } = await ac('Admin', '/dashboard');
+    await ilerlet(15_000);
+    expect(metin(container)).toContain(PROFIL_YUKLENEMEDI);
+    delete durum.kalici[GET_KENDI()];
+    durum.askiyaAl.add(GET_KENDI());
+    const cikisAnahtari = `POST ${CIKIS_UCU}`;
+    durum.askiyaAl.add(cikisAnahtari);
+    fireEvent.click(getByRole('button', { name: 'Yeniden dene' }));
+    await ilerlet(100);
+    expect(kendiOkumaSayisi()).toBe(5);
+    fireEvent.click(getByRole('button', { name: 'Çıkış' }));
+    await ilerlet(100);
+    expect(durum.askida[cikisAnahtari]).toHaveLength(1);                   // sunucu çıkışı askıda; oturum henüz kapanmadı
+    expect(durum.cikisSayisi).toBe(0);
+    await birak(GET_KENDI(), 200, { data: { role: 'Admin', companyId: 'sirket-1', name: 'Deneme Kullanıcı' } });
+    await bekle();
+    expect(kabukVar(container)).toBe(false);
+    expect(yoneticiMenusu(container)).toBe(false);
+    expect(durum.dinleyiciler).toEqual([]);
+    await birak(cikisAnahtari, 200, { ok: true });
+    await bekle();
+    expect(durum.cikisSayisi).toBe(1);
+    expect(kabukVar(container)).toBe(false);
+  });
+});
+
+// ── İ2-a (inceleme 2, 2026-10-17): çıkış sürerken «Yeniden dene» kabuğu AÇMAZ ─────────────────────────────────────────────
+// Çıkış sunucu yanıtını beklerken (en çok 5 sn) oturum hâlâ açıktır: o arada basılan «Yeniden dene» yeni tur alıp çıkışın bayatlattığı
+// turu geçiyor, Yönetici kabuğu açılıyor ve dinleyiciler başlıyordu. İki katman AYRI sınanır: (1) sayfanın düğmesi çıkış sürerken
+// pasif; (2) App'in kapısı (`cikisSuruyorRef`) — düğme atlanıp işleyici doğrudan çağrılır (biri sökülürse kendi satırı kırmızı).
+// Askıdaki okuma yok: çıkış başladıktan sonraki okuma BAŞARILI Yönetici döner — kapı açık kalırsa kabuk görünür.
+describe('İ2-a — çıkış sürerken «Yeniden dene»: kabuk açılmaz, dinleyici 0', () => {
+  const CIKIS = `POST ${CIKIS_UCU}`;
+
+  /** «Profiliniz yüklenemedi.» sayfasına kadar açar, sonraki okumayı başarılı Yönetici yapar, «Çıkış»a basar (sunucu çıkışı askıda). */
+  async function okunamadiVeCikisBaslat() {
+    durum.kalici[GET_KENDI()] = SUNUCU_HATASI;
+    const sonuc = await ac('Admin', '/dashboard');
+    await ilerlet(15_000);
+    expect(metin(sonuc.container)).toContain(PROFIL_YUKLENEMEDI);
+    expect(kendiOkumaSayisi()).toBe(4);
+    delete durum.kalici[GET_KENDI()];                                      // bundan sonraki okuma 200 Yönetici
+    durum.askiyaAl.add(CIKIS);
+    fireEvent.click(sonuc.getByRole('button', { name: 'Çıkış' }));
+    await ilerlet(100);
+    expect(durum.askida[CIKIS]).toHaveLength(1);                           // sunucu çıkışı askıda; oturum henüz kapanmadı
+    expect(durum.cikisSayisi).toBe(0);
+    return sonuc;
+  }
+  /** Askıdaki sunucu çıkışını yanıtlar; oturum kapanır, kabuk ve dinleyici yok. */
+  async function cikisiBitir(kap: HTMLElement) {
+    await birak(CIKIS, 200, { ok: true });
+    await bekle();
+    expect(durum.cikisSayisi).toBe(1);
+    expect(metin(kap)).not.toContain(PROFIL_YUKLENEMEDI);
+    expect(kabukVar(kap)).toBe(false);
+    expect(durum.dinleyiciler).toEqual([]);
+  }
+
+  it('sayfa katmanı: önce «Çıkış», sonra «Yeniden dene» → düğme PASİF (etiket «Yeniden dene», «Deneniyor…» değil); okuma yok, kabuk yok, dinleyici 0', async () => {
+    const { container, getByRole } = await okunamadiVeCikisBaslat();
+    const dugme = getByRole('button', { name: 'Yeniden dene' }) as HTMLButtonElement;
+    expect(dugme.disabled).toBe(true);
+    fireEvent.click(dugme);
+    await bekle();
+    expect(kendiOkumaSayisi()).toBe(4);
+    expect(kabukVar(container)).toBe(false);
+    expect(yoneticiMenusu(container)).toBe(false);
+    expect(durum.dinleyiciler).toEqual([]);
+    expect(akislar).toEqual([]);
+    await cikisiBitir(container);
+  });
+
+  it('App kapısı: düğme atlanır, «Yeniden dene» işleyicisi çıkış sürerken DOĞRUDAN çağrılır → okuma yok, kabuk yok, dinleyici 0', async () => {
+    const { container } = await okunamadiVeCikisBaslat();
+    const sayfa = durum.profilEkrani;
+    expect(sayfa, 'sayfanın özellikleri okunamadı (sarmal bağlı değil)').not.toBeNull();
+    await act(async () => { sayfa?.onYenidenDene(); await vi.advanceTimersByTimeAsync(0); });
+    await bekle();
+    expect(kendiOkumaSayisi()).toBe(4);
+    expect(kabukVar(container)).toBe(false);
+    expect(yoneticiMenusu(container)).toBe(false);
+    expect(durum.dinleyiciler).toEqual([]);
+    expect(akislar).toEqual([]);
+    await cikisiBitir(container);
+  });
+
+  it('çıkış bitince kapı AÇILIR: aynı sekmede yeniden giriş, okuma 500 × 4 → «Yeniden dene» başarıda Yönetici menüsü', async () => {
+    const { container, getByRole } = await okunamadiVeCikisBaslat();
+    await cikisiBitir(container);
+    durum.yanitlar[GET_KENDI()] = [SUNUCU_HATASI, SUNUCU_HATASI, SUNUCU_HATASI, SUNUCU_HATASI];
+    durum.hesap = durum.kullanici;
+    durum.dinleyiciler = []; istekler = []; akislar = [];
+    await act(async () => { await durum.oturumDinleyicisi?.(durum.kullanici); });
+    await ilerlet(15_000);
+    expect(metin(container)).toContain(PROFIL_YUKLENEMEDI);
+    expect(kendiOkumaSayisi()).toBe(4);
+    const dugme = getByRole('button', { name: 'Yeniden dene' }) as HTMLButtonElement;
+    expect(dugme.disabled).toBe(false);
+    fireEvent.click(dugme);
+    await bekle();
+    expect(kendiOkumaSayisi()).toBe(5);
+    expect(yoneticiMenusu(container)).toBe(true);
+    expect(durum.dinleyiciler).toContain('orders');
+  });
+
+  // Kaynak çiti: «hata verse de sıfırlanır» davranışla ölçülemez (`handleLogout`un adımları fırlatmaz) — sıfırlama `finally`de olmalı.
+  it('kaynak: bayrak `handleLogout`ta turdan ÖNCE kurulur ve `finally`de sıfırlanır; «Yeniden dene» girişinde denetlenir', () => {
+    const satirlar = kodSatirlari(join(SRC_KOK, 'App.tsx')).map(s => s.kod.trim());
+    const ilk = (bas: number, satir: string) => {
+      const i = satirlar.findIndex((s, j) => j > bas && s === satir);
+      expect(i, `App.tsx içinde bulunamadı: ${satir}`).toBeGreaterThan(bas);
+      return i;
+    };
+    expect(satirlar.filter(s => /cikisSuruyorRef\.current = true;/.test(s))).toHaveLength(1);
+    expect(satirlar.filter(s => /cikisSuruyorRef\.current = false;/.test(s))).toHaveLength(1);
+    const cikis = ilk(-1, 'const handleLogout = async () => {');
+    const kur = ilk(cikis, 'cikisSuruyorRef.current = true;');
+    expect(satirlar[kur + 1]).toBe('try {');
+    const tur = ilk(kur, 'acilisTuruRef.current += 1;');
+    const sonra = ilk(tur, '} finally {');
+    expect(satirlar[sonra + 1]).toBe('cikisSuruyorRef.current = false;');
+    expect(satirlar.filter(s => s.startsWith('if (rolCozumSuruyorRef.current || cikisSuruyorRef.current || auth.currentUser?.uid !== u.uid) return;'))).toHaveLength(1);
+  });
+});
+
+describe('R5′ — sahip kurulumu: rol yalnız `setDoc` BAŞARILIYSA; düşerse R2 sınıflandırması', () => {
+  beforeEach(() => { durum.kullanici = { ...durum.kullanici, email: SAHIP }; });
+
+  it.each([
+    ['PUT 500', SUNUCU_HATASI],
+    ['PUT 403 KAYIT_YOK', [403, { error: "Bu hesap için CETPA'da kullanıcı kaydı yok. Hesabınızı CETPA yöneticiniz açar.", code: 'KAYIT_YOK' }]],
+  ] as Array<[string, SahteYanit]>)('belge yok + %s → menü yok (Admin sessizce atanmaz); üç deneme sonra «Profiliniz yüklenemedi.»', async (_ad, ret) => {
+    durum.kalici[GET_KENDI()] = [404, { error: 'Not found.' }];
+    durum.kalici[`PUT ${kendiYolu()}`] = ret;
+    const { container } = await ac('Admin', '/dashboard');
+    expect(kabukVar(container)).toBe(false);
+    await ilerlet(15_000);
+    expect(kendiYazimlari('PUT')).toBe(4);                                 // «Yeniden dene» gibi her deneme kurulumun TAMAMINI koşar
+    expect(kabukVar(container)).toBe(false);
+    expect(yoneticiMenusu(container)).toBe(false);
+    expect(metin(container)).toContain(PROFIL_YUKLENEMEDI);
+    expect([durum.cikisSayisi, durum.silinen]).toEqual([0, []]);           // kayıtsız hesap dalına düşmez
+    expect(durum.dinleyiciler).toEqual([]);
+  });
+
+  it('belge yok + PUT 200 → kurulum yazılır, rol Yönetici (bugünkü kurulum dalı)', async () => {
+    durum.kalici[GET_KENDI()] = [404, { error: 'Not found.' }];
+    const { container } = await ac('Admin', '/dashboard');
+    expect(kendiYazimlari('PUT')).toBe(1);
+    expect(yoneticiMenusu(container)).toBe(true);
+  });
+});
+
+describe('R1′ — «rol atanmamış» hesap: ekran bugünkü yerinde, veri BAŞLAMAZ', () => {
+  it('rolsüz kayıt: «rol atanmamış» uyarısı; izin dışı istek 0, dinleyici 0, akış bağlantısı 0, 90 sn zamanlayıcısı yok', async () => {
+    const { container } = await ac(undefined, '/dashboard');
+    expect(metin(container)).toContain('Hesabınıza rol atanmamış');
+    await ilerlet(15_000);
+    expect(izinDisi()).toEqual([]);
+    expect(durum.dinleyiciler).toEqual([]);
+    expect(akislar).toEqual([]);
+    expect(araliklar).not.toContain(90_000);
   });
 });
 
@@ -489,14 +982,28 @@ describe('App.tsx kaynağı — dış rol kapısı bağlı', () => {
     expect(say(/disRolEkraniGosterilir\(/)).toBe(1);
     expect(say(/<DisRolEkrani\b/)).toBe(1);
     expect(kapi).toBeGreaterThan(sira('if (!isAuthReady) return ('));
+    // Rol kapısı (R1) dış rol kapısından ÖNCE: profil okuması düşen bayi de iç menüyü / bayi sayfasını görmez (R6).
+    expect(kapi).toBeGreaterThan(sira("if (user && rolDurumu !== 'cozuldu') {"));
     expect(kapi).toBeLessThan(sira('const uygulamaYolundaMi ='));
     expect(kapi).toBeLessThan(sira('if (!user && !isGuestMode) {'));
     expect(kapi).toBeLessThan(sira('if (baglanSayfasi && user) {'));
   });
 
+  it('R — veri kapısı TEK türetilmiş değer; rol kapısı ve «Profiliniz yüklenemedi.» sayfası bağlı (yazıldı ama bağlanmadı çiti)', () => {
+    expect(say(/^\s*const veriOturumu = veriOturumuSec\(user, rolDurumu, roleMissing\);$/)).toBe(1);
+    expect(say(/veriOturumuSec\(/)).toBe(1);
+    expect(say(/<ProfilYuklenemediEkrani$/)).toBe(1);
+    expect(say(/onYenidenDene=\{\(\) => profiliYenidenCozRef\.current\?\.\(user\)\}/)).toBe(1);
+    expect(say(/^\s*profiliYenidenCozRef\.current = \(u: User\) => \{$/)).toBe(1);
+    expect(kod).toContain("import ProfilYuklenemediEkrani from './components/ProfilYuklenemediEkrani';");
+    // Yönlendirme efekti yalnız `'cozuldu'`da koşar (R1″).
+    expect(say(/^\s*if \(!isAuthReady \|\| !user \|\| rolDurumu !== 'cozuldu'\) return;$/)).toBe(1);
+  });
+
   it('sekme kapılı dinleyiciler `activeTab`i DOĞRUDAN almaz: veri sekmesinden geçer', () => {
-    expect(say(/^\s*const veriSekme = veriSekmesi\(\{ oturumVar: !!user, rol: userRole, sekme: activeTab \}\);$/)).toBe(1);
-    expect(say(/useSekmeVerileri\(\{ user, activeTab: veriSekme, /)).toBe(1);
+    // 2026-10-17 (R1′): oturum veri kapısından (`veriOturumu`) gelir — rol çözülmeden sekme kapılı dinleyici açılmaz (bilerek değişti).
+    expect(say(/^\s*const veriSekme = veriSekmesi\(\{ oturumVar: !!veriOturumu, rol: userRole, sekme: activeTab \}\);$/)).toBe(1);
+    expect(say(/useSekmeVerileri\(\{ user: veriOturumu, activeTab: veriSekme, /)).toBe(1);
     expect(say(/useSekmeVerileri\(/)).toBe(1);
     expect(say(/if \(veriSekme !== 'inventory' \|\| p584Active\) return;/)).toBe(1);
   });

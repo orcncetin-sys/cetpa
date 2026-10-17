@@ -34,12 +34,11 @@ import {
   signInWithPopup,
   signInWithRedirect,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   sendEmailVerification,
   sendPasswordResetEmail,
-  updateProfile,
   GoogleAuthProvider,
   signOut,
+  deleteUser,
   getRedirectResult,
   User
 } from 'firebase/auth';
@@ -289,6 +288,8 @@ import { MAGAZA_PANEL_BAGLAN_YOLU } from './lib/magazaPanelBaglan';
 import { TOP_LEVEL_TABS } from './lib/topLevelTabs';
 import { cikisIstegiGonder } from './lib/oturumCikisi';
 import DisRolEkrani, { disRolMu, disRolEkraniGosterilir, veriSekmesi } from './components/DisRolEkrani';
+import ProfilYuklenemediEkrani from './components/ProfilYuklenemediEkrani';
+import { ROL_YENIDEN_DENEME_MS, profilHatasiSinifi, veriOturumuSec, type RolDurumu } from './lib/rolCozumu';
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -616,6 +617,48 @@ function DeltaBadge({ delta }: { delta: number | null | undefined }) {
 // kayboluyor. Modul yuklenirken calismasi icin bilerek bilesen disinda.
 captureInviteFromUrl();
 
+// ── Herkese açık kayıt kapalı (2026-10-17, şartname «kayıt kapanışı» A1 / A2) ─────────────────────────────────────────────
+/** Giriş ekranının kalıcı notu: hesap açmanın tek yolu yönetici (Yönetim → Kullanıcılar → «Kullanıcı Ekle (manuel)» ya da davet). */
+const HESAP_ACMA_NOTU = { tr: 'Hesabınızı CETPA yöneticiniz açar.', en: 'Your CETPA administrator creates your account.' } as const;
+/** CETPA'da `users` kaydı olmayan hesapla giriş denendi (A2 c). Sunucunun aynı durumdaki reddi (server.ts `KAYIT_YOK_YANITI`)
+ *  aynı cümleyi taşır. */
+const KAYITSIZ_HESAP_ILETISI = {
+  tr: `Bu hesap için CETPA'da kullanıcı kaydı yok. ${HESAP_ACMA_NOTU.tr}`,
+  en: `There is no CETPA user record for this account. ${HESAP_ACMA_NOTU.en}`,
+} as const;
+/**
+ * Bekleyen davetle gelen kişinin YENİ kimlik hesabı Firebase'de açılamadı (`auth/admin-restricted-operation` — konsolda «Oluşturmayı
+ * etkinleştir» kapalı, A5). Davet kabulü oturum ister: hesap açılamayınca davet akışı kapanır — genel «kayıt yok» iletisi yerine
+ * davetliye yolu söylenir (şartname «kayıt kapanışı ve kuruş» İ1-a, 2026-10-17). Yöneticinin yolu: Yönetim → Kullanıcılar →
+ * «Kullanıcı Ekle (manuel)» (sunucu hesabı açar). Not: A5 ÖNERİLMEZ (kod kapısı yeterli); açılırsa davet yerine bu yol.
+ * İleti bölümü Yönetim ekranındaki GERÇEK başlığıyla anar (AdminPage.tsx «Kullanıcı Ekle (manuel)» / "Add User (manual)"; inceleme 2
+ * İ2-b: şartnamenin İ1-a metnindeki bölüm adı Yönetim ekranında YOKTU). Çit: davetPostasi.test.ts İ1-d.
+ */
+const DAVETLI_HESAP_ACILAMADI_ILETISI = {
+  tr: 'Davetiniz kabul edilemedi: bu kurulumda yeni hesabı yalnız CETPA yöneticiniz açabilir. Yöneticinizden sizin için «Kullanıcı Ekle (manuel)» ile hesap açmasını isteyin.',
+  en: 'Your invitation could not be accepted: in this installation only your CETPA administrator can create new accounts. Ask your administrator to create an account for you with "Add User (manual)".',
+} as const;
+/** `auth/admin-restricted-operation` iletisi: bekleyen davet varsa davetliye özel ileti, yoksa kayıtsız hesap iletisi (İ1-a). */
+function kisitliIslemIletisi(dil: Language): string {
+  const ileti = getPendingInvite() ? DAVETLI_HESAP_ACILAMADI_ILETISI : KAYITSIZ_HESAP_ILETISI;
+  return dil === 'tr' ? ileti.tr : ileti.en;
+}
+/** «Bu girişte açıldı» sayılmak için hesabın açılış anının şimdiye en çok bu kadar uzak olması gerekir (saat farkı payı dâhil). */
+const YENI_HESAP_PENCERESI_MS = 10 * 60_000;
+/**
+ * Firebase kimlik hesabı BU girişte mi açıldı? Yalnız `true` ise kayıtsız hesap silinir (A2 c: «yeni olduğu kesin bilinmiyorsa
+ * SİLİNMEZ, yalnız oturum kapanır»). Ölçüt: hesabın açılış anı ile son giriş anı AYNI (Firebase ikisini ilk girişte birlikte yazar;
+ * sonraki her giriş son girişi ilerletir) VE açılış şimdiye yakın — saklı oturumla yeniden açılan, bir daha hiç girilmemiş ESKİ hesap
+ * «yeni» sayılmaz. Biri okunamazsa `false`. `getAdditionalUserInfo(...).isNewUser` kullanılmadı: oturum dinleyicisi giriş sonucunu
+ * (UserCredential) görmez, yönlendirmeli girişte sonuç başka bir turda gelir.
+ */
+function hesapBuGiristeAcildi(u: Pick<User, 'metadata'>, simdi: number): boolean {
+  const acilis = Date.parse(u.metadata?.creationTime ?? '');
+  const sonGiris = Date.parse(u.metadata?.lastSignInTime ?? '');
+  if (!Number.isFinite(acilis) || !Number.isFinite(sonGiris) || acilis !== sonGiris) return false;
+  return Math.abs(simdi - acilis) <= YENI_HESAP_PENCERESI_MS;
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -643,6 +686,9 @@ function AppContent() {
   // (lib/confirm.ts) üretiliyor — dili oraya bildirmezsek İngilizce kullanan
   // kullanıcı Türkçe düğme görür.
   useEffect(() => { setConfirmLanguage(currentLanguage === 'tr' ? 'tr' : 'en'); }, [currentLanguage]);
+  // Oturum dinleyicisi bir kez kurulur (bağımlılığı yok): giriş ekranına yazdığı iletinin dili GÜNCEL dilden okunur.
+  const dilRef = useRef<Language>(currentLanguage);
+  useEffect(() => { dilRef.current = currentLanguage; }, [currentLanguage]);
 
   // ── Zustand store sync ────────────────────────────────────────────────────
   const { setExchangeRates: storeSetRates,
@@ -703,19 +749,38 @@ function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [emailLogin, setEmailLogin] = useState({ email: '', password: '' });
-  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', confirm: '' });
   const [isEmailLoginLoading, setIsEmailLoginLoading] = useState(false);
-  const [authMode, setAuthMode] = useState<'signin'|'signup'|'reset'>('signin');
+  // Herkese açık kayıt YOK (2026-10-17, şartname «kayıt kapanışı» A1): hesabı CETPA yöneticisi açar (Yönetim → Kullanıcılar →
+  // «Kullanıcı Ekle (manuel)» ya da davet). Giriş ekranında yalnız e-posta + şifreyle giriş, Google ile giriş ve şifre sıfırlama var.
+  const [authMode, setAuthMode] = useState<'signin'|'reset'>('signin');
   const [resetSent, setResetSent] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   // 2FA: kullanıcının 2FA'sı açık ama bu oturum doğrulanmamışsa challenge sürülür.
   const [mfaChallenge, setMfaChallenge] = useState(false);
   const [showMfaSettings, setShowMfaSettings] = useState(false);
-  // DİKKAT (2026-10-11, dış rol kapanışı): başlangıç değeri `Sales`. Rol OKUNAMAZSA (aşağıda `mfaPending` dalı) bu değer
-  // kalır; dış rol kapısı (`disRol`) o oturumda rolü bilemez. Bu «okunamayınca Sales» davranışı AYRI düzeltmedir, kullanıcı
-  // onayı bekliyor; bu turda BİLEREK değiştirilmedi (veriyi sunucu kapatır). ÇIKIŞTA (`handleLogout` + oturum dinleyicisinin
-  // `!u` dalı) rol bu başlangıç değerine döner: aynı sekmedeki önceki oturumun rolü sonraki girişe TAŞINMAZ.
+  // Başlangıç değeri `Sales` (tip ve tüketiciler DEĞİŞMEDİ). Bu değer ROL DEĞİLDİR: rol yalnız `rolDurumu === 'cozuldu'` iken
+  // gerçektir — kabuk ve veri kapısı (`veriOturumu`) onu başka durumda KULLANMAZ (şartname «kayıt kapanışı ve kuruş» R1, 2026-10-17;
+  // eskiden profil okunamayınca bu varsayılan kalıyor, arayüzün tamamı Satış rolüyle çiziliyordu). ÇIKIŞTA (`handleLogout` + oturum
+  // dinleyicisinin `!u` dalı) ve her açılış turunun başında rol bu başlangıç değerine döner: önceki oturumun rolü TAŞINMAZ.
   const [userRole, setUserRole] = useState<UserRole>(UserRole.Sales);
+  // Rolün çözüm durumu (R1; anlamları `lib/rolCozumu.ts`). Oturum varken `'cozuldu'` olmadan uygulama kabuğu ÇİZİLMEZ (aşağıda
+  // Render: yükleniyor görünümü / iki adımlı doğrulama penceresi / «Profiliniz yüklenemedi.») ve veri BAŞLAMAZ (`veriOturumu`).
+  const [rolDurumu, setRolDurumu] = useState<RolDurumu>('bekliyor');
+  // «Yeniden dene» çözümü sürüyor mu (R2″): sürerken düğme pasif; ikinci tıklama ikinci çözüm başlatmaz (ref aynı bilginin eşzamanlı kopyası).
+  const [rolCozumSuruyor, setRolCozumSuruyor] = useState(false);
+  const rolCozumSuruyorRef = useRef(false);
+  // Çıkış sürüyor mu (inceleme 2 İ2-a, 2026-10-17): `handleLogout` sunucu çıkışını beklerken (en çok 5 sn) oturum hâlâ açıktır;
+  // o arada başlayan «Yeniden dene» yeni bir tur alıp çıkışın bayatlattığı turu geçer ve Yönetici kabuğunu açıyordu (dinleyiciler
+  // başlıyordu). Bayrak `handleLogout`ta kurulur, sonunda (hata verse de) sıfırlanır; «Yeniden dene» girişinde denetlenir. Görüntü
+  // durumu DEĞİLDİR: düğmeyi `ProfilYuklenemediEkrani`nın kendi `cikiyor`u pasifleştirir (`rolCozumSuruyor` «Deneniyor…» basardı).
+  const cikisSuruyorRef = useRef(false);
+  // Açılış TURU numarası (R2″): her tur (dinleyici turu, «Yeniden dene») bir numara alır; `!u` turu ve çıkış numarayı artırır. Kullanıcı,
+  // rol, rol durumu ve kiracı kimliği yalnız tur GÜNCELKEN (ve `auth.currentUser` aynı hesapken) yazılır; bayat tur sessizce biter.
+  const acilisTuruRef = useRef(0);
+  // Bekleyen kendiliğinden yeniden deneme (R2): `!u` turu ve çıkış onu iptal eder (bekleme `false` ile çözülür, tur biter).
+  const yenidenDenemeRef = useRef<{ iptal: () => void } | null>(null);
+  // Oturum dinleyicisinin çözümünü «Yeniden dene»ye açar (dinleyici efekti kurar; düğme çağırır).
+  const profiliYenidenCozRef = useRef<((u: User) => void) | null>(null);
   // Kullanıcının users/{uid} kaydında role alanı boşsa eskiden sessizce
   // 'Sales'e düşülüyordu — kullanıcı gerçek rolünün ne olduğunu hiç fark
   // etmeden en kısıtlı role ile geziniyordu (2026-08-17 kullanıcı bildirimi:
@@ -730,9 +795,13 @@ function AppContent() {
   // bağlantısı, rapor özeti ve Mikro yeniden deneme zamanlayıcısı bu bayrakla başlamaz. Üyelik TEK yerden sorulur
   // (`disRolMu` → rbac.ts `EXTERNAL_ROLES`); yeni dış rol koşulu rol adıyla YAZILMAZ. Ana veri efektindeki eski
   // `UserRole.Dealer` sipariş sorgusu dalı artık ulaşılmaz (ölü yüzey — B2BPortal'daki dallarla birlikte Faz 4 listesinde).
-  // YENİ VERİ EFEKTİ YAZARKEN: oturum koşulunun yanına `|| disRol` ekle (ör. `if (!user || disRol) return;`) ve bağımlılık
-  // dizisine `disRol` yaz. Unutulursa `DisRolEkrani.uygulama.test.tsx` kırmızıya döner (dış rolde izin dışı istek / dinleyici).
+  // YENİ VERİ EFEKTİ YAZARKEN: oturumu veri kapısından al ve yanına `|| disRol` ekle (ör. `if (!veriOturumu || disRol) return;`,
+  // aşağıda `veriOturumu`) ve bağımlılık dizisine ikisini yaz. Unutulursa `DisRolEkrani.uygulama.test.tsx` kırmızıya döner (dış rolde izin dışı istek / dinleyici).
   const disRol = disRolMu(userRole);
+  // ── Veri kapısı (R1′): `user`'a bakan HER veri kapısı oturumu BURADAN alır — kapı efekt efekt yazılmaz. Rol çözülmeden
+  // (`rolDurumu !== 'cozuldu'`) ve belgede rol yokken (`roleMissing`) `null`: dinleyici, akış bağlantısı, rapor özeti, Mikro
+  // zamanlayıcısı başlamaz; sorgu Satış biçimiyle (`assignedTo` süzgeci) kurulmaz. YENİ VERİ EFEKTİ: `if (!veriOturumu || disRol)`.
+  const veriOturumu = veriOturumuSec(user, rolDurumu, roleMissing);
 
   // Permission helpers
   const canAccess = (tab: string) => {
@@ -755,10 +824,10 @@ function AppContent() {
     const hash = window.location.hash.replace('#', '');
     return path || hash || 'dashboard';
   });
-  // SEKME kapılı veri dinleyicilerine giden sekme (`useSekmeVerileri`, stok sayım oturumu): oturum yokken ve dış rolde BOŞ.
-  // Bu dinleyicilerin kendi oturum koşulu yok; `activeTab` doğrudan verilseydi rol okunmadan ÖNCE abone olurlardı
-  // (`user` ile rol aynı anda yazılır — oturum dinleyicisinin sonu).
-  const veriSekme = veriSekmesi({ oturumVar: !!user, rol: userRole, sekme: activeTab });
+  // SEKME kapılı veri dinleyicilerine giden sekme (`useSekmeVerileri`, stok sayım oturumu): oturum yokken, rol çözülmeden ve dış
+  // rolde BOŞ. Bu dinleyicilerin kendi oturum koşulu yok; `activeTab` doğrudan verilseydi rol okunmadan ÖNCE abone olurlardı.
+  // Oturum veri kapısından (`veriOturumu`) gelir: kullanıcı açılış turunun başında yazılır, rol çözülmeden sekme açılmaz (R1′).
+  const veriSekme = veriSekmesi({ oturumVar: !!veriOturumu, rol: userRole, sekme: activeTab });
   // URL ↔ activeTab bidirectional sync (React Router)
   useRouteSync({ activeTab, setActiveTab });
   const konum = useLocation();
@@ -780,8 +849,8 @@ function AppContent() {
   // bağlı değildir (2026-08-28 kullanıcı düzeltmesi). Panel yalnız aracı
   // seçip localStorage bayrağını yazar; yayın burada yaşar.
   useKonumYayini({
-    aktif: !!user && isAllowed(userRole, 'vehiclePositions', 'write'),
-    kullaniciUid: user?.uid,
+    aktif: !!veriOturumu && isAllowed(userRole, 'vehiclePositions', 'write'),   // rol çözülmeden yayın başlamaz (R1′)
+    kullaniciUid: veriOturumu?.uid,
     plakaBul: id => vehicles.find(v => v.id === id)?.plate
       ?? warehouses.find(w => `wh-${w.id}` === id)?.name ?? '',
   });
@@ -824,12 +893,12 @@ function AppContent() {
   // Boş dizi yüzünden giriş tamamlandıktan sonra BİR DAHA denenmiyordu; hata da
   // yutulduğu için özet sessizce hiç yüklenmiyordu (konsolda 401 olarak görünür).
   useEffect(() => {
-    if (!user || disRol) return;
+    if (!veriOturumu || disRol) return;
     authFetch('/api/reports/summary')
       .then(r => r.ok ? r.json() : null)
       .then((d: typeof summaryData) => { if (d) setSummaryData(d); })
       .catch(() => {});
-  }, [user, disRol]);
+  }, [veriOturumu, disRol]);
 
   // ── System health state ────────────────────────────────────────────────────
   const [healthData, setHealthData] = useState<{
@@ -1027,7 +1096,8 @@ function AppContent() {
   });
 
   // eBA approval queue pending count (badge on nav tab)
-  const pendingApprovalsCount = usePendingApprovalCount(userRole, user?.email);
+  // Rol çözülmeden onay sayacı dinlenmez (R1′): kanca rolden başka bir şeye bakmaz, rol yerine `null` verilir.
+  const pendingApprovalsCount = usePendingApprovalCount(veriOturumu ? userRole : null, veriOturumu?.email);
 
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -1045,13 +1115,13 @@ function AppContent() {
   interface CommissionRuleApp { id: string; tier: string; targetAmount: number; commissionRate: number; bonusRate: number; period: 'monthly' | 'quarterly'; }
 
   useEffect(() => {
-    if (!user || disRol || activeTab !== 'crm') return; // yalnızca CRM lead detayında kullanılır
+    if (!veriOturumu || disRol || activeTab !== 'crm') return; // yalnızca CRM lead detayında kullanılır
     const unsub = onSnapshot(collection(db, 'commissionRules'), snap => {
       setCommissionRules(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRuleApp))));
     });
     return () => unsub();
    
-  }, [user, activeTab, disRol]);
+  }, [veriOturumu, activeTab, disRol]);
 
   // ── Phase 29: Supplier Directory ──────────────────────────────────────────
 
@@ -1062,13 +1132,13 @@ function AppContent() {
   const [newSupplier, setNewSupplier] = useState<Partial<Supplier>>({});
 
   useEffect(() => {
-    if (!user || disRol || !['satin-alma', 'muhasebe', 'lojistik'].includes(activeTab)) return;
+    if (!veriOturumu || disRol || !['satin-alma', 'muhasebe', 'lojistik'].includes(activeTab)) return;
     const unsub = onSnapshot(collection(db, 'suppliers'), snap => {
       setSuppliers(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier))));
     }, err => console.error('suppliers:', err));
     return () => unsub();
    
-  }, [user, activeTab, disRol]);
+  }, [veriOturumu, activeTab, disRol]);
 
   const [vknLookupLoading, setVknLookupLoading] = useState(false);
   const [vknLookupMsg, setVknLookupMsg] = useState<{text: string; ok: boolean} | null>(null);
@@ -1167,10 +1237,11 @@ function AppContent() {
 
   // Load subscription from Firestore
   useEffect(() => {
-    if (!user || disRol) { setUserSubscription(null); setSubscriptionLoaded(false); setPaymentHistory([]); return; }
+    const oturum = veriOturumu;   // veri kapısı (R1′): rol çözülmeden abonelik dinlenmez
+    if (!oturum || disRol) { setUserSubscription(null); setSubscriptionLoaded(false); setPaymentHistory([]); return; }
 
     // Owner/admin accounts get a permanent enterprise subscription — no Firestore doc needed
-    if (ADMIN_EMAILS.includes(user.email ?? '')) {
+    if (ADMIN_EMAILS.includes(oturum.email ?? '')) {
       setUserSubscription({
         plan: 'enterprise',
         status: 'active',
@@ -1185,7 +1256,7 @@ function AppContent() {
       return;
     }
 
-    const unsub = onSnapshot(doc(db, 'subscriptions', user.uid), (snap) => {
+    const unsub = onSnapshot(doc(db, 'subscriptions', oturum.uid), (snap) => {
       if (snap.exists()) {
         setUserSubscription(snap.data() as UserSubscription);
       } else {
@@ -1196,7 +1267,7 @@ function AppContent() {
 
     // Load real payment history from Firestore
     const unsubPayments = onSnapshot(
-      query(collection(db, 'payments'), where('userId', '==', user.uid), limit(24)),
+      query(collection(db, 'payments'), where('userId', '==', oturum.uid), limit(24)),
       (snap) => {
         setPaymentHistory(sortByCreatedAt(snap.docs.map(d => {
           const data = d.data();
@@ -1207,7 +1278,7 @@ function AppContent() {
     );
 
     return () => { unsub(); unsubPayments(); };
-  }, [user, disRol]);
+  }, [veriOturumu, disRol]);
 
   // ── Mikro retry kuyruğu: başarısız push'lar geçici hatada kuyruğa girer;
   //    burada açılışta + 90 sn'de bir bekleyenler yeniden denenir (exponential backoff) ──
@@ -1216,15 +1287,16 @@ function AppContent() {
   // ve rolü atanmamış hesapta (`roleMissing` — o durumda `userRole` varsayılan değerinde kalır, ona güvenilmez) eskiden her
   // 90 saniyede `GET /api/db/syncJobs` 403 alıp yutuluyordu; 2FA doğrulanmadan da koşmaz (istek 403 alır, rol henüz çözülmemiştir).
   // Dış rol de burada durur (dış rol kapanışı D5): `kuyrukYurutebilir` yalnız iç role «evet» der — ayrı `disRol` koşulu gerekmez.
+  // Kimlik veri kapısından (`veriOturumu`, R1′): rol çözülmeden kimlik boştur, zamanlayıcı kurulmaz.
   useEffect(() => {
-    const kimlik = { uid: user?.uid, rol: roleMissing ? null : userRole };
+    const kimlik = { uid: veriOturumu?.uid, rol: roleMissing ? null : userRole };
     if (mfaChallenge || !kuyrukYurutebilir(kimlik)) return;
     let cancelled = false;
     const tick = () => { if (!cancelled) void processMikroRetries(kimlik).catch(() => {}); };
     tick(); // açılışta bir kez
     const timer = setInterval(tick, 90_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [user, userRole, roleMissing, mfaChallenge]);
+  }, [veriOturumu, userRole, roleMissing, mfaChallenge]);
 
   // Check if module is accessible by subscription
   const canAccessBySubscription = (tabId: string): boolean => {
@@ -1401,15 +1473,18 @@ function AppContent() {
   // listener'da ASENKRON gelir ve o ana dek varsayılan 'Sales'tir. Guard'sız
   // hâli, kısıtlı sekmeye derin bağlantıyı (ör. Admin'in /admin yer imi) daha
   // gerçek rol yüklenmeden panoya çevirip URL'yi siliyordu — yetkili kullanıcı
-  // için bile. setIsAuthReady(true) rol çözümünden SONRA aynı handler'da
-  // çağrıldığından, isAuthReady=true iken rol artık gerçek roldür. `user`
-  // yokken de dokunma: landing/login görünür, sekme kararı girişten sonraya kalır.
+  // için bile. `user` yokken de dokunma: landing/login görünür, sekme kararı
+  // girişten sonraya kalır.
+  // DÜZELTME (2026-10-17, şartname «kayıt kapanışı ve kuruş» R1″): eski yorum «isAuthReady=true iken rol artık gerçek roldür»
+  // diyordu — YANLIŞTI: profil okunamayınca (ya da son giriş yazımı düşünce) rol hiç atanmıyor, isAuthReady yine true oluyor ve
+  // Yönetici'nin /admin adresi Satış varsayılanıyla panoya çevriliyordu. Rol YALNIZ `rolDurumu === 'cozuldu'` iken gerçektir;
+  // `'bekliyor'`, `'dogrulama'` ve `'okunamadi'` durumlarında sekmeye ve adrese DOKUNULMAZ («Yeniden dene» başarıda adres korunur).
   useEffect(() => {
-    if (!isAuthReady || !user) return;
+    if (!isAuthReady || !user || rolDurumu !== 'cozuldu') return;
     if (!canAccess(activeTab)) {
       setActiveTab('dashboard');
     }
-  }, [userRole, activeTab, isAuthReady, user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userRole, activeTab, isAuthReady, user, rolDurumu]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // Try local Express server first (dev), then fall back to Frankfurter public API
@@ -1448,19 +1523,19 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    if (!user || !userRole || disRol) return;
-    const unsubNotifications = onSnapshot(query(collection(db, 'notifications'), where('userId', '==', user.uid), limit(10)), (snap) => {
+    if (!veriOturumu || !userRole || disRol) return;
+    const unsubNotifications = onSnapshot(query(collection(db, 'notifications'), where('userId', '==', veriOturumu.uid), limit(10)), (snap) => {
       setNotifications(sortByCreatedAt(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
     }, (error) => importedLogFirestoreError(error, OperationType.LIST, 'notifications', auth.currentUser?.uid));
     return () => unsubNotifications();
-  }, [user, userRole, disRol]);
+  }, [veriOturumu, userRole, disRol]);
 
   useEffect(() => {
-    if (!user || userRole !== 'Admin') return;
+    if (!veriOturumu || userRole !== 'Admin') return;
     getDocs(query(collection(db, 'users'), limit(50)))
       .then(snap => setFirestoreUsers(sortByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() })))))
       .catch(() => {});
-  }, [user, userRole]);
+  }, [veriOturumu, userRole]);
 
   const markNotificationRead = async (id: string) => {
     try {
@@ -1490,6 +1565,7 @@ function AppContent() {
   // Runs once per session after data loads. Checks business rules and creates
   // notifications if they don't already exist (deduped by a 24h window).
   useEffect(() => {
+    const user = veriOturumu;   // veri kapısı (R1′): önceki oturumdan kalan stok / sipariş durumu yeni oturumda tetiklemesin
     if (!user || !inventory.length || !orders.length) return;
 
     const dedupeKey = `autonotif_${user.uid}_${bugunAnahtari()}`;
@@ -1574,7 +1650,7 @@ function AppContent() {
 
     run();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, inventory, orders]);
+  }, [veriOturumu, inventory, orders]);
 
   const logAuditAction = useCallback(async (action: string, details: string) => {
     if (!user) return;
@@ -1714,14 +1790,14 @@ function AppContent() {
   // yazma saveSupplierRating ile (SatinAlmaPage'e prop olarak geçiliyor).
   const [p567Ratings, setP567Ratings] = useState<Record<string, Record<string,number>>>({});
   useEffect(() => {
-    if (!user || disRol) return;
+    if (!veriOturumu || disRol) return;
     const unsub = onSnapshot(collection(db, 'supplierRatings'), snap => {
       const next: Record<string, Record<string, number>> = {};
       snap.docs.forEach(d => { next[d.id] = (d.data() as { ratings?: Record<string, number> }).ratings ?? {}; });
       setP567Ratings(next);
     }, () => {});
     return unsub;
-  }, [user, disRol]);
+  }, [veriOturumu, disRol]);
   const saveSupplierRating = (supplierId: string, criteriaKey: string, score: number) => {
     setDoc(doc(db, 'supplierRatings', supplierId), {
       ratings: { ...(p567Ratings[supplierId] || {}), [criteriaKey]: score },
@@ -1782,14 +1858,14 @@ function AppContent() {
       p570DocVarRef.current = false;
       setP570Targets({ revenue: null, orders: null, avgOrderVal: null, leadConv: null });
     }
-    if (!cid || disRol) return;
+    if (!cid || !veriOturumu || disRol) return;   // veri kapısı (R1′): rol çözülmeden kiracının hedefleri dinlenmez
     const unsub = onSnapshot(doc(db, 'reportTargets', `kpiHedefleri_${cid}`), snap => {
       p570LoadedRef.current = true;
       p570DocVarRef.current = snap.exists();
       if (snap.exists()) setP570Targets(prev => ({ ...prev, ...(snap.data() as Partial<typeof prev>) }));
     }, () => {});
     return unsub;
-  }, [storeCompanyId, user, disRol]);
+  }, [storeCompanyId, user, veriOturumu, disRol]);
   const p570SaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!p570LoadedRef.current) return; // ilk yükleme tamamlanmadan geri-yazma yapma
@@ -1978,7 +2054,7 @@ function AppContent() {
     p547BankAccounts, p547FixedAssets, p548Masraflar, p549Iadeler, p552Records, p554Bins, aracKonumlari, p573Rules, p579Batches, p587Checks, p588Consign, p591Schedules, p608Quotes, p612Budgets, p625BudgetData, p627Risks, p636Calculated, p636Payrolls, p638MatchResults, webhookConfigs, dashVergiDeadlines,
     // Setter'lar: alt bilesenlere prop olarak geciyorlar
     setP547BankAccounts, setP547FixedAssets, setP548Masraflar, setP549Iadeler, setP552Records, setP554Bins, setP573Rules, setP579Batches, setP587Checks, setP588Consign, setP591Schedules, setP608Quotes, setP612Budgets, setP625BudgetData, setP627Risks, setP636Calculated, setP636Payrolls, setP638MatchResults, setWebhookConfigs,
-  } = useSekmeVerileri({ user, activeTab: veriSekme, muhasebeTab, lojistikTab, purchasingSubTab, p625BudgetYear });
+  } = useSekmeVerileri({ user: veriOturumu, activeTab: veriSekme, muhasebeTab, lojistikTab, purchasingSubTab, p625BudgetYear });
 
   const [p625EditMonth, setP625EditMonth] = useState<number|null>(null);
   // ── Phase 626: Müşteri Ödeme Analizi ─────────────────────────────────────
@@ -2036,10 +2112,11 @@ function AppContent() {
   const [aiConsentExpanded, setAiConsentExpanded] = useState<'aydinlatma' | 'kosullar' | null>(null);
 
   useEffect(() => {
-    if (!user || disRol) { setAiConsentChecked(false); setAiConsentGiven(false); return; }
+    const oturum = veriOturumu;   // veri kapısı (R1′)
+    if (!oturum || disRol) { setAiConsentChecked(false); setAiConsentGiven(false); return; }
     (async () => {
       try {
-        const snap = await getDoc(doc(db, 'aiConsents', user.uid));
+        const snap = await getDoc(doc(db, 'aiConsents', oturum.uid));
         const given = snap.exists() && (snap.data() as { accepted?: boolean; version?: number }).accepted === true
           && (snap.data() as { version?: number }).version === AI_CONSENT_VERSION;
         setAiConsentGiven(given);
@@ -2049,7 +2126,7 @@ function AppContent() {
         setAiConsentChecked(true);
       }
     })();
-  }, [user, disRol]);
+  }, [veriOturumu, disRol]);
 
   // Mikro'nun kendi AI modul deseninde oldugu gibi kullanim denenmeden ONCE
   // proaktif olarak goster (KVKK modaliyla ayni gecikme deseni - ust uste
@@ -2345,59 +2422,58 @@ function AppContent() {
   const [isRouteOptimized, setIsRouteOptimized] = useState(false);
 
   // --- Auth & User Profile ---
+  // OTURUM AÇILIŞI (şartname «kayıt kapanışı ve kuruş» A2 + R1–R5′, 2026-10-17). Her açılış TURU (dinleyici turu ya da «Yeniden dene»)
+  // bir numara alır (`acilisTuruRef`); kullanıcı, rol, rol durumu ve kiracı kimliği yalnız tur GÜNCELKEN yazılır (R2″) — `!u` turu ve
+  // çıkış numarayı artırıp bekleyen yeniden denemeyi iptal eder, bayat tur kapanmış oturumu geri açmaz. Turun başında rol açılış
+  // varsayılanına, durum `'bekliyor'`a döner: kabuk çözüm bitene kadar yükleniyor görünümüdür (önceki oturumun rolü görünmez).
+  // Çözüm denemesi YAZMAZ, sonuç döner: kayıt okundu → rol (R3: rol ÖNCE atanır, son giriş yazımı ARDINDAN, düşerse yalnız günlük);
+  // kayıt yok → sahip kurulumu (R5′: rol yalnız `setDoc` BAŞARILIYSA) ya da kayıtsız hesap (A2 c); ret → sınıf (R2: 403 + `mfaRequired`
+  // → doğrulama; diğer her ret → en çok üç kendiliğinden yeniden deneme, sonra `'okunamadi'`). Hiçbir yolda sessizce Admin ya da
+  // Sales atanmaz. Günlük yalnız durum kodunu yazar (R4: e-posta / kimlik YOK).
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      let resolvedCompanyId: string | null = null;
-      // Oturum KAPANDI (`handleLogout` dışından da gelebilir: başka sekmeden çıkış, belirteç iptali): rol açılış varsayılanına
-      // döner — aynı sekmede rolü yazılmayan sonraki giriş (rolsüz hesap, kendi belgesi okunamayan oturum) önceki oturumun
-      // rolünü (ör. Dealer) DEVRALMASIN. Açılıştaki «okunamayınca Sales» davranışı DEĞİŞMEDİ: taze sekmeyle aynı başlangıç.
-      if (!u) {
-        setUserRole(UserRole.Sales);
-        storeSetRole(UserRole.Sales);
-        setRoleMissing(false);
-      }
-      // Profil senkronu ne olursa olsun açılışı KİLİTLEMESİN — aşağıdaki
-      // setIsAuthReady(true) her koşulda çalışmalı (yoksa spinner'da donar).
+    /** Tur hâlâ güncel mi (R2″): numarası son tur VE kimlikteki hesap aynı. */
+    const turGuncel = (tur: number, u: User): boolean => tur === acilisTuruRef.current && auth.currentUser?.uid === u.uid;
+    /** İptal edilebilir bekleme: süre dolunca `true`; `!u` turu / çıkış / yeni tur iptal ederse `false` (tur biter). */
+    const iptalliBekle = (ms: number): Promise<boolean> => new Promise(coz => {
+      const zamanlayici = setTimeout(() => { yenidenDenemeRef.current = null; coz(true); }, ms);
+      yenidenDenemeRef.current = { iptal: () => { clearTimeout(zamanlayici); yenidenDenemeRef.current = null; coz(false); } };
+    });
+
+    type ProfilDenemesi =
+      | { tur: 'cozuldu'; rol: UserRole | null; companyId: string; ikiAdimBekliyor: boolean; davetHatasi: string | null;
+          sonGiris: { ref: ReturnType<typeof doc>; veri: Record<string, unknown> } | null }
+      | { tur: 'kayitsiz'; davetHatasi: string | null }
+      | { tur: 'ret'; sinif: ReturnType<typeof profilHatasiSinifi>; davetHatasi: string | null };
+
+    /** Çözümün TEK denemesi — durum YAZMAZ (yazım turun sonunda, tur güncelse). «Yeniden dene» de bunun tamamını koşar. */
+    const profilDenemesi = async (u: User): Promise<ProfilDenemesi> => {
+      let davetHatasi: string | null = null;
       try {
-      if (u) {
-        // 2FA: kullanıcının 2FA'sı açık ama oturum doğrulanmamışsa challenge sür.
-        // (Veri yükleyiciler /api/db'ye erişmeden önce doğrulama gerekir.)
+        // 2FA: kullanıcının 2FA'sı açık ama oturum doğrulanmamışsa challenge sür. `getMfaStatus` fırlatmaz (kalıcı hatada
+        // «kapalı» döner); doğrulama kararını asıl veren aşağıdaki okumanın 403 + `mfaRequired` yanıtıdır (R2).
+        let ikiAdimBekliyor = false;
         try {
           const mfa = await getMfaStatus();
-          setMfaChallenge(mfa.enabled && !mfa.verified);
+          ikiAdimBekliyor = mfa.enabled && !mfa.verified;
         } catch { /* status alınamazsa engelleme */ }
         // ── Bekleyen daveti UYGULA (users dokumani OKUNMADAN once) ──────────
         // Sunucu users/{uid}'e role + companyId yaziyor; sirayi boyle kurunca
         // asagidaki mevcut mantik hicbir ozel dal gerektirmeden davetteki rolu
-        // okuyor. Ters sirada yeni kullanici once 'Sales' olarak yazilir ve
-        // davet bir sonraki girise kadar etkisiz kalirdi.
+        // okuyor. Ters sırada davetli henüz kaydı olmayan hesap sayılır ve
+        // oturumu kapatılırdı (kayıtsız hesap dalı, şartname «kayıt kapanışı» A2).
         if (!u.isAnonymous && getPendingInvite()) {
           const davet = await redeemPendingInvite(authFetch);
           if (davet && davet.ok === false) {
             // Sessizce yutma: kullanici neden hala rolsuz oldugunu bilmeli.
             console.warn('[invite] Davet uygulanamadi:', davet.error);
-            setInviteError(davet.error);
+            davetHatasi = davet.error;
           }
         }
 
-        // Sync user profile to Firestore
+        // Kendi profili. «Kayıt yok» YALNIZ sunucunun 404'üdür (`getDoc`, durum koduyla — R2′); başka her ret fırlar ve aşağıda
+        // sınıflandırılır. Eskiden HER hata «iki adımlı doğrulama bekliyor» sayılıyor, rol atanmıyor, `Sales` kalıyordu (R yolu 1).
         const userRef = doc(db, 'users', u.uid);
-        let userSnap;
-        let mfaPending = false;
-        try {
-          userSnap = await getDoc(userRef);
-        } catch (error) {
-          // If MFA is pending, GET /api/db/users/:id returns 403 and getDoc throws.
-          // We provide a dummy snapshot so the app can boot and show the MFA challenge modal.
-          // DİKKAT (2026-10-11, dış rol kapanışı): bu dalda rol YAZILMAZ — `userRole` eski değerinde kalır (açılışta ve çıkıştan
-          // sonra `Sales`; dinleyici arada `null` görmeden hesap değişirse önceki rol kalır — arayüzde giriş ekranı yalnız
-          // oturumsuzken çizildiği için bu yol bugün yok).
-          // Dış rol kapısı bu oturumda rolü bilemez; ayrı düzeltme, kullanıcı onayı bekliyor — bu turda BİLEREK dokunulmadı.
-          mfaPending = true;
-          userSnap = { exists: () => false, data: () => ({}) } as unknown as Awaited<ReturnType<typeof getDoc>>;
-        }
-        // Gerçek companyId = users/{uid}.companyId ?? uid (davet edilen üyeler için).
-        resolvedCompanyId = (userSnap.exists() && (userSnap.data()?.companyId as string)) || u.uid;
+        const userSnap = await getDoc(userRef);
 
         // Giriş konumu ARTIK TAHMİN EDİLMİYOR (2026-08-11).
         // Eskiden her girişte ipapi.co'ya IP ile konum sorulur, CSP bunu engellediği
@@ -2416,56 +2492,166 @@ function AppContent() {
           location
         };
 
-        if (!mfaPending) {
-          if (!userSnap.exists()) {
-            // New user, default to Sales role unless it's the first user or specific email
-            const role = u.email === 'orcncetin@gmail.com' || u.isAnonymous ? 'Admin' : 'Sales';
-            try {
-              await setDoc(userRef, { ...userData, role, createdAt: serverTimestamp() });
-            } catch (error) {
-              handleFirestoreError(error, OperationType.CREATE, `users/${u.uid}`);
-            }
-            setRoleMissing(false);
-            setUserRole(role as UserRole);
-            storeSetRole(role as UserRole);
-          } else {
-            try {
-              await updateDoc(userRef, userData);
-            } catch (error) {
-              handleFirestoreError(error, OperationType.UPDATE, `users/${u.uid}`);
-            }
-            const rawRole = userSnap.data()?.role as string | undefined;
-            // Sahip hesabı (mevcut kayıt için de) — role alanı boşsa/silinmişse
-            // bile bu e-posta kendi uygulamasından kilitlenmesin. Aynı güvenlik
-            // ağı zaten YENİ kayıt dalında vardı (satır ~2207), buraya da taşındı.
-            if (u.email === 'orcncetin@gmail.com' && !rawRole) {
-              setRoleMissing(false);
-              setUserRole('Admin' as UserRole);
-              storeSetRole('Admin' as UserRole);
-            } else if (!u.isAnonymous && !rawRole) {
-              // Sessizce 'Sales'e düşme — rolü olmayan bir hesap yanlışlıkla
-              // en kısıtlı rolde geziniyor gibi görünmesin, açıkça durdurulsun.
-              setRoleMissing(true);
-            } else {
-              // roleMissing'i burada da temizle — aksi halde rol'süz bir
-              // hesaptan çıkıp AYNI SEKMEDE rolü düzgün bir hesapla giriş
-              // yapan biri, bir önceki oturumdan kalan bayrakla yanlışlıkla
-              // engellenir (code-review bulgusu).
-              setRoleMissing(false);
-              const resolvedRole = (u.isAnonymous ? 'Admin' : rawRole) as UserRole;
-              setUserRole(resolvedRole);
-              storeSetRole(resolvedRole);
-            }
-          }
+        if (!userSnap.exists() && u.email === 'orcncetin@gmail.com') {
+          // (a) Sahip hesabının kurulum dalı. Sunucuda kayıt kapısı (server.ts `kendiKaydiniAcmaEngeli`) kendi belgesini açmayı yalnız
+          // doğrulanmış süper yönetici e-postasına bırakır; gövdedeki rol alanını rol yükseltme kapısı (`guardRoleEscalation`) artık
+          // süper yöneticinin KENDİ belgesinde muaf tutar (R5′ — eski «rol yükseltme kapısı DEĞİŞMEDİ» notu geçersiz: o kapı bu yazımı
+          // 403'le kesiyor, rol hiç atanmıyordu — R yolu 3). Rol (Admin, `'cozuldu'`) yalnız yazım BAŞARILIYSA döner: düşerse istisna
+          // aşağıdaki sınıflandırmaya gider (403 + `mfaRequired` → doğrulama; 403 `KAYIT_YOK` dâhil diğer her ret → yeniden deneme).
+          const role = 'Admin';
+          await setDoc(userRef, { ...userData, role, createdAt: serverTimestamp() });
+          return { tur: 'cozuldu', rol: role as UserRole, companyId: u.uid, ikiAdimBekliyor, davetHatasi, sonGiris: null };
+        }
+        if (!userSnap.exists()) return { tur: 'kayitsiz', davetHatasi };
+
+        const rawRole = userSnap.data()?.role as string | undefined;
+        // Sahip hesabı (mevcut kayıt için de) — role alanı boşsa/silinmişse bile bu e-posta kendi uygulamasından kilitlenmesin.
+        // Rolü olmayan başka hesap sessizce 'Sales'e DÜŞMEZ: `null` → «rol atanmamış» ekranı (veri de başlamaz — `veriOturumu`).
+        const rol: UserRole | null = u.email === 'orcncetin@gmail.com' && !rawRole
+          ? UserRole.Admin
+          : !u.isAnonymous && !rawRole
+            ? null
+            : (u.isAnonymous ? 'Admin' : rawRole) as UserRole;
+        // Gerçek companyId = users/{uid}.companyId ?? uid (davet edilen üyeler için).
+        const companyId = (userSnap.data()?.companyId as string) || u.uid;
+        return { tur: 'cozuldu', rol, companyId, ikiAdimBekliyor, davetHatasi, sonGiris: { ref: userRef, veri: userData } };
+      } catch (e) {
+        return { tur: 'ret', sinif: profilHatasiSinifi(e), davetHatasi };
+      }
+    };
+
+    /**
+     * (c) KAYITSIZ HESAP — şartname «kayıt kapanışı» A2 (2026-10-17, kullanıcı kararı «kapat»). Bekleyen davet (b) çözüm denemesinde
+     * uygulandı: başarılıysa sunucu belgeyi yazmıştır ve bu dala hiç gelinmez. Buraya gelen hesabın CETPA'da kullanıcı kaydı YOK:
+     * eskiden istemci `role: 'Sales'` ile kendi belgesini yazıp hesabı açıyordu (internetteki herkes Google ile ilk girişte hesap sahibi
+     * oluyordu). Artık: `users` YAZILMAZ, kimlik hesabı yalnız BU girişte açıldığı kesinse silinir (`hesapBuGiristeAcildi`), oturum her
+     * durumda kapanır, giriş ekranı nedeni söyler. Anonim hesap da bu dala düşer (eski «anonim → Admin» kurulumu kalktı).
+     * Silme / çıkış kendi `null` turunu doğurur (tur numarası ilerler): bu dalın son yazımları tur numarasına değil, BAŞKA bir hesabın
+     * oturum açmamış olmasına bakar — yazdıkları zaten oturumu kapatır.
+     */
+    const kayitsizHesabiKapat = async (u: User, davetHatasi: string | null): Promise<void> => {
+      const baskaHesapAcik = () => !!auth.currentUser && auth.currentUser.uid !== u.uid;
+      setInviteError(null);           // davetin hatası aşağıdaki iletide; «rol atanmamış» ekranına taşınmaz
+      setMfaChallenge(false);
+      if (hesapBuGiristeAcildi(u, Date.now())) {
+        try {
+          await deleteUser(u);
+        } catch (e) {
+          // Silinemedi (ör. ağ): oturum yine kapanır; hesap kayıtsız kalır, sunucu ona hiçbir veri vermez.
+          console.warn('[giriş] kayıtsız yeni hesap silinemedi:', e);
         }
       }
-      } catch (bootErr) {
-        console.error('Auth boot profil senkron hatası (yok sayıldı, uygulama yine açılır):', bootErr);
+      if (baskaHesapAcik()) return;
+      try {
+        await signOut(auth);
+      } catch (e) {
+        console.error('[giriş] kayıtsız hesabın oturumu kapatılamadı:', e);
       }
+      if (baskaHesapAcik()) return;
+      const tr = dilRef.current === 'tr';
+      const ileti = tr ? KAYITSIZ_HESAP_ILETISI.tr : KAYITSIZ_HESAP_ILETISI.en;
+      setAuthMode('signin');
+      setResetSent(false);
+      setAuthError(davetHatasi ? `${tr ? 'Davet uygulanamadı' : 'The invitation could not be applied'}: ${davetHatasi} ${ileti}` : ileti);
+      setShowLoginPage(true);
+      // Oturum yukarıda kapatıldı; Firebase'in `null` turu bu dalın beklemeleri sırasında araya girmiş olabilir — burada `u`
+      // YAZILMAZ (turun başında yazılan kullanıcı da geri alınır), yoksa kapanmış oturum geri açılırdı.
+      setUser(null);
+      storeSetUser(null);
+      storeSetCompanyId(null);
+      setRolDurumu('bekliyor');
+      setIsAuthReady(true);
+    };
+
+    /** Bir açılış turu: deneme → (gerekirse bekle, yeniden dene) → sonucu yaz. Bayat tur hiçbir şey yazmadan biter (R2″). */
+    const turuKos = async (u: User, tur: number): Promise<void> => {
+      for (let deneme = 0; ; deneme++) {
+        const s = await profilDenemesi(u);
+        if (!turGuncel(tur, u)) return;
+        if (s.tur === 'kayitsiz') { await kayitsizHesabiKapat(u, s.davetHatasi); return; }
+        if (s.tur === 'ret') {
+          console.error('[açılış] profil okunamadı', s.sinif.durum);
+          const bekleme = s.sinif.tur === 'yeniden' ? ROL_YENIDEN_DENEME_MS[deneme] : undefined;
+          if (bekleme !== undefined) {
+            if (!(await iptalliBekle(bekleme)) || !turGuncel(tur, u)) return;
+            continue;
+          }
+          if (s.davetHatasi) setInviteError(s.davetHatasi);
+          if (s.sinif.tur === 'dogrulama') setMfaChallenge(true);   // doğrulama penceresi AÇIKÇA (getMfaStatus düşmüş olsa da)
+          setRolDurumu(s.sinif.tur === 'dogrulama' ? 'dogrulama' : 'okunamadi');
+          setUser(u);
+          storeSetUser(u);
+          storeSetCompanyId(null);   // kiracı bilinmiyor: tahmin (uid) YAZILMAZ
+          setIsAuthReady(true);
+          return;
+        }
+        // Kayıt okundu (ya da sahip kurulumu yazıldı): rol ÖNCE atanır (R3).
+        setMfaChallenge(s.ikiAdimBekliyor);
+        if (s.davetHatasi) setInviteError(s.davetHatasi);
+        if (s.rol === null) {
+          setRoleMissing(true);
+        } else {
+          // roleMissing'i burada da temizle — aksi halde rol'süz bir hesaptan çıkıp AYNI SEKMEDE rolü düzgün bir hesapla giriş
+          // yapan biri, bir önceki oturumdan kalan bayrakla yanlışlıkla engellenir (code-review bulgusu).
+          setRoleMissing(false);
+          setUserRole(s.rol);
+          storeSetRole(s.rol);
+        }
+        setRolDurumu('cozuldu');
+        setUser(u);
+        storeSetUser(u);
+        storeSetCompanyId(s.companyId);
+        setIsAuthReady(true);
+        // Son giriş yazımı rolden SONRA ve rolü geri almadan (R3): eskiden önce koşuyor, düşünce fırlatıyor, rol hiç atanmıyordu
+        // (R yolu 2). Sonucu beklenmez — yanıt gecikse de kabuk açılır; ret yalnız günlüğe (durum kodu) yazılır.
+        const sonGiris = s.sonGiris;
+        if (sonGiris) {
+          void updateDoc(sonGiris.ref, sonGiris.veri).catch((e: unknown) => {
+            console.error('[açılış] son giriş yazılamadı', profilHatasiSinifi(e).durum);
+          });
+        }
+        return;
+      }
+    };
+
+    // «Yeniden dene» (R2″): aynı çözümün TAMAMI yeni bir turla; çözüm sürerken pasif (ikinci tıklama ikinci tur başlatmaz).
+    profiliYenidenCozRef.current = (u: User) => {
+      if (rolCozumSuruyorRef.current || cikisSuruyorRef.current || auth.currentUser?.uid !== u.uid) return;   // çıkış sürerken de pasif (İ2-a)
+      yenidenDenemeRef.current?.iptal();
+      const tur = ++acilisTuruRef.current;
+      rolCozumSuruyorRef.current = true;
+      setRolCozumSuruyor(true);
+      void turuKos(u, tur).finally(() => {
+        if (tur !== acilisTuruRef.current) return;   // tur bayatladı: bayrağı yeni tur / çıkış zaten sıfırladı
+        rolCozumSuruyorRef.current = false;
+        setRolCozumSuruyor(false);
+      });
+    };
+
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      const tur = ++acilisTuruRef.current;
+      yenidenDenemeRef.current?.iptal();   // önceki turun bekleyen yeniden denemesi biter (R2″)
+      rolCozumSuruyorRef.current = false;
+      setRolCozumSuruyor(false);
+      // Önceki oturumun rolü TAŞINMAZ: oturum kapandığında (`handleLogout` dışından da gelebilir: başka sekmeden çıkış, belirteç
+      // iptali) ve yeni turun başında rol açılış varsayılanına, durum `'bekliyor'`a döner.
+      setUserRole(UserRole.Sales);
+      storeSetRole(UserRole.Sales);
+      setRoleMissing(false);
+      setRolDurumu('bekliyor');
+      if (!u) {
+        setUser(null);
+        storeSetUser(null);
+        storeSetCompanyId(null);
+        setIsAuthReady(true);
+        return;
+      }
+      // Kullanıcı turun BAŞINDA yazılır (tur güncel): kabuk değil, yükleniyor görünümü çizilir (`'bekliyor'`); veri kapısı kapalı.
       setUser(u);
       storeSetUser(u);
-      storeSetCompanyId(resolvedCompanyId);
-      setIsAuthReady(true);
+      storeSetCompanyId(null);
+      // Tur beklenmez: yeniden deneme beklemeleri (1 + 3 + 9 sn) dinleyiciyi tutmasın; sonraki tur bu turu bayatlatır (R2″).
+      void turuKos(u, tur);
     });
     return () => unsubscribe();
   }, []);
@@ -2546,6 +2732,11 @@ function AppContent() {
         );
       } else if (code === 'auth/popup-closed-by-user') {
         toast(currentLanguage === 'tr' ? 'Giriş penceresi kapatıldı.' : 'The sign-in popup was closed.', 'info');
+      } else if (code === 'auth/admin-restricted-operation') {
+        // Firebase konsolunda «Oluşturmayı etkinleştir» kapalıysa (şartname «kayıt kapanışı» A5) istemci yeni hesap AÇAMAZ —
+        // Google ile ilk giriş bu kodla düşer. Kayıtsız hesabın oturum açılışındaki iletisiyle AYNI; bekleyen davet varsa davetliye
+        // özel ileti (İ1-a).
+        setAuthError(kisitliIslemIletisi(currentLanguage));
       } else {
         toast(
           currentLanguage === 'tr'
@@ -2563,7 +2754,7 @@ function AppContent() {
     setAuthError(null);
 
     if (!emailLogin.email || !emailLogin.password) {
-      setAuthError(currentLanguage === 'tr' ? 'E-posta ve sifre gerekli.' : 'Email and password are required.');
+      setAuthError(currentLanguage === 'tr' ? 'E-posta ve şifre gerekli.' : 'Email and password are required.');
       return;
     }
 
@@ -2573,53 +2764,15 @@ function AppContent() {
     } catch (error) {
       const code = (error as Record<string, unknown>)?.code as string | undefined;
       if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-        setAuthError(currentLanguage === 'tr' ? 'E-posta veya sifre hatali.' : 'Invalid email or password.');
+        setAuthError(currentLanguage === 'tr' ? 'E-posta veya şifre hatalı.' : 'Invalid email or password.');
       } else if (code === 'auth/invalid-email') {
-        setAuthError(currentLanguage === 'tr' ? 'Gecersiz e-posta adresi.' : 'Invalid email address.');
+        setAuthError(currentLanguage === 'tr' ? 'Geçersiz e-posta adresi.' : 'Invalid email address.');
       } else if (code === 'auth/too-many-requests') {
-        setAuthError(currentLanguage === 'tr' ? 'Cok fazla deneme yapildi. Lutfen daha sonra tekrar deneyin.' : 'Too many attempts. Please try again later.');
+        setAuthError(currentLanguage === 'tr' ? 'Çok fazla deneme yapıldı. Lütfen daha sonra tekrar deneyin.' : 'Too many attempts. Please try again later.');
       } else {
-        setAuthError(currentLanguage === 'tr' ? `Giris basarisiz: ${code || 'bilinmeyen-hata'}` : `Sign in failed: ${code || 'unknown-error'}`);
+        setAuthError(currentLanguage === 'tr' ? `Giriş başarısız: ${code || 'bilinmeyen-hata'}` : `Sign in failed: ${code || 'unknown-error'}`);
       }
       console.error('Email login error:', error);
-    } finally {
-      setIsEmailLoginLoading(false);
-    }
-  };
-
-  const handleEmailSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    const tr = currentLanguage === 'tr';
-    if (!signupForm.name.trim() || !signupForm.email.trim() || !signupForm.password) {
-      setAuthError(tr ? 'Tüm alanlar zorunludur.' : 'All fields are required.');
-      return;
-    }
-    if (signupForm.password.length < 8) {
-      setAuthError(tr ? 'Şifre en az 8 karakter olmalıdır.' : 'Password must be at least 8 characters.');
-      return;
-    }
-    if (signupForm.password !== signupForm.confirm) {
-      setAuthError(tr ? 'Şifreler eşleşmiyor.' : 'Passwords do not match.');
-      return;
-    }
-    setIsEmailLoginLoading(true);
-    try {
-      const cred = await createUserWithEmailAndPassword(auth, signupForm.email.trim(), signupForm.password);
-      await updateProfile(cred.user, { displayName: signupForm.name.trim() });
-      await sendEmailVerification(cred.user);
-      // user state will be set by onAuthStateChanged
-    } catch (error) {
-      const code = (error as Record<string, unknown>)?.code as string | undefined;
-      if (code === 'auth/email-already-in-use') {
-        setAuthError(tr ? 'Bu e-posta zaten kullanımda.' : 'This email is already in use.');
-      } else if (code === 'auth/invalid-email') {
-        setAuthError(tr ? 'Geçersiz e-posta adresi.' : 'Invalid email address.');
-      } else if (code === 'auth/weak-password') {
-        setAuthError(tr ? 'Şifre çok zayıf.' : 'Password is too weak.');
-      } else {
-        setAuthError(tr ? `Kayıt başarısız: ${code || 'bilinmeyen-hata'}` : `Sign up failed: ${code || 'unknown-error'}`);
-      }
     } finally {
       setIsEmailLoginLoading(false);
     }
@@ -2652,6 +2805,12 @@ function AppContent() {
 
   useEffect(() => {
     getRedirectResult(auth).catch((error) => {
+      // Yönlendirmeli Google girişi (açılır pencere engelliyse) yeni hesapta da `handleLogin` ile AYNI kodla düşer (A5); sayfa
+      // yeniden yüklendiği için giriş ekranı açılır ki ileti görünsün.
+      if ((error as Record<string, unknown>)?.code === 'auth/admin-restricted-operation') {
+        setAuthError(kisitliIslemIletisi(dilRef.current));   // bekleyen davet varsa davetliye özel ileti (İ1-a)
+        setShowLoginPage(true);
+      }
       console.error('Redirect result error:', error);
     });
   }, []);
@@ -2668,26 +2827,40 @@ function AppContent() {
     // fırlatıyor ve istek HİÇ gitmiyordu (oturum çerezi silinmiyor, yenileme belirteçleri iptal edilmiyordu;
     // 2026-10-09). Önce beklenmesinin nedeni: iptal uid bazlı ve küreseldir; yanıt gecikirken kullanıcı aynı hesapla
     // yeniden girseydi yeni oturumun belirteci de iptal olurdu. Modülde 5 sn süre sınırı var, asla fırlatmaz.
-    const sunucuCikisi = await cikisIstegiGonder();
-    if (!sunucuCikisi) console.warn('[handleLogout] sunucu çıkışı başarısız — oturum çerezi silinmemiş / yenileme belirteçleri iptal edilmemiş olabilir');
+    // Süren açılış turu (ya da «Yeniden dene») BAYATLAR ve bekleyen yeniden denemesi iptal edilir (R2″): çıkış sürerken dönen bir
+    // profil okuması kapanmış oturumu geri açmaz. Çıkış bayrağı turdan ÖNCE kurulur: çıkış sürerken basılan «Yeniden dene» yeni tur
+    // ALMAZ (İ2-a; yoksa çıkışın bayatlattığı turu geçip Yönetici kabuğunu açıyordu). Bayrak `finally`de sıfırlanır (hata verse de).
+    cikisSuruyorRef.current = true;
     try {
-      await signOut(auth); // await: oturum kapanışı tamamlanmadan state temizlenmesin
-    } catch (e) { console.error('[handleLogout]', e); }
-    // Yerel durum + SSE oturum cookie'sini temizle (bayat veri kalmasın).
-    setUser(null);
-    storeSetUser(null);
-    storeSetCompanyId(null);
-    resetStream(); // SSE bağlantısı + bellekteki kiracı verisini temizle
-    resetLazyCollections(); // tembel koleksiyon kapıları da başa alınsın
-    // Rol de açılış varsayılanına döner: aynı sekmede rolü yazılmayan sonraki giriş önceki rolü (ör. Dealer) devralmasın
-    // (oturum dinleyicisinin `!u` dalıyla aynı üç satır — orası `handleLogout` dışından gelen çıkışları kapsar).
-    setUserRole(UserRole.Sales);
-    storeSetRole(UserRole.Sales);
-    setRoleMissing(false);
+      acilisTuruRef.current += 1;
+      yenidenDenemeRef.current?.iptal();
+      const sunucuCikisi = await cikisIstegiGonder();
+      if (!sunucuCikisi) console.warn('[handleLogout] sunucu çıkışı başarısız — oturum çerezi silinmemiş / yenileme belirteçleri iptal edilmemiş olabilir');
+      try {
+        await signOut(auth); // await: oturum kapanışı tamamlanmadan state temizlenmesin
+      } catch (e) { console.error('[handleLogout]', e); }
+      // Yerel durum + SSE oturum cookie'sini temizle (bayat veri kalmasın).
+      setUser(null);
+      storeSetUser(null);
+      storeSetCompanyId(null);
+      resetStream(); // SSE bağlantısı + bellekteki kiracı verisini temizle
+      resetLazyCollections(); // tembel koleksiyon kapıları da başa alınsın
+      // Rol de açılış varsayılanına döner: aynı sekmede rolü yazılmayan sonraki giriş önceki rolü (ör. Dealer) devralmasın
+      // (oturum dinleyicisinin `!u` dalıyla aynı üç satır — orası `handleLogout` dışından gelen çıkışları kapsar).
+      setUserRole(UserRole.Sales);
+      storeSetRole(UserRole.Sales);
+      setRoleMissing(false);
+      setRolDurumu('bekliyor');   // R1: çıkışta rol durumu da başa döner
+    } finally {
+      cikisSuruyorRef.current = false;
+      rolCozumSuruyorRef.current = false;
+      setRolCozumSuruyor(false);
+    }
   };
 
   // --- Data Fetching ---
   useEffect(() => {
+    const user = veriOturumu;   // veri kapısı (R1′): rol çözülmeden (`'cozuldu'` değilken) hiçbir dinleyici kurulmaz
     if (!isAuthReady || !user || !userRole) return;
     if (mfaChallenge) return; // 2FA doğrulanana kadar tenant verisi yüklenmez
     if (disRol) return; // dış rol (B2B / Bayi): ERP verisi dinlenmez, akış bağlantısı açılmaz (şartname dış-rol-kapanışı D5)
@@ -2894,12 +3067,12 @@ function AppContent() {
       unsubTargets();
       unsubBudgets();
     };
-  }, [user, userRole, isAuthReady, storeCompanyId, mfaChallenge, disRol]);
+  }, [veriOturumu, userRole, isAuthReady, storeCompanyId, mfaChallenge, disRol]);
 
   // ── auditLog: yalnızca Admin > Denetim Kaydı açıkken dinle ────────────────
   useEffect(() => {
-    if (!user || disRol || activeTab !== 'admin') return;
-    const companyId = storeCompanyId ?? user.uid;
+    if (!veriOturumu || disRol || activeTab !== 'admin') return;
+    const companyId = storeCompanyId ?? veriOturumu.uid;
     const unsub = onSnapshot(
       query(collection(db, 'auditLog'), where('companyId', '==', companyId), orderBy('timestamp', 'desc'), limit(100)),
       (snapshot) => setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
@@ -2907,11 +3080,11 @@ function AppContent() {
     );
     return () => unsub();
 
-  }, [user, activeTab, storeCompanyId, disRol]);
+  }, [veriOturumu, activeTab, storeCompanyId, disRol]);
 
   // ── Phase extended collections — Firestore subscriptions ─────────────────
   useEffect(() => {
-    if (!user || disRol) return;
+    if (!veriOturumu || disRol) return;
     const u: (() => void)[] = [];
     // Bkz. lazyCollections.ts — modül-özel koleksiyonlar ilgili sekme açılana
     // kadar dinlenmez. Tüm dinleyicilerin AYNI kararı vermesi için ortak kapı.
@@ -2935,11 +3108,11 @@ function AppContent() {
     sub('intercompanyTxns',(d) => setP643Txns(d as typeof p643Txns));
 
     return () => u.forEach(fn => fn());
-  }, [user?.uid, activeTab, disRol]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [veriOturumu?.uid, activeTab, disRol]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Customer Risk Scoring — writes to customerRisks collection ──────────
   useEffect(() => {
-    if (!user || leads.length === 0) return;
+    if (!veriOturumu || leads.length === 0) return;   // veri kapısı (R1′)
     // Günlük throttle: SSE her snapshot'ta leads referansını yeniler; throttle
     // olmadan her yüklemede 187 PUT atılıp gereksiz yük oluşuyordu.
     const lastRisk = Number(sessionStorage.getItem('riskScoreAt') || 0);
@@ -3014,7 +3187,7 @@ function AppContent() {
       }
     }, 3000);
     return () => clearTimeout(timer);
-  }, [leads, orders, user]);
+  }, [leads, orders, veriOturumu]);
 
   // --- Reports Filters ---
   // Nearest-neighbor TSP heuristic starting from Antalya (Eski Sanayi) depot
@@ -3785,11 +3958,46 @@ function AppContent() {
     );
   }
 
-  if (!isAuthReady) return (
+  // Yükleniyor görünümü: oturum çözülene kadar ve oturum varken rol çözülürken (`'bekliyor'`, aşağıdaki kapı) AYNI görünüm.
+  const yukleniyorGorunumu = (
     <div className={cn("h-screen flex items-center justify-center transition-colors duration-500", darkMode ? "bg-[#0a0a0a]" : "bg-[#F5F5F7]")}>
       <Clock className="animate-spin text-brand" />
     </div>
   );
+  if (!isAuthReady) return (
+    yukleniyorGorunumu
+  );
+
+  // İki adımlı doğrulama penceresi — TEK tanım, iki yerde çizilir: rol çözülmeden aşağıdaki kapıda (`'dogrulama'`) ve kabuğun
+  // içinde (`mfaChallenge` — bugünkü yeri; profili okunmuş ama bu oturumu doğrulanmamış hesap).
+  const ikiAdimPenceresi = (
+    <MfaChallengeModal
+      currentLanguage={currentLanguage as 'tr' | 'en'}
+      onSuccess={() => { setMfaChallenge(false); window.location.reload(); }}
+      onCancel={() => { setMfaChallenge(false); handleLogout(); }}
+    />
+  );
+
+  // ─── Rol çözülmeden kabuk YOK (şartname «kayıt kapanışı ve kuruş» R1 / R6, 2026-10-17) ───
+  // Oturum varken `rolDurumu === 'cozuldu'` olmadan uygulama kabuğu (menü, sekmeler, modüller) ÇİZİLMEZ — veri de başlamaz
+  // (`veriOturumu`). Profil okuması düşen bayi de iç menüyü görmez: dış rol sayfası, karşılama ve kabuk bu kapıdan SONRA.
+  // ÖLÇÜM (2026-10-17): iki adımlı doğrulama penceresi ve «rol atanmamış» ekranı kabuğun İÇİNDE çiziliyordu. Kapı doğrulama
+  // penceresini gizlerdi → `'dogrulama'`da pencere BURADA çizilir. «Rol atanmamış» hesabın profili OKUNMUŞTUR (`'cozuldu'`,
+  // `roleMissing`): kapı onu gizlemez, ekran bugünkü yerinde kalır (veri kapısı yine kapalı).
+  if (user && rolDurumu !== 'cozuldu') {
+    if (rolDurumu === 'dogrulama') return (
+      <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>{ikiAdimPenceresi}</div>
+    );
+    if (rolDurumu === 'okunamadi') return (
+      <ProfilYuklenemediEkrani
+        dil={currentLanguage}
+        suruyor={rolCozumSuruyor}
+        onYenidenDene={() => profiliYenidenCozRef.current?.(user)}
+        onCikis={handleLogout}
+      />
+    );
+    return yukleniyorGorunumu;
+  }
 
   // ─── Dış rol (B2B / Bayi): ERP kabuğu ÇİZİLMEZ — tek sayfa (şartname dış-rol-kapanışı D5) ───
   // Karşılama sayfasından, giriş sonrası kapılardan (mağaza paneli onayı, kurulum, fiyatlandırma) ve kabuktan ÖNCE: dış rol
@@ -4063,31 +4271,13 @@ function AppContent() {
                 <img src="/cetpalogo.avif" alt="CETPA" className="h-12 w-auto object-contain drop-shadow-sm" />
               </div>
               <h1 className={cn("text-2xl font-black tracking-tight mb-1", darkMode ? "text-[#f5f5f7]" : "text-[#1D1D1F]")}>
-                {authMode === 'signup'
-                  ? (currentLanguage === 'tr' ? 'Hesap Oluştur' : 'Create Account')
-                  : authMode === 'reset'
+                {authMode === 'reset'
                   ? (currentLanguage === 'tr' ? 'Şifre Sıfırla' : 'Reset Password')
                   : (currentLanguage === 'tr' ? 'Hoş Geldiniz' : 'Welcome Back')}
               </h1>
               <p className={cn("text-sm font-medium", darkMode ? "text-white/50" : "text-gray-500")}>
                 CETPA Cloud ERP
               </p>
-            </div>
-
-            {/* Mode tabs */}
-            <div className="px-10 mb-4">
-              <div className={cn("flex rounded-2xl p-1 gap-1", darkMode ? "bg-white/5" : "bg-gray-100")}>
-                {(['signin','signup'] as const).map(m => (
-                  <button key={m} onClick={() => { setAuthMode(m); setAuthError(null); setResetSent(false); }}
-                    className={cn("flex-1 py-2 rounded-xl text-xs font-black transition-all",
-                      authMode === m
-                        ? "bg-brand text-white shadow-sm"
-                        : darkMode ? "text-white/65 hover:text-white/70" : "text-gray-400 hover:text-gray-700"
-                    )}>
-                    {m === 'signin' ? (currentLanguage === 'tr' ? 'Giriş Yap' : 'Sign In') : (currentLanguage === 'tr' ? 'Kayıt Ol' : 'Sign Up')}
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div className="px-10 pb-8 space-y-4">
@@ -4123,35 +4313,6 @@ function AppContent() {
                         {oc(currentLanguage).giris_yap}
                       </button>
                     </form>
-              )}
-
-              {/* ── SIGN UP mode ── */}
-              {authMode === 'signup' && (
-                <form onSubmit={handleEmailSignUp} className="space-y-3">
-                  {[
-                    { key: 'name', label: currentLanguage === 'tr' ? 'AD SOYAD' : 'FULL NAME', type: 'text', ac: 'name' },
-                    { key: 'email', label: currentLanguage === 'tr' ? 'E-POSTA' : 'EMAIL', type: 'email', ac: 'email' },
-                    { key: 'password', label: currentLanguage === 'tr' ? 'ŞİFRE (min 8)' : 'PASSWORD (min 8)', type: 'password', ac: 'new-password' },
-                    { key: 'confirm', label: currentLanguage === 'tr' ? 'ŞİFRE TEKRAR' : 'CONFIRM PASSWORD', type: 'password', ac: 'new-password' },
-                  ].map(f => (
-                    <div key={f.key} className="space-y-1">
-                      <label className={cn("text-[10px] font-black uppercase tracking-widest ml-1", darkMode ? "text-white/60" : "text-gray-400")}>{f.label}</label>
-                      <input type={f.type} value={signupForm[f.key as keyof typeof signupForm]}
-                        onChange={(e) => setSignupForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                        className={cn("w-full rounded-xl px-4 py-3 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-medium", darkMode ? "bg-white/5 border border-white/10 text-[#f5f5f7] placeholder-white/20" : "bg-gray-50/50 border border-gray-200 text-[#1D1D1F] placeholder-gray-400")}
-                        autoComplete={f.ac} />
-                    </div>
-                  ))}
-                  <button type="submit" disabled={isEmailLoginLoading}
-                    className="w-full font-black py-3.5 px-6 rounded-2xl transition-all disabled:opacity-60 text-sm active:scale-[0.98] bg-brand hover:bg-brand/90 text-white shadow-lg outline-none mt-1">
-                    {isEmailLoginLoading ? '...' : (currentLanguage === 'tr' ? 'HESAP OLUŞTUR' : 'CREATE ACCOUNT')}
-                  </button>
-                  <p className={cn("text-[10px] text-center", darkMode ? "text-white/60" : "text-gray-400")}>
-                    {currentLanguage === 'tr' ? 'Kayıt olarak ' : 'By registering you agree to our '}
-                    <span className="text-brand">{oc(currentLanguage).kullanim_kosullari}</span>
-                    {currentLanguage === 'tr' ? "'nı kabul etmiş olursunuz." : '.'}
-                  </p>
-                </form>
               )}
 
               {/* ── SIGN IN mode ── */}
@@ -4218,6 +4379,13 @@ function AppContent() {
                     </svg>
                     {currentT.sign_in_google || 'Google ile Devam Et'}
                   </button>
+                  {/* Herkese açık kayıt YOK (A1): kayıt sekmesinin yerinde hesabın nasıl açıldığı yazar. Kayıtsız hesap iletisi
+                      aynı cümleyle bittiği için o ileti görünürken tekrarlanmaz. */}
+                  {!(authError ?? '').includes(HESAP_ACMA_NOTU[currentLanguage === 'tr' ? 'tr' : 'en']) && (
+                    <p className={cn("text-xs text-center font-medium", darkMode ? "text-white/60" : "text-gray-500")}>
+                      {HESAP_ACMA_NOTU[currentLanguage === 'tr' ? 'tr' : 'en']}
+                    </p>
+                  )}
                 </>
               )}
             </div>
@@ -4989,13 +5157,7 @@ function AppContent() {
           )}
 
           {/* ── 2FA: girişte challenge (oturum doğrulanana dek veri yüklenmez) ── */}
-          {mfaChallenge && (
-            <MfaChallengeModal
-              currentLanguage={currentLanguage as 'tr' | 'en'}
-              onSuccess={() => { setMfaChallenge(false); window.location.reload(); }}
-              onCancel={() => { setMfaChallenge(false); handleLogout(); }}
-            />
-          )}
+          {mfaChallenge && ikiAdimPenceresi}
 
           {/* ── Role atanmamış: sessizce 'Sales'e düşmek yerine durdur ── */}
           {roleMissing && (

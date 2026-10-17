@@ -36,11 +36,15 @@
  * yaptığı düzenleme sessizce bu formun bayat içeriğiyle ezilirdi; yakalanan sürümle sunucu 409 `surum-eski` döner.
  *
  * `<form>` öğesi YOKTUR (Enter ile gönderim / sayfa yenilemesi olmasın); sayı alanları METİNDİR (`inputMode`).
+ *
+ * KURUŞ (kullanıcı kararı 2026-10-17, B2): birim fiyat en çok iki ondalık. Üçüncü ondalık (ör. «83,3333»; beyandan kopyalanan
+ * satırda da) kaydetmede ALAN HATASIDIR — metin sunucu şemasınınkiyle AYNI sabit (`MAGAZA_BIRIM_FIYAT_KURUS_HATASI`), gövde
+ * üretilmez, kuruşa yuvarlanmaz; önizleme o satırda tutar basmaz. Hüküm saf modülde (`magazaFiyatCoz` → `magazaKurusluMu`).
  */
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { paraYaz } from '../../utils/currency';
 import { oc } from '../../i18n/ortak';
-import { MAGAZA_KDV_ORANLARI, MAGAZA_MUSTERI_ALANLARI, magazaKdvOraniMi, type MagazaTalepMusteri } from '../../lib/magazaTalep';
+import { MAGAZA_BIRIM_FIYAT_KURUS_HATASI, MAGAZA_KDV_ORANLARI, MAGAZA_MUSTERI_ALANLARI, magazaKdvOraniMi, type MagazaTalepMusteri } from '../../lib/magazaTalep';
 import {
   MAGAZA_NOT_HAM_SINIRI, bosKalemTaslagi, duzenlemeTaslagi, magazaElleTalepGovdesi, magazaIcerikGovdesi, magazaKayitliVarsayilaninKartOrani, magazaTaslakKdv,
   magazaTaslakOnizlemesi,
@@ -326,10 +330,15 @@ export default function MagazaTalepDuzenle(p: MagazaTalepDuzenleNitelikleri) {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <input type="text" inputMode="decimal" className="apple-input w-28 text-right" aria-label={tr ? `Birim fiyat (KDV hariç): ${ad}` : `Unit price (excl. VAT): ${ad}`} aria-invalid={h?.fiyat === true} value={k.fiyat} disabled={mesgul} onChange={e => kalemYaz(k.yerel, { fiyat: e.target.value })} />
-                        {h?.fiyat === true && (
+                        <input type="text" inputMode="decimal" className="apple-input w-28 text-right" aria-label={tr ? `Birim fiyat (KDV hariç): ${ad}` : `Unit price (excl. VAT): ${ad}`} aria-invalid={h?.fiyat !== undefined} value={k.fiyat} disabled={mesgul} onChange={e => kalemYaz(k.yerel, { fiyat: e.target.value })} />
+                        {h?.fiyat === 'gecersiz' && (
                           <p role="alert" className={ALAN_HATASI}>
                             {tr ? 'Fiyat okunamadı. Binlik ayraç yazmayın; kuruş için virgül kullanın (ör. 1250,50).' : 'The price could not be read. Do not use thousands separators; use a comma for decimals (e.g. 1250,50).'}
+                          </p>
+                        )}
+                        {h?.fiyat === 'kurustan-ince' && (
+                          <p role="alert" className={ALAN_HATASI}>
+                            {tr ? MAGAZA_BIRIM_FIYAT_KURUS_HATASI : 'The unit price may have at most two decimal places.'}
                           </p>
                         )}
                       </td>

@@ -774,6 +774,17 @@ describe('kayıt — tek ekleme, akış olayı ve bildirim yalnız satır GERÇE
     expect(belge.musteri).toEqual({ ad: 'Ali', firma: '', telefon: '05321234567', eposta: '', il: '', adres: '', vergi: '' });
     expect(json).toContain('"talepFiyat":null');
   });
+  it('(B3 çiti, kuruş kararı 2026-10-17) kuruştan ince beyan fiyatı (83,3333 · 0,001 · 1,005) REDDEDİLMEZ: 201 ve fiyat AYNEN yazılır — kuruş kuralı yalnız ERP gövdelerinde, müşterinin talebi kaybolmaz', async () => {
+    const d = await kur();
+    const y = await iste(d, '/siparis-talebi', { govde: {
+      no: 'T261008-AAAA', musteri: { ad: 'Ali', telefon: '05321234567' },
+      kalemler: [{ ad: 'Saten alçı', adet: 12, birimFiyat: 83.3333 }, { ad: 'Vida', adet: 1000, birimFiyat: 0.001 }, { ad: 'Dübel', adet: 1, birimFiyat: 1.005 }],
+    } });
+    expect([y.kod, y.metin]).toEqual([201, '{"ok":true}']);
+    const { belge } = yazilan(d);
+    expect(belge.kalemler.map(k => k.talepFiyat)).toEqual([83.3333, 0.001, 1.005]);
+    expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, eklenen: 1 });
+  });
   it('kırpma: aşan alan REDDEDİLMEZ, kırpılır ve `kirpildi: true` yazılır', async () => {
     const d = await kur();
     const y = await talep(d, { not: 'ğ'.repeat(1500), musteri: { ad: 'ş'.repeat(250), telefon: `0532 123 45 67 ${'9'.repeat(60)}`, il: 'İ'.repeat(81) } });

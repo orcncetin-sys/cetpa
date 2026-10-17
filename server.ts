@@ -428,6 +428,15 @@ function isSuperAdmin(req: Request): boolean {
   if (r.emailVerified !== true) return false;
   return SUPER_ADMIN_EMAILS.has((r.userEmail || '').toLowerCase());
 }
+/**
+ * Kendi `users` belgesini İLK KEZ açmaya çalışan hesabın reddi (2026-10-17, şartname «kayıt kapanışı» A4; kapı: `/api/db` içindeki
+ * `kendiKaydiniAcmaEngeli`). İstemcinin aynı durumdaki iletisi (App.tsx `KAYITSIZ_HESAP_ILETISI`) aynı cümledir. `code` reddin
+ * nedenini ayırır (tek boğazın `ROL_YOK`'undan ayrı: bu ret izin listesinden GEÇMİŞ isteğe işleyicide verilir).
+ */
+const KAYIT_YOK_YANITI: Readonly<{ error: string; code: 'KAYIT_YOK' }> = Object.freeze({
+  error: "Bu hesap için CETPA'da kullanıcı kaydı yok. Hesabınızı CETPA yöneticiniz açar.",
+  code: 'KAYIT_YOK',
+});
 async function requireSuperAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (isSuperAdmin(req)) { next(); return; }
   res.status(403).json({ error: 'Bu işlem için süper-admin yetkisi gerekir.' });
@@ -1992,8 +2001,16 @@ async function startServer() {
     };
     // Yetki yükseltme engeli: kendi users dokümanına 'role' yazılmasını,
     // yazan kişi Admin değilse reddet.
-    const guardRoleEscalation = async (req: Request, res: Response, coll: string, _docId: string, body: Record<string, unknown>): Promise<boolean> => {
+    // SÜPER YÖNETİCİNİN KENDİ BELGESİ MUAF (2026-10-17, şartname «kayıt kapanışı ve kuruş» R5 / R5′): sahibin ilk kurulumu
+    // (istemcinin sahip dalı, `setDoc(users/<uid>, { role: 'Admin' })`) bu kapıya takılıyordu — belgesi yok → rolü `null` → 403;
+    // istemci rolü hiç atamıyor, arayüz Satış varsayılanında kalıyordu. Koşul HARFİYEN `coll === 'users' && docId === uid &&
+    // isSuperAdmin(req)`: `isSuperAdmin` kayıt kapısının (`kendiKaydiniAcmaEngeli`) AYNI işlevidir — e-posta DOĞRULANMIŞ olmalı
+    // (ön kayıtla ele geçirilen adres muaf DEĞİL); başkasının belgesine rol yazımı muaf DEĞİL. Sunucu süper yöneticiyi zaten rolüne
+    // bakmadan geçirir (tek boğaz; `src/lib/mikroUcKapilari.ts` SINIR notu) — muafiyet bunu kurtarma yoluna da taşır. Başka hiçbir
+    // hesap için davranış değişmez. Dört çağıran (PUT, PATCH, `/increment`, `/cas`) aynı işlevi kullanır.
+    const guardRoleEscalation = async (req: Request, res: Response, coll: string, docId: string, body: Record<string, unknown>): Promise<boolean> => {
       const uid = (req as Request & { uid?: string }).uid || '';
+      if (coll === 'users' && docId === uid && isSuperAdmin(req)) return false;
       const role = await getUserRole(uid);
       if (!blocksRoleEscalation(coll, role, body)) return false;
       res.status(403).json({ error: 'Rol değişikliği için yönetici yetkisi gerekir.' });
@@ -2113,6 +2130,23 @@ async function startServer() {
       if (isSelfDocAccess(coll, realId, uid, op)) return false;
       if (yoneticiRoluneDokunabilir(await getUserRole(uid), isSuperAdmin(req), before?.role)) return false;
       res.status(403).json(YONETICI_GEREKLI_YANITI);
+      return true;
+    };
+    // KENDİ KAYDINI AÇMA (2026-10-17, şartname «kayıt kapanışı» A4 — derinlemesine savunma): `users/<kendi uid'i>` belgesi YOKSA PUT
+    // ve PATCH onu OLUŞTURURDU (ikisi de upsert). Herkese açık kayıt kapandı (A1 / A2): hesabı yönetici açar ve belgeyi SUNUCU yazar
+    // (`/api/admin/users`; davet kabulü `/api/invites/redeem`) — ikisi de bu yoldan geçmez, etkilenmez. Belgesi olmayan hesabın rolü
+    // de yoktur (rol bu belgeden okunur): tek boğazın izin listesiyle buraya gelen ROLSÜZ hesaptır, ilk yazımı reddedilir. İstisna
+    // yalnız süper yönetici (doğrulanmış `SUPER_ADMIN_EMAILS` e-postası = kurulum sahibi; istemcinin sahip kurulum dalı bu yazımı
+    // yapar). Var olan belgeye yazım (oturum açılışının `lastLogin` / cihaz güncellemesi) DEĞİŞMEZ; başkasının belgesini açmak
+    // (Yönetici) bu kapının konusu değil — o yol rol kapısından geçer. Oluşturma / güncelleme ayrımı işleyicinin KENDİ okuduğu önceki
+    // satırdandır (`kayitVar`: yazımın dayandığı okumayla aynı). `/cas` ve `/increment` belge yoksa 404 döner (oluşturmaz): kapı
+    // gerekmez. `X-Cetpa-Method` tüneli yöntemi yönlendirmeden önce yazar: tünelli PUT / PATCH aynı işleyiciye, aynı kapıya gelir.
+    const kendiKaydiniAcmaEngeli = (req: Request, res: Response, coll: string, realId: string, kayitVar: boolean): boolean => {
+      if (coll !== 'users' || kayitVar) return false;
+      const uid = (req as Request & { uid?: string }).uid || '';
+      if (!uid || realId !== uid) return false;
+      if (isSuperAdmin(req)) return false;
+      res.status(403).json(KAYIT_YOK_YANITI);
       return true;
     };
 
@@ -2239,6 +2273,7 @@ async function startServer() {
           // Tam değiştirme başkasının SAHİP damgalı kaydına yazamaz — Yönetici dâhil (sahip devredilmez; gövde önceki sahibe düşerdi).
           if (baskasininSahipKaydiMi(coll, before, (req as Request & { uid?: string }).uid || '')) { res.status(403).json({ error: 'Bu kayıt başka bir kullanıcıya ait.' }); return; }
           if (await yoneticiKaydiYazimEngeli(req, res, coll, realId, before, 'write')) return;   // `users` sahiplikDenetimli: bu blok hep koşar
+          if (kendiKaydiniAcmaEngeli(req, res, coll, realId, rows.length > 0)) return;          // A4: rolsüz hesap kendi belgesini AÇAMAZ
           // P4-2: maskeli (***REDACTED***) gelen gizli alan gerçek sırrı EZMEZ ve SİLMEZ — önceki değer geri konur (derin).
           incoming = maskeyiGeriYukle(coll, ham, before);
           if (await ayarYazimiEngeli(req, res, coll, incoming, before)) return;
@@ -2283,6 +2318,7 @@ async function startServer() {
         if (await ayrilmisKimlikEngeli(req, res, coll, realId, gorunur)) return;   // sahiplik yanıtından ÖNCE (varlık sızmasın)
         if (rows.length && !gorunur) { res.status(403).json({ error: 'Bu kayıt başka bir firmaya ait.' }); return; }
         if (await yoneticiKaydiYazimEngeli(req, res, coll, realId, before, 'write')) return;
+        if (kendiKaydiniAcmaEngeli(req, res, coll, realId, rows.length > 0)) return;   // A4: rolsüz hesap kendi belgesini AÇAMAZ
         // P4-2: maskeli gelen gizli alan gerçek sırrı EZMEZ ve SİLMEZ — önceki değer geri konur (derin; lib/sirMaske).
         const patch = maskeyiGeriYukle(coll, resolveSentinels(req.body ?? {}) as Record<string, unknown>, before);
         if (await ayarYazimiEngeli(req, res, coll, patch, before)) return;

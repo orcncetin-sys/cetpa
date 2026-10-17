@@ -607,13 +607,19 @@ describe('T2 — dış rol (Bayi, B2B): ERP verisi kapalı; kendi kullanıcı be
 });
 
 describe('T7 — izin listesi: rolsüz hesapta oturum açılışı, iki adımlı doğrulama kaydı ve davet kabulü ÇALIŞIR', () => {
-  it('oturum açılışı: kendi belgesi (yok → 404, yaz → 200, oku → 200), oturum çerezi, çıkış, açılış soruları', async () => {
+  it('oturum açılışı: kendi belgesi (yok → 404, açma → 403 `KAYIT_YOK`, var olana yaz → 200, oku → 200), oturum çerezi, çıkış, açılış soruları', async () => {
     const { uid, b } = await kimlik('belgesiz', 'acilis');
     const yok = await istek('GET', `/api/db/users/${uid}`, b);
     expect([yok.s, yok.j.code]).toEqual([404, undefined]);                                  // boğaz geçirdi; işleyicinin kendi «yok» yanıtı
     // İstemcinin açılış yazımı rol taşır → bugünkü rol yükseltme kapısı (403, `code` yok); rolsüz yazım geçer.
     const rollu = await istek('PUT', `/api/db/users/${uid}?merge=0`, b, { name: 'Yeni', email: eposta(uid), role: 'Sales' });
     expect([rollu.s, rollu.j.code]).toEqual([403, undefined]);
+    // Kayıt kapanışı (2026-10-17, şartname «kayıt kapanışı» A4): belgesiz hesap kendi belgesini AÇAMAZ — boğaz geçirir, işleyici
+    // reddeder (`KAYIT_YOK`; ayrıntılı ölçüm kucukKapanislar.zincir.test.ts «T3 (A4)»). Var olan belgeye yazım (oturum açılışı) geçer.
+    const acma = await istek('PUT', `/api/db/users/${uid}?merge=1`, b, { name: 'Yeni', email: eposta(uid), companyId: 'CETPA', status: 'active' });
+    expect([acma.s, acma.j.code]).toEqual([403, 'KAYIT_YOK']);
+    expect(await belgeOku('users', uid)).toBeUndefined();
+    await belgeKoy('users', uid, { email: eposta(uid) });   // kapanıştan önce açılmış rolsüz belge (ya da yöneticinin rolsüz açtığı)
     expect((await istek('PUT', `/api/db/users/${uid}?merge=1`, b, { name: 'Yeni', email: eposta(uid), companyId: 'CETPA', status: 'active' })).s).toBe(200);
     expect((await istek('PATCH', `/api/db/users/${uid}`, b, { device: 'tarayıcı' })).s).toBe(200);
     expect((await istek('POST', `/api/db/users/${uid}`, { ...b, 'X-Cetpa-Method': 'PATCH' }, { location: 'Bilinmiyor' })).s).toBe(200);

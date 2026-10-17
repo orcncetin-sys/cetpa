@@ -94,6 +94,8 @@ let yuklemeDizini = '';
 const gercekFetch = globalThis.fetch;
 /** Sunucunun DIŞARI yapmaya çalıştığı her istek (hiçbiri gitmez). */
 const disari: string[] = [];
+/** Aynı isteklerin adresi + gövdesi (A3: giden davet postasının HTML'i buradan okunur). */
+const disariGovde: Array<{ url: string; govde: string }> = [];
 
 const KIRACI = 'CETPA';
 const BASKA_KIRACI = 'BASKA-FIRMA';
@@ -224,6 +226,7 @@ beforeAll(async () => {
   globalThis.fetch = (async (girdi: unknown, init?: RequestInit) => {
     const url = String(typeof girdi === 'string' ? girdi : (girdi as { url?: string }).url ?? girdi);
     disari.push(`${init?.method ?? 'GET'} ${url.replace(/\?.*$/, '')}`);
+    disariGovde.push({ url, govde: typeof init?.body === 'string' ? init.body : '' });
     return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
 
@@ -273,9 +276,12 @@ describe('T11 (D12) — kiracı taraması rolsüz belgeyi saymaz (ortam değeri 
   });
 
   it('giriş ekranından hesap açan yabancı (rolsüz belge) kiracı çözümünü BOZMAZ', async () => {
-    // İstemcinin açılış yazımının bıraktığı belge: rol / kiracı alanı yok → eskiden «ikinci kiracı» sayılıyordu.
+    // İstemcinin açılış yazımının bıraktığı belge: rol / kiracı alanı yok → eskiden «ikinci kiracı» sayılıyordu. Kayıt kapanışından
+    // (2026-10-17, A4 — aşağıda «T3 (A4)») beri yabancı bu belgeyi AÇAMAZ; kapanıştan ÖNCE açılmış eski belge doğrudan konur.
     const b = belirtec('yabanci-1');
-    expect((await istek('PUT', '/api/db/users/yabanci-1?merge=1', b, { name: 'Yabancı', email: eposta('yabanci-1') })).s).toBe(200);
+    const acma = await istek('PUT', '/api/db/users/yabanci-1?merge=1', b, { name: 'Yabancı', email: eposta('yabanci-1') });
+    expect([acma.s, acma.j.code]).toEqual([403, 'KAYIT_YOK']);
+    await belgeKoy('users', 'yabanci-1', { name: 'Yabancı', email: eposta('yabanci-1') });
     expect(await belgeOku('users', 'yabanci-1')).toMatchObject({ name: 'Yabancı' });
     expect((await belgeOku('users', 'yabanci-1'))?.role).toBeUndefined();
     const k = await cozuluyor() as { sayi: number; sahipCozuluyor: boolean };
@@ -944,5 +950,222 @@ describe('D13 — en ağır uçların KENDİ kapısı: `requireStaff`, kimlik ka
     expect(disari.slice(disariOnce).filter(u => !/tcmb\.gov\.tr|exchangerate-api\.com/.test(u))).toEqual([]);
     const dosyalar = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? dosyalar(path.join(d, e.name)) : [e.name]));
     expect(dosyalar(yuklemeDizini)).toEqual([]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Şartname «kayıt kapanışı ve kuruş» (2026-10-17) A4 · T3 — derinlemesine savunma: herkese açık kayıt kapandı (istemci), sunucu da
+// rolsüz hesabın kendi `users` belgesini AÇMASINI reddeder. Kapı `/api/db` PUT / PATCH işleyicisinde (`kendiKaydiniAcmaEngeli`);
+// tek boğaz bu isteği izin listesiyle GEÇİRİR, ret işleyicide gelir (`code: 'KAYIT_YOK'`).
+describe('T3 (A4) — rolsüz hesap kendi `users` belgesini OLUŞTURAMAZ; var olan belgesini günceller; sahip / süper yönetici / davet etkilenmez', () => {
+  const RET = { error: "Bu hesap için CETPA'da kullanıcı kaydı yok. Hesabınızı CETPA yöneticiniz açar.", code: 'KAYIT_YOK' };
+  const profil = (uid: string): Record<string, unknown> => ({ name: 'Yabancı', email: eposta(uid), photoURL: '', device: 'tarayıcı', location: 'Bilinmiyor' });
+  /** Dört oluşturma yolu: PUT (tam / birleştirme), PATCH; ikisi de düz ve IIS tüneliyle (`X-Cetpa-Method`). */
+  const OLUSTURMA = [
+    ['PUT ?merge=0', 'PUT', '?merge=0', false], ['PUT ?merge=1', 'PUT', '?merge=1', false], ['PATCH', 'PATCH', '', false],
+    ['tünelli PUT', 'PUT', '?merge=0', true], ['tünelli PATCH', 'PATCH', '', true],
+  ] as const;
+  const yaz = (yontem: 'PUT' | 'PATCH', uid: string, sorgu: string, tunel: boolean, b: Record<string, string>, govde: unknown): Promise<Yanit> =>
+    tunel ? istek('POST', `/api/db/users/${uid}${sorgu}`, { ...b, 'X-Cetpa-Method': yontem }, govde) : istek(yontem, `/api/db/users/${uid}${sorgu}`, b, govde);
+
+  it('belgesiz hesap: beş oluşturma yolunun HEPSİ 403 `KAYIT_YOK`; belge oluşmaz; okuma bugünkü gibi 404; iş verisi yine kapalı', async () => {
+    const uid = 'a4-belgesiz';
+    const b = belirtec(uid);
+    for (const [ad, yontem, sorgu, tunel] of OLUSTURMA) {
+      const r = await yaz(yontem, uid, sorgu, tunel, b, profil(uid));
+      expect([ad, r.s, r.j]).toEqual([ad, 403, RET]);
+      expect(await belgeOku('users', uid), ad).toBeUndefined();
+    }
+    // Rol taşıyan gövde bugünkü rol yükseltme kapısında kalır (daha önce, `code` yok) — o da belge açmaz.
+    const rollu = await istek('PUT', `/api/db/users/${uid}?merge=0`, b, { ...profil(uid), role: 'Sales' });
+    expect([rollu.s, rollu.j.code]).toEqual([403, undefined]);
+    expect(await belgeOku('users', uid)).toBeUndefined();
+    const oku = await istek('GET', `/api/db/users/${uid}`, b);
+    expect([oku.s, oku.j.code]).toEqual([404, undefined]);
+    const stok = await istek('GET', '/api/db/inventory', b);
+    expect([stok.s, stok.j.code]).toEqual([403, 'ROL_YOK']);
+  });
+
+  it('var olan belge (rolsüz kayıt): oturum açılışının güncellemesi BUGÜNKÜ gibi 200 — düz ve tünelli; rol / kiracı yine yazılamaz', async () => {
+    const uid = 'a4-belgeli-rolsuz';
+    const b = await kullanici(uid, { name: 'Eski Ad' });
+    for (const [ad, yontem, sorgu, tunel] of OLUSTURMA.filter(([, , s]) => s !== '?merge=0')) {
+      const r = await yaz(yontem, uid, sorgu, tunel, b, { lastLogin: '2026-10-17T09:00:00.000Z', device: ad });
+      expect([ad, r.s]).toEqual([ad, 200]);
+    }
+    const belge = await belgeOku('users', uid);
+    expect([belge?.name, belge?.device, belge?.lastLogin, belge?.role, belge?.companyId]).toEqual(['Eski Ad', 'tünelli PATCH', '2026-10-17T09:00:00.000Z', undefined, undefined]);
+    expect((await istek('PATCH', `/api/db/users/${uid}`, b, { companyId: 'BASKA', status: 'active' })).s).toBe(200);
+    expect([(await belgeOku('users', uid))?.companyId, (await belgeOku('users', uid))?.status]).toEqual([undefined, undefined]);
+  });
+
+  it('iç rol kendi belgesini günceller (200); Yönetici BAŞKASININ belgesini açabilir (kapının konusu değil)', async () => {
+    expect((await istek('PATCH', `/api/db/users/${icUid('Sales')}`, ic('Sales'), { device: 'iç rol' })).s).toBe(200);
+    expect((await belgeOku('users', icUid('Sales')))?.role).toBe('Sales');
+    const r = await istek('PUT', '/api/db/users/a4-yoneticinin-actigi?merge=0', ic('Admin'), { name: 'Yeni Personel', email: 'a4-yeni@example.test', role: 'Sales' });
+    expect(r.s).toBe(200);
+    expect(await belgeOku('users', 'a4-yoneticinin-actigi')).toMatchObject({ name: 'Yeni Personel', role: 'Sales' });
+  });
+
+  it('sahip / süper yönetici (doğrulanmış e-posta): kendi belgesini AÇABİLİR (bu kapıdan geçer); doğrulanmamış aynı adres açamaz', async () => {
+    const uid = 'a4-sahip-kurulum';
+    const r = await istek('PUT', `/api/db/users/${uid}?merge=0`, belirtec(uid, SUPER_EPOSTA), { ...profil(uid), email: SUPER_EPOSTA });
+    expect(r.s, r.metin).toBe(200);
+    expect(await belgeOku('users', uid)).toMatchObject({ email: SUPER_EPOSTA, name: 'Yabancı' });
+    // Rol alanlı ilk yazım (istemcinin sahip dalı `role: 'Admin'` gönderir). BİLEREK DEĞİŞTİ (2026-10-17, şartname R5 / R5′): eskiden
+    // taban sürümdeki rol yükseltme kapısında 403 alıyordu (`guardRoleEscalation` süper yöneticiyi ayırmıyordu) ve istemci rolü hiç
+    // atamıyordu. Artık doğrulanmış süper yönetici KENDİ belgesinde muaf: kurulum yazılır (ayrıntılı çit aşağıda «R5′»).
+    const rollu = await istek('PUT', `/api/db/users/a4-sahip-rollu?merge=0`, belirtec('a4-sahip-rollu', SUPER_EPOSTA), { ...profil('a4-sahip-rollu'), role: 'Admin' });
+    expect([rollu.s, rollu.j.code], rollu.metin).toEqual([200, undefined]);
+    expect(await belgeOku('users', 'a4-sahip-rollu')).toMatchObject({ role: 'Admin', email: eposta('a4-sahip-rollu') });
+    // Aynı adres DOĞRULANMAMIŞSA süper yönetici sayılmaz (ön kayıtla ele geçirme): oluşturma reddedilir.
+    const sahte = 'a4-sahip-dogrulanmamis';
+    for (const [ad, yontem, sorgu, tunel] of OLUSTURMA) {
+      const ret = await yaz(yontem, sahte, sorgu, tunel, belirtec(sahte, SUPER_EPOSTA, false), { ...profil(sahte), email: SUPER_EPOSTA });
+      expect([ad, ret.s, ret.j.code]).toEqual([ad, 403, 'KAYIT_YOK']);
+    }
+    expect(await belgeOku('users', sahte)).toBeUndefined();
+  });
+
+  it('davet kabulü (belgeyi SUNUCU yazar) etkilenmez: belgesiz davetli kodu kullanır → rol + kiracı; sonra kendi belgesini günceller', async () => {
+    const uid = 'a4-davetli';
+    const ep = 'a4-davetli@example.test';
+    await belgeKoy('invites', 'a4-davet-kodu', { email: ep, role: 'Logistics', companyId: KIRACI, token: 'a4-davet-kodu', used: false, expiresAt: '2099-01-01T00:00:00.000Z' });
+    const b = belirtec(uid, ep);
+    // Kabulden ÖNCE: belgesiz → istemci yazımı reddedilir (davet kabulü istemcinin yazımına dayanmaz).
+    expect((await istek('PATCH', `/api/db/users/${uid}`, b, profil(uid))).j.code).toBe('KAYIT_YOK');
+    const kabul = await istek('POST', '/api/invites/redeem', b, { token: 'a4-davet-kodu' });
+    expect([kabul.s, kabul.j.success, kabul.j.role]).toEqual([200, true, 'Logistics']);
+    expect(await belgeOku('users', uid)).toMatchObject({ role: 'Logistics', companyId: KIRACI });
+    const guncelle = await istek('PATCH', `/api/db/users/${uid}`, b, { ...profil(uid), name: 'Davetli' });
+    expect(guncelle.s, guncelle.metin).toBe(200);
+    expect(await belgeOku('users', uid)).toMatchObject({ name: 'Davetli', role: 'Logistics', companyId: KIRACI });
+  });
+
+  it('«Kullanıcı Ekle (manuel)» (Yönetim → Kullanıcılar) etkilenmez: hesap + belge sunucuda açılır, açılan kişi kendi belgesini günceller', async () => {
+    const r = await istek('POST', '/api/admin/users', ic('Admin'), { email: 'a4-olusturulan@example.test', role: 'Sales', displayName: 'Oluşturulan' });
+    expect([r.s, r.j.success, typeof r.j.parolaLinki]).toEqual([200, true, 'string']);
+    const uid = String(r.j.uid);
+    expect(await belgeOku('users', uid)).toMatchObject({ role: 'Sales', companyId: KIRACI });
+    expect((await istek('PATCH', `/api/db/users/${uid}`, belirtec(uid, 'a4-olusturulan@example.test'), { device: 'ilk giriş' })).s).toBe(200);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Şartname «kayıt kapanışı ve kuruş» R5 / R5′ (2026-10-17) — rol yükseltme kapısı (`guardRoleEscalation`) doğrulanmış süper yöneticinin
+// KENDİ belgesini muaf tutar (sahibin ilk kurulumu); koşul harfiyen `coll === 'users' && docId === uid && isSuperAdmin(req)`. Dört
+// çağıran (PUT, PATCH, `/increment`, `/cas`) aynı işlevi kullanır. Başka hiçbir hesap için davranış değişmez.
+describe('R5′ — rol yükseltme kapısı: süper yöneticinin KENDİ belgesi muaf; doğrulanmamış adres, başka uid ve başka hesap muaf DEĞİL', () => {
+  const RET = 'Rol değişikliği için yönetici yetkisi gerekir.';
+
+  it('süper yönetici (doğrulanmış), belgesi YOK: kendi belgesini `role: \'Admin\'` ile AÇAR (200) — düz ve tünelli PUT', async () => {
+    for (const [uid, tunel] of [['r5-sahip-duz', false], ['r5-sahip-tunel', true]] as const) {
+      const govde = { name: 'Sahip', email: SUPER_EPOSTA, role: 'Admin', device: 'sınama' };
+      const b = belirtec(uid, SUPER_EPOSTA);
+      const r = tunel
+        ? await istek('POST', `/api/db/users/${uid}?merge=0`, { ...b, 'X-Cetpa-Method': 'PUT' }, govde)
+        : await istek('PUT', `/api/db/users/${uid}?merge=0`, b, govde);
+      expect([uid, r.s], r.metin).toEqual([uid, 200]);
+      expect(await belgeOku('users', uid)).toMatchObject({ role: 'Admin', email: SUPER_EPOSTA });
+      await belgeSil('users', uid);
+    }
+  });
+
+  it('süper yönetici (doğrulanmış), belgesi VAR (`Manager`): kendi rolünü PATCH ve `/cas` ile yazar; `/increment` korunan alanda yine 403', async () => {
+    const uid = 'r5-super-mudur';
+    const b = await kullanici(uid, { role: 'Manager', companyId: KIRACI, name: 'Süper Müdür' }, SUPER_MUDUR_EPOSTA);
+    const patch = await istek('PATCH', `/api/db/users/${uid}`, b, { role: 'Admin' });
+    expect(patch.s, patch.metin).toBe(200);
+    expect((await belgeOku('users', uid))?.role).toBe('Admin');
+    await belgeKoy('users', uid, { ...(await belgeOku('users', uid)), role: 'Manager', name: 'Süper Müdür' });
+    const cas = await istek('POST', `/api/db/users/${uid}/cas`, { ...b, 'X-Cetpa-Method': 'PATCH' }, { field: 'name', expect: 'Süper Müdür', set: { role: 'Admin' } });
+    expect([cas.s, cas.j.claimed], cas.metin).toEqual([200, true]);
+    expect((await belgeOku('users', uid))?.role).toBe('Admin');
+    // Artırma: muafiyet rol kapısından geçirir ama korunan alan (role) HİÇ KİMSE için artırılamaz (D9 çiti değişmedi).
+    const artir = await istek('PATCH', `/api/db/users/${uid}/increment`, b, { field: 'role', delta: 1 });
+    expect([artir.s, artir.j.error]).toEqual([403, 'Bu alan artırılamaz.']);
+    await belgeSil('users', uid);
+  });
+
+  it('SUPER_ADMIN e-postası DOĞRULANMAMIŞ ve belgesi VAR (`Manager`): kendi belgesine `role: \'Admin\'` 403 — PUT, PATCH, `/cas`; rol değişmez', async () => {
+    const uid = 'r5-dogrulanmamis';
+    await kullanici(uid, { role: 'Manager', companyId: KIRACI, name: 'Doğrulanmamış' }, SUPER_MUDUR_EPOSTA);
+    const b = belirtec(uid, SUPER_MUDUR_EPOSTA, false);
+    const put = await istek('PUT', `/api/db/users/${uid}?merge=1`, b, { role: 'Admin' });
+    const patch = await istek('PATCH', `/api/db/users/${uid}`, b, { role: 'Admin' });
+    const cas = await istek('POST', `/api/db/users/${uid}/cas`, { ...b, 'X-Cetpa-Method': 'PATCH' }, { field: 'name', expect: 'Doğrulanmamış', set: { role: 'Admin' } });
+    expect([put.s, put.j.error, put.j.code]).toEqual([403, RET, undefined]);   // ret `KAYIT_YOK` DEĞİL: belge var, rol kapısı
+    expect([patch.s, patch.j.error]).toEqual([403, RET]);
+    expect([cas.s, cas.j.error]).toEqual([403, RET]);
+    expect((await belgeOku('users', uid))?.role).toBe('Manager');
+    await belgeSil('users', uid);
+  });
+
+  it('süper yönetici (doğrulanmış, `Manager` rolünde) BAŞKA uid\'in belgesine `role` → 403 (PATCH ve `/cas`); hedefin rolü değişmez', async () => {
+    const sm = await kullanici('r5-super-mudur-2', { role: 'Manager', companyId: KIRACI }, SUPER_MUDUR_EPOSTA);
+    await kullanici('r5-hedef-satis', { role: 'Sales', companyId: KIRACI, name: 'Hedef' });
+    // Düzenek canlı: süper Müdür bu belgeye rol DIŞI yazabiliyor (koleksiyon ve sahiplik kapılarından geçiyor) — ret rol kapısından.
+    expect((await istek('PATCH', '/api/db/users/r5-hedef-satis', sm, { name: 'Hedef 2' })).s).toBe(200);
+    const patch = await istek('PATCH', '/api/db/users/r5-hedef-satis', sm, { role: 'Admin' });
+    const cas = await istek('POST', '/api/db/users/r5-hedef-satis/cas', { ...sm, 'X-Cetpa-Method': 'PATCH' }, { field: 'name', expect: 'Hedef 2', set: { role: 'Admin' } });
+    expect([patch.s, patch.j.error]).toEqual([403, RET]);
+    expect([cas.s, cas.j.error]).toEqual([403, RET]);
+    expect(await belgeOku('users', 'r5-hedef-satis')).toMatchObject({ role: 'Sales', name: 'Hedef 2' });
+    for (const uid of ['r5-super-mudur-2', 'r5-hedef-satis']) await belgeSil('users', uid);
+  });
+
+  it('başka hesap (süper yönetici değil) kendi belgesine `role` yazamaz — Satış, Müdür, rolsüz: 403, DEĞİŞMEDİ', async () => {
+    for (const [uid, veri] of [['r5-satis', { role: 'Sales', companyId: KIRACI }], ['r5-mudur', { role: 'Manager', companyId: KIRACI }], ['r5-rolsuz', { name: 'Rolsüz' }]] as const) {
+      const b = await kullanici(uid, veri);
+      const r = await istek('PATCH', `/api/db/users/${uid}`, b, { role: 'Admin' });
+      expect([uid, r.s, r.j.error]).toEqual([uid, 403, RET]);
+      expect([uid, (await belgeOku('users', uid))?.role]).toEqual([uid, 'role' in veri ? veri.role : undefined]);
+      await belgeSil('users', uid);
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Şartname «kayıt kapanışı ve kuruş» (2026-10-17) A3 — davet postası kapanmış kayda ÇAĞIRMAZ. İki davet ucu (Yönetimin daveti ve
+// süper yöneticinin kiracı daveti) GERÇEK işleyiciden posta üretir; Resend anahtarı yalnız bu bölümde tanımlıdır, giden istek sahte
+// `fetch`'te kalır (hiçbir yere gitmez). Metin tek kaynaktan (`src/server/davetPostasi.ts`); kaynak çiti `davetPostasi.test.ts`.
+describe('A3 — davet postası: «Hesap Oluştur» yok; davetli Google ile girer, şifreyle girecekse yönetici «Kullanıcı Ekle (manuel)» kullanır', () => {
+  const DUGME = 'Daveti Aç ve Google ile Giriş Yap';
+  const YONERGE = 'bu postanın geldiği e-posta adresine bağlı Google hesabıyla giriş yapın';
+  const SIFRE_NOTU = 'CETPA yöneticinizden sizin için kullanıcı oluşturmasını isteyin';
+  /** Ucu Resend anahtarı TANIMLIYKEN çağırır; Resend'e giden TEK isteğin gövdesini döner. */
+  async function postaUret(yol: string, b: Record<string, string>, govde: Record<string, unknown>): Promise<{ r: Yanit; posta: { to: string[]; subject: string; html: string } }> {
+    const once = disariGovde.length;
+    process.env.RESEND_API_KEY = 'sinama-resend-anahtari';
+    let r: Yanit;
+    try { r = await istek('POST', yol, b, govde); } finally { delete process.env.RESEND_API_KEY; }
+    const resend = disariGovde.slice(once).filter(d => d.url === 'https://api.resend.com/emails');
+    expect(resend, r.metin).toHaveLength(1);
+    return { r, posta: JSON.parse(resend[0].govde) as { to: string[]; subject: string; html: string } };
+  }
+  const metinDenetle = (html: string, davetli: string): void => {
+    expect(html).toContain(DUGME);
+    expect(html).toContain(YONERGE);
+    expect(html).toContain(SIFRE_NOTU);
+    expect(html).toMatch(/<a href="[^"]*\/\?invite=[0-9a-f]{64}"[^>]*>\s*Daveti Aç ve Google ile Giriş Yap\s*<\/a>/);
+    for (const eski of ['Hesap Oluştur', 'kaydınızı tamamlayabilirsiniz', 'Kayıt Ol']) expect(html, eski).not.toContain(eski);
+    // Kişisel veri yok: davetlinin adresi yalnız alıcı alanında, gövdede değil.
+    expect(html).not.toContain(davetli);
+  };
+
+  it('Yönetimin daveti (`POST /api/admin/invite`): düğme, Google yönergesi ve şifre notu; eski çağrı yok; gövdede davetlinin adresi yok', async () => {
+    const ep = 'a3-yonetim-davetli@example.test';
+    const { r, posta } = await postaUret('/api/admin/invite', ic('Admin'), { email: ep, role: 'Sales' });
+    expect([r.s, r.j.success, r.j.emailSent], r.metin).toEqual([200, true, true]);
+    expect(posta.to).toEqual([ep]);
+    metinDenetle(posta.html, ep);
+  });
+
+  it('süper yöneticinin kiracı daveti (`POST /api/superadmin/tenants/:companyId/invite`): AYNI metin', async () => {
+    const ep = 'a3-kiraci-davetli@example.test';
+    const { r, posta } = await postaUret(`/api/superadmin/tenants/${KIRACI}/invite`, SUPER, { email: ep, role: 'Logistics' });
+    expect([r.s, r.j.success, r.j.emailSent], r.metin).toEqual([200, true, true]);
+    expect(posta.to).toEqual([ep]);
+    metinDenetle(posta.html, ep);
   });
 });

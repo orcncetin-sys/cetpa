@@ -26,6 +26,7 @@
  */
 import type { Express, Request, Response } from 'express';
 import { davetKoduUret } from '../davetKodu.js';
+import { DAVET_POSTASI } from '../davetPostasi.js';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import type { Sema } from '../schemas.js';
 import { EmailSendSchema } from '../schemas.js';
@@ -403,12 +404,13 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
       <p style="font-size:14px;color:#1d1d1f;margin:0 0 16px;">Merhaba,</p>
       <p style="font-size:14px;color:#1d1d1f;margin:0 0 24px;">
         CETPA B2B platformuna <strong>${escapeHtml(role)}</strong> rolüyle davet edildiniz.
-        Aşağıdaki butona tıklayarak kaydınızı tamamlayabilirsiniz.
+        ${DAVET_POSTASI.yonerge}
       </p>
       <a href="${inviteUrl}" style="display:inline-block;background:#ff4000;color:#fff;padding:14px 28px;border-radius:12px;font-weight:700;font-size:14px;text-decoration:none;letter-spacing:-.2px;">
-        Hesap Oluştur
+        ${DAVET_POSTASI.dugme}
       </a>
-      <p style="font-size:11px;color:#86868b;margin:20px 0 0;">Bu bağlantı 7 gün geçerlidir. Eğer bu daveti beklemiyor idiyseniz görmezden gelebilirsiniz.</p>
+      <p style="font-size:12px;color:#1d1d1f;margin:20px 0 0;">${DAVET_POSTASI.sifreNotu}</p>
+      <p style="font-size:11px;color:#86868b;margin:12px 0 0;">Bu bağlantı 7 gün geçerlidir. Eğer bu daveti beklemiyor idiyseniz görmezden gelebilirsiniz.</p>
     </div>
     <div style="background:#f5f5f7;padding:16px 32px;text-align:center;">
       <p style="font-size:11px;color:#86868b;margin:0;">CETPA B2B SaaS Platform</p>

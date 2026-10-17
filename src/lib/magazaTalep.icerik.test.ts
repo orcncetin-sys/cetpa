@@ -501,9 +501,16 @@ describe('kaynak çitleri — src/lib/magazaTalep.ts (2b)', () => {
     expect(govde.match(/Math\.round\(/g)).toHaveLength(2);
     expect(kod.match(/Math\.round\(/g)).toHaveLength(2);
     // (İnceleme 2b, bulgu 2 — bilerek değişen çit) birim kuruşu: çarpımın kalıntısı 15 anlamlı haneyle temizlenip yuvarlanır.
-    expect(govde).toContain('Math.round(Number((k.birimFiyat * 100).toPrecision(15))) * k.adet');
+    // (Kuruş kararı 2026-10-17, B1 — bilerek değişen çit) temizlik TEK yardımcıda (`temizKurus`); kuruş denetimi
+    // (`magazaKurusluMu`) AYNI adımı paylaşır — iki ayrı `toPrecision` yazımı ayrışabilirdi.
+    expect(govde).toContain('Math.round(temizKurus(k.birimFiyat)) * k.adet');
     expect(govde).not.toContain('Math.round(k.birimFiyat * 100)');
     expect(kod.match(/toPrecision\(/g)).toHaveLength(1);
+    expect(satirlar).toContain('  return Number((fiyat * 100).toPrecision(15));');
+    const kBas = satirlar.findIndex(s => s.startsWith('export function magazaKurusluMu('));
+    const kSon = satirlar.findIndex((s, i) => i > kBas && s === '}');
+    expect(kBas).toBeGreaterThan(-1);
+    expect(satirlar.slice(kBas, kSon + 1).join('\n')).toContain('Number.isInteger(temizKurus(n))');
     expect(govde).toContain('Math.round(satirKurus * k.kdvOrani / 100)');
   });
 });

@@ -277,6 +277,34 @@ export async function compareAndSet(
   return !!(json as { claimed?: boolean }).claimed;
 }
 
+/**
+ * `/api/db` isteğinin sunucu reddi (2026-10-17, şartname «kayıt kapanışı» R2 / R2′): durum kodunu ve ayrıştırılmış gövdeyi TAŞIR.
+ * Oturum açılışı reddi bunlarla sınıflandırır (App.tsx; `src/lib/rolCozumu.ts` `profilHatasiSinifi`): 403 + `mfaRequired` → iki
+ * adımlı doğrulama; diğer her ret → yeniden deneme. `getDoc` «kayıt yok»u DURUM KODUNDAN (`status === 404`) tanır — eskiden ileti
+ * alt dizisinden (`'404'`) tanınıyordu: uid'si ya da gövdesi «404» içeren 500 «kayıt yok» sayılıp oturum açılışının kayıtsız hesap
+ * dalına (oturum kapatma, hesap silme) düşüyordu.
+ * İLETİ METNİ ESKİSİYLE AYNI (`dbClient <yöntem> /<yol> → <durum> <gövdenin ilk 200 karakteri>`) ve `name` değiştirilmedi
+ * (`String(e)` önekiyle birlikte aynı): iletiyi ayrıştıran mevcut okuyucular (`utils/siparisler/siparisIslemleri.ts`
+ * `\b403\b` / `mfaRequired`) bozulmaz.
+ */
+export class DbIstekHatasi extends Error {
+  /** HTTP durum kodu. */
+  readonly status: number;
+  /** Yanıt gövdesi: JSON ise ayrıştırılmış değer, değilse ham metin, okunamadıysa `null`. */
+  readonly govde: unknown;
+  constructor(ileti: string, status: number, govde: unknown) {
+    super(ileti);
+    this.status = status;
+    this.govde = govde;
+  }
+}
+
+/** Ret gövdesi: JSON ise ayrıştırılır, değilse metin olarak kalır (boş → `null`). */
+function retGovdesi(metin: string): unknown {
+  if (metin === '') return null;
+  try { return JSON.parse(metin) as unknown; } catch { return metin; }
+}
+
 async function api(method: string, path: string, body?: unknown): Promise<Record<string, unknown>> {
   const isPublicWrite = method === 'POST' && PUBLIC_WRITE_COLLECTIONS.has(decodeURIComponent(path));
   const token = isPublicWrite ? '' : await getToken();
@@ -292,7 +320,7 @@ async function api(method: string, path: string, body?: unknown): Promise<Record
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`dbClient ${method} /${path} → ${res.status} ${text.slice(0, 200)}`);
+    throw new DbIstekHatasi(`dbClient ${method} /${path} → ${res.status} ${text.slice(0, 200)}`, res.status, retGovdesi(text));
   }
   return res.json().catch(() => ({}));
 }
@@ -594,7 +622,8 @@ export async function getDoc(ref: DocumentReference): Promise<DocumentSnapshot> 
     const res = await api('GET', `${encodeURIComponent(ref.coll)}/${encodeURIComponent(ref.id)}`);
     return makeDocSnap(ref.coll, ref.id, reviveTimestamps(res.data) as Record<string, unknown>);
   } catch (e) {
-    if (String(e).includes('404')) return makeDocSnap(ref.coll, ref.id, undefined);
+    // «Kayıt yok» = sunucunun 404'ü (durum kodu); ileti alt dizisi DEĞİL — uid'si «404» içeren 500 kayıt yok sayılmasın (R2′).
+    if (e instanceof DbIstekHatasi && e.status === 404) return makeDocSnap(ref.coll, ref.id, undefined);
     throw e;
   }
 }

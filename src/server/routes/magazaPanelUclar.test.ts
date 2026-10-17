@@ -2257,6 +2257,51 @@ describe('ERP uçları (dilim 2b) — elle talep, içerik düzenleme, yumuşak s
     expect(Number((await db.query<{ n: string }>('SELECT count(*) AS n FROM docs WHERE coll = $1', [COLL])).rows[0].n)).toBe(0);
     expect([d.yayinlar, d.denetim, d.bildirimler]).toEqual([[], [], []]);
   });
+  // ── Kuruş (kullanıcı kararı 2026-10-17 «kuruştan ince birim fiyat — hayır»; şartname B1, T4) ─────────────────────────
+  it('(kuruş, B1) içerik: kuruştan ince birim fiyat (83,3333 · 0,001 · 1,005) → 400 `{ ok: false }` ve kayıt DEĞİŞMEZ; 95,5 ve kalıntılı 0,1 + 0,2 → 200, fiyat AYNEN yazılır', async () => {
+    const d = await kur();
+    const id = await talepEkle();
+    const govde = (birimFiyat: number) => ({ icerikSurum: 0, teyit: { kalemler: [{ ad: 'Saten alçı 25 kg', adet: 12, birimFiyat, kdvOrani: 20 }] } });
+    for (const birimFiyat of [83.3333, 0.001, 1.005]) {
+      const y = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', govde(birimFiyat));
+      expect([y.kod, y.json], String(birimFiyat)).toEqual([400, { ok: false }]);
+      // Sabit 400 tutumu: zod iletisi yanıta GİRMEZ (metni kullanıcı formun alan hatasında görür).
+      expect(y.metin).not.toMatch(/ondalık|kuruş/);
+    }
+    expect(await belge(id)).toEqual(talepVerisi());
+    expect([d.yayinlar, d.denetim, d.revizeler]).toEqual([[], [], []]);
+    expect(d.sorgular.filter(s => /^UPDATE/.test(s))).toEqual([]);
+    expect(magazaPanelSayaclari()).toMatchObject({ icerik400: 3, icerik: 0 });
+
+    const y = await erp(d, ERP_YOLU(id, 'icerik'), 'u-satis', {
+      icerikSurum: 0, teyit: { kalemler: [{ ad: 'Saten alçı 25 kg', adet: 12, birimFiyat: 95.5, kdvOrani: 20 }, { ad: 'Mala', adet: 1, birimFiyat: 0.1 + 0.2, kdvOrani: 20 }] },
+    });
+    expect([y.kod, y.json]).toEqual([200, { ok: true, degisti: true }]);
+    const t = await teyitOku(id);
+    expect(t.kalemler.map(k => k.birimFiyat)).toEqual([95.5, 0.1 + 0.2]);
+    // 12 × 95,50 + 1 × 0,30 = 1.146,30 · KDV %20: 229,20 + 0,06 = 229,26 · toplam 1.375,56 (kuruş yuvarlaması savunma olarak durur).
+    expect([t.araToplam, t.kdv, t.toplam]).toEqual([1146.3, 229.26, 1375.56]);
+    expect(magazaPanelSayaclari()).toMatchObject({ icerik400: 3, icerik: 1 });
+  });
+  it('(kuruş, B1) elle talep: kuruştan ince birim fiyat → 400 `{ ok: false }`, kayıt / kuyruk işi / denetim YOK; 95,5 → 201 ve beyan fiyatı AYNEN; fiyatsız kalem (`null` / anahtarsız) yine geçer', async () => {
+    const d = await kur();
+    for (const birimFiyat of [83.3333, 0.001, 1.005]) {
+      const y = await erp(d, '/api/magaza-talepleri', 'u-satis', { ...ELLE_GOVDESI, kalemler: [{ ad: 'Saten alçı 25 kg', adet: 12, birimFiyat }] });
+      expect([y.kod, y.json], String(birimFiyat)).toEqual([400, { ok: false }]);
+      expect(y.metin).not.toMatch(/ondalık|kuruş/);
+    }
+    expect(Number((await db.query<{ n: string }>('SELECT count(*) AS n FROM docs WHERE coll = $1', [COLL])).rows[0].n)).toBe(0);
+    expect([d.yayinlar, d.denetim, d.bildirimler]).toEqual([[], [], []]);
+
+    const y = await erp(d, '/api/magaza-talepleri', 'u-satis', {
+      ...ELLE_GOVDESI, kalemler: [{ ad: 'Saten alçı 25 kg', adet: 12, birimFiyat: 95.5 }, { ad: 'Mala', adet: 1, birimFiyat: null }, { ad: 'Fırça', adet: 2 }],
+    });
+    expect(y.kod).toBe(201);
+    const g = y.json as { id: string };
+    expect(((await belge(g.id)).kalemler as Satir[]).map(k => k.talepFiyat)).toEqual([95.5, null, null]);
+    expect(d.bildirimler).toEqual([g.id]);
+    expect(magazaPanelSayaclari()).toMatchObject({ elleTalep: 1 });
+  });
   it('elle talep: numara çakışırsa yeni numarayla dener — üç çakışmada 503 `{ ok: false }` ve kuyrukta iş YOK (mevcut kayda dokunulmaz); ikinci denemede tutarsa 201 ve tam 1 iş', async () => {
     const dolu = (no: string): Promise<string> => talepEkle({ talepNo: no, not: 'MEVCUT' }, magazaTalepKimligi(CID, no, ELLE_SON10));
     const hep = await kur({ elleNoUret: () => 'T261009-AAAA' });

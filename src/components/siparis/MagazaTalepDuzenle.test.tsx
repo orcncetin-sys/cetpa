@@ -9,6 +9,9 @@
  *   - teyidi OLMAYAN talepte form beyan kopyasıyla açılır (§ 10.4) ve bunun TEYİT yazacağını kaydetmeden önce söyler; bütün
  *     kalemler kaldırılırsa gövdede `teyit` yoktur;
  *   - `12,5` / `abc` adet alan hatasıdır (null'a çevrilip gönderilmez); boş fiyat `null` («fiyat sorulacak»);
+ *   - KURUŞ (kullanıcı kararı 2026-10-17, B2): üçüncü ondalık açık alan hatasıdır («Birim fiyat en çok iki ondalık olabilir
+ *     (kuruş).» — sunucu şemasıyla AYNI sabit), `onKaydet` çağrılmaz, kutu yuvarlanmaz; «95,50» ve boş → `null` bozulmaz;
+ *     iki kipte de (düzenle, elle talep) ve beyandan kopyalanan satırda da;
  *   - form HER ZAMAN tam gövde gönderir (değişmeyen bölüm de); «değişiklik yok» yanıtında form açık kalır;
  *   - EKRAN SIRASI (V19): fiyat alanları ve «Ara toplam (KDV hariç)» KDV seçicilerinden ÖNCE; «KDV» ve «Genel toplam» SONRA;
  *   - canlı önizleme: fiyat değişince ara toplam, oran değişince KDV ve genel toplam; boş fiyatta üçü de «fiyat sorulacak»;
@@ -352,6 +355,106 @@ describe('MagazaTalepDuzenle — teyit edilen kalemler', () => {
     await kaydet();
     expect(sonGovde().teyit?.kalemler.map(k => k.birimFiyat)).toEqual([null, 1250.5]);
     expect(ErpIcerikGovdesi.safeParse(sonGovde()).success).toBe(true);
+  });
+
+  describe('kuruş — birim fiyat en çok iki ondalık (kullanıcı kararı 2026-10-17, B2)', () => {
+    const KURUS_HATASI = 'Birim fiyat en çok iki ondalık olabilir (kuruş).';
+
+    it('üçüncü ondalık → AÇIK alan hatası, `onKaydet` ÇAĞRILMAZ, kutu yuvarlanmaz, önizleme tutar basmaz; düzeltilince iki ondalıklı değer gider', async () => {
+      duzenle(talep({ teyit: teyit() }));
+      yaz(kutu('Birim fiyat (KDV hariç): İç cephe boyası'), '83,3333');
+      expect([cikti('Ara toplam (KDV hariç)'), cikti('KDV'), cikti('Genel toplam')]).toEqual(['—', '—', '—']);
+      await kaydet();
+      expect(icerikKaydet).not.toHaveBeenCalled();
+      expect(screen.getByText(KURUS_HATASI)).toBeTruthy();
+      expect(screen.queryByText(/Fiyat okunamadı/)).toBeNull();
+      expect(kutu('Birim fiyat (KDV hariç): İç cephe boyası').getAttribute('aria-invalid')).toBe('true');
+      expect(kutu('Birim fiyat (KDV hariç): Fırça').getAttribute('aria-invalid')).toBe('false');
+      expect(kutu('Birim fiyat (KDV hariç): İç cephe boyası').value).toBe('83,3333');
+      expect(screen.getByText('Kaydedilmedi — işaretli alanları düzeltin.')).toBeTruthy();
+      // Art arda tıklama da istek üretmez.
+      await kaydet();
+      expect(icerikKaydet).not.toHaveBeenCalled();
+
+      yaz(kutu('Birim fiyat (KDV hariç): İç cephe boyası'), '83,33');
+      expect(cikti('Ara toplam (KDV hariç)')).toBe('₺206,66');
+      await kaydet();
+      expect(icerikKaydet).toHaveBeenCalledTimes(1);
+      expect(sonGovde().teyit?.kalemler.map(k => k.birimFiyat)).toEqual([83.33, 40]);
+      expect(ErpIcerikGovdesi.safeParse(sonGovde()).success).toBe(true);
+    });
+
+    it('«95,50» (virgül, sondaki sıfır) 95,5 olarak, boş fiyat `null` olarak gider — kuruş denetimi ikisini de bozmaz', async () => {
+      duzenle(talep({ teyit: teyit() }));
+      yaz(kutu('Birim fiyat (KDV hariç): İç cephe boyası'), '95,50');
+      yaz(kutu('Birim fiyat (KDV hariç): Fırça'), '');
+      await kaydet();
+      expect(screen.queryByText(KURUS_HATASI)).toBeNull();
+      expect(sonGovde().teyit?.kalemler.map(k => k.birimFiyat)).toEqual([95.5, null]);
+      expect(ErpIcerikGovdesi.safeParse(sonGovde()).success).toBe(true);
+    });
+
+    it('İ1-b — 1 trilyon TL ve üstü («10000000000000») `gecersiz`: okunamayan fiyat metni (kuruş metni DEĞİL), `onKaydet` ÇAĞRILMAZ', async () => {
+      duzenle(talep({ teyit: teyit() }));
+      yaz(kutu('Birim fiyat (KDV hariç): İç cephe boyası'), '10000000000000');
+      await kaydet();
+      expect(icerikKaydet).not.toHaveBeenCalled();
+      expect(screen.getByText('Fiyat okunamadı. Binlik ayraç yazmayın; kuruş için virgül kullanın (ör. 1250,50).')).toBeTruthy();
+      expect(screen.queryByText(KURUS_HATASI)).toBeNull();
+      expect(kutu('Birim fiyat (KDV hariç): İç cephe boyası').getAttribute('aria-invalid')).toBe('true');
+    });
+
+    it('okunamayan («1.250») ve kuruştan ince («0,001») fiyat AYRI metin alır — ikisi aynı anda, kendi satırında', async () => {
+      duzenle(talep({ teyit: teyit() }));
+      yaz(kutu('Birim fiyat (KDV hariç): İç cephe boyası'), '1.250');
+      yaz(kutu('Birim fiyat (KDV hariç): Fırça'), '0,001');
+      await kaydet();
+      expect(icerikKaydet).not.toHaveBeenCalled();
+      expect(screen.getAllByText('Fiyat okunamadı. Binlik ayraç yazmayın; kuruş için virgül kullanın (ör. 1250,50).')).toHaveLength(1);
+      expect(screen.getAllByText(KURUS_HATASI)).toHaveLength(1);
+    });
+
+    it('teyidi OLMAYAN talep: beyandaki 83,3333 (kimliksiz uç AYNEN kabul eder) kopyada YUVARLANMADAN görünür; dokunmadan kayıt REDDEDİLİR', async () => {
+      duzenle(talep({ kalemler: [kalem({ talepFiyat: 83.3333, adet: 12 })] }));
+      expect(kutu('Birim fiyat (KDV hariç): İç cephe boyası').value).toBe('83,3333');
+      expect(cikti('Ara toplam (KDV hariç)')).toBe('—');
+      await kaydet();
+      expect(icerikKaydet).not.toHaveBeenCalled();
+      expect(screen.getByText(KURUS_HATASI)).toBeTruthy();
+      yaz(kutu('Birim fiyat (KDV hariç): İç cephe boyası'), '83,33');
+      await kaydet();
+      expect(sonGovde().teyit?.kalemler).toEqual([
+        { anahtar: 'b:0', id: 'u1', sku: 'DYO-0001', ad: 'İç cephe boyası', marka: 'DYO', adet: 12, birimFiyat: 83.33, tedarik: false },
+      ]);
+    });
+
+    it('elle talep (yeni kip): üçüncü ondalık → alan hatası, `onKaydet` ÇAĞRILMAZ; «0,10» → 0,1 gider ve elle talep şemasından geçer', async () => {
+      yeni();
+      yaz(kutu('Müşteri adı (zorunlu)'), 'Hüseyin Ağaoğlu');
+      yaz(kutu('Telefon (zorunlu, en az 10 rakam)'), '0532 111 22 33');
+      yaz(kutu('Ürün adı: 1. kalem'), 'Saten alçı');
+      yaz(kutu('Adet: Saten alçı'), '12');
+      yaz(kutu('Birim fiyat (KDV hariç): Saten alçı'), '83,3333');
+      await tikla(dugme('Talebi aç'));
+      expect(elleKaydet).not.toHaveBeenCalled();
+      expect(screen.getByText(KURUS_HATASI)).toBeTruthy();
+      expect(kutu('Birim fiyat (KDV hariç): Saten alçı').getAttribute('aria-invalid')).toBe('true');
+      yaz(kutu('Birim fiyat (KDV hariç): Saten alçı'), '0,10');
+      await tikla(dugme('Talebi aç'));
+      expect(elleKaydet).toHaveBeenCalledTimes(1);
+      const govde = elleKaydet.mock.calls[0][0];
+      expect(govde.kalemler).toEqual([{ ad: 'Saten alçı', adet: 12, sku: '', marka: '', birimFiyat: 0.1, tedarik: false }]);
+      expect(ErpElleTalepGovdesi.safeParse(govde).success).toBe(true);
+    });
+
+    it('İngilizce arayüzde metin çevrilir (Türkçe harf kalmaz)', async () => {
+      duzenle(talep({ teyit: teyit([teyitKalemi({ ad: 'Brush' })]) }), 'en');
+      yaz(screen.getByLabelText('Unit price (excl. VAT): Brush'), '1,005');
+      await tikla(dugme('Save content'));
+      expect(icerikKaydet).not.toHaveBeenCalled();
+      expect(screen.getByText('The unit price may have at most two decimal places.')).toBeTruthy();
+      expect(screen.queryByText(KURUS_HATASI)).toBeNull();
+    });
   });
 
   it('adet / fiyat alanları METİNDİR (`type=number` yok; `inputMode` ile)', () => {

@@ -14,7 +14,8 @@
  */
 import { z } from 'zod';
 import {
-  MAGAZA_KALEM_ANAHTARI_DESENI, MAGAZA_PANEL_43_DESENI, MAGAZA_PANEL_TUR_DESENI, MAGAZA_TALEP_ASAMALARI, PANEL_DURUMLARI, magazaKdvOraniMi,
+  MAGAZA_BIRIM_FIYAT_KURUS_HATASI, MAGAZA_KALEM_ANAHTARI_DESENI, MAGAZA_PANEL_43_DESENI, MAGAZA_PANEL_TUR_DESENI, MAGAZA_TALEP_ASAMALARI, PANEL_DURUMLARI,
+  magazaKdvOraniMi, magazaKurusluMu,
 } from '../lib/magazaTalep.js';
 import type { MagazaKdvOrani } from '../lib/magazaTalep.js';
 
@@ -112,6 +113,20 @@ export const EmailSendSchema = z.object({
 //  • `fiyatiSorulacakVar` şemada BİLEREK yok: zod bilinmeyen alanı SİLER — istemciden alınmaz, sunucuda kalemlerden türetilir.
 //  • `no` deseni src/lib/magazaTalep.ts `MAGAZA_TALEP_NO_DESENI` ile AYNI olmalı (bu dosya yalnız zod'a bağlı kalsın
 //    diye kopya; ayrışmayı kanal/magazaTalep.test.ts kilitler).
+//  • `birimFiyat`'ta KURUŞ DENETİMİ YOK (B3, 2026-10-17): müşterinin beyanıdır, mağaza fiyatları iki ondalıktır; bu uçta ret
+//    mağazanın talebini kaybettirirdi. Kuruş kuralı yalnız ERP'nin kendi gövdelerinde (`KurusluBirimFiyat`, aşağıda).
+
+/** Kimliksiz talebin kalemi — `ErpElleTalepGovdesi` aynı nesneyi `birimFiyat`'ı kuruşla sınırlayarak genişletir (kopya yok). */
+const MagazaTalepKalemSemasi = z.object({
+  ad:         z.string(),
+  adet:       z.number().int().positive(),
+  id:         z.string().optional(),
+  sku:        z.string().optional(),
+  marka:      z.string().optional(),
+  birimFiyat: z.number().nonnegative().nullable().optional(),
+  tedarik:    z.boolean().optional(),
+});
+
 export const MagazaSiparisTalebiSchema = z.object({
   no:      z.string().regex(/^T\d{6}-[A-Z0-9]{4}$/),
   tarih:   z.string().optional(),
@@ -125,15 +140,7 @@ export const MagazaSiparisTalebiSchema = z.object({
     vergi:   z.string().optional(),
   }),
   not:     z.string().optional(),
-  kalemler: z.array(z.object({
-    ad:         z.string(),
-    adet:       z.number().int().positive(),
-    id:         z.string().optional(),
-    sku:        z.string().optional(),
-    marka:      z.string().optional(),
-    birimFiyat: z.number().nonnegative().nullable().optional(),
-    tedarik:    z.boolean().optional(),
-  })).min(1),
+  kalemler: z.array(MagazaTalepKalemSemasi).min(1),
   araToplam: z.number().nonnegative().optional(),
   kdv:       z.number().nonnegative().optional(),
   toplam:    z.number().nonnegative().optional(),
@@ -206,6 +213,14 @@ export const BildirimGonderSorgusu = z.object({
 }).strict();
 
 /**
+ * ERP gövdelerinin birim fiyatı (B1, kullanıcı kararı 2026-10-17 «kuruştan ince birim fiyat — hayır»): negatif değil VE en çok
+ * iki ondalık. Denetim saf ortak işlevde (`magazaKurusluMu` — kayan nokta kalıntısına dayanıklı; form aynı işlevle süzer),
+ * ileti de oradan (`MAGAZA_BIRIM_FIYAT_KURUS_HATASI`). Rotalar yine sabit `400 { ok: false }` döner (zod ayrıntısı yanıta
+ * girmez); metni kullanıcı formun alan hatasında görür. `null` («fiyat sorulacak») çağıran yerde `.nullable()` ile — DEĞİŞMEZ.
+ */
+const KurusluBirimFiyat = z.number().nonnegative().refine(magazaKurusluMu, { message: MAGAZA_BIRIM_FIYAT_KURUS_HATASI });
+
+/**
  * İçerik gövdesinin müşteri bloğu: YEDİ alan birden ZORUNLU (`''` = boş). Yazma yolu `data || yama` ile SIĞ birleştirir —
  * kısmi `musteri` nesnesi eski alanları SİLERDİ. Metinlerde `.max()` yok: aşım ret değil KIRPMA (dilim 1 kuralı).
  */
@@ -220,9 +235,9 @@ const IcerikMusteriGovdesi = z.object({
 }).strict();
 
 /**
- * Teyit kalemi. `birimFiyat` KDV HARİÇ net ve ZORUNLU anahtar: sayı ya da açıkça `null` («fiyat sorulacak»; varsayılan YOK,
- * 0'a çevrilmez). `kdvOrani` İSTEĞE BAĞLI: verilmişse kümede olmalı (`MAGAZA_KDV_ORANLARI` — sabit içe aktarılır, kopyalanmaz;
- * 8 / 18 → 400), verilmemişse sunucu ürün kaydından çözer. `kdvKaynagi` şemada BİLEREK yok: kaynak sunucunun çıkarımıdır,
+ * Teyit kalemi. `birimFiyat` KDV HARİÇ net ve ZORUNLU anahtar: EN ÇOK İKİ ONDALIKLI sayı (`KurusluBirimFiyat`; 83,3333 → 400)
+ * ya da açıkça `null` («fiyat sorulacak»; varsayılan YOK, 0'a çevrilmez). `kdvOrani` İSTEĞE BAĞLI: verilmişse kümede olmalı
+ * (`MAGAZA_KDV_ORANLARI` — sabit içe aktarılır, kopyalanmaz; 8 / 18 → 400), verilmemişse sunucu ürün kaydından çözer. `kdvKaynagi` şemada BİLEREK yok: kaynak sunucunun çıkarımıdır,
  * gövdede gelirse `.strict()` 400 verir. `anahtar` kurallı desen (öncü sıfırlı `b:01` → 400); yalnız «hangi kalem» bilgisidir.
  */
 const IcerikTeyitKalemGovdesi = z.object({
@@ -232,7 +247,7 @@ const IcerikTeyitKalemGovdesi = z.object({
   ad:         z.string(),
   marka:      z.string().optional(),
   adet:       z.number().int().positive(),
-  birimFiyat: z.number().nonnegative().nullable(),
+  birimFiyat: KurusluBirimFiyat.nullable(),
   kdvOrani:   z.custom<MagazaKdvOrani>(magazaKdvOraniMi).optional(),
   tedarik:    z.boolean().optional(),
 }).strict();
@@ -273,10 +288,14 @@ export const PanelSilGovdesi = z.object({
 
 /**
  * `POST /api/magaza-talepleri` — ERP'de elle talep. Mağaza talebi gövdesinin `no` ve `tarih`'siz hâli: numarayı SUNUCU üretir,
- * müşteri cihazı saati yoktur. Kimliksiz uçtan farkı `.strict()`: ERP'nin kendi formu tanınmayan alan göndermez (gelirse 400).
- * Telefonda 10 rakam ZORUNLU — eşleyicide ölçülür (takip ucu aynı `no` + telefonla çalışır).
+ * müşteri cihazı saati yoktur. Kimliksiz uçtan iki farkı var: `.strict()` (ERP'nin kendi formu tanınmayan alan göndermez —
+ * gelirse 400) ve kalem `birimFiyat`'ı EN ÇOK İKİ ONDALIK (`KurusluBirimFiyat`, B1; kalem nesnesinin geri kalanı kimliksiz
+ * uçla AYNI nesne — `MagazaTalepKalemSemasi.extend`). Telefonda 10 rakam ZORUNLU — eşleyicide ölçülür (takip ucu aynı `no` +
+ * telefonla çalışır).
  */
-export const ErpElleTalepGovdesi = MagazaSiparisTalebiSchema.omit({ no: true, tarih: true }).strict();
+export const ErpElleTalepGovdesi = MagazaSiparisTalebiSchema.omit({ no: true, tarih: true }).extend({
+  kalemler: z.array(MagazaTalepKalemSemasi.extend({ birimFiyat: KurusluBirimFiyat.nullable().optional() })).min(1),
+}).strict();
 
 /** `POST /api/magaza-panel/yetki-kodu` — § 3.2. */
 export const YetkiKoduGovdesi = z.object({

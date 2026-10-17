@@ -4,6 +4,8 @@
  * KİLİTLENEN DEĞİŞMEZLER:
  *   - sayı girdisi METİNDİR: okunamayan adet / fiyat `gecersiz`'dir — `null`'a ya da 0'a ÇEVRİLMEZ; boş fiyat = «fiyat sorulacak»;
  *     «1.250» (nokta + tam üç hane) belirsizdir ve HATADIR (sessizce bin kat küçük fiyat yazılmasın);
+ *   - KURUŞ (kullanıcı kararı 2026-10-17, B2): ikiden çok ondalıklı fiyat `kurustan-ince` ALAN HATASIDIR (kuruşa yuvarlanmaz,
+ *     gövde üretilmez, önizleme tutar basmaz); hüküm sunucu şemasıyla AYNI işlevden — saf vektörler `magazaTalep.kurus.test.ts`;
  *   - müşterinin BEYANI kopyalanır, değişmez; gövdede `kalemler` / `talepEdilen` / toplam / `kdvKaynagi` anahtarı YOKTUR;
  *   - teyit bölümü ilk açılışta `teyit ?? kalemler`'den kopyalanır (§ 10.4): teyidi OLMAYAN talep beyan kopyasıyla açılır ve
  *     dokunulmadan kaydedilse de tam gövde (`teyit` dâhil) gider; bütün satırlar kaldırılırsa gövdede `teyit` yoktur;
@@ -70,8 +72,9 @@ describe('magazaFiyatCoz — KDV hariç birim fiyat', () => {
     expect(magazaFiyatCoz('95,50')).toEqual({ tur: 'sayi', deger: 95.5 });      // virgüllü ondalık, sondaki sıfırla
     expect(magazaFiyatCoz('95.5')).toEqual({ tur: 'sayi', deger: 95.5 });
     expect(magazaFiyatCoz('1250,50')).toEqual({ tur: 'sayi', deger: 1250.5 });
-    expect(magazaFiyatCoz('0,015')).toEqual({ tur: 'sayi', deger: 0.015 });
-    expect(magazaFiyatCoz('1,250')).toEqual({ tur: 'sayi', deger: 1.25 });       // virgül AÇIKTIR: ondalık
+    // (Kuruş kararı 2026-10-17, B2 — bilerek değişen beklenen değer) üç ondalık artık `kurustan-ince` (önce `sayi` 0,015 idi).
+    expect(magazaFiyatCoz('0,015')).toEqual({ tur: 'kurustan-ince' });
+    expect(magazaFiyatCoz('1,250')).toEqual({ tur: 'sayi', deger: 1.25 });       // virgül AÇIKTIR: ondalık; değer iki ondalıklı
     expect(magazaFiyatCoz('0')).toEqual({ tur: 'sayi', deger: 0 });
     expect(magazaFiyatCoz(' 40 ')).toEqual({ tur: 'sayi', deger: 40 });
   });
@@ -81,7 +84,8 @@ describe('magazaFiyatCoz — KDV hariç birim fiyat', () => {
     for (const belirsiz of ['1.250', '12.500', '0.125']) expect(magazaFiyatCoz(belirsiz), belirsiz).toEqual({ tur: 'gecersiz' });
     // Nokta + iki ya da dört hane belirsiz değildir (binlik ayraç üç hanelidir).
     expect(magazaFiyatCoz('1.25')).toEqual({ tur: 'sayi', deger: 1.25 });
-    expect(magazaFiyatCoz('1.2505')).toEqual({ tur: 'sayi', deger: 1.2505 });
+    // Nokta + dört hane belirsiz değildir ama KURUŞTAN İNCEDİR (kuruş kararı — bilerek değişen beklenen değer).
+    expect(magazaFiyatCoz('1.2505')).toEqual({ tur: 'kurustan-ince' });
   });
 
   it('binlik ayraç, eksi, üs, boşluk, para simgesi, yarım yazım → `gecersiz`', () => {
@@ -101,9 +105,14 @@ describe('magazaSayiMetni — sayı → giriş metni (ondalık ayraç virgül)',
     expect(magazaSayiMetni(0)).toBe('0');
   });
 
-  it('gidiş-dönüş: forma yazılan kayıtlı fiyat AYNI sayı olarak geri okunur (üç ondalıklı değer dâhil — virgülle belirsizlik yok)', () => {
-    for (const n of [0, 0.5, 40, 95, 204.99, 1250.5, 0.015, 1.125, 12.5, 100000]) {
+  it('gidiş-dönüş: forma yazılan kayıtlı fiyat AYNI sayı olarak geri okunur; kuruştan ince kayıtlı değer YUVARLANMADAN basılır ve alan hatasıdır', () => {
+    for (const n of [0, 0.5, 40, 95, 204.99, 1250.5, 12.5, 100000, 0.30000000000000004]) {
       expect(magazaFiyatCoz(magazaSayiMetni(n)), String(n)).toEqual({ tur: 'sayi', deger: n });
+    }
+    // Beyandaki 83,3333 (kimliksiz uç AYNEN kabul eder — B3) forma «83,3333» diye gelir; kuruşa yuvarlanıp yazılmaz.
+    for (const n of [0.015, 1.125, 83.3333]) {
+      expect(magazaSayiMetni(n), String(n)).toBe(String(n).replace('.', ','));
+      expect(magazaFiyatCoz(magazaSayiMetni(n)), String(n)).toEqual({ tur: 'kurustan-ince' });
     }
     for (const n of [1, 2, 12, 1000]) expect(magazaAdetCoz(magazaSayiMetni(n)), String(n)).toEqual({ tur: 'sayi', deger: n });
   });
@@ -370,11 +379,30 @@ describe('magazaTaslakOnizlemesi — canlı önizleme (kayıtlı tutar sunucunun
   });
 
   it('kuruş formülü sunucunun işlevindedir: önizleme `magazaTeyitToplamlari` ile AYNI sonucu verir (yuvarlama dâhil)', () => {
-    // 0,015 × 3: tam sayı kuruşla kararlı (kayan nokta toplamı değil).
-    const k = [satir({ yerel: 1, adet: '3', fiyat: '0,015' }), satir({ yerel: 2, adet: '7', fiyat: '33,33', secilenKdv: 1 })];
-    const beklenen = magazaTeyitToplamlari([{ adet: 3, birimFiyat: 0.015, kdvOrani: 20 }, { adet: 7, birimFiyat: 33.33, kdvOrani: 1 }]);
-    expect(beklenen.toplam).not.toBeNull();
+    // 0,15 × 3 (%20 → 0,09) + 7 × 33,33 (%1 → 2,3331 → 2,33): tam sayı kuruşla kararlı (kayan nokta toplamı değil).
+    const k = [satir({ yerel: 1, adet: '3', fiyat: '0,15' }), satir({ yerel: 2, adet: '7', fiyat: '33,33', secilenKdv: 1 })];
+    const beklenen = magazaTeyitToplamlari([{ adet: 3, birimFiyat: 0.15, kdvOrani: 20 }, { adet: 7, birimFiyat: 33.33, kdvOrani: 1 }]);
+    expect(beklenen).toEqual({ araToplam: 233.76, kdv: 2.42, toplam: 236.18 });
     expect(magazaTaslakOnizlemesi(k, kdvYok)).toEqual({ ...beklenen, durum: 'tutar' });
+  });
+
+  it('(kuruş kararı, B2) kuruştan ince fiyat önizlemede tutar BASMAZ (`okunamadi` — kuruşa yuvarlanmış sahte toplam yok); gövde de üretilmez', () => {
+    for (const fiyat of ['0,015', '83,3333', '1,005', '0,001']) {
+      const k = [satir({ yerel: 1, adet: '12', fiyat }), satir({ yerel: 2, adet: '1', fiyat: '40' })];
+      expect(magazaTaslakOnizlemesi(k, kdvYok), fiyat).toEqual({ araToplam: null, kdv: null, toplam: null, durum: 'okunamadi' });
+      expect(magazaIcerikGovdesi(taslak({ kalemler: k }), 0, false), fiyat).toEqual({ ok: false, hatalar: { kalemler: { 1: { fiyat: 'kurustan-ince' } } } });
+      expect(magazaElleTalepGovdesi(taslak({ kalemler: k })), fiyat).toEqual({ ok: false, hatalar: { kalemler: { 1: { fiyat: 'kurustan-ince' } } } });
+    }
+  });
+
+  it('(kuruş kararı, B2) kuruştan ince fiyat, yanında fiyatı BOŞ satır olsa da `okunamadi` — «fiyat sorulacak» hatayı ÖRTMEZ (sıra fark etmez)', () => {
+    const bos = { araToplam: null, kdv: null, toplam: null };
+    const ince = satir({ yerel: 1, adet: '12', fiyat: '83,3333' });
+    const fiyatsiz = satir({ yerel: 2, adet: '1', fiyat: '' });
+    expect(magazaTaslakOnizlemesi([ince, fiyatsiz], kdvYok)).toEqual({ ...bos, durum: 'okunamadi' });
+    expect(magazaTaslakOnizlemesi([fiyatsiz, ince], kdvYok)).toEqual({ ...bos, durum: 'okunamadi' });
+    // Karşılaştırma: kuruşlu fiyat + boş satır gerçekten «fiyat sorulacak»tır.
+    expect(magazaTaslakOnizlemesi([satir({ yerel: 1, adet: '12', fiyat: '83,33' }), fiyatsiz], kdvYok)).toEqual({ ...bos, durum: 'fiyat-sorulacak' });
   });
 });
 
@@ -427,7 +455,7 @@ describe('magazaIcerikGovdesi — düzenleme gövdesi (TAM gövde; «ne değişt
     const s = magazaIcerikGovdesi(taslak({ kalemler: [
       satir({ yerel: 1, adet: '12,5' }), satir({ yerel: 2, adet: 'abc' }), satir({ yerel: 3, adet: '' }), satir({ yerel: 4, fiyat: '1.250' }), satir({ yerel: 5, ad: '  ' }), satir({ yerel: 6 }),
     ] }), 0, false);
-    expect(s).toEqual({ ok: false, hatalar: { kalemler: { 1: { adet: 'gecersiz' }, 2: { adet: 'gecersiz' }, 3: { adet: 'bos' }, 4: { fiyat: true }, 5: { ad: true } } } });
+    expect(s).toEqual({ ok: false, hatalar: { kalemler: { 1: { adet: 'gecersiz' }, 2: { adet: 'gecersiz' }, 3: { adet: 'bos' }, 4: { fiyat: 'gecersiz' }, 5: { ad: true } } } });
   });
 
   it('müşteri adı boş / telefonda 10 rakam yok / not ham sınırı aşıyor → alan hatası, gövde yok', () => {
