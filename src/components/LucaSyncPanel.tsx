@@ -22,6 +22,8 @@ import { db } from '../firebase';
 import { format } from 'date-fns';
 import { tr as trLocale } from 'date-fns/locale';
 import { zamanDate } from '../utils/zaman';
+import { useAppStore } from '../store/appStore';
+import { entegrasyonUcKapisindanGecer } from '../lib/entegrasyonUcKapilari';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -119,6 +121,12 @@ function SyncCard({
 
 export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLanguage?: string }) {
   const lang = currentLanguage === 'tr';
+  // Kapı ortak tablodan (2026-10-17, iç rol daraltma L4 / L5 — İ3, İ4): fatura gönderimi `invoices` yazma, stok çekme
+  // `inventory` yazma. Geçemeyen rolde kart ÇİZİLMEZ, çağrı HİÇ yapılmaz. Panel Ayarlar sekmesinde (Yönetici, Müdür) — bugün
+  // iki rol de geçer; koşul sekme tablosuna güvenmez.
+  const rol = useAppStore(s => s.userRole);
+  const faturaGonderebilir = entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/sync/fatura');
+  const stokCekebilir = entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/sync/stok');
 
   const [status,       setStatus]       = useState<LucaStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
@@ -161,6 +169,7 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const runFaturaSync = async () => {
+    if (!faturaGonderebilir) return;   // kart bu rolde çizilmez (İ3)
     const id = orderIdInput.trim();
     if (!id) {
       setFaturaSync(prev => ({ ...prev, error: lang ? 'Sipariş ID girin.' : 'Enter an order ID.' }));
@@ -187,14 +196,21 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
   };
 
   const runStokSync = async () => {
+    if (!stokCekebilir) return;   // kart bu rolde çizilmez (İ3)
     setStokSync({ running: true, result: null, error: null });
     try {
       const r = await authFetch('/api/luca/sync/stok', { method: 'POST' });
-      const d = await r.json() as { success: boolean; upserted?: number; notConfigured?: boolean; error?: string; duration?: number };
+      // Yanıt alanları sunucudakiyle aynı (`created` / `updated` / `yabanci`). Eskiden var olmayan `upserted` okunup her
+      // seferinde «0 ürün güncellendi» yazılıyordu. `yabanci` (2026-10-17, L4): başka firmaya ait olduğu için ATLANAN kart sayısı.
+      const d = await r.json() as { success: boolean; created?: number; updated?: number; yabanci?: number; notConfigured?: boolean; error?: string; duration?: number };
       if (d.notConfigured) {
         setStokSync({ running: false, result: null, error: lang ? 'Luca yapılandırılmamış.' : 'Luca not configured.' });
       } else if (d.success) {
-        setStokSync({ running: false, result: `✓ ${d.upserted ?? 0} ${lang ? 'ürün güncellendi' : 'products synced'} (${d.duration ?? '?'}ms)`, error: null });
+        const sayi = (n: number | undefined) => (typeof n === 'number' && Number.isFinite(n) ? String(n) : '—');
+        const atlanan = typeof d.yabanci === 'number' && d.yabanci > 0
+          ? (lang ? `, ${d.yabanci} kart başka firmaya ait olduğu için atlandı` : `, ${d.yabanci} cards skipped (another company)`)
+          : '';
+        setStokSync({ running: false, result: `✓ ${sayi(d.created)} ${lang ? 'yeni' : 'new'}, ${sayi(d.updated)} ${lang ? 'güncellendi' : 'updated'}${atlanan} (${d.duration ?? '?'}ms)`, error: null });
       } else {
         setStokSync({ running: false, result: null, error: d.error ?? (lang ? 'Bilinmeyen hata' : 'Unknown error') });
       }
@@ -248,6 +264,7 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
         </p>
 
         {/* Fatura sync — needs an order ID */}
+        {faturaGonderebilir && (
         <div className="bg-gray-50 rounded-xl p-4 space-y-3">
           <div className="flex items-start gap-3">
             <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm flex-shrink-0">
@@ -292,8 +309,10 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
             </div>
           )}
         </div>
+        )}
 
         {/* Stok sync */}
+        {stokCekebilir && (
         <SyncCard
           icon={Package}
           title={lang ? 'Stok Çek (Luca → Firebase)' : 'Pull Stock (Luca → Firebase)'}
@@ -304,6 +323,7 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
           onRun={() => void runStokSync()}
           lang={lang}
         />
+        )}
       </div>
 
       {/* ── Sync log ── */}

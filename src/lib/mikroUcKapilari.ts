@@ -21,12 +21,14 @@
  * SINIR: sunucu süper yöneticiyi (sahip hesabı) rolüne bakmadan geçirir; istemci ROLE bakar. Sahip hesabının rolü
  * Yönetici'dir — fark bilerek kabul edildi (gizli düğme, ölü düğme değil).
  *
- * Saf modül: sunucu testi ve istemci (bileşen / kanca / servis) AYNI tabloyu okur.
+ * Saf modül: sunucu testi ve istemci (bileşen / kanca / servis) AYNI tabloyu okur. Karar işlevi ORTAK çekirdekte
+ * (`ucKapisiCekirdegi.ts`) — entegrasyon uçlarının tablosu (`entegrasyonUcKapilari.ts`) da aynı çekirdeği çağırır (kopya yok).
  */
-import { isAllowed, type AppRole } from './rbac';
+import type { AppRole } from './rbac';
+import { tablodakiUcKapisindanGecer, type UcKapisi } from './ucKapisiCekirdegi';
 
-/** `requireCollectionAccess(koleksiyon, eylem)` ikilisi. */
-export type UcKapisi = readonly [koleksiyon: string, eylem: 'read' | 'write'];
+/** `requireCollectionAccess(koleksiyon, eylem)` ikilisi (tanım çekirdekte). */
+export type { UcKapisi } from './ucKapisiCekirdegi';
 
 export const MIKRO_UC_KAPILARI = {
   // K1 — arama DÂHİL iki dal da `leads`'e yazar (arama istek başına en çok 200 cari upsert eder) → yazma kapısı.
@@ -57,7 +59,5 @@ export type MikroKapiliUc = keyof typeof MIKRO_UC_KAPILARI;
 /** Bu rol, ucun sunucudaki kapısından geçer mi? İstemci düğmeyi çizmeden / çağrıyı yapmadan ÖNCE sorar.
  *  Rolsüz hesap ve tabloda olmayan anahtar (tip dışı çağrı) GEÇEMEZ — kapalı başarısızlık. */
 export function ucKapisindanGecer(rol: AppRole | null | undefined, uc: MikroKapiliUc): boolean {
-  if (!rol || !Object.prototype.hasOwnProperty.call(MIKRO_UC_KAPILARI, uc)) return false;
-  const [koleksiyon, eylem] = MIKRO_UC_KAPILARI[uc];
-  return isAllowed(rol, koleksiyon, eylem);
+  return tablodakiUcKapisindanGecer(MIKRO_UC_KAPILARI, rol, uc);
 }

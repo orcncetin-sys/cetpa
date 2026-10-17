@@ -48,6 +48,8 @@ import { type LabelItem } from './LabelSheetModal';
 import { type InventoryItem, type InventoryMovement, type Warehouse, type Consignment, type StockDiscrepancy } from '../types';
 import { oc } from '../i18n/ortak';
 import { satirNet } from '../lib/stokFiyat';
+import { useAppStore } from '../store/appStore';
+import { entegrasyonUcKapisindanGecer } from '../lib/entegrasyonUcKapilari';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -319,6 +321,11 @@ const InventoryView: React.FC<InventoryViewProps> = ({
 
   const [autoReorderLoading, setAutoReorderLoading] = useState(false);
   const [autoReorderResult, setAutoReorderResult] = useState<string | null>(null);
+  // Kapı ortak tablodan (2026-10-17, iç rol daraltma A1 — İ3, İ4): «Otomatik SAS» `purchaseOrders` yazma ister (uç taslak SAS
+  // yazar). Kilitlenen: Lojistik (Stok sekmesi tam yetkili), Muhasebe ve Satış (salt okunur). Geçemeyen rolde iki düğme de
+  // ÇİZİLMEZ, çağrı HİÇ yapılmaz. Rol küresel depodan (bileşende rol adı yazılmaz).
+  const depoRolu = useAppStore(s => s.userRole);
+  const otomatikSasAcabilir = entegrasyonUcKapisindanGecer(depoRolu, 'POST /api/inventory/auto-reorder');
   // Phase 546: inline notes quick-edit
   const [p546EditingNoteId, setP546EditingNoteId] = useState<string | null>(null);
   const [p546NoteDraft, setP546NoteDraft] = useState('');
@@ -561,6 +568,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
   };
 
   const handleAutoReorder = async () => {
+    if (!otomatikSasAcabilir) return;
     setAutoReorderLoading(true);
     setAutoReorderResult(null);
     try {
@@ -599,6 +607,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         icon={Package}
         actionButton={
           <div className="flex items-center gap-2">
+            {otomatikSasAcabilir && (
             <button
               onClick={() => void handleAutoReorder()}
               disabled={autoReorderLoading}
@@ -610,6 +619,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                 : <ShoppingCart className="w-4 h-4" />}
               {currentLanguage === 'tr' ? 'Otomatik SAS' : 'Auto-Reorder'}
             </button>
+            )}
             <button onClick={() => setIsAddingProduct(true)} className="apple-button-primary flex items-center gap-2">
               <Plus className="w-4 h-4" /> {currentT.add_product}
             </button>
@@ -1501,10 +1511,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                     : `${critical.length > 0 ? `${critical.length} critical (out of stock)` : ''}${critical.length > 0 && warning.length > 0 ? ', ' : ''}${warning.length > 0 ? `${warning.length} low stock warning` : ''}`}
                 </span>
               </div>
+              {otomatikSasAcabilir && (
               <button onClick={() => void handleAutoReorder()} disabled={autoReorderLoading}
                 className={`text-[10px] font-bold px-3 py-1 rounded-full transition-colors ${critical.length > 0 ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>
                 {autoReorderLoading ? '…' : (currentLanguage === 'tr' ? '⚡ Otomatik SAS' : '⚡ Auto-Reorder')}
               </button>
+              )}
             </div>
             <div className="bg-white divide-y divide-gray-50 max-h-48 overflow-y-auto">
               {[...critical, ...warning].slice(0, 10).map(item => {

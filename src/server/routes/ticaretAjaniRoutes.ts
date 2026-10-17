@@ -34,7 +34,7 @@
  * birleşmiyor; ticaret istemleri politika açısından zararsız, olası bir
  * refusal parsed_output=null → 502 olarak net biçimde yüzeye çıkar.
  */
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, RequestHandler, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
@@ -47,12 +47,15 @@ export interface TicaretAjaniCtx {
   requireAuth: unknown;
   requireMfaVerified: unknown;
   /**
-   * Yalnız iç personel (2026-10-11, şartname «dış rol kapanışı» D13). İki ajan yalnız `requireAuth` taşıyordu: satış ajanı
-   * `cariKod` ile kiracı kolonu OLMAYAN Mikro aynasını okur — hesap açan yabancı ve dış rol herhangi bir carinin satış
-   * geçmişinden üretilen özeti alıyor, satın alma ajanı kritik stokları ve son alış tedarikçilerini veriyordu; her çağrı
-   * ücretli model çağrısıdır. Tek boğaz `requireAuth`'ta; bu, boğaz sökülse de kapalı kalsın diye uçların KENDİ kapısı.
+   * Uçların KENDİ rol kapısı (server.ts `requireCollectionAccess`). Tarihçe: 2026-10-11 (şartname «dış rol kapanışı» D13)
+   * iki ajan yalnız `requireAuth` taşıyordu — satış ajanı `cariKod` ile kiracı kolonu OLMAYAN Mikro aynasını okur; hesap açan
+   * yabancı ve dış rol herhangi bir carinin satış geçmişinden üretilen özeti alıyor, satın alma ajanı kritik stokları ve son
+   * alış tedarikçilerini veriyordu; her çağrı ücretli model çağrısıdır → `requireStaff`. 2026-10-17 (iç rol daraltma Y2 / Y3):
+   * `requireStaff`'ın yerine eşdeğer verinin OKUMA kuralı — satış ajanı `invoices` okuma (bir carinin satış satırları =
+   * satış faturası satırları), satın alma ajanı `purchaseOrders` okuma. İki kural da dış rolü içermez: tek boğaz
+   * (`requireAuth`) sökülse de kapalı kalır. Kapı ortak tablodan sorulur (src/lib/entegrasyonUcKapilari.ts).
    */
-  requireStaff: unknown;
+  requireCollectionAccess: (coll: string, op: 'read' | 'write') => RequestHandler;
   reqCompanyId: (req: Request) => Promise<string>;
   reqActor: (req: Request) => { uid: string; email: string };
   writeAuditLog: (actor: { uid: string; email: string }, action: string, details: string) => Promise<unknown>;
@@ -60,7 +63,8 @@ export interface TicaretAjaniCtx {
   getPgPool: () => { query: (sql: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> } | null;
   /** Gemini yolu (Claude anahtarı yokken) — aiRoutes ile aynı çözücüler. */
   resolveGeminiClient: () => Promise<GoogleGenAI | null>;
-  resolveGeminiModel: (requested?: string) => string;
+  /** Parametresiz (2026-10-17, Y1 / K2): model sunucuda çözülür, istekten okunmaz (aiRoutes ile aynı imza). */
+  resolveGeminiModel: () => string;
 }
 
 const MODEL = 'claude-opus-5';
@@ -183,8 +187,10 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
     return m;
   };
 
-  /** POST /api/ai/satis-ajani — Body: { cariKod: string } */
-  app.post('/api/ai/satis-ajani', C.requireAuth as never, C.requireStaff as never, C.requireMfaVerified as never, async (req: Request, res: Response) => {
+  /** POST /api/ai/satis-ajani — Body: { cariKod: string }
+   *  Rol kapısı `invoices` okuma (Y2). Kilitlenen (K5): Satın Alma — CRM'de salt okunur; ücretli modele müşteri satış geçmişi
+   *  verilmez, panel bu rolde çizilmez. */
+  app.post('/api/ai/satis-ajani', C.requireAuth as never, C.requireCollectionAccess('invoices', 'read'), C.requireMfaVerified as never, async (req: Request, res: Response) => {
     const cariKod = String((req.body as { cariKod?: string } | undefined)?.cariKod ?? '').trim();
     if (!cariKod) return res.status(400).json({ success: false, error: 'cariKod gerekli.' });
     const pool = C.getPgPool();
@@ -254,8 +260,9 @@ export function ticaretAjaniRoutes(app: Express, C: TicaretAjaniCtx): void {
     }
   });
 
-  /** POST /api/ai/satinalma-ajani — Body: {} */
-  app.post('/api/ai/satinalma-ajani', C.requireAuth as never, C.requireStaff as never, C.requireMfaVerified as never, async (req: Request, res: Response) => {
+  /** POST /api/ai/satinalma-ajani — Body: {}
+   *  Rol kapısı `purchaseOrders` okuma (Y3) — Satın Alma sekmesinin rol kümesiyle aynı; arayüzde kilit yok. */
+  app.post('/api/ai/satinalma-ajani', C.requireAuth as never, C.requireCollectionAccess('purchaseOrders', 'read'), C.requireMfaVerified as never, async (req: Request, res: Response) => {
     const pool = C.getPgPool();
     try {
       const cid = await C.reqCompanyId(req);

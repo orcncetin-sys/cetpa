@@ -11,6 +11,8 @@ import { authFetch } from '../services/authFetch';
 import { eslesir } from '../utils/arama';
 import { paraYaz } from '../utils/currency';
 import { oc } from '../i18n/ortak';
+import { useAppStore } from '../store/appStore';
+import { entegrasyonUcKapisindanGecer } from '../lib/entegrasyonUcKapilari';
 
 interface Oneri {
   sku: string; urunAdi: string; oneriTipi: 'yeniden-siparis' | 'capraz-satis';
@@ -39,8 +41,13 @@ export default function SatisAjaniPanel({ currentLanguage, aiOnayli, musteriler 
     () => (ara.trim() ? musteriler.filter(m => eslesir(ara, m.ad)).slice(0, 8) : []),
     [ara, musteriler],
   );
+  // Kapı ortak tablodan (2026-10-17, iç rol daraltma Y2 — İ3, İ4): uç `invoices` okuma ister. Kilitlenen (K5): Satın Alma —
+  // CRM'de salt okunur; ücretli modele müşteri satış geçmişi verilmez. Geçemeyen rolde panel ÇİZİLMEZ, çağrı HİÇ yapılmaz.
+  const rol = useAppStore(s => s.userRole);
+  const ajanCalisabilir = entegrasyonUcKapisindanGecer(rol, 'POST /api/ai/satis-ajani');
 
   const calistir = async (m: { ad: string; cariKod: string }) => {
+    if (!ajanCalisabilir) return;
     setSecili(m); setAra(''); setYukleniyor(true); setSonuc(null);
     try {
       const r = await authFetch('/api/ai/satis-ajani', {
@@ -52,6 +59,8 @@ export default function SatisAjaniPanel({ currentLanguage, aiOnayli, musteriler 
       setSonuc({ success: false, error: e instanceof Error ? e.message : String(e) });
     } finally { setYukleniyor(false); }
   };
+
+  if (!ajanCalisabilir) return null;
 
   return (
     <div className="bg-white p-6 rounded-xl border border-purple-100 shadow-sm space-y-3">

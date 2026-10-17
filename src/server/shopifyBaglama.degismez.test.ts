@@ -74,7 +74,8 @@ describe('Shopify uçları server.ts\'e bağlı ve ara katman sırası doğru', 
   });
   it('LUCA fatura aktarımı mağaza siparişini reddeder — kalemler / gövde kurulmadan ve dış çağrıdan ÖNCE', () => {
     // Mağaza siparişinin kaleminde `price` yok: kapı olmasa ₺0 birim fiyatlı resmî kayıt + `hasInvoice: true` yazılırdı.
-    const uc = tek(/^\s*app\.post\('\/api\/luca\/sync\/fatura', requireAuth, requireMfaVerified, requireStaff, async/);
+    // Rol kapısı 2026-10-17'den beri `invoices` yazma (iç rol daraltma L5); bu çit yalnız rota satırının YERİNİ arar.
+    const uc = tek(/^\s*app\.post\('\/api\/luca\/sync\/fatura', requireAuth, requireMfaVerified, requireCollectionAccess\('invoices', 'write'\), async/);
     const kapi = tek(/if \(order\.source === MAGAZA_KAYNAGI\) return res\.status\(400\)\.json\(\{ success: false, error: "Mağaza siparişi LUCA'ya fatura olarak aktarılamaz\." \}\);/);
     const kalemler = satirNo(/^\s*const lines = \(\(order\.lineItems as /).filter(n => n > uc)[0];
     const disCagri = satirNo(/fetch\(`\$\{creds\.baseUrl\}\/v1\/faturalar`/).filter(n => n > uc)[0];

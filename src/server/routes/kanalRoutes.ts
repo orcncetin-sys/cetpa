@@ -18,7 +18,7 @@
  * bagimliliklar ACIK baglam nesnesiyle gecer, `import` DEGIL - server.ts bu
  * modulu import ettigi icin ters yonde import DONGU olurdu.
  */
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, RequestHandler, Response } from 'express';
 import type { AdminDbLike } from '../adminDbTypes.js';
 // Node yerlesigi — server.ts'e bagimlilik degil (dongu yok).
 
@@ -33,6 +33,9 @@ export interface KanalRouteCtx {
   requireAuth: any;
   /** Yalnız iç personel (server.ts requireStaff) — entegrasyon durum uçları için (2026-10-02). */
   requireStaff: any;
+  /** Koleksiyon kuralı kapısı (server.ts requireCollectionAccess) — Shopify uçları (2026-10-17, iç rol daraltma S1 / S2).
+   *  Kapı ortak tablodan sorulur (src/lib/entegrasyonUcKapilari.ts). */
+  requireCollectionAccess: (coll: string, op: 'read' | 'write') => RequestHandler;
   requireMfaVerified: any;
   reqActor: (req: Request) => { uid: string; email: string };
   reqCompanyId: (req: Request) => Promise<string>;
@@ -61,10 +64,13 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
   // ── shopify (3 rota) ─────────────────────────────────────────────────
   // Manual Sync Trigger
   // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (mağazanın son 50 siparişi HAM hâliyle: müşteri e-postası, telefonu, adresi).
-  app.post("/api/shopify/sync", C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
-    const body = req.body || {};
-    const accessToken = body.accessToken || process.env.SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || process.env.VITE_SHOPIFY_ACCESS_TOKEN;
-    let storeDomain = body.storeUrl || process.env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_URL || process.env.VITE_SHOPIFY_STORE_DOMAIN || "cetpa.myshopify.com";
+  // 2026-10-17 (iç rol daraltma S2 / K1): uç HİÇBİR koleksiyona YAZMAZ — mağazadan ürün ve siparişleri OKUR. Eskiden ham diziyi
+  // (müşteri e-postası, telefonu, adresi) istemciye döndürüyordu; istemci yalnız `.length` okuyup «senkronize edildi» diyordu.
+  // Artık: kapı `orders` okuma (`/api/shopify/baglanti` ile aynı; MFA korunur), yanıtta YALNIZ sayılar, gövdeden erişim belirteci
+  // ve mağaza adresi KABUL EDİLMEZ (istemci göndermiyordu; belirteç yalnız sunucu ortamından okunur).
+  app.post("/api/shopify/sync", C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('orders', 'read'), async (req: Request, res: Response) => {
+    const accessToken = process.env.SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+    let storeDomain = process.env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_URL || process.env.VITE_SHOPIFY_STORE_DOMAIN || "cetpa.myshopify.com";
 
     if (!accessToken) {
       // Env anahtar adlarını client'a sızdırma (yalnız sunucu logunda). İleti Ayarlar'a YÖNLENDİRMEZ: erişim belirteci alanı
@@ -121,12 +127,17 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
       }
       const ordersData = await ordersResponse.json();
 
-      await C.writeAuditLog(C.reqActor(req), 'Shopify Senkronizasyon',
-        `${(productsData.products || []).length} ürün, ${(ordersData.orders || []).length} sipariş çekildi`);
-      res.json({ 
-        message: "Shopify sync completed successfully", 
-        products: productsData.products || [],
-        orders: ordersData.orders || []
+      // Yalnız SAYILAR döner (K1): ham ürün / sipariş dizisi (müşteri kişisel verisi) istemciye GİTMEZ. Yanıtta liste yoksa sayı
+      // UYDURULMAZ (eskiden `|| []` ile «0 ürün» deniyordu): beklenmeyen biçim hata olarak döner.
+      if (!Array.isArray(productsData.products)) throw new Error('Shopify yanıtında ürün listesi yok.');
+      if (!Array.isArray(ordersData.orders)) throw new Error('Shopify yanıtında sipariş listesi yok.');
+      const urunSayisi: number = productsData.products.length;
+      const siparisSayisi: number = ordersData.orders.length;
+      await C.writeAuditLog(C.reqActor(req), 'Shopify Senkronizasyon', `${urunSayisi} ürün, ${siparisSayisi} sipariş çekildi`);
+      res.json({
+        message: `Shopify'dan ${urunSayisi} ürün, ${siparisSayisi} sipariş okundu (Cetpa'ya aktarılmadı).`,
+        urunSayisi,
+        siparisSayisi,
       });
     } catch (error: unknown) {
       console.error("Shopify sync error:", error);
@@ -135,7 +146,9 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
   });
 
   // Create Draft Order
-  app.post('/api/shopify/draft-order', C.requireAuth, C.requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-17, iç rol daraltma S1): mağazada sipariş AÇAR (İ1) — `orders` yazma; MFA korunur. Kilitlenen (K5):
+  // Muhasebe ve Satın Alma (b2b / crm sekmelerinde salt okunur) — «Dönüştür» düğmesi bu rollerde çizilmez.
+  app.post('/api/shopify/draft-order', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('orders', 'write'), async (req: Request, res: Response) => {
     const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
     const storeDomain = (() => {
       const raw = process.env.SHOPIFY_STORE_DOMAIN || 'cetpa.myshopify.com';
@@ -207,11 +220,12 @@ export function kanalRoutes(app: Express, C: KanalRouteCtx): void {
       const data = await shopifyRes.json();
       await C.writeAuditLog(C.reqActor(req), 'Shopify Taslak Sipariş',
         `#${data.draft_order.order_number || data.draft_order.id} oluşturuldu`);
+      // Ham taslak nesnesi (`raw`) DÖNMEZ (S1): müşteri nesnesini (e-posta, telefon, adres) taşıyabilir; istemci okumuyordu
+      // (B2BPortal yalnız `response.ok`).
       res.json({
         shopifyDraftOrderId: `#${data.draft_order.order_number || data.draft_order.id}`,
         shopifyAdminUrl: data.draft_order.admin_graphql_api_id,
         invoiceUrl: data.draft_order.invoice_url,
-        raw: data.draft_order
       });
     } catch (err: unknown) {
       console.error('Draft order error:', err);

@@ -2755,7 +2755,9 @@ async function startServer() {
   });
 
   // ── Luca Kontör Bakiyesi ─────────────────────────────────────────────────
-  app.get("/api/luca/kontor", requireAuth, async (_req: Request, res: Response) => {
+  // Rol kapısı (2026-10-17, iç rol daraltma L1): e-belge gönderim kredisi — e-Belge Merkezi'nin okuma kümesi (`eBelgeler` okuma).
+  // Kapı ortak tablodan sorulur (src/lib/entegrasyonUcKapilari.ts); MFA'sız (GET kalıbı).
+  app.get("/api/luca/kontor", requireAuth, requireCollectionAccess('eBelgeler', 'read'), async (_req: Request, res: Response) => {
     if (!LUCA_API_KEY) {
       return res.status(503).json({
         success: false,
@@ -2777,7 +2779,9 @@ async function startServer() {
   });
 
   // ── Luca e-Fatura Gönderimi ──────────────────────────────────────────────
-  app.post("/api/luca/fatura-gonder", requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-17, iç rol daraltma L2): resmî belge muhasebenindir (İ5) — `invoices` yazma. Eskiden yalnız kimlik + MFA:
+  // Lojistik, Kalite, İK dâhil her iç rol LUCA'ya e-Fatura gönderebiliyordu.
+  app.post("/api/luca/fatura-gonder", requireAuth, requireMfaVerified, requireCollectionAccess('invoices', 'write'), async (req: Request, res: Response) => {
     const { invoiceId, invoiceData } = req.body;
     console.log(`e-Fatura gönderimi başlatıldı: ${invoiceId}`);
 
@@ -3059,7 +3063,9 @@ async function startServer() {
 
   // requireStaff (2026-10-11, D13): yalnız `requireAuth`'tu — dış rol (B2B / Bayi) /api/db'de hiç yetkisi olmayan `purchaseOrders`'a
   // bu uçtan toplu taslak SAS yazabiliyor, yanıtta kritik ürün adlarını alıyordu.
-  app.post('/api/inventory/auto-reorder', requireAuth, requireStaff, requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-17, iç rol daraltma A1): `requireStaff`'ın yerine `purchaseOrders` yazma (İ1 — uç taslak SAS yazar).
+  // Kilitlenen: Lojistik (Stok sekmesi tam yetkili), Muhasebe ve Satış (salt okunur) — düğme bu rollerde çizilmez.
+  app.post('/api/inventory/auto-reorder', requireAuth, requireCollectionAccess('purchaseOrders', 'write'), requireMfaVerified, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     try {
       // Kiracı izolasyonu: yalnız çağıranın firmasının (veya etiketsiz legacy)
@@ -3277,7 +3283,8 @@ async function startServer() {
    */
   // requireStaff (2026-10-11, D13): yalnız `requireAuth`'tu — her çağrı ortam düzeyindeki Shopify belirteciyle ürün listesi çeker;
   // dış rol çağırınca gerçek kiracının bütün `skuMappings` belgeleri yeniden yazılıyor, elle eşleşmeler eziliyordu.
-  app.post('/api/sku-mapping/auto-match', requireAuth, requireStaff, requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-17, iç rol daraltma S3): `requireStaff`'ın yerine `skuMappings` yazma (İ1).
+  app.post('/api/sku-mapping/auto-match', requireAuth, requireCollectionAccess('skuMappings', 'write'), requireMfaVerified, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
     const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -3851,8 +3858,9 @@ async function startServer() {
    *  Body: { entries: Array<{id, date, fiş, aciklama, debitHesap, alacakHesap, borc, alacak}> }
    *  Yalnızca Luca'nın kabul ettiği kayıtların id'leri synced olarak döner —
    *  client isSynced işaretini SADECE gerçek başarıda atar.
+   *  Rol kapısı (2026-10-17, iç rol daraltma L3): yevmiye muhasebenindir (İ5) — `journalEntries` yazma. İstemcide çağıranı yok.
    */
-  app.post('/api/luca/sync/yevmiye', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  app.post('/api/luca/sync/yevmiye', requireAuth, requireMfaVerified, requireCollectionAccess('journalEntries', 'write'), async (req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const { entries } = req.body as { entries: Record<string, unknown>[] };
@@ -3917,7 +3925,10 @@ async function startServer() {
   // POST /api/luca/sync/fatura
   // Body: { orderId } — reads order from Firestore, pushes to Luca as sales invoice
   // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu.
-  app.post('/api/luca/sync/fatura', requireAuth, requireMfaVerified, requireStaff, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-17, iç rol daraltma L5 / K4): `requireStaff`'ın yerine `invoices` yazma — resmî belge muhasebenindir (İ5).
+  // `orders:write` İSTENMEZ, bilerek: başarıda `orders`'a yalnız sunucuda türetilen alanlar (fatura no, eşitleme damgası,
+  // `hasInvoice`, kiracı denetiminden sonra `companyId`) merge edilir; İ5 İ1'e baskındır. Kural dış rolü içermez (süzgeç aşılmaz).
+  app.post('/api/luca/sync/fatura', requireAuth, requireMfaVerified, requireCollectionAccess('invoices', 'write'), async (req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
@@ -3999,7 +4010,8 @@ async function startServer() {
   });
 
   // POST /api/luca/sync/stok — pull products from Luca → Firebase inventory (upsert)
-  app.post('/api/luca/sync/stok', requireAuth, requireMfaVerified, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-17, iç rol daraltma L4): `inventory`'ye yazar (İ1) — `inventory` yazma. Eskiden yalnız kimlik + MFA.
+  app.post('/api/luca/sync/stok', requireAuth, requireMfaVerified, requireCollectionAccess('inventory', 'write'), async (req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
@@ -4015,13 +4027,23 @@ async function startServer() {
       const data = await r.json() as { items?: Record<string, unknown>[] };
       const items = data.items ?? (Array.isArray(data) ? data as Record<string, unknown>[] : []);
 
-      let created = 0; let updated = 0;
+      // KİRACI SINIRI (2026-10-17, iç rol daraltma L4): belge kimliği `luca-<sku>` kiracısızdır. Eskiden var olan belgenin
+      // `companyId`'si çağıranınkiyle EZİLİYORDU (tarama deneyi: `inventory/luca-DYO-1` companyId GERCEK → p1) — başka
+      // kiracının stok kartı çağıranın kiracısına taşınıyordu. Desen (CLAUDE.md, import ucu kuralı): var olan belgenin
+      // `companyId`'si doluysa ve çağıranınkinden farklıysa ATLA (sayaç `yabanci`, yanıtta); etiketsiz eski kaydı onar.
+      // Kimlik biçimi DEĞİŞMEDİ (göç yok).
+      const cid = await reqCompanyId(req);
+      let created = 0; let updated = 0; let yabanci = 0;
       const batch = adminDb.batch();
       for (const item of items) {
         const sku  = (item.stokKodu ?? item.kod ?? item.code) as string | undefined;
         if (!sku) continue;
         const ref = adminDb.collection('inventory').doc(`luca-${sku}`);
         const snap = await ref.get();
+        if (snap.exists) {
+          const dc = String((snap.data() as { companyId?: unknown } | undefined)?.companyId ?? '');
+          if (dc && dc !== cid) { yabanci++; continue; }
+        }
         const data2 = {
           name:       item.stokAdi ?? item.ad ?? item.name ?? sku,
           sku,
@@ -4029,14 +4051,14 @@ async function startServer() {
           source:     'luca',
           lucaSynced: true,
           updatedAt:  pgServerTimestamp(),
-          companyId:  await reqCompanyId(req), // tenant etiketi (create+update, self-heal)
+          companyId:  cid, // tenant etiketi (create + update; etiketsiz eski kaydı onarır)
         };
         if (snap.exists) { batch.update(ref, data2); updated++; }
         else             { batch.set(ref, { ...data2, createdAt: pgServerTimestamp() }); created++; }
       }
       await batch.commit();
-      await writeAuditLog(reqActor(req), 'Luca Stok Sync', `${items.length} ürün — ${created} yeni, ${updated} güncellendi`);
-      res.json({ success: true, total: items.length, created, updated, duration: Date.now() - t0 });
+      await writeAuditLog(reqActor(req), 'Luca Stok Sync', `${items.length} ürün — ${created} yeni, ${updated} güncellendi${yabanci ? `, ${yabanci} başka firmaya ait kart atlandı` : ''}`);
+      res.json({ success: true, total: items.length, created, updated, yabanci, duration: Date.now() - t0 });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
     }
@@ -4239,12 +4261,13 @@ async function startServer() {
   // 429) alias otomatik güncel modele kayar. Override: env GEMINI_MODEL veya
   // settings/aiConfig.geminiModel.
   const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
-  // Emekli model adları (1.x, 2.0): eski istemci bundle'ından gelirse varsayılana çevir.
-  const LEGACY_GEMINI_MODEL_RE = /^gemini-(1\.|2\.0)/;
-  const resolveGeminiModel = (requested?: string): string => {
-    if (requested && !LEGACY_GEMINI_MODEL_RE.test(requested)) return requested;
-    return geminiKeyCache?.model || DEFAULT_GEMINI_MODEL;
-  };
+  // MODEL SUNUCUDA (2026-10-17, iç rol daraltma Y1 / K2): istekteki `model` artık HİÇ okunmaz — parametre kaldırıldı, gövdeden
+  // model geçiren çağrı derlenmez. Eskiden gövdedeki ad (emekli 1.x / 2.0 dışında) olduğu gibi kullanılıyordu: her iç rol ücretli
+  // en pahalı modeli seçerek firmanın kotasını harcayabiliyordu. İstemcide `model` geçiren çağıran yoktu (ölçüldü). Emekli model
+  // süzgeci (eski istemci paketinden gelen ad) bu yüzden gereksizleşti ve kalktı. Çözüm sırası DEĞİŞMEDİ:
+  // `settings/aiConfig.geminiModel` → `GEMINI_MODEL` → `gemini-flash-latest`. Bir özellik gerçekten başka model isterse
+  // sunucuda adlandırılmış izin listesi (özellik adı → model) yazılır; istemci yalnız özellik adını gönderir.
+  const resolveGeminiModel = (): string => geminiKeyCache?.model || DEFAULT_GEMINI_MODEL;
 
   // Sunucunun anahtarı hangi kaynaktan aldığını (firestore/env/vertex) raporlar.
   const geminiKeySource = (): 'env' | 'vertex' | 'firestore' | 'none' => {
@@ -4498,7 +4521,7 @@ async function startServer() {
   // rawBody undefined olur ve TUM webhook'lar sessizce 401 doner.
   kanalRoutes(app, {
     getAdminDb: adminDbZorunlu, getBoss: () => boss,
-    requireAuth, requireMfaVerified, requireStaff, reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp,
+    requireAuth, requireMfaVerified, requireStaff, requireCollectionAccess, reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp,
     getTrendyolCreds, getHepsiburadaCreds, getAmazonCreds,
   });
 
@@ -4538,7 +4561,7 @@ async function startServer() {
   // KONUM: digerleriyle AYNI nokta - express.json + apiLimiter'dan SONRA.
   erpRoutes(app, {
     getPgPool: () => pgPool,   // bakım kilidi / yazıcı kaydı / ops yayını (bakimKilidi.ts, opsRoutes)
-    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, requireStaff,
+    getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, requireStaff, requireCollectionAccess,
     reqActor, reqCompanyId, writeAuditLog, writeSyncLog, pgServerTimestamp, tenantSnap,
     getParasutCreds, getParasutToken, parasutGetAll,
     getLogoCreds, getSAPSession, getSAPCredsFromFirestore,
@@ -4554,7 +4577,7 @@ async function startServer() {
   // Claude ticaret ajanları (commerce-agents blueprint uyarlaması, 2026-09-01).
   // ANTHROPIC_API_KEY yoksa uçlar 503 döner — otomatik harcama yok.
   ticaretAjaniRoutes(app, {
-    requireAuth, requireMfaVerified, requireStaff, reqCompanyId, reqActor, writeAuditLog,
+    requireAuth, requireMfaVerified, requireCollectionAccess, reqCompanyId, reqActor, writeAuditLog,
     loadCompanyDocs, getPgPool: () => pgPool,
     resolveGeminiClient, resolveGeminiModel,
   });

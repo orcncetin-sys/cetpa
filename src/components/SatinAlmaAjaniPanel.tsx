@@ -9,6 +9,8 @@ import { Sparkles, Loader2, AlertTriangle, Factory } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { authFetch } from '../services/authFetch';
 import { oc } from '../i18n/ortak';
+import { useAppStore } from '../store/appStore';
+import { entegrasyonUcKapisindanGecer } from '../lib/entegrasyonUcKapilari';
 
 interface Kalem { sku: string; urunAdi: string; onerilenMiktar: number; mevcutStok: number | null; esik: number | null; }
 interface Grup { tedarikci: string; kalemler: Kalem[]; gerekce: string; }
@@ -21,8 +23,13 @@ export default function SatinAlmaAjaniPanel({ currentLanguage, aiOnayli }: { cur
   const tr = currentLanguage === 'tr';
   const [yukleniyor, setYukleniyor] = useState(false);
   const [sonuc, setSonuc] = useState<Yanit | null>(null);
+  // Kapı ortak tablodan (2026-10-17, iç rol daraltma Y3 — İ3, İ4): uç `purchaseOrders` okuma ister (Satın Alma sekmesinin rol
+  // kümesiyle aynı; bugün kilitlenen yok). Geçemeyen rolde panel ÇİZİLMEZ, çağrı HİÇ yapılmaz.
+  const rol = useAppStore(s => s.userRole);
+  const ajanCalisabilir = entegrasyonUcKapisindanGecer(rol, 'POST /api/ai/satinalma-ajani');
 
   const calistir = async () => {
+    if (!ajanCalisabilir) return;
     setYukleniyor(true); setSonuc(null);
     try {
       const r = await authFetch('/api/ai/satinalma-ajani', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -31,6 +38,8 @@ export default function SatinAlmaAjaniPanel({ currentLanguage, aiOnayli }: { cur
       setSonuc({ success: false, error: e instanceof Error ? e.message : String(e) });
     } finally { setYukleniyor(false); }
   };
+
+  if (!ajanCalisabilir) return null;
 
   return (
     <div className="apple-card p-5 space-y-3 border border-purple-100">

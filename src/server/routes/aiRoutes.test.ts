@@ -32,7 +32,7 @@ function sahteCtx(setAiHealthProbe: (fn: () => Promise<{ ok: boolean; detail: st
     requireAuth: gecir(), requireMfaVerified: gecir(), requireAdmin: gecir(), requireStaff: gecir(),
     validate: <T,>() => null as T | null,
     resolveGeminiClient: async () => null,
-    resolveGeminiModel: (r?: string) => r ?? 'gemini-flash-latest',
+    resolveGeminiModel: () => 'gemini-flash-latest',   // parametresiz (2026-10-17, Y1 / K2): model istekten okunmaz
     safeAiError: (m: string) => m,
     geminiKeySource: () => 'none' as const,
     setAiHealthProbe,

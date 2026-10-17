@@ -21,6 +21,7 @@ import { useDataStore } from '../store/dataStore';
 import { useAppStore } from '../store/appStore';
 import { getMikroStatus } from '../services/mikroService';
 import { ucKapisindanGecer, type MikroKapiliUc } from '../lib/mikroUcKapilari';
+import { entegrasyonUcKapisindanGecer } from '../lib/entegrasyonUcKapilari';
 
 interface VknSonuc { durum?: string; vknTckn?: string; unvan?: string; vergiDairesi?: string; il?: string; }
 interface LucaKontor { remaining?: number; limit?: number; used?: number; }
@@ -164,6 +165,10 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
   // K7 / H1: indirme kapısı İKİ YÖNDE de aynı — belgenin yönü koşula girmez.
   const pdfIndirebilir = ucKapisindanGecer(rol, 'POST /api/mikro/ebelge/pdf');
   const xmlIndirebilir = ucKapisindanGecer(rol, 'POST /api/mikro/ebelge/xml');
+  // LUCA uçları (2026-10-17, iç rol daraltma L1 / L2): kontör kartı `eBelgeler` okuma, «e-Fatura Gönder» `invoices` yazma —
+  // kapı entegrasyon tablosundan. Geçemeyen rolde kart / düğme ÇİZİLMEZ ve istek HİÇ atılmaz.
+  const kontorOkuyabilir = entegrasyonUcKapisindanGecer(rol, 'GET /api/luca/kontor');
+  const eFaturaGonderebilir = entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/fatura-gonder');
 
   // ── VKN Sorgulama + Luca Kontör + Gönderim Bekleyen Faturalar (2026-08-13) ──
   // Muhasebe'deki eski "e-Fatura" sekmesinden buraya taşındı — iki ayrı ekran
@@ -204,6 +209,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
   }, []);
 
   useEffect(() => {
+    if (!kontorOkuyabilir) return;   // kapıdan geçemeyen rolde istek atılmaz (İ3)
     authFetch('/api/luca/kontor')
       .then(res => res.json())
       .then(data => {
@@ -211,7 +217,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
         else if (data.notConfigured) setLucaNotConfigured(true);
       })
       .catch(console.error);
-  }, []);
+  }, [kontorOkuyabilir]);
 
   const handleVknSorgula = async () => {
     if (!vknSearch.trim() || vknSearch.trim().length < 10) {
@@ -236,6 +242,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
   };
 
   const handleeFaturaGonder = async (invId: string) => {
+    if (!eFaturaGonderebilir) return;   // düğme bu rolde çizilmez; çağrı da yapılmaz (İ3)
     const inv = invoices.find(i => i.id === invId);
     if (!inv) return;
     const ok = await confirmAction({
@@ -557,6 +564,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
           )}
         </div>
 
+        {kontorOkuyabilir && (
         <div className="apple-card p-5 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-3 mb-4">
@@ -584,6 +592,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
             )}
           </div>
         </div>
+        )}
       </div>
 
       {invoices.filter(i => i.status === 'Kesildi' && i.faturaTipi === 'e-fatura').length > 0 && (
@@ -611,9 +620,11 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
                     <td className="px-5 py-3"><div className="font-medium text-gray-900 truncate max-w-[200px]">{inv.customerName}</div><div className="text-xs text-gray-500 font-mono">{inv.taxId}</div></td>
                     <td className="px-5 py-3 whitespace-nowrap font-bold text-gray-900">{paraYaz(inv.totalPrice)}</td>
                     <td className="px-5 py-3 text-right">
+                      {eFaturaGonderebilir && (
                       <button onClick={() => handleeFaturaGonder(inv.id)} disabled={sendingInvoiceId === inv.id} className="px-3 py-2 rounded-xl bg-blue-50 text-blue-600 font-bold hover:bg-blue-100 transition-colors disabled:opacity-50 text-xs flex items-center gap-1.5 ml-auto">
                         {sendingInvoiceId === inv.id ? (<><RefreshCw size={14} className="animate-spin" /> Gönderiliyor</>) : (<><FileUp size={14} /> e-Fatura Gönder</>)}
                       </button>
+                      )}
                     </td>
                   </tr>
                 ))}

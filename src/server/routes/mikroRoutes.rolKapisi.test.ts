@@ -819,7 +819,9 @@ describe('kilit değişmezi (İ3) — ÖLÜ DÜĞME YOK: düğmeyi / çağrıyı
     expect(adet(detay, 'mikroGonderebilir: boolean;')).toBe(1);
     const portal = kodSatirlari(join(SRC_KOK, 'components', 'B2BPortal.tsx')).map(s => s.kod.trim());
     expect(adet(portal, 'const icRol = (STAFF_ROLES as readonly string[]).includes(userRole);')).toBe(1);
-    expect(portal.filter(k => k.includes('mikroGonderebilir='))).toEqual(['onConvertToOrder={handleConvertToOrder} mikroGonderebilir={icRol} t={currentT} />']);
+    // 2026-10-17 (iç rol daraltma S1): «Dönüştür» (Shopify taslak siparişi) kendi kapısını ortak entegrasyon tablosundan sorar;
+    // «Mikro'ya Gönder» koşulu DEĞİŞMEDİ (iç rol).
+    expect(portal.filter(k => k.includes('mikroGonderebilir='))).toEqual(['onConvertToOrder={shopifyTaslakAcabilir ? handleConvertToOrder : undefined} mikroGonderebilir={icRol} t={currentT} />']);
   });
 
   it('Ç17 — H2 / İ5 veri katmanı: `eBelgeler` okuma = `mikroFaturalar` okuma (Yönetici, Müdür, Muhasebe); e-Belge sekmesi aynı kümeyle açılır, salt okunur rolü YOK', () => {
@@ -840,8 +842,10 @@ describe('kilit değişmezi (İ3) — ÖLÜ DÜĞME YOK: düğmeyi / çağrıyı
     const gecenDosyalar = kaynakDosyalari(SRC_KOK)
       .filter(y => !gorece(y).startsWith('src/server/') && oku(y).includes('eBelgeler') && kodSatirlari(y).some(s => /\beBelgeler\b/.test(s.kod)))
       .map(gorece);
+    // `entegrasyonUcKapilari.ts` (2026-10-17, iç rol daraltma L1) OKUYUCU değil kapı tablosudur: LUCA kontör ucunun kuralı
+    // `eBelgeler` okuma; kontör kartı aynı e-Belge Merkezi ekranında, aynı rol kümesiyle çizilir.
     expect(sirali(gecenDosyalar)).toEqual([
-      'src/components/EBelgeMerkezi.tsx', 'src/lib/collections.ts', 'src/lib/mikroUcKapilari.ts', 'src/lib/rbac.ts',
+      'src/components/EBelgeMerkezi.tsx', 'src/lib/collections.ts', 'src/lib/entegrasyonUcKapilari.ts', 'src/lib/mikroUcKapilari.ts', 'src/lib/rbac.ts',
     ]);
   });
 });

@@ -76,7 +76,8 @@ describe('kimliksiz takip ucu — yapısal kayıtta «kalan» dışarı verilmez
 });
 
 describe('LUCA fatura gövdesi — adres tek yardımcıdan', () => {
-  const g = isleyici(/^ {2}app\.post\('\/api\/luca\/sync\/fatura', requireAuth, requireMfaVerified, requireStaff, async \(req: Request, res: Response\) => \{$/);
+  // Rol kapısı 2026-10-17'den beri `invoices` yazma (iç rol daraltma L5); bu çit işleyici gövdesini rota satırından bulur.
+  const g = isleyici(/^ {2}app\.post\('\/api\/luca\/sync\/fatura', requireAuth, requireMfaVerified, requireCollectionAccess\('invoices', 'write'\), async \(req: Request, res: Response\) => \{$/);
 
   it('`musteri.adres` = `teslimatAdresiMetni(order)`; alan doğrudan okunmaz', () => {
     const musteri = tek(g, /^\s*musteri: \{$/);

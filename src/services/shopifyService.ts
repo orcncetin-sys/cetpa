@@ -1,14 +1,16 @@
 import { Order } from '../types';
 import { authFetch } from './authFetch';
 
-export const syncShopify = async (config?: { accessToken?: string; storeUrl?: string }): Promise<{ products: any[], orders: any[] }> => {
+/** `POST /api/shopify/sync` yanıtı (2026-10-17, iç rol daraltma K1): uç mağazadan ürün ve siparişleri yalnız OKUR, hiçbir
+ *  Cetpa koleksiyonuna yazmaz; ham diziler (müşteri kişisel verisi) dönmez — yalnız sayılar. */
+export interface ShopifyOkumaOzeti { message: string; urunSayisi: number; siparisSayisi: number }
+
+/** Erişim belirteci ve mağaza adresi gövdeden GÖNDERİLMEZ (sunucu artık kabul etmiyor; yalnız sunucu ortamından okunur). */
+export const syncShopify = async (): Promise<ShopifyOkumaOzeti> => {
   const res = await authFetch('/api/shopify/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      accessToken: config?.accessToken,
-      storeUrl: config?.storeUrl
-    })
+    body: '{}',
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Sync failed' }));

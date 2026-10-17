@@ -16,6 +16,8 @@ import { authFetch } from '../services/authFetch';
 import { logAudit } from '../services/auditLog';
 import { RefreshCw, Search, Link2, CheckCircle2, AlertTriangle, Save } from 'lucide-react';
 import { oc } from '../i18n/ortak';
+import { useAppStore } from '../store/appStore';
+import { entegrasyonUcKapisindanGecer } from '../lib/entegrasyonUcKapilari';
 
 interface SkuMapping {
   id: string;
@@ -44,6 +46,10 @@ const SkuMappingPanel: React.FC<Props> = ({ currentLanguage }) => {
   const [matchResult, setMatchResult] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Partial<SkuMapping>>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  // Kapı ortak tablodan (2026-10-17, iç rol daraltma S3 — İ3, İ4): «Otomatik Eşleştir» `skuMappings` yazma ister. Geçemeyen
+  // rolde düğme ÇİZİLMEZ, çağrı HİÇ yapılmaz. Panel Ayarlar sekmesinde (Yönetici, Müdür) — bugün iki rol de geçer.
+  const rol = useAppStore(s => s.userRole);
+  const otomatikEslestirebilir = entegrasyonUcKapisindanGecer(rol, 'POST /api/sku-mapping/auto-match');
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'skuMappings'), snap => {
@@ -75,6 +81,7 @@ const SkuMappingPanel: React.FC<Props> = ({ currentLanguage }) => {
   const unmatchedCount = mappings.length - matchedCount;
 
   const runAutoMatch = async () => {
+    if (!otomatikEslestirebilir) return;
     setMatching(true);
     setMatchResult(null);
     try {
@@ -128,6 +135,7 @@ const SkuMappingPanel: React.FC<Props> = ({ currentLanguage }) => {
             {tr ? 'Mikro ↔ Shopify ↔ Pazaryerleri' : 'Mikro ↔ Shopify ↔ Marketplaces'}
           </span>
         </div>
+        {otomatikEslestirebilir && (
         <button
           onClick={runAutoMatch}
           disabled={matching}
@@ -136,6 +144,7 @@ const SkuMappingPanel: React.FC<Props> = ({ currentLanguage }) => {
           <RefreshCw className={`w-3.5 h-3.5 ${matching ? 'animate-spin' : ''}`} />
           {matching ? (tr ? 'Eşleştiriliyor…' : 'Matching…') : (tr ? 'Otomatik Eşleştir' : 'Auto-Match')}
         </button>
+        )}
       </div>
 
       {matchResult && (

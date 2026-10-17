@@ -11,9 +11,9 @@ async function getToken(): Promise<string> {
   return token;
 }
 
+// `model` alanı YOK (2026-10-17, iç rol daraltma Y1 / K2): model sunucuda çözülür, gövdedeki ad yok sayılır.
 async function aiGenerate(payload: {
   prompt: string;
-  model?: string;
   systemInstruction?: string;
   thinkingLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
   jsonSchema?: unknown;

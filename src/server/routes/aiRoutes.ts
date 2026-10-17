@@ -30,14 +30,21 @@ export interface AiRouteCtx {
    * Yalnız iç personel (2026-10-11, şartname «dış rol kapanışı» D13). Üretim uçları (generate / chat / demand-forecast) yalnız
    * `requireAuth` taşıyordu: anahtar kiracıdan bağımsız çözülür (`settings/aiConfig` → ortam → Vertex), yani giriş ekranından
    * hesap açan yabancı ve dış rol firmanın ücretli yapay zekâ kotasını serbest istem + istediği modelle harcayabiliyordu.
-   * Tek boğaz `requireAuth`'ta; bu, boğaz sökülse de kapalı kalsın diye uçların KENDİ kapısı. İç roller arası daraltma YOK.
+   * Tek boğaz `requireAuth`'ta; bu, boğaz sökülse de kapalı kalsın diye uçların KENDİ kapısı. İç roller arası daraltma YOK
+   * (2026-10-17, Y1 kararı): veri istemciden gelir ve istemci onu zaten kendi kapısından okudu; asıl açık maliyetti — model
+   * artık sunucuda (`resolveGeminiModel` parametresiz).
    */
   requireStaff: RequestHandler;
   validate: <T>(sema: Sema<T>, veri: unknown, res: Response) => T | null;
   /** GERÇEK tip (2026-09-03): eskiden `Promise<any>` idi ve `geminiDene` generic'i
    *  T'yi çözemeyip yanıtları `unknown` yapıyordu — CLAUDE.md "yaklaşık tip yazma". */
   resolveGeminiClient: () => Promise<GoogleGenAI | null>;
-  resolveGeminiModel: (requested?: string) => string;
+  /**
+   * Model SUNUCUDA çözülür (2026-10-17, iç rol daraltma Y1 / K2): parametresiz — gövdedeki `model` hiçbir uçta okunmaz.
+   * Parametre geri eklenip gövdeden ad geçirilirse ücretli en pahalı modeli her iç rol seçebilirdi; parametresiz imza o
+   * çağrıyı DERLEMEDE kırar. Çözüm sırası server.ts'te: `settings/aiConfig.geminiModel` → `GEMINI_MODEL` → varsayılan.
+   */
+  resolveGeminiModel: () => string;
   safeAiError: (msg: string) => string;
   geminiKeySource: () => 'env' | 'vertex' | 'firestore' | 'none';
   /** server.ts'teki `let aiHealthProbe`a YAZAR - bkz. dosya basligi. */
@@ -84,21 +91,22 @@ export function aiRoutes(app: Express, C: AiRouteCtx): void {
 
   /**
    * POST /api/ai/generate
-   * Body: { prompt, model?, systemInstruction?, thinkingLevel?, jsonSchema? }
+   * Body: { prompt, systemInstruction?, thinkingLevel?, jsonSchema? } — gövdede `model` gelirse YOK SAYILIR (Y1 / K2).
+   * Düşünme düzeyi KORUNUR: tek çağıran pano analizi (`thinkingLevel: 'HIGH'`).
    * Returns: { text: string }
    * Used by: geminiService.ts (lead scoring, dashboard analysis, FMEA, 8D)
    */
   app.post('/api/ai/generate', C.requireAuth, C.requireStaff, C.requireMfaVerified, async (req: Request, res: Response) => {
     const client = await C.resolveGeminiClient();
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
-    const { prompt, model, systemInstruction, thinkingLevel, jsonSchema } = req.body as {
-      prompt: string; model?: string; systemInstruction?: string;
+    const { prompt, systemInstruction, thinkingLevel, jsonSchema } = req.body as {
+      prompt: string; systemInstruction?: string;
       thinkingLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE'; jsonSchema?: unknown;
     };
     if (!prompt) return res.status(400).json({ error: 'prompt is required.' });
     try {
       const response = await geminiDene(() => client.models.generateContent({
-        model: C.resolveGeminiModel(model),
+        model: C.resolveGeminiModel(),
         contents: prompt,
         config: {
           ...(systemInstruction ? { systemInstruction } : {}),
@@ -116,7 +124,8 @@ export function aiRoutes(app: Express, C: AiRouteCtx): void {
 
   /**
    * POST /api/ai/chat
-   * Body: { message, history?, systemInstruction?, model?, highThinking? }
+   * Body: { message, history?, systemInstruction?, highThinking? } — gövdede `model` gelirse YOK SAYILIR (Y1 / K2).
+   * Düşünme düzeyi KORUNUR: `highThinking` (AIChat «Yüksek Düşünme» düğmesi) → `thinkingLevel: HIGH`.
    * Returns: { text: string }
    * Used by: AIChat.tsx
    */
@@ -125,17 +134,16 @@ export function aiRoutes(app: Express, C: AiRouteCtx): void {
     if (!client) return res.status(503).json({ error: 'AI service not configured. Enter your Gemini API key in Settings → AI.' });
     const chatValidated = C.validate(AiChatSchema, { message: req.body?.message, context: req.body?.systemInstruction, language: req.body?.language }, res);
     if (!chatValidated) return;
-    const { message, history = [], systemInstruction, model, highThinking = false } = req.body as {
+    const { message, history = [], systemInstruction, highThinking = false } = req.body as {
       message: string;
       history?: { role: string; parts: { text: string }[] }[];
       systemInstruction?: string;
-      model?: string;
       highThinking?: boolean;
     };
     if (!message) return res.status(400).json({ error: 'message is required.' });
     try {
       const chat = client.chats.create({
-        model: C.resolveGeminiModel(model),
+        model: C.resolveGeminiModel(),
         config: {
           ...(systemInstruction ? { systemInstruction } : {}),
           ...(highThinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } } : {}),

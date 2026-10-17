@@ -194,23 +194,36 @@ describe('/api/db kaçakları kapalı', () => {
   });
 });
 
-describe('siparişe dokunan özel uçlar personel kapılı', () => {
+describe('siparişe dokunan özel uçlar personel kapılı (ya da dış rolü İÇERMEYEN koleksiyon kuralıyla kapılı)', () => {
   const R = (ad: string) => join(SRC, 'server', 'routes', ad);
+  // 2026-10-17 (iç rol daraltma, `.wf/SARTNAME-ic-rol-daraltma.md` L5 / P1 / S2): üç uçta `requireStaff`'ın YERİNE eşdeğer
+  // koleksiyonun kuralı geldi (kapı ortak tablodan: src/lib/entegrasyonUcKapilari.ts). Bu çitin amacı (dış rol süzgeci bu
+  // uçlardan aşmasın) korunur: kural dış rolü İÇERMEZ — aşağıdaki «kural kapısı» sınaması sabitler.
+  const KURAL_KAPILI: Array<[string, RegExp, string, 'read' | 'write']> = [
+    [SERVER, /app\.post\('\/api\/luca\/sync\/fatura', requireAuth, requireMfaVerified, requireCollectionAccess\('invoices', 'write'\),/, 'invoices', 'write'],
+    [R('erpRoutes.ts'), /app\.post\('\/api\/parasut\/fatura', C\.requireAuth, C\.requireMfaVerified, C\.requireCollectionAccess\('invoices', 'write'\),/, 'invoices', 'write'],
+    [R('kanalRoutes.ts'), /app\.post\("\/api\/shopify\/sync", C\.requireAuth, C\.requireMfaVerified, C\.requireCollectionAccess\('orders', 'read'\),/, 'orders', 'read'],
+  ];
+  it('kural kapılı üç uç: satır tam bir kez; kural dış rolü ve rolsüz hesabı GEÇİRMEZ', () => {
+    const eksik = KURAL_KAPILI.filter(([yol, desen]) => say(yol, desen) !== 1).map(([yol, desen]) => `${gorece(yol)} ${desen}`);
+    expect(eksik).toEqual([]);
+    for (const [, desen, koleksiyon, eylem] of KURAL_KAPILI) {
+      for (const dis of EXTERNAL_ROLES) expect(isAllowed(dis, koleksiyon, eylem), `${desen} × ${dis}`).toBe(false);
+      expect(isAllowed(null, koleksiyon, eylem)).toBe(false);
+    }
+  });
   const UCLAR: Array<[string, RegExp]> = [
     [SERVER, /app\.get\('\/api\/aging', requireAuth, requireStaff,/],
-    [SERVER, /app\.post\('\/api\/luca\/sync\/fatura', requireAuth, requireMfaVerified, requireStaff,/],
     [SERVER, /app\.post\('\/api\/whatsapp\/order-notification', requireAuth, requireMfaVerified, requireStaff,/],
     [SERVER, /app\.post\('\/api\/whatsapp\/send', requireAuth, requireMfaVerified, requireStaff,/],
     [R('reportsRoutes.ts'), /app\.get\('\/api\/reports\/summary', C\.requireAuth, C\.requireStaff,/],
     // Alış maliyeti + tüm müşterilere satış hareketleri (Mikro) — dış role kapalı.
     [R('reportsRoutes.ts'), /app\.get\('\/api\/reports\/stok-fiyat-karsilastirma', C\.requireAuth, C\.requireStaff,/],
     [R('reportsRoutes.ts'), /app\.get\('\/api\/reports\/stok-fiyat-karsilastirma\/:sku\/detay', C\.requireAuth, C\.requireStaff,/],
-    [R('erpRoutes.ts'), /app\.post\('\/api\/parasut\/fatura', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
     [R('mikroRoutes.ts'), /app\.post\('\/api\/mikro\/siparis\/kaydet', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
     [R('mikroRoutes.ts'), /app\.post\('\/api\/mikro\/fatura\/kaydet', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
     [R('mikroRoutes.ts'), /app\.post\('\/api\/mikro\/fatura\/kalemler', C\.requireAuth, C\.requireStaff,/],
     [R('mikroRoutes.ts'), /app\.post\('\/api\/mikro\/import\/faturadan-siparis', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
-    [R('kanalRoutes.ts'), /app\.post\("\/api\/shopify\/sync", C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
     [R('kanalRoutes.ts'), /app\.post\('\/api\/trendyol\/sync', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
     [R('kanalRoutes.ts'), /app\.post\('\/api\/hepsiburada\/sync', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],
     [R('epostaRoutes.ts'), /app\.post\('\/api\/email\/order-notification', C\.requireAuth, C\.requireMfaVerified, C\.requireStaff,/],

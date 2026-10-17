@@ -24,6 +24,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { generateSync as totpKodu } from 'otplib';
 import { EXTERNAL_ROLES, STAFF_ROLES, type AppRole } from '../lib/rbac';
+import { ENTEGRASYON_UC_KAPILARI, entegrasyonUcKapisindanGecer, type EntegrasyonKapiliUc } from '../lib/entegrasyonUcKapilari';
 
 // ── Sahteler (yalnız süreç dışına çıkanlar) ────────────────────────────────────────────────────────────────────────────────
 vi.mock('dotenv', () => ({ default: { config: () => ({ parsed: {} }) }, config: () => ({ parsed: {} }) }));
@@ -861,39 +862,49 @@ describe('T10 (D11) — Yönetici rolüne yalnız Yönetici dokunur; davet kodu 
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-describe('D13 — en ağır uçların KENDİ kapısı: `requireStaff`, kimlik kapısından hemen sonra (tek boğaz sökülse de kapalı)', () => {
-  const AGIR: ReadonlyArray<[string, string, string, unknown, number]> = [
-    // yöntem, desen, somut yol, gövde, iç rolün bugünkü yanıtı (yayin-11'de aynı düzenekle ölçüldü — kimlikYuzeyi.zincir.test.ts)
-    ['GET', '/api/inventory/son-alis-tedarikci', '/api/inventory/son-alis-tedarikci?stokKod=DYO-001', undefined, 200],
-    ['POST', '/api/inventory/auto-reorder', '/api/inventory/auto-reorder', {}, 200],
-    ['POST', '/api/sku-mapping/auto-match', '/api/sku-mapping/auto-match', {}, 200],
-    ['POST', '/api/upload/tahsilat', '/api/upload/tahsilat', {}, 400],
-    ['POST', '/api/ai/generate', '/api/ai/generate', { prompt: 'merhaba' }, 503],
-    ['POST', '/api/ai/chat', '/api/ai/chat', { message: 'merhaba' }, 503],
-    ['POST', '/api/ai/demand-forecast', '/api/ai/demand-forecast', {}, 503],
-    ['POST', '/api/ai/satis-ajani', '/api/ai/satis-ajani', {}, 400],
-    ['POST', '/api/ai/satinalma-ajani', '/api/ai/satinalma-ajani', {}, 503],
+describe('D13 — en ağır uçların KENDİ kapısı, kimlik kapısından hemen sonra (tek boğaz sökülse de kapalı)', () => {
+  // 2026-10-17 (iç rol daraltma, şartname `.wf/SARTNAME-ic-rol-daraltma.md` A1 / S3 / Y2 / Y3): dört uçta `requireStaff`'ın YERİNE
+  // eşdeğer koleksiyonun kuralı geldi (kapı ortak tablodan: src/lib/entegrasyonUcKapilari.ts). Kuralların hiçbiri dış rolü
+  // içermez → D13'ün amacı (boğaz sökülse de kapalı) AYNEN sınanır; iç rolde artık daraltma VAR (rol matrisinin tamamı:
+  // entegrasyonUcKapilari.zincir.test.ts). Son sütun kapıdır: `'staff'` ya da ortak tablo anahtarı.
+  const AGIR: ReadonlyArray<[string, string, string, unknown, number, 'staff' | EntegrasyonKapiliUc]> = [
+    // yöntem, desen, somut yol, gövde, kapıdan geçen iç rolün yanıtı (yayin-11'de aynı düzenekle ölçüldü — kimlikYuzeyi.zincir.test.ts), kapı
+    ['GET', '/api/inventory/son-alis-tedarikci', '/api/inventory/son-alis-tedarikci?stokKod=DYO-001', undefined, 200, 'staff'],
+    ['POST', '/api/inventory/auto-reorder', '/api/inventory/auto-reorder', {}, 200, 'POST /api/inventory/auto-reorder'],
+    ['POST', '/api/sku-mapping/auto-match', '/api/sku-mapping/auto-match', {}, 200, 'POST /api/sku-mapping/auto-match'],
+    ['POST', '/api/upload/tahsilat', '/api/upload/tahsilat', {}, 400, 'staff'],
+    ['POST', '/api/ai/generate', '/api/ai/generate', { prompt: 'merhaba' }, 503, 'staff'],
+    ['POST', '/api/ai/chat', '/api/ai/chat', { message: 'merhaba' }, 503, 'staff'],
+    ['POST', '/api/ai/demand-forecast', '/api/ai/demand-forecast', {}, 503, 'staff'],
+    ['POST', '/api/ai/satis-ajani', '/api/ai/satis-ajani', {}, 400, 'POST /api/ai/satis-ajani'],
+    ['POST', '/api/ai/satinalma-ajani', '/api/ai/satinalma-ajani', {}, 503, 'POST /api/ai/satinalma-ajani'],
   ];
+  /** Kapıdan geçen iç rol: personel kapısında hepsi, kural kapısında ortak tablonun dediği. */
+  const gecer = (kapi: 'staff' | EntegrasyonKapiliUc, rol: AppRole): boolean => kapi === 'staff' || entegrasyonUcKapisindanGecer(rol, kapi);
+  const KURAL_RETTI = { error: 'Bu veri için yetkiniz yok.' };
+  const PERSONEL_RETTI = { error: 'Bu işlem için personel yetkisi gerekir.' };
 
-  it('dokuz ucun zincirinde `requireStaff`, `requireAuth`\'un HEMEN ardında; hepsi AYNI işlev', () => {
+  it('dokuz ucun zincirinde rol kapısı `requireAuth`\'un HEMEN ardında: beş uçta AYNI `requireStaff` işlevi, dördünde koleksiyon kuralı', () => {
     const kapilar = new Set<Katman['handle']>();
-    for (const [yontem, desen] of AGIR) {
+    for (const [yontem, desen, , , , kapi] of AGIR) {
       const u = uc(yontem, desen);
       const i = u.adlar.indexOf('requireAuth');
       expect(i, `${yontem} ${desen}: ${u.adlar.join(' → ')}`).toBeGreaterThan(-1);
-      expect(u.adlar[i + 1], `${yontem} ${desen}: ${u.adlar.join(' → ')}`).toBe('requireStaff');
-      kapilar.add(u.katmanlar[i + 1].handle);
+      // Koleksiyon kuralı fabrikadan döner (adsız katman); HANGİ kural olduğunu aşağıdaki davranış sınaması ölçer.
+      expect(u.adlar[i + 1], `${yontem} ${desen}: ${u.adlar.join(' → ')}`).toBe(kapi === 'staff' ? 'requireStaff' : '<anonymous>');
+      if (kapi === 'staff') kapilar.add(u.katmanlar[i + 1].handle);
     }
     expect(kapilar.size).toBe(1);
   });
 
-  it('yapay zekâ modülünün HER ucu rol kapılı: zincirde `requireStaff` ya da `requireAdmin` var (yeni uç kapısız doğarsa kırılır)', () => {
+  it('yapay zekâ modülünün HER ucu rol kapılı: zincirde `requireStaff`, `requireAdmin` ya da ortak tablodaki kural var (yeni uç kapısız doğarsa kırılır)', () => {
     const yz = rotaDokumu().filter(u => u.desen.startsWith('/api/ai/'));
     expect(yz.map(u => `${u.yontem} ${u.desen}`).sort()).toEqual([
       'GET /api/ai/status', 'POST /api/ai/chat', 'POST /api/ai/demand-forecast', 'POST /api/ai/generate',
       'POST /api/ai/satinalma-ajani', 'POST /api/ai/satis-ajani', 'POST /api/ai/test',
     ]);
-    const kapisiz = yz.filter(u => !u.adlar.includes('requireStaff') && !u.adlar.includes('requireAdmin')).map(u => `${u.yontem} ${u.desen}: ${u.adlar.join(' → ')}`);
+    const tablodaki = (u: { yontem: string; desen: string }): boolean => Object.prototype.hasOwnProperty.call(ENTEGRASYON_UC_KAPILARI, `${u.yontem} ${u.desen}`);
+    const kapisiz = yz.filter(u => !u.adlar.includes('requireStaff') && !u.adlar.includes('requireAdmin') && !tablodaki(u)).map(u => `${u.yontem} ${u.desen}: ${u.adlar.join(' → ')}`);
     expect(kapisiz).toEqual([]);
   });
 
@@ -902,24 +913,27 @@ describe('D13 — en ağır uçların KENDİ kapısı: `requireStaff`, kimlik ka
     await kullanici('d13-cop', { role: 1 });
     await kullanici('d13-bayi', { role: 'Dealer', companyId: KIRACI });
     await kullanici('d13-b2b', { role: 'B2B', companyId: KIRACI });
-    for (const [yontem, desen] of AGIR) {
+    for (const [yontem, desen, , , , kapiTuru] of AGIR) {
       const u = uc(yontem, desen);
       const kapi = u.katmanlar[u.adlar.indexOf('requireAuth') + 1];
       for (const uid of ['d13-rolsuz', 'd13-cop', 'd13-bayi', 'd13-b2b', 'd13-belgesiz']) {
         const r = await katmanKostur(kapi, { uid, method: yontem, originalUrl: desen, path: desen });
-        expect([desen, uid, r.ileri, r.durum, r.govde]).toEqual([desen, uid, 0, 403, { error: 'Bu işlem için personel yetkisi gerekir.' }]);
+        expect([desen, uid, r.ileri, r.durum, r.govde]).toEqual([desen, uid, 0, 403, kapiTuru === 'staff' ? PERSONEL_RETTI : KURAL_RETTI]);
       }
-      // Aynı katman iç rolü geçirir (kapı «herkese kapalı» değil).
-      const icRol = await katmanKostur(kapi, { uid: icUid('Sales'), method: yontem, originalUrl: desen, path: desen });
+      // Aynı katman kapıdan geçen iç rolü geçirir (kapı «herkese kapalı» değil).
+      const gecenRol = STAFF_ROLES.find(r => gecer(kapiTuru, r));
+      if (!gecenRol) throw new Error(`${desen}: kapıdan geçen iç rol yok`);
+      const icRol = await katmanKostur(kapi, { uid: icUid(gecenRol), method: yontem, originalUrl: desen, path: desen });
       expect([desen, icRol.ileri, icRol.durum]).toEqual([desen, 1, 0]);
     }
     for (const id of ['d13-rolsuz', 'd13-cop', 'd13-bayi', 'd13-b2b']) await belgeSil('users', id);
   });
 
-  it('HER iç rol: dokuz uçta bugünkü yanıt (iç roller arası daraltma YOK); süper yönetici (rolsüz) kapıdan geçer', async () => {
+  it('HER iç rol: kapıdan geçen bugünkü yanıtı, kural kapısında kilitli olan kapının 403\'ünü alır; süper yönetici (rolsüz) kapıdan geçer', async () => {
     const fark: string[] = [];
-    for (const rol of STAFF_ROLES) for (const [yontem, , yol, govde, beklenen] of AGIR) {
+    for (const rol of STAFF_ROLES) for (const [yontem, , yol, govde, gecenYanit, kapi] of AGIR) {
       const r = await istek(yontem, yol, ic(rol), govde);
+      const beklenen = gecer(kapi, rol) ? gecenYanit : 403;
       if (r.s !== beklenen) fark.push(`${rol} ${yontem} ${yol} → ${r.s} (beklenen ${beklenen}) ${r.metin.slice(0, 120)}`);
     }
     expect(fark, fark.join('\n')).toEqual([]);

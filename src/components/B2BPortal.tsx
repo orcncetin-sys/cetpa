@@ -25,6 +25,7 @@ import type {
 } from '../types';
 import { cn } from '../lib/utils';
 import { STAFF_ROLES } from '../lib/rbac';
+import { entegrasyonUcKapisindanGecer } from '../lib/entegrasyonUcKapilari';
 import { sortByCreatedAt } from '../utils/fsSort';
 import { paraYaz, tlYaz } from '../utils/currency';
 import { logFirestoreError as importedLogFirestoreError, OperationType } from '../utils/firebase';
@@ -72,6 +73,10 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
   const canManagePrices = userRole === 'Admin' || userRole === 'Manager' || userRole === 'Sales';
   /** Sunucudaki `requireStaff` ile AYNI liste (lib/rbac) — kopya rol listesi yok. */
   const icRol = (STAFF_ROLES as readonly string[]).includes(userRole);
+  // Shopify uçlarının kapısı ORTAK tablodan (2026-10-17, iç rol daraltma S1 / S2 — İ3, İ4): geçemeyen rolde düğme / kart
+  // ÇİZİLMEZ, çağrı HİÇ yapılmaz. Taslak sipariş (`orders` yazma) Muhasebe ve Satın Alma'da kilitli (K5; salt okunur sekme).
+  const shopifyTaslakAcabilir = entegrasyonUcKapisindanGecer(userRole, 'POST /api/shopify/draft-order');
+  const shopifyOkuyabilir = entegrasyonUcKapisindanGecer(userRole, 'POST /api/shopify/sync');
   const [b2bTab, setB2bTab] = useState<'quotations' | 'dealers' | 'pricelists' | 'komisyon'>('quotations');
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
@@ -197,6 +202,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
     });
 
   const handleConvertToOrder = async (q: Quotation) => {
+    if (!shopifyTaslakAcabilir) return;   // düğme bu rolde çizilmez; çağrı da yapılmaz (İ3)
     const ok = await confirmAction({
       title: currentT.confirm_convert_to_order || 'Siparişe Dönüştür',
       message: currentT.confirm_convert_to_order_msg || 'Bu teklifi Shopify siparişine dönüştürmek istediğinize emin misiniz?',
@@ -363,7 +369,7 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
       {selectedQuotation && !isEditingQuotation && (
         <QuotationDetail isOpen={!!selectedQuotation} quotation={selectedQuotation} onClose={() => setSelectedQuotation(null)}
           onEdit={(q) => { setSelectedQuotation(q); setIsEditingQuotation(true); }}
-          onConvertToOrder={handleConvertToOrder} mikroGonderebilir={icRol} t={currentT} />
+          onConvertToOrder={shopifyTaslakAcabilir ? handleConvertToOrder : undefined} mikroGonderebilir={icRol} t={currentT} />
       )}
 
       {/* Dealers Tab */}
@@ -596,15 +602,16 @@ const B2BPortal: React.FC<B2BPortalProps> = ({
               </>)}
             </div>
 
-            {/* Yalnız İÇ rol: POST /api/shopify/sync personel kapılı (requireStaff) — dış rolde bu düğme her tıklamada 403 verirdi. */}
-            {icRol && (
+            {/* Kapı ortak tablodan: POST /api/shopify/sync `orders` okuma kapılı (2026-10-17, K1) — geçemeyen rolde (dış rol, İK,
+                Hukuk, Kurumsal, Kalite) kart çizilmez; her tıklama 403 verirdi. Uç mağazadan yalnız OKUR, Cetpa'ya aktarmaz. */}
+            {shopifyOkuyabilir && (
             <div className="apple-card p-6">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-9 h-9 bg-green-50 rounded-xl flex items-center justify-center flex-shrink-0"><ShoppingBag className="w-5 h-5 text-green-600" /></div>
-                <div><h3 className="text-sm font-bold">Shopify Entegrasyonu</h3><p className="text-[11px] text-[#86868B]">Ürün ve sipariş senkronizasyonu</p></div>
+                <div><h3 className="text-sm font-bold">Shopify Entegrasyonu</h3><p className="text-[11px] text-[#86868B]">Mağazadaki ürün ve sipariş sayısını okur (Cetpa'ya aktarmaz)</p></div>
               </div>
               {shopifySyncStatus && (<div className={cn('text-xs px-3 py-2 rounded-xl mb-3 font-medium', shopifySyncStatus.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600')}>{shopifySyncStatus.message}</div>)}
-              <button onClick={async () => { setShopifySyncing(true); setShopifySyncStatus(null); try { const result = await syncShopify(); setShopifySyncStatus({ type: 'success', message: `${result?.products?.length ?? 0} ürün, ${result?.orders?.length ?? 0} sipariş senkronize edildi.` }); } catch (err) { setShopifySyncStatus({ type: 'error', message: err instanceof Error ? err.message : 'Shopify bağlantısı kurulamadı.' }); } finally { setShopifySyncing(false); } }} disabled={shopifySyncing}
+              <button onClick={async () => { if (!shopifyOkuyabilir) return; setShopifySyncing(true); setShopifySyncStatus(null); try { const result = await syncShopify(); setShopifySyncStatus({ type: 'success', message: `Shopify'dan ${result.urunSayisi} ürün, ${result.siparisSayisi} sipariş okundu (Cetpa'ya aktarılmadı).` }); } catch (err) { setShopifySyncStatus({ type: 'error', message: err instanceof Error ? err.message : 'Shopify bağlantısı kurulamadı.' }); } finally { setShopifySyncing(false); } }} disabled={shopifySyncing}
                 className={cn('w-full py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2', shopifySyncing ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white active:scale-95')}>
                 <RefreshCw className={cn('w-3.5 h-3.5', shopifySyncing && 'animate-spin')} />
                 {shopifySyncing ? 'Senkronize ediliyor...' : 'Shopify Senkronize Et'}

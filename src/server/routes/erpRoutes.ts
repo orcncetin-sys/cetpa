@@ -18,7 +18,7 @@
  * (express.json + apiLimiter'dan SONRA). Yukari alinirsa bu 13 rotanin TUM
  * POST'lari req.body'siz kalir - 2026-08-24'te mikroRoutes'ta tam bu oldu.
  */
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, RequestHandler, Response } from 'express';
 import type { AdminDbLike, AdminDocRef, AdminQuerySnapshot, DocDaralt } from '../adminDbTypes.js';
 import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
 import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
@@ -35,6 +35,9 @@ export interface ErpRouteCtx {
   requireAuth: any;
   /** Yalnız iç personel (server.ts requireStaff) — entegrasyon durum uçları için (2026-10-02). */
   requireStaff: any;
+  /** Koleksiyon kuralı kapısı (server.ts requireCollectionAccess) — Paraşüt fatura ucu (2026-10-17, iç rol daraltma P1).
+   *  Kapı ortak tablodan sorulur (src/lib/entegrasyonUcKapilari.ts). */
+  requireCollectionAccess: (coll: string, op: 'read' | 'write') => RequestHandler;
   requireMfaVerified: any;
   requireAdmin: any;
   reqActor: (req: Request) => { uid: string; email: string };
@@ -203,7 +206,10 @@ export function erpRoutes(app: Express, C: ErpRouteCtx): void {
 
   // requireStaff (2026-10-02): sipariş gövdesi İSTEMCİDEN gelir — dış rol (B2B / Bayi) bu uçla firmanın Paraşüt hesabında
   // keyfi müşteri / tutarla satış faturası açabiliyordu (Mikro ve Luca fatura uçlarıyla aynı kapı).
-  app.post('/api/parasut/fatura', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
+  // Rol kapısı (2026-10-17, iç rol daraltma P1 / K3): `requireStaff`'ın yerine `invoices` yazma — resmî belge muhasebenindir
+  // (İ5; LUCA fatura ucunun kardeşi). Kural dış rolü içermez. İstemcide çağıranı yok (ölçüldü: ParasutSyncPanel yalnız durum +
+  // iki içe aktarma ucunu çağırır).
+  app.post('/api/parasut/fatura', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('invoices', 'write'), async (req: Request, res: Response) => {
     const creds = await C.getParasutCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
     const { order } = req.body as { order: Record<string, unknown> };

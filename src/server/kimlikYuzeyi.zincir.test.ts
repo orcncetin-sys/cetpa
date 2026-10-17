@@ -389,17 +389,20 @@ describe('D8 — zincirinde `requireAuth` olan HER uç: rolsüz hesap ve dış r
 
 describe('iç rol ve süper yönetici: bugünkü yanıt (gerçek HTTP)', () => {
   // Durum kodları TABAN sürümde (yayin-11 = a01a254) aynı düzenekle ölçüldü; dış sistem anahtarı yok, sahte `fetch` boş nesne döner.
+  // 2026-10-17 (iç rol daraltma, şartname `.wf/SARTNAME-ic-rol-daraltma.md`): Satış'ın BİLEREK kilitlendiği uçlar `// İRD` ile
+  // işaretli — yanıt artık uç kapısının 403'ü (`code` YOK, boğazın reddi değil). Rol matrisinin tamamı:
+  // `entegrasyonUcKapilari.zincir.test.ts`.
   const SATIS_BEKLENEN: ReadonlyArray<[string, string, unknown, number]> = [
     // ── Taramanın server.ts uçları (11) ──
     ['GET', '/api/gib/vkn/1234567890', undefined, 503],
-    ['GET', '/api/luca/kontor', undefined, 503],
-    ['POST', '/api/luca/fatura-gonder', { invoiceId: 'x', invoiceData: {} }, 503],
-    ['POST', '/api/luca/sync/yevmiye', { entries: [] }, 503],
-    ['POST', '/api/luca/sync/stok', {}, 503],
+    ['GET', '/api/luca/kontor', undefined, 403],                                     // İRD L1 — `eBelgeler` okuma
+    ['POST', '/api/luca/fatura-gonder', { invoiceId: 'x', invoiceData: {} }, 403],   // İRD L2 — `invoices` yazma
+    ['POST', '/api/luca/sync/yevmiye', { entries: [] }, 403],                       // İRD L3 — `journalEntries` yazma
+    ['POST', '/api/luca/sync/stok', {}, 403],                                        // İRD L4 — `inventory` yazma
     ['GET', '/api/exchange-rates/at?date=2026-10-01', undefined, 200],
     ['POST', '/api/upload/tahsilat', {}, 400],
     ['GET', '/api/inventory/son-alis-tedarikci?stokKod=DYO-001', undefined, 200],
-    ['POST', '/api/inventory/auto-reorder', {}, 200],
+    ['POST', '/api/inventory/auto-reorder', {}, 403],                                // İRD A1 — `purchaseOrders` yazma
     ['GET', '/api/integrations/health', undefined, 200],
     ['POST', '/api/sku-mapping/auto-match', {}, 200],
     // ── Taramanın rota modülü uçları (26) ──
@@ -407,7 +410,7 @@ describe('iç rol ve süper yönetici: bugünkü yanıt (gerçek HTTP)', () => {
     ['POST', '/api/ai/chat', { message: 'merhaba' }, 503],
     ['POST', '/api/ai/demand-forecast', {}, 503],
     ['POST', '/api/ai/satis-ajani', {}, 400],
-    ['POST', '/api/ai/satinalma-ajani', {}, 503],
+    ['POST', '/api/ai/satinalma-ajani', {}, 403],                                    // İRD Y3 — `purchaseOrders` okuma
     ['GET', '/api/tracking/dhl/123', undefined, 200],
     ['GET', '/api/tracking/ups/123', undefined, 200],
     ['POST', '/api/tracking/fedex', { trackingNumber: '123' }, 200],
