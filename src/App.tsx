@@ -809,6 +809,27 @@ function AppContent() {
   // (`rolDurumu !== 'cozuldu'`) ve belgede rol yokken (`roleMissing`) `null`: dinleyici, akış bağlantısı, rapor özeti, Mikro
   // zamanlayıcısı başlamaz; sorgu Satış biçimiyle (`assignedTo` süzgeci) kurulmaz. YENİ VERİ EFEKTİ: `if (!veriOturumu || disRol)`.
   const veriOturumu = veriOturumuSec(user, rolDurumu, roleMissing);
+  // ── Rol Simülatörü (Yönetim → Kullanıcılar) — 2026-10-17, iç rol şartnamesi § 8 «Bilinen sınır»ın kalıcı çözümü ──────────
+  // Seçilen rol İKİ kaynağa birden yazılır (`simulatorRolunuAyarla`): bu bileşenin yerel rolü (prop'tan okuyan kapılar: B2BPortal,
+  // cari arama kutuları, sekme tablosu) VE küresel depo (depodan okuyan kapılar: ajan panelleri, LUCA, SKU, e-Belge, Mikro düğmeleri
+  // ve kuyruk kartı, `mikroEvrak` / `ebelgeIndir` servis süzgeçleri). Eskiden yalnız yerel rol değişiyordu: aynı ekranda iki rol vardı.
+  // Simülasyon YALNIZ ARAYÜZDÜR — arka plan işi ondan ETKİLENMEZ: Mikro yeniden deneme zamanlayıcısı oturumun GERÇEK rolüyle koşar
+  // (`kuyrukRolu`; sunucu da gerçek role bakar). Simüle rolle koşsaydı gerçek rolün gönderebildiği işler simülasyon boyunca bekler,
+  // dış rol seçilince zamanlayıcı hiç kurulmazdı (eskiden yerel rolü okuduğu için tam böyleydi). Gerçek rol simülasyonun İLK adımında
+  // açılış TURUYLA (`acilisTuruRef`) birlikte saklanır: çıkış, oturum değişimi ve her yeni açılış turu numarayı artırır, kayıt
+  // kendiliğinden geçersizleşir; gerçek role dönülünce simülasyon biter. Açılış rol ataması, `rolDurumu` ve `veriOturumu` akışı bu
+  // ayarlayıcıdan GEÇMEZ (yalnız turu okur). Simülatör yalnız Yönetim sekmesinde (yalnız Yönetici) çizilir: Yönetici dışı rol seçilince
+  // sekme kapısı panoya yönlendirir; simülasyondan çıkış sayfa yenileme ya da çıkıştır (ikisi de iki kaynağı birlikte sıfırlar).
+  // Çit + davranış: components/RolSimulatoru.uygulama.test.tsx.
+  const [simulasyon, setSimulasyon] = useState<{ tur: number; gercekRol: UserRole } | null>(null);
+  const gercekRolKaydi = simulasyon !== null && simulasyon.tur === acilisTuruRef.current ? simulasyon.gercekRol : null;
+  const kuyrukRolu = gercekRolKaydi ?? userRole;
+  const simulatorRolunuAyarla = (r: UserRole) => {
+    const gercekRol = gercekRolKaydi ?? userRole;
+    setSimulasyon(r === gercekRol ? null : { tur: acilisTuruRef.current, gercekRol });
+    setUserRole(r);
+    storeSetRole(r);
+  };
 
   // Permission helpers
   const canAccess = (tab: string) => {
@@ -1295,15 +1316,18 @@ function AppContent() {
   // 90 saniyede `GET /api/db/syncJobs` 403 alıp yutuluyordu; 2FA doğrulanmadan da koşmaz (istek 403 alır, rol henüz çözülmemiştir).
   // Dış rol de burada durur (dış rol kapanışı D5): `kuyrukYurutebilir` yalnız iç role «evet» der — ayrı `disRol` koşulu gerekmez.
   // Kimlik veri kapısından (`veriOturumu`, R1′): rol çözülmeden kimlik boştur, zamanlayıcı kurulmaz.
+  // Rol `kuyrukRolu`dur (2026-10-17): Rol Simülatörü süreken oturumun GERÇEK rolü, değilse `userRole` — simülasyon yalnız arayüzdür,
+  // zamanlayıcı simülasyonda yeniden kurulmaz ve süzgeci değişmez (yukarıda «Rol Simülatörü» bloğu).
+  // Çıkış sürerken (`cikisSuruyorRef`, İ2-a) tur atılmaz: çıkan oturum adına kuyruk okunmaz / yürütülmez (yayin17 delta incelemesi).
   useEffect(() => {
-    const kimlik = { uid: veriOturumu?.uid, rol: roleMissing ? null : userRole };
+    const kimlik = { uid: veriOturumu?.uid, rol: roleMissing ? null : kuyrukRolu };
     if (mfaChallenge || !kuyrukYurutebilir(kimlik)) return;
     let cancelled = false;
-    const tick = () => { if (!cancelled) void processMikroRetries(kimlik).catch(() => {}); };
+    const tick = () => { if (!cancelled && !cikisSuruyorRef.current) void processMikroRetries(kimlik).catch(() => {}); };
     tick(); // açılışta bir kez
     const timer = setInterval(tick, 90_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [veriOturumu, userRole, roleMissing, mfaChallenge]);
+  }, [veriOturumu, kuyrukRolu, roleMissing, mfaChallenge]);
 
   // Check if module is accessible by subscription
   const canAccessBySubscription = (tabId: string): boolean => {
@@ -5957,7 +5981,7 @@ function AppContent() {
                 firestoreUsers={firestoreUsers}
                 mikroSettings={mikroSettings}
                 lucaSettings={lucaSettings}
-                setUserRole={setUserRole}
+                setUserRole={simulatorRolunuAyarla}
                 openConfirm={openConfirm}
                 toast={toast}
                 logAuditAction={logAuditAction}

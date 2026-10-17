@@ -26,8 +26,10 @@
  *  - Rolsüz / tanınmayan rol değeri: kapıdan geçemez, düğme çizilmez (kapalı başarısızlık).
  *  - Sahip hesabı: sunucu süper yöneticiyi rolüne bakmadan geçirir, istemci ROLE bakar. Sahip hesabının kaydındaki rol
  *    Yönetici değilse düğme gizlenir — gizli düğme, ölü düğme değil; bilerek kabul edildi.
- *  - Ayarlar'daki «Rol Simülatörü» depoyu DEĞİŞTİRMEZ (yalnız App'in yerel durumunu): simülasyonda bu düğme GERÇEK
- *    role göre çizilir. Sunucu da gerçek role baktığı için tıklanan düğme çalışır (ölü düğme oluşmaz).
+ *  - Yönetim → Kullanıcılar'daki «Rol Simülatörü» depoyu da günceller (2026-10-17; eskiden yalnız App'in yerel durumunu
+ *    değiştiriyordu, düğme simülasyonda GERÇEK role göre çiziliyordu): düğme SİMÜLE role göre çizilir. Sunucu gerçek role
+ *    bakar; simülatörü yalnız Yönetici açar ve simüle rolün geçtiği her kapıdan Yönetici de geçer — tıklanan düğme çalışır
+ *    (ölü düğme oluşmaz; çit: components/RolSimulatoru.uygulama.test.tsx).
  */
 
 import React, { useState } from 'react';

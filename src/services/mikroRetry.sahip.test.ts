@@ -419,17 +419,21 @@ describe('kaynak çiti — yürütücü her çağrıda KİMLİKLE koşar; kuyruk
     const app = kod('src/App.tsx').map(s => s.trim());
     // 2026-10-17 (şartname «kayıt kapanışı ve kuruş» R1′): kimliğin oturumu veri kapısından (`veriOturumu`) gelir — rol çözülmeden
     // kimlik boştur, zamanlayıcı kurulmaz. Bu iki satır bilerek değişti.
-    const i = app.indexOf('const kimlik = { uid: veriOturumu?.uid, rol: roleMissing ? null : userRole };');
+    // 2026-10-17 (iç rol şartnamesi § 8, Rol Simülatörü): rol `kuyrukRolu` — simülasyonda oturumun GERÇEK rolü (davranış testi:
+    // components/RolSimulatoru.uygulama.test.tsx). Kimlik satırı ve bağımlılık dizisi bilerek değişti.
+    const i = app.indexOf('const kimlik = { uid: veriOturumu?.uid, rol: roleMissing ? null : kuyrukRolu };');
     expect(i).toBeGreaterThan(0);
     expect(app.slice(i + 1, i + 7)).toEqual([
       'if (mfaChallenge || !kuyrukYurutebilir(kimlik)) return;',
       'let cancelled = false;',
-      'const tick = () => { if (!cancelled) void processMikroRetries(kimlik).catch(() => {}); };',
+      'const tick = () => { if (!cancelled && !cikisSuruyorRef.current) void processMikroRetries(kimlik).catch(() => {}); };',
       'tick();',
       'const timer = setInterval(tick, 90_000);',
       'return () => { cancelled = true; clearInterval(timer); };',
     ]);
-    expect(app[i + 7]).toBe('}, [veriOturumu, userRole, roleMissing, mfaChallenge]);');
+    expect(app[i + 7]).toBe('}, [veriOturumu, kuyrukRolu, roleMissing, mfaChallenge]);');
+    // `kuyrukRolu` yalnız gerçek rol kaydından ya da `userRole`dan türer (başka kaynak yok).
+    expect(app).toContain('const kuyrukRolu = gercekRolKaydi ?? userRole;');
     expect(app[i - 1]).toBe('useEffect(() => {');
   });
 
