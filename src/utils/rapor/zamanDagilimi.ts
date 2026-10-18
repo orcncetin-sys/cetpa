@@ -98,6 +98,18 @@
  * `haftaGunIzgarasi` `dovizTutar` / `paraBirimi` OKUMAZ; TRY dışı mağaza siparişi verilirse hücresi «tutarı bilinmeyen»
  * olur ve renk almaz. Çağıran `siparisler/magazaSiparisi.tryDisiMi` ile ayırır, `dovizli` sayısını kendi notunda verir.
  * K2 · İptaller ciroya girsin mi → "hayır". — iki yardımcı da `status` okumaz; süzgeç ÇAĞIRANDA.
+ *
+ * ## 6d EKİ (2026-10-18, Faz 3 6/n Genel III) — `tarihliKovala` + `TarihliKovalar` (ADDITIVE; yukarıdakiler DOKUNULMADI)
+ * Yer (orkestratör kararı O29): tarih çözümü (`zamanDate`) ve kova sayaç sözleşmesi bu modülde; `kapsamNotu` metin modülüdür.
+ * `zamanKovalari`nın (SABİT uzunluklu indeksli kova) AÇIK ANAHTARLI kardeşi.
+ * Neden var — src/components/reports/genel/GenelBloklar5.tsx P2 `const d = zamanDate(o.createdAt); if (!d) return;
+ *   if (d.getFullYear() !== thisYear) return;` ve P12 / GenelBloklar6.tsx P9 `const key = ayAnahtari(o.createdAt); if (!key) return;`:
+ *   tarihi çözülemeyen kayıt SESSİZCE düşüyor (kaç tane — yazmıyor); pencere dışı ile tarihsiz AYNI `return`.
+ *   • Tarihsiz (`zamanDate` null) → `tarihsiz` SAYILIR (epoch 0 / «bugün» yedeği YOK); çağıran NOT BASAR.
+ *   • `anahtarSec` `null` ya da `''` → `anahtarsiz` (pencere dışı) SAYILIR; çağıran NOT BASMAZ (veri kusuru değil).
+ *   • Map sırası anahtarın İLK görüldüğü sıra; kronolojik sıralama ÇAĞIRANDA. Tarih kuralı ÇAĞIRANDA (`tarihSec` ZORUNLU).
+ *   • Para / `status` OKUNMAZ (K2 iptal süzgeci ve O21 TRY dışı ayrımı ÇAĞIRANDA).
+ *   • GenelBloklar1 P202 / GenelBloklar4 P66'daki satır içi `Map` + `kovayaEkle` kopyaları kapalı dosyalarda DOKUNULMADI (O29 — 6m).
  */
 import { tamTutar, type Tutar } from '../para';
 import { zamanDate, gunAnahtari, gunFarki } from '../zaman';
@@ -380,4 +392,49 @@ export function aktifGunSerisi<T extends TarihliSiparis>(
   });
 
   return { mevcutSeri, enUzunSeri, aktifGun: gunler.size, sonGunler, tarihsiz };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Açık anahtarlı tarih kovası (6d eki — GenelBloklar5 P2 / P12, GenelBloklar6 P9; O29). GB5 P2 kullanıcının 2026-10-18 K14
+// aday kararıyla kalktı; tüketiciler GB5 P12 + GB6 P9.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TarihliKovalar<T> {
+  /**
+   * Anahtar → kovanın öğeleri (girdi sırası; nesne kimliği korunur). Map sırası = anahtarın İLK görüldüğü sıra — kronolojik
+   * sıralama ÇAĞIRANDA ('YYYY-MM' / 'YYYY-MM-DD' metin sırası kronolojiktir).
+   */
+  kovalar: Map<string, T[]>;
+  /** Tarihi `zamanDate` ile ÇÖZÜLEMEYEN — hiçbir kovaya girmez, SAYILIR (epoch 0 / 1970 / «bugün» yedeği YOK). Çağıran NOT BASAR. */
+  tarihsiz: number;
+  /**
+   * Tarihi çözülen ama `anahtarSec` `null` ya da `''` döndürdü (pencere dışı) — SAYILIR; çağıran NOT BASMAZ (pencere dışı kayıt veri
+   * kusuru değildir). `''` anahtar DEĞİLDİR.
+   */
+  anahtarsiz: number;
+}
+
+/**
+ * Listeyi tarihinden türeyen AÇIK anahtarlı kovalara dağıtır (6d eki — GenelBloklar5 P12, GenelBloklar6 P9; GB5 P2 2026-10-18 kalktı).
+ * Tarih: `zamanDate(tarihSec(o))` — tarih KURALI çağıranın (`o => o.createdAt` parite; `ciroDonem.ciroTarihi` de geçilebilir).
+ * `tarihSec` ZORUNLU (`T` kısıtsız; varsayılan yok). `anahtarSec`in fırlattığı hata yutulmaz.
+ * DEĞİŞMEZ: Σ |kova| + tarihsiz + anahtarsiz === liste.length. Girdi mutasyona uğramaz. `status` / tutar OKUNMAZ.
+ */
+export function tarihliKovala<T>(
+  liste: readonly T[],
+  tarihSec: (o: T) => unknown,
+  anahtarSec: (d: Date) => string | null,
+): TarihliKovalar<T> {
+  const kovalar = new Map<string, T[]>();
+  let tarihsiz = 0;
+  let anahtarsiz = 0;
+  for (const o of liste) {
+    const d = zamanDate(tarihSec(o));
+    if (d === null) { tarihsiz += 1; continue; }                    // ASLA epoch 0 / «bugün»e düşmez
+    const a = anahtarSec(d);
+    if (a === null || a === '') { anahtarsiz += 1; continue; }      // pencere dışı — sessiz `return` DEĞİL
+    const kova = kovalar.get(a);
+    if (kova) kova.push(o); else kovalar.set(a, [o]);
+  }
+  return { kovalar, tarihsiz, anahtarsiz };
 }

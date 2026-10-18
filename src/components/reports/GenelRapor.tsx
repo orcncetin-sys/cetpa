@@ -21,6 +21,12 @@
  * haritasıyla TEK müşteri sayar. Harita GenelBloklar3'e geçtiği gibi GenelBloklar2 ve GenelBloklar4'e de geçer; prop
  * verilmezse `musteriOzeti` iki kimliği BİRLEŞTİRMEZ ve bağ sessizce ölür.
  */
+/*
+ * 6d (2026-10-18) — O5 genişlemesi (GB6 grubu): `leadCariKodu` GenelBloklar6'ya da geçer (rekor kartlarındaki en iyi
+ * müşteri, K4 "kimlikle"). "Modüller Arası Genel Bakış" kartının düşük stok kutusu K14 ile kalktı (orkestratör N2; sayı
+ * Genel Özet KPI'sında) → GenelBloklar6'ya stok prop'u GEÇMEZ.
+ * O32 (orkestratör): rapor6c.degismez 3b.4 sayım yerine blok bazlı iddiaya çevrildi (aynı commit).
+ */
 import { type ReportsCtx } from './useReportsData';
 import GenelOzet from './genel/GenelOzet';
 import GenelBloklar1 from './genel/GenelBloklar1';
@@ -112,6 +118,7 @@ export default function GenelRapor(ctx: ReportsCtx) {
         quotations={ctx.quotations}
         currentLanguage={ctx.currentLanguage}
         fmtAna={ctx.fmtAna}
+        leadCariKodu={ctx.leadCariKodu}
       />
     </>
   );

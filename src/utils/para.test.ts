@@ -194,6 +194,9 @@ describe('donemKarsilastir — iki dönemin cirosu: ekran ≠ türetme (haftalı
   it('iki dönem de tam biliniyorsa yüzde ve yön hesaplanır', () => {
     expect(donemKarsilastir(t(120000, 8, 0), t(100000, 7, 0))).toEqual({ ekran: 120000, yuzde: 20, yon: 'artis' });
     expect(donemKarsilastir(t(70000, 5, 0), t(100000, 7, 0))).toEqual({ ekran: 70000, yuzde: -30, yon: 'azalis' });
+    // Eşitlik artış sayılır (GB5 P4 / P9 yeşili buna dayanır; `>=` → `>` olursa düşer). Küçük düşüş −0'a yuvarlansa da azalış.
+    expect(donemKarsilastir(t(100000, 7, 0), t(100000, 7, 0))).toEqual({ ekran: 100000, yuzde: 0, yon: 'artis' });
+    expect(donemKarsilastir(t(99700, 7, 0), t(100000, 7, 0))).toEqual({ ekran: 99700, yuzde: -0, yon: 'azalis' });
   });
   it('bir dönemde tek kayıt bile bilinmiyorsa SAPMA ÜRETİLMEZ — kısmi toplamdan "▼ %30" basılıyordu (mutasyon-ayırt-edici)', () => {
     expect(donemKarsilastir(t(70000, 7, 3), t(100000, 7, 0))).toEqual({ ekran: 70000, yuzde: null, yon: null });

@@ -30,7 +30,18 @@
  * UYGULANAN KULLANICI KARARI (KARARLAR.md K4, 2026-09-19): müşteri gruplaması "kimlikle" —
  * "ikisi de yoksa 'kimliksiz N sipariş' NOTU (satır değil)". `kimliksiz` sayacı o notu basar;
  * birimi SABİT `siparis` (kimliksiz kayıt ekranda SATIR olmadığı için ürün/kalem sayılamaz).
+ *
+ * ## 6d EKİ (2026-10-18, Faz 3 6/n Genel III) — `panelDurumu` (ADDITIVE; yukarıdakiler DOKUNULMADI)
+ * Neden var — src/components/reports/genel/GenelBloklar5.tsx P7 `if (ytdTotal === 0) return null;` ve P9
+ *   `if (curr === 0 && prev === 0) return null;`: tutarı okunamayan sipariş ₺0 sayılınca panel GİZLENİYOR — «veri yok» ile
+ *   «veri var ama okunamadı» ayırt edilemiyor; iki dönem de meşru ₺0 iken de panel kayboluyor (PLAN Y07).
+ *   • Dönüş: 'veri' (herhangi bir girdide `bilinen > 0` — KISMİ ve meşru ₺0 dâhil) > 'bilinmiyor' (bilinen yok,
+ *     `bilinmeyen > 0`: panel çizilir, rakam '—' + neden) > 'bos' (hiç kayıt yok: panel bugünkü gibi gizlenir).
+ *   • `toplam`a BAKILMAZ (meşru ₺0 ve negatif toplam da 'veri'). Dönüş tipi İSİMLENDİRİLMEZ: «panel durumu» adlı tip
+ *     src/lib/magazaTalep.ts'te başka anlamda (mağaza paneli aşaması) var.
+ *   • Yalnız TÜR içe aktarımı (`Tutar`) — modüle çalışma anı bağımlılığı doğmaz.
  */
+import type { Tutar } from '../para';
 
 /**
  * Not cümlesinde geçebilecek birimler. 6a birimleri = 6a'da GERÇEK tüketicisi olanlar + nötr
@@ -215,4 +226,21 @@ export function kapsamNotu(s: KapsamSayaclari, secenek?: KapsamSecenekleri): str
   const govde = parcalar.join(' · ');
   const sonuc = secenek?.sonuc?.trim();
   return sonuc ? `${govde} — ${sonuc}` : govde;
+}
+
+// ── Panel veri durumu (6d eki — GenelBloklar5 P7 / P9; P7 kullanıcının 2026-10-18 K14 aday kararıyla kalktı, tüketici P9) ──
+
+/**
+ * Panelin veri durumu — `if (x === 0) return null` kapılarının yerine (PLAN Y07).
+ *   'veri'       : herhangi bir girdide `bilinen > 0` (KISMİ de 'veri' — çağıran kapsam notunu basar; meşru ₺0 da 'veri').
+ *   'bilinmiyor' : bilinen yok ama `bilinmeyen > 0` — panel GİZLENMEZ, rakam '—' + nedenini yazar.
+ *   'bos'        : hiç kayıt yok (argümansız çağrı dâhil) — panel bugünkü gibi gizlenir.
+ * `toplam`a BAKILMAZ. Sayaçlar `toplaBilinen` / `tutarBirlestir` üretimidir (sonlu tam sayı); bozuk sayaç için ayrı kapı
+ * yok (`NaN > 0` yanlıştır, o girdi yok sayılır). Saf; girdi mutasyona uğramaz; fırlatmaz.
+ * Dönüş tipi İSİMLENDİRİLMEZ: «panel durumu» adlı tip lib/magazaTalep'te başka anlamda var (grep karışmasın).
+ */
+export function panelDurumu(...t: readonly Tutar[]): 'veri' | 'bilinmiyor' | 'bos' {
+  if (t.some(x => x.bilinen > 0)) return 'veri';
+  if (t.some(x => x.bilinmeyen > 0)) return 'bilinmiyor';
+  return 'bos';
 }

@@ -423,3 +423,115 @@ describe('yuzdelikler — 6c eki (O6)', () => {
     expect(b.degerler).toEqual(a.degerler);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6d EKİ (2026-10-18): `enBuyukBilinen` — `siraliDilimler` SARMALAYICISI (O6; dönüş tipi KESİN — O33)
+//   GenelBloklar6 P1 «Largest Order»:
+//     `let maxOrderValue = 0; let maxOrderCustomer = '';`
+//       → taban 0: hiç bilinen yokken «Largest Order ₺0.0k» + boş müşteri; hepsi negatifse ₺0 uydurur
+//     `if (total > maxOrderValue) { maxOrderValue=total; maxOrderCustomer=cid; }`
+//       → bilinmeyen tutar ₺0 aday; kaç siparişin aday OLAMADIĞI yazmıyor
+// Kural (O6): bilinmeyen değer adaylığa KATILMAZ, SAYILIR (çağıran «N kayıt bilinmiyor» notu basar). İşaret şartı YOK.
+// Fonksiyon ASLA null dönmez; `oge === null ⇔ deger === null`. O21: TRY dışı ayrımı ÇAĞIRANDA.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { enBuyukBilinen } from './dagilim';
+import type { MagazaSiparisAlanlari } from '../siparisler/magazaSiparisi';
+
+/** O21 ortak fikstürü (6d — TİPLİ): TRY dışı mağaza siparişi; `totalPrice` YOK (shopifyEsleme TRY dışı yazımı). */
+const DOVIZLI: MagazaSiparisAlanlari = {
+  source: 'shopify_webhook', paraBirimi: 'EUR', dovizTutar: 50, customerName: 'Kaya Hırdavat', status: 'Delivered', createdAt: new Date(2026, 2, 5, 10),
+};
+const adli = (musteri: string, tutar: unknown): Siparis => ({ musteri, urun: 'ÇİMENTO 50KG', tutar });
+
+/** GB6 P1'in ESKİ döngüsü test içinde yeniden yazıldı (pozitif bilinen girdide parite ölçüsü). */
+const eskiP1 = (liste: readonly Siparis[]): { maxOrderValue: number; maxOrderCustomer: string } => {
+  let maxOrderValue = 0;
+  let maxOrderCustomer = '';
+  for (const o of liste) {
+    const total = Number(o.tutar);
+    if (total > maxOrderValue) { maxOrderValue = total; maxOrderCustomer = o.musteri; }
+  }
+  return { maxOrderValue, maxOrderCustomer };
+};
+/** Sarmalayıcı paritesi (Y-1): sayaç `siraliDilimler`in tek dilim + 'taban' sayacıyla AYNI. */
+const sarmalayiciSayaci = <T,>(liste: readonly T[], sec: (o: T) => unknown): number =>
+  siraliDilimler(liste, sec, 1, { bolme: 'taban' }).bilinmeyen;
+
+describe('enBuyukBilinen — 6d eki (O6)', () => {
+  it('1 · PARİTE: pozitif bilinen tutarlarda öğe ve değer eski döngüyle aynı — beraberlikte İLK', () => {
+    // Mutasyon: beraberlik yürüyüşü silinirse → Kaya Hırdavat.
+    const x = [adli('Şirin İnşaat', 6_000), adli('Öz Beton', 9_500), adli('Kaya Hırdavat', 9_500)];
+    const r = enBuyukBilinen(x, tutarSec);
+    expect(r.oge?.musteri).toBe('Öz Beton');
+    expect(r.deger).toBe(9_500);
+    expect(r.bilinmeyen).toBe(0);
+    expect(r.oge?.musteri).toBe(eskiP1(x).maxOrderCustomer);
+    expect(r.deger).toBe(eskiP1(x).maxOrderValue);
+    expect(r.oge).toBe(x[1]);
+    expect(r.bilinmeyen).toBe(sarmalayiciSayaci(x, tutarSec));
+  });
+
+  it('2 · MUTASYON AYIRT EDİCİ: bilinmeyen adaylığa KATILMAZ, SAYILIR; sayısal metin sayıya çevrilir', () => {
+    // Mutasyon: `|| 0` aday sayımı → bilinmeyen 0.
+    const x = [sip(NaN), sip(5_000), sip(undefined), sip('7000'), sip('abc')];
+    const r = enBuyukBilinen(x, tutarSec);
+    expect(r.deger).toBe(7_000);
+    expect(r.oge).toBe(x[3]);
+    expect(r.bilinmeyen).toBe(3);
+    expect(r.bilinmeyen).toBe(sarmalayiciSayaci(x, tutarSec));
+  });
+
+  it('3 · hiç bilinen yok / boş → { oge: null, deger: null } (eski «₺0.0k» + boş ad) — sonuç HER ZAMAN nesne', () => {
+    const hepsiBilinmeyen = [sip(NaN), sip(null)];
+    const r = enBuyukBilinen(hepsiBilinmeyen, tutarSec);
+    expect(r).not.toBeNull();
+    expect(r).toEqual({ oge: null, deger: null, bilinmeyen: 2 });
+    expect(r.bilinmeyen).toBe(sarmalayiciSayaci(hepsiBilinmeyen, tutarSec));
+    const bos = enBuyukBilinen([], tutarSec);
+    expect(bos).not.toBeNull();
+    expect(bos).toEqual({ oge: null, deger: null, bilinmeyen: 0 });
+    expect(eskiP1(hepsiBilinmeyen)).toEqual({ maxOrderValue: 0, maxOrderCustomer: '' });
+  });
+
+  it('4 · işaret şartı YOK: meşru ₺0 ve negatif değer adaydır (eski taban 0 uydururdu)', () => {
+    // Mutasyon: `sadecePozitif: true` → deger null.
+    expect(enBuyukBilinen([sip(0)], tutarSec)).toMatchObject({ deger: 0, bilinmeyen: 0 });
+    const iade = [adli('Yıldız Yapı', -500), adli('Öz Beton', -100)];
+    const r = enBuyukBilinen(iade, tutarSec);
+    expect(r.deger).toBe(-100);
+    expect(r.oge?.musteri).toBe('Öz Beton');
+    expect(eskiP1(iade).maxOrderValue).toBe(0);
+    expect(r.bilinmeyen).toBe(sarmalayiciSayaci(iade, tutarSec));
+  });
+
+  it('5 · O21 (çağıranın seçicisiyle): dövizli sipariş aday DEĞİL, süzgeçsiz SAYILIR; çağıran reçetesiyle hiç ulaşmaz', () => {
+    const x: MagazaSiparisAlanlari[] = [{ customerName: 'Şirin İnşaat', totalPrice: 6_000 }, DOVIZLI];
+    const donuk = Object.freeze(x.map(o => Object.freeze({ ...o })));
+    const a = enBuyukBilinen(donuk, siparisTutari);
+    expect(a.deger).toBe(6_000);
+    expect(a.oge?.customerName).toBe('Şirin İnşaat');
+    expect(a.bilinmeyen).toBe(1);
+    expect(a.bilinmeyen).toBe(sarmalayiciSayaci(donuk, siparisTutari));
+    const b = enBuyukBilinen(x.filter(o => !tryDisiMi(o)), siparisTutari);
+    expect(b.bilinmeyen).toBe(0);
+    expect(b.deger).toBe(6_000);
+    expect(x.filter(tryDisiMi).length).toBe(1);
+    expect(donuk[1].dovizTutar).toBe(50);
+  });
+
+  it('6 · sarmalayıcı beraberlik yönü: eşit değerlerde girdi sırasında İLK (sayısal metin de eşittir)', () => {
+    // Mutasyon: `ogeler[ogeler.length - 1]` döndürmek → D.
+    const x = [{ ad: 'A', v: 9_500 }, { ad: 'B', v: 100 }, { ad: 'C', v: 9_500 }, { ad: 'D', v: '9500' }];
+    const r = enBuyukBilinen(x, o => o.v);
+    expect(r.oge?.ad).toBe('A');
+    expect(r.deger).toBe(9_500);
+    expect(r.bilinmeyen).toBe(sarmalayiciSayaci(x, o => o.v));
+    // DEĞİŞMEZ: deger === null ⇔ bilinmeyen === liste.length; oge === null ⇔ deger === null.
+    const listeler: { ad: string; v: unknown }[][] = [x, [{ ad: 'E', v: null }], []];
+    for (const l of listeler) {
+      const q = enBuyukBilinen(l, o => o.v);
+      expect(q.deger === null).toBe(q.bilinmeyen === l.length);
+      expect(q.oge === null).toBe(q.deger === null);
+    }
+  });
+});

@@ -740,3 +740,178 @@ describe('hareketliOrtalama — 6c eki (O6)', () => {
     expect(dovizliSayisi).toBe(1);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6d EKİ (2026-10-18): `kumulatifSeyir` — gün gün kümülatif ciro (GenelBloklar5 P13 «Kümülatif Ciro Seyri»)
+//   `[...orders].sort((a,b) => { const ta = zamanMs(a.createdAt) ?? 0; const tb = zamanMs(b.createdAt) ?? 0; return ta-tb; })`
+//     → tarihsiz sipariş EPOCH 0'a (1970) sıralanıp eğrinin BAŞINA giriyor, sayılmıyor; iptaller dâhil (K2)
+//   `cumulative += total; return cumulative;` → hayalet `total` / kalem toplamı; bilinmeyen tutar ₺0
+//   `.filter((_,i)=>i%Math.max(1,Math.floor(sorted.length/40))===0)` → örnekleme SON noktayı düşürür: «total» rozeti
+//     GERÇEK toplamı göstermez (n = 100 → son indeks 98); n = 41 → 41 nokta (tavan tutmaz)
+// K2 · İptaller ciroya girsin mi → "hayır". — `sec.iptalHaric` ÇAĞIRANDA açıkça verilir.
+// K1 + O26: sipariş tutarı siparisTutari — kalem toplamından yedek YOK; total / unitPrice okunmaz.
+// O21: TRY dışı mağaza siparişi yardımcıya ULAŞMAZ — ayrım ÇAĞIRANDA.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { kumulatifSeyir, type KumulatifSeyir } from './ciroDonem';
+import { zamanMs } from '../zaman';
+import type { Order } from '../../types';
+import type { MagazaSiparisAlanlari } from '../siparisler/magazaSiparisi';
+
+/** O21 ortak fikstürü (6d — TİPLİ): TRY dışı mağaza siparişi; `totalPrice` YOK (shopifyEsleme TRY dışı yazımı). */
+const DOVIZLI: MagazaSiparisAlanlari = {
+  source: 'shopify_webhook', paraBirimi: 'EUR', dovizTutar: 50, customerName: 'Kaya Hırdavat', status: 'Delivered', createdAt: new Date(2026, 2, 5, 10),
+};
+
+/** `i`. gün (0 = 1 Mart 2026), yerel SAATLİ. */
+const mGun = (i: number, saat = 10): Date => new Date(2026, 2, 1 + i, saat);
+/** Günün yerel başlangıcı — `KumulatifNokta.tarih` beklenen değeri. */
+const gunBasi0 = (i: number): Date => new Date(2026, 2, 1 + i);
+
+/** GB5 P13'ün ESKİ hesabı test içinde yeniden yazıldı (tutarı BİLİNEN siparişlerle; yalnız parite ölçüsü). */
+const eskiP13 = (liste: readonly CiroSiparisi[]): number[] => {
+  const sorted = [...liste].sort((a, b) => { const ta = zamanMs(a.createdAt) ?? 0; const tb = zamanMs(b.createdAt) ?? 0; return ta - tb; });
+  let cumulative = 0;
+  return sorted
+    .map(o => { cumulative += Number(o.totalPrice); return cumulative; })
+    .filter((_, i) => i % Math.max(1, Math.floor(sorted.length / 40)) === 0);
+};
+/** Günde bir sipariş, `n` gün; tutar 1.000 + 10·i (Şirin İnşaat ÇİMENTO 50KG). */
+const gunlukSeri = (n: number): CiroSiparisi[] =>
+  Array.from({ length: n }, (_, i) => s({ createdAt: new Date(2026, 0, 1 + i, 10), totalPrice: 1_000 + 10 * i, status: 'Delivered' }));
+const sonNokta = (r: KumulatifSeyir) => r.noktalar[r.noktalar.length - 1];
+
+describe('kumulatifSeyir — 6d eki (GenelBloklar5 P13)', () => {
+  it('1 · PARİTE: günde tek bilinen sipariş, iptal / tarihsiz yok, n ≤ 40 → noktalar ve son değer eski formülle BİREBİR', () => {
+    const on = Array.from({ length: 10 }, (_, i) => s({ createdAt: mGun(9 - i), totalPrice: 2_500 + 500 * i, status: 'Delivered' }));
+    const r = kumulatifSeyir(on, { iptalHaric: true }, { enCokNokta: 40 });
+    expect(r.noktalar.map(n => n.ekran)).toEqual(eskiP13(on));
+    expect(r.noktalar).toHaveLength(10);
+    expect(sonNokta(r).kumulatif).toEqual(r.toplam);
+    expect(r.toplam).toEqual({ toplam: 47_500, bilinen: 10, bilinmeyen: 0 });
+    expect(r.noktalar[0]).toEqual({ anahtar: '2026-03-01', tarih: gunBasi0(0), kumulatif: { toplam: 7_000, bilinen: 1, bilinmeyen: 0 }, ekran: 7_000 });
+    expect(r.tarihsiz).toBe(0);
+    expect(r.ilkKismi).toBeNull();
+  });
+
+  it('2 · aynı gün TEK nokta (bilinçli fark — bugün sipariş başına nokta)', () => {
+    const x = [
+      s({ createdAt: mGun(0, 9), totalPrice: 12_000 }),     // Şirin İnşaat
+      s({ createdAt: mGun(1, 11), totalPrice: 4_000 }),     // Öz Beton
+      s({ createdAt: mGun(0, 17), totalPrice: 3_400 }),     // Kaya Hırdavat — aynı gün
+    ];
+    const r = kumulatifSeyir(x, { iptalHaric: true });
+    expect(r.noktalar.map(n => n.anahtar)).toEqual(['2026-03-01', '2026-03-02']);
+    expect(r.noktalar[0].kumulatif).toEqual({ toplam: 15_400, bilinen: 2, bilinmeyen: 0 });
+    expect(r.noktalar[1].ekran).toBe(19_400);
+    expect(r.toplam.bilinen + r.toplam.bilinmeyen).toBe(3);
+  });
+
+  it('3 · MUTASYON AYIRT EDİCİ: tarihsiz SAYILIR — eğriye ve toplama girmez, 1970 başına dizilmez', () => {
+    // Mutasyon: `?? new Date(0)` / `?? 0` → '1970-01-01' noktası ve 99.000 toplamda.
+    const x = [
+      s({ createdAt: mGun(4), totalPrice: 6_000 }),
+      s({ createdAt: 'çöp', totalPrice: 99_000 }),
+      s({ createdAt: mGun(2), totalPrice: 1_500 }),
+    ];
+    const r = kumulatifSeyir(x, { iptalHaric: true });
+    expect(r.tarihsiz).toBe(1);
+    expect(r.noktalar[0].anahtar).toBe('2026-03-03');
+    expect(r.noktalar.some(n => n.anahtar.startsWith('1970-'))).toBe(false);
+    expect(r.toplam).toEqual({ toplam: 7_500, bilinen: 2, bilinmeyen: 0 });
+  });
+
+  it('4 · `syncedAt` yedeği (modülün `ciroTarihi` kuralı; GB5 bugün düşürüyor)', () => {
+    const r = kumulatifSeyir([s({ syncedAt: new Date(2026, 2, 5, 14), totalPrice: 8_200 })], { iptalHaric: true });
+    expect(r.tarihsiz).toBe(0);
+    expect(r.noktalar.map(n => n.anahtar)).toEqual(['2026-03-05']);
+    expect(r.noktalar[0].tarih).toEqual(new Date(2026, 2, 5));
+  });
+
+  it('5 · MUTASYON AYIRT EDİCİ: bilinmeyen tutar ₺0 SAYILMAZ — `ilkKismi` ve yürüyen `bilinmeyen`', () => {
+    // Mutasyon: `|| 0` → bilinmeyen 0, ilkKismi null.
+    const x = [
+      s({ createdAt: mGun(0), totalPrice: 5_000 }),
+      s({ createdAt: mGun(1), totalPrice: undefined }),     // Yıldız Yapı — tutarı okunamadı
+      s({ createdAt: mGun(2), totalPrice: 2_000 }),
+    ];
+    const r = kumulatifSeyir(x, { iptalHaric: true });
+    expect(r.ilkKismi).toBe(1);
+    expect(r.noktalar[0].kumulatif.bilinmeyen).toBe(0);
+    expect(r.noktalar.slice(1).every(n => n.kumulatif.bilinmeyen === 1)).toBe(true);
+    expect(r.toplam).toEqual({ toplam: 7_000, bilinen: 2, bilinmeyen: 1 });
+    expect(r.noktalar.map(n => n.ekran)).toEqual([5_000, 5_000, 7_000]);
+    const yalniz = kumulatifSeyir([s({ createdAt: mGun(0), totalPrice: 'abc' })], { iptalHaric: true });
+    expect(yalniz.noktalar[0].ekran).toBeNaN();
+    expect(yalniz.ilkKismi).toBe(0);
+  });
+
+  it('6 · örnekleme İLK ve SON noktayı tutar: 100 gün → 40 nokta, uç = toplam (eski filtre son indeksi 98)', () => {
+    const yuz = gunlukSeri(100);
+    const r = kumulatifSeyir(yuz, { iptalHaric: true }, { enCokNokta: 40 });
+    expect(r.noktalar).toHaveLength(40);
+    expect(r.noktalar[0].anahtar).toBe('2026-01-01');
+    expect(r.noktalar[39].anahtar).toBe('2026-04-10');
+    expect(sonNokta(r).kumulatif).toEqual(r.toplam);
+    const anahtarlar = r.noktalar.map(n => n.anahtar);
+    expect(anahtarlar.every((a, i) => i === 0 || a > anahtarlar[i - 1])).toBe(true);
+    // Eski filtre: adım 2 → 50 nokta, son nokta 99. değil 98. sipariş → rozet GERÇEK toplamı göstermiyordu.
+    const eski = eskiP13(yuz);
+    expect(eski).toHaveLength(50);
+    expect(eski[eski.length - 1]).not.toBe(r.toplam.toplam);
+    expect(kumulatifSeyir(gunlukSeri(41), { iptalHaric: true }, { enCokNokta: 40 }).noktalar).toHaveLength(40);
+    expect(eskiP13(gunlukSeri(41))).toHaveLength(41);
+  });
+
+  it('7 · `enCokNokta` sınırları: geçersiz → throw; m ≥ n → tüm günler; m = 1 → yalnız son gün', () => {
+    const bes = gunlukSeri(5);
+    for (const m of [0, 2.5, NaN, -1]) expect(() => kumulatifSeyir(bes, { iptalHaric: true }, { enCokNokta: m })).toThrow(/enCokNokta/);
+    expect(kumulatifSeyir(bes, { iptalHaric: true }, { enCokNokta: 5 }).noktalar).toHaveLength(5);
+    expect(kumulatifSeyir(bes, { iptalHaric: true }, { enCokNokta: 9 }).noktalar).toHaveLength(5);
+    expect(kumulatifSeyir(bes, { iptalHaric: true }, {}).noktalar).toHaveLength(5);
+    const tek = kumulatifSeyir(bes, { iptalHaric: true }, { enCokNokta: 1 });
+    expect(tek.noktalar.map(n => n.anahtar)).toEqual(['2026-01-05']);
+    expect(tek.noktalar[0].kumulatif).toEqual(tek.toplam);
+  });
+
+  it('8 · K2 + O26 + O21 + boş + mutasyon yok', () => {
+    const iptalli = [s({ createdAt: mGun(0), totalPrice: 4_000, status: 'Delivered' }), s({ createdAt: mGun(1), totalPrice: 9_000, status: 'Cancelled' })];
+    const haric = kumulatifSeyir(iptalli, { iptalHaric: true });
+    expect(haric.noktalar).toHaveLength(1);
+    expect(haric.tarihsiz).toBe(0);
+    expect(haric.toplam.toplam).toBe(4_000);
+    expect(kumulatifSeyir(iptalli, { iptalHaric: false }).toplam.toplam).toBe(13_000);
+    // O26: başlıksız Mikro faturası siparişi — kalem toplamı OKUNMAZ (Mutasyon: kalem yedeği → 12.000).
+    const mf: Order = {
+      id: 'mf-1', customerName: 'Öz Beton', totalPrice: NaN, status: 'Delivered', customerType: 'B2B', source: 'mikro-fatura',
+      createdAt: mGun(3), lineItems: [{ id: 'k1', sku: 'CIM-50', name: 'ÇİMENTO 50KG', quantity: 40, price: 250, total: 12_000, netTutar: 10_000, kdv: 2_000 }],
+    };
+    const r8 = kumulatifSeyir([mf], { iptalHaric: true });
+    expect(r8.toplam.bilinmeyen).toBe(1);
+    expect(r8.noktalar[0].ekran).toBeNaN();
+    // O21: süzgeçsiz dövizli sipariş «tutarı okunamadı» sayılır (50 EUR EKLENMEDİ); çağıran reçetesiyle hiç ulaşmaz.
+    const x: MagazaSiparisAlanlari[] = [{ customerName: 'Şirin İnşaat', totalPrice: 6_000, createdAt: mGun(1) }, DOVIZLI];
+    const suzgecsiz = kumulatifSeyir(x, { iptalHaric: true });
+    expect(suzgecsiz.toplam).toEqual({ toplam: 6_000, bilinen: 1, bilinmeyen: 1 });
+    expect(kumulatifSeyir(x.filter(o => !tryDisiMi(o)), { iptalHaric: true }).toplam.bilinmeyen).toBe(0);
+    expect(kumulatifSeyir([mf, DOVIZLI], { iptalHaric: true }).toplam.bilinmeyen).toBe(2);
+    expect(kumulatifSeyir([], { iptalHaric: true })).toEqual({ noktalar: [], toplam: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, tarihsiz: 0, ilkKismi: null });
+    expect(kumulatifSeyir([], { iptalHaric: true }, { enCokNokta: 1 }).noktalar).toEqual([]);
+    const donuk = Object.freeze(gunlukSeri(3).map(o => Object.freeze(o)));
+    expect(kumulatifSeyir(donuk, { iptalHaric: true }).toplam.toplam).toBe(3_030);
+    expect(donuk[0].totalPrice).toBe(1_000);
+  });
+
+  it('9 · `ilkKismi` ÖRNEKLENMİŞ dizinin İNDEKSİ → tarih `noktalar[ilkKismi].tarih`; DEĞİŞMEZ sayım', () => {
+    // Mutasyon: `ilkKismi`yi örneklenmemiş seride hesaplamak → 2 / 3.
+    const seri = (tutarsizGun: number) =>
+      Array.from({ length: 5 }, (_, i) => s({ createdAt: mGun(i), totalPrice: i === tutarsizGun ? null : 1_000 * (i + 1) }));
+    const u = kumulatifSeyir(seri(2), { iptalHaric: true }, { enCokNokta: 3 });
+    expect(u.noktalar.map(n => n.anahtar)).toEqual(['2026-03-01', '2026-03-03', '2026-03-05']);
+    expect(u.ilkKismi).toBe(1);
+    expect(u.ilkKismi === null ? null : u.noktalar[u.ilkKismi].tarih).toEqual(gunBasi0(2));
+    const d = kumulatifSeyir(seri(3), { iptalHaric: true }, { enCokNokta: 3 });
+    expect(d.ilkKismi).toBe(2);
+    expect(d.ilkKismi === null ? null : d.noktalar[d.ilkKismi].tarih).toEqual(gunBasi0(4));
+    for (const r of [u, d]) expect(r.toplam.bilinen + r.toplam.bilinmeyen + r.tarihsiz).toBe(5);
+  });
+});

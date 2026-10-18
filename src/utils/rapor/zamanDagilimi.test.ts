@@ -550,3 +550,123 @@ describe('aktifGunSerisi — 6c eki (O17)', () => {
     expect(() => aktifGunSerisi([], new Date(NaN), 30)).toThrow(/bugun/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6d EKİ (2026-10-18): `tarihliKovala` — AÇIK anahtarlı tarih kovası (O29; `zamanKovalari`nın kardeşi)
+//   GenelBloklar5 P2 «Bu Yılın En İyi Günleri»:
+//     `const d = zamanDate(o.createdAt); if (!d) return; if (d.getFullYear() !== thisYear) return;`
+//     `const key = gunAnahtari(d); if (!key) return;`
+//       → tarihi çözülemeyen kayıt SESSİZCE düşüyor (kaç tane — yazmıyor); pencere dışı ile tarihsiz AYNI `return`
+//   GenelBloklar5 P12 ve GenelBloklar6 P9: `const key = ayAnahtari(o.createdAt); if (!key) return;` → aynı arıza
+// Kural: tarihsiz kayıt hiçbir kovaya girmez, SAYILIR (epoch 0 / 1970 / «bugün» yedeği YOK); pencere dışı `anahtarsiz`
+// sayılır ve NOT basılmaz (veri kusuru değildir). Tarih kuralı ÇAĞIRANDA (`tarihSec` zorunlu).
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { tarihliKovala } from './zamanDagilimi';
+import { ayAnahtari } from '../zaman';
+
+describe('tarihliKovala — 6d eki (O29)', () => {
+  /** 2026 Mart'ında üç gün / beş sipariş (yerel, SAATLİ). */
+  const mart: Siparis[] = [
+    sip({ musteri: 'Şirin İnşaat', createdAt: new Date(2026, 2, 5, 10), totalPrice: 12_000 }),
+    sip({ musteri: 'Öz Beton', urun: 'İNŞAAT DEMİRİ Ø12', createdAt: new Date(2026, 2, 7, 9), totalPrice: 48_000 }),
+    sip({ musteri: 'Kaya Hırdavat', urun: 'ALÇI 25KG', createdAt: new Date(2026, 2, 5, 16, 30), totalPrice: 3_400 }),
+    sip({ musteri: 'Yıldız Yapı', createdAt: new Date(2026, 2, 12, 11), totalPrice: 7_250 }),
+    sip({ musteri: 'Öz Beton', urun: 'ALÇI 25KG', createdAt: new Date(2026, 2, 7, 14), totalPrice: 1_900 }),
+  ];
+  const createdAt = (o: Siparis): unknown => o.createdAt;
+
+  /** ESKİ gruplama — GB5 P2 / P12, GB6 P9 kalıbı test içinde yeniden yazıldı (tutarsız; yalnız üyelik). */
+  const eskiGruplama = (liste: readonly Siparis[], anahtar: (v: unknown) => string | null): Map<string, Siparis[]> => {
+    const m = new Map<string, Siparis[]>();
+    liste.forEach(o => {
+      const key = anahtar(o.createdAt);
+      if (!key) return;
+      const kova = m.get(key);
+      if (kova) kova.push(o); else m.set(key, [o]);
+    });
+    return m;
+  };
+
+  it('1 · PARİTE: tarihi çözülen kayıtlarda gün ve ay kovalarının anahtarları ve üyeleri eski gruplamayla BİREBİR', () => {
+    const g = tarihliKovala(mart, createdAt, gunAnahtari);
+    expect([...g.kovalar.entries()]).toEqual([...eskiGruplama(mart, gunAnahtari).entries()]);
+    expect([...g.kovalar.keys()]).toEqual(['2026-03-05', '2026-03-07', '2026-03-12']);
+    expect(g.kovalar.get('2026-03-07')?.map(o => o.totalPrice)).toEqual([48_000, 1_900]);
+    expect(g.tarihsiz).toBe(0);
+    expect(g.anahtarsiz).toBe(0);
+    const a = tarihliKovala([...mart, sip({ createdAt: new Date(2026, 0, 20, 10) })], createdAt, ayAnahtari);
+    expect([...a.kovalar.entries()]).toEqual([...eskiGruplama([...mart, sip({ createdAt: new Date(2026, 0, 20, 10) })], ayAnahtari).entries()]);
+    expect(a.kovalar.get('2026-03')).toHaveLength(5);
+  });
+
+  it('2 · MUTASYON AYIRT EDİCİ: tarihsiz kayıt SAYILIR, kovaya girmez — 1970 kovası doğmaz', () => {
+    // Mutasyon: `zamanDate(x) ?? new Date(0)` → '1970-01-01' kovası.
+    const bozuk = [
+      sip({ musteri: 'Kaya Hırdavat', createdAt: 'çöp' }),
+      sip({ musteri: 'Yıldız Yapı', createdAt: null }),
+      sip({ musteri: 'Öz Beton', createdAt: undefined }),
+      sip({ musteri: 'Şirin İnşaat', createdAt: {} }),
+    ];
+    const g = tarihliKovala([...bozuk, mart[0]], createdAt, gunAnahtari);
+    expect(g.tarihsiz).toBe(4);
+    expect(g.anahtarsiz).toBe(0);
+    expect([...g.kovalar.keys()]).toEqual(['2026-03-05']);
+    expect([...g.kovalar.keys()].some(k => k.startsWith('1970-'))).toBe(false);
+  });
+
+  it('3 · pencere dışı `anahtarsiz` (tarihsiz DEĞİL); `\'\'` anahtar sayılmaz', () => {
+    // Mutasyon: pencere dışını `tarihsiz`e saymak; `''`yi anahtar kabul etmek.
+    const liste = [...mart, sip({ musteri: 'Şirin İnşaat', createdAt: new Date(2025, 11, 30, 10) })];
+    const buYil = tarihliKovala(liste, createdAt, d => (d.getFullYear() === 2026 ? gunAnahtari(d) : null));
+    expect(buYil.anahtarsiz).toBe(1);
+    expect(buYil.tarihsiz).toBe(0);
+    expect([...buYil.kovalar.values()].flat()).toHaveLength(5);
+    const bosAnahtar = tarihliKovala(liste, createdAt, () => '');
+    expect(bosAnahtar.anahtarsiz).toBe(liste.length);
+    expect(bosAnahtar.kovalar.size).toBe(0);
+    expect(bosAnahtar.kovalar.has('')).toBe(false);
+  });
+
+  it('4 · Map sırası anahtarın İLK görüldüğü sıra (sıralama ÇAĞIRANDA); öğe kimliği korunur', () => {
+    // Mutasyon: anahtarları sıralamak → ['2026-01', '2026-03'].
+    const girdi = [
+      sip({ musteri: 'Öz Beton', createdAt: new Date(2026, 2, 9, 10) }),
+      sip({ musteri: 'Yıldız Yapı', createdAt: new Date(2026, 0, 14, 10) }),
+      sip({ musteri: 'Kaya Hırdavat', createdAt: new Date(2026, 2, 2, 10) }),
+    ];
+    const g = tarihliKovala(girdi, createdAt, ayAnahtari);
+    expect([...g.kovalar.keys()]).toEqual(['2026-03', '2026-01']);
+    expect(g.kovalar.get('2026-03')?.[0]).toBe(girdi[0]);
+    expect(g.kovalar.get('2026-03')?.[1]).toBe(girdi[2]);
+  });
+
+  it('5 · DEĞİŞMEZ Σ|kova| + tarihsiz + anahtarsiz === liste.length; donuk girdi mutasyona uğramaz; boş liste', () => {
+    const karisik = Object.freeze([
+      ...mart,
+      sip({ createdAt: 'çöp' }),
+      sip({ createdAt: new Date(2025, 5, 1, 10) }),
+      sip({ createdAt: new Date(2026, 3, 1, 10) }),
+    ].map(o => Object.freeze(o)));
+    const g = tarihliKovala(karisik, createdAt, d => (d.getFullYear() === 2026 ? ayAnahtari(d) : null));
+    const kovadakiler = [...g.kovalar.values()].reduce((t, k) => t + k.length, 0);
+    expect(kovadakiler + g.tarihsiz + g.anahtarsiz).toBe(karisik.length);
+    expect(g).toMatchObject({ tarihsiz: 1, anahtarsiz: 1 });
+    expect(karisik).toHaveLength(8);
+    const bos = tarihliKovala([], createdAt, gunAnahtari);
+    expect(bos.kovalar.size).toBe(0);
+    expect(bos.tarihsiz).toBe(0);
+    expect(bos.anahtarsiz).toBe(0);
+  });
+
+  it('6 · tarih kuralı ÇAĞIRANDA: yalnız `syncedAt`li sipariş `createdAt` kuralında tarihsiz, yedekli kuralda kovada', () => {
+    const senkron = sip({ musteri: 'Yıldız Yapı', syncedAt: new Date(2026, 2, 5, 18) });
+    expect(tarihliKovala([senkron], createdAt, gunAnahtari).tarihsiz).toBe(1);
+    const yedekli = tarihliKovala([senkron], o => o.createdAt ?? o.syncedAt, gunAnahtari);
+    expect(yedekli.tarihsiz).toBe(0);
+    expect(yedekli.kovalar.get('2026-03-05')).toEqual([senkron]);
+    // Firestore ham zarfı `{ seconds }` ve Date çözülür (zamanDate kuralı).
+    const zarf = sip({ musteri: 'Şirin İnşaat', createdAt: { seconds: Math.floor(new Date(2026, 2, 5, 12).getTime() / 1000) } });
+    const g = tarihliKovala([zarf, mart[0]], createdAt, gunAnahtari);
+    expect(g.kovalar.get('2026-03-05')).toEqual([zarf, mart[0]]);
+  });
+});

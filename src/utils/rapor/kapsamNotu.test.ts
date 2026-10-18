@@ -219,3 +219,64 @@ describe('kapsamNotu — `sikligisiz`: NEDEN ayrımı (MRR şablonu)', () => {
       .toBe('1 şablonun sıklığı tanınmadı');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 6d EKİ (2026-10-18): `panelDurumu` — `if (x === 0) return null` kapılarının yerine (PLAN Y07)
+//   GenelBloklar5 P7 «Yıl İçi Çeyrekler»:   `if (ytdTotal === 0) return null;`
+//   GenelBloklar5 P9 «90 / 90 Karşılaştırma»: `if (curr === 0 && prev === 0) return null;`
+//     → tutarı okunamayan siparişler ₺0 sayılınca panel GİZLENİYOR: «veri yok» ile «veri var ama okunamadı»
+//       ayırt edilemiyor; iki dönem de meşru ₺0 iken de panel kayboluyor. Panel sipariş ADEDİ de basıyor —
+//       adet varken ciro okunamadıysa panel tümden siliniyordu.
+// Sıra: 'veri' (herhangi bir girdide bilinen > 0; KISMİ ve meşru ₺0 dâhil) > 'bilinmiyor' > 'bos'.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+import { panelDurumu } from './kapsamNotu';
+import { toplaBilinen, type Tutar } from '../para';
+
+describe('panelDurumu — 6d eki (PLAN Y07)', () => {
+  /** Şirin İnşaat ₺5.000 okunuyor, Öz Beton'un tutarı okunamıyor. */
+  const kismi: Tutar = { toplam: 5_000, bilinen: 1, bilinmeyen: 1 };
+  /** Kaya Hırdavat + Yıldız Yapı — iki siparişin de tutarı okunamıyor. */
+  const bilinmeyenli: Tutar = { toplam: 0, bilinen: 0, bilinmeyen: 2 };
+  const bilinenli: Tutar = { toplam: 12_500, bilinen: 3, bilinmeyen: 0 };
+  const bos: Tutar = { toplam: 0, bilinen: 0, bilinmeyen: 0 };
+
+  it('1 · KISMİ toplam (bilinen + bilinmeyen) → \'veri\' — panel çizilir, çağıran kapsam notunu basar', () => {
+    // Mutasyon: `bilinmeyen > 0` önce sorulursa → 'bilinmiyor'.
+    expect(panelDurumu(kismi)).toBe('veri');
+  });
+
+  it('2 · MUTASYON AYIRT EDİCİ: yalnız bilinmeyen → \'bilinmiyor\' (eski `toplam === 0` kapısı paneli gizlerdi)', () => {
+    expect(panelDurumu(bilinmeyenli)).toBe('bilinmiyor');
+    expect(panelDurumu(bilinmeyenli)).not.toBe('bos');
+  });
+
+  it('3 · hepsi boş → \'bos\' (parite: hiç sipariş yokken panel bugünkü gibi gizlenir)', () => {
+    expect(panelDurumu(bos, { toplam: 0, bilinen: 0, bilinmeyen: 0 })).toBe('bos');
+  });
+
+  it('4 · argümansız çağrı → \'bos\'', () => {
+    expect(panelDurumu()).toBe('bos');
+  });
+
+  it('5 · meşru ₺0 bilinen → \'veri\' (`toplam > 0` ölçütü değil; negatif toplam da \'veri\')', () => {
+    // Mutasyon: `toplam > 0` ölçütü → 'bos' (iki dönem meşru ₺0 iken panel kaybolurdu).
+    const sifir = toplaBilinen([{ musteri: 'Öz Beton', tutar: 0 }], o => o.tutar);
+    expect(sifir).toEqual({ toplam: 0, bilinen: 1, bilinmeyen: 0 });
+    expect(panelDurumu(sifir)).toBe('veri');
+    const iade = toplaBilinen([{ musteri: 'Yıldız Yapı', tutar: -1_250 }], o => o.tutar);
+    expect(panelDurumu(iade)).toBe('veri');
+  });
+
+  it('6 · çoklu argüman: herhangi birinde bilinen → \'veri\'; yalnız bilinmeyenler → \'bilinmiyor\'; girdi değişmez', () => {
+    expect(panelDurumu(bilinmeyenli, bilinenli)).toBe('veri');
+    expect(panelDurumu(bilinmeyenli, bilinmeyenli)).toBe('bilinmiyor');
+    expect(panelDurumu(bos, bilinmeyenli)).toBe('bilinmiyor');
+    expect(panelDurumu(bilinenli, bos)).toBe('veri');
+    const donuk = Object.freeze([Object.freeze({ ...bilinmeyenli }), Object.freeze({ ...kismi })]);
+    expect(panelDurumu(...donuk)).toBe('veri');
+    expect(donuk[0]).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 2 });
+    // GB5 P9 reçetesi: seçici her siparişi bilinen ya da bilinmeyen sayar → 'bos' ⇔ iki pencerede de sipariş yok.
+    const k = [toplaBilinen([{ tutar: undefined }], (o: { tutar?: unknown }) => o.tutar), toplaBilinen([], (o: { tutar?: unknown }) => o.tutar)];
+    expect(panelDurumu(...k)).toBe('bilinmiyor');
+  });
+});

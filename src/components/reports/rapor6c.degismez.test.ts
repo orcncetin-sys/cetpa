@@ -385,12 +385,17 @@ describe('§3b · K2 / K4 / O5 / O21: kalıntı yok, bağlar çağıranda', () =
     expect(eslesmeSayisi(kodMetni(GB4), HAM_SIPARIS_GECISI)).toBe(1);
   });
 
-  it('3b.4 · O5: `GenelRapor.tsx` K4 haritasını üç bloğa da geçirir (GB2, GB3, GB4)', () => {
+  it('3b.4 · O5: `GenelRapor.tsx` K4 haritasını üç bloğun her birine geçirir (GB2, GB3, GB4; GB6 → rapor6d 3b.4)', () => {
     // Dayanak: `utils/rapor/musteri.ts` "VERİLMEZSE Cetpa kaydı ile Mikro carisi BİRLEŞTİRİLMEZ" — alan isteğe bağlı
-    // olduğu için GB2 haritayı almadan da derlenir; K4'ün Mikro bağı sessizce ölür. Orkestratör O5'i GB4 için geri
-    // alırsa sayı 2 olur — bu satır o kararla AYNI commit'te güncellenir.
-    // Bağlamadaki karşılığı: GB2 kapanışı `grep -c "leadCariKodu={ctx.leadCariKodu}"` → 3.
-    expect(eslesmeSayisi(kodMetni(GENEL_RAPOR), LEAD_CARI_KODU_PROP)).toBe(3);
+    // olduğu için GB2 haritayı almadan da derlenir; K4'ün Mikro bağı sessizce ölür. Orkestratör O5'i bir blok için geri
+    // alırsa o blok listeden AYNI commit'te çıkar.
+    // 6d (orkestratör O32, 2026-10-18): sayım iddiası BLOK bazlı iddiaya çevrildi — GB6 grubu haritayı GenelBloklar6'ya da
+    // geçirince sayı 4 oluyordu; sayı her yeni tüketicide yeniden kırılırdı. GB6'nın bağı `rapor6d.degismez` 3b.4'te.
+    // Bağlamadaki karşılığı: GB2 kapanışı `grep -c "leadCariKodu={ctx.leadCariKodu}"` (6d sonrası 4).
+    const genel = kodMetni(GENEL_RAPOR);
+    const eksik = (['GenelBloklar2', 'GenelBloklar3', 'GenelBloklar4'] as const)
+      .filter(ad => !LEAD_CARI_KODU_PROP.test(new RegExp(`<${ad}\\b[\\s\\S]*?\\/>`).exec(genel)?.[0] ?? ''));
+    expect(eksik).toEqual([]);
   });
 
   it('3b.5 · O21: TRY dışı süzgeci (`magazaSiparisi.tryDisiMi`) iki dosyada da çağıranda içe aktarılıyor', () => {

@@ -87,6 +87,22 @@
  * Bu modül `dovizTutar` / `paraBirimi` OKUMAZ. TRY dışı mağaza siparişi (`totalPrice` yazılmaz) buraya verilirse «tutarı
  * bilinmeyen» sayılır ve YoY'yi / yedi hareketli ortalama noktasını '—' yapar; çağıran `siparisler/magazaSiparisi.tryDisiMi`
  * ile ayırır, `dovizli` sayısını kendi notunda verir.
+ *
+ * ## 6d EKİ (2026-10-18, Faz 3 6/n Genel III) — `kumulatifSeyir` + `KumulatifSeyir` + `KumulatifNokta` (ADDITIVE; yukarıdakiler DOKUNULMADI)
+ * Neden var — src/components/reports/genel/GenelBloklar5.tsx P13 «Kümülatif Ciro Seyri»: siparişler `zamanMs(…) ?? 0` ile
+ *   sıralanıyor (tarihsiz sipariş EPOCH 0'a, eğrinin BAŞINA giriyor, sayılmıyor); iptaller dâhil; `cumulative += total`
+ *   hayalet `total` / kalem toplamı okuyor ve bilinmeyen tutarı ₺0 sayıyor; `i % Math.max(1, Math.floor(n / 40))` örneklemesi
+ *   SON noktayı düşürüyor → «total» rozeti GERÇEK toplamı göstermiyor.
+ *   • Nokta GÜN başınadır (`gunAnahtari`, yerel gün); tarih modülün TEK kuralı `ciroTarihi` (`createdAt` → `syncedAt`).
+ *     Tarihi çözülemeyen sipariş eğriye ve `toplam`a GİRMEZ, `tarihsiz` SAYILIR.
+ *   • Tutar `siparisTutari` — seçici YOK (K1 + O26: kalem toplamından yedek YOK); yürüyen toplam `tutarBirlestir`,
+ *     ekran `ekranTutari`. `ilkKismi` ÖRNEKLENMİŞ `noktalar` dizisinin İNDEKSİdir (tarih DEĞİL).
+ *   • Örnekleme `Math.round(k·(n−1)/(m−1))`: İLK ve SON nokta HER ZAMAN dâhil, uzunluk TAM `enCokNokta`; `toplam`
+ *     örneklemeden bağımsızdır. Ayrı `adet` alanı YOK (O2): eğriye giren sipariş `toplam.bilinen + toplam.bilinmeyen`.
+ *   • Katman: `rapor/zamanDagilimi.tarihliKovala` KULLANILMAZ (pano → rapor içe aktarımı yok); gün kovası modülün kendi
+ *     `gunAnahtari` + `Map`'i (`ceyreklikCiro` emsali).
+ *   • K2 · İptaller ciroya girsin mi → "hayır". — `sec.iptalHaric` ÇAĞIRANDA AÇIKÇA verilir (varsayılan YOK).
+ *   • O21: TRY dışı mağaza siparişi buraya verilirse «tutarı bilinmeyen» sayılır; ayrım ÇAĞIRANDA.
  */
 import {
   toplaBilinen,
@@ -484,4 +500,94 @@ export function hareketliOrtalama(tutarlar: readonly Tutar[], pencere: number): 
     const t = tamTutar(tutarBirlestir(...tutarlar.slice(i - pencere + 1, i + 1)));
     return Number.isFinite(t) ? t / pencere : null;
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kümülatif ciro seyri (6d eki — GenelBloklar5 P13)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface KumulatifNokta {
+  /** 'YYYY-MM-DD' — `zaman.gunAnahtari` (yerel gün). */
+  anahtar: string;
+  /** Günün yerel başlangıcı (00:00). */
+  tarih: Date;
+  /** O güne KADAR (dâhil) yürüyen toplam — `tutarBirlestir`; `bilinmeyen` hiç azalmaz. */
+  kumulatif: Tutar;
+  /** `ekranTutari(kumulatif)` — o ana dek hiç bilinen yoksa NaN. */
+  ekran: number;
+}
+
+export interface KumulatifSeyir {
+  /** Artan gün sırası; `enCokNokta` verildiyse örneklenmiş — İLK (enCokNokta ≥ 2) ve SON nokta HER ZAMAN dâhil. */
+  noktalar: KumulatifNokta[];
+  /**
+   * Tarihi çözülen TÜM siparişlerin toplamı (örneklemeden bağımsız). `noktalar` boş değilse SON noktanın `kumulatif`i ile `toEqual`.
+   * Eğriye giren sipariş SAYISI = `toplam.bilinen + toplam.bilinmeyen` (ayrı `adet` alanı YOK — O2).
+   */
+  toplam: Tutar;
+  /** İptal süzgecinden GEÇEN ama `ciroTarihi` çözülemeyen — eğriye ve `toplam`a GİRMEZ, SAYILIR (epoch 0 YOK). */
+  tarihsiz: number;
+  /**
+   * ÖRNEKLENMİŞ `noktalar` dizisinde `kumulatif.bilinmeyen > 0` olan İLK noktanın İNDEKSİ (tarih DEĞİL); yoksa null. O indeksten
+   * sonraki her nokta ALT SINIRDIR. Tarihi `noktalar[ilkKismi].tarih`: tutarı okunamayan ilk siparişin günü ya da (örneklemede o gün
+   * düştüyse) onu İZLEYEN ilk örnek gün.
+   */
+  ilkKismi: number | null;
+}
+
+/**
+ * Siparişlerin gün gün kümülatif cirosu (6d eki — GenelBloklar5 P13 «Kümülatif Ciro Seyri»). Tarih modülün TEK kuralı `ciroTarihi`
+ * (`createdAt` → `syncedAt`), gün `gunAnahtari`, sıra artan; tutar `siparisTutari` (K1 + O26 — kalem yedeği YOK, seçici YOK; modülün
+ * diğer fonksiyonlarıyla aynı); K2 · İptaller ciroya girsin mi → "hayır". — `sec.iptalHaric` ÇAĞIRANDA AÇIKÇA verilir (varsayılan YOK).
+ * `s.enCokNokta` pozitif TAM SAYI değilse throw.
+ * DEĞİŞMEZ: `toplam.bilinen + toplam.bilinmeyen + tarihsiz === iptalSuz(siparisler, sec).length`. Girdi mutasyona uğramaz.
+ */
+export function kumulatifSeyir(
+  siparisler: readonly CiroSiparisi[],
+  sec: DonemSecenek,
+  s?: { enCokNokta?: number },
+): KumulatifSeyir {
+  const m = s?.enCokNokta;
+  if (m !== undefined && (!Number.isInteger(m) || m <= 0)) {
+    throw new Error(`kumulatifSeyir: enCokNokta pozitif tam sayı olmalı (geldi: ${String(m)})`);
+  }
+  // K2 · İptaller ciroya girsin mi → "hayır". — süzgeç çağıranın `sec`iyle (varsayılan yok).
+  const liste = iptalSuz(siparisler, sec);
+
+  const gunler = new Map<string, { tarih: Date; siparisler: CiroSiparisi[] }>();
+  let tarihsiz = 0;
+  for (const o of liste) {
+    const d = ciroTarihi(o);
+    const a = gunAnahtari(d);
+    // Tarihsiz sipariş epoch 0'a sıralanmaz: eğriye ve toplama girmez, SAYILIR.
+    if (d === null || a === null) { tarihsiz += 1; continue; }
+    const gun = gunler.get(a);
+    if (gun) gun.siparisler.push(o);
+    else gunler.set(a, { tarih: new Date(d.getFullYear(), d.getMonth(), d.getDate()), siparisler: [o] });
+  }
+
+  // Anahtarlar tekil; 'YYYY-MM-DD' metin sırası kronolojiktir.
+  const sirali = [...gunler.entries()].sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+  const tumu: KumulatifNokta[] = [];
+  let yuruyen: Tutar = { toplam: 0, bilinen: 0, bilinmeyen: 0 };
+  for (const [anahtar, gun] of sirali) {
+    // K1 + O26: sipariş tutarı siparisTutari — kalem toplamından yedek YOK; total / unitPrice okunmaz.
+    yuruyen = tutarBirlestir(yuruyen, toplaBilinen(gun.siparisler, siparisTutari));
+    tumu.push({ anahtar, tarih: gun.tarih, kumulatif: yuruyen, ekran: ekranTutari(yuruyen) });
+  }
+
+  const noktalar = kumulatifOrnekle(tumu, m);
+  const kismi = noktalar.findIndex(n => n.kumulatif.bilinmeyen > 0);
+  return { noktalar, toplam: yuruyen, tarihsiz, ilkKismi: kismi === -1 ? null : kismi };
+}
+
+/**
+ * Örnekleme — n = gün sayısı, m = `enCokNokta`. `m` yok ya da `m ≥ n` → tüm noktalar; `m === 1` → yalnız SON nokta;
+ * `2 ≤ m < n` → indeksler `Math.round(k · (n − 1) / (m − 1))`, k = 0..m−1 (adım ≥ 1 → kesin artan, tekrarsız; ilk 0, son n − 1).
+ */
+function kumulatifOrnekle(tumu: readonly KumulatifNokta[], m: number | undefined): KumulatifNokta[] {
+  const n = tumu.length;
+  if (m === undefined || m >= n) return [...tumu];
+  if (m === 1) return tumu.slice(n - 1);
+  return Array.from({ length: m }, (_, k) => tumu[Math.round((k * (n - 1)) / (m - 1))]);
 }

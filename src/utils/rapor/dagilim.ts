@@ -75,6 +75,17 @@
  *     yapan katı türetme kuralı burada UYGULANMAZ). Ortalama çağıranda `tamTutar(toplam) / bilinen` (ayrı elle toplama YOK).
  *   • O21: TRY dışı mağaza siparişi buraya verilirse «tutarı bilinmiyor» notunda YANLIŞ nedenle görünür; ayrım ÇAĞIRANDA
  *     (`siparisler/magazaSiparisi.tryDisiMi`). Bu modül `dovizTutar` / `paraBirimi` OKUMAZ. İptal süzgeci (K2) de çağıranda.
+ *
+ * ## 6d EKİ (2026-10-18, Faz 3 6/n Genel III) — `enBuyukBilinen` + `EnBuyukBilinen` (ADDITIVE; yukarıdakiler DOKUNULMADI)
+ * Neden var — src/components/reports/genel/GenelBloklar6.tsx P1 «Largest Order»: `let maxOrderValue = 0;` tabanı hiç bilinen
+ *   yokken «₺0.0k» + boş müşteri, hepsi negatifken ₺0 uyduruyor; `if (total > maxOrderValue)` bilinmeyen tutarı ₺0 aday sayıyor
+ *   ve kaç siparişin aday OLAMADIĞI yazmıyor.
+ *   • `siraliDilimler` SARMALAYICISI (`yuzdelikler` emsali) — eleme / sayaç / kararlı sıralama KOPYALANMAZ; yalnız «hangi öğe,
+ *     beraberlikte girdi sırasında İLK» sorusunu ekler (GB6 `>` paritesi).
+ *   • Dağılım istatistiği sözleşmesi (O6): bilinmeyen adaylığa KATILMAZ, `bilinmeyen`de SAYILIR. İşaret şartı YOK (₺0 ve
+ *     negatif meşru aday — `sadecePozitif` verilmez).
+ *   • Dönüş KESİN (O33): ASLA null dönmez; `oge === null ⇔ deger === null`.
+ *   • O21: TRY dışı ayrımı ÇAĞIRANDA; bu ek de `dovizTutar` / `paraBirimi` OKUMAZ.
  */
 import { bilinenSayi, sayiSirala, tutarBirlestir, type Tutar } from '../para';
 import { BOS_TUTAR, kovayaEkle } from '../pano/raporVeriKatmani';
@@ -292,4 +303,34 @@ export function yuzdelikler<T>(
   const degerler = yuzdeler.map(p => (n === 0 ? null : sirali[Math.floor((p / 100) * (n - 1))]));
   // `r.toplam` (bilinmeyeni TAŞIYAN) KULLANILMAZ: O6 — bilinmeyen dağılım istatistiğine katılmaz, yalnız sayılır.
   return { degerler, toplam: d.tutar, bilinen: d.adet, bilinmeyen: r.bilinmeyen, kapsamDisi: r.kapsamDisi };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// En büyük bilinen değer (6d eki — GenelBloklar6 P1; O6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface EnBuyukBilinen<T> {
+  /** En büyük BİLİNEN değerin öğesi (beraberlikte girdi sırasında İLK); hiç bilinen yoksa null. */
+  oge: T | null;
+  /** O değer (sayısal metin sayıya çevrilir); hiç bilinen yoksa null. İşaret şartı YOK: ₺0 ve negatif meşrudur. */
+  deger: number | null;
+  /** `degerSec` bilinmeyen (`bilinenSayi` false) — adaylığa GİRMEZ, SAYILIR (O6: çağıran «N kayıt bilinmiyor» notu basar). */
+  bilinmeyen: number;
+}
+
+/**
+ * O6 — en büyük bilinen değer ve öğesi (6d eki — GenelBloklar6 P1 «Largest Order»). Girdi mutasyona uğramaz. ASLA null DÖNMEZ.
+ * DEĞİŞMEZ: `oge === null ⇔ deger === null`; `deger === null ⇔ bilinmeyen === liste.length`.
+ * `degerSec` SAF olmalı (birden çok kez çağrılır — `yuzdelikler` notu).
+ */
+export function enBuyukBilinen<T>(liste: readonly T[], degerSec: (o: T) => unknown): EnBuyukBilinen<T> {
+  // Eleme + sayaç `siraliDilimler`de TEK yerde: tek dilim + 'taban' → bütün bilinenler ARTAN, eşit değerde girdi sırası (kararlı).
+  const r = siraliDilimler(liste, degerSec, 1, { bolme: 'taban' });
+  const ogeler = r.dilimler[0].ogeler;
+  if (ogeler.length === 0) return { oge: null, deger: null, bilinmeyen: r.bilinmeyen };
+  const deger = Number(degerSec(ogeler[ogeler.length - 1]));
+  // Beraberlikte İLK (GB6 `>` paritesi): en büyük değerin öğeleri sonda ve girdi sırasında — başa doğru yürü.
+  let i = ogeler.length - 1;
+  while (i > 0 && Number(degerSec(ogeler[i - 1])) === deger) i -= 1;
+  return { oge: ogeler[i], deger, bilinmeyen: r.bilinmeyen };
 }
