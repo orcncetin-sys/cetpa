@@ -25,6 +25,7 @@ import {
   type FaturaGonderimDurumu, type FaturaKesilemezNedeni, type FaturaYanitKodu, type MikroFaturaGonderimi,
 } from '../../lib/faturaGonderimi.js';
 import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi.js';
+import { MF_KAYNAGI } from '../../lib/mfKaynagi.js';
 
 export interface FaturaHavuzu {
   query: (sql: string, p?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
@@ -44,6 +45,7 @@ export interface FaturaBaglami {
 
 // ── SQL ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 if (!/^[A-Za-z0-9_]+$/.test(FATURA_GONDERIM_ALANI)) throw new Error('FATURA_GONDERIM_ALANI SQL\'e gömülemez');
+if (!/^[A-Za-z0-9_-]+$/.test(MF_KAYNAGI)) throw new Error('MF_KAYNAGI SQL\'e gömülemez');
 const A = FATURA_GONDERIM_ALANI;
 const ISARET = `data->'${A}'`;
 /** D15 + Y2: çağıranın kiracısı YA DA etiketsiz (alan yok / JSON `null` / boş dize — `companyId || ''` kalıbı). */
@@ -59,11 +61,11 @@ const bayatSql = (esik: string): string =>
  * D1 — TALEP: siparişte Mikro faturası YOKSA `gonderiliyor` yazılır. «İşaret yok» = anahtar yok YA DA nesne değil (JSON `null`
  * dâhil); `reddedildi` yeniden gönderilebilir; bayat `gonderiliyor` GEÇMEZ. `hasInvoice` kapıya girmez (Cetpa-içi fatura).
  * `btrim` yalnız boşluğu kırpar: sekme / satır sonu içeren numara «dolu» sayılır (güvenli yön).
- * $3 işaret (jsonb), $4 mağaza kaynağı (`MAGAZA_KAYNAGI` — metin kopyası yok).
+ * $3 işaret (jsonb), $4 mağaza kaynağı (`MAGAZA_KAYNAGI` — metin kopyası yok). MF kaynağı `MF_KAYNAGI`'dan gömülür (lib/mfKaynagi).
  */
 export const FATURA_TALEP_SQL = `UPDATE docs SET data = data || jsonb_build_object('${A}', $3::jsonb, 'companyId', $2::text), updated_at = now()
  WHERE coll = 'orders' AND id = $1 AND ${KIRACI}
-   AND coalesce(data->>'source', '') NOT IN ('mikro-fatura', $4::text)
+   AND coalesce(data->>'source', '') NOT IN ('${MF_KAYNAGI}', $4::text)
    AND btrim(coalesce(data->>'mikroFaturaNo', '')) = '' AND btrim(coalesce(data->>'ettn', '')) = ''
    AND (data->'faturali') IS DISTINCT FROM 'false'::jsonb
    AND (jsonb_typeof(${ISARET}) IS DISTINCT FROM 'object' OR ${ISARET}->>'durum' = 'reddedildi')
@@ -170,7 +172,8 @@ function gonderildiRet(o: FaturaOkunan, isaret: MikroFaturaGonderimi | null): Fa
  */
 export function talepRetKarari(o: FaturaOkunan): FaturaRetKarari {
   const isaret = faturaIsareti(o.data);
-  const neden: FaturaKesilemezNedeni | null = o.kaynak === 'mikro-fatura' ? 'mikro-fatura'
+  // Sol yan kaynak DEĞERİ (lib/mfKaynagi); sağdaki 'mikro-fatura' RET NEDENİ KODUDUR (`FaturaKesilemezNedeni`) — sabite bağlanmaz.
+  const neden: FaturaKesilemezNedeni | null = o.kaynak === MF_KAYNAGI ? 'mikro-fatura'
     : o.kaynak === MAGAZA_KAYNAGI ? 'magaza'
     : o.faturasiz ? 'faturasiz' : null;
   if (neden) {

@@ -53,7 +53,7 @@ import {
   SAHIP_SATIR_ALANI,
   SUNUCU_TURETILEN_ALANLAR,
 } from "./src/lib/collections.js";
-import { kiraciWhere, kiraciDamgala, sunucuAlanKorumaSql, sunucuTuretilenAlanlar, baskasininSahipKaydiMi, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, siparisGorebilir, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
+import { kiraciWhere, kiraciDamgala, sunucuAlanKorumaSql, sunucuKorumaVar, sunucuTuretilenAlanlar, baskasininSahipKaydiMi, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, siparisGorebilir, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
 import { rolIcinMaskele, maskeyiGeriYukle, farkDegeriMaskele, ayarAdresAlaniDegisti } from './src/lib/sirMaske.js';
 import { kimlikYuzeyiKarari, KIMLIK_YUZEYI_RETLERI, ROL_OKUNAMADI_YANITI } from './src/lib/kimlikYuzeyi.js';
 import { izinliTaban, genelHttpsTaban, genelAdresMi, TabanAdresHatasi, LUCA_TABAN, IYZICO_TABAN } from './src/lib/guvenliTaban.js';
@@ -2063,6 +2063,8 @@ async function startServer() {
     // AYRILMIŞ KİMLİK (2026-10-02): `__` içeren kimlikleri sunucu üretir (`mikrofat__<cid>__<seri>-<sıra>`, `shopify__<özet>`) ve
     // tahmin edilebilir olanları vardır. Satır süzgeçli koleksiyonda DIŞ ROL henüz var olmayan böyle bir kimliği önceden açarsa
     // (kimlik kapma), sunucunun sonradan AYNI kimliğe yazdığı sipariş — damgalanan `assignedTo` yüzünden — ona görünür olurdu.
+    // MF öneki (`mikrofat__`, lib/mfKaynagi — 2026-10-19, şartname «sipariş kaynak kapısı» K2) İÇ ROLE DE kapalıdır: önceden açılan
+    // kayıt gece türetmesinde «zaten var» sayılıp MF siparişini hiç doğurmazdı. Var olan (görünen) kayda yazım değişmez.
     // Karar VE ön eleme saf işlevde (lib/tenantErisim.ayrilmisKimlikMi / ayrilmisKimlikAdayi — testli). `gorunur` = kayıt var VE bu
     // kullanıcıya görünür: "yok" ile "var ama görünmez" AYNI yanıtı alır (ileti farkı tahmin edilebilir kimliklerin varlığını sızdırırdı).
     const ayrilmisKimlikEngeli = async (req: Request, res: Response, coll: string, id: string, gorunur: boolean): Promise<boolean> => {
@@ -2291,13 +2293,15 @@ async function startServer() {
         if (coll === 'users') data = await pinProtectedUserFields((req as Request & { uid?: string }).uid || '', data, before, isSuperAdmin(req)); // companyId/role/status escalation engeli
         // SUNUCUNUN TÜRETTİĞİ ALAN (D3, lib/tenantErisim.sunucuAlanKorumaSql): alan `injectTenant`'ta gövdeden düştü; çakışma dalında
         // YAZIM ANINDAKİ satır değeri SQL'de korunur. Yayın ve yanıt yazılan GERÇEK satırdan (RETURNING): JS verisi işareti
-        // taşımadığından yayın istemcinin canlı listesinden işareti silerdi. Türetilen alanı olmayan koleksiyonda ifade `EXCLUDED.data`.
+        // taşımadığından yayın istemcinin canlı listesinden işareti silerdi. Korumasız koleksiyonda ifade `EXCLUDED.data`.
+        // + SUNUCUNUN KORUDUĞU KAYNAK DEĞERİ (2026-10-19, `orders.source` MF / mağaza — collections.SUNUCU_KAYNAK_DEGERLERI): aynı
+        //   ifade ve aynı kural; satır korunan değeri taşıyorsa yazımdan sonra da taşır (koşul: tenantErisim.sunucuKorumaVar).
         const putYazim = await docsDb.query(
           `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
            ON CONFLICT (coll, id) DO UPDATE SET data = ${sunucuAlanKorumaSql(coll)}, updated_at = now() RETURNING data`,
           [coll, realId, JSON.stringify(data)],
         );
-        if (sunucuTuretilenAlanlar(coll).length && putYazim.rows[0]?.data) data = putYazim.rows[0].data as Record<string, unknown>;
+        if (sunucuKorumaVar(coll) && putYazim.rows[0]?.data) data = putYazim.rows[0].data as Record<string, unknown>;
         if (coll === 'settings' && realId === 'aiConfig') invalidateGeminiKeyCache(); // yeni anahtar anında etkir
         broadcastDocChange(coll, 'set', id, data, ayarKapsami(coll, perCompany, cid)); // orijinal id ile yayınla (client settings/{id} dinler)
         // before yalnızca audited/scoped/merge'de çekildiği için logu bununla sınırla
@@ -2343,7 +2347,7 @@ async function startServer() {
            ON CONFLICT (coll, id) DO UPDATE SET data = ${sunucuAlanKorumaSql(coll)}, updated_at = now() RETURNING data`,
           [coll, realId, JSON.stringify(data)],
         );
-        if (sunucuTuretilenAlanlar(coll).length && patchYazim.rows[0]?.data) data = patchYazim.rows[0].data as Record<string, unknown>;
+        if (sunucuKorumaVar(coll) && patchYazim.rows[0]?.data) data = patchYazim.rows[0].data as Record<string, unknown>;
         if (coll === 'settings' && realId === 'aiConfig') invalidateGeminiKeyCache(); // yeni anahtar anında etkir
         broadcastDocChange(coll, 'set', id, data, ayarKapsami(coll, perCompany, cid)); // orijinal id ile yayınla
         // 'kim neyi değiştirdi' diff'i kaydet (bloklamadan); before her zaman çekildi.
@@ -2432,7 +2436,13 @@ async function startServer() {
         const data = upd.rows[0]?.data;
         broadcastDocChange(coll, 'set', id, data as Record<string, unknown>);
         res.json({ id, data });
-      } catch (e) { dbErr(e, res, 'INCREMENT', coll); }
+      } catch (e) {
+        // Alan sayıya çevrilemiyor (PG `22P02`, ör. `orders.source` metni — korunan kaynak değeri `mikro-fatura` dâhil; şartname
+        // «sipariş kaynak kapısı» H6): istemci hatası, 500 DEĞİL. İleti alana özgü değil (alan adı öğretmez); UPDATE tek deyim,
+        // satır değişmez. Korunan değer bu yoldan ÜRETİLEMEZ (sonuç hep sayıdır).
+        if ((e as { code?: unknown } | null)?.code === '22P02') { res.status(400).json({ error: 'Bu alan artırılamaz.' }); return; }
+        dbErr(e, res, 'INCREMENT', coll);
+      }
     });
 
     // Atomik compare-and-set (CAS) — yarış koşulsuz "claim" için.
@@ -2478,8 +2488,11 @@ async function startServer() {
               isSuperAdmin(req),
             )
           : await injectTenant(req, coll, set as Record<string, unknown>, rows[0].data as Record<string, unknown>);
+        // YAZIM ANINDA koruma (2026-10-19, şartname «sipariş kaynak kapısı» H4): PUT / PATCH ile AYNI yardımcı — sunucunun türettiği
+        // alan ve koruduğu kaynak değeri (`orders.source` MF / mağaza) satırdaki GÜNCEL değerden korunur; `set` ile SELECT arasına
+        // düşen sunucu yazımı ezilmez. Korumasız koleksiyonda ifade `(docs.data || $4::jsonb)` (davranış birebir eski).
         const upd = await docsDb.query(
-          `UPDATE docs SET data = data || $4::jsonb, updated_at = now()
+          `UPDATE docs SET data = ${sunucuAlanKorumaSql(coll, '(docs.data || $4::jsonb)')}, updated_at = now()
            WHERE coll = $1 AND id = $2 AND data->>$3 = $5 RETURNING data`,
           [coll, id, field, JSON.stringify(setYazilacak), String(expect)],
         );

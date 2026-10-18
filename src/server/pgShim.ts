@@ -19,7 +19,7 @@
 import { EventEmitter } from 'events';
 import pg from 'pg';
 import { FieldValue } from 'firebase-admin/firestore';
-import { ayarSahibi, satirSahibiAlani, sunucuAlanKorumaSql, sunucuTuretilenAlanlar } from '../lib/tenantErisim.js';
+import { ayarSahibi, satirSahibiAlani, sunucuAlanKorumaSql, sunucuKorumaVar } from '../lib/tenantErisim.js';
 
 export interface PgShimDeps {
   /** `pgServerTimestamp` PG modunda mi Firestore modunda mi oldugunu bilmeli. */
@@ -246,8 +246,12 @@ export class PgDocRef {
    * talep geçerdi (bugün de `mikroFaturaNo` için aynı pencere vardı). Yazım ifadesi artık `/api/db` PUT / PATCH ile AYNI
    * yardımcıdan (tenantErisim.sunucuAlanKorumaSql): çakışma / güncelleme anında satırdaki GÜNCEL değer korunur — JS'te okunan
    * değerden geri konmaz. Yayın yazılan GERÇEK satırdan (RETURNING): bayat işaretli JS verisi istemcinin canlı listesini
-   * yanıltmasın. Türetilen alanı olmayan koleksiyonda SQL ve yayın birebir eski. Sunucunun KENDİ işaret yazımları doğrudan
-   * SQL'dir (bu sınıftan geçmez). Çit: server/faturaCiftKesim.zincir.test («Y1»).
+   * yanıltmasın. Korumasız koleksiyonda SQL ve yayın birebir eski. Sunucunun KENDİ işaret yazımları doğrudan SQL'dir (bu sınıftan
+   * geçmez). Çit: server/faturaCiftKesim.zincir.test («Y1»).
+   * + SUNUCUNUN KORUDUĞU KAYNAK DEĞERİ (2026-10-19, collections.SUNUCU_KAYNAK_DEGERLERI — `orders.source` MF / mağaza): aynı ifade,
+   *   TEK YÖNLÜ (satır korunan değeri taşıyorsa o kalır; gelen tarafa bakılmaz): sunucunun MF yaratması (`faturadanSiparis` →
+   *   `batch.set`) ve korumasız satırın üstüne yazması bozulmaz; MF / mağaza satırının kaynağını hiçbir sunucu yazıcısı (ör. kanal
+   *   eşleşmesi `source: 'Trendyol'`) çeviremez. Koşul `sunucuKorumaVar`. Çit: server/siparisKaynakKapisi.zincir.test.
    */
   async set(data: PgDocData, opts?: { merge?: boolean }): Promise<void> {
     const incoming = resolveSentinels(data) as PgDocData;
@@ -256,7 +260,7 @@ export class PgDocRef {
       const { rows } = await this.pool.query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [this.coll, this.id]);
       final = mergeDocData((rows[0]?.data as PgDocData) ?? {}, incoming);
     }
-    const koru = sunucuTuretilenAlanlar(this.coll).length > 0;
+    const koru = sunucuKorumaVar(this.coll);
     const yazim = await this.pool.query(
       `INSERT INTO docs (coll, id, data) VALUES ($1, $2, $3)
        ON CONFLICT (coll, id) DO UPDATE SET data = ${sunucuAlanKorumaSql(this.coll)}, updated_at = now()${koru ? ' RETURNING data' : ''}`,
@@ -281,7 +285,7 @@ export class PgDocRef {
     }
     const final = mergeDocData(rows[0].data as PgDocData, patch);
     // Sunucunun türettiği alan: `set` ile AYNI kural (yukarıdaki not) — güncelleme anındaki satır değeri korunur.
-    const koru = sunucuTuretilenAlanlar(this.coll).length > 0;
+    const koru = sunucuKorumaVar(this.coll);
     const yazim = await this.pool.query(
       koru
         ? `UPDATE docs SET data = ${sunucuAlanKorumaSql(this.coll, '$3::jsonb')}, updated_at = now() WHERE coll = $1 AND id = $2 RETURNING data`

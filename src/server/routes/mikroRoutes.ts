@@ -53,6 +53,7 @@ import {
 import { pgServerTimestamp, resolveSentinels } from '../pgShim.js';
 import { faturaGecisiYaz, faturaGuncelIsareti, faturaSonucunuYaz, faturaTalebiniGeriAl, faturaTalepEt, type FaturaBaglami, type FaturaHavuzu, type TalepSonucu } from '../mikro/faturaGonderimi.js';
 import { FATURA_GONDERIM_ALANI } from '../../lib/faturaGonderimi.js';
+import { MF_KAYNAGI, MF_KIMLIK_ONEKI } from '../../lib/mfKaynagi.js';
 import { mikroGovdeHatasiMi } from '../mikro/govdeHatasi.js';
 import { stokGovdesi, cariGovdesi } from '../mikro/govdeStokCari.js';
 import { siparisGovdesi } from '../mikro/govdeSiparis.js';
@@ -4719,7 +4720,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     const siparisAdi = (o: Record<string, unknown>) => (typeof o.orderNumber === 'string' && o.orderNumber ? o.orderNumber : String(o.id));
     let iBatch = C.getAdminDb().batch(); let iOps = 0;
     for (const o of mevcutSip) {
-      if (o.source !== 'mikro-fatura') {
+      if (o.source !== MF_KAYNAGI) {
         const ettn = ettnAnahtari(o.ettn);
         if (ettn && redEttnleri.has(ettn) && o.status !== 'Cancelled') {
           cetpaSiparisliRed.push(`${siparisAdi(o)}${typeof o.mikroFaturaNo === 'string' && o.mikroFaturaNo ? ` (fatura ${o.mikroFaturaNo})` : ''}`);
@@ -4800,7 +4801,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       if (!rol || EXTERNAL_ROLES.includes(rol)) return res.status(403).json({ success: false, error: 'Bu işlem için yetkiniz yok.' });
       const cid = await C.reqCompanyId(req);
       const id = String((req.body as { id?: unknown } | undefined)?.id ?? '');
-      if (!id.startsWith(`mikrofat__${cid}__`)) {
+      if (!id.startsWith(`${MF_KIMLIK_ONEKI}${cid}__`)) {
         return res.status(400).json({ success: false, error: 'Yalnız Mikro faturasından türeyen sipariş bu yolla silinir.' });
       }
       const ref = C.getAdminDb().collection('orders').doc(id);
@@ -4808,7 +4809,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const o = (snap.exists ? snap.data() : undefined) as Record<string, unknown> | undefined;
       // Başka kiracının kaydı "yok" gibi görünür (varlığı sızmaz).
       if (!o || o.companyId !== cid) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
-      if (o.source !== 'mikro-fatura') return res.status(400).json({ success: false, error: 'Yalnız Mikro faturasından türeyen sipariş bu yolla silinir.' });
+      if (o.source !== MF_KAYNAGI) return res.status(400).json({ success: false, error: 'Yalnız Mikro faturasından türeyen sipariş bu yolla silinir.' });
       // Notta e-posta DEĞİL görünen ad (kişisel veri sipariş okuyan herkese açılmasın); yoksa "bir kullanıcı".
       let silenAd: string | null = null;
       try {
@@ -4899,7 +4900,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // gönder" düğmesi duruyordu. Eksik alanı olan eski kayıtları onar.
       const backfillGerekli = mevcutSiparisler.filter(o => {
         const x = o as Record<string, unknown>;
-        return x.source === 'mikro-fatura' && (x.faturali !== true || !x.mikroFaturaNo);
+        return x.source === MF_KAYNAGI && (x.faturali !== true || !x.mikroFaturaNo);
       });
 
       // Cari adları: PG aynası (tek sorgu). Kalemler: kiracının stok hareketleri + stok adları (fatura başına sorgu YOK).
@@ -4916,7 +4917,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         if (sku && ad && !stokAdlari.has(sku)) stokAdlari.set(sku, ad);
       }
       const mevcutMf = new Map(mevcutSiparisler
-        .filter(o => (o as Record<string, unknown>).source === 'mikro-fatura')
+        .filter(o => (o as Record<string, unknown>).source === MF_KAYNAGI)
         .map(o => [String(o.id ?? ''), o as Record<string, unknown>]));
       // Kalem sayaçları YAZILAN kalemler için (yeni sipariş + otomatik doldurulan); yenileme adayları AYRI sayılır.
       let miktarsizKalem = 0, tutarsizKalem = 0, kalemKaynagiYok = 0, bosDoldurulan = 0;

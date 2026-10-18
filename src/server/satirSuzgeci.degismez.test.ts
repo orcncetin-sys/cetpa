@@ -146,7 +146,7 @@ describe('/api/db kaçakları kapalı', () => {
     // PATCH / koşullu yazma / silme yüklemi SORMAZ (Yönetici'nin kapatma ve temizlik yolları).
     expect(say(SERVER, /baskasininSahipKaydiMi\(/)).toBe(1);
   });
-  it('PUT ve PATCH: dış rol, sunucunun ürettiği biçimde (`__`) kimlikle yeni kayıt açamaz', () => {
+  it('PUT ve PATCH: dış rol sunucunun ürettiği biçimde (`__`) kimlikle, iç rol dâhil HER rol `mikrofat__` önekli kimlikle yeni kayıt açamaz', () => {
     // Kapı "var VE görünür" ile sorulur ve sahiplik yanıtından ÖNCE gelir: "yok" ile "var ama görünmez" aynı yanıtı alır.
     const GORUNUR = /^\s*const gorunur = rows\.length > 0 && await ownsDoc\(req, coll, before, realId\);$/;
     const KAPI = /^\s*if \(await ayrilmisKimlikEngeli\(req, res, coll, realId, gorunur\)\) return;$/;

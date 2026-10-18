@@ -58,6 +58,12 @@ describe('SAHIP_SATIR_ALANI — tablo', () => {
     expect(ayrilmisKimlikAdayi('syncJobs', id, false)).toBe(false);
     for (const r of [...YONETICI_DISI, 'Admin' as AppRole]) expect(ayrilmisKimlikMi('syncJobs', id, r, false), String(r)).toBe(false);
   });
+  it('`mikrofat__` önek dalı (K2, 2026-10-19) koleksiyon kapısından SONRA gelir: syncJobs ve leads için HİÇBİR rolde engel değil', () => {
+    for (const coll of ['syncJobs', 'leads']) for (const id of ['mikrofat__A__CTP-1', 'mikrofat__A__CTP-1_satis1']) {
+      expect(ayrilmisKimlikAdayi(coll, id, false), `${coll} / ${id}`).toBe(false);
+      for (const r of [...YONETICI_DISI, 'Admin' as AppRole]) expect(ayrilmisKimlikMi(coll, id, r, false), `${coll} / ${id} / ${String(r)}`).toBe(false);
+    }
+  });
   it('rbac satırı DEĞİŞMEDİ: kuyruğu her iç rol okur / yazar, dış rol hiçbirini; silme Yönetici + Müdür', () => {
     for (const r of STAFF_ROLES) { expect(isAllowed(r, 'syncJobs', 'read'), r).toBe(true); expect(isAllowed(r, 'syncJobs', 'write'), r).toBe(true); }
     for (const r of EXTERNAL_ROLES) { expect(isAllowed(r, 'syncJobs', 'read'), r).toBe(false); expect(isAllowed(r, 'syncJobs', 'write'), r).toBe(false); }

@@ -59,6 +59,7 @@
  *   dokümanına EŞLER. İkisini karıştırma.
  */
 import { bilinenSayi } from '../../utils/para.js';
+import { MF_KAYNAGI, MF_KIMLIK_ONEKI } from '../../lib/mfKaynagi.js';
 import { kalemleriCoz, faturaAnahtari, satirMasrafi, kdvOranaUymuyor, type StokHareketi, type NetKaynagi } from '../../lib/stokFiyat.js';
 
 /** Bir alanın "hiçbir satırda okunamadı" sayılması için gereken en az satır sayısı. */
@@ -353,7 +354,7 @@ export function faturadanSiparis(
   const sira = metin(baslik.cha_evrakno_sira).trim();
   if (!sira) return null;
 
-  const id = `mikrofat__${opts.companyId}__${seri}-${sira}`.replace(/[/\\ ]/g, '_');
+  const id = `${MF_KIMLIK_ONEKI}${opts.companyId}__${seri}-${sira}`.replace(/[/\\ ]/g, '_');
   const tarih = metin(baslik.cha_tarihi).slice(0, 10);
   const cariKod = metin(baslik.cha_kod).trim();
   const tutarVar = bilinenSayi(baslik.cha_meblag);
@@ -378,7 +379,7 @@ export function faturadanSiparis(
     ...(tutarVar ? { totalPrice: Number(baslik.cha_meblag) } : {}),
     lineItems: [...satirlar],
     orderDate: tarih || null,
-    source: 'mikro-fatura',
+    source: MF_KAYNAGI,               // lib/mfKaynagi — TEK KAYNAK (okuyanlar ve `/api/db` kapısı aynı sabitten)
     mikroEvrak: { seri, sira },
     // Kaynak zaten kesilmiş bir satış faturası — listede "FATURASIZ" rozeti yanlıştı
     // (2026-09-03 SS bulgusu); ✓ Mikro rozeti evrak no'sunu gösterir.

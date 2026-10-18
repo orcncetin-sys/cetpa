@@ -24,6 +24,7 @@
  * NULL tutar / vergi satırı ayrıca sayılır ve o toplam `null` döner.
  */
 import { FT_ISKONTO_DESENI } from '../../lib/faturaMatrahi.js';
+import { MF_KAYNAGI } from '../../lib/mfKaynagi.js';
 import { iptalMi } from './faturaTani.js';
 import { kes } from './ebelgeDurumTani.js';
 
@@ -274,12 +275,12 @@ export const CETPA_FATURA_SORGUSU: { sql: string; params: string[] } = {
   sql: `SELECT data->>'companyId' AS "companyId", data->>'cha_evrakno_seri' AS seri, COUNT(*)::int AS adet FROM docs WHERE coll = $1 GROUP BY 1, 2`,
   params: ['mikroFaturalar'],
 };
-/** (5) Mikro faturasından türeyen siparişler (`source = 'mikro-fatura'`, eslemeFatura.ts:381): kiracı × `mikroEvrak.seri`
+/** (5) Mikro faturasından türeyen siparişler (`source = MF_KAYNAGI` — lib/mfKaynagi, eslemeFatura.faturadanSiparis): kiracı × `mikroEvrak.seri`
  *  (eslemeFatura.ts:382) × `faturali` değeri → adet. `jsonb_typeof` alanın YOKLUĞUNU (NULL) JSON null / boolean / başka tipten ayırır. */
 export const CETPA_SIPARIS_SORGUSU: { sql: string; params: string[] } = {
   sql: `SELECT data->>'companyId' AS "companyId", data->'mikroEvrak'->>'seri' AS seri, jsonb_typeof(data->'faturali') AS tur, ` +
     `data->>'faturali' AS deger, COUNT(*)::int AS adet FROM docs WHERE coll = $1 AND data->>'source' = $2 GROUP BY 1, 2, 3, 4`,
-  params: ['orders', 'mikro-fatura'],
+  params: ['orders', MF_KAYNAGI],
 };
 
 // ── Yanıt biçimleyiciler ─────────────────────────────────────────────────────

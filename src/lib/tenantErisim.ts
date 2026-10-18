@@ -10,8 +10,9 @@
  * `cid()` GETTER'dır (tembel): USER_SCOPED ve sınıfsız koleksiyonlarda kiracı sorgusu HİÇ
  * yapılmaz — eski davranış korunur (getUserCompanyId 60 sn önbellekli ama ilk çağrı DB'ye gider).
  */
-import { TENANT_COLLECTIONS as TENANT_LIST, USER_SCOPED_COLLECTIONS as USER_SCOPED_LIST, SERVER_ONLY_COLLECTIONS as SERVER_ONLY_LIST, DIS_ROL_SATIR_ALANI, DIS_ROL_YAZAMAZ, SAHIP_SATIR_ALANI, SUNUCU_TURETILEN_ALANLAR } from './collections';
+import { TENANT_COLLECTIONS as TENANT_LIST, USER_SCOPED_COLLECTIONS as USER_SCOPED_LIST, SERVER_ONLY_COLLECTIONS as SERVER_ONLY_LIST, DIS_ROL_SATIR_ALANI, DIS_ROL_YAZAMAZ, SAHIP_SATIR_ALANI, SUNUCU_TURETILEN_ALANLAR, SUNUCU_KAYNAK_DEGERLERI } from './collections';
 import { STAFF_ROLES, type AppRole } from './rbac';
+import { MF_KIMLIK_ONEKI } from './mfKaynagi';
 
 const TENANT = new Set<string>(TENANT_LIST);
 const USER_SCOPED = new Set<string>(USER_SCOPED_LIST);
@@ -75,23 +76,29 @@ export function satirGorunur(coll: string, rol: AppRole | null | undefined, k: {
 
 /**
  * AYRILMIŞ KİMLİK: `__` içeren kimlikleri sunucu üretir (`mikrofat__<cid>__<seri>-<sıra>`, `shopify__<özet>`) ve tahmin
- * edilebilir olanları vardır. Satır süzgeçli koleksiyonda DIŞ ROL, kendisine GÖRÜNEN bir kaydı olmayan böyle bir kimliğe
- * yazamaz: önceden açarsa (kimlik kapma) sunucunun sonradan aynı kimliğe yazdığı sipariş — damgalanan sahiplik alanı
- * yüzünden — ona görünür olurdu. `gorunur` = kayıt VAR ve bu kullanıcıya görünür; "yok" ile "var ama görünmez" aynı sonucu
- * verir (yanıt farkı tahmin edilebilir kimliklerin VARLIĞINI sızdırırdı).
+ * edilebilir olanları vardır. Satır süzgeçli koleksiyonda kendisine GÖRÜNEN bir kaydı olmayan böyle bir kimliğe yazamayanlar:
+ *   • DIŞ ROL (ve rolü çözülemeyen) — HER `__` kimliğinde: önceden açarsa (kimlik kapma) sunucunun sonradan aynı kimliğe yazdığı
+ *     sipariş — damgalanan sahiplik alanı yüzünden — ona görünür olurdu;
+ *   • İÇ ROL DÂHİL HER ROL — yalnız `MF_KIMLIK_ONEKI` ile BAŞLAYAN kimlikte (2026-10-19, şartname «sipariş kaynak kapısı» K2 / H7):
+ *     iç rol `mikrofat__<cid>__<seri>-<sıra>` kimliğiyle önceden kayıt açarsa gece türetmesi o faturayı «zaten var» sayıp atlar
+ *     (routes/mikroRoutes `mevcutIdler`), MF siparişi ne türer ne onarılır. Var olan (görünen) MF siparişine yazım değişmez; öteki
+ *     `__` kimlikleri (`shopify__…` yalnız sunucuda üretilir) iç role kapanmaz.
+ * `gorunur` = kayıt VAR ve bu kullanıcıya görünür; "yok" ile "var ama görünmez" aynı sonucu verir (yanıt farkı tahmin edilebilir
+ * kimliklerin VARLIĞINI sızdırırdı).
  */
 export function ayrilmisKimlikMi(coll: string, id: string, rol: AppRole | null | undefined, gorunur: boolean): boolean {
-  return ayrilmisKimlikAdayi(coll, id, gorunur) && satirAlani(coll, rol) !== null;
+  return ayrilmisKimlikAdayi(coll, id, gorunur) && (satirAlani(coll, rol) !== null || id.startsWith(MF_KIMLIK_ONEKI));
 }
 
 /**
  * `ayrilmisKimlikMi`'nin ROL SORMADAN bilinen kısmı (ucuz ön eleme): aday değilse hiçbir rolde engel yoktur, rol sorgusuna gerek
- * kalmaz. Kararın kendisi DEĞİL: adayı engele çeviren, rolün dış ya da çözülemez olmasıdır.
+ * kalmaz. Kararın kendisi DEĞİL: adayı engele çeviren, rolün dış ya da çözülemez olması YA DA kimliğin `MF_KIMLIK_ONEKI` ile
+ * başlamasıdır (iç rol dâhil).
  * Eskiden bu üç koşul server.ts sarmalayıcısında KOPYA olarak duruyordu ve saf işlevden önce dönüyordu: tek işaret hatası
  * kapıyı sessizce devre dışı bırakıyor, testler yeşil kalıyordu.
- * YALNIZ dış rol haritası (DIS_ROL_SATIR_ALANI): SAHİP süzgeçli koleksiyona (`syncJobs`) BİLEREK uygulanmaz — kuyruk işinin
- * kimliği gönderilen varlığın kimliğinden türer ve o `__` taşıyabilir (`mikro_…_mikrofat__<cid>__<seri>-<sıra>_<uid>`);
- * kapı uygulansaydı meşru iş 403 alırdı.
+ * YALNIZ dış rol haritası (DIS_ROL_SATIR_ALANI — koleksiyon kapısı önek dalından ÖNCE): SAHİP süzgeçli koleksiyona (`syncJobs`)
+ * BİLEREK uygulanmaz — kuyruk işinin kimliği gönderilen varlığın kimliğinden türer ve o `__` (hatta `mikrofat__` öneki) taşıyabilir
+ * (`mikro_…_mikrofat__<cid>__<seri>-<sıra>_<uid>`); kapı uygulansaydı meşru iş 403 alırdı.
  */
 export function ayrilmisKimlikAdayi(coll: string, id: string, gorunur: boolean): boolean {
   return !gorunur && id.includes('__') && DIS_ROL_SATIR_ALANI.has(coll);
@@ -233,10 +240,13 @@ export function yasakAlanlariKoru(coll: string, onceki: Record<string, unknown> 
  */
 export async function kiraciDamgala(coll: string, gelen: Record<string, unknown>, k: KiraciKimligi, onceki?: Record<string, unknown>): Promise<Record<string, unknown>> {
   // SUNUCUNUN TÜRETTİĞİ ALANLAR (collections.SUNUCU_TURETILEN_ALANLAR — e-Fatura gönderim işareti): ROLDEN BAĞIMSIZ, sessizce
-  // düşer. Önceki değer burada geri KONMAZ: PUT / PATCH çakışma dalında YAZIM ANINDAKİ satır değerini SQL korur
-  // (`sunucuAlanKorumaSql`), cas `data || set` ile korur. JS'te okunan `onceki`den geri koymak, SELECT ile yazım arasına düşen
-  // sunucu talebini silerdi (şartname «e-Fatura çift kesim» D3 / SV-4).
-  const data = sunucuAlanlariniDusur(coll, gelen);
+  // düşer. Önceki değer burada geri KONMAZ: PUT / PATCH / cas yazımında YAZIM ANINDAKİ satır değerini SQL korur
+  // (`sunucuAlanKorumaSql`; cas `(docs.data || $4::jsonb)` biçimiyle). JS'te okunan `onceki`den geri koymak, SELECT ile yazım
+  // arasına düşen sunucu talebini silerdi (şartname «e-Fatura çift kesim» D3 / SV-4).
+  // SUNUCUNUN KORUDUĞU KAYNAK DEĞERLERİ (collections.SUNUCU_KAYNAK_DEGERLERI — `orders.source`: MF / mağaza): ROLDEN BAĞIMSIZ,
+  // sessiz; gelen korunan değer düşer, önceki korunan değer `onceki`den taşınır (`kaynakDegeriniUygula`). Yazım anındaki satır
+  // SQL'de ayrıca korunur (tek yönlü CASE — `sunucuAlanKorumaSql`).
+  const data = kaynakDegeriniUygula(coll, sunucuAlanlariniDusur(coll, gelen), onceki);
   if (TENANT.has(coll)) {
     // SAHİP damgası (K10 — collections.SAHIP_SATIR_ALANI): ROLDEN BAĞIMSIZ, Yönetici oluştururken de damgalanır. Kayıtta sahip
     // VARSA o korunur — devredilemez: yamada / gövdede gelen değer 403 ÜRETMEZ, sessizce ezilir (`companyId` / `userId` ile
@@ -278,22 +288,74 @@ export function sunucuAlanlariniDusur(coll: string, data: Record<string, unknown
 }
 
 /**
- * `… SET data = <bu ifade>` — sunucunun türettiği alanı YAZIM ANINDA koruyan ifade. `yeni` = yazılacak verinin SQL ifadesi:
+ * Sunucunun koruduğu kaynak değerleri (collections.SUNUCU_KAYNAK_DEGERLERI; yoksa null). Alan adı ve değerler SQL'e gömülür →
+ * alan yalnız `[A-Za-z0-9_]`, değer yalnız `[A-Za-z0-9_-]` kabul edilir (fırlatır). Boş değer listesi «koruma yok» sayılır.
+ */
+export function sunucuKaynakDegerleri(coll: string): { alan: string; degerler: readonly string[] } | null {
+  const k = SUNUCU_KAYNAK_DEGERLERI.get(coll);
+  if (!k || k.degerler.length === 0) return null;
+  if (!/^[A-Za-z0-9_]+$/.test(k.alan)) throw new Error(`SUNUCU_KAYNAK_DEGERLERI: geçersiz alan adı '${k.alan}'`);
+  for (const d of k.degerler) if (!/^[A-Za-z0-9_-]+$/.test(d)) throw new Error(`SUNUCU_KAYNAK_DEGERLERI: geçersiz değer '${d}'`);
+  return k;
+}
+
+/**
+ * Yazım gövdesinde sunucunun koruduğu kaynak değeri kuralı (saf; `kiraciDamgala` — yalnız `/api/db` yolu, pgShim çağırmaz).
+ * `data` = birleştirilmiş veri (PUT / PATCH) ya da ham gövde (POST, cas `set`); `onceki` = okunan satır (POST'ta yok, satırsız
+ * PUT / PATCH'te `{}`):
+ *   • gövdedeki korunan değer KOŞULSUZ düşer (birleştirilmiş veride önceki satırdan gelen de); alanın nokta yollu anahtarı
+ *     (`source.x` — ham gövdede) da düşer: metin değerli köken alanının alt yolu meşru yazım değildir;
+ *   • `onceki`deki değer korunan değerse sonuç ONU taşır (gelen başka değer, `null`, alanın yokluğu fark etmez) — PUT / PATCH'in
+ *     INSERT dalında (satır okuma ile yazım arasında silindi) kayıt korunan değerle geri gelir, «hayalet Cetpa siparişi» doğmaz;
+ *   • `onceki`deki değer korunan değer DEĞİLSE ve gövdeden korunan değer düştüyse önceki değer (varsa) geri konur, yoksa alan yok.
+ * Korunan değer burada ASLA eklenmez (yalnız `onceki`den taşınır). Rolden bağımsız, sessiz. Yazım ANINDAKİ satırı SQL korur
+ * (`sunucuAlanKorumaSql`): bu işlev yalnız gövdeyi düzeltir.
+ */
+export function kaynakDegeriniUygula(coll: string, data: Record<string, unknown>, onceki?: Record<string, unknown>): Record<string, unknown> {
+  const k = sunucuKaynakDegerleri(coll);
+  if (!k) return data;
+  const korunan = (v: unknown): v is string => typeof v === 'string' && k.degerler.includes(v);
+  const gelenKorunan = korunan(data[k.alan]);
+  const temiz = Object.fromEntries(Object.entries(data).filter(([ad, v]) => !(ad === k.alan && korunan(v)) && !ad.startsWith(`${k.alan}.`)));
+  const eski = onceki?.[k.alan];
+  if (korunan(eski)) return { ...temiz, [k.alan]: eski };
+  if (gelenKorunan && onceki && Object.prototype.hasOwnProperty.call(onceki, k.alan)) return { ...temiz, [k.alan]: eski };
+  return temiz;
+}
+
+/** Bu koleksiyonun yazımında sunucu koruması var mı (türetilen alan VEYA kaynak değeri)? Varsa yazım `sunucuAlanKorumaSql`
+ *  ifadesiyle yapılır ve yanıt / yayın yazılan GERÇEK satırdan (RETURNING) verilir — server.ts PUT / PATCH, pgShim `set` / `update`. */
+export function sunucuKorumaVar(coll: string): boolean {
+  return sunucuTuretilenAlanlar(coll).length > 0 || sunucuKaynakDegerleri(coll) !== null;
+}
+
+/**
+ * `… SET data = <bu ifade>` — sunucunun türettiği alanı ve koruduğu kaynak değerini YAZIM ANINDA koruyan ifade. `yeni` = yazılacak
+ * verinin SQL ifadesi:
  *   • `EXCLUDED.data` (varsayılan) — `/api/db` PUT ve PATCH'in son yazımı (server.ts) ve pgShim `set`in çakışma dalı
  *     (`INSERT … ON CONFLICT (coll, id) DO UPDATE SET data = <ifade>`);
- *   • `$3::jsonb` — pgShim `update` (`UPDATE docs SET data = <ifade> WHERE …`; şartname «e-Fatura çift kesim» Y1).
- * Sunucunun türettiği alan yoksa ifade `yeni`nin KENDİSİDİR (davranış birebir eski). Varsa gelen veriden alan çıkarılır ve YAZIM
- * ANINDAKİ satırın (`docs.data` — iki deyimde de güncellenen satırın ESKİ değeri) değeri geri konur — tek ifadede, satır kilidi
+ *   • `$3::jsonb` — pgShim `update` (`UPDATE docs SET data = <ifade> WHERE …`; şartname «e-Fatura çift kesim» Y1);
+ *   • `(docs.data || $4::jsonb)` — `/api/db` cas (`UPDATE docs SET data = <ifade> WHERE … AND data->>$3 = $5`; şartname «sipariş
+ *     kaynak kapısı» H4).
+ * Koruma yoksa ifade `yeni`nin KENDİSİDİR (davranış birebir eski). Türetilen alan varsa gelen veriden alan çıkarılır ve YAZIM
+ * ANINDAKİ satırın (`docs.data` — üç deyimde de güncellenen satırın ESKİ değeri) değeri geri konur — tek ifadede, satır kilidi
  * altında: oku-değiştir-yaz kalıbının SELECT'i ile yazımı arasına düşen sunucu talebi korunur; araya düşen geri alma / çözüm
- * işareti sildiyse bayat okumadaki işaret de geri GELMEZ. Satır yoksa (INSERT dalı) ifade koşmaz: `/api/db`'de alan zaten
- * `kiraciDamgala`'da düşmüştür; pgShim'de sunucunun kendi verisi aynen yazılır. İfade alan listesinden üretilir (kopya metin yok).
+ * işareti sildiyse bayat okumadaki işaret de geri GELMEZ. Kaynak değeri (collections.SUNUCU_KAYNAK_DEGERLERI) TEK YÖNLÜDÜR:
+ * satır korunan değerlerden birini taşıyorsa o değer KALIR, taşımıyorsa gelen veri olduğu gibi yazılır — gelen tarafa (`EXCLUDED`
+ * / `$3` / `$4`) bakan dal YOK; iki yönlü dal pgShim'de sunucunun kendi `MF_KAYNAGI` yazımını düşürürdü. Satır yoksa (INSERT dalı)
+ * ifade koşmaz: `/api/db`'de gövde zaten `kiraciDamgala`'da düzeltilmiştir; pgShim'de sunucunun kendi verisi aynen yazılır.
+ * İfade alan / değer listesinden üretilir (kopya metin yok).
  */
 export function sunucuAlanKorumaSql(coll: string, yeni = 'EXCLUDED.data'): string {
   const alanlar = sunucuTuretilenAlanlar(coll);
-  if (alanlar.length === 0) return yeni;
+  const kaynak = sunucuKaynakDegerleri(coll);
+  if (alanlar.length === 0 && !kaynak) return yeni;
   const cikar = alanlar.map(a => ` - '${a}'`).join('');
   const koru = alanlar.map(a => ` || CASE WHEN docs.data ? '${a}' THEN jsonb_build_object('${a}', docs.data->'${a}') ELSE '{}'::jsonb END`).join('');
-  return `(${yeni}${cikar})${koru}`;
+  const govde = alanlar.length > 0 ? `(${yeni}${cikar})${koru}` : yeni;
+  if (!kaynak) return govde;
+  const liste = kaynak.degerler.map(d => `'${d}'`).join(', ');
+  return `${govde} || CASE WHEN docs.data->>'${kaynak.alan}' IN (${liste}) THEN jsonb_build_object('${kaynak.alan}', docs.data->'${kaynak.alan}') ELSE '{}'::jsonb END`;
 }
 
 /**

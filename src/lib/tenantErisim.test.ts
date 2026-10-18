@@ -342,7 +342,7 @@ describe('dış rol satır süzgeci — orders (2026-10-02)', () => {
   });
 });
 
-describe('ayrilmisKimlikMi — dış rol, sunucunun ürettiği biçimde (`__`) kimliğe yazamaz (kimlik kapma)', () => {
+describe('ayrilmisKimlikMi — dış rol sunucunun ürettiği biçimde (`__`) kimliğe, iç rol dâhil HER rol `mikrofat__` önekli kimliğe yeni kayıt açamaz (kimlik kapma)', () => {
   const DIS: Array<AppRole | null> = [...EXTERNAL_ROLES, null];
   it('dış rol / rolsüz + `__` kimlik + görünür kayıt YOK → engel', () => {
     for (const r of DIS) expect(ayrilmisKimlikMi('orders', 'mikrofat__A__FTR-123', r, false), String(r)).toBe(true);
@@ -355,8 +355,16 @@ describe('ayrilmisKimlikMi — dış rol, sunucunun ürettiği biçimde (`__`) k
   it('kendisine GÖRÜNEN kayıt → engel yok (kendi siparişini güncelleyebilir)', () => {
     for (const r of DIS) expect(ayrilmisKimlikMi('orders', 'a__b', r, true), String(r)).toBe(false);
   });
-  it('HER iç rol → engel yok (sunucu biçimli kimlikle içe aktarma / onarım iç rolün işidir)', () => {
-    for (const r of STAFF_ROLES) expect(ayrilmisKimlikMi('orders', 'mikrofat__A__FTR-123', r, false), r).toBe(false);
+  it('HER iç rol: GÖRÜNMEYEN `mikrofat__` kimliği → engel (K2 — gece türetmesi kapılmış kimliği «zaten var» sayıp atlardı); GÖRÜNEN → serbest', () => {
+    for (const r of STAFF_ROLES) {
+      expect(ayrilmisKimlikMi('orders', 'mikrofat__A__FTR-123', r, false), r).toBe(true);
+      expect(ayrilmisKimlikMi('orders', 'mikrofat__A__FTR-123', r, true), r).toBe(false);   // var olan MF siparişine yazım değişmez
+    }
+  });
+  it('HER iç rol: öteki `__` kimlikleri serbest — `shopify__…` (yalnız sunucuda üretilir), önek BAŞTA değilse (`x_mikrofat__…`), `a__b`', () => {
+    for (const r of STAFF_ROLES) for (const id of ['shopify__abc', 'x_mikrofat__A__1', 'a__b', 'mikrofat_A__1']) {
+      expect(ayrilmisKimlikMi('orders', id, r, false), `${r} / ${id}`).toBe(false);
+    }
   });
   it('`__` içermeyen kimlik ve süzgeçsiz koleksiyon → engel yok', () => {
     expect(ayrilmisKimlikMi('orders', 'rastgeleKimlik20hane', 'Dealer', false)).toBe(false);
@@ -377,12 +385,12 @@ describe('ayrilmisKimlikAdayi — rol SORULMADAN önceki ucuz ön eleme (sunucu 
     expect(ayrilmisKimlikAdayi('leads', 'a__b', false)).toBe(false);                   // süzgeçsiz koleksiyon
     expect(ayrilmisKimlikAdayi(SINIFSIZ, 'a__b', false)).toBe(false);
   });
-  it('ön eleme kararı DEĞİŞTİRMEZ: aday değilse HİÇBİR rolde engel yok; adaysa engel yalnız dış rol / rolsüzde', () => {
-    for (const coll of ['orders', 'leads', SINIFSIZ]) for (const id of ['mikrofat__A__FTR-123', 'rastgeleKimlik20hane']) for (const gorunur of [false, true]) {
+  it('ön eleme kararı DEĞİŞTİRMEZ: aday değilse HİÇBİR rolde engel yok; adaysa engel dış rol / rolsüzde, `mikrofat__` önekinde HER rolde', () => {
+    for (const coll of ['orders', 'leads', SINIFSIZ]) for (const id of ['mikrofat__A__FTR-123', 'shopify__abc', 'rastgeleKimlik20hane']) for (const gorunur of [false, true]) {
       const aday = ayrilmisKimlikAdayi(coll, id, gorunur);
       for (const r of ROLLER) {
         const icRol = r !== null && STAFF_ROLES.includes(r);
-        expect(ayrilmisKimlikMi(coll, id, r, gorunur), `${coll} / ${id} / ${gorunur} / ${r}`).toBe(aday && !icRol);
+        expect(ayrilmisKimlikMi(coll, id, r, gorunur), `${coll} / ${id} / ${gorunur} / ${r}`).toBe(aday && (!icRol || id.startsWith('mikrofat__')));
       }
     }
   });

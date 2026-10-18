@@ -19,6 +19,8 @@
  * stockDiscrepancies / syncJobs / auditLog'u tam bu durumda buldu.
  */
 import { FATURA_GONDERIM_ALANI } from './faturaGonderimi';
+import { MF_KAYNAGI } from './mfKaynagi';
+import { MAGAZA_KAYNAGI } from './magazaKaynagi';
 
 /** İş verisi — `companyId` ile kiracı bazında izole edilir. */
 export const TENANT_COLLECTIONS: readonly string[] = [
@@ -179,7 +181,8 @@ export const SAHIP_SATIR_ALANI: ReadonlyMap<string, string> = new Map([
  *   • POST — gövdedeki alan düşer;
  *   • PUT / PUT?merge=1 / PATCH (nokta yolu dâhil) — alan gövdeden düşer, çakışma dalında YAZIM ANINDAKİ satır değeri SQL'de
  *     korunur (tenantErisim.sunucuAlanKorumaSql; JS'te okunan önceki değerden geri KONMAZ — araya düşen talebi silerdi);
- *   • cas — `set`'ten düşer (`data || set` o anki değeri korur);   • increment — 400 (server.ts SAHIPLIK_ALANLARI).
+ *   • cas — `set`'ten düşer; yazım ifadesi de aynı yardımcıdan (`sunucuAlanKorumaSql(coll, '(docs.data || $4::jsonb)')`);
+ *   • increment — 400 (server.ts SAHIPLIK_ALANLARI).
  * Sunucunun kendi yazımları doğrudan SQL'dir, bu süzgeçten geçmez. Alan adları SQL'e gömüldüğü için yalnız `[A-Za-z0-9_]`
  * (collections.test). `mikroFaturaNo` / `ettn` / `hasInvoice` listeye ALINMAZ (meşru istemci yazıcıları var; çift kesim
  * güvenliği işarete dayanır). Kural tek yerde: lib/tenantErisim (`kiraciDamgala`, `sunucuAlanKorumaSql`); çit:
@@ -187,6 +190,29 @@ export const SAHIP_SATIR_ALANI: ReadonlyMap<string, string> = new Map([
  */
 export const SUNUCU_TURETILEN_ALANLAR: ReadonlyMap<string, readonly string[]> = new Map([
   ['orders', [FATURA_GONDERIM_ALANI]],
+]);
+
+/**
+ * SUNUCUNUN KORUDUĞU KAYNAK DEĞERLERİ (2026-10-19, şartname «sipariş kaynak kapısı» H2): koleksiyon → bir alan ve o alanın YALNIZ
+ * SUNUCUNUN yazdığı değerleri. Alan BÜTÜNÜYLE korunmaz (öteki değerler — `Trendyol`, `manual` … — istemciye açık kalır); korunan
+ * değerler güvenlik kararı verir:
+ *   • `MF_KAYNAGI` ('mikro-fatura', lib/mfKaynagi) — Mikro faturasından türeyen sipariş: raporlar çift sayımı, gece türetmesi
+ *     (routes/mikroRoutes) Cetpa siparişini, e-Fatura talebi (server/mikro/faturaGonderimi) ikinci resmî belgeyi bununla ayırır;
+ *   • `MAGAZA_KAYNAGI` ('shopify_webhook', lib/magazaKaynagi) — çevrim içi mağaza siparişi: e-Fatura reddi, kimliksiz takip ucunda
+ *     gizleme ve LUCA reddi (server.ts) bununla karar verir.
+ * Kural (`SUNUCU_TURETILEN_ALANLAR` ile AYNI katman; ROLDEN BAĞIMSIZ — Yönetici ve süper yönetici dâhil —, SESSİZ):
+ *   • gelen korunan değer HER yazımda düşer (POST, PUT, PUT?merge=1, PATCH — nokta yolu dâhil —, cas); JS'te asla EKLENMEZ;
+ *   • satırda korunan değer VARSA yazımdan sonra da KALIR (gelen başka değer, `null`, tam değiştirmede alanın yokluğu fark etmez):
+ *     YAZIM ANINDAKİ satırdan SQL'de (tenantErisim.sunucuAlanKorumaSql — TEK YÖNLÜ: yalnız `docs.data`ya bakar, gelen tarafa bakan
+ *     dal YOK; pgShim de aynı ifadeyi kullanır ve sunucunun kendi `MF_KAYNAGI` yazımı bozulmaz) ve okunan satırdan JS'te
+ *     (tenantErisim.kaynakDegeriniUygula — INSERT dalı: satır okuma ile yazım arasında silindiyse kayıt korunan değerle döner);
+ *   • satırda korunan değer YOKSA gelen korunan değer düştükten sonra önceki değer (ya da alanın yokluğu) korunur;
+ *   • increment — korunan değer metindir, sayıya çevrilemez: 400 (server.ts, PG `22P02`).
+ * Alan adı ve değerler SQL'e gömülür: alan yalnız `[A-Za-z0-9_]`, değer yalnız `[A-Za-z0-9_-]` (aksi fırlatır —
+ * tenantErisim.sunucuKaynakDegerleri). Çit: server/siparisKaynakKapisi.zincir.test.
+ */
+export const SUNUCU_KAYNAK_DEGERLERI: ReadonlyMap<string, { alan: string; degerler: readonly string[] }> = new Map([
+  ['orders', { alan: 'source', degerler: [MF_KAYNAGI, MAGAZA_KAYNAGI] }],
 ]);
 
 export const USER_SCOPED_COLLECTIONS: readonly string[] = [
