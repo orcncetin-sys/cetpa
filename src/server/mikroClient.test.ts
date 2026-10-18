@@ -327,3 +327,60 @@ describe('mikroPost — MIKRO_YAZIM_SECENEGI: LOKAL kipte istek sayısı değiş
     expect(yazanlar.map(c => c.yetki)).toEqual(['Bearer t2', 'Bearer t2']);
   });
 });
+
+// ── Stub sayacı (2026-10-18, şartname yeniden-deneme v3 § 8.2 commit 0-B; H8 (4); M0.16, M0.17) ─────────────────────────────
+// `sayi` kip koşulundan ÖNCE artar (LOKAL dâhil); `atlanan` yalnız BULUT dalında ve `stubYenidenDeneme: false` iken (5 dk geri
+// çekilme içinde de). Sayaç süreç (modül) içidir → her sınama taze modül.
+describe('stubSayaciOzeti — yöntem başına stub ve ikinci gönderimi YAPILMAYAN stub', () => {
+  const TABAN = 'https://mikro.ornek.test:8094/Api/APIMethods';
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv('MIKRO_API_URL', TABAN);
+    vi.stubEnv('MIKRO_IDM_EMAIL', 'srv@example.test');
+    vi.stubEnv('MIKRO_IDM_PASSWORD', 'sinama');
+    vi.stubEnv('MIKRO_API_KEY', 'anahtar');
+    vi.stubEnv('MIKRO_ALIAS', 'takma');
+    vi.stubGlobal('fetch', async (url: string) => (url.includes('onlinekullanici')
+      ? new Response(JSON.stringify({ access_token: 't', expires_in: 21600 }))
+      : new Response(JSON.stringify({ Method: 'X' }))));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+  const kur = async (lokal: '0' | '1') => {
+    vi.stubEnv('MIKRO_LOCAL', lokal);
+    const m = await import('./mikroClient');
+    const { MIKRO_YAZIM_SECENEGI } = await import('./mikro/yazimSecenegi');
+    m.initMikroClient({ getAdminDb: () => null });
+    return { ...m, MIKRO_YAZIM_SECENEGI };
+  };
+  const sayac = (o: { yontemler: Record<string, { sayi: number; atlanan: number }> }, y: string) =>
+    (o.yontemler[y] ? [o.yontemler[y].sayi, o.yontemler[y].atlanan] : null);
+
+  it('LOKAL: yazan çağrı stub → sayi 1, atlanan 0 (LOKAL\'de ikinci gönderim zaten yok)', async () => {
+    const m = await kur('1');
+    await m.mikroPost('DekontKaydetV2', {}, true, m.MIKRO_YAZIM_SECENEGI);
+    expect(sayac(m.stubSayaciOzeti(), 'DekontKaydetV2')).toEqual([1, 0]);
+  });
+  it('BULUT, `stubYenidenDeneme: false` → 1 / 1; BULUT varsayılan (okuyan) → 1 / 0', async () => {
+    const m = await kur('0');
+    await m.mikroPost('DekontKaydetV2', {}, true, m.MIKRO_YAZIM_SECENEGI);
+    expect(sayac(m.stubSayaciOzeti(), 'DekontKaydetV2')).toEqual([1, 1]);
+    vi.resetModules();
+    const taze = await kur('0');
+    await taze.mikroPost('StokListesiV2', {});
+    expect(sayac(taze.stubSayaciOzeti(), 'StokListesiV2')).toEqual([1, 0]);
+  });
+  it('BULUT, 5 dk geri çekilme içinde `false` → atlanan yine artar (H5); başarılı yanıt sayılmaz', async () => {
+    const m = await kur('0');
+    await m.mikroPost('StokListesiV2', {});                                    // damgayı kurar
+    await m.mikroPost('SiparisKaydetV2', {}, true, m.MIKRO_YAZIM_SECENEGI);    // geri çekilme dalı
+    await m.mikroPost('SiparisKaydetV2', {}, true, m.MIKRO_YAZIM_SECENEGI);
+    const o = m.stubSayaciOzeti();
+    expect(sayac(o, 'SiparisKaydetV2')).toEqual([2, 2]);
+    expect(Number.isFinite(o.baslangic)).toBe(true);
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ result: [{ IsError: false }] })));
+    await m.mikroPost('SiparisKaydetV2', {}, true, m.MIKRO_YAZIM_SECENEGI);
+    expect(sayac(m.stubSayaciOzeti(), 'SiparisKaydetV2')).toEqual([2, 2]);
+  });
+});

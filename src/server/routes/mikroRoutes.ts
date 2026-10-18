@@ -43,6 +43,9 @@ import {
 } from '../mikroClient.js';
 // Yazan her `mikroPost` çağrısının 4. argümanı + stub iletisi (şartname yeniden-deneme v3 K0a; çit: yazimSecenegi.degismez.test.ts).
 import { MIKRO_YAZIM_SECENEGI, MIKRO_STUB_METNI, mikroStubMu, yazimHataMetni } from '../mikro/yazimSecenegi.js';
+// Gönderim defterinin ölçüm parçası (Dilim 0; evrak işleyicisi). Modül düzeyindeki kip önbelleği ve uçuş kümesi server.ts ile
+// AYNI yoldan (`.js`) içe aktarılır — ikinci bir modül örneği oluşmasın.
+import { gonderimKipiOku, olcumBaslat } from '../mikro/gonderimDefteri.js';
 import {
   CHA_COLS, STH_COLS, FIS_COLS, SIP_COLS, mirrorMikroCariler, mirrorMikroInsert,
   mirrorMikroStoklar,
@@ -4157,16 +4160,25 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     if (!payload || typeof payload !== 'object') {
       return res.status(400).json({ success: false, error: 'payload zorunlu.' });
     }
+    // ÖLÇÜM DEFTERİ (şartname yeniden-deneme v3 K0b, Dilim 0): kip yapılandırma ve 400 denetimlerinden SONRA, süre ölçümünden
+    // ÖNCE okunur (10 sn önbellek; havuz yok / okunamadı → `kapali`). `kapali` (varsayılan): yol ve yanıt bugünküyle BİREBİR.
+    // `olcum`: gövdesiz bir ölçüm kaydı Mikro çağrısını BEKLETMEDEN açılır, sonucu arkadan yazılır; ölçüm hatası yutulur ve
+    // yanıtı ASLA değiştirmez (src/server/mikro/gonderimDefteri.ts). Kiracı bugünkü okumadan (`reqCompanyId`; ölçüm karar vermez).
+    const olcum = (await gonderimKipiOku(C.getPgPool())) === 'olcum'
+      ? olcumBaslat(C.getPgPool(), { companyId: C.reqCompanyId(req), uc: '/api/mikro/evrak/kaydet', method, entityType, entityId, payload })
+      : null;
     const t0 = Date.now();
     try {
       const yanit = await mikroPost(method, payload, true, MIKRO_YAZIM_SECENEGI);
       const { ok, data, status } = yanit;
+      void olcum?.bitir({ tur: 'yanit', yanit, gonderilmedi: yanit.gonderilmedi === true, stub: ok && mikroStubMu(data), sureMs: Date.now() - t0 });
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       const success = ok && !!r0 && !r0.IsError;
       const errorMsg = success ? null : yazimHataMetni(ok, status, data);   // stub → «OLABİLİR» iletisi (K0a)
       await C.writeSyncLog(method, entityType || 'evrak', entityId || 'unknown', success, null, errorMsg, Date.now() - t0, C.reqActor(req));
       res.json({ success, error: errorMsg, data: r0?.Data ?? null });
     } catch (err) {
+      void olcum?.bitir({ tur: 'hata', hata: err, gonderilmedi: mikroGonderilmediMi(err), sureMs: Date.now() - t0 });
       const msg = err instanceof Error ? err.message : String(err);
       await C.writeSyncLog(method, entityType || 'evrak', entityId || 'unknown', false, null, msg, Date.now() - t0, C.reqActor(req));
       res.status(500).json({ success: false, error: msg });

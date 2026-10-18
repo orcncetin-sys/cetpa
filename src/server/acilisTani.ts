@@ -56,7 +56,9 @@ const TANIMLAYICI = /^[A-Za-z][A-Za-z0-9_.:-]*$/;
  *  2026-10-08). Dar tutulur: tek kısa küçük harfli takma ad + tek büyük harfli ek — serbest metne kapı açmaz. */
 const SQL_ISLEM_ADI = /^SQL:[A-Z][A-Z0-9_]*(?: [a-z]{1,8})?(?:\([A-Z0-9_]{1,12}\))?$/;
 export const TANIMSIZ_AD = '(tanımsız)';
-const adAlani = (v: unknown, enUzun: number): string => {
+/** Dışa açık (2026-10-18): Mikro gönderim ölçüm kaydı (`src/server/mikro/gonderimOzeti.ts`) istemcinin `entityType`'ını ve hata adını
+ *  AYNI kuralla süzer — ikinci bir «tanımlayıcı mı» düzenli ifadesi yazılmaz. */
+export const adAlani = (v: unknown, enUzun: number): string => {
   const s = metin(v);
   return s === '' ? '' : s.length <= enUzun && (TANIMLAYICI.test(s) || SQL_ISLEM_ADI.test(s)) ? s : TANIMSIZ_AD;
 };

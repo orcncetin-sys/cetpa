@@ -26,6 +26,8 @@ import { resendGonderici, resendSagligi, resendSagligiOnbellekten, escapeHtml, i
 import type { AdminDbLike, DocDaralt } from "./src/server/adminDbTypes.js";
 import { initCrons } from "./src/server/crons.js";
 import { yetimIsleriKapat, surecBaslangiciMs } from "./src/server/mikro/arkaPlanIsi.js";
+// Mikro gönderim defteri — açılış işareti (şartname yeniden-deneme v3 K0b; aynı `.js` yolu: uçuş kümesi mikroRoutes'la ortak).
+import { olcumAcilisIsareti } from "./src/server/mikro/gonderimDefteri.js";
 // Bu sürecin başlangıcı (epoch ms) — modül yüklenirken BİR KEZ. Açılış taraması bundan SONRA kaydolan yazıcı
 // kaydını canlı sayar, silmez (delta hakem 2026-09-25: varsayılana bırakılan hesap testle korunmuyordu).
 const SUREC_BASLANGICI_MS = surecBaslangiciMs();
@@ -4874,6 +4876,16 @@ async function startServer() {
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  // ── Mikro gönderim defteri: açılış işareti (şartname yeniden-deneme v3 K0b / v2 K11; Dilim 0) ─────────────────────────
+  // Önceki süreçte Mikro çağrısı sürerken kesilen ölçüm kaydı (`suruyor`) `kesildi` olur — yayın başına kesilen gönderim (C9).
+  // Dinlemeyi BEKLETMEZ (dinlemeden SONRA, arkada): süreç başlangıcı + uçuş kümesi süzgeci bu süreçte açılan kayda dokunmaz.
+  // Bildirim yok. Yalnız PG yolunda (lokal Firestore yedeğinde defter yok). İşlev fırlatmaz; `catch` yalnız emniyet.
+  if (pgPool) {
+    void olcumAcilisIsareti(pgPool, SUREC_BASLANGICI_MS)
+      .then(r => { if (r.kesilen) console.warn(`[mikroGonderim] açılış işareti: ${r.kesilen} ölçüm kaydı «kesildi»`); })
+      .catch((e: unknown) => console.error('[mikroGonderim] açılış işareti:', e instanceof Error ? e.message : String(e)));
+  }
 
   // Yakalanmamış hata/promise reddi process'i çökertmesin (cron fire-and-forget dahil).
   process.on('unhandledRejection', (reason) => { console.error('[unhandledRejection]', reason); });

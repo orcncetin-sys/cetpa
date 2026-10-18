@@ -48,6 +48,10 @@ describe('koleksiyon sınıflandırması', () => {
     }
   });
 
+  it("Mikro gönderim defteri SERVER_ONLY (şartname yeniden-deneme v3 § 8.1 H6: özellik geri alınsa da satır ve bu çit KALIR)", () => {
+    expect(SERVER_ONLY_COLLECTIONS).toContain('mikroGonderimleri');
+  });
+
   it('SERVER_ONLY koleksiyonlar TENANT listesinde DEĞİL (aksi halde /api/db\'ye sızar)', () => {
     const sizinti = SERVER_ONLY_COLLECTIONS.filter(c => TENANT_COLLECTIONS.includes(c));
     expect(sizinti).toEqual([]);

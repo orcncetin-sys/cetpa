@@ -231,6 +231,7 @@ export const SERVER_ONLY_COLLECTIONS: readonly string[] = [
   // 2026-10-09 (mağaza dilim 2a, § 3.6): panel belirteci iptali — `magazaPanelIptal/{uid}` = `{ gecersizOnce, companyId }`.
   // Yalnız `src/server/kanal/magazaPanelIptal.ts` okur / yazar (adminDb upsert); /api/db ve akışa kapalı.
   'magazaPanelIptal',
+  'mikroGonderimleri',   // 2026-10-18 Mikro gönderim defteri (src/server/mikro/gonderimDefteri.ts; şartname yeniden-deneme v3) — yalnız sunucu
 ];
 
 /**

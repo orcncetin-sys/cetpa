@@ -14,7 +14,10 @@
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import { runOpsWatchdog, diskNobetcisi } from '../opsWatchdog.js';
-import { MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, getMikroCreds, mikroSql } from '../mikroClient.js';
+import { MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, getMikroCreds, mikroSql, stubSayaciOzeti } from '../mikroClient.js';
+// Gönderim defteri ölçüm özeti + kip yazıcısı (şartname yeniden-deneme v3 K0b). Modül düzeyi önbellek ve sayaçlar mikroRoutes /
+// server.ts ile AYNI yoldan (`.js`) içe aktarılır.
+import { gonderimKipiYaz, mikroGonderimOzetiOku } from '../mikro/gonderimDefteri.js';
 import { saatTanisi } from '../saatTanisi.js';
 import path from 'path';
 import fs from 'fs';
@@ -66,8 +69,12 @@ function sayacKumesi(oku: () => unknown): Record<string, number> | null {
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface OpsRouteCtx {
-  /** /api/ops/yayinla için (bakım scripti doğrudan SQL yazar, SSE olayı üretemez). GETTER; opsiyonel. */
-  getPgPool?: () => { query: (sql: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> } | null;
+  /** /api/ops/yayinla için (bakım scripti doğrudan SQL yazar, SSE olayı üretemez). GETTER; opsiyonel. `connect`: tek işlemli
+   *  yazım (Mikro gönderim kipi — `SELECT … FOR UPDATE`); gerçek `pg.Pool` taşır. */
+  getPgPool?: () => {
+    query: (sql: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>>; rowCount?: number | null }>;
+    connect?: () => Promise<{ query: (sql: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>>; rowCount?: number | null }>; release: () => void }>;
+  } | null;
   getAdminDb: () => AdminDbLike;
   requireAuth: any;
   requireMfaVerified: any;
@@ -307,6 +314,56 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
     } catch (e) {
       console.error('[/api/ops/acilis-tani]', e instanceof Error ? e.message : String(e));
       res.status(500).json({ success: false, error: 'Ölçüm yapılamadı. Ayrıntı sunucu günlüğünde.' });
+    }
+  });
+
+  /**
+   * GET /api/ops/mikro-gonderim-ozet — Mikro gönderim defterinin ÖLÇÜM özeti (2026-10-18, şartname yeniden-deneme v3 K0b / K12
+   * «Ops uçları»; Dilim 0). SALT OKUNUR; GÖVDE, kullanıcı / kiracı kimliği, `entityId`, özet karması DÖNMEZ — yalnız sayı, HTTP durumu,
+   * tanımlayıcı ad ve yanıt anahtar yolu:
+   *   • `kip`: geçerli kip + son 10 değişiklik (neden metni ops'un yazdığıdır);
+   *   • `kayitlar`: defterde tür × durum sayısı; `olcum`: son 30 günün dağılımları (C2, C3, C9, C10, C11, C14);
+   *   • `syncJobs`: eski istemci kuyruğunun durum sayıları, son 30 günde ölü, en eski `createdAt` (C1);
+   *   • `surec`: ölçüm kaydı açma / sonuç yazma hatası, uçuştaki kayıt; `stubSayaci`: yöntem başına stub / atlanan ikinci gönderim.
+   * Token: X-Ops-Token (scripts/ops-istek.sh).
+   */
+  app.get('/api/ops/mikro-gonderim-ozet', async (req: Request, res: Response) => {
+    if (!opsJetonuGecerli(req, res)) return;
+    const pool = C.getPgPool?.();
+    if (!pool) return res.status(503).json({ error: 'pg havuzu yok (lokal Firestore fallback)' });
+    try {
+      const ozet = await mikroGonderimOzetiOku(pool);
+      const stub = stubSayaciOzeti();
+      const yontemler: Record<string, { sayi: number; atlanan: number; sonAt: string }> = {};
+      for (const [ad, k] of Object.entries(stub.yontemler)) {
+        // Yöntem adı kod sabitinden ya da beyaz listeden gelir; yine de yalnız tanımlayıcı biçimi yanıta girer.
+        if (/^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(ad)) yontemler[ad] = { sayi: k.sayi, atlanan: k.atlanan, sonAt: new Date(k.sonAt).toISOString() };
+      }
+      res.json({
+        success: true, uretim: new Date().toISOString(), ...ozet,
+        stubSayaci: { baslangic: new Date(stub.baslangic).toISOString(), yontemler },
+      });
+    } catch (e) {
+      console.error('[/api/ops/mikro-gonderim-ozet]', e instanceof Error ? e.message : String(e));
+      res.status(500).json({ success: false, error: 'Ölçüm yapılamadı. Ayrıntı sunucu günlüğünde.' });
+    }
+  });
+
+  /**
+   * POST /api/ops/mikro-gonderim-kipi `{ kip, neden }` — gönderim defteri kipi (K20; Dilim 0: yalnız `kapali | olcum`; `tam` /
+   * `durdur` 400). `neden` zorunlu (1–200 karakter); kip belgesi son 10 değişikliği tutar. Etkisi bu süreçte hemen, öteki süreçlerde
+   * ≤ 10 sn (önbellek); hizmet yeniden başlamaz. Kipi `olcum`'a almak kullanıcı kararıdır (S7). Gövde: `scripts/ops-istek.sh --govde`.
+   */
+  app.post('/api/ops/mikro-gonderim-kipi', async (req: Request, res: Response) => {
+    if (!opsJetonuGecerli(req, res)) return;
+    const govde = (req.body ?? {}) as { kip?: unknown; neden?: unknown };
+    try {
+      const sonuc = await gonderimKipiYaz(C.getPgPool?.() ?? null, { kip: govde.kip, neden: govde.neden });
+      if (!sonuc.tamam) return res.status(sonuc.durum).json({ success: false, error: sonuc.error });
+      res.json({ success: true, kip: sonuc.kip, onceki: sonuc.onceki, at: new Date(sonuc.at).toISOString() });
+    } catch (e) {
+      console.error('[/api/ops/mikro-gonderim-kipi]', e instanceof Error ? e.message : String(e));
+      res.status(500).json({ success: false, error: 'Kip yazılamadı. Ayrıntı sunucu günlüğünde.' });
     }
   });
 

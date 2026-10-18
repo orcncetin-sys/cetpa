@@ -21,7 +21,9 @@ beforeAll(() => {
   // Sahte security: -w → düz test jetonu; -g → yazdırılabilir biçim (`password: "…"`, stderr'e — gerçek aracın davranışı).
   writeFileSync(join(bin, 'security'), '#!/bin/sh\nfor a; do son="$a"; done\ncase "$son" in -w) printf \'testjeton123\' ;; -g) echo \'password: "testjeton123"\' >&2 ;; esac\nexit 0\n');
   // Sahte curl: çağrıyı iz dosyasına yazar; SAHTE_RC ≠ 0 ise -w kodunu basıp o kodla çıkar, yoksa gövdeyi -o dosyasına yazar.
-  writeFileSync(join(bin, 'curl'), '#!/bin/sh\necho cagrildi >> "$CURL_IZ"\ncikti=""\nwhile [ $# -gt 0 ]; do case "$1" in -o) cikti="$2"; shift 2 ;; *) shift ;; esac; done\nif [ "${SAHTE_RC:-0}" != 0 ]; then printf \'%s\' "${SAHTE_KOD:-000}"; exit "$SAHTE_RC"; fi\n[ -n "$cikti" ] && printf \'{"ok":true}\' > "$cikti"\nprintf \'%s\' "${SAHTE_KOD:-200}"\n');
+  // 2026-10-18 (--govde): her argümanı `$CURL_IZ.arg`'a satır satır, `-H @dosya` başlık dosyasının İÇERİĞİNİ `$CURL_IZ.baslik`'a
+  // yazar — jetonun komut satırında DEĞİL başlık dosyasında olduğu ve POST gövdesinin dosyadan gittiği buradan sınanır.
+  writeFileSync(join(bin, 'curl'), '#!/bin/sh\necho cagrildi >> "$CURL_IZ"\nfor a; do printf \'%s\\n\' "$a" >> "$CURL_IZ.arg"; done\ncikti=""\nwhile [ $# -gt 0 ]; do case "$1" in -o) cikti="$2"; shift 2 ;; -H) case "$2" in @*) cat "${2#@}" >> "$CURL_IZ.baslik" ;; esac; shift 2 ;; *) shift ;; esac; done\nif [ "${SAHTE_RC:-0}" != 0 ]; then printf \'%s\' "${SAHTE_KOD:-000}"; exit "$SAHTE_RC"; fi\n[ -n "$cikti" ] && printf \'{"ok":true}\' > "$cikti"\nprintf \'%s\' "${SAHTE_KOD:-200}"\n');
   // GNU mktemp taklidi (CI Ubuntu): şablonda en az üç X yoksa reddeder. Mac'te BSD `mktemp -t ad` çalıştığı için bu fark
   // yalnız CI'da görünüyordu (2026-09-28, 22 test) — test düzeneği artık yerelde de aynı katılıkta.
   writeFileSync(join(bin, 'mktemp'), '#!/bin/sh\nfor a; do son="$a"; done\ncase "$son" in *XXX*) exec /usr/bin/mktemp "$@" ;; esac\necho "mktemp: too few X\'s in template \'$son\'" >&2\nexit 1\n');
@@ -37,7 +39,8 @@ function kos(args: string[], env: Record<string, string> = {}) {
     cwd: kok, encoding: 'utf8',
     env: { PATH: `${bin}:/usr/bin:/bin`, USER: 'test', HOME: kok, CURL_IZ: iz, CETPA_TABAN: 'http://127.0.0.1:9', ...env },
   });
-  return { kod: r.status, hata: r.stderr, cikti: r.stdout, curlCagrildi: existsSync(iz) };
+  const okuVarsa = (yol: string): string => (existsSync(yol) ? readFileSync(yol, 'utf8') : '');
+  return { kod: r.status, hata: r.stderr, cikti: r.stdout, curlCagrildi: existsSync(iz), curlArg: okuVarsa(`${iz}.arg`).split('\n').filter(Boolean), curlBaslik: okuVarsa(`${iz}.baslik`) };
 }
 
 describe('ops-istek.sh — çıktı yolu istekten ÖNCE denetlenir (64, istek yok)', () => {
@@ -168,5 +171,49 @@ describe('ops-istek.sh — curl çıkış kodu ayrımı: yerel kodlar beyaz list
   });
   it('HTTP 401 → 5', () => {
     expect(kos(['/api/ops/summary'], { SAHTE_KOD: '401' }).kod).toBe(5);
+  });
+});
+
+describe('ops-istek.sh — `--govde <dosya>`: JSON gövdeli POST (2026-10-18, Mikro gönderim kipi ucu)', () => {
+  it('gövde dosyası varsa POST: `-X POST`, `Content-Type: application/json`, `--data-binary @dosya`; jeton YALNIZ başlık dosyasında', () => {
+    const f = join(kok, 'kip.json');
+    writeFileSync(f, '{"kip":"olcum","neden":"Dilim 0 ölçümü"}');
+    const r = kos(['--govde', f, '/api/ops/mikro-gonderim-kipi']);
+    expect(r.kod).toBe(0);
+    expect(r.curlCagrildi).toBe(true);
+    const i = r.curlArg.indexOf('-X');
+    expect(r.curlArg[i + 1]).toBe('POST');
+    expect(r.curlArg).toContain('Content-Type: application/json');
+    expect(r.curlArg[r.curlArg.indexOf('--data-binary') + 1]).toBe(`@${f}`);
+    expect(r.curlArg.at(-1)).toBe('http://127.0.0.1:9/api/ops/mikro-gonderim-kipi');
+    expect(r.curlArg.join(' ')).not.toContain('testjeton123');            // komut satırında jeton YOK
+    expect(r.curlBaslik).toContain('x-ops-token: testjeton123');            // başlık dosyasında
+    expect(r.cikti + r.hata).not.toContain('Dilim 0 ölçümü');                // istek gövdesi ekrana basılmaz
+  });
+  it('`--govde` sonda ve çıktı dosyasıyla da çalışır (konumsal argümanlar aynı)', () => {
+    const f = join(kok, 'kip2.json');
+    writeFileSync(f, '{}');
+    const cikti = join(kok, 'kip-sonuc.json');
+    const r = kos(['/api/ops/mikro-gonderim-kipi', cikti, '--govde', f]);
+    expect(r.kod).toBe(0);
+    expect(r.curlArg).toContain('--data-binary');
+    expect(readFileSync(cikti, 'utf8')).toBe('{"ok":true}');
+  });
+  it('gövde dosyası yok → 64, istek YOK', () => {
+    const r = kos(['--govde', join(kok, 'yok.json'), '/api/ops/mikro-gonderim-kipi']);
+    expect(r.kod).toBe(64);
+    expect(r.curlCagrildi).toBe(false);
+    expect(r.hata).toContain('GÖNDERİLMEDİ');
+  });
+  it('`--govde` değersiz → 64 (kullanım), istek YOK', () => {
+    const r = kos(['/api/ops/mikro-gonderim-kipi', '--govde']);
+    expect(r.kod).toBe(64);
+    expect(r.curlCagrildi).toBe(false);
+  });
+  it('`--govde` yoksa GET kalır: `--data-binary` / `-X` yok', () => {
+    const r = kos(['/api/ops/mikro-gonderim-ozet']);
+    expect(r.kod).toBe(0);
+    expect(r.curlArg).not.toContain('--data-binary');
+    expect(r.curlArg).not.toContain('-X');
   });
 });

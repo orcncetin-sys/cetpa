@@ -14,8 +14,11 @@
 #        security add-generic-password -U -a "$(id -un)" -s cetpa-ops-token -w
 #   3. Dene:  scripts/ops-istek.sh /api/ops/summary
 #
-# KULLANIM: scripts/ops-istek.sh <yol /api/...> [çıktı-dosyası]
+# KULLANIM: scripts/ops-istek.sh [--govde <istek.json>] <yol /api/...> [çıktı-dosyası]
 #   Çıktı dosyası verilirse gövde oraya yazılır (sema-kesif örnekleri müşteri verisi içerebilir — sohbete yapıştırma).
+#   --govde (2026-10-18, Mikro gönderim kipi ucu — şartname yeniden-deneme v3 K12): istek POST olur, dosya `Content-Type:
+#   application/json` ile OLDUĞU GİBİ gönderilir (curl --data-binary @dosya); gövde ekrana basılmaz, jeton yine yalnız başlıkta.
+#   Örnek: printf '{"kip":"olcum","neden":"Dilim 0 ölçümü"}' > kip.json && scripts/ops-istek.sh --govde kip.json /api/ops/mikro-gonderim-kipi
 # ÇIKIŞ KODLARI: 0 = 2xx · 1 = diğer HTTP · 2/3 = Anahtar Zinciri/jeton biçimi · 5 = HTTP 401 · 6 = HTTP 503 ·
 #   7 = AĞ / SUNUCU TARAFI (HTTP yanıtı yok: DNS/proxy/bağlantı/TLS/zaman aşımı; ya da yanıt yarıda kesildi/bozuk: 18/8) ·
 #   8 = YEREL curl hatası (ağ DEĞİL; ör. 23 çıktı dosyasına yazılamadı, 26 başlık okunamadı, 3 adres bozuk) ·
@@ -25,14 +28,34 @@ set -euo pipefail
 # raporlanıyordu (son kontrol 2026-09-28).
 HESAP="${USER:-${LOGNAME:-$(id -un)}}"
 
-YOL="${1:-}"
-CIKTI="${2:-}"
+# Seçenek ayrıştırma: `--govde <dosya>` herhangi bir konumda; geri kalan argümanlar eskisi gibi <yol> [çıktı-dosyası].
+ISTEK_GOVDESI=""
+YOL=""
+CIKTI=""
+KONUM=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --govde)
+      if [ $# -lt 2 ] || [ -z "$2" ]; then echo "kullanim: $0 [--govde istek.json] /api/... [cikti-dosyasi]" >&2; exit 64; fi
+      ISTEK_GOVDESI="$2"; shift 2 ;;
+    *)
+      KONUM=$((KONUM + 1))
+      if [ "$KONUM" -eq 1 ]; then YOL="$1"; elif [ "$KONUM" -eq 2 ]; then CIKTI="$1"; fi
+      shift ;;
+  esac
+done
 TABAN="${CETPA_TABAN:-https://app.cetpa.com.tr}"
 
 case "$YOL" in
   /api/*) ;;
-  *) echo "kullanim: $0 /api/... [cikti-dosyasi]" >&2; exit 64 ;;
+  *) echo "kullanim: $0 [--govde istek.json] /api/... [cikti-dosyasi]" >&2; exit 64 ;;
 esac
+
+# İstek gövdesi dosyası da İSTEKTEN (ve jeton okumaktan) ÖNCE denetlenir: yoksa / okunamıyorsa istek HİÇ gönderilmez.
+if [ -n "$ISTEK_GOVDESI" ] && { [ ! -f "$ISTEK_GOVDESI" ] || [ ! -r "$ISTEK_GOVDESI" ]; }; then
+  echo "HATA: istek gövdesi dosyası yok ya da okunamıyor ($ISTEK_GOVDESI). İstek GÖNDERİLMEDİ." >&2
+  exit 64
+fi
 
 # Çıktı yolu İSTEKTEN (ve jeton okumaktan) ÖNCE denetlenir (tur 3, 2026-09-28): curl çıktı dosyasını ilk gövde baytında
 # açar — dizin yoksa sunucu ağır sorguyu (ör. /api/mikro/iskonto-tutarsizlik: tüm geçmiş SqlVeriOkuV2) ÇALIŞTIRIP 200
@@ -111,7 +134,13 @@ fi
 # okunamadı) gibi YEREL hatalar ayrı kod (8) ve ayrı metinle: istek sunucuya ulaşıp işlenmiş olabilir, "ağı kontrol et"
 # demek kullanıcıyı ağır ucu yeniden koşmaya yönlendiriyordu.
 RC=0
-KOD=$(curl -sS --max-time 180 -o "$GOVDE" -w '%{http_code}' -H @<(printf 'x-ops-token: %s\n' "$TOKEN") "$TABAN$YOL") || RC=$?
+if [ -n "$ISTEK_GOVDESI" ]; then
+  # POST: gövde dosyadan, olduğu gibi (--data-binary @dosya); jeton yine süreç ikamesindeki başlık dosyasından.
+  KOD=$(curl -sS --max-time 180 -o "$GOVDE" -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data-binary "@$ISTEK_GOVDESI" \
+    -H @<(printf 'x-ops-token: %s\n' "$TOKEN") "$TABAN$YOL") || RC=$?
+else
+  KOD=$(curl -sS --max-time 180 -o "$GOVDE" -w '%{http_code}' -H @<(printf 'x-ops-token: %s\n' "$TOKEN") "$TABAN$YOL") || RC=$?
+fi
 if [ "$RC" -ne 0 ]; then
   unset TOKEN
   # Delta (2026-09-28): liste TERSİNE çevrildi — YEREL olduğu kanıtlı kodlar beyaz listede (1 protokol yok, 2 başlatılamadı,

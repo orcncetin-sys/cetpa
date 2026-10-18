@@ -658,6 +658,8 @@ export async function mikroPost(
   // `stubYenidenDeneme: false` (resmî belge yazan çağrı, D2): AYNI gövde ikinci kez GÖNDERİLMEZ — stub çağırana döner. Belirteç
   // önbelleği YİNE silinir ve 5 dk damgası YİNE yazılır (inceleme 1, İ1-1): stub'ın olası nedeni geçersizleşmiş belirteçtir;
   // silinmezse sonraki her çağrı (sonraki fatura dâhil) aynı bayat belirteçle stub almaya devam ederdi. Yalnız tekrar atlanır.
+  // Sayaç (ölçüm; davranış DEĞİŞMEZ — şartname yeniden-deneme v3 § 8.1 H8 (4)): `sayi` kip koşulundan ÖNCE artar (LOKAL dâhil).
+  if (result.ok && mikroStubMu(result.data)) stubSay(endpoint, 'sayi');
   if (result.ok && mikroStubMu(result.data) && !MIKRO_LOCAL_MODE) {
     const cacheKey = `${creds.idmEmail}|${creds.alias}`;
     const lastRefresh = mikroStubRefreshAt.get(cacheKey) ?? 0;
@@ -665,12 +667,15 @@ export async function mikroPost(
       mikroStubRefreshAt.set(cacheKey, Date.now());
       mikroTokenCacheMap.delete(cacheKey);
       if (secenek?.stubYenidenDeneme === false) {
+        stubSay(endpoint, 'atlanan');
         console.warn(`Mikro ${endpoint}: stub yanıt — token düşürüldü; resmî belge gövdesi İKİNCİ KEZ GÖNDERİLMEDİ (sonuç bilinmiyor)`);
       } else {
         console.warn(`Mikro ${endpoint}: stub yanıt — token yenilenip tekrar deneniyor`);
         result = await doCall();
       }
     } else {
+      // 5 dk geri çekilme içinde de yazan çağrının ikinci gönderimi «atlanan» sayılır (H5): tekrar burada zaten yoktur.
+      if (secenek?.stubYenidenDeneme === false) stubSay(endpoint, 'atlanan');
       console.warn(`Mikro ${endpoint}: stub yanıt — backoff aktif (5 dk), token YENİLENMEDİ`);
     }
   }
@@ -679,6 +684,25 @@ export async function mikroPost(
 }
 // Stub sonrası token tazeleme zaman damgası — refresh fırtınasını önler
 const mikroStubRefreshAt = new Map<string, number>();
+
+// ── Stub sayacı (2026-10-18, şartname yeniden-deneme v3 K0a / § 8.2 commit 0-B; C14) ─────────────────────────────────────
+// Yöntem başına: `sayi` = HTTP başarılı + `result` anahtarsız yanıt (stub) sayısı, her kipte; `atlanan` = BULUT kipinde
+// `stubYenidenDeneme: false` olduğu için aynı gövdenin İKİNCİ KEZ GÖNDERİLMEDİĞİ stub sayısı; `sonAt` = son stub (epoch ms).
+// Süreç içidir (yeniden başlatmada sıfırlanır; başlangıç `baslangic`'te). Kalıcı iz her çağrının syncLog hata satırıdır.
+// Okuyan: `GET /api/ops/mikro-gonderim-ozet` (opsRoutes). Modül AYNI yoldan (`.js`) içe aktarılır — ikinci örnek oluşmasın.
+const stubSayaci = new Map<string, { sayi: number; atlanan: number; sonAt: number }>();
+const STUB_SAYACI_BASLANGICI_MS = Date.now();
+function stubSay(endpoint: string, alan: 'sayi' | 'atlanan'): void {
+  const kayit = stubSayaci.get(endpoint) ?? { sayi: 0, atlanan: 0, sonAt: Date.now() };
+  kayit[alan]++;
+  if (alan === 'sayi') kayit.sonAt = Date.now();
+  stubSayaci.set(endpoint, kayit);
+}
+export function stubSayaciOzeti(): { baslangic: number; yontemler: Record<string, { sayi: number; atlanan: number; sonAt: number }> } {
+  const yontemler: Record<string, { sayi: number; atlanan: number; sonAt: number }> = {};
+  for (const [ad, k] of stubSayaci) yontemler[ad] = { ...k };
+  return { baslangic: STUB_SAYACI_BASLANGICI_MS, yontemler };
+}
 
 /** Write a sync event to the syncLog Firestore collection.
  *  When `actor` is provided, ALSO writes an auditLog entry so the operation
