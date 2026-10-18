@@ -52,12 +52,15 @@ interface Kosu { d: Duzenek; sorguSayisi: number; yazilanKiracilar: string[]; us
 
 /** Rotaları kurar, `users` içeriğini verir, zamanlanmış işi ELLE koşturur. Mikro her sorguya boş döner; yalnız sipariş listesinin
  *  ilk sayfası TEK satır verir (bu tanımın satır sonrası işlemi yok) — o satırın hangi kiracıyla yazıldığı ölçülür. */
-async function kostur(ifade: string, kullanicilar: Kullanicilar, ortamKiracisi?: string): Promise<Kosu> {
+async function kostur(ifade: string, kullanicilar: Kullanicilar, ortamKiracisi?: string, belgeler: Record<string, Array<Record<string, unknown>>> = {}): Promise<Kosu> {
   vi.stubEnv('MIKRO_CRON_SYNC', 'true');
   vi.stubEnv('MIKRO_CRON_COMPANY_ID', ortamKiracisi);          // `undefined` → tanımsız (canlının bugünkü durumu)
   vi.mocked(cron.schedule).mockClear();
   const d = duzenekKur();
   d.snapAyarla('users', kullanicilar);
+  // `loadCompanyDocs` sahtesi (koleksiyon → dokümanlar; yoksa []): gece faturadan-sipariş adımı (2026-10-18) bir satış faturası
+  // görsün diye — boş liste adımı erken dönüş dalına düşürür ve «adım koştu mu» sorusu yazımdan okunamazdı.
+  vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) => belgeler[coll] ?? []) as typeof d.C.loadCompanyDocs);
   let sorguSayisi = 0;
   vi.mocked(mikroSql).mockImplementation((async (sql: string) => {
     sorguSayisi++;
@@ -116,6 +119,31 @@ describe('gece SQL senkronu (03:20) — hedef kiracı `users` taramasında yaln�
   it('ortam değeri dolu → o; `users` HİÇ taranmaz (iki gerçek kiracı varken de)', async () => {
     const k = await kostur(GECE, { ...SAHIP, ...IKINCI, ...YABANCI }, 'ORTAM-KIRACISI');
     expect([k.belirsizIletisi, k.yazilanKiracilar, k.usersOkuma]).toEqual([[], ['ORTAM-KIRACISI'], 0]);
+  });
+});
+
+// Şartname «fatura gövde + gece MF» § 3 / § 6 (gece-isi-4, 2026-10-18): gece faturadan-sipariş adımı YENİ çözücü yazmaz — işin
+// yukarıda çözdüğü `companyId`'yi kullanır. Kiracı belirsizse adım HİÇ koşmaz: `orders` yazılmaz, syncLog yazılmaz (günlük =
+// mevcut konsol iletisi, TEK).
+describe('gece faturadan-sipariş adımı (03:20, son adım) — AYNI kiracı çözümü', () => {
+  const SATIS_FATURASI = { cha_evrakno_seri: '', cha_evrakno_sira: 412, cha_tarihi: '2026-10-17T00:00:00', cha_tip: 0, cha_kod: '120.01.0042', cha_meblag: 15000 };
+  const adimSatirlari = (k: Kosu) => k.d.syncLog.mock.calls.filter(c => c[0] === 'faturadan-siparis');
+
+  it('iki GERÇEK kiracı, ortam değeri tanımsız → adım ÇAĞRILMAZ: orders yazılmaz, syncLog yazılmaz, «tenant var» iletisi TEK', async () => {
+    const k = await kostur(GECE, { ...SAHIP, ...PERSONEL, ...IKINCI }, undefined, { mikroFaturalar: [SATIS_FATURASI] });
+    expect(k.belirsizIletisi).toEqual(['Mikro SQL senkron: 2 tenant var ve MIKRO_CRON_COMPANY_ID tanımsız → atlandı.']);
+    expect(k.d.koleksiyon('orders')).toEqual([]);
+    expect(k.d.syncLog).not.toHaveBeenCalled();
+    expect(vi.mocked(k.d.C.loadCompanyDocs)).not.toHaveBeenCalled();     // işlev hiç koşmadı (ilk okuması mikroFaturalar)
+  });
+
+  it('ortam değeri tanımsız ama rolü olan TEK kiracı (+ rolsüz yabancı) → adım KOŞAR ve o kiracıya yazar', async () => {
+    const k = await kostur(GECE, { ...SAHIP, ...PERSONEL, ...YABANCI }, undefined, { mikroFaturalar: [SATIS_FATURASI] });
+    expect(k.belirsizIletisi).toEqual([]);
+    expect(k.d.koleksiyon('orders').map(y => [y.ref.id, y.data?.companyId])).toEqual([['mikrofat__sahip-uid__-412', 'sahip-uid']]);
+    expect(adimSatirlari(k)).toHaveLength(1);
+    expect(adimSatirlari(k)[0]?.[9]).toEqual({ denetimKiracisi: 'sahip-uid' });
+    expect(k.usersOkuma).toBe(1);                                          // kopya çözücü yok: `users` yine TEK kez taranır
   });
 });
 

@@ -4,9 +4,12 @@
  *
  * İKİ İŞ YAPAR:
  *  1. PARİTE: bilinen girdide gövde, rotadaki ESKİ kodun ürettiğinin BİREBİR aynısı
- *     (`toEqual` ile alan alan kilitli — sabit Mikro kodları: evraktip 4/1, seri F/I,
- *     cha_evrak_tip 63, cha_cinsi 7, cha_ebelge_turu eşlemesi). Gövde tek kaynağa
- *     taşınırken sessizce bir alanın düşmesi/değişmesi burada patlar.
+ *     (`toEqual` ile alan alan kilitli — sabit Mikro kodları: evraktip 4/1, irsaliyede seri I,
+ *     cha_evrak_tip 63, cha_ebelge_turu eşlemesi). Gövde tek kaynağa taşınırken sessizce bir
+ *     alanın düşmesi/değişmesi burada patlar. BİLİNÇLİ FARK (modül başlığındaki 6. madde,
+ *     2026-10-18): e-Fatura seri '' (cha + sth) ve cha_cinsi 6 — Mikro'nun kendi 411 satış
+ *     faturasıyla aynı (`seri-ozet` ölçümü); 7, V17 örnek değeriydi. Sıra anahtarı
+ *     (`cha_evrakno_sira` / `sth_evrakno_sira`) gövdede HİÇ YOK — sırayı Mikro verir (G2).
  *  2. VARSAYILAN YOK: eski kodun `price ?? 0`, `quantity ?? 1`, `kdvOran ?? 20`,
  *     `sth_vergi_pntr: 4` (tahmin) ve kalemsiz irsaliyede "tek satır, 0 tutar"
  *     ürettiği HER site için ayrı bir "bilinmiyorsa throw" vakası. Bunlar mutasyon
@@ -77,7 +80,7 @@ describe('faturaGovdesi — parite', () => {
     expect(satirlar).toEqual([
       {
         sth_tarih: '19.09.2026', sth_tip: 1, sth_cins: 0, sth_normal_iade: 0,
-        sth_evraktip: 4, sth_evrakno_seri: 'F',
+        sth_evraktip: 4, sth_evrakno_seri: '',
         sth_stok_kod: 'CIM-50', sth_cari_cinsi: 0, sth_cari_kodu: 'C-0042',
         sth_miktar: 40, sth_birim_pntr: 1, sth_tutar: 12500,
         sth_vergi: 2500, sth_vergi_pntr: 4, sth_vergisiz_fl: false,
@@ -87,7 +90,7 @@ describe('faturaGovdesi — parite', () => {
       },
       {
         sth_tarih: '19.09.2026', sth_tip: 1, sth_cins: 0, sth_normal_iade: 0,
-        sth_evraktip: 4, sth_evrakno_seri: 'F',
+        sth_evraktip: 4, sth_evrakno_seri: '',
         sth_stok_kod: 'DMR-12', sth_cari_cinsi: 0, sth_cari_kodu: 'C-0042',
         sth_miktar: 2, sth_birim_pntr: 1, sth_tutar: 2499,
         sth_vergi: 499.8, sth_vergi_pntr: 4, sth_vergisiz_fl: false,
@@ -97,12 +100,27 @@ describe('faturaGovdesi — parite', () => {
       },
     ]);
     expect(evrak).toEqual({
-      cha_tip: 0, cha_cinsi: 7, cha_normal_Iade: 0, cha_evrak_tip: 63, cha_cari_cins: 0,
-      cha_d_cins: 0, cha_d_kur: 1, cha_tarihi: '19.09.2026', cha_evrakno_seri: 'F',
+      cha_tip: 0, cha_cinsi: 6, cha_normal_Iade: 0, cha_evrak_tip: 63, cha_cari_cins: 0,
+      cha_d_cins: 0, cha_d_kur: 1, cha_tarihi: '19.09.2026', cha_evrakno_seri: '',
       cha_kod: 'C-0042', cha_projekodu: '', cha_srmrkkodu: '', cha_vade: 0, cha_subeno: 0,
       cha_aciklama: '', kdv_istisna_kodu: '', detay: satirlar,
     });
     expect(evrak.detay).toBe(satirlar);  // rota satırları ayrıca aynalıyor: tek dizi
+  });
+
+  it("G1 + G2: e-Fatura seri '' (cha + sth AYNI), cinsi 6; sıra anahtarı gövdede HİÇ YOK (V16 ve V17, üç belge tipi) — mutasyon-ayırt-edici", () => {
+    for (const jumpSurum of [16, 17]) {
+      for (const faturaTipi of ['e-fatura', 'e-arsiv', 'ihracat']) {
+        const { evrak } = faturaGovdesi({ ...SIPARIS, faturaTipi }, { ...SECENEK, jumpSurum });
+        expect([evrak.cha_evrakno_seri, evrak.cha_cinsi], `${faturaTipi} / V${jumpSurum}`).toEqual(['', 6]);
+        // `toEqual` değeri undefined olan anahtarı GÖRMEZ — yokluk ayrıca kilitli (şartname § 2 kesinlik notu).
+        expect(evrak).not.toHaveProperty('cha_evrakno_sira');
+        for (const satir of evrak.detay) {
+          expect(satir.sth_evrakno_seri).toBe(evrak.cha_evrakno_seri);   // satırı başlığa seri + sıra bağlar
+          expect(satir).not.toHaveProperty('sth_evrakno_sira');
+        }
+      }
+    }
   });
 
   it('V17: cha_ebelge_turu e-arşivde 1, e-faturada 0, ihracatta 0 (2026-08-25 düzeltmesi korunur)', () => {

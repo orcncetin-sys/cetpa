@@ -51,7 +51,8 @@ import {
   mirrorMikroStoklar,
 } from '../mikroMirror.js';
 import { pgServerTimestamp, resolveSentinels } from '../pgShim.js';
-import { faturaGecisiYaz, faturaGuncelIsareti, faturaSonucunuYaz, faturaTalebiniGeriAl, faturaTalepEt, type FaturaBaglami, type FaturaHavuzu, type TalepSonucu } from '../mikro/faturaGonderimi.js';
+import { faturaEttnEkle, faturaGecisiYaz, faturaGuncelIsareti, faturaSonucunuYaz, faturaTalebiniGeriAl, faturaTalepEt, type FaturaBaglami, type FaturaHavuzu, type SonucYazimi, type TalepSonucu } from '../mikro/faturaGonderimi.js';
+import { cetpaEttnAnahtari } from '../../lib/ettn.js';
 import { FATURA_GONDERIM_ALANI } from '../../lib/faturaGonderimi.js';
 import { MF_KAYNAGI, MF_KIMLIK_ONEKI } from '../../lib/mfKaynagi.js';
 import { mikroGovdeHatasiMi } from '../mikro/govdeHatasi.js';
@@ -63,7 +64,7 @@ import {
   type YevmiyeGovde, type TahsilatGovde, type CariHareketGovde,
 } from '../mikro/govdeMuhasebe.js';
 import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
-import { yaziciyiIstegeBagla } from '../bakimKilidi.js';
+import { yaziciyiIstegeBagla, yaziciOlarakCalistir } from '../bakimKilidi.js';
 import { EXTERNAL_ROLES, type AppRole } from '../../lib/rbac.js';
 import { rolluKiracilar } from '../kiraciOrtami.js';
 import { mikroIsAdi } from '../../lib/mikroIsAdi.js';
@@ -78,6 +79,7 @@ import { onizlemeSorgulari, baglantiSorgulari, onizlemeSatiri } from '../mikro/m
 import { FT_ISKONTO_DESENI, SATIR_MASRAF_DESENI, gercekAd } from '../../lib/faturaMatrahi.js';
 import { kdvOzetSorgusu } from '../mikro/kdvOzetSorgusu.js';
 import { yetimRaporu, guidBicimli, guidAnahtari, type CetpaFatura } from '../mikro/faturaTani.js';
+import { bekletmeKarari, cariAnahtari, cetpaBaglariniKur } from '../mikro/faturaBekletme.js';
 import { gibDurumTara, taramaNotu, type TaramaFaturasi } from '../mikro/gibDurumTarama.js';
 import { gibDurumCoz, gibRedMi, gibReddedildi, faturaEttn } from '../../lib/gibDurum.js';
 import { durumDenemesiOzeti, ettnGecerli, hucreleriKes, type DurumDenemesi } from '../mikro/ebelgeDurumTani.js';
@@ -3697,7 +3699,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // 03:20 İstanbul (zamanla.ts). Yedek görevi 03:30 SUNUCU-yerel saattedir;
     // sunucu dilimi düzeltilene kadar ikisi arasında sıra ilişkisi yoktur.
     // CRON ÇAĞRI DESENİ DEĞİŞMEZ: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DOĞRUDAN; arka plan
-    // yardımcısına (arkaPlanIsiBaslat) BAĞLANMAZ, kilit ALMAZ, `ilerle` geçmez (parite testi d).
+    // yardımcısına (arkaPlanIsiBaslat) BAĞLANMAZ, kilit ALMAZ, `ilerle` geçmez (parite testi d). Bu kural SQL tanımları içindir;
+    // işin SON adımı (faturadan sipariş, 2026-10-18) bakım kilidi yazıcısı olarak koşar — aşağıda.
     // BİLİNÇLİ FARK (S5/K-A ortak gövde, 2026-09-25): sayfa sorgusu + iptal süpürgesi listeZamanAsimiMs()
     // kullanır → burada da sayfa zaman aşımı 30 sn → 120 sn (env ile en çok 600 sn). SQL yolunda devre
     // kesici YOK (yalnız stok/cari adaptif sayfalamada): Mikro bağlantıyı kabul edip yanıt vermezse her
@@ -3730,6 +3733,39 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         const { not } = await gibDurumCalistir(companyId, 10 * 60_000, actor);
         console.log(`  GİB durum taraması: ${not}`);
       } catch (e) { console.warn('  GİB durum taraması istisna:', e instanceof Error ? e.message : String(e)); }
+      // FATURADAN SİPARİŞ TÜRETME (şartname «fatura gövde + gece MF» G3 / G3a, § 3; 2026-10-18). Kullanıcı: «son evrak 16.10
+      // görünüyor, otomatik olarak çalışmıyor demekki cron» — MF siparişleri yalnız panelin «Faturadan Sipariş Türet» / «Tümünü
+      // Çek»iyle oluşuyordu. SIRA: 13 SQL tanımının (fatura aynası, iptal faturaları, stok hareketleri — kalemler
+      // `inventoryMovements`'tan) VE GİB taramasının (alıcının reddettiği faturaya hiç sipariş türetilmez) ARDINDAN, ayrı try.
+      // Önkoşul / atlama kuralı YOK: varsayılan mod boş kalemi ertesi koşuda doldurur. Panel ucuyla AYNI işlev, AYNI kiracı
+      // (yukarıda çözülen `companyId`), sistem aktörü; `kalemYenile` VERİLMEZ (kalem yenileme yalnız elle önizle → uygula).
+      // BAKIM KİLİDİ: gecenin kilide bakan TEK adımı (13 tanım ve GİB taraması bakmıyor — ayrı iş).
+      // GÜNLÜK: adıma ulaşan her koşuda TAM BİR sistem syncLog satırı — tamam → true; satış faturası yok → true (yönsüz > 0 ise
+      // false), nedeni metinde; bakım kilidi → false «bakım kilidi: …»; istisna → false, hata metni. Denetim satırı da TEK
+      // (writeSyncLog'un içindeki) ve HEDEF KİRACIYA yazılır — ucun ayrı denetimi gecede yazılmaz, `'system'` kiracısı yok.
+      {
+        const t1 = Date.now();
+        const GECE_ADIMI = 'gece senkronu';
+        let satir: { ozet: string; basarili: boolean; hata: string | null };
+        try {
+          const y = await yaziciOlarakCalistir(C.getPgPool?.() ?? null, 'mikro-cron:faturadan-siparis',
+            () => faturadanSiparisCalistir(companyId, {}));
+          if ('kilit' in y) satir = { ozet: GECE_ADIMI, basarili: false, hata: `bakım kilidi: ${y.kilit.aciklama}` };
+          else if (y.sonuc.tur === 'tamam') satir = { ozet: y.sonuc.denetimOzeti, basarili: true, hata: null };
+          else if (y.sonuc.tur === 'faturaYok') {
+            const metin = `${y.sonuc.message}${y.sonuc.note ? ` — ${y.sonuc.note}` : ''}`;
+            satir = y.sonuc.yonsuz > 0 ? { ozet: metin, basarili: false, hata: metin } : { ozet: metin, basarili: true, hata: null };
+          } else satir = { ozet: GECE_ADIMI, basarili: false, hata: 'önizleme sonucu beklenmiyordu — gece kalem yenilemesi koşmaz' };
+        } catch (e) {
+          satir = { ozet: GECE_ADIMI, basarili: false, hata: e instanceof Error ? e.message : String(e) };
+        }
+        if (satir.basarili) console.log(`  Faturadan sipariş: ${satir.ozet}`);
+        else console.warn(`  Faturadan sipariş: ${satir.hata}`);
+        try {
+          await C.writeSyncLog('faturadan-siparis', 'orders', satir.ozet, satir.basarili, null, satir.hata, Date.now() - t1, actor,
+            undefined, { denetimKiracisi: companyId });
+        } catch (e) { console.warn('  Faturadan sipariş günlüğü yazılamadı:', e instanceof Error ? e.message : String(e)); }
+      }
     });
 
     // ── Ayda bir TAM senkron (ayın 1'i, 02:00) ────────────────────────────
@@ -4699,6 +4735,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   // (elle açılmış siparişi kendiliğinden iptal etmek kullanıcı kararı ister) — sayılır ve notta söylenir.
   type IptalSonucu = { iptalEdilen: number; iptalGeriAlinan: number; iptalBelirsiz: number; redIptal: number; kaynaksiz: string[]; cetpaSiparisliRed: string[] };
   const BOS_IPTAL: IptalSonucu = { iptalEdilen: 0, iptalGeriAlinan: 0, iptalBelirsiz: 0, redIptal: 0, kaynaksiz: [], cetpaSiparisliRed: [] };
+  /** Notta siparişin adı: sipariş numarası, yoksa kimliği (`mfIptalEsle` ve faturadan-sipariş G3a ortak). */
+  const siparisAdi = (o: Record<string, unknown>) => (typeof o.orderNumber === 'string' && o.orderNumber ? o.orderNumber : String(o.id));
   async function mfIptalEsle(
     cid: string, hamFaturalar: readonly Record<string, unknown>[], mevcutSip: readonly Record<string, unknown>[], kaynaksizSay: boolean,
   ): Promise<IptalSonucu> {
@@ -4714,14 +4752,14 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // Cetpa'dan kesilmiş faturanın siparişi ETTN ile eşlenir (`/api/mikro/fatura/kaydet` siparişe `ettn` yazar). Numara alanları
     // KULLANILMAZ (inceleme 2026-10-02): `mikroEvrakNo` SİPARİŞ evrakının numarasıdır (fatura sayacından bağımsız) ve
     // `mikroFaturaNo`'nun seri/sıra biçimi ölçülmedi — numarayla eşlemek ilgisiz, geçerli bir siparişi "elle iptal edin" diye gösterebilirdi.
-    const ettnAnahtari = (v: unknown) => String(v ?? '').trim().replace(/^\{|\}$/g, '').toLowerCase();
-    const redEttnleri = new Set(reddedilen.map(f => ettnAnahtari(faturaEttn(f))).filter(Boolean));
+    // Anahtar `guidAnahtari` (mikro/faturaTani — süslü parantez + küçük harf); burada duran yerel kopya G3a'da (2026-10-18) kaldırıldı:
+    // faturadan-sipariş'in «Cetpa siparişine bağlı» dışlaması AYNI işlevi çağırır, iki eşleme ayrışamaz.
+    const redEttnleri = new Set(reddedilen.map(f => guidAnahtari(faturaEttn(f))).filter(Boolean));
     const kaynaksiz: string[] = [], cetpaSiparisliRed: string[] = [];
-    const siparisAdi = (o: Record<string, unknown>) => (typeof o.orderNumber === 'string' && o.orderNumber ? o.orderNumber : String(o.id));
     let iBatch = C.getAdminDb().batch(); let iOps = 0;
     for (const o of mevcutSip) {
       if (o.source !== MF_KAYNAGI) {
-        const ettn = ettnAnahtari(o.ettn);
+        const ettn = guidAnahtari(o.ettn);
         if (ettn && redEttnleri.has(ettn) && o.status !== 'Cancelled') {
           cetpaSiparisliRed.push(`${siparisAdi(o)}${typeof o.mikroFaturaNo === 'string' && o.mikroFaturaNo ? ` (fatura ${o.mikroFaturaNo})` : ''}`);
         }
@@ -4786,7 +4824,12 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  (stok-hareket importu), hesap lib/stokFiyat — KDV hariç net + iskonto ayrı (sürüm 2). Eski kaynak PG aynası
    *  YALNIZ push'ta doluyordu → Mikro'da kesilen faturanın siparişi kalemsizdi. MEVCUT MF siparişinin kalemi yalnız
    *  açık istekle yenilenir: body `kalemYenile: 'onizle'` HİÇBİR ŞEY YAZMAZ (sayaç + örnek döner), `'uygula'` yazar
-   *  (yalnız `lineItems` — durum, not, sevkiyat dokunulmaz; kaynak boşsa dokunulmaz). */
+   *  (yalnız `lineItems` — durum, not, sevkiyat dokunulmaz; kaynak boşsa dokunulmaz).
+   *
+   *  CETPA'DAN KESİLMİŞ FATURA (2026-10-18 / 19, şartname «fatura gövde + gece MF» § 4 G3a, § 8 H1, § 9): Cetpa siparişine
+   *  GEÇERLİ ETTN ile bağlı fatura türetilmez; bağı BİLİNMEYEN (gönderiliyor / belirsiz / gonderildi + ETTN yok) Cetpa
+   *  siparişi varken aynı carinin talep gününden sonraki yeni faturası BEKLETİLİR (türetilmez, sayılır, nota düşer) — ayrıntı
+   *  `faturadanSiparisCalistir` içindeki G3a / H1 notunda ve server/mikro/faturaBekletme. */
   /** POST /api/mikro/siparis/sil — K-MF-SİL (kullanıcı 2026-09-25: "sildiğim tekrar gelsin ama yanına not düşsün
    *  silinmişti diye"). Yalnız faturadan türeyen MF siparişi (`source:'mikro-fatura'`, id `mikrofat__<kiracı>__…`),
    *  yalnız çağıranın kiracısı, yalnız İÇ roller: `orders` yazma yetkisi B2B/Dealer'ı da kapsıyor (şartname kapısı C1).
@@ -4841,6 +4884,283 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     }
   });
 
+  // ── Faturadan sipariş türetme — TEK GÖVDE, İKİ ÇAĞIRAN (şartname «fatura gövde + gece MF» G3 / § 3, 2026-10-18) ──────────
+  // Panel ucu (`MikroSyncPanel` «Faturadan Sipariş Türet» / «Tümünü Çek») ve 03:20 gece işi AYNI işlevi koşar (`gibDurumCalistir`
+  // deseni). Gövdenin ayrıntısı yukarıdaki `POST /api/mikro/import/faturadan-siparis` belgesinde. İşlev HTTP'ye, bakım kilidine,
+  // syncLog'a ve denetim kaydına DOKUNMAZ — onlar çağıranın sözleşmesi: uçta mevcut davranış aynen (423 kilidi, başarıda denetim +
+  // syncLog), gecede `yaziciOlarakCalistir` + her koşuda TAM BİR sistem syncLog satırı (tek denetim, hedef kiracıya). Kalem yenileme
+  // (`kalemYenile: 'onizle' | 'uygula'`) yalnız uçtan gelir; gece verilmez.
+  type FaturadanSiparisSonucu =
+    /** Geçerli satış faturası yok (erken dönüş). `yonsuz` > 0: faturalar var ama yönü okunamadı. */
+    | { tur: 'faturaYok'; yonsuz: number; note: string | null; message: string }
+    | { tur: 'onizleme'; govde: Record<string, unknown> }
+    | { tur: 'tamam'; created: number; denetimOzeti: string; govde: Record<string, unknown> };
+  async function faturadanSiparisCalistir(cid: string, secenek: { kalemYenile?: unknown }): Promise<FaturadanSiparisSonucu> {
+    const pool = C.getPgPool();
+    const ham = await C.loadCompanyDocs('mikroFaturalar', cid);
+    // Yönü okunamayan fatura SATIŞ SAYILMAZ: eski `?? 0` bir ALIŞ faturasından
+    // sipariş türetip ciroyu şişiriyordu (server/mikro/eslemeFatura.faturaYonu).
+    const yonlu = ham.map(f => ({ f, yon: faturaYonu(f as Record<string, unknown>) }));
+    // ALICININ REDDETTİĞİ satış e-Faturası (GİB 2002, lib/gibDurum — fatura 389, 2026-10-02) Mikro'da iptal bayrağı TAŞIMAZ ve
+    // fatura-listesi'nde geçerli görünür. Kullanıcı kararı (2026-09-25): hesaplara girmez → yeni MF siparişi TÜRETİLMEZ, mevcut
+    // MF siparişi iptal eşlemesinde iptal edilen faturayla AYNI muameleyi görür.
+    const satisFaturalari = yonlu.filter(y => y.yon === 'satis' && !gibReddedildi(y.f as Record<string, unknown>)).map(y => y.f);
+    const yonsuz = yonlu.filter(y => y.yon === null).length;
+    const kalemYenile = secenek.kalemYenile;
+    const onizleme = kalemYenile === 'onizle';
+    // KALEM MODU (önizle/uygula): YALNIZ mevcut MF siparişinin kalemi — yeni sipariş oluşturulmaz, eski alan onarımı
+    // yapılmaz (inceleme 2026-09-25: 'uygula' tüm importu koşturuyor, önizleme ise yalnız kalem sayısını gösteriyordu).
+    const yalnizKalem = kalemYenile === 'onizle' || kalemYenile === 'uygula';
+    // İptal / red eşlemesi üst düzey `mfIptalEsle`'de (gece GİB taraması da aynı gövdeyi koşar). Kaynaksız sayımı yalnız geçerli
+    // satış faturası VARKEN: hiç fatura çekilmemişken tüm MF siparişleri "kaynaksız" görünürdü (şartname kapısı 2026-10-02).
+    const iptalEsle = (mevcutSip: readonly Record<string, unknown>[]) => mfIptalEsle(cid, ham, mevcutSip, satisFaturalari.length > 0);
+    if (!satisFaturalari.length) {
+      // ERKEN DÖNÜŞ SAYACI YUTMAZ (2026-09-19 hakem bulgusu): yönü okunamayan N fatura
+      // tek iz bırakmadan "Satış faturası bulunamadı — önce Faturaları Çek çalıştırın"
+      // mesajına dönüşüyordu; kullanıcı ZATEN yaptığı adıma geri yollanıyor, gerçek
+      // neden (cha_tip okunamıyor) hiçbir yerde görünmüyordu. Üstelik MikroSyncPanel
+      // .handleExtraPull yalnız `note`u basar — `message` ekranda HİÇ görünmez.
+      const erkenNot: string[] = [];
+      // Faturaların TAMAMI yönsüz ve yeterince satır varsa bu veri değil okuma arızasıdır.
+      if (yonsuz === ham.length && ham.length >= OKUMA_ARIZASI_ESIK) {
+        const uyari = okumaArizasiUyarisi(['cha_tip']);
+        if (uyari) { console.warn('[faturadan-siparis]', uyari); erkenNot.push(uyari); }
+      }
+      const sayac = siparisTuretmeNotu({ turetilen: 0, tutarsiz: 0, yonsuz,
+        miktarsizKalem: 0, tutarsizKalem: 0, kalemKaynagiYok: 0, pgYok: !pool });
+      if (sayac) erkenNot.push(sayac);
+      // Yalnız GERÇEKTEN geçerli satış faturası yoksa: yön okunamadığı için buraya düşüldüyse (yonsuz > 0) geçerli küme
+      // boş görünür ve "hem geçerli hem iptal → dokunma" koruması devre dışı kalır (delta hakem 2026-09-25).
+      if (!yalnizKalem && yonsuz === 0) erkenNot.push(...iptalNotlari(await iptalEsle(await C.loadCompanyDocs('orders', cid))));
+      return { tur: 'faturaYok', yonsuz,
+        note: erkenNot.join(' · ') || null,
+        message: yonsuz > 0
+          ? `${yonsuz} faturanın yönü okunamadı — satış faturası ayırt edilemedi.`
+          : 'Satış faturası bulunamadı — önce "Faturaları Çek" çalıştırın.' };
+    }
+
+    const mevcutSiparisler = await C.loadCompanyDocs('orders', cid);
+    const mevcutIdler = new Set(mevcutSiparisler.map(o => String(o.id ?? '')));
+    // BACKFILL (2026-09-03 code review): `faturali`/`mikroFaturaNo` alanları bu uca
+    // sonradan eklendi; idempotent atlama yüzünden ÖNCEKİ koşuların yazdığı kayıtlara
+    // hiç ulaşmıyordu. Sonuç: aynı listede kimi sipariş "MİKRO FATURA", kimi
+    // "FATURASIZ" görünüyor ve zaten Mikro'da kesilmiş faturada "Mikro'ya e-Fatura
+    // gönder" düğmesi duruyordu. Eksik alanı olan eski kayıtları onar.
+    const backfillGerekli = mevcutSiparisler.filter(o => {
+      const x = o as Record<string, unknown>;
+      return x.source === MF_KAYNAGI && (x.faturali !== true || !x.mikroFaturaNo);
+    });
+
+    // Cari adları: PG aynası (tek sorgu). Kalemler: kiracının stok hareketleri + stok adları (fatura başına sorgu YOK).
+    const cariAd = new Map<string, string>();
+    if (pool) {
+      const cr = await pool.query(`SELECT cari_kod, COALESCE(cari_unvan1, '') AS unvan FROM mikro_cari_hesaplar`);
+      for (const row of cr.rows) cariAd.set(String(row.cari_kod), String(row.unvan));
+    }
+    const hareketler = satisFaturasiHareketleri(await C.loadCompanyDocs('inventoryMovements', cid));
+    const stokAdlari = new Map<string, string>();
+    for (const u of await C.loadCompanyDocs('inventory', cid)) {
+      const sku = String((u as Record<string, unknown>).sku ?? '').trim();
+      const ad = String((u as Record<string, unknown>).name ?? '').trim();
+      if (sku && ad && !stokAdlari.has(sku)) stokAdlari.set(sku, ad);
+    }
+    const mevcutMf = new Map(mevcutSiparisler
+      .filter(o => (o as Record<string, unknown>).source === MF_KAYNAGI)
+      .map(o => [String(o.id ?? ''), o as Record<string, unknown>]));
+    // Kalem sayaçları YAZILAN kalemler için (yeni sipariş + otomatik doldurulan); yenileme adayları AYRI sayılır.
+    let miktarsizKalem = 0, tutarsizKalem = 0, kalemKaynagiYok = 0, bosDoldurulan = 0;
+    let kalemYenilenecek = 0, kalemYenilenen = 0, yenileMiktarsiz = 0, yenileTutarsiz = 0, kalemAzalan = 0, kaynaksizBekleyen = 0;
+    // K-MF-SİL: Cetpa'da silinmiş MF siparişlerinin mezarları — yeniden yaratılırken not düşülür (kalem modunda okunmaz).
+    const mezarlar = yalnizKalem ? new Map<string, Record<string, unknown>>()
+      : new Map((await C.loadCompanyDocs('siparisMezarlari', cid)).map(m => [String(m.id ?? ''), m as Record<string, unknown>]));
+    let geriGelen = 0;
+    const kalemOrnek: Array<{ orderNumber: string; eski: number; yeni: number }> = [];
+
+    let batch = C.getAdminDb().batch();
+    let ops = 0, created = 0, skipped = 0, onarilan = 0, tutarsizSiparis = 0;
+    for (const o of yalnizKalem ? [] : backfillGerekli) {
+      const x = o as Record<string, unknown>;
+      const ev = (x.mikroEvrak ?? {}) as { seri?: unknown; sira?: unknown };
+      // Evrak no yalnız mikroEvrak'tan türetilir; yoksa alan yazılmaz (uydurma yok).
+      const evrakNo = ev.sira != null ? `${String(ev.seri ?? '')}${String(ev.sira)}` : null;
+      batch.update(C.getAdminDb().collection('orders').doc(String(x.id)), {
+        faturali: true,
+        ...(evrakNo ? { mikroFaturaNo: evrakNo } : {}),
+      });
+      onarilan++;
+      if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+    }
+    // G3a — CETPA'DAN KESİLMİŞ FATURA TÜRETİLMEZ (şartname «fatura gövde + gece MF» § 4, 2026-10-18; kapı bulgusu gece-isi-1).
+    // `/api/mikro/fatura/kaydet` Cetpa siparişine `ettn` yazar; o fatura gece fatura-listesiyle `mikroFaturalar`'a düşer. Dışlama
+    // yokken aynı satış için ikinci (MF) sipariş türüyor, silinse mezar notuyla ertesi koşuda geri geliyordu (çift ciro, çift sevkiyat).
+    // Eşleme YALNIZ ETTN ile — `mfIptalEsle`'nin «Cetpa siparişli red» eşlemesiyle AYNI anahtar (`guidAnahtari`: süslü parantez ve
+    // harf büyüklüğü farkı tutmayı bozmaz). `mikroFaturaNo` / `mikroEvrak` KULLANILMAZ: biçimi ölçülmedi / sipariş evrakının numarası.
+    // `hasInvoice: true` ama geçerli ETTN'si olmayan Cetpa siparişi (kaydet yolu ETTN okuyamadı) tahminle EŞLENMEZ — ayrı sayılır,
+    // nota örnekle düşer. Cetpa kümesine yalnız GEÇERLİ ETTN girer (`cetpaEttnAnahtari`; § 8 H4 — sıfır ETTN'li tek sipariş `cha_uuid`'i
+    // sıfır olan TÜM faturaları bastırırdı). Küme ETTN → { işaretteki cari, sipariş } (§ 9.B B3): ETTN tutuyor ama iki cari de
+    // biliniyor ve FARKLIYSA fatura bastırılmaz (bağ kurulmaz, nota düşer), bekletme kuralından geçer.
+    //
+    // H1 — BEKLETME (§ 8 İ-1 + § 9.A A1–A6, 2026-10-19): Mikro'ya gönderilmiş ama hangi faturaya karşılık geldiği BİLİNMEYEN Cetpa
+    // siparişi (işaret `gonderiliyor` / `belirsiz`, ya da `gonderildi` + geçerli ETTN yok) varken aynı carinin talep gününden sonraki
+    // YENİ faturası türetilmez — o sipariş Mikro'da kesildiyse ikinci (MF) sipariş türerdi. Tahminle eşleme YOK; bekletme geçicidir:
+    // sonuç çözülünce («Mikro'da var» + ETTN, «ETTN ekle», «Mikro'da yok») sonraki koşuda türer ya da G3a ile bağlanır. Kural ve
+    // kümeler server/mikro/faturaBekletme (saf). Küme yalnız varsayılan modda kurulur; mevcut MF siparişlerine (kalem doldurma, iptal
+    // eşlemesi) dokunmaz; mezarlı fatura da bekletilir (geri getirilmez). Sayaç `skipped`'e KATILMAZ. Değişmez (varsayılan mod):
+    // created + skipped + cetpaSiparisineBagli + bekletilen === satisFaturalari.length. Yanıt sözleşmesi DEĞİŞMEZ (A6): sayı yalnız
+    // `not`a girer (denetim özetine ve gece syncLog'una kendiliğinden düşer).
+    const baglar = cetpaBaglariniKur(mevcutSiparisler, siparisAdi, { bekletme: !yalnizKalem, simdi: new Date() });
+    // § 9.A A7 — ETTN'si GEÇERLİ ama hiçbir Mikro faturasıyla tutmayan yeni Cetpa siparişi: ne bekletilir ne bağlanır (ayna 90
+    // günlük pencere — bekletme kuralına çevrilseydi eski siparişler kalıcı bekletmeye düşerdi). Yalnız sayılır. Küme GİB reddi
+    // süzgecinden ÖNCEKİ tüm satış faturalarından (reddedilen fatura da «tutar»).
+    const satisEttnleri = new Set(yonlu.filter(y => y.yon === 'satis').map(y => guidAnahtari(faturaEttn(y.f as Record<string, unknown>))).filter(Boolean));
+    const ettnTutmayan = yalnizKalem ? [] : baglar.yakinGonderilen.filter(g => !satisEttnleri.has(g.ettn)).map(g => g.siparis);
+    let cetpaSiparisineBagli = 0;
+    const bekletilen = { cari: 0, carisiBilinmeyen: 0 };
+    const bekletenSiparisler = { cari: new Set<string>(), carisiBilinmeyen: new Set<string>() };
+    const cariCeliskili: string[] = [];
+    for (const f of satisFaturalari) {
+      const x = f as Record<string, unknown>;
+      const anahtar = `${String(x.cha_evrakno_seri ?? '').trim()}|${String(x.cha_evrakno_sira ?? '').trim()}`;
+      // Gövde tek kaynakta (server/mikro/eslemeFatura.faturadanSiparis): doküman id
+      // biçimi ve tüm alanlar BİREBİR aynı; tek fark tutar bilinmiyorsa totalPrice
+      // alanının HİÇ YAZILMAMASI. Okuyan tarafın durumu (hangi yüzey `siparisTutari`
+      // kullanıyor, hangisi hâlâ ham topluyor) eslemeFatura.ts'teki uyarıda.
+      const hareket = hareketler.get(anahtar) ?? [];
+      const k = mfKalemleri(hareket, x.cha_meblag, sku => stokAdlari.get(sku));
+      const t = faturadanSiparis(x, k.kalemler,
+        { companyId: cid, cariUnvan: cariAd.get(String(x.cha_kod ?? '').trim()) });
+      if (!t) { skipped++; continue; }                  // evrak sıra no yok
+      if (mevcutIdler.has(t.id)) {
+        skipped++;
+        const mevcut = mevcutMf.get(t.id);
+        if (!mevcut) continue;
+        // Kaynak BOŞSA kıyas yapılamaz: yalnız sürüme bakılır (kaynaksız bekleyen sayılır).
+        if (!kalemYenilenmeli(mevcut.lineItems, k.kalemler.length > 0 ? k.kalemler : undefined)) continue;
+        const eskiSayi = Array.isArray(mevcut.lineItems) ? mevcut.lineItems.length : 0;
+        // Kaynak yok: yazılacak kalem yok — sessiz kalmaz, sayılır ("önce Stok Hareketleri").
+        if (k.kalemler.length === 0) { kaynaksizBekleyen++; continue; }
+        if (!yalnizKalem && eskiSayi === 0) {
+          // VARSAYILAN MOD: BOŞ kalemi doldurmak ekleme — kullanıcı verisini değiştirmez; Tümünü Çek'in ana yolu
+          // (inceleme 2026-09-25, CONFIRMED: sipariş stok hareketinden önce türediyse bir daha hiç dolmuyordu).
+          batch.update(C.getAdminDb().collection('orders').doc(t.id), { lineItems: k.kalemler });
+          bosDoldurulan++;
+          miktarsizKalem += k.miktarsiz; tutarsizKalem += k.tutarsiz;
+          if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+          continue;
+        }
+        // Mevcut kalemi DEĞİŞTİRMEK (eski biçim → sürüm 2) ya da kalem modunda boşu doldurmak: yalnız açık
+        // önizle → uygula ile; satır eşleme yok, kalemler kaynaktan BÜTÜNÜYLE yazılır.
+        kalemYenilenecek++;
+        yenileMiktarsiz += k.miktarsiz; yenileTutarsiz += k.tutarsiz;
+        if (k.kalemler.length < eskiSayi) kalemAzalan++;
+        if (kalemOrnek.length < 10) kalemOrnek.push({ orderNumber: String(mevcut.orderNumber ?? t.id), eski: eskiSayi, yeni: k.kalemler.length });
+        if (kalemYenile === 'uygula') {
+          batch.update(C.getAdminDb().collection('orders').doc(t.id), { lineItems: k.kalemler });
+          kalemYenilenen++;
+          if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+        }
+        continue;
+      }
+      if (yalnizKalem) continue;                        // kalem modunda yeni sipariş OLUŞTURULMAZ
+      // G3a (yukarıda): fatura bir Cetpa siparişine ETTN ile bağlıysa MF siparişi YARATILMAZ — mezarlı olsa da geri getirilmez.
+      // Cari çelişkisi (B3): iki cari de biliniyor ve farklı → bağ KURULMAZ, fatura bekletme kuralından geçer.
+      const faturaEttnKimligi = guidAnahtari(faturaEttn(x));
+      const bag = faturaEttnKimligi ? baglar.ettnler.get(faturaEttnKimligi) : undefined;
+      if (bag) {
+        const faturaCarisi = cariAnahtari(t.doc.mikroCariKod), siparisCarisi = cariAnahtari(bag.cariKod);
+        if (faturaCarisi && siparisCarisi && faturaCarisi !== siparisCarisi) cariCeliskili.push(bag.siparis);
+        else { cetpaSiparisineBagli++; continue; }
+      }
+      // H1 bekletme (yukarıda) — G3a'nın hemen ardında, kalem sayaçlarından / `created`'dan / mezar bloğundan ÖNCE.
+      const bekleten = bekletmeKarari(baglar, t.doc.mikroCariKod, t.doc.orderDate);
+      if (bekleten) {
+        bekletilen[bekleten.neden]++;
+        for (const ad of bekleten.siparisler) bekletenSiparisler[bekleten.neden].add(ad);
+        continue;
+      }
+      if (hareket.length === 0) kalemKaynagiYok++;
+      miktarsizKalem += k.miktarsiz; tutarsizKalem += k.tutarsiz;
+      if (t.tutarBilinmiyor) tutarsizSiparis++;
+      created++;
+      // Cetpa'da silinmişti → notla geri gelir (sistem notu AYRI alan; kullanıcının iç notu `notes`a geri konur).
+      const mezar = mezarlar.get(t.id);
+      const geriGelis = mezar && mezar.geriGeldi !== true ? {
+        sistemNotu: `Cetpa'da ${typeof mezar.silinmeGunu === 'string' ? mezar.silinmeGunu : 'bilinmeyen bir tarihte'} `
+          + `${typeof mezar.silenAd === 'string' && mezar.silenAd ? mezar.silenAd : 'bir kullanıcı'} tarafından silinmişti — Mikro'dan yeniden geldi.`,
+        ...(typeof mezar.silinenNot === 'string' && mezar.silinenNot ? { notes: mezar.silinenNot } : {}),
+      } : {};
+      batch.set(C.getAdminDb().collection('orders').doc(t.id), {
+        ...t.doc,
+        ...geriGelis,
+        // Fatura tarihi sipariş tarihi olarak işlenir (kullanıcının isteği).
+        createdAt: t.olusturmaTarihi ?? pgServerTimestamp(),
+      });
+      if (mezar && mezar.geriGeldi !== true) {
+        batch.update(C.getAdminDb().collection('siparisMezarlari').doc(t.id), { geriGeldi: true, geriGelmeZamani: pgServerTimestamp() });
+        geriGelen++;
+        if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+      }
+      if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+    }
+    if (ops > 0) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
+    // Yönü okunamayan fatura varken (yonsuz > 0) iptal eşlemesi KOŞMAZ: o fatura geçerli kümede görünmez, "hem geçerli hem
+    // iptal → dokunma" koruması onun için devre dışı kalırdı (son hakem 2026-09-25, PLAUSIBLE). Not bunu söyler.
+    const iptalAtlandi = !yalnizKalem && yonsuz > 0;
+    const iptal: IptalSonucu = yalnizKalem || iptalAtlandi ? BOS_IPTAL : await iptalEsle(mevcutSiparisler);
+    const { iptalEdilen, iptalGeriAlinan, iptalBelirsiz } = iptal;
+    if (ops > 0) await batch.commit();
+
+    const kaynaksizNotu = kaynaksizBekleyen > 0
+      ? `${kaynaksizBekleyen} MF siparişinin kalemi boş/eski ama stok hareketi yok — önce "Stok Hareketleri"ni çekin` : null;
+    const not = (yalnizKalem
+      ? [
+          yenileTutarsiz > 0 ? `${yenileTutarsiz} kalemin tutarı çözülemiyor — yenilenirse '—' görünür` : null,
+          yenileMiktarsiz > 0 ? `${yenileMiktarsiz} kalemin miktarı bilinmiyor` : null,
+          kalemAzalan > 0 ? `${kalemAzalan} siparişte kalem sayısı AZALIYOR — örnekleri kontrol edin` : null,
+          kaynaksizNotu,
+        ]
+      : [
+          siparisTuretmeNotu({ turetilen: created, tutarsiz: tutarsizSiparis, yonsuz,
+            miktarsizKalem, tutarsizKalem, kalemKaynagiYok, pgYok: !pool }),
+          cetpaSiparisineBagli > 0 ? `${cetpaSiparisineBagli} fatura Cetpa siparişine bağlı (ETTN) — türetilmedi` : null,
+          // İki dal AYNI «N fatura bekletildi» alt dizesiyle ve `⚠` ile başlar (§ 9.A A6 — açılış tanısı satırı uyarılı gösterir).
+          bekletilen.cari > 0
+            ? `⚠ ${bekletilen.cari} fatura bekletildi: aynı müşterinin Mikro'ya gönderilmiş ama hangi faturaya karşılık geldiği bilinmeyen Cetpa siparişi var (${ilkBes([...bekletenSiparisler.cari])}) — Siparişler'de sonucu çözün ya da ETTN ekleyin; çözülünce sonraki koşuda türer`
+            : null,
+          bekletilen.carisiBilinmeyen > 0
+            ? `⚠ ${bekletilen.carisiBilinmeyen} fatura bekletildi: carisi okunamayan, Mikro'ya gönderilmiş ve sonucu bilinmeyen Cetpa siparişi var (${ilkBes([...bekletenSiparisler.carisiBilinmeyen])}) — bu yüzden tarih koşulunu sağlayan TÜM yeni faturalar bekletildi; Siparişler'de sonucu çözün ya da ETTN ekleyin; çözülünce sonraki koşuda türer`
+            : null,
+          cariCeliskili.length > 0
+            ? `⚠ ${cariCeliskili.length} fatura: ETTN bir Cetpa siparişiyle tutuyor ama carisi farklı (${ilkBes(cariCeliskili)}) — bağ kurulmadı; siparişin ETTN'sini denetleyin`
+            : null,
+          ettnTutmayan.length > 0 ? `ETTN'si hiçbir Mikro faturasıyla tutmayan Cetpa siparişi: ${ettnTutmayan.length} (${ilkBes(ettnTutmayan)})` : null,
+          baglar.ettnsizFaturali.length > 0
+            ? `ETTN'siz Cetpa faturalı sipariş: ${baglar.ettnsizFaturali.length} (${ilkBes(baglar.ettnsizFaturali)}) — hiçbir faturayla eşlenmedi (tahmin edilmez); faturası Mikro'da hangisi, kontrol edin`
+            : null,
+          bosDoldurulan > 0 ? `${bosDoldurulan} kalemsiz MF siparişinin kalemi dolduruldu` : null,
+          geriGelen > 0 ? `${geriGelen} silinmiş MF siparişi Mikro'dan notla yeniden geldi` : null,
+          ...iptalNotlari(iptal),
+          iptalAtlandi ? `${yonsuz} faturanın yönü okunamadığı için iptal eşlemesi ATLANDI — faturaları yeniden çekin` : null,
+          kalemYenilenecek > 0 ? `${kalemYenilenecek} MF siparişinin kalemi eski biçimde ya da Mikro'daki satırlarla TUTMUYOR (eksik/değişmiş) — Entegrasyon → "MF Sipariş Kalemlerini Yenile"` : null,
+          kaynaksizNotu,
+        ]).filter(Boolean).join(' · ') || null;
+    if (not?.startsWith('UYARI:')) console.warn('[faturadan-siparis]', not);
+    if (onizleme) {
+      return { tur: 'onizleme', govde: { kalemYenilenecek, kalemOrnek, yenileTutarsiz, yenileMiktarsiz,
+        kalemAzalan, kaynaksizBekleyen, total: satisFaturalari.length, note: not } };
+    }
+    return {
+      tur: 'tamam', created,
+      denetimOzeti: `${created} sipariş türetildi, ${skipped} atlandı, ${onarilan} eski kayıt onarıldı, ${bosDoldurulan} kalemsiz sipariş dolduruldu, ${kalemYenilenen} siparişin kalemi yenilendi, ${iptalEdilen} iptal edildi, ${iptalGeriAlinan} iptali geri alındı (${satisFaturalari.length} satış faturası)${not ? ` — ${not}` : ''}`,
+      govde: { created, skipped, onarilan, bosDoldurulan, iptalEdilen, iptalGeriAlinan, iptalBelirsiz, kalemYenilenecek, kalemYenilenen, kalemOrnek,
+        yenileTutarsiz, yenileMiktarsiz, kalemAzalan, kaynaksizBekleyen, total: satisFaturalari.length,
+        // `kalemsiz` alanı KALDIRILDI: MikroSyncPanel jenerik kartı yalnız `note`u basıyor
+        // (handleExtraPull, MikroSyncPanel.tsx 328-333) — bu uyarı ekranda HİÇ GÖRÜNMÜYORDU.
+        // Artık aynı cümle `note` içinde, diğer sayaçlarla birlikte.
+        note: not },
+    };
+  }
+
   // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu.
   // Rol kapısı (2026-10-10): iç personel şartına `orders` yazma eklendi (kural dış rol içerdiği için `requireStaff` KALIR) — uç `orders` yazar; çağıran yalnız Ayarlar paneli.
   app.post('/api/mikro/import/faturadan-siparis', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.requireCollectionAccess('orders', 'write'), C.mikroLimiter, async (req: Request, res: Response) => {
@@ -4848,210 +5168,12 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     const t0 = Date.now();
     try {
       const cid = await C.reqCompanyId(req);
-      const pool = C.getPgPool();
-      const ham = await C.loadCompanyDocs('mikroFaturalar', cid);
-      // Yönü okunamayan fatura SATIŞ SAYILMAZ: eski `?? 0` bir ALIŞ faturasından
-      // sipariş türetip ciroyu şişiriyordu (server/mikro/eslemeFatura.faturaYonu).
-      const yonlu = ham.map(f => ({ f, yon: faturaYonu(f as Record<string, unknown>) }));
-      // ALICININ REDDETTİĞİ satış e-Faturası (GİB 2002, lib/gibDurum — fatura 389, 2026-10-02) Mikro'da iptal bayrağı TAŞIMAZ ve
-      // fatura-listesi'nde geçerli görünür. Kullanıcı kararı (2026-09-25): hesaplara girmez → yeni MF siparişi TÜRETİLMEZ, mevcut
-      // MF siparişi iptal eşlemesinde iptal edilen faturayla AYNI muameleyi görür.
-      const satisFaturalari = yonlu.filter(y => y.yon === 'satis' && !gibReddedildi(y.f as Record<string, unknown>)).map(y => y.f);
-      const yonsuz = yonlu.filter(y => y.yon === null).length;
-      const kalemYenile = (req.body as { kalemYenile?: unknown } | undefined)?.kalemYenile;
-      const onizleme = kalemYenile === 'onizle';
-      // KALEM MODU (önizle/uygula): YALNIZ mevcut MF siparişinin kalemi — yeni sipariş oluşturulmaz, eski alan onarımı
-      // yapılmaz (inceleme 2026-09-25: 'uygula' tüm importu koşturuyor, önizleme ise yalnız kalem sayısını gösteriyordu).
-      const yalnizKalem = kalemYenile === 'onizle' || kalemYenile === 'uygula';
-      // İptal / red eşlemesi üst düzey `mfIptalEsle`'de (gece GİB taraması da aynı gövdeyi koşar). Kaynaksız sayımı yalnız geçerli
-      // satış faturası VARKEN: hiç fatura çekilmemişken tüm MF siparişleri "kaynaksız" görünürdü (şartname kapısı 2026-10-02).
-      const iptalEsle = (mevcutSip: readonly Record<string, unknown>[]) => mfIptalEsle(cid, ham, mevcutSip, satisFaturalari.length > 0);
-      if (!satisFaturalari.length) {
-        // ERKEN DÖNÜŞ SAYACI YUTMAZ (2026-09-19 hakem bulgusu): yönü okunamayan N fatura
-        // tek iz bırakmadan "Satış faturası bulunamadı — önce Faturaları Çek çalıştırın"
-        // mesajına dönüşüyordu; kullanıcı ZATEN yaptığı adıma geri yollanıyor, gerçek
-        // neden (cha_tip okunamıyor) hiçbir yerde görünmüyordu. Üstelik MikroSyncPanel
-        // .handleExtraPull yalnız `note`u basar — `message` ekranda HİÇ görünmez.
-        const erkenNot: string[] = [];
-        // Faturaların TAMAMI yönsüz ve yeterince satır varsa bu veri değil okuma arızasıdır.
-        if (yonsuz === ham.length && ham.length >= OKUMA_ARIZASI_ESIK) {
-          const uyari = okumaArizasiUyarisi(['cha_tip']);
-          if (uyari) { console.warn('[faturadan-siparis]', uyari); erkenNot.push(uyari); }
-        }
-        const sayac = siparisTuretmeNotu({ turetilen: 0, tutarsiz: 0, yonsuz,
-          miktarsizKalem: 0, tutarsizKalem: 0, kalemKaynagiYok: 0, pgYok: !pool });
-        if (sayac) erkenNot.push(sayac);
-        // Yalnız GERÇEKTEN geçerli satış faturası yoksa: yön okunamadığı için buraya düşüldüyse (yonsuz > 0) geçerli küme
-        // boş görünür ve "hem geçerli hem iptal → dokunma" koruması devre dışı kalır (delta hakem 2026-09-25).
-        if (!yalnizKalem && yonsuz === 0) erkenNot.push(...iptalNotlari(await iptalEsle(await C.loadCompanyDocs('orders', cid))));
-        return res.json({ success: true, created: 0, skipped: 0, total: 0,
-          note: erkenNot.join(' · ') || null,
-          message: yonsuz > 0
-            ? `${yonsuz} faturanın yönü okunamadı — satış faturası ayırt edilemedi.`
-            : 'Satış faturası bulunamadı — önce "Faturaları Çek" çalıştırın.' });
-      }
-
-      const mevcutSiparisler = await C.loadCompanyDocs('orders', cid);
-      const mevcutIdler = new Set(mevcutSiparisler.map(o => String(o.id ?? '')));
-      // BACKFILL (2026-09-03 code review): `faturali`/`mikroFaturaNo` alanları bu uca
-      // sonradan eklendi; idempotent atlama yüzünden ÖNCEKİ koşuların yazdığı kayıtlara
-      // hiç ulaşmıyordu. Sonuç: aynı listede kimi sipariş "MİKRO FATURA", kimi
-      // "FATURASIZ" görünüyor ve zaten Mikro'da kesilmiş faturada "Mikro'ya e-Fatura
-      // gönder" düğmesi duruyordu. Eksik alanı olan eski kayıtları onar.
-      const backfillGerekli = mevcutSiparisler.filter(o => {
-        const x = o as Record<string, unknown>;
-        return x.source === MF_KAYNAGI && (x.faturali !== true || !x.mikroFaturaNo);
-      });
-
-      // Cari adları: PG aynası (tek sorgu). Kalemler: kiracının stok hareketleri + stok adları (fatura başına sorgu YOK).
-      const cariAd = new Map<string, string>();
-      if (pool) {
-        const cr = await pool.query(`SELECT cari_kod, COALESCE(cari_unvan1, '') AS unvan FROM mikro_cari_hesaplar`);
-        for (const row of cr.rows) cariAd.set(String(row.cari_kod), String(row.unvan));
-      }
-      const hareketler = satisFaturasiHareketleri(await C.loadCompanyDocs('inventoryMovements', cid));
-      const stokAdlari = new Map<string, string>();
-      for (const u of await C.loadCompanyDocs('inventory', cid)) {
-        const sku = String((u as Record<string, unknown>).sku ?? '').trim();
-        const ad = String((u as Record<string, unknown>).name ?? '').trim();
-        if (sku && ad && !stokAdlari.has(sku)) stokAdlari.set(sku, ad);
-      }
-      const mevcutMf = new Map(mevcutSiparisler
-        .filter(o => (o as Record<string, unknown>).source === MF_KAYNAGI)
-        .map(o => [String(o.id ?? ''), o as Record<string, unknown>]));
-      // Kalem sayaçları YAZILAN kalemler için (yeni sipariş + otomatik doldurulan); yenileme adayları AYRI sayılır.
-      let miktarsizKalem = 0, tutarsizKalem = 0, kalemKaynagiYok = 0, bosDoldurulan = 0;
-      let kalemYenilenecek = 0, kalemYenilenen = 0, yenileMiktarsiz = 0, yenileTutarsiz = 0, kalemAzalan = 0, kaynaksizBekleyen = 0;
-      // K-MF-SİL: Cetpa'da silinmiş MF siparişlerinin mezarları — yeniden yaratılırken not düşülür (kalem modunda okunmaz).
-      const mezarlar = yalnizKalem ? new Map<string, Record<string, unknown>>()
-        : new Map((await C.loadCompanyDocs('siparisMezarlari', cid)).map(m => [String(m.id ?? ''), m as Record<string, unknown>]));
-      let geriGelen = 0;
-      const kalemOrnek: Array<{ orderNumber: string; eski: number; yeni: number }> = [];
-
-      let batch = C.getAdminDb().batch();
-      let ops = 0, created = 0, skipped = 0, onarilan = 0, tutarsizSiparis = 0;
-      for (const o of yalnizKalem ? [] : backfillGerekli) {
-        const x = o as Record<string, unknown>;
-        const ev = (x.mikroEvrak ?? {}) as { seri?: unknown; sira?: unknown };
-        // Evrak no yalnız mikroEvrak'tan türetilir; yoksa alan yazılmaz (uydurma yok).
-        const evrakNo = ev.sira != null ? `${String(ev.seri ?? '')}${String(ev.sira)}` : null;
-        batch.update(C.getAdminDb().collection('orders').doc(String(x.id)), {
-          faturali: true,
-          ...(evrakNo ? { mikroFaturaNo: evrakNo } : {}),
-        });
-        onarilan++;
-        if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
-      }
-      for (const f of satisFaturalari) {
-        const x = f as Record<string, unknown>;
-        const anahtar = `${String(x.cha_evrakno_seri ?? '').trim()}|${String(x.cha_evrakno_sira ?? '').trim()}`;
-        // Gövde tek kaynakta (server/mikro/eslemeFatura.faturadanSiparis): doküman id
-        // biçimi ve tüm alanlar BİREBİR aynı; tek fark tutar bilinmiyorsa totalPrice
-        // alanının HİÇ YAZILMAMASI. Okuyan tarafın durumu (hangi yüzey `siparisTutari`
-        // kullanıyor, hangisi hâlâ ham topluyor) eslemeFatura.ts'teki uyarıda.
-        const hareket = hareketler.get(anahtar) ?? [];
-        const k = mfKalemleri(hareket, x.cha_meblag, sku => stokAdlari.get(sku));
-        const t = faturadanSiparis(x, k.kalemler,
-          { companyId: cid, cariUnvan: cariAd.get(String(x.cha_kod ?? '').trim()) });
-        if (!t) { skipped++; continue; }                  // evrak sıra no yok
-        if (mevcutIdler.has(t.id)) {
-          skipped++;
-          const mevcut = mevcutMf.get(t.id);
-          if (!mevcut) continue;
-          // Kaynak BOŞSA kıyas yapılamaz: yalnız sürüme bakılır (kaynaksız bekleyen sayılır).
-          if (!kalemYenilenmeli(mevcut.lineItems, k.kalemler.length > 0 ? k.kalemler : undefined)) continue;
-          const eskiSayi = Array.isArray(mevcut.lineItems) ? mevcut.lineItems.length : 0;
-          // Kaynak yok: yazılacak kalem yok — sessiz kalmaz, sayılır ("önce Stok Hareketleri").
-          if (k.kalemler.length === 0) { kaynaksizBekleyen++; continue; }
-          if (!yalnizKalem && eskiSayi === 0) {
-            // VARSAYILAN MOD: BOŞ kalemi doldurmak ekleme — kullanıcı verisini değiştirmez; Tümünü Çek'in ana yolu
-            // (inceleme 2026-09-25, CONFIRMED: sipariş stok hareketinden önce türediyse bir daha hiç dolmuyordu).
-            batch.update(C.getAdminDb().collection('orders').doc(t.id), { lineItems: k.kalemler });
-            bosDoldurulan++;
-            miktarsizKalem += k.miktarsiz; tutarsizKalem += k.tutarsiz;
-            if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
-            continue;
-          }
-          // Mevcut kalemi DEĞİŞTİRMEK (eski biçim → sürüm 2) ya da kalem modunda boşu doldurmak: yalnız açık
-          // önizle → uygula ile; satır eşleme yok, kalemler kaynaktan BÜTÜNÜYLE yazılır.
-          kalemYenilenecek++;
-          yenileMiktarsiz += k.miktarsiz; yenileTutarsiz += k.tutarsiz;
-          if (k.kalemler.length < eskiSayi) kalemAzalan++;
-          if (kalemOrnek.length < 10) kalemOrnek.push({ orderNumber: String(mevcut.orderNumber ?? t.id), eski: eskiSayi, yeni: k.kalemler.length });
-          if (kalemYenile === 'uygula') {
-            batch.update(C.getAdminDb().collection('orders').doc(t.id), { lineItems: k.kalemler });
-            kalemYenilenen++;
-            if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
-          }
-          continue;
-        }
-        if (yalnizKalem) continue;                        // kalem modunda yeni sipariş OLUŞTURULMAZ
-        if (hareket.length === 0) kalemKaynagiYok++;
-        miktarsizKalem += k.miktarsiz; tutarsizKalem += k.tutarsiz;
-        if (t.tutarBilinmiyor) tutarsizSiparis++;
-        created++;
-        // Cetpa'da silinmişti → notla geri gelir (sistem notu AYRI alan; kullanıcının iç notu `notes`a geri konur).
-        const mezar = mezarlar.get(t.id);
-        const geriGelis = mezar && mezar.geriGeldi !== true ? {
-          sistemNotu: `Cetpa'da ${typeof mezar.silinmeGunu === 'string' ? mezar.silinmeGunu : 'bilinmeyen bir tarihte'} `
-            + `${typeof mezar.silenAd === 'string' && mezar.silenAd ? mezar.silenAd : 'bir kullanıcı'} tarafından silinmişti — Mikro'dan yeniden geldi.`,
-          ...(typeof mezar.silinenNot === 'string' && mezar.silinenNot ? { notes: mezar.silinenNot } : {}),
-        } : {};
-        batch.set(C.getAdminDb().collection('orders').doc(t.id), {
-          ...t.doc,
-          ...geriGelis,
-          // Fatura tarihi sipariş tarihi olarak işlenir (kullanıcının isteği).
-          createdAt: t.olusturmaTarihi ?? pgServerTimestamp(),
-        });
-        if (mezar && mezar.geriGeldi !== true) {
-          batch.update(C.getAdminDb().collection('siparisMezarlari').doc(t.id), { geriGeldi: true, geriGelmeZamani: pgServerTimestamp() });
-          geriGelen++;
-          if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
-        }
-        if (++ops >= 450) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
-      }
-      if (ops > 0) { await batch.commit(); batch = C.getAdminDb().batch(); ops = 0; }
-      // Yönü okunamayan fatura varken (yonsuz > 0) iptal eşlemesi KOŞMAZ: o fatura geçerli kümede görünmez, "hem geçerli hem
-      // iptal → dokunma" koruması onun için devre dışı kalırdı (son hakem 2026-09-25, PLAUSIBLE). Not bunu söyler.
-      const iptalAtlandi = !yalnizKalem && yonsuz > 0;
-      const iptal: IptalSonucu = yalnizKalem || iptalAtlandi ? BOS_IPTAL : await iptalEsle(mevcutSiparisler);
-      const { iptalEdilen, iptalGeriAlinan, iptalBelirsiz } = iptal;
-      if (ops > 0) await batch.commit();
-
-      const kaynaksizNotu = kaynaksizBekleyen > 0
-        ? `${kaynaksizBekleyen} MF siparişinin kalemi boş/eski ama stok hareketi yok — önce "Stok Hareketleri"ni çekin` : null;
-      const not = (yalnizKalem
-        ? [
-            yenileTutarsiz > 0 ? `${yenileTutarsiz} kalemin tutarı çözülemiyor — yenilenirse '—' görünür` : null,
-            yenileMiktarsiz > 0 ? `${yenileMiktarsiz} kalemin miktarı bilinmiyor` : null,
-            kalemAzalan > 0 ? `${kalemAzalan} siparişte kalem sayısı AZALIYOR — örnekleri kontrol edin` : null,
-            kaynaksizNotu,
-          ]
-        : [
-            siparisTuretmeNotu({ turetilen: created, tutarsiz: tutarsizSiparis, yonsuz,
-              miktarsizKalem, tutarsizKalem, kalemKaynagiYok, pgYok: !pool }),
-            bosDoldurulan > 0 ? `${bosDoldurulan} kalemsiz MF siparişinin kalemi dolduruldu` : null,
-            geriGelen > 0 ? `${geriGelen} silinmiş MF siparişi Mikro'dan notla yeniden geldi` : null,
-            ...iptalNotlari(iptal),
-            iptalAtlandi ? `${yonsuz} faturanın yönü okunamadığı için iptal eşlemesi ATLANDI — faturaları yeniden çekin` : null,
-            kalemYenilenecek > 0 ? `${kalemYenilenecek} MF siparişinin kalemi eski biçimde ya da Mikro'daki satırlarla TUTMUYOR (eksik/değişmiş) — Entegrasyon → "MF Sipariş Kalemlerini Yenile"` : null,
-            kaynaksizNotu,
-          ]).filter(Boolean).join(' · ') || null;
-      if (not?.startsWith('UYARI:')) console.warn('[faturadan-siparis]', not);
-      if (onizleme) {
-        return res.json({ success: true, onizleme: true, kalemYenilenecek, kalemOrnek, yenileTutarsiz, yenileMiktarsiz,
-          kalemAzalan, kaynaksizBekleyen, total: satisFaturalari.length, note: not, duration: Date.now() - t0 });
-      }
-      await C.writeAuditLog(C.reqActor(req), 'Faturadan Sipariş',
-        `${created} sipariş türetildi, ${skipped} atlandı, ${onarilan} eski kayıt onarıldı, ${bosDoldurulan} kalemsiz sipariş dolduruldu, ${kalemYenilenen} siparişin kalemi yenilendi, ${iptalEdilen} iptal edildi, ${iptalGeriAlinan} iptali geri alındı (${satisFaturalari.length} satış faturası)${not ? ` — ${not}` : ''}`);
-      await C.writeSyncLog('faturadan-siparis', 'orders', String(created), true, null, null, Date.now() - t0, C.reqActor(req));
-      res.json({ success: true, created, skipped, onarilan, bosDoldurulan, iptalEdilen, iptalGeriAlinan, iptalBelirsiz, kalemYenilenecek, kalemYenilenen, kalemOrnek,
-        yenileTutarsiz, yenileMiktarsiz, kalemAzalan, kaynaksizBekleyen, total: satisFaturalari.length,
-        // `kalemsiz` alanı KALDIRILDI: MikroSyncPanel jenerik kartı yalnız `note`u basıyor
-        // (handleExtraPull, MikroSyncPanel.tsx 328-333) — bu uyarı ekranda HİÇ GÖRÜNMÜYORDU.
-        // Artık aynı cümle `note` içinde, diğer sayaçlarla birlikte.
-        note: not,
-        duration: Date.now() - t0 });
+      const r = await faturadanSiparisCalistir(cid, { kalemYenile: (req.body as { kalemYenile?: unknown } | undefined)?.kalemYenile });
+      if (r.tur === 'faturaYok') return res.json({ success: true, created: 0, skipped: 0, total: 0, note: r.note, message: r.message });
+      if (r.tur === 'onizleme') return res.json({ success: true, onizleme: true, ...r.govde, duration: Date.now() - t0 });
+      await C.writeAuditLog(C.reqActor(req), 'Faturadan Sipariş', r.denetimOzeti);
+      await C.writeSyncLog('faturadan-siparis', 'orders', String(r.created), true, null, null, Date.now() - t0, C.reqActor(req));
+      res.json({ success: true, ...r.govde, duration: Date.now() - t0 });
     } catch (err) {
       console.error('[faturadan-siparis]', err);
       res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
@@ -5504,7 +5626,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   //      başarı → `gonderildi` (numara okunamasa da) · Mikro reddi (200 + IsError) → `reddedildi` (yeniden gönderilebilir) ·
   //      gönderim BAŞLAMADAN düşen hata (kimlik / belirteç) → işaret GERİ ALINIR · geri kalan her şey (ağ, zaman aşımı, HTTP
   //      4xx / 5xx, stub, `result: []`, JSON olmayan gövde) → `belirsiz` (kullanıcı Mikro'dan bakıp `fatura/sonuc` ile çözer).
-  // Her yanıt `kod` (istemcinin iletisi bundan seçilir — D9) ve güncel işareti (D8) taşır. Mikro'ya yazan gövde DEĞİŞMEDİ.
+  // Her yanıt `kod` (istemcinin iletisi bundan seçilir — D9) ve güncel işareti (D8) taşır. Mikro'ya yazan gövde o işte DEĞİŞMEDİ;
+  // 2026-10-18'de yalnız seri '' ve cha_cinsi 6 oldu (govdeFaturaIrsaliye başlığı, 6. fark — sıra yine GÖNDERİLMEZ).
   app.post('/api/mikro/fatura/kaydet', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     // (1) Şema + E2. `C.validate` yerine doğrudan: yanıt aynı gövdeye `kod` ekler (gönderim başlamadı → «gönderilmedi» iletisi).
     const parsed = FaturaKaydetSchema.safeParse(req.body);
@@ -5583,7 +5706,14 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     const istekNo = randomUUID();
     let talep: TalepSonucu;
     try {
-      talep = await faturaTalepEt(B, { durum: 'gonderiliyor', istekNo, zaman: new Date().toISOString(), kim: actor.email || actor.uid });
+      // `cariKod` / `faturaTarihi` (§ 9.A A1, 2026-10-19): gövdeye YAZILAN `cha_kod` ve `cha_tarihi` — gece faturadan-sipariş
+      // bekletmesi «aynı müşterinin talep gününden sonraki faturası» kararını bunlarla verir. Başka sunucu kaynağı yok (değer
+      // istemcinin müşteri kartından geliyor ve saklanmıyordu); geçiş ve sonuç SQL'leri işareti `(ISARET) || $5` ile birleştirir,
+      // alanlar korunur. Müşteri kartından yeniden türetmek YASAK (istemci formülünün kopyası olurdu).
+      talep = await faturaTalepEt(B, {
+        durum: 'gonderiliyor', istekNo, zaman: new Date().toISOString(), kim: actor.email || actor.uid,
+        cariKod: String(evrak.cha_kod), faturaTarihi: evrak.cha_tarihi,
+      });
     } catch (err) {
       console.error('[FaturaKaydetV2] gönderim işareti yazılamadı — Mikro\'ya GİDİLMEDİ:', err);
       return res.status(500).json({ success: false, kod: 'FATURA_GONDERILMEDI', error: 'Gönderim işareti yazılamadı; fatura gönderilmedi.' });
@@ -5752,32 +5882,62 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
   });
 
   // POST /api/mikro/fatura/sonuc — `belirsiz` (ya da bayat `gonderiliyor`) e-Fatura kaydını ÇÖZER (şartname «e-Fatura çift kesim»
-  // E3 + § 7 D6). Body: { firebaseId, karar: 'mikrodaVar' | 'mikrodaYok', numara? }.
-  //   mikrodaVar → `gonderildi` (numara verilirse işarete ve `mikroFaturaNo`'ya) · mikrodaYok → işaret SİLİNİR (yeniden gönderilebilir).
+  // E3 + § 7 D6). Body: { firebaseId, karar: 'mikrodaVar' | 'mikrodaYok' | 'ettnEkle', numara?, ettn? }.
+  //   mikrodaVar → `gonderildi` (numara verilirse işarete ve `mikroFaturaNo`'ya; ETTN verilirse `ettn`'ye) · mikrodaYok → işaret
+  //   SİLİNİR (yeniden gönderilebilir) · ettnEkle (2026-10-19, şartname «fatura gövde + gece MF» § 9.B B2) → `gonderildi` ama
+  //   geçerli ETTN'si olmayan siparişe ETTN yazar (karşılaştır-yaz). ETTN yazılınca gece faturadan-sipariş bekletmesi o sipariş
+  //   için kalkar ve G3a bağı kurulur. Biçim `cetpaEttnAnahtari` ile sınanır (geçersiz → 400 `FATURA_ETTN_GECERSIZ`); siparişe ham
+  //   girdi değil ANAHTAR yazılır (küçük harf, parantezsiz). Yazımdan önce B3 denetimi: aynı ETTN başka Cetpa siparişinde → 409
+  //   `FATURA_ETTN_BASKA_SIPARISTE`; fatura aynasına göre alış faturası / başka cari → 409 `FATURA_ETTN_BASKA_CARI`; aynı carinin
+  //   talep sınırından önceki faturası → 409 `FATURA_ETTN_ONCEKI_FATURA` (gece bekletme ölçütüyle aynı); aynada yok /
+  //   doğrulanamadı → KABUL + `uyari`. Ön denetim ile yazım arasındaki pencere: ETTN yazan UPDATE, (kiracı, ETTN) danışma kilidiyle
+  //   AYNI işlemde koşar (`BEGIN` → kilit → UPDATE → `COMMIT`) — UPDATE'in `NOT EXISTS`'i READ COMMITTED'da eşzamanlı iki yazımı
+  //   TEK BAŞINA durdurmaz; kilit ikinciyi birincinin işlenmiş yazımını görecek şekilde sıraya sokar (faturaGonderimi `ettnKilidiyleYaz`).
   // KAPI = KESİM KAPISI (D6 — E3'teki `invoices:write` YERİNE): yanlış `mikrodaYok` ikinci resmî belgeyi doğurur, yani işlem kesimle
-  // EŞDEĞERDİR; zincir `fatura/kaydet` ile AYNI (kimlik → MFA → iç personel) + kiracı (yabancı / olmayan sipariş 404). Kabul yalnız
-  // `belirsiz` / bayat `gonderiliyor`; koşul tek SQL'in WHERE'inde (iki eşzamanlı `sonuc`'tan biri uygulanır, öteki 409). Denetim
-  // kaydı `writeSyncLog` + oturum (→ auditLog). İstemci `istekNo` göndermez (D13): arka arkaya iki belirsiz denemede ikinci `sonuc`
-  // yenisini çözer — onay metnindeki işaret `zaman`ı bunu görünür kılar (bilinçli kalıntı).
+  // EŞDEĞERDİR; zincir `fatura/kaydet` ile AYNI (kimlik → MFA → iç personel) + kiracı (yabancı / olmayan sipariş 404). `ettnEkle`
+  // AYNI uçtadır: kapısı yapı gereği birebir. Kabul yalnız `belirsiz` / bayat `gonderiliyor` (`ettnEkle`: `gonderildi`); koşul tek
+  // SQL'in WHERE'inde (iki eşzamanlı `sonuc`'tan biri uygulanır, öteki 409). Denetim kaydı `writeSyncLog` + oturum (→ auditLog);
+  // ayrıntı `{ karar, numara?, ettn?, ettnOnceki?, uyari? }`. İstemci `istekNo` göndermez (D13): arka arkaya iki belirsiz denemede
+  // ikinci `sonuc` yenisini çözer — onay metnindeki işaret `zaman`ı bunu görünür kılar (bilinçli kalıntı).
   app.post('/api/mikro/fatura/sonuc', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
     const parsed = FaturaSonucSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ success: false, error: 'Geçersiz istek gövdesi.', details: parsed.error.flatten() });
+    // Uçtaki öteki kalıpla aynı: ilk sorunun iletisi (şemadaki tüm iletiler Türkçe).
+    if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message ?? 'Geçersiz istek gövdesi.', details: parsed.error.flatten() });
     const havuz = C.getPgPool() as FaturaHavuzu | null;
     if (!havuz) return res.status(503).json({ success: false, error: 'Veritabanı (PostgreSQL) bağlı değil.' });
     const { firebaseId, karar } = parsed.data;
     const numara = karar === 'mikrodaVar' ? parsed.data.numara : undefined;
+    // `mikrodaYok` + `ettn` şemada reddedildi; `ettnEkle` + ETTN'siz de.
+    const ettnHam = karar === 'mikrodaYok' ? undefined : parsed.data.ettn;
+    const ettn = ettnHam === undefined ? undefined : cetpaEttnAnahtari(ettnHam);
+    const ettnGecersiz = () => res.status(400).json({ success: false, kod: 'FATURA_ETTN_GECERSIZ',
+      error: 'ETTN geçersiz: Mikro\'da e-Fatura ekranındaki 36 karakterlik ETTN\'yi girin (sıfır ETTN kabul edilmez).' });
+    if (ettn === '') return ettnGecersiz();
     const actor = C.reqActor(req);
     const t0 = Date.now();
     try {
-      const sonuc = await faturaSonucunuYaz({
-        havuz, id: firebaseId, companyId: await C.reqCompanyId(req),
-        yayinla: (id, data) => C.broadcastDocChange('orders', 'set', id, data),
-      }, karar, numara);
+      const cid = await C.reqCompanyId(req);
+      const B: FaturaBaglami = { havuz, id: firebaseId, companyId: cid, yayinla: (id, data) => C.broadcastDocChange('orders', 'set', id, data) };
+      const ettnGirdisi = ettn ? { ettn, aynaOku: () => C.loadCompanyDocs('mikroFaturalar', cid) } : undefined;
+      let sonuc: SonucYazimi;
+      if (karar === 'ettnEkle') {
+        if (!ettnGirdisi) return ettnGecersiz();   // şema ETTN'siz `ettnEkle`yi zaten reddeder; tip daraltması için
+        sonuc = await faturaEttnEkle(B, ettnGirdisi);
+      } else {
+        sonuc = await faturaSonucunuYaz(B, karar, numara, ettnGirdisi);
+      }
       if (!sonuc.tamam) return res.status(sonuc.karar.durum).json(sonuc.karar.govde);
       const isaret = sonuc.data[FATURA_GONDERIM_ALANI] ?? null;
-      await C.writeSyncLog('FaturaSonucCozumu', 'order', firebaseId, true, numara ?? null, null, Date.now() - t0, actor,
-        { karar, ...(numara ? { numara } : {}) });
-      return res.json({ success: true, karar, mikroFaturaGonderimi: isaret, ...(numara ? { numara } : {}) });
+      // Yanıttaki ETTN YAZILAN satırdan (gövdeden değil): istemci yerel yamasını bununla yapar.
+      const yazilanEttn = typeof sonuc.data.ettn === 'string' && sonuc.data.ettn !== '' ? sonuc.data.ettn : undefined;
+      const ek = {
+        ...(numara ? { numara } : {}),
+        ...(yazilanEttn ? { ettn: yazilanEttn } : {}),
+        ...(sonuc.ettnOnceki ? { ettnOnceki: sonuc.ettnOnceki } : {}),
+        ...(sonuc.uyari ? { uyari: sonuc.uyari } : {}),
+      };
+      await C.writeSyncLog('FaturaSonucCozumu', 'order', firebaseId, true, numara ?? null, null, Date.now() - t0, actor, { karar, ...ek });
+      return res.json({ success: true, karar, mikroFaturaGonderimi: isaret, ...ek });
     } catch (err) {
       console.error('[fatura/sonuc] yazılamadı:', err);
       return res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });

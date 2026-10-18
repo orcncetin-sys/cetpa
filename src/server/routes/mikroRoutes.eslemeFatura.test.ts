@@ -630,3 +630,376 @@ describe('POST /api/mikro/siparis/sil + faturadan-siparis geri geliş notu', () 
     expect(mezar?.data?.silenAd).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G3a (şartname «fatura gövde + gece MF» § 4, 2026-10-18; kapı bulgusu gece-isi-1, ENGELLEYİCİ): Cetpa'dan kesilmiş fatura
+// MF siparişine TÜRETİLMEZ. `/api/mikro/fatura/kaydet` Cetpa siparişine `ettn` yazar; o fatura gece fatura-listesiyle
+// `mikroFaturalar`'a düşer. Dışlama yokken aynı satış için ikinci (MF) sipariş türüyordu. Eşleme YALNIZ ETTN — süslü parantez ve
+// harf büyüklüğü farkı tutmayı bozmaz (`guidAnahtari`, `mfIptalEsle` ile AYNI anahtar). Panel ucu ve gece işi aynı işlevi koşar;
+// burada uçtan sınanır (gece yolu: mikroRoutes.geceFaturadanSiparis.test.ts).
+describe("faturadan-siparis G3a — Cetpa'dan kesilmiş fatura türetilmez (ETTN)", () => {
+  const ETTN = 'ABCDEF12-3456-7890-ABCD-EF1234567890';
+  const BASLIK = { cha_evrakno_seri: '', cha_evrakno_sira: 412, cha_tarihi: '2026-10-19T00:00:00', cha_tip: 0, cha_kod: '120.01.0042', cha_meblag: 15000 };
+  /** Cetpa'nın kendi (MF olmayan) siparişi — İŞARETSİZ ESKİ KAYIT (`mikroFaturaGonderimi` yok): `fatura/kaydet` başarısının üst
+   *  düzey alanları var ama gönderim işareti yok (2026-10-17 öncesi kayıt biçimi). İşaretli kayıtlar aşağıdaki «H1» bloğunda. */
+  const CETPA = (id: string, p: Record<string, unknown> = {}) => ({ id, companyId: 'A', orderNumber: `SIP-${id}`, customerName: 'Şirin Yapı Malzemeleri',
+    status: 'Delivered', hasInvoice: true, mikroFaturaNo: 'CTP2026000000001', ...p });
+  const kur = (faturalar: Record<string, unknown>[], siparisler: Record<string, unknown>[], mezarlar: Record<string, unknown>[] = []) => {
+    vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) =>
+      coll === 'mikroFaturalar' ? faturalar : coll === 'orders' ? siparisler : coll === 'siparisMezarlari' ? mezarlar : []) as typeof d.C.loadCompanyDocs);
+  };
+  const not = (res: { govde: unknown }) => String((res.govde as { note?: unknown }).note);
+
+  it("ETTN'i '{X}' (büyük harf) olan Cetpa siparişi + ETTN'i 'x' (küçük harf, parantezsiz) satış faturası → MF siparişi YAZILMAZ, not «1 fatura Cetpa siparişine bağlı»; tutmayan fatura yine türetilir", async () => {
+    kur([
+      { ...BASLIK, cha_uuid: ETTN.toLowerCase() },
+      { ...BASLIK, cha_evrakno_sira: 413, cha_uuid: '11111111-2222-3333-4444-555555555555' },
+    ], [CETPA('c1', { ettn: `{${ETTN}}` })]);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(d.koleksiyon('orders').map(y => [y.op, y.ref.id])).toEqual([['set', 'mikrofat__A__-413']]);
+    expect(res.govde).toMatchObject({ success: true, created: 1, total: 2 });
+    expect(not(res)).toContain('1 fatura Cetpa siparişine bağlı (ETTN) — türetilmedi');
+    expect(d.C.writeAuditLog).toHaveBeenCalledWith(expect.anything(), 'Faturadan Sipariş', expect.stringContaining('1 fatura Cetpa siparişine bağlı'));
+  });
+
+  it("ters yön de tutar: fatura ETTN'i '{X}', Cetpa siparişininki 'x' → türetilmez (anahtar normalleştirmesi iki tarafta)", async () => {
+    kur([{ ...BASLIK, cha_uuid: `{${ETTN}}` }], [CETPA('c1', { ettn: ETTN.toLowerCase() })]);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(d.koleksiyon('orders')).toEqual([]);
+    expect(not(res)).toContain('1 fatura Cetpa siparişine bağlı');
+  });
+
+  it("MF kaynaklı sipariş (source 'mikro-fatura') Cetpa siparişi SAYILMAZ: aynı ETTN'li fatura türetilir", async () => {
+    kur([{ ...BASLIK, cha_uuid: ETTN }], [{ id: 'mikrofat__A__-999', source: 'mikro-fatura', companyId: 'A', ettn: ETTN, mikroEvrak: { seri: '', sira: '999' } }]);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(d.koleksiyon('orders').filter(y => y.op === 'set').map(y => y.ref.id)).toEqual(['mikrofat__A__-412']);
+    expect(not(res)).not.toContain('Cetpa siparişine bağlı');
+  });
+
+  it('MEZARLI ve Cetpa siparişine bağlı fatura geri GETİRİLMEZ: sipariş yazılmaz, mezar işaretlenmez, «geri geldi» notu yok', async () => {
+    kur([{ ...BASLIK, cha_uuid: ETTN }], [CETPA('c1', { ettn: ETTN })],
+      [{ id: 'mikrofat__A__-412', geriGeldi: false, silinmeGunu: '2026-10-18', silenAd: 'Ayşe Yılmaz' }]);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(d.koleksiyon('orders')).toEqual([]);
+    expect(d.koleksiyon('siparisMezarlari')).toEqual([]);
+    expect(not(res)).toContain('1 fatura Cetpa siparişine bağlı');
+    expect(not(res)).not.toContain('yeniden geldi');
+  });
+
+  it("`hasInvoice: true` ama `ettn` boş Cetpa siparişi tahminle EŞLENMEZ: not «ETTN'siz Cetpa faturalı sipariş: 1» (örnekle), ETTN'siz ya da ETTN'li fatura yine türetilir", async () => {
+    kur([
+      { ...BASLIK },                                                                   // ETTN'siz fatura: boş anahtar boş anahtarla TUTMAZ
+      { ...BASLIK, cha_evrakno_sira: 413, cha_uuid: ETTN },
+    ], [CETPA('c2', { ettn: '' }), CETPA('c3', { hasInvoice: false })]);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(d.koleksiyon('orders').map(y => y.ref.id)).toEqual(['mikrofat__A__-412', 'mikrofat__A__-413']);
+    expect(not(res)).toContain("ETTN'siz Cetpa faturalı sipariş: 1 (SIP-c2)");
+    expect(not(res)).not.toContain('Cetpa siparişine bağlı (ETTN)');
+  });
+
+  it("H4 (İ-2) — İŞARETSİZ eski kayıt, sıfır ETTN: Cetpa kümesine GİRMEZ → sıfır `cha_uuid`'li fatura TÜRER; «ETTN'siz» 1, «bağlı» yok, «bekletildi» yok", async () => {
+    const SIFIR = '00000000-0000-0000-0000-000000000000';
+    kur([{ ...BASLIK, cha_uuid: `{${SIFIR}}` }], [CETPA('z1', { ettn: SIFIR })]);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(d.koleksiyon('orders').map(y => y.ref.id)).toEqual(['mikrofat__A__-412']);
+    expect(not(res)).toContain("ETTN'siz Cetpa faturalı sipariş: 1 (SIP-z1)");
+    expect(not(res)).not.toContain('Cetpa siparişine bağlı');
+    expect(not(res)).not.toContain('bekletildi');
+  });
+
+  it("H4 + H1 (b) — İŞARETLİ ikiz (`gonderildi` + sıfır ETTN, `hasInvoice` YOK): fatura türetilmez, «⚠ 1 fatura bekletildi»", async () => {
+    const SIFIR = '00000000-0000-0000-0000-000000000000';
+    kur([{ ...BASLIK, cha_uuid: `{${SIFIR}}` }], [{ id: 'z2', companyId: 'A', orderNumber: 'SIP-z2', ettn: SIFIR,
+      mikroFaturaGonderimi: { durum: 'gonderildi', istekNo: 'i', zaman: '2026-10-18T07:00:00.000Z', kim: 'k', cariKod: '120.01.0042', faturaTarihi: '18.10.2026' } }]);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(d.koleksiyon('orders')).toEqual([]);
+    expect(not(res)).toContain('⚠ 1 fatura bekletildi: aynı müşterinin');
+    expect(not(res)).not.toContain('Cetpa siparişine bağlı');
+  });
+
+  it('kalem modunda (önizle / uygula) dışlama sayacı NOTA GİRMEZ ve yeni sipariş zaten yazılmaz', async () => {
+    for (const kalemYenile of ['onizle', 'uygula'] as const) {
+      d.sifirla();
+      kur([{ ...BASLIK, cha_uuid: ETTN }], [CETPA('c1', { ettn: ETTN })]);
+      const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis', { kalemYenile });
+      expect(d.koleksiyon('orders'), kalemYenile).toEqual([]);
+      expect(not(res), kalemYenile).not.toContain('Cetpa siparişine bağlı');
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ortak işleve çıkarma (şartname «fatura gövde + gece MF» § 3 / § 6, 2026-10-18): gövde `faturadanSiparisCalistir`'e taşındı,
+// panel ucunun SÖZLEŞMESİ DEĞİŞMEDİ — yanıt biçimi, 423 bakım kilidi, başarıda TAM BİR denetim + TAM BİR syncLog (çağıranın
+// aktörüyle, denetim kiracısı alanı VERİLMEDEN; sıra: denetim → syncLog), erken dönüşte ve hatada günlük YOK. Gece yolunun
+// sözleşmesi ayrı ve farklı (tek denetim, hedef kiracı): mikroRoutes.geceFaturadanSiparis.test.ts.
+describe('POST /api/mikro/import/faturadan-siparis — panel ucu sözleşmesi ortak işleve çıkarılınca DEĞİŞMEDİ', () => {
+  const BASLIK = { cha_evrakno_seri: '', cha_evrakno_sira: 321, cha_tarihi: '2026-08-01T00:00:00', cha_tip: 0, cha_kod: '120 01', cha_meblag: 21600 };
+  const AKTOR = { uid: 'u1', email: 'a@cetpa.com.tr' };
+  const kur = (faturalar: Record<string, unknown>[], hata?: Error) => {
+    vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) => {
+      if (hata) throw hata;
+      return coll === 'mikroFaturalar' ? faturalar : [];
+    }) as typeof d.C.loadCompanyDocs);
+  };
+
+  it('başarı: yanıt anahtarları aynı; denetim TAM BİR satır (3 argüman — kiracı alanı yok), syncLog TAM BİR satır (8 argüman — `ayrinti` / `secenek` yok); önce denetim', async () => {
+    kur([BASLIK]);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(res.kod).toBe(200);
+    const govde = res.govde as Record<string, unknown>;
+    expect(Object.keys(govde)).toEqual(['success', 'created', 'skipped', 'onarilan', 'bosDoldurulan', 'iptalEdilen', 'iptalGeriAlinan', 'iptalBelirsiz',
+      'kalemYenilenecek', 'kalemYenilenen', 'kalemOrnek', 'yenileTutarsiz', 'yenileMiktarsiz', 'kalemAzalan', 'kaynaksizBekleyen', 'total', 'note', 'duration']);
+    expect(govde).toMatchObject({ success: true, created: 1, skipped: 0, total: 1 });
+    const denetim = vi.mocked(d.C.writeAuditLog).mock.calls;
+    expect(denetim).toEqual([[AKTOR, 'Faturadan Sipariş', `1 sipariş türetildi, 0 atlandı, 0 eski kayıt onarıldı, 0 kalemsiz sipariş dolduruldu, `
+      + `0 siparişin kalemi yenilendi, 0 iptal edildi, 0 iptali geri alındı (1 satış faturası) — ${String(govde.note)}`]]);
+    expect(d.syncLog.mock.calls).toEqual([['faturadan-siparis', 'orders', '1', true, null, null, expect.any(Number), AKTOR]]);
+    expect(vi.mocked(d.C.writeAuditLog).mock.invocationCallOrder[0]).toBeLessThan(d.syncLog.mock.invocationCallOrder[0]);
+  });
+
+  it('satış faturası yok (erken dönüş): yanıt biçimi aynı (`duration` yok), denetim ve syncLog YAZILMAZ', async () => {
+    kur([]);
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(res.govde).toEqual({ success: true, created: 0, skipped: 0, total: 0, note: 'PG yok — cari adları eklenemedi (lokal dev)',
+      message: 'Satış faturası bulunamadı — önce "Faturaları Çek" çalıştırın.' });
+    expect(d.C.writeAuditLog).not.toHaveBeenCalled();
+    expect(d.syncLog).not.toHaveBeenCalled();
+  });
+
+  it("bakım kilidi → 423, işlev KOŞMAZ (hiçbir okuma / yazım yok), günlük yok", async () => {
+    kur([BASLIK]);
+    d.kilitAyarla({ aciklama: 'lead-birlestir', baslangic: '2026-10-18T12:00:00.000Z' });
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(res.kod).toBe(423);
+    expect(res.govde).toEqual({ success: false, error: 'Bakım kilidi: lead-birlestir (2026-10-18T12:00:00.000Z) — veri bakımı bitince tekrar deneyin.' });
+    expect(d.C.loadCompanyDocs).not.toHaveBeenCalled();
+    expect(d.koleksiyon('orders')).toEqual([]);
+    expect(d.C.writeAuditLog).not.toHaveBeenCalled();
+    expect(d.syncLog).not.toHaveBeenCalled();
+  });
+
+  it('istisna → 500 { success: false, error }, günlük yok (ucun bugünkü davranışı)', async () => {
+    const hata = vi.spyOn(console, 'error').mockImplementation(() => {});
+    kur([BASLIK], new Error('mikroFaturalar okunamadı'));
+    const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
+    expect(res.kod).toBe(500);
+    expect(res.govde).toEqual({ success: false, error: 'mikroFaturalar okunamadı' });
+    expect(d.C.writeAuditLog).not.toHaveBeenCalled();
+    expect(d.syncLog).not.toHaveBeenCalled();
+    hata.mockRestore();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H1 — BEKLETME (şartname «fatura gövde + gece MF» § 8 İ-1 + § 9.A A1–A8, § 9.B B3; 2026-10-19). Kaydet sonucu «belirsiz» /
+// «gönderiliyor» kalan ya da `gonderildi` olup geçerli ETTN'si olmayan Cetpa siparişi varken, aynı carinin TALEP GÜNÜNDEN
+// sonraki yeni Mikro faturası MF siparişine TÜRETİLMEZ — o sipariş Mikro'da kesildiyse ikinci sipariş türerdi. Panel ucu ve gece
+// AYNI işlevi koşar; burada uçtan (gece zinciri: server/geceFaturadanSiparis.zincir.test.ts).
+describe('faturadan-siparis H1 — bağı bilinmeyen Cetpa siparişi varken aynı carinin yeni faturası BEKLETİLİR', () => {
+  const CARI = '120.01.0042';
+  const fatura = (sira: number, ek: Record<string, unknown> = {}) =>
+    ({ cha_evrakno_seri: '', cha_evrakno_sira: sira, cha_tarihi: '2026-10-19T00:00:00', cha_tip: 0, cha_kod: CARI, cha_meblag: 15000, ...ek });
+  const gun = (g: string) => ({ cha_tarihi: `${g}T00:00:00` });
+  const isaret = (durum: string, ek: Record<string, unknown> = {}) =>
+    ({ mikroFaturaGonderimi: { durum, istekNo: 'i-1', zaman: '2026-10-18T07:00:00.000Z', kim: 'satis@cetpa.com.tr', ...ek } });
+  /** İşaretli Cetpa siparişi (talep anında `cariKod` yazılmış — A1). */
+  const cetpa = (id: string, ek: Record<string, unknown> = {}) =>
+    ({ id, companyId: 'A', orderNumber: `SIP-${id}`, customerName: 'Şirin Yapı Malzemeleri', status: 'Processing', ...ek });
+  const kur = (faturalar: Record<string, unknown>[], siparisler: Record<string, unknown>[], mezarlar: Record<string, unknown>[] = []) => {
+    vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) =>
+      coll === 'mikroFaturalar' ? faturalar : coll === 'orders' ? siparisler : coll === 'siparisMezarlari' ? mezarlar : []) as typeof d.C.loadCompanyDocs);
+  };
+  const cagir = (govde?: Record<string, unknown>) => d.cagir('POST', '/api/mikro/import/faturadan-siparis', govde);
+  const not = (res: { govde: unknown }) => String((res.govde as { note?: unknown }).note);
+  const yazilanlar = () => d.koleksiyon('orders').filter(y => y.op === 'set').map(y => y.ref.id);
+  /** Nottaki «N <desen>» sayılarının toplamı (desen notta yoksa 0: o sayaç bu koşuda hiç artmadı). */
+  const topla = (metin: string, desen: RegExp): number => [...metin.matchAll(desen)].reduce((t, m) => t + Number(m[1]), 0);
+  /** Değişmez (varsayılan mod, A5): created + skipped + cetpaSiparisineBagli + bekletilen === satış faturası sayısı. */
+  const degismez = (res: { govde: unknown }) => {
+    const g = res.govde as { created: number; skipped: number; total: number; note?: unknown };
+    const n = String(g.note);
+    const bagli = topla(n, /(\d+) fatura Cetpa siparişine bağlı/g);
+    const bekleyen = topla(n, /⚠ (\d+) fatura bekletildi/g);
+    expect(g.created + g.skipped + bagli + bekleyen, n).toBe(g.total);
+  };
+
+  it('`belirsiz` + aynı carinin talep gününden SONRAKİ faturası → MF YOK, «⚠ 1 fatura bekletildi» (örnek: bekleten sipariş); başka carininki ve talep gününden ÖNCEKİ türer', async () => {
+    kur([
+      fatura(500),                                     // 19.10, aynı cari → bekler
+      fatura(501, { ...gun('2026-10-18') }),           // talep günü (18.10) → bekler
+      fatura(502, { cha_kod: '120.01.0099' }),         // başka cari → türer
+      fatura(503, { ...gun('2026-10-17') }),           // talep gününden önce → türer
+    ], [cetpa('c1', isaret('belirsiz', { cariKod: CARI }))]);
+    const res = await cagir();
+    expect(res.kod).toBe(200);
+    expect(yazilanlar()).toEqual(['mikrofat__A__-502', 'mikrofat__A__-503']);
+    expect(res.govde).toMatchObject({ success: true, created: 2, skipped: 0, total: 4 });
+    expect(not(res)).toContain("⚠ 2 fatura bekletildi: aynı müşterinin Mikro'ya gönderilmiş ama hangi faturaya karşılık geldiği bilinmeyen Cetpa siparişi var (SIP-c1) — Siparişler'de sonucu çözün ya da ETTN ekleyin; çözülünce sonraki koşuda türer");
+    degismez(res);
+    // A6: yanıt sözleşmesi DEĞİŞMEZ — yeni sayısal alan yok; sayı denetim özetine `not` üstünden düşer.
+    expect(Object.keys(res.govde as object)).toEqual(['success', 'created', 'skipped', 'onarilan', 'bosDoldurulan', 'iptalEdilen', 'iptalGeriAlinan', 'iptalBelirsiz',
+      'kalemYenilenecek', 'kalemYenilenen', 'kalemOrnek', 'yenileTutarsiz', 'yenileMiktarsiz', 'kalemAzalan', 'kaynaksizBekleyen', 'total', 'note', 'duration']);
+    expect(d.C.writeAuditLog).toHaveBeenCalledWith(expect.anything(), 'Faturadan Sipariş', expect.stringMatching(/^2 sipariş türetildi, 0 atlandı, .* — .*⚠ 2 fatura bekletildi/));
+  });
+
+  it('bekletilen fatura kalem sayaçlarına KATILMAZ (bekletme `kalemKaynagiYok` satırından ÖNCE): yalnız bekleyen varken «stok hareketi yok» notu yok', async () => {
+    kur([fatura(500)], [cetpa('c1', isaret('belirsiz', { cariKod: CARI }))]);
+    const res = await cagir();
+    expect(yazilanlar()).toEqual([]);
+    expect(not(res)).toContain('⚠ 1 fatura bekletildi');
+    expect(not(res)).not.toContain('stok hareketi yok');
+    expect(not(res)).not.toContain('sipariş türetildi');
+    degismez(res);
+  });
+
+  it('`gonderiliyor` (taze ve bayat) da bekletir; `reddedildi` ve işaretsiz kayıt BEKLETMEZ', async () => {
+    for (const [durum, bekler] of [['gonderiliyor', true], ['reddedildi', false]] as const) {
+      d.sifirla();
+      kur([fatura(500)], [cetpa('c1', isaret(durum, { cariKod: CARI, zaman: durum === 'gonderiliyor' ? '2026-10-01T07:00:00.000Z' : '2026-10-18T07:00:00.000Z' }))]);
+      const res = await cagir();
+      expect(yazilanlar(), durum).toEqual(bekler ? [] : ['mikrofat__A__-500']);
+      degismez(res);
+    }
+    d.sifirla();
+    kur([fatura(500)], [cetpa('c1', { hasInvoice: true })]);
+    expect((await cagir()).kod).toBe(200);
+    expect(yazilanlar()).toEqual(['mikrofat__A__-500']);
+  });
+
+  it('carisi BİLİNMEYEN (işarette `cariKod` yok) belirsiz sipariş → tarih koşulunu sağlayan TÜM yeni faturalar bekler (ikinci not dalı); önceki tarihli türer', async () => {
+    kur([fatura(500), fatura(501, { cha_kod: '120.01.0099' }), fatura(502, { cha_kod: '', ...gun('2026-10-18') }), fatura(503, { cha_kod: '120.01.0099', ...gun('2026-10-17') })],
+      [cetpa('x1', isaret('belirsiz'))]);
+    const res = await cagir();
+    expect(yazilanlar()).toEqual(['mikrofat__A__-503']);
+    expect(not(res)).toContain("⚠ 3 fatura bekletildi: carisi okunamayan, Mikro'ya gönderilmiş ve sonucu bilinmeyen Cetpa siparişi var (SIP-x1) — bu yüzden tarih koşulunu sağlayan TÜM yeni faturalar bekletildi; Siparişler'de sonucu çözün ya da ETTN ekleyin; çözülünce sonraki koşuda türer");
+    degismez(res);
+  });
+
+  it("A8 — `zaman` okunamayan (`''`, `'dün'`) belirsiz sipariş: uç 200, aynı carinin HER tarihli yeni faturası bekler (sınırsız); başka cari türer", async () => {
+    for (const zaman of ['', 'dün']) {
+      d.sifirla();
+      kur([fatura(500, { ...gun('2020-01-02') }), fatura(501), fatura(502, { cha_kod: '120.01.0099' })], [cetpa('c1', isaret('belirsiz', { cariKod: CARI, zaman }))]);
+      const res = await cagir();
+      expect(res.kod, zaman).toBe(200);
+      expect(yazilanlar(), zaman).toEqual(['mikrofat__A__-502']);
+      expect(not(res)).toContain('⚠ 2 fatura bekletildi');
+    }
+  });
+
+  it("A8 — İstanbul günü: `zaman: '2026-10-17T22:30:00.000Z'` (İstanbul 18.10 01:30), `faturaTarihi` yok → 17.10 tarihli aynı carili fatura TÜRER, 18.10 bekler", async () => {
+    kur([fatura(500, { ...gun('2026-10-17') }), fatura(501, { ...gun('2026-10-18') })], [cetpa('c1', isaret('belirsiz', { cariKod: CARI, zaman: '2026-10-17T22:30:00.000Z' }))]);
+    const res = await cagir();
+    expect(yazilanlar()).toEqual(['mikrofat__A__-500']);
+    expect(not(res)).toContain('⚠ 1 fatura bekletildi');
+  });
+
+  it('A8 — `faturaTarihi` işaretteyse sınır odur: zaman 18.10, gövde tarihi 15.10 → 16.10 tarihli fatura BEKLER, 14.10 tarihli türer', async () => {
+    kur([fatura(500, { ...gun('2026-10-16') }), fatura(501, { ...gun('2026-10-14') })], [cetpa('c1', isaret('belirsiz', { cariKod: CARI, faturaTarihi: '15.10.2026' }))]);
+    const res = await cagir();
+    expect(yazilanlar()).toEqual(['mikrofat__A__-501']);
+    expect(not(res)).toContain('⚠ 1 fatura bekletildi');
+  });
+
+  it('fatura günü okunamıyorsa (cha_tarihi yok) ve cari tutuyorsa bekletilir (güvenli yön)', async () => {
+    kur([fatura(500, { cha_tarihi: null })], [cetpa('c1', isaret('belirsiz', { cariKod: CARI }))]);
+    const res = await cagir();
+    expect(yazilanlar()).toEqual([]);
+    expect(not(res)).toContain('⚠ 1 fatura bekletildi');
+  });
+
+  it('MEZARLI ve bekletilen fatura geri GETİRİLMEZ: sipariş yazılmaz, mezar işaretlenmez', async () => {
+    kur([fatura(500)], [cetpa('c1', isaret('belirsiz', { cariKod: CARI }))],
+      [{ id: 'mikrofat__A__-500', geriGeldi: false, silinmeGunu: '2026-10-18', silenAd: 'Ayşe Yılmaz' }]);
+    const res = await cagir();
+    expect(d.koleksiyon('orders')).toEqual([]);
+    expect(d.koleksiyon('siparisMezarlari')).toEqual([]);
+    expect(not(res)).not.toContain('yeniden geldi');
+  });
+
+  it('mevcut MF siparişine dokunmaz: aynı carinin kalemsiz MF siparişinin kalemi YİNE dolar (bekletme yalnız yeni sipariş yaratmayı durdurur)', async () => {
+    const hareket = { source: 'mikro_sql', sth_evraktip: 4, sth_evrakno_seri: '', sth_evrakno_sira: 500, sth_tarih: '2026-10-19',
+      sth_stok_kod: 'CIM-50', sth_miktar: 2, sth_tutar: 600, sth_vergi: 120 };
+    vi.mocked(d.C.loadCompanyDocs).mockImplementation((async (coll: string) =>
+      coll === 'mikroFaturalar' ? [fatura(500)]
+        : coll === 'orders' ? [cetpa('c1', isaret('belirsiz', { cariKod: CARI })), { id: 'mikrofat__A__-500', source: 'mikro-fatura', companyId: 'A', lineItems: [], faturali: true, mikroFaturaNo: '500' }]
+          : coll === 'inventoryMovements' ? [hareket] : []) as typeof d.C.loadCompanyDocs);
+    const res = await cagir();
+    expect(res.govde).toMatchObject({ created: 0, skipped: 1, bosDoldurulan: 1 });
+    expect(d.koleksiyon('orders').map(y => [y.op, y.ref.id])).toEqual([['update', 'mikrofat__A__-500']]);
+    expect(not(res)).not.toContain('bekletildi');
+  });
+
+  it('kalem modunda (önizle / uygula) bekletme kümesi KURULMAZ: not yok, yeni sipariş zaten yazılmaz', async () => {
+    for (const kalemYenile of ['onizle', 'uygula'] as const) {
+      d.sifirla();
+      kur([fatura(500)], [cetpa('c1', isaret('belirsiz', { cariKod: CARI }))]);
+      const res = await cagir({ kalemYenile });
+      expect(d.koleksiyon('orders'), kalemYenile).toEqual([]);
+      expect(not(res), kalemYenile).not.toContain('bekletildi');
+    }
+  });
+
+  it('ETTN yazılınca bekletme KALKAR ve G3a bağı kurulur: `gonderildi` + geçerli ETTN → «1 fatura Cetpa siparişine bağlı», bekletme yok', async () => {
+    const ETTN = 'abcdef12-3456-7890-abcd-ef1234567890';
+    kur([fatura(500, { cha_uuid: `{${ETTN.toLocaleUpperCase('tr-TR')}}` }), fatura(501)],
+      [cetpa('c1', { ...isaret('gonderildi', { cariKod: CARI }), ettn: ETTN, hasInvoice: true })]);
+    const res = await cagir();
+    expect(yazilanlar()).toEqual(['mikrofat__A__-501']);
+    expect(not(res)).toContain('1 fatura Cetpa siparişine bağlı (ETTN) — türetilmedi');
+    expect(not(res)).not.toContain('bekletildi');
+    degismez(res);
+  });
+
+  it('B3 — ETTN tutuyor ama işaretteki cari ile faturanın carisi FARKLI → bastırılmaz (türer), «⚠ 1 fatura: … carisi farklı»; cari bilinmiyorsa bugünkü gibi bağlanır', async () => {
+    const ETTN = 'abcdef12-3456-7890-abcd-ef1234567890';
+    kur([fatura(500, { cha_uuid: ETTN, cha_kod: '120.01.0099' })], [cetpa('c1', { ...isaret('gonderildi', { cariKod: CARI }), ettn: ETTN })]);
+    const res = await cagir();
+    expect(yazilanlar()).toEqual(['mikrofat__A__-500']);
+    expect(not(res)).toContain("⚠ 1 fatura: ETTN bir Cetpa siparişiyle tutuyor ama carisi farklı (SIP-c1) — bağ kurulmadı; siparişin ETTN'sini denetleyin");
+    expect(not(res)).not.toContain('Cetpa siparişine bağlı');
+    degismez(res);
+    // Cari harf / boşluk farkı ÇELİŞKİ DEĞİLDİR (iki taraf `trim().toLocaleUpperCase('tr-TR')`).
+    d.sifirla();
+    kur([fatura(500, { cha_uuid: ETTN, cha_kod: ' cari-i ' })], [cetpa('c1', { ...isaret('gonderildi', { cariKod: 'CARİ-İ' }), ettn: ETTN })]);
+    expect(not(await cagir())).toContain('1 fatura Cetpa siparişine bağlı');
+    // İşaretsiz eski kayıt (cari bilinmiyor) → bugünkü davranış: bağlanır.
+    d.sifirla();
+    kur([fatura(500, { cha_uuid: ETTN, cha_kod: '120.01.0099' })], [cetpa('c1', { ettn: ETTN, hasInvoice: true })]);
+    const r3 = await cagir();
+    expect(yazilanlar()).toEqual([]);
+    expect(not(r3)).toContain('1 fatura Cetpa siparişine bağlı');
+  });
+
+  it('B3 — cari çelişkili fatura bekletme kuralından geçer: faturanın carisinde bağı bilinmeyen sipariş varsa BEKLER', async () => {
+    const ETTN = 'abcdef12-3456-7890-abcd-ef1234567890';
+    kur([fatura(500, { cha_uuid: ETTN, cha_kod: '120.01.0099' })], [
+      cetpa('c1', { ...isaret('gonderildi', { cariKod: CARI }), ettn: ETTN }),
+      cetpa('c2', isaret('belirsiz', { cariKod: '120.01.0099' })),
+    ]);
+    const res = await cagir();
+    expect(yazilanlar()).toEqual([]);
+    expect(not(res)).toContain('carisi farklı (SIP-c1)');
+    expect(not(res)).toContain('⚠ 1 fatura bekletildi: aynı müşterinin');
+    degismez(res);
+  });
+
+  it('A7 — `gonderildi` + geçerli ETTN + sınırı son 60 gün içinde, hiçbir Mikro faturasıyla tutmuyor → yalnız SAYILIR (bekletme / bağ yok); GİB reddi süzgecinden ÖNCEKİ küme', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-10-19T09:00:00.000Z') });
+    try {
+      const E = (n: number) => `abcdef12-3456-7890-abcd-${String(n).padStart(12, '0')}`;
+      kur([
+        fatura(500, { cha_kod: '120.01.0099' }),
+        fatura(501, { cha_uuid: E(2), gibRed: true }),           // reddedilen faturada tutar → sayılmaz
+      ], [
+        cetpa('t1', { ...isaret('gonderildi', { cariKod: CARI, faturaTarihi: '18.10.2026' }), ettn: E(1) }),   // tutmuyor → sayılır
+        cetpa('t2', { ...isaret('gonderildi', { cariKod: CARI, faturaTarihi: '18.10.2026' }), ettn: E(2) }),   // red faturasında tutar
+        cetpa('t3', { ...isaret('gonderildi', { cariKod: CARI, faturaTarihi: '19.08.2026' }), ettn: E(3) }),   // 60 gün dışında
+      ]);
+      const res = await cagir();
+      expect(yazilanlar()).toEqual(['mikrofat__A__-500']);
+      expect(not(res)).toContain("ETTN'si hiçbir Mikro faturasıyla tutmayan Cetpa siparişi: 1 (SIP-t1)");
+      expect(not(res)).not.toContain('bekletildi');
+    } finally { vi.useRealTimers(); }
+  });
+});

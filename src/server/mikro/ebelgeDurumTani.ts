@@ -57,9 +57,9 @@ export function durumDenemesiOzeti(eBelgeTipi: 0 | 1, sonuc: { ok: boolean; stat
   };
 }
 
-/** ETTN biçimi (36 karakter, onaltılık + tire; sıfır GUID değil) — yalnız bu biçimdeki değer Mikro'ya gönderilir. */
-export const ettnGecerli = (v: unknown): v is string =>
-  typeof v === 'string' && /^[0-9a-fA-F-]{36}$/.test(v.trim()) && !/^[0-]+$/.test(v.trim());
+// ETTN biçimi (36 karakter, onaltılık + tire; sıfır GUID değil) TEK kaynakta: lib/ettn (2026-10-19, § 9.B B4). Mevcut içe
+// aktaranlar için yeniden dışa aktarılır.
+export { ettnGecerli } from '../../lib/ettn.js';
 
 /** Ham tablo satırlarını yanıt için küçültür: uzun metin hücreleri `sinir` karakterde kesilir (ikili/uzun alan yanıtı şişirmesin). */
 export function hucreleriKes(satirlar: readonly Record<string, unknown>[], sinir = 300): Record<string, unknown>[] {

@@ -27,9 +27,9 @@
  * `throw new MikroGovdeHatasi(alan, satirNo?)`; rota 400 döner ve `mikroPost` HİÇ çağrılmaz.
  *
  * PARİTE: bilinen girdide üretilen gövde eski kodun ürettiğinin BİREBİR aynısı — sabit
- * Mikro kodları (evraktip 4/1, seri 'F'/'I', cha_evrak_tip 63, cha_cinsi 7, cha_tip 0,
+ * Mikro kodları (evraktip 4/1, irsaliyede seri 'I', cha_evrak_tip 63, cha_tip 0,
  * sth_tip 1, birim_pntr 1), alan adları ve sth_vergi yuvarlaması (`round(tutar*oran)/100`)
- * korunur; testte `toEqual` ile kilitli.
+ * korunur; testte `toEqual` ile kilitli. e-Fatura serisi ve cinsi pariteden ÇIKTI (6. fark).
  *
  * BİLİNÇLİ FARKLAR (parite dışı, hepsi "uydurma değer yazma" kuralının sonucu):
  *   1. Bilinmeyen fiyat/miktar/KDV oranı/cari kod/tarih/kalem yokluğu → throw (eskiden sessiz varsayılan).
@@ -43,6 +43,14 @@
  *      irsaliyeyi zaten bu gerekçeyle reddediyor, kardeş gövde (govdeSiparis) aynı
  *      alanda throw ediyordu. Şema `sku`yu optional bırakıyor (schemas.ts), yani
  *      doğrulanmış gövde bile SKU'suz kalem taşıyabilir — kapı burada.
+ *   6. e-Fatura seri '' (cha + sth) ve cha_cinsi 6. Kaynak: 2026-10-17 `seri-ozet` ölçümü (411 satış
+ *      faturası: evrak tipi 63, cinsi 6, seri boş). 7, V17 örnek değeriydi. (Şartname «fatura gövde + gece MF»
+ *      G1, 2026-10-18; kullanıcı: «boş kalsın e fatura/arşiv kesmeyeceğim Q ile».) `sth` serisi `cha` serisiyle
+ *      AYNI kalır: satırı başlığa seri + sıra + evrak tipiyle bağlayan okuyucular var (faturaListesiSorgusu,
+ *      seriOzet, matrahTani, eslemeFatura, mikroRoutes fatura kalemleri) — yalnız biri değişirse fatura kalemsiz
+ *      görünür. SIRA (`cha_evrakno_sira` / `sth_evrakno_sira`) Cetpa GÖNDERMEZ, Mikro verir; Cetpa tarafına sıra
+ *      hesabı (en büyük + 1 vb.) EKLENMEZ (G2). Mikro API'si ile masaüstünün aynı boş seri sayacından numara alıp
+ *      almadığı koddan ölçülemez: ilk Cetpa faturası GÖZETİMLİ kesilir ve `seri-ozet` / `fatura-tani?sira=N` ile ölçülür.
  *
  * AÇIK MADDE — FATURA SATIRINDA DEPO: `sth_giris_depo_no/sth_cikis_depo_no` fatura
  * tarafında hâlâ 1. Bu, irsaliyedekiyle AYNI arıza sınıfı, ama burada throw'a çevirmek
@@ -335,7 +343,7 @@ export function faturaGovdesi(fatura: FaturaGirdisi, secenek: FaturaSecenekleri)
       sth_cins:            0,
       sth_normal_iade:     0,
       sth_evraktip:        4,   // fatura
-      sth_evrakno_seri:    'F',
+      sth_evrakno_seri:    '',  // boş seri — başlıktaki cha_evrakno_seri ile AYNI (başlıktaki 6. fark)
       sth_stok_kod:        stokKod,
       sth_cari_cinsi:      0,
       sth_cari_kodu:       cariKod,
@@ -369,7 +377,7 @@ export function faturaGovdesi(fatura: FaturaGirdisi, secenek: FaturaSecenekleri)
 
   const evrak: FaturaEvraki = {
     cha_tip:          0,   // satış
-    cha_cinsi:        7,   // V17 örnek değeri (toptan satış faturası)
+    cha_cinsi:        6,   // ölçülen: Mikro'nun kendi 411 satış faturasının hepsi cinsi 6 (2026-10-17 `seri-ozet`); 7 V17 örnek değeriydi
     cha_normal_Iade:  0,
     cha_evrak_tip:    63,  // fatura
     cha_cari_cins:    0,
@@ -407,7 +415,7 @@ export function faturaGovdesi(fatura: FaturaGirdisi, secenek: FaturaSecenekleri)
     cha_d_cins:       0,
     cha_d_kur:        1,
     cha_tarihi:       faturaDate,
-    cha_evrakno_seri: 'F',
+    cha_evrakno_seri: '',  // boş seri (ölçülen, başlıktaki 6. fark); sıra GÖNDERİLMEZ — Mikro verir (G2)
     cha_kod:          cariKod,
     cha_projekodu:    '',
     cha_srmrkkodu:    '',

@@ -28,6 +28,8 @@ import { FATURA_GONDERIM_ALANI, FATURA_GONDERIM_BAYATLIK_MS } from '../lib/fatur
 import { SUNUCU_TURETILEN_ALANLAR } from '../lib/collections';
 import { MAGAZA_KAYNAGI } from '../lib/magazaKaynagi';
 import { SRC_KOK, kodSatirlari } from '../test/kaynakTarama';
+import { cetpaEttnAnahtari } from '../lib/ettn';
+import { ETTN_VAKALARI } from '../test/ettnVakalari';
 
 // ── Sahteler (yalnız süreç dışına çıkanlar) ────────────────────────────────────────────────────────────────────────────────
 vi.mock('dotenv', () => ({ default: { config: () => ({ parsed: {} }) }, config: () => ({ parsed: {} }) }));
@@ -992,8 +994,9 @@ describe('D3 — istemci `/api/db` ile işareti yazamaz (rolden bağımsız, ses
     // increment — SAHIPLIK_ALANLARI türetilen alanları içerir.
     expect(inc).toMatch(/if \(SAHIPLIK_ALANLARI\.has\(field\)\) return res\.status\(400\)/);
     expect(kod.join('\n')).toMatch(/\.\.\.\[\.\.\.SUNUCU_TURETILEN_ALANLAR\.keys\(\)\]\.flatMap\(c => sunucuTuretilenAlanlar\(c\)\)/);
-    // Korunan ad TEK kaynaktan: işaret alanı listede ve server.ts adı metin olarak YAZMIYOR.
-    expect(SUNUCU_TURETILEN_ALANLAR.get('orders')).toEqual([FATURA_GONDERIM_ALANI]);
+    // Korunan ad TEK kaynaktan: işaret alanı listede ve server.ts adı metin olarak YAZMIYOR. `ettn` 2026-10-19'dan beri listede
+    // (şartname «fatura gövde + gece MF» § 9.B B1 — G3a / H1 onu MF türetme kararında okur; davranış çiti aşağıda «B1»).
+    expect(SUNUCU_TURETILEN_ALANLAR.get('orders')).toEqual([FATURA_GONDERIM_ALANI, 'ettn']);
     expect(kod.filter(k => k.includes(FATURA_GONDERIM_ALANI))).toEqual([]);
   });
 });
@@ -1112,5 +1115,459 @@ describe('Y1 — pgShim yazımı talebi ezmez (sunucu içi sipariş yazıcılar�
     // Korumasız `SET data = $3` yalnız türetilen alanı OLMAYAN koleksiyon dalında (koru ? … : …).
     expect(kod.match(/'UPDATE docs SET data = \$3, updated_at = now\(\) WHERE coll = \$1 AND id = \$2'/g)).toHaveLength(1);
     expect(kod).toMatch(/koru\s*\?\s*`UPDATE docs SET data = \$\{sunucuAlanKorumaSql/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Şartname «fatura gövde + gece MF» § 9 (2026-10-19): A1 (işarete `cariKod` + `faturaTarihi`), B1 (`ettn` sunucuya özel alan),
+// B2 / B3 / B6 («Mikro'da var» + ETTN, «ETTN ekle», ayna tutarlılığı). Faturadan-sipariş koşan sınamalar KENDİ kiracısında: bu
+// dosyanın öteki sınamaları ana kiracıda carisi bilinmeyen `belirsiz` işaretler bırakır — onlar tarih koşulunu sağlayan TÜM
+// faturaları bekletirdi (kural böyle, § 9.A A5).
+let kiraciSayaci = 0;
+/** Yeni kiracı + Yönetici ve Satış kullanıcıları. */
+const kiraciKur = async (): Promise<{ cid: string; YON: Record<string, string>; SAT: Record<string, string> }> => {
+  const cid = `ETTN-KIRACI-${++kiraciSayaci}`;
+  await belgeKoy('users', `k${kiraciSayaci}-Admin`, { email: eposta(`k${kiraciSayaci}-Admin`), role: 'Admin', companyId: cid });
+  await belgeKoy('users', `k${kiraciSayaci}-Sales`, { email: eposta(`k${kiraciSayaci}-Sales`), role: 'Sales', companyId: cid });
+  return { cid, YON: belirtec(`k${kiraciSayaci}-Admin`), SAT: belirtec(`k${kiraciSayaci}-Sales`) };
+};
+const ETTN_A = 'abcdef12-3456-7890-abcd-ef1234567890';
+const ettnNo = (n: number): string => `abcdef12-3456-7890-abcd-${String(n).padStart(12, '0')}`;
+let aynaSayaci = 0;
+/** `mikroFaturalar` satırı (fatura-listesi importunun ham cha_* biçimi). */
+const aynaKoy = async (cid: string, ek: Record<string, unknown>): Promise<number> => {
+  const sira = 7000 + (++aynaSayaci);
+  await belgeKoy('mikroFaturalar', `ayna-${sira}`, { cha_evrakno_seri: '', cha_evrakno_sira: sira, cha_tarihi: '2026-10-19T00:00:00', cha_tip: 0,
+    cha_kod: '120.01.0042', cha_meblag: 15000, companyId: cid, source: 'mikro_import', ...ek });
+  return sira;
+};
+const ettnEkle = (b: Record<string, string>, firebaseId: string, ettn?: unknown): Promise<Yanit> =>
+  istek('POST', '/api/mikro/fatura/sonuc', b, { firebaseId, karar: 'ettnEkle', ...(ettn !== undefined ? { ettn } : {}) });
+const varEttn = (b: Record<string, string>, firebaseId: string, ettn: string, numara?: string): Promise<Yanit> =>
+  istek('POST', '/api/mikro/fatura/sonuc', b, { firebaseId, karar: 'mikrodaVar', ettn, ...(numara !== undefined ? { numara } : {}) });
+const turet = (b: Record<string, string>): Promise<Yanit> => istek('POST', '/api/mikro/import/faturadan-siparis', b, {});
+const isaretli = (durum: string, cariKod = '120.01.0042', ek: Record<string, unknown> = {}) =>
+  ({ [FATURA_GONDERIM_ALANI]: isaretNesnesi(durum, Date.now(), { cariKod, faturaTarihi: '18.10.2026', ...ek }) });
+
+describe('§ 9.A A1 — talepte işarete `cariKod` (gövdedeki `cha_kod`) ve `faturaTarihi` (`cha_tarihi`) yazılır, geçişlerde KORUNUR', () => {
+  it('talep anında (uçuşta) işaret iki alanı taşır; `gonderildi` geçişinden sonra da', async () => {
+    const id = await siparisKur();
+    let birak: (r: Response) => void = () => {};
+    sonraki(() => new Promise<Response>(c => { birak = c; }));
+    const once = mikro.sayac;
+    const a = kes(YONETICI, id);
+    await bekle(() => mikro.sayac === once + 1, 30_000, 'talep yazıldı, Mikro\'da');
+    const ucusta = await isaretOku(id);
+    expect(ucusta).toMatchObject({ durum: 'gonderiliyor', cariKod: '120.01.0042', faturaTarihi: '17.10.2026' });
+    // Gövdeye giden değerlerle AYNI (müşteri kartından türetilmedi).
+    const evrak = (JSON.parse(mikro.govdeler[mikro.govdeler.length - 1]) as { Mikro?: { evraklar?: Array<Record<string, unknown>> }; evraklar?: Array<Record<string, unknown>> });
+    const gonderilen = (evrak.Mikro?.evraklar ?? evrak.evraklar ?? [])[0];
+    expect(gonderilen).toBeDefined();
+    expect([gonderilen?.cha_kod, gonderilen?.cha_tarihi]).toEqual([ucusta?.cariKod, ucusta?.faturaTarihi]);
+    birak(mikroBasari({ faturaNo: yeniNumara() }));
+    expect((await a).s).toBe(200);
+    expect(await isaretOku(id)).toMatchObject({ durum: 'gonderildi', cariKod: '120.01.0042', faturaTarihi: '17.10.2026' });
+  });
+
+  it('`belirsiz` geçişinden ve ardından «Mikro\'da var» çözümünden sonra iki alan korunur', async () => {
+    const id = await siparisKur();
+    sonraki(() => new Response('<html>Bad Gateway</html>', { status: 502 }));
+    expect((await kes(YONETICI, id)).j.kod).toBe('FATURA_SONUCU_BILINMIYOR');
+    expect(await isaretOku(id)).toMatchObject({ durum: 'belirsiz', cariKod: '120.01.0042', faturaTarihi: '17.10.2026' });
+    expect((await coz(YONETICI, id, 'mikrodaVar', 'N-a1')).s).toBe(200);
+    expect(await isaretOku(id)).toMatchObject({ durum: 'gonderildi', numara: 'N-a1', cariKod: '120.01.0042', faturaTarihi: '17.10.2026' });
+  });
+});
+
+describe('§ 9.B B1 — `ettn` sunucuya özel alan: istemci `/api/db` ile DEĞİŞTİREMEZ (Satış rolü, beş yazma yolu)', () => {
+  it('POST yeni kayda ETTN yazmaz; PUT / PUT?merge=1 / PATCH (nokta yolu, tünel) / cas satırdaki değeri DEĞİŞTİRMEZ; öteki alanlar yazılır', async () => {
+    const { SAT } = await kiraciKur();
+    const p = await istek('POST', '/api/db/orders', SAT, { customerName: 'Yeni', ettn: ETTN_A });
+    expect(p.s, p.metin).toBe(200);
+    expect(await belgeOku('orders', String(p.j.id))).not.toHaveProperty('ettn');
+    const SIFIR = '00000000-0000-0000-0000-000000000000';
+    for (const [ad, tohum] of [['geçerli', ETTN_A], ['sıfır', SIFIR]] as const) {
+      const id = `b1-${ad === 'geçerli' ? 'g' : 's'}-${Date.now()}`;
+      const d0 = await belgeOku('users', `k${kiraciSayaci}-Sales`);
+      await belgeKoy('orders', id, { customerName: 'Şirin Yapı Malzemeleri', status: 'Processing', companyId: d0?.companyId, ettn: tohum, notes: 'ilk' });
+      const korundu = async (adim: string): Promise<void> => expect((await belgeOku('orders', id))?.ettn, `${ad} — ${adim}`).toBe(tohum);
+      const yeni = ad === 'geçerli' ? SIFIR : ETTN_A;
+      expect((await istek('PUT', `/api/db/orders/${id}`, SAT, { customerName: 'Şirin Yapı Malzemeleri', status: 'Processing', notes: 'put', ettn: yeni })).s).toBe(200);
+      await korundu('PUT');
+      expect((await istek('PUT', `/api/db/orders/${id}?merge=1`, SAT, { ettn: null, notes: 'merge' })).s).toBe(200);
+      await korundu('PUT?merge=1');
+      for (const yama of [{ ettn: yeni }, { ettn: null }, { 'ettn.x': 'y' }] as Array<Record<string, unknown>>) {
+        expect((await istek('PATCH', `/api/db/orders/${id}`, SAT, { ...yama, notes: 'patch' })).s).toBe(200);
+        await korundu(`PATCH ${JSON.stringify(yama)}`);
+        expect((await istek('POST', `/api/db/orders/${id}`, { ...SAT, 'X-Cetpa-Method': 'PATCH' }, { ...yama, notes: 'tunel' })).s).toBe(200);
+        await korundu(`tünel ${JSON.stringify(yama)}`);
+      }
+      const c = await istek('PATCH', `/api/db/orders/${id}/cas`, SAT, { field: 'status', expect: 'Processing', set: { ettn: yeni, notes: 'cas' } });
+      expect([c.s, c.j.claimed], c.metin).toEqual([200, true]);
+      await korundu('cas');
+      expect((await belgeOku('orders', id))?.notes).toBe('cas');
+      expect((await istek('PATCH', `/api/db/orders/${id}/increment`, SAT, { field: 'ettn', delta: 1 })).s).toBe(400);
+    }
+  });
+
+  it('PATCH sonrası G3a «bağlı» sayacı DEĞİŞMEZ: ETTN\'yi silmeye / değiştirmeye çalışan istemci yazımı Mikro faturasını MF siparişine çevirmez', async () => {
+    const { cid, YON, SAT } = await kiraciKur();
+    const sira = await aynaKoy(cid, { cha_uuid: `{${ETTN_A.toLocaleUpperCase('tr-TR')}}` });
+    await belgeKoy('orders', 'b1-bagli', { companyId: cid, orderNumber: 'SIP-B1', customerName: 'Şirin Yapı Malzemeleri', status: 'Delivered', hasInvoice: true, ettn: ETTN_A });
+    const r1 = await turet(YON);
+    expect(r1.s, r1.metin).toBe(200);
+    expect(String(r1.j.note)).toContain('1 fatura Cetpa siparişine bağlı (ETTN) — türetilmedi');
+    for (const yama of [{ ettn: '' }, { ettn: null }, { ettn: ettnNo(99) }]) {
+      expect((await istek('PATCH', '/api/db/orders/b1-bagli', SAT, yama)).s).toBe(200);
+      const r = await turet(YON);
+      expect(String(r.j.note), JSON.stringify(yama)).toContain('1 fatura Cetpa siparişine bağlı (ETTN) — türetilmedi');
+    }
+    expect(await satirVar('orders', `mikrofat__${cid}__-${sira}`)).toBe(false);
+  });
+});
+
+describe('§ 9.B B2 / B6 — «ETTN ekle» ve «Mikro\'da var» + ETTN (`POST /api/mikro/fatura/sonuc`)', () => {
+  it('KAPI (sonuc ucuyla birebir): BAYİ / B2B 403, MFA doğrulanmamış 403, yabancı kiracı 404, olmayan sipariş 404 — işarete ve ETTN\'ye dokunulmaz', async () => {
+    const id = await siparisKur(isaretli('gonderildi'));
+    const once = await belgeOku('orders', id);
+    for (const b of [BAYI, B2B]) expect((await ettnEkle(b, id, ETTN_A)).s).toBe(403);
+    const m = await ettnEkle(MFA_ACIK, id, ETTN_A);
+    expect([m.s, m.j.mfaRequired]).toEqual([403, true]);
+    const y = await ettnEkle(YABANCI, id, ETTN_A);
+    expect([y.s, y.j.error]).toEqual([404, 'Kayıt bulunamadı.']);
+    expect((await ettnEkle(YONETICI, 'boyle-bir-siparis-yok', ETTN_A)).s).toBe(404);
+    expect(await satirVar('orders', 'boyle-bir-siparis-yok')).toBe(false);
+    expect(await belgeOku('orders', id)).toEqual(once);
+  });
+
+  it('ŞEMA: `ettnEkle` ETTN\'siz → 400 «ETTN eklemek için…»; `mikrodaYok` + ETTN → 400 ««Mikro\'da yok» kararında ETTN verilmez.»; bilinmeyen karar → Türkçe ileti', async () => {
+    const id = await siparisKur(isaretli('gonderildi'));
+    const r1 = await ettnEkle(YONETICI, id);
+    expect([r1.s, r1.j.error]).toEqual([400, 'ETTN eklemek için geçerli bir ETTN girin.']);
+    const r2 = await istek('POST', '/api/mikro/fatura/sonuc', YONETICI, { firebaseId: id, karar: 'mikrodaYok', ettn: ETTN_A });
+    expect([r2.s, r2.j.error]).toEqual([400, '«Mikro\'da yok» kararında ETTN verilmez.']);
+    const r3 = await istek('POST', '/api/mikro/fatura/sonuc', YONETICI, { firebaseId: id, karar: 'ettnSil', ettn: ETTN_A });
+    expect([r3.s, r3.j.error]).toEqual([400, 'Geçersiz karar: mikrodaVar, mikrodaYok ya da ettnEkle olmalı.']);
+    expect((await belgeOku('orders', id))).not.toHaveProperty('ettn');
+  });
+
+  it('400 FATURA_ETTN_GECERSIZ — \'abc\', sıfır GUID, tire yeri bozuk (iki kararda da); hiçbir şey yazılmaz', async () => {
+    for (const ettn of ['abc', '00000000-0000-0000-0000-000000000000', 'abcdef123-456-7890-abcd-ef1234567890']) {
+      const g = await siparisKur(isaretli('gonderildi'));
+      const r = await ettnEkle(YONETICI, g, ettn);
+      expect([r.s, r.j.kod, r.j.error], ettn).toEqual([400, 'FATURA_ETTN_GECERSIZ', 'ETTN geçersiz: Mikro\'da e-Fatura ekranındaki 36 karakterlik ETTN\'yi girin (sıfır ETTN kabul edilmez).']);
+      expect(await belgeOku('orders', g), ettn).not.toHaveProperty('ettn');
+      const b = await siparisKur(isaretli('belirsiz'));
+      expect((await varEttn(YONETICI, b, ettn)).j.kod, ettn).toBe('FATURA_ETTN_GECERSIZ');
+      expect(await isaretOku(b), ettn).toMatchObject({ durum: 'belirsiz' });
+    }
+  });
+
+  it('VAKA TABLOSU (lib/ettn.test ile AYNI): uç geçerliyi YAZILAN anahtarla kabul eder, geçersizi 400 ile reddeder — sonuçlar `cetpaEttnAnahtari` ile birebir', async () => {
+    const { cid, YON } = await kiraciKur();
+    for (const [i, v] of ETTN_VAKALARI.entries()) {
+      const id = `vaka-${cid}-${i}`;
+      await belgeKoy('orders', id, { companyId: cid, orderNumber: `SIP-V${i}`, ...isaretli('gonderildi', `120.07.${i}`) });
+      const r = await ettnEkle(YON, id, v.girdi);
+      const uc = r.s === 200 ? String((await belgeOku('orders', id))?.ettn) : '';
+      expect(uc, `${v.ad}: ${r.metin}`).toBe(cetpaEttnAnahtari(v.girdi));
+      expect(uc, v.ad).toBe(v.anahtar);
+      if (r.s !== 200) {
+        expect(r.s, v.ad).toBe(400);
+        expect(r.j.kod, v.ad).toBe(v.bos ? undefined : 'FATURA_ETTN_GECERSIZ');
+      } else {
+        expect(r.j.ettn, v.ad).toBe(v.anahtar);
+        // Vaka satırları aynı ETTN'yi paylaşamaz (B3) — sonraki geçerli vakaya yer aç: bu satırın ETTN'si doğrudan silinir.
+        const d = await belgeOku('orders', id);
+        if (d) { const { ettn: _e, ...kalan } = d; await belgeKoy('orders', id, kalan); }
+      }
+    }
+  });
+
+  it('200 — `belirsiz` + «Mikro\'da var» + `{1B2C…}` (büyük harf, parantezli) → KÜÇÜK HARFLİ anahtar yazılır; yanıt ETTN\'yi yazılan satırdan döner; syncLog ayrıntısı + denetim 1', async () => {
+    const { cid, SAT } = await kiraciKur();
+    const ETTN = '1b2c3d4e-0000-4abc-8def-0123456789ab';
+    await aynaKoy(cid, { cha_uuid: ETTN });
+    const id = `belirsiz-var-${cid}`;
+    await belgeKoy('orders', id, { companyId: cid, orderNumber: 'SIP-BV', ...isaretli('belirsiz') });
+    const r = await varEttn(SAT, id, `{${ETTN.toLocaleUpperCase('tr-TR')}}`, 'N-77');
+    expect([r.s, r.j.success, r.j.karar, r.j.ettn, r.j.numara], r.metin).toEqual([200, true, 'mikrodaVar', ETTN, 'N-77']);
+    expect(r.j).not.toHaveProperty('uyari');
+    expect(await belgeOku('orders', id)).toMatchObject({ ettn: ETTN, mikroFaturaNo: 'N-77', hasInvoice: true, [FATURA_GONDERIM_ALANI]: { durum: 'gonderildi', numara: 'N-77', cariKod: '120.01.0042' } });
+    const sync = await syncLogSatirlari('FaturaSonucCozumu', id);
+    expect(sync).toHaveLength(1);
+    expect(sync[0].ayrinti).toEqual({ karar: 'mikrodaVar', numara: 'N-77', ettn: ETTN });
+    const denetim = await pg().query("SELECT data FROM docs WHERE coll = 'auditLog' AND data->>'action' = 'FaturaSonucCozumu' AND data->>'details' LIKE $1", [`%${id}%`]);
+    expect(denetim.rows.length).toBe(1);
+  });
+
+  it('200 — `gonderildi` + ETTN yok / sıfır GUID / biçimsiz + «ETTN ekle» → yazılır (`ettnOnceki` yalnız eski değer doluysa); sonraki koşuda bekletme KALKAR, G3a «bağlı» 1', async () => {
+    const { cid, YON, SAT } = await kiraciKur();
+    const durumlar: Array<[string, Record<string, unknown>]> = [
+      ['yok', {}], ['sıfır', { ettn: '00000000-0000-0000-0000-000000000000' }], ['biçimsiz', { ettn: 'abc-bozuk' }],
+    ];
+    for (const [i, [ad, ek]] of durumlar.entries()) {
+      const cari = `120.08.${i}`;
+      const ETTN = ettnNo(800 + i);
+      const sira = await aynaKoy(cid, { cha_uuid: `{${ETTN}}`, cha_kod: cari });
+      const id = `ekle-${ad}-${cid}`;
+      await belgeKoy('orders', id, { companyId: cid, orderNumber: `SIP-E${i}`, hasInvoice: true, ...ek, ...isaretli('gonderildi', cari) });
+      // Önce: ETTN'siz `gonderildi` sipariş aynı carinin yeni faturasını BEKLETİR (İ-1 kapanışı).
+      const once = await turet(YON);
+      expect(once.s, once.metin).toBe(200);
+      expect(String(once.j.note), ad).toContain(`(SIP-E${i})`);
+      expect(await satirVar('orders', `mikrofat__${cid}__-${sira}`), ad).toBe(false);
+      const r = await ettnEkle(SAT, id, ETTN.toLocaleUpperCase('tr-TR'));
+      expect([r.s, r.j.success, r.j.karar, r.j.ettn], `${ad}: ${r.metin}`).toEqual([200, true, 'ettnEkle', ETTN]);
+      expect((await belgeOku('orders', id))?.ettn, ad).toBe(ETTN);
+      const sync = await syncLogSatirlari('FaturaSonucCozumu', id);
+      expect(sync.map(x => x.ayrinti), ad).toEqual([{ karar: 'ettnEkle', ettn: ETTN, ...(typeof ek.ettn === 'string' ? { ettnOnceki: ek.ettn } : {}) }]);
+      const sonra = await turet(YON);
+      expect(String(sonra.j.note), ad).not.toContain(`SIP-E${i}`);
+      // Kiracının önceki turlarda bağlanan faturaları da sayılır: tur i'de i + 1 fatura bağlı.
+      expect(String(sonra.j.note), ad).toContain(`${i + 1} fatura Cetpa siparişine bağlı (ETTN)`);
+      expect(await satirVar('orders', `mikrofat__${cid}__-${sira}`), ad).toBe(false);
+    }
+  });
+
+  it('409 FATURA_ETTN_VAR — geçerli ETTN varken «ETTN ekle» ÜZERİNE YAZMAZ (parantezli / büyük harfli kayıtlı değer de geçerli sayılır)', async () => {
+    for (const kayitli of [ETTN_A, `{${ETTN_A.toLocaleUpperCase('tr-TR')}}`]) {
+      const id = await siparisKur({ ettn: kayitli, ...isaretli('gonderildi') });
+      const r = await ettnEkle(YONETICI, id, ettnNo(1));
+      expect([r.s, r.j.kod, r.j.error]).toEqual([409, 'FATURA_ETTN_VAR', 'Bu siparişin ETTN\'si zaten kayıtlı.']);
+      expect((await belgeOku('orders', id))?.ettn).toBe(kayitli);
+    }
+  });
+
+  it('409 — «ETTN ekle» yalnız `gonderildi`de: `belirsiz` / bayat `gonderiliyor` → SONUCU_BILINMIYOR, taze `gonderiliyor` → GONDERILIYOR, işaretsiz / `reddedildi` → SONUC_YOK; MF kaydı → 400', async () => {
+    const vakalar: Array<[Record<string, unknown>, number, string]> = [
+      [isaretli('belirsiz'), 409, 'FATURA_SONUCU_BILINMIYOR'],
+      [{ [FATURA_GONDERIM_ALANI]: isaretNesnesi('gonderiliyor', Date.now() - FATURA_GONDERIM_BAYATLIK_MS - 5_000) }, 409, 'FATURA_SONUCU_BILINMIYOR'],
+      [isaretli('gonderiliyor'), 409, 'FATURA_GONDERILIYOR'],
+      [{}, 409, 'FATURA_SONUC_YOK'],
+      [isaretli('reddedildi'), 409, 'FATURA_SONUC_YOK'],
+      [{ source: 'mikro-fatura', ...isaretli('gonderildi') }, 400, 'FATURA_KESILEMEZ'],
+    ];
+    for (const [ek, durum, kod] of vakalar) {
+      const id = await siparisKur(ek);
+      const r = await ettnEkle(YONETICI, id, ETTN_A);
+      expect([r.s, r.j.kod], JSON.stringify(ek)).toEqual([durum, kod]);
+      expect(await belgeOku('orders', id), kod).not.toHaveProperty('ettn');
+    }
+  });
+
+  it('409 FATURA_ETTN_BASKA_SIPARISTE — aynı ETTN aynı kiracının başka Cetpa siparişinde (kaydetin yazdığı parantezli / büyük harfli biçim dâhil); iki kararda da', async () => {
+    const { cid, YON } = await kiraciKur();
+    await belgeKoy('orders', `ilk-${cid}`, { companyId: cid, orderNumber: 'SIP-ILK', ettn: `{${ETTN_A.toLocaleUpperCase('tr-TR')}}`, ...isaretli('gonderildi') });
+    const g = `ikinci-g-${cid}`;
+    await belgeKoy('orders', g, { companyId: cid, orderNumber: 'SIP-G', ...isaretli('gonderildi') });
+    const r = await ettnEkle(YON, g, ETTN_A);
+    expect([r.s, r.j.kod, r.j.error]).toEqual([409, 'FATURA_ETTN_BASKA_SIPARISTE', 'Bu ETTN başka bir siparişte kayıtlı: SIP-ILK']);
+    expect(await belgeOku('orders', g)).not.toHaveProperty('ettn');
+    const b = `ikinci-b-${cid}`;
+    await belgeKoy('orders', b, { companyId: cid, orderNumber: 'SIP-B', ...isaretli('belirsiz') });
+    const r2 = await varEttn(YON, b, ETTN_A);
+    expect([r2.s, r2.j.kod]).toEqual([409, 'FATURA_ETTN_BASKA_SIPARISTE']);
+    expect(await isaretOku(b)).toMatchObject({ durum: 'belirsiz' });
+    // MF siparişi «başka Cetpa siparişi» SAYILMAZ; başka kiracının siparişi de.
+    await belgeKoy('orders', `mf-${cid}`, { companyId: cid, source: 'mikro-fatura', ettn: ettnNo(5) });
+    await belgeKoy('orders', `yabanci-${cid}`, { companyId: BASKA_KIRACI, ettn: ettnNo(6) });
+    const g2 = `ucuncu-${cid}`;
+    await belgeKoy('orders', g2, { companyId: cid, orderNumber: 'SIP-3', ...isaretli('gonderildi') });
+    expect((await ettnEkle(YON, g2, ettnNo(5))).s).toBe(200);
+    const g3 = `dorduncu-${cid}`;
+    await belgeKoy('orders', g3, { companyId: cid, orderNumber: 'SIP-4', ...isaretli('gonderildi') });
+    expect((await ettnEkle(YON, g3, ettnNo(6))).s).toBe(200);
+  });
+
+  it('409 FATURA_ETTN_BASKA_CARI — aynada yalnız ALIŞ faturası; satış faturası başka carinin', async () => {
+    const { cid, YON } = await kiraciKur();
+    await aynaKoy(cid, { cha_uuid: ettnNo(11), cha_tip: 1, cha_kod: '320.01.0001' });
+    const a = `alis-${cid}`;
+    await belgeKoy('orders', a, { companyId: cid, orderNumber: 'SIP-A', ...isaretli('gonderildi') });
+    const r1 = await ettnEkle(YON, a, ettnNo(11));
+    expect([r1.s, r1.j.kod, r1.j.error]).toEqual([409, 'FATURA_ETTN_BASKA_CARI', 'Bu ETTN bir alış faturasına ait']);
+    await aynaKoy(cid, { cha_uuid: ettnNo(12), cha_kod: '120.01.0099' });
+    const c = `cari-${cid}`;
+    await belgeKoy('orders', c, { companyId: cid, orderNumber: 'SIP-C', ...isaretli('belirsiz') });
+    const r2 = await varEttn(YON, c, ettnNo(12));
+    expect([r2.s, r2.j.kod, r2.j.error]).toEqual([409, 'FATURA_ETTN_BASKA_CARI', 'Bu ETTN 120.01.0099 carisinin faturası; sipariş carisi 120.01.0042']);
+    for (const id of [a, c]) expect(await belgeOku('orders', id)).not.toHaveProperty('ettn');
+  });
+
+  // İnceleme 2026-10-19 (B3 × A2): bekletme kuralı talep sınırından önceki faturayı «bu siparişin olamaz» sayar (gece MF'ye dönüşür).
+  // Bağ kurulurken aynı ölçüt sınanmazsa eski faturanın ETTN'si kabul edilir, bekletme kalkar, gerçek fatura da MF türer (çift satış).
+  it('409 FATURA_ETTN_ONCEKI_FATURA — aynı carinin talep sınırından ÖNCEKİ (zaten MF siparişi olmuş) faturasının ETTN\'si: «Mikro\'da var» ve «ETTN ekle»; işaret / ETTN değişmez, gece bekletme SÜRER; sınır günü ve sonrası kabul', async () => {
+    const { cid, YON, SAT } = await kiraciKur();
+    const CARI = '120.01.0042';
+    const ESKI = ettnNo(31);
+    const YENI = ettnNo(32);
+    // Talep sınırı 2026-10-18 (`isaretli` → faturaTarihi 18.10.2026). Eski fatura 10.10 (sınırdan önce), yeni fatura 19.10.
+    const eskiSira = await aynaKoy(cid, { cha_uuid: `{${ESKI.toLocaleUpperCase('tr-TR')}}`, cha_tarihi: '2026-10-10T00:00:00', cha_kod: CARI });
+    const yeniSira = await aynaKoy(cid, { cha_uuid: `{${YENI}}`, cha_tarihi: '2026-10-19T00:00:00', cha_kod: CARI });
+    const a = `onceki-a-${cid}`;
+    await belgeKoy('orders', a, { companyId: cid, orderNumber: 'SIP-OA', ...isaretli('belirsiz', CARI) });
+    const once = await turet(YON);
+    expect(once.s, once.metin).toBe(200);
+    expect(String(once.j.note)).toContain('(SIP-OA)');
+    expect(await satirVar('orders', `mikrofat__${cid}__-${eskiSira}`), 'eski fatura sınırdan önce: bekletilmez, MF türer').toBe(true);
+    expect(await satirVar('orders', `mikrofat__${cid}__-${yeniSira}`), 'yeni fatura bekletilir').toBe(false);
+
+    const HATA = 'Bu ETTN 2026-10-10 tarihli, talepten (2026-10-18) önceki bir faturanın; bu siparişin faturası olamaz';
+    const r = await varEttn(SAT, a, ESKI, 'N-ESKI');
+    expect([r.s, r.j.kod, r.j.error], r.metin).toEqual([409, 'FATURA_ETTN_ONCEKI_FATURA', HATA]);
+    expect(r.j.mikroFaturaGonderimi).toMatchObject({ durum: 'belirsiz' });
+    const aSonra = await belgeOku('orders', a);
+    expect(aSonra).not.toHaveProperty('ettn');
+    expect(aSonra).not.toHaveProperty('mikroFaturaNo');
+    expect(aSonra).not.toHaveProperty('hasInvoice');
+    expect(await isaretOku(a)).toMatchObject({ durum: 'belirsiz', cariKod: CARI, faturaTarihi: '18.10.2026' });
+    expect(await syncLogSatirlari('FaturaSonucCozumu', a)).toHaveLength(0);
+
+    // «ETTN ekle» (`gonderildi`, ETTN'siz) aynı ret.
+    const b = `onceki-b-${cid}`;
+    await belgeKoy('orders', b, { companyId: cid, orderNumber: 'SIP-OB', hasInvoice: true, ...isaretli('gonderildi', CARI) });
+    const r2 = await ettnEkle(YON, b, ESKI);
+    expect([r2.s, r2.j.kod, r2.j.error], r2.metin).toEqual([409, 'FATURA_ETTN_ONCEKI_FATURA', HATA]);
+    expect(await belgeOku('orders', b)).not.toHaveProperty('ettn');
+    expect(await isaretOku(b)).toMatchObject({ durum: 'gonderildi' });
+
+    // Gece: bekletme SÜRER — yeni fatura MF olarak türemez, not iki siparişi de anar.
+    const ara = await turet(YON);
+    expect(ara.s, ara.metin).toBe(200);
+    expect(String(ara.j.note)).toContain('SIP-OA');
+    expect(await satirVar('orders', `mikrofat__${cid}__-${yeniSira}`)).toBe(false);
+
+    // Doğru fatura (sınırdan sonra) kabul; sınır GÜNÜ de kabul (bekletme `>=`).
+    const r3 = await varEttn(SAT, a, YENI);
+    expect([r3.s, r3.j.success, r3.j.ettn], r3.metin).toEqual([200, true, YENI]);
+    expect(r3.j).not.toHaveProperty('uyari');
+    const ESIT = ettnNo(33);
+    await aynaKoy(cid, { cha_uuid: ESIT, cha_tarihi: '2026-10-18T00:00:00', cha_kod: CARI });
+    const r4 = await ettnEkle(YON, b, ESIT);
+    expect([r4.s, r4.j.success, r4.j.ettn], r4.metin).toEqual([200, true, ESIT]);
+    expect((await belgeOku('orders', b))?.ettn).toBe(ESIT);
+    const son = await turet(YON);
+    expect(String(son.j.note)).not.toContain('SIP-OA');
+    expect(await satirVar('orders', `mikrofat__${cid}__-${yeniSira}`), 'G3a ile bağlı: MF türemez').toBe(false);
+  });
+
+  it('`uyari` — aynada yok / yönü okunamayan satır / işarette cari yok → KABUL; uyarı yanıtta ve syncLog ayrıntısında', async () => {
+    const { cid, YON } = await kiraciKur();
+    const UYARI = 'ETTN Mikro fatura aynasında henüz yok ya da carisi doğrulanamadı (ayna gece güncellenir)';
+    await aynaKoy(cid, { cha_uuid: ettnNo(22), cha_tip: null, yon: null, cha_kod: '120.01.0099' });
+    await aynaKoy(cid, { cha_uuid: ettnNo(23), cha_kod: '120.01.0099' });
+    const vakalar: Array<[string, Record<string, unknown>, string]> = [
+      ['aynada yok', isaretli('gonderildi', '120.09.1'), ettnNo(21)],
+      ['yönü okunamayan', isaretli('gonderildi', '120.09.2'), ettnNo(22)],
+      ['işarette cari yok', { [FATURA_GONDERIM_ALANI]: isaretNesnesi('gonderildi') }, ettnNo(23)],
+    ];
+    for (const [i, [ad, ek, ettn]] of vakalar.entries()) {
+      const id = `uyari-${i}-${cid}`;
+      await belgeKoy('orders', id, { companyId: cid, orderNumber: `SIP-U${i}`, ...ek });
+      const r = await ettnEkle(YON, id, ettn);
+      expect([r.s, r.j.uyari, r.j.ettn], `${ad}: ${r.metin}`).toEqual([200, UYARI, ettn]);
+      expect((await syncLogSatirlari('FaturaSonucCozumu', id))[0]?.ayrinti, ad).toEqual({ karar: 'ettnEkle', ettn, uyari: UYARI });
+    }
+  });
+
+  // SINIR: PGlite TEK bağlantılıdır — burada B, A'nın UPDATE'inden ÖNCE baştan sona koşar (SIRALI araya girme). Sınanan: ön denetimi
+  // ikisi de geçer, A'nın UPDATE'i B'nin İŞLENMİŞ yazımını `NOT EXISTS` ile görür. GERÇEK eşzamanlılık (iki bağlantıda aynı anda iki
+  // UPDATE, READ COMMITTED) burada SINANAMAZ: orada `NOT EXISTS` ötekinin işlenmemiş yazımını görmez, yarışı (kiracı, ETTN) danışma
+  // kilidi kapatır — kilidin sırası ve işlem sınırı aşağıdaki «DANIŞMA KİLİDİ» testinde ve `mikro/faturaGonderimi.ettn.test.ts`'te.
+  it('SIRALI ARAYA GİRME — aynı ETTN iki siparişe: ön denetimi ikisi de geçer, B\'nin yazımı A\'nın UPDATE\'inden önce işlenir → A\'nın NOT EXISTS\'i görür, YALNIZ biri yazar; öteki 409 BASKA_SIPARISTE (eşzamanlı iki UPDATE\'i durduran danışma kilididir, PGlite tek bağlantılı — sınanamaz)', async () => {
+    for (const karar of ['ettnEkle', 'mikrodaVar'] as const) {
+      const { cid, YON, SAT } = await kiraciKur();
+      const durum = karar === 'ettnEkle' ? 'gonderildi' : 'belirsiz';
+      const a = `yaris-a-${cid}`, b = `yaris-b-${cid}`;
+      await belgeKoy('orders', a, { companyId: cid, orderNumber: 'SIP-YA', ...isaretli(durum) });
+      await belgeKoy('orders', b, { companyId: cid, orderNumber: 'SIP-YB', ...isaretli(durum) });
+      const ETTN = ettnNo(karar === 'ettnEkle' ? 31 : 32);
+      let bBitti: Promise<Yanit> | undefined;
+      let durdu = false;
+      // A'nın yazım ifadesi KOŞMADAN önce B baştan sona koşar (ön denetimi A'nınkinden sonra, yazımı önce).
+      G.__faturaPgOnKanca = async (sql: string, p: unknown[] | undefined) => {
+        if (!durdu && /^UPDATE docs SET data = /.test(sql) && /NOT EXISTS/.test(sql) && p?.[0] === a) {
+          durdu = true;
+          bBitti = karar === 'ettnEkle' ? ettnEkle(SAT, b, ETTN) : varEttn(SAT, b, ETTN);
+          await bBitti;
+        }
+      };
+      try {
+        const ra = karar === 'ettnEkle' ? await ettnEkle(YON, a, ETTN) : await varEttn(YON, a, ETTN);
+        expect(durdu, karar).toBe(true);
+        const rb = await bBitti;
+        expect([rb?.s, ra.s, ra.j.kod], karar).toEqual([200, 409, 'FATURA_ETTN_BASKA_SIPARISTE']);
+        expect(ra.j.error, karar).toBe('Bu ETTN başka bir siparişte kayıtlı: SIP-YB');
+        expect([(await belgeOku('orders', a))?.ettn, (await belgeOku('orders', b))?.ettn], karar).toEqual([undefined, ETTN]);
+      } finally { G.__faturaPgOnKanca = undefined; }
+    }
+  });
+
+  it('DANIŞMA KİLİDİ — iki yolda da kilit deyimi UPDATE\'ten ÖNCE ve AYNI işlemde (BEGIN → kilit → UPDATE → COMMIT, araya deyim girmez); UPDATE düşerse ROLLBACK, satır değişmez, sonraki istek temiz işlemle yazar (gerçek eşzamanlılık PGlite\'ta sınanamaz)', async () => {
+    const { cid, YON } = await kiraciKur();
+    const gunluk: Array<{ sql: string; p: unknown[] | undefined }> = [];
+    const ETTN_YAZAN = /^UPDATE docs SET data = .*NOT EXISTS/s;
+    const adim = (x: { sql: string }): string => (/^(BEGIN|COMMIT|ROLLBACK)$/.test(x.sql.trim()) ? x.sql.trim()
+      : /pg_advisory_xact_lock/.test(x.sql) ? 'KILIT' : ETTN_YAZAN.test(x.sql) ? 'YAZ' : 'BASKA');
+    const dizi = (): string[] => {
+      const i = gunluk.findIndex(x => adim(x) === 'BEGIN');
+      return i < 0 ? [] : gunluk.slice(i, i + 4).map(adim);
+    };
+    try {
+      for (const karar of ['ettnEkle', 'mikrodaVar'] as const) {
+        gunluk.length = 0;
+        G.__faturaPgOnKanca = (sql: string, p: unknown[] | undefined) => { gunluk.push({ sql, p }); };
+        const id = `kilit-${karar}-${cid}`;
+        await belgeKoy('orders', id, { companyId: cid, orderNumber: `SIP-K-${karar}`, ...isaretli(karar === 'ettnEkle' ? 'gonderildi' : 'belirsiz') });
+        const ETTN = ettnNo(karar === 'ettnEkle' ? 51 : 52);
+        const r = karar === 'ettnEkle' ? await ettnEkle(YON, id, `{${ETTN.toLocaleUpperCase('tr-TR')}}`) : await varEttn(YON, id, ETTN);
+        expect(r.s, `${karar}: ${r.metin}`).toBe(200);
+        expect(dizi(), karar).toEqual(['BEGIN', 'KILIT', 'YAZ', 'COMMIT']);
+        expect(gunluk.find(x => adim(x) === 'KILIT')?.p, karar).toEqual([cid, ETTN]);   // anahtar: kiracı + KÜÇÜK HARFLİ anahtar
+        expect(gunluk.filter(x => adim(x) === 'BEGIN'), karar).toHaveLength(1);
+        expect((await belgeOku('orders', id))?.ettn, karar).toBe(ETTN);
+      }
+      // ETTN'siz «Mikro'da var»: işlem açılmaz, kilit alınmaz (eski tek deyim).
+      gunluk.length = 0;
+      const yalin = `kilit-yalin-${cid}`;
+      await belgeKoy('orders', yalin, { companyId: cid, orderNumber: 'SIP-K-Y', ...isaretli('belirsiz') });
+      expect((await coz(YON, yalin, 'mikrodaVar', 'N-k1')).s).toBe(200);
+      expect(gunluk.map(adim).filter(a => a !== 'BASKA')).toEqual([]);
+      // UPDATE düşer → ROLLBACK, COMMIT yok, satır değişmez; ardından aynı istek temiz işlemle yazar.
+      gunluk.length = 0;
+      const dus = `kilit-dus-${cid}`;
+      await belgeKoy('orders', dus, { companyId: cid, orderNumber: 'SIP-K-D', ...isaretli('gonderildi') });
+      const once = await belgeOku('orders', dus);
+      let dusur = true;
+      G.__faturaPgOnKanca = (sql: string, p: unknown[] | undefined) => {
+        gunluk.push({ sql, p });
+        if (dusur && ETTN_YAZAN.test(sql)) { dusur = false; throw new Error('yazım düştü (sınama)'); }
+      };
+      const r1 = await ettnEkle(YON, dus, ettnNo(53));
+      expect(r1.s, r1.metin).toBe(500);
+      expect(dizi()).toEqual(['BEGIN', 'KILIT', 'YAZ', 'ROLLBACK']);
+      expect(gunluk.some(x => adim(x) === 'COMMIT')).toBe(false);
+      expect(await belgeOku('orders', dus)).toEqual(once);
+      const r2 = await ettnEkle(YON, dus, ettnNo(53));
+      expect([r2.s, r2.j.ettn], r2.metin).toEqual([200, ettnNo(53)]);
+    } finally { G.__faturaPgOnKanca = undefined; }
+  });
+
+  it('409 FATURA_ETTN_DEGISTI — okumadan sonra ham ETTN araya giren yazımla değişti: karşılaştır-yaz tutmaz, değer EZİLMEZ', async () => {
+    const id = await siparisKur({ ettn: 'eski-bozuk', ...isaretli('gonderildi') });
+    let girdi = false;
+    G.__faturaPgOnKanca = async (sql: string, p: unknown[] | undefined) => {
+      if (!girdi && /^UPDATE docs SET data = data \|\| jsonb_build_object\('ettn'/.test(sql) && p?.[0] === id) {
+        girdi = true;
+        await pg().query("UPDATE docs SET data = data || '{\"ettn\":\"araya-giren\"}'::jsonb WHERE coll = 'orders' AND id = $1", [id]);
+      }
+    };
+    try {
+      const r = await ettnEkle(YONETICI, id, ettnNo(41));
+      expect([r.s, r.j.kod, r.j.error], r.metin).toEqual([409, 'FATURA_ETTN_DEGISTI', 'Kayıt bu arada değişti; yenileyip yeniden deneyin.']);
+      expect(girdi).toBe(true);
+      expect((await belgeOku('orders', id))?.ettn).toBe('araya-giren');
+    } finally { G.__faturaPgOnKanca = undefined; }
   });
 });

@@ -184,12 +184,18 @@ export const SAHIP_SATIR_ALANI: ReadonlyMap<string, string> = new Map([
  *   • cas — `set`'ten düşer; yazım ifadesi de aynı yardımcıdan (`sunucuAlanKorumaSql(coll, '(docs.data || $4::jsonb)')`);
  *   • increment — 400 (server.ts SAHIPLIK_ALANLARI).
  * Sunucunun kendi yazımları doğrudan SQL'dir, bu süzgeçten geçmez. Alan adları SQL'e gömüldüğü için yalnız `[A-Za-z0-9_]`
- * (collections.test). `mikroFaturaNo` / `ettn` / `hasInvoice` listeye ALINMAZ (meşru istemci yazıcıları var; çift kesim
- * güvenliği işarete dayanır). Kural tek yerde: lib/tenantErisim (`kiraciDamgala`, `sunucuAlanKorumaSql`); çit:
- * server/faturaCiftKesim.zincir.test (T23–T25).
+ * (collections.test). Kural tek yerde: lib/tenantErisim (`kiraciDamgala`, `sunucuAlanKorumaSql`); çit:
+ * server/faturaCiftKesim.zincir.test (T23–T25, B1).
+ *
+ * `ettn` 2026-10-19'dan beri korunur (şartname «fatura gövde + gece MF» § 9.B B1): G3a / H1 onu MF türetme kararında okur —
+ * istemcinin yazdığı bir ETTN gece Mikro faturasını bir Cetpa siparişine bağlar ya da bekletmeyi kaldırırdı. İstemcide
+ * `orders.ettn` yazan yer yok (EBelgeMerkezi `invoices`'a yazar; ölçüm 2026-10-19). Yazıcılar kaydet geçişi (`faturaGecisiYaz`),
+ * `sonuc mikrodaVar` ve `sonuc ettnEkle`; üçü de doğrudan SQL (server/mikro/faturaGonderimi). pgShim `set` / `update` üzerinden
+ * `orders.ettn` yazan sunucu yolu yok (grep ölçümü 2026-10-19) — olsaydı bu korumayla sessizce düşerdi. Önceki «meşru istemci
+ * yazıcısı» istisnası ölçüyle çürüdü. `mikroFaturaNo` / `hasInvoice` listeye ALINMAZ.
  */
 export const SUNUCU_TURETILEN_ALANLAR: ReadonlyMap<string, readonly string[]> = new Map([
-  ['orders', [FATURA_GONDERIM_ALANI]],
+  ['orders', [FATURA_GONDERIM_ALANI, 'ettn']],
 ]);
 
 /**

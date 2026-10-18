@@ -4,7 +4,7 @@
  * («OLABİLİR» denmez) ile «kesilmiş OLABİLİR» ayrıdır.
  */
 import { describe, it, expect } from 'vitest';
-import { faturaOlabilirMetni, faturaSonucMesaji, faturaYanitMesaji, type FaturaYaniti } from './faturaGonder';
+import { faturaOlabilirMetni, faturaSonucMesaji, faturaSonucUyarisi, faturaYanitMesaji, type FaturaYaniti } from './faturaGonder';
 
 const OLABILIR = 'Fatura Mikro\'da kesilmiş OLABİLİR. Tekrar göndermeden önce Mikro\'dan kontrol edin.';
 
@@ -84,5 +84,63 @@ describe('faturaSonucMesaji (D6)', () => {
     expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_GONDERILIYOR' }, 'tr').metin).toBe('Bu siparişin faturası şu an gönderiliyor.');
     expect(faturaSonucMesaji(404, { success: false, error: 'Kayıt bulunamadı.' }, 'tr').metin).toBe('Kayıt çözülemedi: Kayıt bulunamadı.');
     expect(faturaSonucMesaji(null, null, 'tr').tur).toBe('error');
+  });
+});
+
+describe('faturaSonucMesaji — ETTN (şartname «fatura gövde + gece MF» § 9.B B5)', () => {
+  it('«ETTN ekle» başarısı → «ETTN eklendi: fatura bu siparişe bağlandı.» (İngilizcesi de)', () => {
+    expect(faturaSonucMesaji(200, { success: true, karar: 'ettnEkle', ettn: 'e' }, 'tr')).toEqual({ tur: 'success', metin: 'ETTN eklendi: fatura bu siparişe bağlandı.' });
+    expect(faturaSonucMesaji(200, { success: true, karar: 'ettnEkle' }, 'en').metin).toBe('ETTN added: the invoice is linked to this order.');
+    // «Mikro'da var» + ETTN: bugünkü çözüm iletisi.
+    expect(faturaSonucMesaji(200, { success: true, karar: 'mikrodaVar', ettn: 'e' }, 'tr').metin).toBe('Kayıt çözüldü: fatura Mikro\'da kesilmiş olarak işaretlendi.');
+  });
+
+  it('yeni 409 kodları Türkçe iletiyle; sunucunun ayrıntısı (öteki sipariş, cari) iletide', () => {
+    expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_VAR', error: 'Bu siparişin ETTN\'si zaten kayıtlı.' }, 'tr', 'ettnEkle'))
+      .toEqual({ tur: 'info', metin: 'Bu siparişin ETTN\'si zaten kayıtlı.' });
+    expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_BASKA_SIPARISTE', error: 'Bu ETTN başka bir siparişte kayıtlı: SIP-0007' }, 'tr', 'ettnEkle'))
+      .toEqual({ tur: 'error', metin: 'ETTN yazılmadı. Bu ETTN başka bir siparişte kayıtlı: SIP-0007. Mikro\'daki ETTN\'yi denetleyin.' });
+    expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_BASKA_CARI', error: 'Bu ETTN bir alış faturasına ait' }, 'tr', 'mikrodaVar').metin)
+      .toBe('ETTN yazılmadı. Bu ETTN bir alış faturasına ait. Mikro\'daki ETTN\'yi denetleyin.');
+    expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_BASKA_CARI', error: 'Bu ETTN 120.01.0099 carisinin faturası; sipariş carisi 120.01.0042' }, 'tr').metin)
+      .toBe('ETTN yazılmadı. Bu ETTN 120.01.0099 carisinin faturası; sipariş carisi 120.01.0042. Mikro\'daki ETTN\'yi denetleyin.');
+    // Sunucu iletisi yoksa genel cümle.
+    expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_BASKA_SIPARISTE' }, 'tr').metin).toBe('ETTN yazılmadı. Bu ETTN başka bir siparişte kayıtlı. Mikro\'daki ETTN\'yi denetleyin.');
+    expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_DEGISTI', error: 'Kayıt bu arada değişti; yenileyip yeniden deneyin.' }, 'tr', 'ettnEkle').metin)
+      .toBe('Kayıt bu arada değişti; sayfayı yenileyip yeniden deneyin.');
+    expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_BASKA_SIPARISTE', error: 'Bu ETTN başka bir siparişte kayıtlı: S-1' }, 'en').metin)
+      .toBe('ETTN not saved: this ETTN is recorded on another order (Bu ETTN başka bir siparişte kayıtlı: S-1). Check the ETTN in Mikro.');
+  });
+
+  it('409 FATURA_ETTN_ONCEKI_FATURA — talepten önceki faturanın ETTN\'si: sunucu iletisi (iki gün) Türkçede, İngilizcede genel cümle + parantez; iki kararda da', () => {
+    const hata = 'Bu ETTN 2026-10-10 tarihli, talepten (2026-10-19) önceki bir faturanın; bu siparişin faturası olamaz';
+    for (const istenen of ['mikrodaVar', 'ettnEkle'] as const) {
+      expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_ONCEKI_FATURA', error: hata }, 'tr', istenen))
+        .toEqual({ tur: 'error', metin: `ETTN yazılmadı. ${hata}. Mikro'daki ETTN'yi denetleyin.` });
+    }
+    expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_ONCEKI_FATURA' }, 'tr').metin)
+      .toBe('ETTN yazılmadı. Mikro fatura kayıtlarına göre bu ETTN talepten önceki bir faturanın; bu siparişin faturası olamaz. Mikro\'daki ETTN\'yi denetleyin.');
+    expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_ONCEKI_FATURA', error: hata }, 'en').metin)
+      .toBe(`ETTN not saved: according to Mikro's invoice records this ETTN belongs to an invoice dated before the request, so it cannot be this order's invoice (${hata}). Check the ETTN in Mikro.`);
+    // «Kesilmiş OLABİLİR» / «Kayıt çözülemedi» genel yoluna DÜŞMEZ.
+    expect(faturaSonucMesaji(409, { success: false, kod: 'FATURA_ETTN_ONCEKI_FATURA', error: hata }, 'tr').metin).not.toMatch(/OLABİLİR|Kayıt çözülemedi/);
+  });
+
+  it('KİLİT — 400\'de SUNUCU iletisi gösterilir (`FATURA_ETTN_GECERSIZ`, şema iletisi); «ETTN ekle»de önek «ETTN eklenemedi», ötekilerde bugünkü «Kayıt çözülemedi»', () => {
+    const gecersiz = 'ETTN geçersiz: Mikro\'da e-Fatura ekranındaki 36 karakterlik ETTN\'yi girin (sıfır ETTN kabul edilmez).';
+    expect(faturaSonucMesaji(400, { success: false, kod: 'FATURA_ETTN_GECERSIZ', error: gecersiz }, 'tr', 'ettnEkle')).toEqual({ tur: 'error', metin: `ETTN eklenemedi: ${gecersiz}` });
+    expect(faturaSonucMesaji(400, { success: false, kod: 'FATURA_ETTN_GECERSIZ', error: gecersiz }, 'tr', 'mikrodaVar').metin).toBe(`Kayıt çözülemedi: ${gecersiz}`);
+    expect(faturaSonucMesaji(400, { success: false, error: 'ETTN eklemek için geçerli bir ETTN girin.' }, 'tr', 'ettnEkle').metin).toBe('ETTN eklenemedi: ETTN eklemek için geçerli bir ETTN girin.');
+    expect(faturaSonucMesaji(400, { success: false, kod: 'FATURA_ETTN_GECERSIZ', error: gecersiz }, 'tr').metin).toBe(`Kayıt çözülemedi: ${gecersiz}`);
+    expect(faturaSonucMesaji(null, null, 'tr', 'ettnEkle').metin).toBe('ETTN eklenemedi: yanıt alınamadı. Sayfayı yenileyip yeniden deneyin.');
+  });
+
+  it('faturaSonucUyarisi — yalnız başarıda ve `uyari` doluysa bilgi iletisi (metin istemcide, İngilizcesi de)', () => {
+    const u = 'ETTN Mikro fatura aynasında henüz yok ya da carisi doğrulanamadı (ayna gece güncellenir)';
+    expect(faturaSonucUyarisi({ success: true, karar: 'ettnEkle', uyari: u }, 'tr')).toEqual({ tur: 'info', metin: 'ETTN kaydedildi ama Mikro fatura aynasında henüz yok ya da carisi doğrulanamadı (ayna gece güncellenir). ETTN\'yi Mikro\'daki faturayla bir kez daha karşılaştırın.' });
+    expect(faturaSonucUyarisi({ success: true, karar: 'ettnEkle', uyari: u }, 'en')?.metin).toMatch(/^The ETTN was saved/);
+    expect(faturaSonucUyarisi({ success: true, karar: 'ettnEkle' }, 'tr')).toBeNull();
+    expect(faturaSonucUyarisi({ success: false, uyari: u }, 'tr')).toBeNull();
+    expect(faturaSonucUyarisi(null, 'tr')).toBeNull();
   });
 });

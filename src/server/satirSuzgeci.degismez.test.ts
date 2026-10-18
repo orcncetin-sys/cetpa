@@ -255,8 +255,11 @@ describe('sunucuda `orders` okuyan / yazan yerlerin SAYISI sabit', () => {
     // 14 → 13 + yeni modül 6 (2026-10-17, e-Fatura çift kesim D1 / D4 / D6): fatura rotasının pgShim set-merge yazımı kalktı;
     // gönderim işaretinin atomik SQL'i (`coll = 'orders'` — talep, yeniden okuma, geçiş, geri alma, iki sonuç) yalnız
     // `requireStaff` kapılı iki uçtan (fatura/kaydet, fatura/sonuc) çağrılır ve kiracı koşulunu taşır.
+    // faturaGonderimi 6 → 8 (2026-10-19, şartname «fatura gövde + gece MF» § 9.B B2 / B3): «ETTN ekle» karşılaştır-yaz UPDATE'i
+    // ve «aynı ETTN başka Cetpa siparişinde» koşulu (`d2.coll = 'orders'` — ön denetim + yazımın NOT EXISTS'i). İkisi de yalnız
+    // `requireStaff` kapılı `fatura/sonuc` ucundan çağrılır ve kiracı koşulunu taşır (aynı kiracı ya da etiketsiz).
     'src/server/routes/mikroRoutes.ts': 13,
-    'src/server/mikro/faturaGonderimi.ts': 6,
+    'src/server/mikro/faturaGonderimi.ts': 8,
     'src/server/routes/opsRoutes.ts': 1,
     'src/server/routes/paymentRoutes.ts': 2,
     'src/server/routes/reportsRoutes.ts': 1,

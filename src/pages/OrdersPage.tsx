@@ -4,13 +4,15 @@ import { eslesir } from '../utils/arama';
 import { gorunenSiparisNo, siparisTarih, siparisTarihMs, odemeTakipli } from '../utils/siparis';
 import { irsaliyeIstegi, irsaliyeNedenMetni } from '../utils/siparisler/irsaliyeGonder';
 import { faturaKesilebilir, faturaSonucuCozulebilir, mikroFaturaDurumMetni, mikroFaturasiKesilmisOlabilir, mikroyaFaturaGonderilebilir } from '../utils/siparisler/faturaDurumu';
-import type { FaturaSonucKarari } from '../lib/faturaGonderimi';
+import { faturaIsareti, type FaturaSonucKarari } from '../lib/faturaGonderimi';
+import { cetpaEttnAnahtari } from '../lib/ettn';
 import { yerelDegistirilebilir, sevkiyatEngeli, sevkiyatEngeliMetni, yerelDegistirilemezMetni, silmeYolu, mikroSilOnayMetni, mikroSilindiMetni, silmeEngelMetni, silmeHataMetni, siparisNotMetni } from '../utils/siparisler/siparisIslemleri';
 import { mikroSiparisiSil } from '../services/mikroSiparisSil';
 import { useMikroSiparisKalemleri } from '../hooks/useMikroSiparisKalemleri';
 import MikroSiparisKalemleri from '../components/siparis/MikroSiparisKalemleri';
 import OnlineSiparisBilgisi, { OnlineRozeti } from '../components/siparis/OnlineSiparisBilgisi';
-import FaturaSonucuSecenekleri from '../components/siparis/FaturaSonucuSecenekleri';
+import FaturaSonucuSecenekleri, { type FaturaSonucEki } from '../components/siparis/FaturaSonucuSecenekleri';
+import FaturaEttnEkle from '../components/siparis/FaturaEttnEkle';
 import { magazaSiparisiMi } from '../utils/siparisler/magazaSiparisi';
 import { kalemleriMikrodanOkunacak, mikroFaturaKalemleriGetir, mikroKalemTablosu, kayitliKalemTablosu, kayitliMikroKalemleri } from '../services/mikroFaturaKalemleri';
 import { kalemTutari, kalemBirimFiyati, kdvDahilKalemVar } from '../utils/pano/stokSevkiyat';
@@ -218,8 +220,11 @@ interface Props {
   /** "Siparişi kopyala": sipariş penceresini bu tohumla açar (pencere birim fiyatı kalemden yeniden türetir). */
   setSiparisTohumu: (t: { order: Partial<Order>; kalemler: OrderLineItem[] } | null) => void;
   handleMikroFatura: (order: Order) => Promise<void>;
-  /** D6 (e-Fatura çift kesim): belirsiz fatura kaydını çözer — onay penceresi ve istek App.tsx'te (`handleMikroFatura`'nın yanında). */
-  handleMikroFaturaSonuc: (order: Order, karar: FaturaSonucKarari, numara?: string) => Promise<void>;
+  /** D6 (e-Fatura çift kesim): belirsiz fatura kaydını çözer — onay penceresi ve istek App.tsx'te (`handleMikroFatura`'nın yanında).
+   *  `ek`: «Mikro'da var» ile girilen numara ve geçerli ETTN'nin anahtarı (şartname «fatura gövde + gece MF» § 9.B B5). */
+  handleMikroFaturaSonuc: (order: Order, karar: FaturaSonucKarari, ek?: FaturaSonucEki) => Promise<void>;
+  /** § 9.B B5: `gonderildi` ama geçerli ETTN'si olmayan siparişe ETTN ekler (aynı uç, `karar: 'ettnEkle'`) — onay ve istek App.tsx'te. */
+  handleMikroFaturaEttnEkle: (order: Order, ettn: string) => Promise<void>;
   /**
    * id → e-Fatura gönderimi SÜRÜYOR (App.tsx'teki ORTAK uçuş kilidi — utils/siparisler/belgeKilidi; 2026-10-17, D11). Liste ve
    * ayrıntı düğmesi bunu okur: pasif + «Gönderiliyor…». Eski sayfa-yerel `faturaLoading` setter'sızdı (kalıcı `{}`) — kilit ÖLÜYDÜ.
@@ -268,7 +273,7 @@ export default function OrdersPage({
   orders, leads, inventory, exchangeRates, employees,
   userRole, user, kpiCurrency, setKpiCurrency, activeTab, darkMode, warehouses, vehicles, aracKonumlari, konumYazabilir, irsaliyeKesebilir, kullaniciUid, locationStocks, shipments,
   setSiparisTohumu,
-  handleMikroFatura, handleMikroFaturaSonuc, mikroFaturaGonderiliyor, mikroFaturaKesebilir, mikroFaturaSonucuCozebilir,
+  handleMikroFatura, handleMikroFaturaSonuc, handleMikroFaturaEttnEkle, mikroFaturaGonderiliyor, mikroFaturaKesebilir, mikroFaturaSonucuCozebilir,
   handleEIrsaliye, eIrsaliyeGonderiliyor, handleIyzicoPaymentLink, setRouteStops, handleBuildRoute, handleClearRoute, p554Bins,
   handleToggleOrderPaid, trackView, openConfirm,
   toast, setActiveTab, setSelectedLead, setIsAddingOrder,
@@ -2218,6 +2223,8 @@ export default function OrdersPage({
                         const canli = guncelSiparis(selectedOrder);
                         const suruyor = !!mikroFaturaGonderiliyor[canli.id];
                         const durumMetni = mikroFaturaDurumMetni(canli, currentLanguage);
+                        // § 9.B B5: tek «geçerli ETTN» ölçütü (`cetpaEttnAnahtari` — sunucu ve gece işiyle AYNI işlev).
+                        const ettnAnahtari = cetpaEttnAnahtari(canli.ettn);
                         return (<>
                           {mikroFaturaKesebilir && (mikroyaFaturaGonderilebilir(canli) || suruyor) && (
                             <button
@@ -2237,7 +2244,18 @@ export default function OrdersPage({
                               key={canli.id}
                               siparis={canli}
                               dil={currentLanguage}
-                              onKarar={(karar, numara) => void handleMikroFaturaSonuc(canli, karar, numara)}
+                              onKarar={(karar, ek) => void handleMikroFaturaSonuc(canli, karar, ek)}
+                            />
+                          )}
+                          {/* § 9.B B5 — kesilmiş (`gonderildi`) ama geçerli ETTN'si kayıtlı olmayan fatura: ETTN ekle. AYRI koşul (D6
+                              seçenekleriyle çakışmaz: onlar `belirsiz` / bayat `gonderiliyor`'da); `hasInvoice` OKUNMAZ (§ 9.A A3).
+                              Görünürlük `fatura/sonuc` ucunun kapısı (kesebilen çözebilir); onay ve istek App.tsx'te. */}
+                          {mikroFaturaSonucuCozebilir && !suruyor && faturaIsareti(canli)?.durum === 'gonderildi' && !ettnAnahtari && (
+                            <FaturaEttnEkle
+                              key={`ettn-${canli.id}`}
+                              siparis={canli}
+                              dil={currentLanguage}
+                              onEkle={ettn => void handleMikroFaturaEttnEkle(canli, ettn)}
                             />
                           )}
                           {durumMetni && !faturaSonucuCozulebilir(canli) && (
@@ -2248,6 +2266,11 @@ export default function OrdersPage({
                           {canli.mikroFaturaNo && (
                             <span className="bg-[#1a3a5c]/10 text-[#1a3a5c] px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20">
                               <CheckCircle2 className="w-4 h-4"/> Mikro: {canli.mikroFaturaNo}
+                            </span>
+                          )}
+                          {ettnAnahtari && (
+                            <span data-fatura-ettn={canli.id} className="bg-[#1a3a5c]/10 text-[#1a3a5c] px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-[#1a3a5c]/20">
+                              ETTN: <span className="font-mono font-semibold">{ettnAnahtari}</span>
                             </span>
                           )}
                         </>);

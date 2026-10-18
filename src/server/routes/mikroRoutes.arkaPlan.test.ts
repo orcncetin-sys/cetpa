@@ -536,8 +536,12 @@ describe('(d) cron paritesi: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DO�
     expect(sorgular.some(s => s.includes("sth_tarih >= '2026-06-26'"))).toBe(true);
     expect(sorgular.filter(s => /BETWEEN/.test(s))).toEqual([]);
     expect(arkaPlanIsiBaslat).not.toHaveBeenCalled();
-    expect(dc.syncLog).toHaveBeenCalledTimes(14);   // 13 tanım (2026-09-25: + iptal-faturalar) + GİB durum taraması (2026-10-02, döngüden SONRA)
-    expect(dc.syncLog).toHaveBeenLastCalledWith('EBelgeDurumSorgulamaV2', 'mikroFaturalar', expect.stringContaining('GİB durum taraması'), true, null, null, expect.any(Number), expect.anything());
+    // 13 tanım (2026-09-25: + iptal-faturalar) + GİB durum taraması (2026-10-02, döngüden SONRA) + faturadan sipariş (2026-10-18,
+    // şartname «fatura gövde + gece MF» G3: GİB taramasından SONRA; burada satış faturası yok → «bulunamadı» satırı, true).
+    expect(dc.syncLog).toHaveBeenCalledTimes(15);
+    expect(dc.syncLog).toHaveBeenNthCalledWith(14, 'EBelgeDurumSorgulamaV2', 'mikroFaturalar', expect.stringContaining('GİB durum taraması'), true, null, null, expect.any(Number), expect.anything());
+    expect(dc.syncLog).toHaveBeenLastCalledWith('faturadan-siparis', 'orders', expect.stringContaining('Satış faturası bulunamadı'), true, null, null, expect.any(Number),
+      { uid: 'system', email: '' }, undefined, { denetimKiracisi: 'A' });
     // iptal-faturalar: fatura-listesiyle AYNI evrak koşulu + `<> 0`; iptal süpürgesi YOK (kendi yazdığını silerdi).
     expect(sorgular.some(s => s.includes('ISNULL(cha.cha_iptal, 0) <> 0') && s.includes("cha.cha_tarihi >= '2000-01-01'"))).toBe(true);
     // BİLİNÇLİ FARK (S5/K-A ortak gövde; kapanış hakemi 2026-09-25): cron'un ÇAĞRI deseni değişmedi, ama

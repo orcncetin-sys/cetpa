@@ -11,6 +11,10 @@
  * fatura isteği istenirse ASKIDA bekletilir), `EventSource` (canlı yayın HİÇ gelmez — B2 «yayın gelmeden» koşulu) ve onay
  * penceresinin kararı (`confirmAction` kaydedilir; «Faturayı kes» / «Vazgeç» sınama verir). Sipariş listesi veri deposuna
  * doğrudan konur (akış başlatılmaz). Tembel sayfalar GERÇEK yüklenir.
+ *
+ * ETTN (şartname «fatura gövde + gece MF» § 9.B B5 / B6, 2026-10-19): «ETTN ekle» (sıfır GUID'li `gonderildi` siparişte görünür)
+ * ve «Mikro'da var» + ETTN uygulama yolundan: onay metni, istek gövdesinde ANAHTAR, yerel yama YANITTAKİ `ettn` ile — yayın
+ * gelmeden düğme kaybolur, rozet çizilir.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
@@ -366,5 +370,134 @@ describe('İnceleme 1 — onaydan sonraki yeniden denetim GÜNCEL depodan (İ1-6
     await waitFor(() => expect(sonucSayisi()).toBe(1));
     await waitFor(() => expect(veriDeposu.getState().orders[0]).toMatchObject({ hasInvoice: true, mikroSynced: true, mikroFaturaNo: 'CTP2026000000999', mikroFaturaGonderimi: { durum: 'gonderildi' } }));
     expect(veriDeposu.getState().orders[0]).not.toHaveProperty('mikroFaturaDate');
+    // § 9.B B5: ETTN girilmedi — onay metni söyler; gövdede `ettn` YOK; çözümden sonra (`gonderildi`, ETTN yok) «ETTN ekle» çizilir.
+    expect(durum.onaylar[durum.onaylar.length - 1].message).toContain('(No: CTP2026000000999 · ETTN girilmedi)');
+    expect(JSON.parse(istekler.filter(i => `${i.yontem} ${i.yol}` === SONUC)[0].govde)).toEqual({ firebaseId: 'sip-fatura-1', karar: 'mikrodaVar', numara: 'CTP2026000000999' });
+    expect(veriDeposu.getState().orders[0]).not.toHaveProperty('ettn');
+    await waitFor(() => expect(c.querySelector('[data-fatura-ettn-ekle="sip-fatura-1"]')).not.toBeNull());
+  });
+});
+
+describe('§ 9.B B5 / B6 — ETTN uygulama yolundan: «ETTN ekle» ve «Mikro\'da var» + ETTN', () => {
+  const ANAHTAR = '1b2c3d4e-0000-4abc-8def-0123456789ab';
+  const SIFIR = '00000000-0000-0000-0000-000000000000';
+  /** Uygulamayı açar, siparişin satırına tıklayıp ayrıntıya geçer. */
+  async function ayrintiyaAc(o: Order): Promise<HTMLElement> {
+    window.history.pushState({}, '', '/orders');
+    tazele();
+    veriDeposu.setState({ orders: [o] });
+    const { container: c } = render(<BrowserRouter><App /></BrowserRouter>);
+    const satir = await waitFor(() => {
+      const t = [...c.querySelectorAll('tr')].find(x => x.textContent?.includes('Şirin Yapı Malzemeleri'));
+      if (!t) throw new Error('satır yok');
+      return t;
+    }, { timeout: 60_000 });
+    await act(async () => { fireEvent.click(satir); });
+    return c;
+  }
+  const kesilmis = (ek: Partial<Order> = {}) => siparis({
+    hasInvoice: true, mikroSynced: true, mikroFaturaNo: 'CTP2026000000321',
+    mikroFaturaGonderimi: { ...isaretGovdesi('gonderildi'), numara: 'CTP2026000000321' } as Order['mikroFaturaGonderimi'], ...ek,
+  });
+  const ettnKutusu = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-fatura-ettn-ekle="sip-fatura-1"]');
+  const sonucGovdeleri = () => istekler.filter(i => `${i.yontem} ${i.yol}` === SONUC).map(i => JSON.parse(i.govde) as unknown);
+
+  it('sıfır GUID\'li `gonderildi` siparişte «ETTN ekle» görünür; Vazgeç → istek yok; onay → gövdede ANAHTAR; yayın gelmeden yerelde YANITTAKİ `ettn`, düğme kaybolur, rozet, ileti', async () => {
+    const c = await ayrintiyaAc(kesilmis({ ettn: SIFIR }));
+    const kutu = await waitFor(() => { const k = ettnKutusu(c); if (!k) throw new Error('«ETTN ekle» yok'); return k; });
+    expect(c.querySelector('[data-fatura-ettn]')).toBeNull();   // sıfır GUID geçerli ETTN değil: rozet yok
+    const girdi = kutu.querySelector<HTMLInputElement>('input[aria-label="Mikro ETTN"]');
+    const dugme = kutu.querySelector<HTMLButtonElement>('[data-fatura-ettn-ekle-dugmesi]');
+    if (!girdi || !dugme) throw new Error('girdi / düğme yok');
+    await act(async () => { fireEvent.change(girdi, { target: { value: `{${ANAHTAR.toLocaleUpperCase('tr-TR')}}` } }); });
+    durum.onayKarari = false;
+    await act(async () => { fireEvent.click(dugme); });
+    await waitFor(() => expect(durum.onaylar).toHaveLength(1));
+    expect(sonucSayisi()).toBe(0);
+    expect(durum.onaylar[0]).toMatchObject({ title: 'ETTN eklensin mi?', variant: 'warning', confirmLabel: 'ETTN ekle' });
+    expect(durum.onaylar[0].message).toContain('Şirin Yapı Malzemeleri');
+    expect(durum.onaylar[0].message).toContain('No: CTP2026000000321');
+    expect(durum.onaylar[0].message).toContain(`ETTN: ${ANAHTAR}`);
+    durum.onayKarari = true;
+    durum.yanitlar[SONUC] = [[200, { success: true, karar: 'ettnEkle', ettn: ANAHTAR, mikroFaturaGonderimi: { ...isaretGovdesi('gonderildi'), numara: 'CTP2026000000321' } }]];
+    await act(async () => { fireEvent.click(dugme); });
+    await waitFor(() => expect(sonucSayisi()).toBe(1));
+    expect(sonucGovdeleri()).toEqual([{ firebaseId: 'sip-fatura-1', karar: 'ettnEkle', ettn: ANAHTAR }]);
+    await waitFor(() => expect(veriDeposu.getState().orders[0].ettn).toBe(ANAHTAR));
+    await waitFor(() => expect(ettnKutusu(c)).toBeNull());
+    expect(c.querySelector('[data-fatura-ettn="sip-fatura-1"]')?.textContent).toBe(`ETTN: ${ANAHTAR}`);
+    expect(veriDeposu.getState().orders[0]).toMatchObject({ mikroFaturaNo: 'CTP2026000000321', mikroFaturaGonderimi: { durum: 'gonderildi' } });
+    await waitFor(() => expect(document.body.textContent).toContain('ETTN eklendi: fatura bu siparişe bağlandı.'));
+  });
+
+  it('yerel yama YANITTAN: yanıt `ettn` taşımazsa (eski sunucu / vekil) yerelde ETTN YAZILMAZ — girdi uydurulmaz, düğme kalır', async () => {
+    const c = await ayrintiyaAc(kesilmis());
+    const kutu = await waitFor(() => { const k = ettnKutusu(c); if (!k) throw new Error('«ETTN ekle» yok'); return k; });
+    const girdi = kutu.querySelector<HTMLInputElement>('input[aria-label="Mikro ETTN"]');
+    const dugme = kutu.querySelector<HTMLButtonElement>('[data-fatura-ettn-ekle-dugmesi]');
+    if (!girdi || !dugme) throw new Error('girdi / düğme yok');
+    await act(async () => { fireEvent.change(girdi, { target: { value: ANAHTAR } }); });
+    durum.yanitlar[SONUC] = [[200, { success: true, karar: 'ettnEkle', mikroFaturaGonderimi: isaretGovdesi('gonderildi') }]];
+    await act(async () => { fireEvent.click(dugme); });
+    await waitFor(() => expect(sonucSayisi()).toBe(1));
+    await waitFor(() => expect(document.body.textContent).toContain('ETTN eklendi'));
+    expect(veriDeposu.getState().orders[0]).not.toHaveProperty('ettn');
+    expect(ettnKutusu(c)).not.toBeNull();
+  });
+
+  it('409 FATURA_ETTN_BASKA_SIPARISTE → ileti (öteki siparişle), yerel ETTN değişmez; sonra 200 + `uyari` → bilgi iletisi', async () => {
+    const c = await ayrintiyaAc(kesilmis());
+    const kutu = await waitFor(() => { const k = ettnKutusu(c); if (!k) throw new Error('«ETTN ekle» yok'); return k; });
+    const girdi = kutu.querySelector<HTMLInputElement>('input[aria-label="Mikro ETTN"]');
+    const dugme = kutu.querySelector<HTMLButtonElement>('[data-fatura-ettn-ekle-dugmesi]');
+    if (!girdi || !dugme) throw new Error('girdi / düğme yok');
+    await act(async () => { fireEvent.change(girdi, { target: { value: ANAHTAR } }); });
+    durum.yanitlar[SONUC] = [
+      [409, { success: false, kod: 'FATURA_ETTN_BASKA_SIPARISTE', error: 'Bu ETTN başka bir siparişte kayıtlı: S-12', mikroFaturaGonderimi: isaretGovdesi('gonderildi') }],
+      [200, { success: true, karar: 'ettnEkle', ettn: ANAHTAR, uyari: 'ETTN Mikro fatura aynasında henüz yok ya da carisi doğrulanamadı (ayna gece güncellenir)', mikroFaturaGonderimi: isaretGovdesi('gonderildi') }],
+    ];
+    await act(async () => { fireEvent.click(dugme); });
+    await waitFor(() => expect(document.body.textContent).toContain('ETTN yazılmadı. Bu ETTN başka bir siparişte kayıtlı: S-12. Mikro\'daki ETTN\'yi denetleyin.'));
+    expect(veriDeposu.getState().orders[0]).not.toHaveProperty('ettn');
+    expect(ettnKutusu(c)).not.toBeNull();
+    await act(async () => { fireEvent.click(dugme); });
+    await waitFor(() => expect(document.body.textContent).toContain('ETTN kaydedildi ama Mikro fatura aynasında henüz yok ya da carisi doğrulanamadı'));
+    await waitFor(() => expect(ettnKutusu(c)).toBeNull());
+  });
+
+  it('«Mikro\'da var» + ETTN (belirsiz): onay metninde « · ETTN: <anahtar>», gövdede anahtar, yerelde YANITTAKİ `ettn` + fatura alanları; «ETTN ekle» çizilmez', async () => {
+    const c = await ayrintiyaAc(siparis({ mikroFaturaGonderimi: isaretGovdesi('belirsiz') as Order['mikroFaturaGonderimi'] }));
+    const uyari = await waitFor(() => { const u = c.querySelector<HTMLElement>('[data-fatura-sonucu="sip-fatura-1"]'); if (!u) throw new Error('uyarı yok'); return u; });
+    const numara = uyari.querySelector<HTMLInputElement>('input[aria-label="Mikro fatura numarası (isteğe bağlı)"]');
+    const ettn = uyari.querySelector<HTMLInputElement>('input[aria-label="Mikro ETTN (isteğe bağlı)"]');
+    const varDugmesi = [...uyari.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Mikro\'da var');
+    if (!numara || !ettn || !varDugmesi) throw new Error('seçenek yok');
+    await act(async () => {
+      fireEvent.change(numara, { target: { value: 'CTP2026000000444' } });
+      fireEvent.change(ettn, { target: { value: ` {${ANAHTAR.toLocaleUpperCase('tr-TR')}}` } });
+    });
+    durum.yanitlar[SONUC] = [[200, { success: true, karar: 'mikrodaVar', numara: 'CTP2026000000444', ettn: ANAHTAR, mikroFaturaGonderimi: { ...isaretGovdesi('gonderildi'), numara: 'CTP2026000000444' } }]];
+    await act(async () => { fireEvent.click(varDugmesi); });
+    await waitFor(() => expect(sonucSayisi()).toBe(1));
+    expect(durum.onaylar[0].message).toContain(`(No: CTP2026000000444 · ETTN: ${ANAHTAR})`);
+    expect(sonucGovdeleri()).toEqual([{ firebaseId: 'sip-fatura-1', karar: 'mikrodaVar', numara: 'CTP2026000000444', ettn: ANAHTAR }]);
+    await waitFor(() => expect(veriDeposu.getState().orders[0]).toMatchObject({ hasInvoice: true, mikroSynced: true, mikroFaturaNo: 'CTP2026000000444', ettn: ANAHTAR, mikroFaturaGonderimi: { durum: 'gonderildi' } }));
+    await waitFor(() => expect(c.querySelector('[data-fatura-ettn="sip-fatura-1"]')?.textContent).toBe(`ETTN: ${ANAHTAR}`));
+    expect(ettnKutusu(c)).toBeNull();
+    expect(c.querySelector('[data-fatura-sonucu]')).toBeNull();
+  });
+
+  it('İngilizce onay metni ETTN girilmeyince « · ETTN not entered»', async () => {
+    const c = await ayrintiyaAc(siparis({ mikroFaturaGonderimi: isaretGovdesi('belirsiz') as Order['mikroFaturaGonderimi'] }));
+    const dil = [...c.querySelectorAll<HTMLButtonElement>('button')].find(x => x.textContent?.trim() === 'EN');
+    if (!dil) throw new Error('dil düğmesi yok');
+    await act(async () => { fireEvent.click(dil); });
+    const uyari = await waitFor(() => { const u = c.querySelector<HTMLElement>('[data-fatura-sonucu="sip-fatura-1"]'); if (!u) throw new Error('uyarı yok'); return u; });
+    const varDugmesi = [...uyari.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'It is in Mikro');
+    if (!varDugmesi) throw new Error('seçenek yok');
+    durum.onayKarari = false;
+    await act(async () => { fireEvent.click(varDugmesi); });
+    await waitFor(() => expect(durum.onaylar).toHaveLength(1));
+    expect(durum.onaylar[0].message).toContain('(no number entered · ETTN not entered)');
   });
 });

@@ -65,7 +65,7 @@ const ozellikler = (ek: Partial<Props> = {}): Props => ({
   kpiCurrency: 'TRY', setKpiCurrency: bos, activeTab: 'orders', darkMode: false,
   warehouses: [], vehicles: [], aracKonumlari: [], konumYazabilir: false, irsaliyeKesebilir: false, kullaniciUid: 'uid-7',
   locationStocks: [], shipments: [], setSiparisTohumu: bos,
-  handleMikroFatura: sozBos, handleMikroFaturaSonuc: sozBos, mikroFaturaGonderiliyor: {}, mikroFaturaKesebilir: true, mikroFaturaSonucuCozebilir: true,
+  handleMikroFatura: sozBos, handleMikroFaturaSonuc: sozBos, handleMikroFaturaEttnEkle: sozBos, mikroFaturaGonderiliyor: {}, mikroFaturaKesebilir: true, mikroFaturaSonucuCozebilir: true,
     handleEIrsaliye: sozBos, eIrsaliyeGonderiliyor: {}, handleIyzicoPaymentLink: sozBos,
   setRouteStops: bos, p554Bins: [], handleBuildRoute: bos, handleClearRoute: bos, handleToggleOrderPaid: bos,
   trackView: bos, openConfirm: bos, toast: bos, setActiveTab: bos, setSelectedLead: bos, setIsAddingOrder: bos,

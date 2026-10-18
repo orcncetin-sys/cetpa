@@ -55,10 +55,24 @@ export const FaturaKaydetSchema = z.object({
 
 // Belirsiz e-Fatura kaydını çözme (şartname «e-Fatura çift kesim» E3 / D6). `numara` yalnız `mikrodaVar`'da kullanılır; boş /
 // yalnız boşluk «verilmedi» sayılır (uydurulmaz), kırpılarak saklanır.
+// `ettnEkle` + `ettn` (2026-10-19, şartname «fatura gövde + gece MF» § 9.B B2): boş / yalnız boşluk ETTN «verilmedi» sayılır.
+// Biçim sınaması ŞEMADA DEĞİL rotada (`cetpaEttnAnahtari` → 400 `FATURA_ETTN_GECERSIZ`, Türkçe ileti); şema yalnız kararla
+// alanın birlikteliğini sınar. İletiler `issues[0].message` ile istemciye gider.
+// Her alanın iletisi Türkçe (zod'un İngilizce varsayılanı istemciye gitmesin — rota `issues[0].message`'ı döner).
 export const FaturaSonucSchema = z.object({
-  firebaseId: z.string().refine(v => v.trim() !== '', { message: 'Sipariş kimliği (firebaseId) zorunludur.' }),
-  karar: z.enum(['mikrodaVar', 'mikrodaYok']),
-  numara: z.string().max(64).optional().transform(v => (v !== undefined && v.trim() !== '' ? v.trim() : undefined)),
+  firebaseId: z.string({ error: 'Sipariş kimliği (firebaseId) zorunludur.' }).refine(v => v.trim() !== '', { message: 'Sipariş kimliği (firebaseId) zorunludur.' }),
+  karar: z.enum(['mikrodaVar', 'mikrodaYok', 'ettnEkle'], { error: 'Geçersiz karar: mikrodaVar, mikrodaYok ya da ettnEkle olmalı.' }),
+  numara: z.string({ error: 'Fatura numarası metin olmalı.' }).max(64, { error: 'Fatura numarası en çok 64 karakter olabilir.' }).optional()
+    .transform(v => (v !== undefined && v.trim() !== '' ? v.trim() : undefined)),
+  ettn: z.string({ error: 'ETTN metin olmalı.' }).max(64, { error: 'ETTN en çok 64 karakter olabilir.' }).optional()
+    .transform(v => (v !== undefined && v.trim() !== '' ? v.trim() : undefined)),
+}, { error: 'Geçersiz istek gövdesi.' }).superRefine((v, ctx) => {
+  if (v.karar === 'ettnEkle' && v.ettn === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['ettn'], message: 'ETTN eklemek için geçerli bir ETTN girin.' });
+  }
+  if (v.karar === 'mikrodaYok' && v.ettn !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['ettn'], message: '«Mikro\'da yok» kararında ETTN verilmez.' });
+  }
 });
 
 // İrsaliye kaydetme şeması

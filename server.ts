@@ -1310,7 +1310,11 @@ async function writeSyncLog(
   duration:   number | null,
   actor?:     { uid: string; email: string },
   // Tanı ayrıntısı (ör. Mikro yanıtının ANAHTAR yolları — değer değil; mikro/belgeNo.yanitAnahtarYollari).
-  ayrinti?:   Record<string, unknown>
+  ayrinti?:   Record<string, unknown>,
+  // İç denetim satırının kiracısı (şartname «fatura gövde + gece MF» § 3, 2026-10-18). Sistem aktörünün (`uid:'system'`)
+  // kullanıcı belgesi yok: `getUserCompanyId` uid'ye düşer, satır `companyId:'system'` olur ve kiracının Denetim Kaydı'nda
+  // görünmez. Verilmezse BUGÜNKÜ davranış — bugün yalnız gece faturadan-sipariş adımı verir (uç ve öteki gece adımları değişmedi).
+  secenek?:   { denetimKiracisi?: string }
 ): Promise<void> {
   if (!adminDb) return;
   try {
@@ -1332,7 +1336,7 @@ async function writeSyncLog(
   if (actor) {
     await writeAuditLog(actor, operation, success
       ? `${entityType}/${entityId}${mikroRef ? ` → ${mikroRef}` : ''} (${duration}ms)`
-      : `HATA: ${error} — ${entityType}/${entityId}`);
+      : `HATA: ${error} — ${entityType}/${entityId}`, undefined, secenek?.denetimKiracisi);
   }
 }
 
@@ -1379,7 +1383,9 @@ async function writeAuditLog(
   actor:   { uid: string; email: string },
   action:  string,
   details: string,
-  diff?:   FieldDiff
+  diff?:   FieldDiff,
+  // Satırın kiracısı açıkça biliniyorsa (sistem aktörü — `writeSyncLog` `secenek.denetimKiracisi`). Verilmezse bugünkü kural.
+  kiraci?: string
 ): Promise<void> {
   if (!adminDb) return;
   try {
@@ -1391,7 +1397,7 @@ async function writeAuditLog(
       // Kullanıcının uid'i DEĞİL, ait olduğu firmanın id'si. Tek-kullanıcılı
       // hesapta ikisi aynıdır; bir firmaya bağlı çalışanda FARKLIDIR ve uid
       // yazmak satırı firmanın denetim görünümünden düşürür (2026-07-30).
-      companyId: await getUserCompanyId(actor.uid),
+      companyId: kiraci || await getUserCompanyId(actor.uid),
       userName:  actor.email || 'Sunucu',
       userEmail: actor.email,
       source:    'server',

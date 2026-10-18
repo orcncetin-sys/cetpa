@@ -8,6 +8,10 @@
  *   (b) kayıt duruyor, iptal e-belge tarafında (GİB/e-Arşiv iptali) → durum sorgusundan okunur.
  * Bu modül SAF: Cetpa'daki fatura kopyalarını Mikro'nun güncel GUID kümesiyle karşılaştırır. Yazım yok.
  */
+// GUID karşılaştırma anahtarı ve biçim sınaması TEK kaynakta: lib/ettn (2026-10-19, şartname «fatura gövde + gece MF» § 9.B B4 —
+// istemci de aynı ölçütü okur). Bu dosya içeride kullandığı için içe aktarır; mevcut içe aktaranlar için yeniden dışa aktarır.
+import { guidAnahtari, guidBicimli } from '../../lib/ettn.js';
+export { guidAnahtari, guidBicimli };
 
 export interface CetpaFatura {
   id: string;
@@ -23,9 +27,6 @@ export interface CetpaFatura {
   gibBelgeKodu?: string | null;
 }
 
-/** GUID karşılaştırma anahtarı: süslü parantez ve harf büyüklüğü farkı eşleşmeyi bozmasın. */
-export const guidAnahtari = (v: unknown): string => String(v ?? '').trim().replace(/^\{|\}$/g, '').toLowerCase();
-export const guidBicimli = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$/.test(v);
 /** Mikro bit kolonu boolean, sayı ya da metin dönebiliyor. */
 export const iptalMi = (v: unknown): boolean => v === true || v === 'true' || (v !== false && v !== null && v !== '' && Number(v) > 0);
 

@@ -25,10 +25,23 @@ import {
   type FaturaGonderimDurumu, type FaturaKesilemezNedeni, type FaturaYanitKodu, type MikroFaturaGonderimi,
 } from '../../lib/faturaGonderimi.js';
 import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi.js';
+import { cetpaEttnAnahtari, guidAnahtari } from '../../lib/ettn.js';
+import { faturaEttn } from '../../lib/gibDurum.js';
+import { faturaYonu } from './eslemeFatura.js';
+import { GUN, cariAnahtari, talepSiniri } from './faturaBekletme.js';
+
+/** Havuzdan alınan TEK bağlantı (`pg.PoolClient` alt kümesi): işlem (`BEGIN` … `COMMIT`) aynı bağlantıda koşmalı. `release(hata)`
+ *  doğru bir değerle çağrılırsa havuz bağlantıyı atar (geri alma da düştüyse bağlantı işlem ortasında kalmış olabilir). */
+export interface FaturaIstemcisi {
+  query: (sql: string, p?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
+  release: (hata?: Error | boolean) => void;
+}
 import { MF_KAYNAGI } from '../../lib/mfKaynagi.js';
 
 export interface FaturaHavuzu {
   query: (sql: string, p?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
+  /** ETTN yazımları (danışma kilidi + UPDATE tek işlemde) için bağlantı (§ 9.B B3, delta 2026-10-19). */
+  connect: () => Promise<FaturaIstemcisi>;
 }
 
 /** Yazımdan sonra RETURNING verisiyle yayın (rota `broadcastDocChange('orders', 'set', id, data)` verir). */
@@ -119,11 +132,63 @@ export const FATURA_GERI_AL_SQL = `UPDATE docs SET data = (data - '${A}') || jso
 
 /** D6 — çözülebilir işaret: `belirsiz` ya da bayat `gonderiliyor`. Koşul WHERE'de: iki eşzamanlı `sonuc`'tan biri uygulanır. */
 const COZULEBILIR = `jsonb_typeof(${ISARET}) = 'object' AND (${ISARET}->>'durum' = 'belirsiz' OR ${bayatSql('$3')})`;
+/** `mikrodaVar` UPDATE'i; `ek` yalnız ETTN'li biçimde (aşağıda) WHERE'e eklenir — ETTN'siz metin birebir eskisi. */
+const sonucVarSql = (ek = ''): string => `UPDATE docs SET data = (data || $4::jsonb) || jsonb_build_object('${A}', (${ISARET}) || $5::jsonb, 'companyId', $2::text), updated_at = now()
+ WHERE coll = 'orders' AND id = $1 AND ${KIRACI} AND ${COZULEBILIR}${ek}
+ RETURNING data`;
 /** `mikrodaVar` → `gonderildi` (numara verilirse işarete ve `mikroFaturaNo`'ya); üst düzeyde kaydet başarısıyla AYNI fatura
  *  alanları (`sonucVarYamasi`). $3 eşik, $4 üst düzey yama, $5 işaret yaması. */
-export const FATURA_SONUC_VAR_SQL = `UPDATE docs SET data = (data || $4::jsonb) || jsonb_build_object('${A}', (${ISARET}) || $5::jsonb, 'companyId', $2::text), updated_at = now()
- WHERE coll = 'orders' AND id = $1 AND ${KIRACI} AND ${COZULEBILIR}
+export const FATURA_SONUC_VAR_SQL = sonucVarSql();
+/**
+ * § 9.B B3 — «aynı ETTN başka bir Cetpa siparişinde» koşulu (`d2` takma adıyla; sipariş KENDİSİ hariç). ETTN anahtarı `guidAnahtari`
+ * ile aynı biçim: baştaki / sondaki boşluk ve TEK süslü parantez soyulur, küçük harfe çevrilir — kaydet yolu Mikro'nun döndürdüğü
+ * ham değeri (parantezli / büyük harfli olabilir) yazar, `sonuc` anahtarı yazar; ikisi de tutmalı. Geçerlilik ÖLÇÜTÜ buraya
+ * kopyalanmaz (rota `cetpaEttnAnahtari` ile sınar). $1 sipariş, $2 kiracı (aynı kiracı ya da etiketsiz — `KIRACI` kalıbı),
+ * `anahtar` = anahtarın parametre yeri.
+ */
+const baskaSiparisKosulu = (anahtar: string): string =>
+  `d2.coll = 'orders' AND d2.id <> $1 AND (d2.data->>'companyId' = $2 OR coalesce(d2.data->>'companyId', '') = '')
+   AND coalesce(d2.data->>'source', '') <> '${MF_KAYNAGI}'
+   AND lower(regexp_replace(coalesce(d2.data->>'ettn', ''), '^\\s*\\{?|\\}?\\s*$', '', 'g')) = ${anahtar}`;
+/**
+ * Yazım anında aynı ETTN'yi taşıyan başka sipariş YOK (UPDATE'in WHERE'inde). TEK BAŞINA YARIŞI KAPATMAZ: READ COMMITTED'da iki
+ * eşzamanlı UPDATE farklı satırlara yazar, her biri deyim başındaki görüntüde ötekinin İŞLENMEMİŞ yazımını görmez — ikisi de
+ * `NOT EXISTS`'i geçer (inceleme delta, 2026-10-19). Yarışı `FATURA_ETTN_KILIT_SQL` kapatır: iki yazım aynı (kiracı, anahtar)
+ * danışma kilidinde sıraya girer, ikincinin UPDATE'i birincinin İŞLENMİŞ yazımını görür. `NOT EXISTS` sıralı araya girmeyi
+ * (ön denetimden sonra başka siparişe yazıldı) ve kilidin dışından gelen yazımı yakalar.
+ */
+const baskaSiparisYok = (anahtar: string): string => `NOT EXISTS (SELECT 1 FROM docs d2 WHERE ${baskaSiparisKosulu(anahtar)})`;
+/** Ön denetim ve 0 satır sonrası ayrım: aynı ETTN'yi taşıyan başka siparişin numarası. $1 sipariş, $2 kiracı, $3 anahtar. */
+export const FATURA_ETTN_BASKA_SIPARIS_SQL = `SELECT d2.id, d2.data->>'orderNumber' AS no FROM docs d2 WHERE ${baskaSiparisKosulu('$3')} ORDER BY d2.id LIMIT 1`;
+
+/** `mikrodaVar` + ETTN (§ 9.B B2 / B3): `FATURA_SONUC_VAR_SQL` + yazım anında «başka sipariş yok». $6 ETTN anahtarı. Yalnız
+ *  `FATURA_ETTN_KILIT_SQL` ile aynı işlemde koşar (`ettnKilidiyleYaz`). */
+export const FATURA_SONUC_VAR_ETTN_SQL = sonucVarSql(`\n   AND ${baskaSiparisYok('$6')}`);
+
+/**
+ * § 9.B B3 (delta 2026-10-19) — ETTN yazan iki yolun (`mikrodaVar` + ETTN, «ETTN ekle») ORTAK danışma kilidi: işlem sonuna dek
+ * tutulur (`_xact_`; COMMIT / ROLLBACK bırakır). Anahtar (kiracı, ETTN anahtarı): aynı ETTN'yi iki siparişe yazmaya çalışan iki
+ * istek sıraya girer; farklı ETTN'ler birbirini beklemez. AYRI DEYİM olmalı: READ COMMITTED'da görüntü deyim BAŞINDA alınır —
+ * kilit UPDATE'in CTE'sinde alınsaydı UPDATE'in `NOT EXISTS`'i kilitten ÖNCEKİ görüntüyü okur, beklediği yazımı yine görmezdi.
+ * $1 kiracı, $2 ETTN anahtarı.
+ */
+export const FATURA_ETTN_KILIT_SQL = `SELECT pg_advisory_xact_lock(hashtext($1::text || ':ettn:' || $2::text))`;
+
+/**
+ * § 9.B B2 — «ETTN ekle» KARŞILAŞTIR-YAZ: yalnız işaret `gonderildi`, Mikro faturasından türemiş kayıt DEĞİL, ham `ettn` OKUNAN
+ * değerle AYNI (araya giren yazım → 0 satır → `FATURA_ETTN_DEGISTI`) ve aynı ETTN başka siparişte yokken yazar. «Geçerli ETTN yok»
+ * ölçütü SQL'e kopyalanmaz: JS `cetpaEttnAnahtari` okunan değerde sınar, karşılaştırma o değerin değişmediğini garanti eder.
+ * Yalnız `FATURA_ETTN_KILIT_SQL` ile aynı işlemde koşar (`ettnKilidiyleYaz`; `NOT EXISTS` eşzamanlı yazımı tek başına durdurmaz).
+ * $3 yazılacak anahtar (küçük harf, parantezsiz), $4 okunan ham değer (`data->>'ettn'`; yoksa `null`).
+ */
+export const FATURA_ETTN_EKLE_SQL = `UPDATE docs SET data = data || jsonb_build_object('ettn', $3::text, 'companyId', $2::text), updated_at = now()
+ WHERE coll = 'orders' AND id = $1 AND ${KIRACI}
+   AND coalesce(data->>'source', '') <> '${MF_KAYNAGI}'
+   AND ${ISARET}->>'durum' = 'gonderildi'
+   AND (data->>'ettn') IS NOT DISTINCT FROM $4::text
+   AND ${baskaSiparisYok('$3')}
  RETURNING data`;
+
 /** `mikrodaYok` → anahtar SİLİNİR (yeniden gönderilebilir). $3 eşik. */
 export const FATURA_SONUC_YOK_SQL = `UPDATE docs SET data = (data - '${A}') || jsonb_build_object('companyId', $2::text), updated_at = now()
  WHERE coll = 'orders' AND id = $1 AND ${KIRACI} AND ${COZULEBILIR}
@@ -223,6 +288,34 @@ async function yaz(b: FaturaBaglami, sql: string, p: unknown[]): Promise<Record<
   return data;
 }
 
+/**
+ * ETTN yazan UPDATE (`FATURA_SONUC_VAR_ETTN_SQL` / `FATURA_ETTN_EKLE_SQL`) TEK bağlantıda, tek işlemde: `BEGIN` → AYRI deyimle
+ * danışma kilidi (`FATURA_ETTN_KILIT_SQL`) → UPDATE → `COMMIT`; hata olursa `ROLLBACK` (o da düşerse bağlantı havuzdan atılır).
+ * Yayın COMMIT'ten SONRA: işlenmemiş satır yayınlanmaz. `ettn` = yazılacak anahtar (kilidin anahtarı).
+ */
+async function ettnKilidiyleYaz(b: FaturaBaglami, ettn: string, sql: string, p: unknown[]): Promise<Record<string, unknown> | null> {
+  const istemci = await b.havuz.connect();
+  let bozuk: Error | undefined;
+  let data: unknown;
+  try {
+    await istemci.query('BEGIN');
+    await istemci.query(FATURA_ETTN_KILIT_SQL, [b.companyId, ettn]);
+    const { rows } = await istemci.query(sql, p);
+    data = rows[0]?.data;
+    await istemci.query('COMMIT');
+  } catch (err) {
+    try { await istemci.query('ROLLBACK'); } catch (geriAlmaHatasi) {
+      bozuk = geriAlmaHatasi instanceof Error ? geriAlmaHatasi : new Error(String(geriAlmaHatasi));
+    }
+    throw err;
+  } finally {
+    istemci.release(bozuk);
+  }
+  if (!nesneMi(data)) return null;
+  b.yayinla(b.id, data);
+  return data;
+}
+
 export type TalepSonucu = { tamam: true; data: Record<string, unknown> } | { tamam: false; karar: FaturaRetKarari };
 
 /** D1 talebi. Tutmazsa sipariş yeniden okunur ve D1 öncelik sırasıyla ret kararı döner (404 dâhil). */
@@ -254,21 +347,185 @@ export async function faturaGuncelIsareti(b: FaturaBaglami): Promise<unknown> {
 }
 
 /** `mikrodaVar` üst düzey yaması (İ1-4): kaydet başarısının fatura alanları — `hasInvoice`, `mikroSynced`, numara verildiyse
- *  `mikroFaturaNo`. Kesim zamanı (`mikroFaturaDate`) ve ETTN BİLİNMEDİĞİ için yazılmaz (uydurma yok). */
-export const sonucVarYamasi = (numara?: string): Record<string, unknown> =>
-  ({ hasInvoice: true, mikroSynced: true, ...(numara ? { mikroFaturaNo: numara } : {}) });
+ *  `mikroFaturaNo`, ETTN verildiyse `ettn` (§ 9.B B2: rotanın `cetpaEttnAnahtari` ile sınadığı ANAHTAR — ham girdi değil). Kesim
+ *  zamanı (`mikroFaturaDate`) BİLİNMEDİĞİ için yazılmaz (uydurma yok). */
+export const sonucVarYamasi = (numara?: string, ettn?: string): Record<string, unknown> =>
+  ({ hasInvoice: true, mikroSynced: true, ...(numara ? { mikroFaturaNo: numara } : {}), ...(ettn ? { ettn } : {}) });
 
-/** D6 `sonuc`. `numara` yalnız `mikrodaVar`'da kullanılır. Tutmazsa ret kararı (404 dâhil). */
-export async function faturaSonucunuYaz(b: FaturaBaglami, karar: 'mikrodaVar' | 'mikrodaYok', numara?: string): Promise<TalepSonucu> {
-  const data = karar === 'mikrodaVar'
-    ? await yaz(b, FATURA_SONUC_VAR_SQL, [
-        b.id, b.companyId, FATURA_GONDERIM_BAYATLIK_MS,
-        JSON.stringify(sonucVarYamasi(numara)),
-        JSON.stringify({ durum: 'gonderildi', ...(numara ? { numara } : {}) }),
-      ])
-    : await yaz(b, FATURA_SONUC_YOK_SQL, [b.id, b.companyId, FATURA_GONDERIM_BAYATLIK_MS]);
-  if (data) return { tamam: true, data };
+// ── § 9.B B3 — ETTN tutarlılığı (yazma anı; saf) ───────────────────────────────────────────────────────────────────────────
+/** Fatura aynasında ETTN henüz yok ya da carisi doğrulanamadı: yazım KABUL edilir, yanıta ve syncLog ayrıntısına düşer. */
+export const ETTN_AYNA_UYARISI = 'ETTN Mikro fatura aynasında henüz yok ya da carisi doğrulanamadı (ayna gece güncellenir)';
+
+export interface EttnTutarlilikGirdisi {
+  /** `cetpaEttnAnahtari` anahtarı. */
+  ettn: string;
+  /** Siparişin işaretindeki cari (`faturaIsareti(o)?.cariKod`); yoksa doğrulanamaz. */
+  cariKod?: string;
+  /** Kiracının `mikroFaturalar` aynası (TÜMÜ — işlev ETTN'yi `faturaEttn` ile süzer; kolon adı tahmini yok). */
+  aynaSatirlari: readonly Readonly<Record<string, unknown>>[];
+  /** Aynı anahtarı taşıyan BAŞKA Cetpa siparişinin adı (`FATURA_ETTN_BASKA_SIPARIS_SQL`); yoksa `null` / verilmez. */
+  baskaSiparis?: string | null;
+  /** İşaretin talep sınırı (`YYYY-MM-DD`, `talepSiniri(isaret)` — § 9.A A2, bekletme kuralıyla AYNI işlev); yoksa / biçim dışıysa
+   *  tarih denetimi yapılmaz. */
+  sinir?: string | null;
+}
+export interface EttnTutarlilikKarari {
+  ret?: { kod: 'FATURA_ETTN_BASKA_SIPARISTE' | 'FATURA_ETTN_BASKA_CARI' | 'FATURA_ETTN_ONCEKI_FATURA'; error: string };
+  uyari?: string;
+}
+
+/**
+ * «Mikro'da var» + ETTN ve «ETTN ekle»nin ORTAK kararı. Ret YALNIZ kesin çelişkide (§ 9.A A7 tutumu):
+ *   • aynı ETTN başka bir Cetpa siparişinde → `FATURA_ETTN_BASKA_SIPARISTE` (kaydet yolu bir faturayı tek siparişe bağlar:
+ *     her `FaturaKaydetV2` çağrısı tek `firebaseId` için yeni bir belge keser — ölçüm 2026-10-19). Bu karar yazımdan ÖNCEKİ
+ *     okumadır; ön denetim ile yazım arasındaki pencereyi yazımın danışma kilidi (`FATURA_ETTN_KILIT_SQL`) + `NOT EXISTS`'i
+ *     kapatır — `NOT EXISTS` TEK BAŞINA eşzamanlı iki UPDATE'i durdurmaz (READ COMMITTED);
+ *   • aynadaki satırların HEPSİ alış (`faturaYonu`) → `FATURA_ETTN_BASKA_CARI` «alış faturası»;
+ *   • satış satırı var, işarette `cariKod` var, hiçbir satış satırının `cha_kod`'u tutmuyor (iki taraf `cariAnahtari`) ve yönü
+ *     okunamayan satır yok → `FATURA_ETTN_BASKA_CARI` «başka cari»;
+ *   • cari TUTAN satış satırlarının HEPSİNİN günü (`cha_tarihi` ilk 10 karakteri, `YYYY-MM-DD`) talep sınırından KESİN önce →
+ *     `FATURA_ETTN_ONCEKI_FATURA`. Gece bekletme kuralı (`bekletmeKarari`: `faturaGunu >= sinir`) sınırdan önceki faturayı «bu
+ *     siparişin olamaz» sayar (o fatura zaten MF siparişine dönüşmüştür); bağ kurulurken aynı ölçüt sınanmazsa eski faturanın
+ *     ETTN'si kabul edilir, bekletme kalkar ve siparişin gerçek faturası gece AYRICA MF olarak türer (aynı satış iki kez; inceleme
+ *     2026-10-19). Sınır yok ya da biçim dışı, ya da bir satırın günü okunamıyorsa ret YOK (kesin değil).
+ * Satır yok, yönü okunamayan satır var ya da `cariKod` yok → KABUL + `uyari` (ayna 90 günlük pencere, gece güncellenir).
+ */
+export function ettnTutarlilikKarari(g: EttnTutarlilikGirdisi): EttnTutarlilikKarari {
+  if (g.baskaSiparis) {
+    return { ret: { kod: 'FATURA_ETTN_BASKA_SIPARISTE', error: `Bu ETTN başka bir siparişte kayıtlı: ${g.baskaSiparis}` } };
+  }
+  const satirlar = g.aynaSatirlari.filter(f => guidAnahtari(faturaEttn(f)) === g.ettn);
+  if (satirlar.length === 0) return { uyari: ETTN_AYNA_UYARISI };
+  const yonler = satirlar.map(f => faturaYonu(f as Record<string, unknown>));
+  if (yonler.every(y => y === 'alis')) return { ret: { kod: 'FATURA_ETTN_BASKA_CARI', error: 'Bu ETTN bir alış faturasına ait' } };
+  const satislar = satirlar.filter((_, i) => yonler[i] === 'satis');
+  const cari = cariAnahtari(g.cariKod);
+  if (!cari || satislar.length === 0) return { uyari: ETTN_AYNA_UYARISI };
+  const tutanlar = satislar.filter(f => cariAnahtari(f.cha_kod) === cari);
+  if (tutanlar.length > 0) {
+    const sinir = typeof g.sinir === 'string' && GUN.test(g.sinir) ? g.sinir : null;
+    const gunler = tutanlar.map(f => String(f.cha_tarihi).slice(0, 10));
+    if (sinir !== null && gunler.every(d => GUN.test(d) && d < sinir)) {
+      const gun = gunler.reduce((a, d) => (d > a ? d : a));
+      return { ret: { kod: 'FATURA_ETTN_ONCEKI_FATURA', error: `Bu ETTN ${gun} tarihli, talepten (${sinir}) önceki bir faturanın; bu siparişin faturası olamaz` } };
+    }
+    return {};
+  }
+  if (yonler.some(y => y === null)) return { uyari: ETTN_AYNA_UYARISI };
+  const faturaCarisi = String(satislar[0].cha_kod ?? '').trim();
+  return { ret: { kod: 'FATURA_ETTN_BASKA_CARI', error: `Bu ETTN ${faturaCarisi} carisinin faturası; sipariş carisi ${g.cariKod ?? ''}` } };
+}
+
+/** `sonuc` yazımının sonucu: başarıda yazılan satır (+ varsa ayna uyarısı ve eski ham ETTN), aksi ret kararı (404 dâhil). */
+export type SonucYazimi =
+  | { tamam: true; data: Record<string, unknown>; uyari?: string; ettnOnceki?: string }
+  | { tamam: false; karar: FaturaRetKarari };
+
+/** ETTN'li `sonuc`un girdisi: anahtar (rota `cetpaEttnAnahtari` ile sınadı) ve kiracının fatura aynasını okuyan işlev. */
+export interface EttnGirdisi {
+  ettn: string;
+  aynaOku: () => Promise<readonly Readonly<Record<string, unknown>>[]>;
+}
+
+async function baskaSiparisAdi(b: FaturaBaglami, ettn: string): Promise<string | null> {
+  const { rows } = await b.havuz.query(FATURA_ETTN_BASKA_SIPARIS_SQL, [b.id, b.companyId, ettn]);
+  const r = rows[0];
+  if (!r) return null;
+  return typeof r.no === 'string' && r.no.trim() !== '' ? r.no : String(r.id);
+}
+
+/** Ayna + başka sipariş kararı; ret ise güncel işaretli 409 kararı. */
+async function ettnDenetimi(
+  b: FaturaBaglami, o: FaturaOkunan, g: EttnGirdisi,
+): Promise<{ ret: FaturaRetKarari } | { uyari?: string }> {
+  const isaret = faturaIsareti(o.data);
+  const karar = ettnTutarlilikKarari({
+    ettn: g.ettn, ...(isaret?.cariKod ? { cariKod: isaret.cariKod } : {}), ...(isaret ? { sinir: talepSiniri(isaret) } : {}),
+    aynaSatirlari: await g.aynaOku(), baskaSiparis: await baskaSiparisAdi(b, g.ettn),
+  });
+  if (karar.ret) return { ret: ret(409, karar.ret.kod, karar.ret.error, isaret) };
+  return karar.uyari ? { uyari: karar.uyari } : {};
+}
+
+/** D6 `sonuc`. `numara` yalnız `mikrodaVar`'da kullanılır; ETTN verilirse (§ 9.B B2) önce B3 denetimi, yazım danışma kilidi
+ *  altında «başka sipariş yok» koşullu biçimle (`ettnKilidiyleYaz`). Tutmazsa ret kararı (404 dâhil). */
+export async function faturaSonucunuYaz(
+  b: FaturaBaglami, karar: 'mikrodaVar' | 'mikrodaYok', numara?: string, ettnGirdisi?: EttnGirdisi,
+): Promise<SonucYazimi> {
+  let uyari: string | undefined;
+  if (karar === 'mikrodaVar' && ettnGirdisi) {
+    const okunan = await yeniden(b);
+    if (!okunan) return { tamam: false, karar: { durum: 404, govde: { ...FATURA_BULUNAMADI } } };
+    const d = await ettnDenetimi(b, okunan, ettnGirdisi);
+    if ('ret' in d) return { tamam: false, karar: d.ret };
+    uyari = d.uyari;
+  }
+  const ettn = karar === 'mikrodaVar' ? ettnGirdisi?.ettn : undefined;
+  const varParametreleri = [
+    b.id, b.companyId, FATURA_GONDERIM_BAYATLIK_MS,
+    JSON.stringify(sonucVarYamasi(numara, ettn)),
+    JSON.stringify({ durum: 'gonderildi', ...(numara ? { numara } : {}) }),
+  ];
+  // ETTN'li biçim danışma kilidi altında (aynı ETTN'yi başka siparişe yazan eşzamanlı istekle sıraya girer); ETTN'siz biçim eskisi.
+  const data = karar !== 'mikrodaVar'
+    ? await yaz(b, FATURA_SONUC_YOK_SQL, [b.id, b.companyId, FATURA_GONDERIM_BAYATLIK_MS])
+    : ettn
+      ? await ettnKilidiyleYaz(b, ettn, FATURA_SONUC_VAR_ETTN_SQL, [...varParametreleri, ettn])
+      : await yaz(b, FATURA_SONUC_VAR_SQL, varParametreleri);
+  if (data) return { tamam: true, data, ...(uyari ? { uyari } : {}) };
   const okunan = await yeniden(b);
   if (!okunan) return { tamam: false, karar: { durum: 404, govde: { ...FATURA_BULUNAMADI } } };
+  if (ettn) {
+    // Ön denetimden sonra araya giren yazım aynı ETTN'yi başka siparişe yazdıysa (`NOT EXISTS` tuttu) bunu söyle.
+    const baska = await baskaSiparisAdi(b, ettn);
+    if (baska) return { tamam: false, karar: ret(409, 'FATURA_ETTN_BASKA_SIPARISTE', `Bu ETTN başka bir siparişte kayıtlı: ${baska}`, faturaIsareti(okunan.data)) };
+  }
   return { tamam: false, karar: sonucRetKarari(okunan) };
+}
+
+// ── § 9.B B2 — «ETTN ekle» ─────────────────────────────────────────────────────────────────────────────────────────────────
+/** «ETTN ekle» uygun değil: hangi durumda olduğuna göre ret. Geçerli ETTN → `FATURA_ETTN_VAR`; işaret `gonderildi` değilse mevcut
+ *  ret kararları (`belirsiz` / bayat `gonderiliyor` → «sonuç bilinmiyor»; taze `gonderiliyor` → «gönderiliyor»; işaretsiz /
+ *  `reddedildi` → «çözülecek sonuç yok»); Mikro faturasından türemiş kayıt → `FATURA_KESILEMEZ`. Uygunsa `null`. */
+export function ettnEkleRetKarari(o: FaturaOkunan): FaturaRetKarari | null {
+  const isaret = faturaIsareti(o.data);
+  if (o.kaynak === MF_KAYNAGI) {
+    return ret(400, 'FATURA_KESILEMEZ', 'Bu kayıt Mikro faturasından türetildi — ETTN eklenemez.', isaret, { neden: 'mikro-fatura' });
+  }
+  if (cetpaEttnAnahtari(o.data.ettn) !== '') return ret(409, 'FATURA_ETTN_VAR', 'Bu siparişin ETTN\'si zaten kayıtlı.', isaret);
+  if (isaret?.durum === 'gonderildi') return null;
+  if (isaret?.durum === 'belirsiz' || (isaret?.durum === 'gonderiliyor' && o.bayat)) {
+    return ret(409, 'FATURA_SONUCU_BILINMIYOR', 'Bu siparişin fatura sonucu bilinmiyor; önce Mikro\'dan kontrol edip kaydı çözün.', isaret);
+  }
+  if (isaret?.durum === 'gonderiliyor') return ret(409, 'FATURA_GONDERILIYOR', 'Bu siparişin faturası şu an gönderiliyor.', isaret);
+  return ret(409, 'FATURA_SONUC_YOK', 'Bu siparişte çözülecek bir fatura sonucu yok.', isaret);
+}
+
+/**
+ * § 9.B B2 — `gonderildi` ama geçerli ETTN'si olmayan siparişe ETTN yazar (KARŞILAŞTIR-YAZ). Önce okunur ve JS'te sınanır
+ * (`ettnEkleRetKarari`: `faturaIsareti(o)?.durum === 'gonderildi'` ve `cetpaEttnAnahtari(o.ettn) === ''`; `hasInvoice` OKUNMAZ),
+ * B3 denetimi, sonra danışma kilidi altında `FATURA_ETTN_EKLE_SQL` ($4 = OKUNAN ham değer; `ettnKilidiyleYaz`). 0 satırda yeniden okunup ayrılır: satır yok → 404; geçerli
+ * ETTN / durum değişti → `ettnEkleRetKarari`; aynı ETTN başka siparişte → `FATURA_ETTN_BASKA_SIPARISTE`; ham değer araya giren
+ * yazımla değişti → `FATURA_ETTN_DEGISTI`.
+ */
+export async function faturaEttnEkle(b: FaturaBaglami, g: EttnGirdisi): Promise<SonucYazimi> {
+  const okunan = await yeniden(b);
+  if (!okunan) return { tamam: false, karar: { durum: 404, govde: { ...FATURA_BULUNAMADI } } };
+  const uygunDegil = ettnEkleRetKarari(okunan);
+  if (uygunDegil) return { tamam: false, karar: uygunDegil };
+  const d = await ettnDenetimi(b, okunan, g);
+  if ('ret' in d) return { tamam: false, karar: d.ret };
+  const data = await ettnKilidiyleYaz(b, g.ettn, FATURA_ETTN_EKLE_SQL, [b.id, b.companyId, g.ettn, okunan.ettnMetin]);
+  if (data) {
+    const onceki = okunan.ettnMetin !== null && okunan.ettnMetin.trim() !== '' ? okunan.ettnMetin : undefined;
+    return { tamam: true, data, ...(d.uyari ? { uyari: d.uyari } : {}), ...(onceki !== undefined ? { ettnOnceki: onceki } : {}) };
+  }
+  const simdi = await yeniden(b);
+  if (!simdi) return { tamam: false, karar: { durum: 404, govde: { ...FATURA_BULUNAMADI } } };
+  const durumRet = ettnEkleRetKarari(simdi);
+  if (durumRet) return { tamam: false, karar: durumRet };
+  const isaret = faturaIsareti(simdi.data);
+  const baska = await baskaSiparisAdi(b, g.ettn);
+  if (baska) return { tamam: false, karar: ret(409, 'FATURA_ETTN_BASKA_SIPARISTE', `Bu ETTN başka bir siparişte kayıtlı: ${baska}`, isaret) };
+  return { tamam: false, karar: ret(409, 'FATURA_ETTN_DEGISTI', 'Kayıt bu arada değişti; yenileyip yeniden deneyin.', isaret) };
 }

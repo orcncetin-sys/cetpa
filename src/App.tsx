@@ -225,7 +225,9 @@ import { kisaTutar, paraYaz } from './utils/currency';
 import { irsaliyeIstegi, irsaliyeNedenMetni, irsaliyeYanitMesaji, irsaliyeSonucYamasi, type IrsaliyeYaniti } from './utils/siparisler/irsaliyeGonder';
 import { siparisBelgeTipi, belgeTipiCelisiyor, musteriBelgeTipi } from './utils/siparisler/belgeTipi';
 import { bayatKalemVar, kalemSatirKdv, mikroFaturasiKesilmisOlabilir } from './utils/siparisler/faturaDurumu';
-import { faturaSonucMesaji, faturaYanitMesaji, type FaturaYaniti } from './utils/siparisler/faturaGonder';
+import { faturaSonucMesaji, faturaSonucUyarisi, faturaYanitMesaji, type FaturaYaniti } from './utils/siparisler/faturaGonder';
+import { ettnGecersizMetni, ettnGirdisi } from './utils/siparisler/ettnGirdisi';
+import type { FaturaSonucEki } from './components/siparis/FaturaSonucuSecenekleri';
 import { useBelgeKilidi } from './hooks/useBelgeKilidi';
 import { ucKapisindanGecer } from './lib/mikroUcKapilari';
 import { FATURA_GONDERIM_ALANI, faturaIsareti, type FaturaSonucKarari, type MikroFaturaGonderimi } from './lib/faturaGonderimi';
@@ -3932,8 +3934,39 @@ function AppContent() {
   // doğurur: kesimle eşdeğer karar — HER ZAMAN onayla (kullanıcı kuralı «resmî belge HER ZAMAN onayla»), «yok» `danger`.
   // Onay metni cari, tutar ve işaretin zamanını / kimini taşır: kullanıcı Mikro'da arayabilsin; aynı siparişte arka arkaya iki
   // belirsiz deneme oluşursa çözülen SON denemedir (istemci `istekNo` göndermez — D13) ve zaman bunu görünür kılar.
-  const handleMikroFaturaSonuc = async (order: Order, karar: FaturaSonucKarari, numara?: string) => {
+  // ETTN (şartname «fatura gövde + gece MF» § 9.B B5, 2026-10-19): «Mikro'da var» ile isteğe bağlı ETTN girilebilir; «ETTN ekle»
+  // (`gonderildi` ama geçerli ETTN'si yok) AYNI uca `karar: 'ettnEkle'` ile gider. Gövdeye ANAHTAR yazılır (`ettnGirdisi` — ölçüt
+  // sunucuyla AYNI `cetpaEttnAnahtari`); yerel yama YANITTAKİ `ettn` ile (sunucunun YAZDIĞI satırdan), ham girdiyle değil.
+  /** `fatura/sonuc` isteği: HTTP durumu (`null` = yanıt alınamadı) ve JSON gövde (`null` = okunamadı). */
+  const faturaSonucIstegi = async (govde: Record<string, unknown>): Promise<{ durum: number | null; d: FaturaYaniti | null }> => {
+    try {
+      const r = await authFetch('/api/mikro/fatura/sonuc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(govde),
+      });
+      const d = await r.json().then((j: unknown) => (j && typeof j === 'object' && !Array.isArray(j) ? j as FaturaYaniti : null), () => null);
+      return { durum: r.status, d };
+    } catch {
+      return { durum: null, d: null };
+    }
+  };
+  /** Yanıttaki ETTN — sunucunun YAZDIĞI satırdan (B2); yoksa `undefined`. */
+  const yanitEttni = (d: FaturaYaniti | null): string | undefined => (typeof d?.ettn === 'string' && d.ettn !== '' ? d.ettn : undefined);
+  /** Başarı / hata iletisi ve (varsa) ayna uyarısı. */
+  const faturaSonucIletisi = (durum: number | null, d: FaturaYaniti | null, istenen: FaturaSonucKarari) => {
+    const m = faturaSonucMesaji(durum, d, currentLanguage, istenen);
+    toast(m.metin, m.tur);
+    const u = faturaSonucUyarisi(d, currentLanguage);
+    if (u) toast(u.metin, u.tur);
+  };
+  const handleMikroFaturaSonuc = async (order: Order, karar: FaturaSonucKarari, ek: FaturaSonucEki = {}) => {
     if (!mikroFaturaSonucuCozebilir) return;
+    if (karar === 'ettnEkle') {
+      // Seçenekler bu kararı vermez; verilirse «ETTN ekle» işleyicisine gider (tek yol, tek onay).
+      if (ek.ettn !== undefined) await handleMikroFaturaEttnEkle(order, ek.ettn);
+      return;
+    }
     const tr = currentLanguage === 'tr';
     const canli = orders.find(x => x.id === order.id) ?? order;
     const isaret = faturaIsareti(canli);
@@ -3941,7 +3974,12 @@ function AppContent() {
       ? (tr ? `Gönderim denemesi: ${tarihSaatYaz(isaret.zaman, undefined, currentLanguage)} · ${isaret.kim || '—'}.` : `Attempt: ${tarihSaatYaz(isaret.zaman, undefined, currentLanguage)} · ${isaret.kim || '—'}.`)
       : '';
     const ozet = `${canli.customerName} — ${paraYaz(canli.totalPrice)}. ${deneme}`;
-    const no = numara?.trim() ?? '';
+    const no = ek.numara?.trim() ?? '';
+    // ETTN yalnız «Mikro'da var»da; bileşen geçersizde düğmeyi pasif tutar — buraya geçersiz gelirse istek GİTMEZ (savunma).
+    const ettnGirdi = ettnGirdisi(karar === 'mikrodaVar' ? ek.ettn ?? '' : '');
+    if (ettnGirdi.gecersiz) { toast(ettnGecersizMetni(currentLanguage), 'error'); return; }
+    const ettn = ettnGirdi.anahtar;
+    const ettnMetni = ettn ? ` · ETTN: ${ettn}` : (tr ? ' · ETTN girilmedi' : ' · ETTN not entered');
     const onaylandi = await confirmAction(karar === 'mikrodaYok' ? {
       title: tr ? 'Fatura Mikro\'da yok mu?' : 'Is the invoice missing in Mikro?',
       message: tr
@@ -3952,33 +3990,54 @@ function AppContent() {
     } : {
       title: tr ? 'Fatura Mikro\'da kesilmiş mi?' : 'Was the invoice issued in Mikro?',
       message: tr
-        ? `${ozet} Bu siparişin faturasının Mikro'da KESİLDİĞİNİ onaylıyorsunuz${no ? ` (No: ${no})` : ' (numara girilmedi)'}: sipariş faturalanmış sayılır ve yeniden gönderilemez.`
-        : `${ozet} You confirm the invoice WAS issued in Mikro${no ? ` (No: ${no})` : ' (no number entered)'}: the order counts as invoiced and cannot be sent again.`,
+        ? `${ozet} Bu siparişin faturasının Mikro'da KESİLDİĞİNİ onaylıyorsunuz (${no ? `No: ${no}` : 'numara girilmedi'}${ettnMetni}): sipariş faturalanmış sayılır ve yeniden gönderilemez.`
+        : `${ozet} You confirm the invoice WAS issued in Mikro (${no ? `No: ${no}` : 'no number entered'}${ettnMetni}): the order counts as invoiced and cannot be sent again.`,
       confirmLabel: tr ? 'Mikro\'da var' : 'It is in Mikro',
       variant: 'warning',
     });
     if (!onaylandi) return;
-    let durum: number | null = null;
-    let d: FaturaYaniti | null = null;
-    try {
-      const r = await authFetch('/api/mikro/fatura/sonuc', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ firebaseId: order.id, karar, ...(karar === 'mikrodaVar' && no ? { numara: no } : {}) }),
-      });
-      durum = r.status;
-      d = await r.json().then((j: unknown) => (j && typeof j === 'object' && !Array.isArray(j) ? j as FaturaYaniti : null), () => null);
-    } catch {
-      d = null;
-    }
+    const { durum, d } = await faturaSonucIstegi({
+      firebaseId: order.id, karar,
+      ...(karar === 'mikrodaVar' && no ? { numara: no } : {}),
+      ...(karar === 'mikrodaVar' && ettn ? { ettn } : {}),
+    });
     // «Mikro'da var» sunucuda kaydet başarısıyla AYNI fatura alanlarını yazar (İ1-4; server/mikro/faturaGonderimi.sonucVarYamasi):
-    // `hasInvoice`, `mikroSynced`, numara verildiyse `mikroFaturaNo`. Kesim zamanı bilinmediği için yazılmaz (uydurma yok).
+    // `hasInvoice`, `mikroSynced`, numara verildiyse `mikroFaturaNo`, ETTN verildiyse `ettn` (YANITTAKİ — yazılan satırdan).
+    // Kesim zamanı bilinmediği için yazılmaz (uydurma yok).
     if (d && FATURA_GONDERIM_ALANI in d) {
+      const yazilanEttn = yanitEttni(d);
       faturaIsaretiniYama(order.id, faturaIsareti(d), d.success && d.karar === 'mikrodaVar'
-        ? { hasInvoice: true, mikroSynced: true, ...(d.numara ? { mikroFaturaNo: d.numara } : {}) } : {});
+        ? { hasInvoice: true, mikroSynced: true, ...(d.numara ? { mikroFaturaNo: d.numara } : {}), ...(yazilanEttn ? { ettn: yazilanEttn } : {}) } : {});
     }
-    const m = faturaSonucMesaji(durum, d, currentLanguage);
-    toast(m.metin, m.tur);
+    faturaSonucIletisi(durum, d, karar);
+  };
+
+  // ── e-Fatura: kesilmiş faturaya ETTN ekle (§ 9.B B2 / B5) ─────────────────────
+  // Görünürlük OrdersPage'de (`gonderildi` + geçerli ETTN yok + `fatura/sonuc` kapısı). ETTN resmî belgenin kimliğidir ve sonradan
+  // buradan DÜZELTİLEMEZ (sunucu yalnız geçerli ETTN yokken yazar) — HER ZAMAN onayla; metinde cari, tutar, numara ve anahtar.
+  const handleMikroFaturaEttnEkle = async (order: Order, ettnHam: string) => {
+    if (!mikroFaturaSonucuCozebilir) return;
+    const tr = currentLanguage === 'tr';
+    const g = ettnGirdisi(ettnHam);
+    if (g.anahtar === '') { toast(ettnGecersizMetni(currentLanguage), 'error'); return; }
+    const canli = orders.find(x => x.id === order.id) ?? order;
+    const no = canli.mikroFaturaNo || faturaIsareti(canli)?.numara || '';
+    const ozet = `${canli.customerName} — ${paraYaz(canli.totalPrice)}${no ? ` · No: ${no}` : ''} · ETTN: ${g.anahtar}.`;
+    const onaylandi = await confirmAction({
+      title: tr ? 'ETTN eklensin mi?' : 'Add the ETTN?',
+      message: tr
+        ? `${ozet} Bu ETTN'nin Mikro'da BU siparişin faturasına ait olduğunu onaylıyorsunuz: gece Mikro faturalarından sipariş türetilirken fatura bu siparişe bağlanır. Kaydedilen ETTN buradan değiştirilemez — Mikro'daki e-Fatura ekranıyla karşılaştırın.`
+        : `${ozet} You confirm this ETTN belongs to THIS order's invoice in Mikro: when orders are derived from Mikro invoices overnight, the invoice is linked to this order. The saved ETTN cannot be changed here — compare it with the e-Invoice screen in Mikro.`,
+      confirmLabel: tr ? 'ETTN ekle' : 'Add ETTN',
+      variant: 'warning',
+    });
+    if (!onaylandi) return;
+    const { durum, d } = await faturaSonucIstegi({ firebaseId: order.id, karar: 'ettnEkle', ettn: g.anahtar });
+    if (d && FATURA_GONDERIM_ALANI in d) {
+      const yazilanEttn = yanitEttni(d);
+      faturaIsaretiniYama(order.id, faturaIsareti(d), d.success && d.karar === 'ettnEkle' && yazilanEttn ? { ettn: yazilanEttn } : {});
+    }
+    faturaSonucIletisi(durum, d, 'ettnEkle');
   };
 
   // ── iyzico: generate payment link ─────────────────────────────────────────
@@ -6568,6 +6627,7 @@ function AppContent() {
                 setSiparisTohumu={setSiparisTohumu}
                 handleMikroFatura={handleMikroFatura}
                 handleMikroFaturaSonuc={handleMikroFaturaSonuc}
+                handleMikroFaturaEttnEkle={handleMikroFaturaEttnEkle}
                 mikroFaturaGonderiliyor={mikroFaturaGonderiliyor}
                 mikroFaturaKesebilir={mikroFaturaKesebilir}
                 mikroFaturaSonucuCozebilir={mikroFaturaSonucuCozebilir}

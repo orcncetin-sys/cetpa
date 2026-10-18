@@ -180,7 +180,8 @@ describe('POST /api/mikro/fatura/kaydet — gövde kurulamazsa Mikro’ya GİDİ
 describe('POST /api/mikro/fatura/kaydet — bilinen sipariş: eski gövdeyle BİREBİR', () => {
   const ORTAK = {
     sth_tarih: '19.09.2026', sth_tip: 1, sth_cins: 0, sth_normal_iade: 0,
-    sth_evraktip: 4, sth_evrakno_seri: 'F',
+    // Seri '' ve cinsi 6 (2026-10-18, şartname «fatura gövde + gece MF» G1): Mikro'nun kendi satış faturalarıyla aynı.
+    sth_evraktip: 4, sth_evrakno_seri: '',
     sth_cari_cinsi: 0, sth_cari_kodu: '120.01.0042',
     sth_birim_pntr: 1, sth_vergi_pntr: 4, sth_vergisiz_fl: false,
     sth_cari_srm_merkezi: '', sth_stok_srm_merkezi: '',
@@ -191,8 +192,8 @@ describe('POST /api/mikro/fatura/kaydet — bilinen sipariş: eski gövdeyle Bİ
   const SATIR_1 = { ...ORTAK, sth_stok_kod: 'CIM-50', sth_miktar: 40, sth_tutar: 12500, sth_vergi: 2500, sth_aciklama: 'ÇİMENTO 50KG' };
   const SATIR_2 = { ...ORTAK, sth_stok_kod: 'DMR-12', sth_miktar: 2,  sth_tutar: 2499,  sth_vergi: 499.8, sth_aciklama: 'NERVÜRLÜ DEMİR Ø12' };
   const EVRAK = {
-    cha_tip: 0, cha_cinsi: 7, cha_normal_Iade: 0, cha_evrak_tip: 63, cha_cari_cins: 0,
-    cha_d_cins: 0, cha_d_kur: 1, cha_tarihi: '19.09.2026', cha_evrakno_seri: 'F',
+    cha_tip: 0, cha_cinsi: 6, cha_normal_Iade: 0, cha_evrak_tip: 63, cha_cari_cins: 0,
+    cha_d_cins: 0, cha_d_kur: 1, cha_tarihi: '19.09.2026', cha_evrakno_seri: '',
     cha_kod: '120.01.0042', cha_projekodu: '', cha_srmrkkodu: '', cha_vade: 0, cha_subeno: 0,
     cha_aciklama: '', kdv_istisna_kodu: '',
     detay: [SATIR_1, SATIR_2],
@@ -207,6 +208,26 @@ describe('POST /api/mikro/fatura/kaydet — bilinen sipariş: eski gövdeyle Bİ
     // Gövde BİREBİR aynı; dördüncü argüman stub tekrarını KAPATIR (şartname «e-Fatura çift kesim» D2 — ikinci gönderim yok).
     expect(mikroPost).toHaveBeenCalledWith('FaturaKaydetV2', { evraklar: [EVRAK] }, true, { stubYenidenDeneme: false });
     expect(res.govde).toMatchObject({ success: true, mikroFaturaNo: 'FTR-000123', ettn: 'E-1111' });
+  });
+
+  it("G2: rotanın Mikro'ya gönderdiği evraklar[0]'da sıra anahtarı YOK (cha + her sth satırı) — sırayı Mikro verir, Cetpa hesaplamaz", async () => {
+    basariliYanit({ faturaNo: 'FTR-000124' });
+    await faturaGonder(SIPARIS);
+
+    expect(mikroPost).toHaveBeenCalledTimes(1);
+    const govde = vi.mocked(mikroPost).mock.calls[0]?.[1] as { evraklar?: Array<Record<string, unknown>> } | undefined;
+    expect(govde && Object.keys(govde)).toEqual(['evraklar']);
+    const evrak = govde?.evraklar?.[0];
+    expect(govde?.evraklar).toHaveLength(1);
+    // `toEqual` değeri undefined olan anahtarı görmez — yokluk ayrıca kilitli (şartname § 2 kesinlik notu).
+    expect(evrak).not.toHaveProperty('cha_evrakno_sira');
+    expect([evrak?.cha_evrakno_seri, evrak?.cha_cinsi]).toEqual(['', 6]);
+    const detay = evrak?.detay;
+    expect(Array.isArray(detay) && detay.length).toBe(2);
+    for (const satir of Array.isArray(detay) ? detay : []) {
+      expect(satir).not.toHaveProperty('sth_evrakno_sira');
+      expect((satir as Record<string, unknown>).sth_evrakno_seri).toBe('');
+    }
   });
 
   it('İkiz ölçümü (I2): syncLog yanıtın yalnız ANAHTAR yollarını taşır — numara/ETTN DEĞERİ yazılmaz', async () => {
