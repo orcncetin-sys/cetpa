@@ -794,7 +794,8 @@ describe('D5 — bayat `gonderiliyor`', () => {
     const globalZamanAsimi = Number(m[1]);
     const rota = kodSatirlari(join(SRC_KOK, 'server', 'routes', 'mikroRoutes.ts')).map(s => s.kod).join('\n');
     // FaturaKaydetV2 çağrısı kendi zaman aşımını VERMİYOR ve stub tekrarını KAPATIYOR — verilirse bu bütçe ona göre güncellenir.
-    expect(rota).toContain("yanit = await mikroPost('FaturaKaydetV2', { evraklar: [evrak] }, true, { stubYenidenDeneme: false });");
+    // Stub tekrarı ortak sabitle kapalı (şartname yeniden-deneme v3 K0a: `MIKRO_YAZIM_SECENEGI` = `{ stubYenidenDeneme: false }`).
+    expect(rota).toContain("yanit = await mikroPost('FaturaKaydetV2', { evraklar: [evrak] }, true, MIKRO_YAZIM_SECENEGI);");
     const istemci = kodSatirlari(join(SRC_KOK, 'server', 'mikroClient.ts')).map(s => s.kod).join('\n');
     const belirtec = istemci.slice(istemci.indexOf('export async function getMikroToken('), istemci.indexOf('function buildMikroDailySifre('));
     expect(belirtec).not.toMatch(/signal:/);   // belirteç çağrısı global zaman aşımında

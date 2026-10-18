@@ -265,3 +265,65 @@ describe('mikroPost — stub tekrarı seçeneği (T22) ve «gönderilmedi» işa
     expect(yontemCagrisi('SiparisKaydetV2')).toBe(1);
   });
 });
+
+// ── Yazan çağrının ortak seçeneği (2026-10-18, şartname `.wf/SARTNAME-yeniden-deneme-sunucuda-v3.md` K0a; § 8.1 H5 / H8) ──────────
+// İki kip: LOKAL (`MIKRO_LOCAL=1`, canlı — Ö20) belirteç adımı ve stub tekrarı YOK; BULUT (`MIKRO_LOCAL=0`) stub tekrarı ve 5 dk geri
+// çekilme damgası VAR. Modül sabitleri yükleme anında okunur → her sınamada `vi.resetModules` + dinamik içe aktarım.
+describe('mikroPost — MIKRO_YAZIM_SECENEGI: LOKAL kipte istek sayısı değişmez; BULUT kipte 5 dk geri çekilme içinde belirteç SİLİNMEZ', () => {
+  const TABAN = 'https://mikro.ornek.test:8094/Api/APIMethods';
+  let cagrilar: Array<{ url: string; yetki: string | null }> = [];
+  let belirtecSayaci = 0;
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv('MIKRO_API_URL', TABAN);
+    vi.stubEnv('MIKRO_IDM_EMAIL', 'srv@example.test');
+    vi.stubEnv('MIKRO_IDM_PASSWORD', 'sinama');
+    vi.stubEnv('MIKRO_API_KEY', 'anahtar');
+    vi.stubEnv('MIKRO_ALIAS', 'takma');
+    cagrilar = [];
+    belirtecSayaci = 0;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const basliklar = (init?.headers ?? {}) as Record<string, string>;
+      cagrilar.push({ url, yetki: basliklar.Authorization ?? null });
+      if (url.includes('onlinekullanici')) { belirtecSayaci++; return new Response(JSON.stringify({ access_token: `t${belirtecSayaci}`, expires_in: 21600 })); }
+      return new Response(JSON.stringify({ Method: 'X' }));   // stub: `result` anahtarı yok
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+  const yontemCagrilari = (yontem: string) => cagrilar.filter(c => c.url === `${TABAN}/${yontem}`);
+  const belirtecIstekleri = () => cagrilar.filter(c => c.url.includes('onlinekullanici')).length;
+
+  it('LOKAL (`MIKRO_LOCAL=1`): yazan çağrı stub → Mikro\'ya 1 istek; okuyan çağrı stub → yine 1 istek; belirteç isteği 0', async () => {
+    vi.stubEnv('MIKRO_LOCAL', '1');
+    const { mikroPost, initMikroClient } = await import('./mikroClient');
+    const { MIKRO_YAZIM_SECENEGI } = await import('./mikro/yazimSecenegi');
+    initMikroClient({ getAdminDb: () => null });
+    // Sıra bilerek: okuyan çağrı ÖNCE — 5 dk geri çekilme damgası henüz yokken. Stub dalı LOKAL'de koşsaydı (M0.15) okuyan
+    // çağrı burada İKİ istek atardı; yazan çağrı önce gelseydi damgayı kurar, okuyanın tekrarı geri çekilmede saklanırdı.
+    await mikroPost('StokListesiV2', {});
+    expect(yontemCagrilari('StokListesiV2')).toHaveLength(1);
+    const yazan = await mikroPost('DekontKaydetV2', { evraklar: [] }, true, MIKRO_YAZIM_SECENEGI);
+    expect(yazan).toEqual({ ok: true, status: 200, data: { Method: 'X' } });
+    expect(yontemCagrilari('DekontKaydetV2')).toHaveLength(1);
+    expect(belirtecIstekleri()).toBe(0);
+  });
+
+  it('BULUT, 5 dk geri çekilme içinde (H5): okuyan çağrı stub (2 istek, damga kurulur) → yazan çağrı stub → 1 istek, belirteç SİLİNMEZ; ikinci basış AYNI belirteçle', async () => {
+    vi.stubEnv('MIKRO_LOCAL', '0');
+    const { mikroPost, initMikroClient } = await import('./mikroClient');
+    const { MIKRO_YAZIM_SECENEGI } = await import('./mikro/yazimSecenegi');
+    initMikroClient({ getAdminDb: () => null });
+    await mikroPost('StokListesiV2', {});
+    expect(yontemCagrilari('StokListesiV2')).toHaveLength(2);   // bugünkü davranış: belirteç tazelenip bir kez daha
+    expect(belirtecIstekleri()).toBe(2);
+    await mikroPost('SiparisKaydetV2', { evraklar: [] }, true, MIKRO_YAZIM_SECENEGI);
+    expect(yontemCagrilari('SiparisKaydetV2')).toHaveLength(1);
+    await mikroPost('SiparisKaydetV2', { evraklar: [] }, true, MIKRO_YAZIM_SECENEGI);
+    const yazanlar = yontemCagrilari('SiparisKaydetV2');
+    expect(yazanlar).toHaveLength(2);
+    expect(belirtecIstekleri()).toBe(2);                        // geri çekilme içinde belirteç ne silindi ne yenilendi
+    expect(yazanlar.map(c => c.yetki)).toEqual(['Bearer t2', 'Bearer t2']);
+  });
+});

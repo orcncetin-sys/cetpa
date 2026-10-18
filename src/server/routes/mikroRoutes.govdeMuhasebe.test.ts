@@ -19,6 +19,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
 import { mikroPost } from '../mikroClient.js';
 import { mirrorMikroInsert } from '../mikroMirror.js';
+// Yazan çağrının 4. argümanı (şartname yeniden-deneme v3 K0a): stub yanıtında ikinci gönderim yok — bilerek değişen çit.
+import { MIKRO_YAZIM_SECENEGI } from '../mikro/yazimSecenegi.js';
 
 // ── mikroMockTarifi (mikroRoutes.testDuzenegi.ts) — vitest hoisting yüzünden BURADA olmalı
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
@@ -166,7 +168,7 @@ describe('POST /api/mikro/tahsilat/kaydet — bilinen tahsilat: eski gövdeyle B
     expect(mikroPost).toHaveBeenCalledTimes(1);
     expect(mikroPost).toHaveBeenCalledWith('TahsilatTediyeKaydetV2', {
       evraklar: [{ evrak_aciklamalari: [{ aciklama: TAHSILAT.aciklama }], satirlar: [SATIR] }],
-    }, true);
+    }, true, MIKRO_YAZIM_SECENEGI);
   });
 
   it('ayna satırı `__kaynak: tahsilat_push` ile yazılır; syncLog doğrulanmış cari kodunu taşır', async () => {
@@ -280,7 +282,7 @@ describe('POST /api/mikro/yevmiye/kaydet — batch sözleşmesi korunur (200 + s
           { ...TABAN, fis_hesap_kod: '600', fis_aciklama1: FIS.aciklama, fis_meblag0: -45000 },
         ],
       }],
-    }, true);
+    }, true, MIKRO_YAZIM_SECENEGI);
 
     const govde = vi.mocked(mikroPost).mock.calls[0][1] as { evraklar: [{ satirlar: unknown[] }] };
     const aynaCagrisi = vi.mocked(mirrorMikroInsert).mock.calls[0];
@@ -368,7 +370,7 @@ describe('POST /api/mikro/cari-hareket/kaydet — zorunlu beşli denetimi', () =
         satirlar: [{ ...DEKONT, cha_ozel_kod: 'PROJE-A' }],
         evrak_aciklamalari: [{ aciklama: 'Eylül ayı fiyat farkı dekontu' }],
       }],
-    }, true);
+    }, true, MIKRO_YAZIM_SECENEGI);
     expect(mirrorMikroInsert).toHaveBeenCalledWith(
       'mikro_cari_hesap_hareketleri',
       [{ ...DEKONT, cha_ozel_kod: 'PROJE-A', __kaynak: 'hareket_push' }],
@@ -380,6 +382,6 @@ describe('POST /api/mikro/cari-hareket/kaydet — zorunlu beşli denetimi', () =
     basariliYanit();
     await dekontGonder(DEKONT);
 
-    expect(mikroPost).toHaveBeenCalledWith('DekontKaydetV2', { evraklar: [{ satirlar: [DEKONT] }] }, true);
+    expect(mikroPost).toHaveBeenCalledWith('DekontKaydetV2', { evraklar: [{ satirlar: [DEKONT] }] }, true, MIKRO_YAZIM_SECENEGI);
   });
 });

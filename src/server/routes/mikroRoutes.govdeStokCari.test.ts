@@ -21,6 +21,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
 import { mikroPost, mikroVergiOranlari } from '../mikroClient.js';
 import { mirrorMikroStoklar, mirrorMikroCariler } from '../mikroMirror.js';
+// Yazan çağrının 4. argümanı (şartname yeniden-deneme v3 K0a): stub yanıtında ikinci gönderim yok — bilerek değişen çit.
+import { MIKRO_YAZIM_SECENEGI } from '../mikro/yazimSecenegi.js';
 
 // ── mikroMockTarifi (mikroRoutes.testDuzenegi.ts) — vitest hoisting yüzünden BURADA olmalı
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
@@ -144,7 +146,7 @@ describe('POST /api/mikro/stok/kaydet — bilinen ürün: eski gövdeyle BİREB�
         sto_toptan_vergi:    4,
         satis_fiyatlari: [fiyatSatiri(1, 189.9), fiyatSatiri(2, 172.5), fiyatSatiri(3, 165), fiyatSatiri(4, 158.25)],
       }],
-    }, true);
+    }, true, MIKRO_YAZIM_SECENEGI);
     expect(res.govde).toMatchObject({ success: true, mikroStoKod: 'CIM-50' });
     expect(d.koleksiyon('inventory')).toEqual([
       { op: 'update', ref: { id: 'inv1', coll: 'inventory' }, data: { mikroStoKod: 'CIM-50', mikroSynced: true, mikroSyncedAt: 'TS' } },
@@ -207,7 +209,7 @@ describe('POST /api/mikro/cari/kaydet — bilinen cari: eski gövdeyle BİREBİR
           adr_posta_kodu: 0, yetkili: [],
         }],
       }],
-    }, true);
+    }, true, MIKRO_YAZIM_SECENEGI);
     expect(res.govde).toMatchObject({ success: true, cariKod: 'CARABC123' });
     expect(d.koleksiyon('suppliers')).toEqual([
       // `eFaturaKaydiTeyitsiz`: e-Fatura kaydı BİLİNMEDEN gönderildi (gövdede cari_efatura_fl: 0) — cron'un geri yazacağı

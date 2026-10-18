@@ -41,6 +41,8 @@ import {
   mikroSatirlar, mikroSql, mikroStokMiktari, listeZamanAsimiMs,
   mikroVergiOranlari, sqlTarih, kolonBul, sqlTanimlayici,
 } from '../mikroClient.js';
+// Yazan her `mikroPost` çağrısının 4. argümanı + stub iletisi (şartname yeniden-deneme v3 K0a; çit: yazimSecenegi.degismez.test.ts).
+import { MIKRO_YAZIM_SECENEGI, MIKRO_STUB_METNI, mikroStubMu, yazimHataMetni } from '../mikro/yazimSecenegi.js';
 import {
   CHA_COLS, STH_COLS, FIS_COLS, SIP_COLS, mirrorMikroCariler, mirrorMikroInsert,
   mirrorMikroStoklar,
@@ -343,13 +345,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // Bilinmeyen SKU/ad/birim/KDV oranı/fiyat → MikroGovdeHatasi → 400 (mikroPost çağrılmaz).
       const stok = stokGovdesi(item, await mikroVergiOranlari());
 
-      const { ok, data, status } = await mikroPost('StokKaydetV2', { stoklar: [stok] }, true); // V17: stoklar Mikro objesi İÇİNDE (inMikro)
+      const { ok, data, status } = await mikroPost('StokKaydetV2', { stoklar: [stok] }, true, MIKRO_YAZIM_SECENEGI); // V17: stoklar Mikro objesi İÇİNDE (inMikro)
       const duration = Date.now() - t0;
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0 = envelope?.[0] as Record<string, unknown> | undefined;
       const success = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
       const mikroStoKod = stok.sto_kod;
-      const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+      const errorMsg = success ? null : yazimHataMetni(ok, status, data);   // stub → «OLABİLİR» iletisi (K0a)
 
       await C.writeSyncLog('StokKaydetV2', 'inventory', firebaseId, success, mikroStoKod, errorMsg, duration, C.reqActor(req));
       if (success) void mirrorMikroStoklar([stok]);
@@ -458,12 +460,12 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const cariKod = cari.cari_kod;
 
       // inMikro: V17 evrak kalıbı — payload (cariler) Mikro objesi İÇİNDE gider.
-      const { ok, data, status } = await mikroPost('CariKaydetV2', { cariler: [cari] }, true);
+      const { ok, data, status } = await mikroPost('CariKaydetV2', { cariler: [cari] }, true, MIKRO_YAZIM_SECENEGI);
       const duration = Date.now() - t0;
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0 = envelope?.[0] as Record<string, unknown> | undefined;
       const success = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
-      const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+      const errorMsg = success ? null : yazimHataMetni(ok, status, data);   // stub → «OLABİLİR» iletisi (K0a)
 
       await C.writeSyncLog('CariKaydetV2', targetCollection === 'suppliers' ? 'supplier' : 'lead', firebaseId, success, cariKod, errorMsg, duration, C.reqActor(req));
       if (success) void mirrorMikroCariler([cari]);
@@ -727,7 +729,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // inMikro: V17 evrak kalıbı — payload (evraklar) Mikro objesi İÇİNDE gider.
       // `govde.evraklar[0].satirlar === satirlar` (modül testiyle kilitli) — aşağıdaki
       // ayna çağrısı aynı diziyi yazar.
-      const { ok, data, status } = await mikroPost('SiparisKaydetV2', govde, true);
+      const { ok, data, status } = await mikroPost('SiparisKaydetV2', govde, true, MIKRO_YAZIM_SECENEGI);
 
       const duration = Date.now() - t0;
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
@@ -736,7 +738,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const md = (r0?.Data ?? r0?.data ?? {}) as Record<string, unknown>;
       // Numara METNE normalize edilir (sayısal Mikro yanıtı sessizce düşmesin): src/server/mikro/belgeNo.ts
       const mikroEvrakNo = belgeNoMetni(md?.evrakNo, md?.EvrakNo, md?.id);
-      const errorMsg = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+      const errorMsg = success ? null : yazimHataMetni(ok, status, data);   // stub → «OLABİLİR» iletisi (K0a)
 
       await C.writeSyncLog('SiparisKaydetV2', 'order', firebaseId, success, mikroEvrakNo, errorMsg, duration, C.reqActor(req));
       if (success) void mirrorMikroInsert('mikro_siparisler', satirlar as unknown as Record<string, unknown>[], SIP_COLS);
@@ -4123,10 +4125,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       return res.status(400).json({ success: false, error: e.message });
     }
     try {
-      const { ok, data, status } = await mikroPost('DekontKaydetV2', govde.payload, true); // inMikro: V17 evrak kalıbı — alanlar Mikro objesi İÇİNDE
+      const { ok, data, status } = await mikroPost('DekontKaydetV2', govde.payload, true, MIKRO_YAZIM_SECENEGI); // inMikro: V17 evrak kalıbı — alanlar Mikro objesi İÇİNDE
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       const success = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
-      const errorMsg = success ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
+      const errorMsg = success ? null : yazimHataMetni(ok, status, data);   // stub → «OLABİLİR» iletisi (K0a)
       await C.writeSyncLog('DekontKaydetV2', 'payment', govde.cariKod, success, null, errorMsg, Date.now() - t0, C.reqActor(req));
       if (success) void mirrorMikroInsert('mikro_cari_hesap_hareketleri', [{ ...govde.satir, __kaynak: 'hareket_push' }], CHA_COLS);
       res.json({ success, error: errorMsg, data });
@@ -4157,10 +4159,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     }
     const t0 = Date.now();
     try {
-      const { ok, data, status } = await mikroPost(method, payload, true);
+      const yanit = await mikroPost(method, payload, true, MIKRO_YAZIM_SECENEGI);
+      const { ok, data, status } = yanit;
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       const success = ok && !!r0 && !r0.IsError;
-      const errorMsg = success ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
+      const errorMsg = success ? null : yazimHataMetni(ok, status, data);   // stub → «OLABİLİR» iletisi (K0a)
       await C.writeSyncLog(method, entityType || 'evrak', entityId || 'unknown', success, null, errorMsg, Date.now() - t0, C.reqActor(req));
       res.json({ success, error: errorMsg, data: r0?.Data ?? null });
     } catch (err) {
@@ -4202,13 +4205,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           errors.push({ id: String(e.id), error: ge.message });
           continue;
         }
-        const { ok, data, status } = await mikroPost('MuhasebeFisKaydetV2', govde.payload, true);
+        const { ok, data, status } = await mikroPost('MuhasebeFisKaydetV2', govde.payload, true, MIKRO_YAZIM_SECENEGI);
         const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
         if (ok && r0 && !r0.IsError) {
           syncedIds.push(String(e.id));
           void mirrorMikroInsert('mikro_muhasebe_fisleri', govde.satirlar, FIS_COLS);
         }
-        else errors.push({ id: String(e.id), error: (r0?.ErrorMessage as string) || `HTTP ${status}` });
+        else errors.push({ id: String(e.id), error: yazimHataMetni(ok, status, data) });   // stub → «OLABİLİR» iletisi (K0a)
       }
       await C.writeAuditLog(C.reqActor(req), 'Mikro Yevmiye Aktarımı',
         `${syncedIds.length}/${entries.length} fiş aktarıldı${errors.length ? `, ${errors.length} hata: ${errors[0].error.slice(0, 80)}` : ''}`);
@@ -4245,10 +4248,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       return res.status(400).json({ success: false, error: e.message });
     }
     try {
-      const { ok, data, status } = await mikroPost('TahsilatTediyeKaydetV2', govde.payload, true);
+      const { ok, data, status } = await mikroPost('TahsilatTediyeKaydetV2', govde.payload, true, MIKRO_YAZIM_SECENEGI);
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       const success = ok && !!r0 && !r0.IsError;
-      const errorMsg = success ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
+      const errorMsg = success ? null : yazimHataMetni(ok, status, data);   // stub → «OLABİLİR» iletisi (K0a)
       await C.writeSyncLog('TahsilatTediyeKaydetV2', 'payment', govde.cariKod, success, null, errorMsg, Date.now() - t0, C.reqActor(req));
       if (success) void mirrorMikroInsert('mikro_cari_hesap_hareketleri', [{ ...govde.satir, __kaynak: 'tahsilat_push' }], CHA_COLS);
       res.json({ success, error: errorMsg, data });
@@ -5375,9 +5378,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           IptalAciklamasi: aciklama,
           FaturaSilinsin: req.body?.faturaSilinsin === true ? 'true' : 'false',
         },
-      }, true);
+      }, true, MIKRO_YAZIM_SECENEGI);
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
-      if (!ok || !r0 || r0.IsError) return res.status(502).json({ success: false, error: mikroHata(data) });
+      // Stub (HTTP başarılı + `result` yok): iptal Mikro'da işlenmiş OLABİLİR — kullanıcıya bunu söyleyen metin (K0a).
+      if (!ok || !r0 || r0.IsError) return res.status(502).json({ success: false, error: ok && mikroStubMu(data) ? MIKRO_STUB_METNI : mikroHata(data) });
       if (C.getAdminDb()) {
         // Sahiplik kontrolü — bkz. /ebelge/durum'daki aynı gerekçe.
         const mevcut = await C.getAdminDb().collection('eBelgeler').doc(uuid).get().catch(() => null);
@@ -5413,11 +5417,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       if (sahip === 'yabanci' || sahip === 'yok') return res.status(404).json(YABANCI_BELGE); }   // GİB'e gitmeden ÖNCE
     const t0 = Date.now();
     try {
-      const { ok, data, status } = await mikroPost('GelenFaturalarKabulV2', { FaturaGuid: faturaGuid });
+      const { ok, data, status } = await mikroPost('GelenFaturalarKabulV2', { FaturaGuid: faturaGuid }, false, MIKRO_YAZIM_SECENEGI);
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0       = envelope?.[0] as Record<string, unknown> | undefined;
       const isOk     = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
-      const errorMsg = isOk ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+      const errorMsg = isOk ? null : yazimHataMetni(ok, status, data);   // stub → «OLABİLİR» iletisi (K0a)
 
       await C.writeSyncLog('GelenFaturalarKabulV2', 'gelenFatura', faturaGuid, isOk, faturaGuid, errorMsg, Date.now() - t0, C.reqActor(req));
 
@@ -5448,11 +5452,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const { ok, data, status } = await mikroPost('GelenFaturalarRedV2', {
         FaturaGuid: faturaGuid,
         Aciklama:   aciklama || 'Fatura reddedildi.',
-      });
+      }, false, MIKRO_YAZIM_SECENEGI);
       const envelope = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0       = envelope?.[0] as Record<string, unknown> | undefined;
       const isOk     = ok && !!r0 && !r0.IsError; // r0 YOKSA basari DEGIL: result anahtarsiz 200 (stub/"Api Server Error") eskiden basari sayiliyordu (C13)
-      const errorMsg = isOk ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+      const errorMsg = isOk ? null : yazimHataMetni(ok, status, data);   // stub → «OLABİLİR» iletisi (K0a)
 
       await C.writeSyncLog('GelenFaturalarRedV2', 'gelenFatura', faturaGuid, isOk, faturaGuid, errorMsg, Date.now() - t0, C.reqActor(req));
 
@@ -5594,7 +5598,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // inMikro: V17 evrak kalıbı — payload (evraklar) Mikro objesi İÇİNDE gider.
       let yanit: Awaited<ReturnType<typeof mikroPost>>;
       try {
-        yanit = await mikroPost('FaturaKaydetV2', { evraklar: [evrak] }, true, { stubYenidenDeneme: false });
+        yanit = await mikroPost('FaturaKaydetV2', { evraklar: [evrak] }, true, MIKRO_YAZIM_SECENEGI);
       } catch (err) {
         const duration = Date.now() - t0;
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -5839,7 +5843,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       });
 
       // inMikro: V17 evrak kalıbı — payload (evraklar) Mikro objesi İÇİNDE gider.
-      const { ok, data, status } = await mikroPost('IrsaliyeKaydetV2', { evraklar: [evrak] }, true);
+      const { ok, data, status } = await mikroPost('IrsaliyeKaydetV2', { evraklar: [evrak] }, true, MIKRO_YAZIM_SECENEGI);
       const duration      = Date.now() - t0;
       const envelope      = (data as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
       const r0            = envelope?.[0] as Record<string, unknown> | undefined;
@@ -5850,7 +5854,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // yazılmıyor ve rozet kalıcı "gönderildi — numara gelmedi" diyordu (2026-09-19 kapanış).
       const irsaliyeNo    = belgeNoMetni(md?.irsaliyeNo, md?.IrsaliyeNo, md?.evrakNo, md?.EvrakNo, md?.id);
       const irsaliyeEttn  = belgeNoMetni(md?.ettn, md?.Ettn, md?.uuid);
-      const errorMsg      = success ? null : ((r0?.ErrorMessage || `HTTP ${status}`) as string);
+      const errorMsg      = success ? null : yazimHataMetni(ok, status, data);   // stub → «OLABİLİR» iletisi (K0a)
 
       await C.writeSyncLog('IrsaliyeKaydetV2', 'shipment', firebaseId || 'unknown', success, irsaliyeNo, errorMsg, duration, C.reqActor(req));
       if (success) void mirrorMikroInsert('mikro_stok_hareketleri',

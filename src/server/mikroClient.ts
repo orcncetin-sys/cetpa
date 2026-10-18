@@ -17,6 +17,8 @@
 import type { AdminDbLike } from './adminDbTypes.js';
 import { createHash } from 'crypto';
 import { jumpSurumOku } from './mikro/jumpSurum.js';
+// Stub tanımı TEK yerde (yaprak modül; şartname yeniden-deneme v3 K0a): yazan rotaların hata iletisi de aynı işlevi çağırır.
+import { mikroStubMu } from './mikro/yazimSecenegi.js';
 
 export interface MikroDeps {
   /** `settings/mikro` dokumanini okumak icin. server.ts'te SONRADAN atanan bir
@@ -425,8 +427,9 @@ export function mikroLikeKacisi(metin: string): string {
 /** mikroPost/mikroSql seçeneği. `zamanAsimiMs`: bu çağrıya ÖZEL `AbortSignal.timeout` (ms).
  *  `stubYenidenDeneme` (2026-10-17, şartname «e-Fatura çift kesim» D2): `result` anahtarsız 200 (stub) yanıtında belirteci
  *  tazeleyip AYNI gövdeyi İKİNCİ kez gönderme davranışı. Varsayılan `true` = bugünkü davranış (okuyan uçlar için zararsız).
- *  RESMÎ BELGE YAZAN çağrı `false` geçer: stub «Mikro isteği aldı mı» sorusunu yanıtlamaz — ikinci gönderim ikinci resmî
- *  belge olabilir; stub sonuç BİLİNMİYOR sayılır (`FaturaKaydetV2`, mikroRoutes). */
+ *  Mikro'ya YAZAN her çağrı `false` geçer — ortak sabit `MIKRO_YAZIM_SECENEGI` (src/server/mikro/yazimSecenegi.ts; 2026-10-18,
+ *  şartname yeniden-deneme v3 K0a): stub «Mikro isteği aldı mı» sorusunu yanıtlamaz — ikinci gönderim ikinci kayıt (resmî belge
+ *  dâhil) olabilir; stub sonuç BİLİNMİYOR sayılır. */
 export interface MikroPostSecenek { zamanAsimiMs?: number; stubYenidenDeneme?: boolean }
 
 /**
@@ -650,13 +653,12 @@ export async function mikroPost(
   // ({"Method": "..."}). Bu durumda cache'i boşalt, taze token ile bir kez dene.
   // ANCAK: taze token da stub alırsa sorun Mikro tarafındadır (kilit/bakım) —
   // 5 dk boyunca tekrar token üretme ki kendi kendimize kilidi uzatmayalım.
-  const isStub = (d: unknown) =>
-    !!d && typeof d === 'object' && !('result' in (d as Record<string, unknown>));
+  // Stub = `result` anahtarsız nesne gövde (`mikroStubMu`, src/server/mikro/yazimSecenegi.ts — tek tanım).
   // Lokal modda token yok → yenilemenin anlamı yok (stub başka sebepten gelir).
   // `stubYenidenDeneme: false` (resmî belge yazan çağrı, D2): AYNI gövde ikinci kez GÖNDERİLMEZ — stub çağırana döner. Belirteç
   // önbelleği YİNE silinir ve 5 dk damgası YİNE yazılır (inceleme 1, İ1-1): stub'ın olası nedeni geçersizleşmiş belirteçtir;
   // silinmezse sonraki her çağrı (sonraki fatura dâhil) aynı bayat belirteçle stub almaya devam ederdi. Yalnız tekrar atlanır.
-  if (result.ok && isStub(result.data) && !MIKRO_LOCAL_MODE) {
+  if (result.ok && mikroStubMu(result.data) && !MIKRO_LOCAL_MODE) {
     const cacheKey = `${creds.idmEmail}|${creds.alias}`;
     const lastRefresh = mikroStubRefreshAt.get(cacheKey) ?? 0;
     if (Date.now() - lastRefresh > 5 * 60 * 1000) {

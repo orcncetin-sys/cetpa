@@ -21,6 +21,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
 import { mikroPost, mikroVergiOranlari } from '../mikroClient.js';
 import { mirrorMikroInsert } from '../mikroMirror.js';
+// Yazan çağrının 4. argümanı (şartname yeniden-deneme v3 K0a): stub yanıtında ikinci gönderim yok — bilerek değişen çit.
+import { MIKRO_YAZIM_SECENEGI } from '../mikro/yazimSecenegi.js';
 
 // ── mikroMockTarifi (mikroRoutes.testDuzenegi.ts) — vitest hoisting yüzünden BURADA olmalı
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
@@ -177,7 +179,7 @@ describe('POST /api/mikro/siparis/kaydet — bilinen sipariş: eski gövdeyle B�
 
     expect(res.kod).toBe(200);
     expect(mikroPost).toHaveBeenCalledTimes(1);
-    expect(mikroPost).toHaveBeenCalledWith('SiparisKaydetV2', { evraklar: [{ satirlar: [SATIR_1, SATIR_2] }] }, true);
+    expect(mikroPost).toHaveBeenCalledWith('SiparisKaydetV2', { evraklar: [{ satirlar: [SATIR_1, SATIR_2] }] }, true, MIKRO_YAZIM_SECENEGI);
     expect(res.govde).toMatchObject({ success: true, mikroEvrakNo: 'T000123' });
     expect(d.koleksiyon('orders')).toEqual([
       { op: 'update', ref: { id: 'ord1', coll: 'orders' }, data: { mikroEvrakNo: 'T000123', mikroSynced: true, mikroSyncedAt: 'TS' } },

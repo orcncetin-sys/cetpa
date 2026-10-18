@@ -25,6 +25,8 @@ import { join } from 'path';
 import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
 import { mikroRoutes } from './mikroRoutes.js';
 import { mikroPost, mikroSql } from '../mikroClient.js';
+// Yazan çağrının 4. argümanı (şartname yeniden-deneme v3 K0a): stub yanıtında ikinci gönderim yok — bilerek değişen çit.
+import { MIKRO_YAZIM_SECENEGI } from '../mikro/yazimSecenegi.js';
 import {
   ADMIN_ONLY_COLLECTIONS, APP_ROLES, EXTERNAL_ROLES, STAFF_ROLES, hasExplicitRule, isAllowed, type AppRole, type DbOp,
 } from '../../lib/rbac.js';
@@ -541,7 +543,7 @@ describe('kaynak çiti — mikroRoutes.ts\'teki her kayıt rol kapısı taşır 
       'return icRol ? C.requireStaff(req, res, kuralKapisi) : kuralKapisi();',
       'const method = evrakYontemi(req.body);',
       'if (!MIKRO_EVRAK_KAPILARI.has(method)) {',
-      'const { ok, data, status } = await mikroPost(method, payload, true);',
+      'const yanit = await mikroPost(method, payload, true, MIKRO_YAZIM_SECENEGI);',
     ];
     for (const satir of TEK) expect(adet(mikroSatir, satir), satir).toBe(1);
     // K1: arama metni kapıya GİRMEZ — ayıklayıcının tek çağıranı işleyicidir (kapı sabit `leads` yazma; Ç3 / Ç4 rota satırını kilitler).
@@ -1249,6 +1251,6 @@ describe('evrak/kaydet işleyicisi — beyaz liste tabloyla aynı (kapıdan geç
     expect(mikroPost).not.toHaveBeenCalled();
     const r = await duz.cagir('POST', `${P}/evrak/kaydet`, { method: 'ZiyaretKaydetV2', payload: { a: 1 } });
     expect(r.kod).toBe(200);
-    expect(mikroPost).toHaveBeenCalledWith('ZiyaretKaydetV2', { a: 1 }, true);
+    expect(mikroPost).toHaveBeenCalledWith('ZiyaretKaydetV2', { a: 1 }, true, MIKRO_YAZIM_SECENEGI);
   });
 });

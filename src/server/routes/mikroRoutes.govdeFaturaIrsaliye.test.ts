@@ -25,6 +25,8 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { duzenekKur, pgliteDocs, type Duzenek, type PgliteDocs } from './mikroRoutes.testDuzenegi';
 import { mikroPost, mikroVergiOranlari } from '../mikroClient.js';
 import { mirrorMikroInsert } from '../mikroMirror.js';
+// Yazan çağrının 4. argümanı (şartname yeniden-deneme v3 K0a): stub yanıtında ikinci gönderim yok — bilerek değişen çit.
+import { MIKRO_YAZIM_SECENEGI } from '../mikro/yazimSecenegi.js';
 
 // ── mikroMockTarifi (mikroRoutes.testDuzenegi.ts) — vitest hoisting yüzünden BURADA olmalı
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
@@ -365,7 +367,7 @@ describe('POST /api/mikro/irsaliye/kaydet — bilinen sevkiyat: eski gövdeyle B
     expect(mikroPost).toHaveBeenCalledTimes(1);
     // Bu iddia AYNI ZAMANDA şema kapısını kilitler: IrsaliyeKaydetSchema'dan
     // `depoNo`/`kdvOran` düşerse zod onları kırpar ve bu çağrı hiç yapılmaz (400).
-    expect(mikroPost).toHaveBeenCalledWith('IrsaliyeKaydetV2', { evraklar: [EVRAK] }, true);
+    expect(mikroPost).toHaveBeenCalledWith('IrsaliyeKaydetV2', { evraklar: [EVRAK] }, true, MIKRO_YAZIM_SECENEGI);
     expect(res.govde).toMatchObject({ success: true, irsaliyeNo: 'IRS-000777', irsaliyeEttn: 'E-2222' });
   });
 

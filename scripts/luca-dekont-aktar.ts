@@ -34,6 +34,8 @@ import dotenv from 'dotenv';
 import { initMikroClient, getMikroCreds, mikroPost, mikroSql, MIKRO_API_BASE } from '../src/server/mikroClient.js';
 import { cariHareketGovdesi } from '../src/server/mikro/govdeMuhasebe.js';
 import { mikroGovdeHatasiMi } from '../src/server/mikro/govdeHatasi.js';
+// Yazan çağrının ortak seçeneği: stub yanıtında AYNI dekont İKİNCİ kez gönderilmez (şartname yeniden-deneme v3 K0a / H4).
+import { MIKRO_YAZIM_SECENEGI, yazimHataMetni } from '../src/server/mikro/yazimSecenegi.js';
 
 dotenv.config();
 // mikroClient yalnız env kimlik bilgileri EKSİKSE adminDb'ye düşer. Betikte adminDb yok:
@@ -567,12 +569,12 @@ async function main(): Promise<void> {
     const t0 = Date.now();
     let ok = false, hataMsg: string | null = null, ham: unknown = null;
     try {
-      const { ok: httpOk, data, status } = await mikroPost('DekontKaydetV2', g.payload, true);
+      const { ok: httpOk, data, status } = await mikroPost('DekontKaydetV2', g.payload, true, MIKRO_YAZIM_SECENEGI);
       ham = data;
       const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
       // r0 YOKSA başarı DEĞİL: anahtarsız 200 (stub / "Api Server Error") başarı sayılmaz.
       ok = httpOk && !!r0 && !r0.IsError;
-      hataMsg = ok ? null : ((r0?.ErrorMessage as string) || `HTTP ${status}`);
+      hataMsg = ok ? null : yazimHataMetni(httpOk, status, data);   // stub → «OLABİLİR» iletisi
     } catch (e) {
       // Ağ hatası BELİRSİZDİR: kayıt Mikro'da oluşmuş olabilir. Otomatik tekrar YOK.
       hataMsg = `[BELİRSİZ-AĞ] ${e instanceof Error ? e.message : String(e)}`;
