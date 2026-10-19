@@ -6,7 +6,9 @@
  * incelemesi, KRİTİK). Firestore semantiği: update var olmayan dokümanda yazmaz. `set` ise oluşturur.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { PgDocRef, dbEvents, broadcastDocChange } from './pgShim';
+import { PgDocRef, dbEvents, broadcastDocChange, genDocId } from './pgShim';
+import { join } from 'node:path';
+import { SRC_KOK, kodSatirlari } from '../test/kaynakTarama';
 
 function sahtePool(mevcut: Record<string, Record<string, unknown>>) {
   const sorgular: Array<{ sql: string; params: unknown[] }> = [];
@@ -102,5 +104,25 @@ describe('broadcastDocChange — satır sahibi etiketi (orders.assignedTo)', () 
       broadcastDocChange('leads', 'set', 'l1', { companyId: 'A', assignedTo: 'u1' });
     });
     for (const e of o) expect(e).not.toHaveProperty('satirSahibi');
+  });
+});
+
+describe('genDocId — kriptografik üreteç (2026-10-19, şartname «takip kodu + LUCA reddi» TD)', () => {
+  it('biçim ve uzunluk aynı (20 karakter, base62); iki çağrı farklı; 2.000 kimlikte tekrar yok', () => {
+    for (let i = 0; i < 200; i++) expect(genDocId()).toMatch(/^[A-Za-z0-9]{20}$/);
+    expect(genDocId()).not.toBe(genDocId());
+    expect(new Set(Array.from({ length: 2000 }, () => genDocId())).size).toBe(2000);
+  });
+
+  it('kaynak çiti: gövdede `Math.random` YOK, `crypto.randomInt` var (eski yolun tek sırrı tahmin edilebilir üreteçle kurulmaz)', () => {
+    const kod = kodSatirlari(join(SRC_KOK, 'server', 'pgShim.ts')).map(s => s.kod);
+    const bas = kod.findIndex(k => /^export function genDocId\(\): string \{$/.test(k));
+    expect(bas).toBeGreaterThan(-1);
+    const son = kod.findIndex((k, i) => i > bas && /^\}$/.test(k));
+    const govde = kod.slice(bas, son + 1).join('\n');
+    expect(govde).not.toMatch(/Math\.random/);
+    expect(govde).toMatch(/DOC_ID_CHARS\[randomInt\(DOC_ID_CHARS\.length\)\]/);
+    expect(kod).toContain("import { randomInt } from 'node:crypto';");
+    expect(kod.join('\n')).not.toMatch(/Math\.random/);
   });
 });

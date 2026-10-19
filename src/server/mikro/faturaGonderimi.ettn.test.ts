@@ -217,7 +217,7 @@ describe('VAKA TABLOSU — «ETTN ekle» kapısının «geçerli ETTN var mı» 
       const isaret = { durum: 'gonderildi', istekNo: 'i', zaman: '2026-10-19T09:00:00.000Z', kim: 'k' };
       const r = ettnEkleRetKarari({
         data: { ettn: v.girdi, [FATURA_GONDERIM_ALANI]: isaret }, bayat: false, kaynak: '', noDolu: false,
-        ettnDolu: v.girdi.trim() !== '', faturasiz: false, noMetin: null, ettnMetin: v.girdi,
+        ettnDolu: v.girdi.trim() !== '', faturasiz: false, lucaGonderildi: false, noMetin: null, ettnMetin: v.girdi,
       });
       if (v.anahtar === '') expect(r).toBeNull();
       else expect([r?.durum, r?.govde.kod]).toEqual([409, 'FATURA_ETTN_VAR']);

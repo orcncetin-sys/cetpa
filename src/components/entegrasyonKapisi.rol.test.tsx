@@ -6,7 +6,8 @@
  * geçen rolde düğme çizilir ve tıklama KENDİ ucuna gider. Her yüzey 12 rolün tamamıyla ortak tabloya karşı sınanır —
  * bileşende kopya rol listesi kalırsa ya da çizim koşulu kalkarsa kırılır.
  *
- * Yüzeyler: Satış Ajanı (Y2), Satın Alma Ajanı (Y3), SKU eşleştirme (S3), LUCA paneli (L4 / L5), Stok ekranı otomatik SAS (A1).
+ * Yüzeyler: Satış Ajanı (Y2), Satın Alma Ajanı (Y3), SKU eşleştirme (S3), LUCA paneli (L4; L5 «Fatura Gönder» kartı 2026-10-19'da
+ * kalktı — LA), Stok ekranı otomatik SAS (A1).
  * e-Belge Merkezi (L1 / L2) `EBelgeMerkezi.rol.test.tsx`'te, B2B Portalı (S1 / S2) `B2BPortal.test.tsx`'te.
  *
  * Bileşenler GERÇEKTEN çizilir; rol gerçek depodan, kapı gerçek ortak tablodan. Yalnız ağ (`authFetch`), veri katmanı
@@ -51,7 +52,6 @@ beforeEach(() => {
     if (url === '/api/sku-mapping/auto-match') return json({ success: true, matched: 3, unmatched: 1, shopifyVariants: 4 });
     if (url === '/api/luca/status') return json({ configured: false, connected: false });
     if (url === '/api/luca/sync/stok') return json({ success: true, total: 4, created: 1, updated: 2, yabanci: 1, duration: 12 });
-    if (url === '/api/luca/sync/fatura') return json({ success: true, lucaFaturaNo: 'LF-1', duration: 9 });
     if (url === '/api/inventory/auto-reorder') return json({ success: true, created: 1, lowStockCount: 1, message: '1 taslak SAS oluşturuldu.' });
     return json({ success: false, error: `beklenmeyen istek ${url}` }, false);
   });
@@ -151,7 +151,7 @@ describe('S3 — SKU eşleştirme «Otomatik Eşleştir» (`POST /api/sku-mappin
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-describe('L4 / L5 — LUCA paneli: fatura gönder (`invoices` yazma) ve stok çek (`inventory` yazma) kartları', () => {
+describe('L4 — LUCA paneli: stok çek (`inventory` yazma); L5 «Fatura Gönder» kartı KALKTI (2026-10-19, LA)', () => {
   const ciz = (rol: UserRole) => {
     useAppStore.setState({ userRole: rol });
     return render(<LucaSyncPanel currentLanguage="tr" />);
@@ -159,16 +159,16 @@ describe('L4 / L5 — LUCA paneli: fatura gönder (`invoices` yazma) ve stok çe
   const FATURA = 'Fatura Gönder (Luca)';
   const STOK = 'Stok Çek (Luca → Firebase)';
 
-  it('Satış (iki kapıdan da geçemez): iki kart da ÇİZİLMEZ; yalnız durum ucu (kapısı değişmedi) sorulur', async () => {
+  it('Satış (stok kapısından geçemez): kart ÇİZİLMEZ; yalnız durum ucu (kapısı değişmedi) sorulur', async () => {
     ciz(UserRole.Sales);
     await waitFor(() => expect(istekler('/api/luca/status')).toHaveLength(1));
     expect(screen.queryByText(FATURA)).toBeNull();
     expect(screen.queryByText(STOK)).toBeNull();
     expect(authFetch.mock.calls.map(c => c[0]).filter(u => u !== '/api/luca/status')).toEqual([]);
   });
-  it('Müdür (iki kapıdan da geçer — Ayarlar sekmesi): stok kartı KENDİ ucuna gider; sonuç gerçek alanlardan, atlanan yabancı kart sayısıyla', async () => {
+  it('Müdür (Ayarlar sekmesi): stok kartı KENDİ ucuna gider; sonuç gerçek alanlardan, atlanan yabancı kart sayısıyla; fatura kartı YOK', async () => {
     ciz(UserRole.Manager);
-    expect(screen.getByText(FATURA)).toBeTruthy();
+    expect(screen.queryByText(FATURA)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Çalıştır' }));
     expect(await screen.findByText(/✓ 1 yeni, 2 güncellendi, 1 kart başka firmaya ait olduğu için atlandı/)).toBeTruthy();
     expect(istekler('/api/luca/sync/stok')).toHaveLength(1);
@@ -183,18 +183,17 @@ describe('L4 / L5 — LUCA paneli: fatura gönder (`invoices` yazma) ve stok çe
     expect(await screen.findByText('✓ — yeni, — güncellendi (7ms)')).toBeTruthy();
     expect(screen.queryByText(/başka firmaya ait/)).toBeNull();
   });
-  it('12 rolün HEPSİ: fatura kartı ⇔ `POST /api/luca/sync/fatura`, stok kartı ⇔ `POST /api/luca/sync/stok`', () => {
+  it('12 rolün HEPSİ: fatura kartı HİÇBİR rolde yok, sipariş kimliği girdisi yok ve `POST /api/luca/sync/fatura`\'ya istek atılmaz; stok kartı ⇔ `POST /api/luca/sync/stok`', () => {
     for (const rol of TUM_ROLLER) {
       const { unmount } = ciz(rol);
-      expect(screen.queryByText(FATURA) !== null, `fatura × ${rol}`).toBe(entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/sync/fatura'));
+      expect(screen.queryByText(FATURA), `fatura × ${rol}`).toBeNull();
+      expect(screen.queryByPlaceholderText('Sipariş ID…'), `girdi × ${rol}`).toBeNull();
       expect(screen.queryByText(STOK) !== null, `stok × ${rol}`).toBe(entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/sync/stok'));
       unmount();
     }
-    // Panel Ayarlar sekmesinde (Yönetici + Müdür): ikisi de iki kapıdan geçer — arayüzde kilit yok (K5).
-    for (const rol of [UserRole.Admin, UserRole.Manager]) {
-      expect(entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/sync/fatura')).toBe(true);
-      expect(entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/sync/stok')).toBe(true);
-    }
+    expect(istekler('/api/luca/sync/fatura')).toEqual([]);
+    // Panel Ayarlar sekmesinde (Yönetici + Müdür): ikisi de stok kapısından geçer — arayüzde kilit yok (K5).
+    for (const rol of [UserRole.Admin, UserRole.Manager]) expect(entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/sync/stok')).toBe(true);
   });
 });
 

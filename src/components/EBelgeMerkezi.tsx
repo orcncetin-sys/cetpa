@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { confirmDelete, confirmAction } from '../lib/confirm';
+import { confirmDelete } from '../lib/confirm';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   FileText, Send, AlertTriangle, Clock, Plus, X, RefreshCw,
   CheckCircle, XCircle, Wifi, Search, Trash2, ChevronDown, Download, Inbox, Upload, FileCode,
-  MapPin, PieChart, FileUp,
+  MapPin, PieChart,
 } from 'lucide-react';
 import { db } from '../firebase';
 import { authFetch } from '../services/authFetch';
@@ -25,7 +25,6 @@ import { entegrasyonUcKapisindanGecer } from '../lib/entegrasyonUcKapilari';
 
 interface VknSonuc { durum?: string; vknTckn?: string; unvan?: string; vergiDairesi?: string; il?: string; }
 interface LucaKontor { remaining?: number; limit?: number; used?: number; }
-interface NativeInvoice { id: string; faturaNo?: string; date?: string; customerName?: string; taxId?: string; totalPrice?: number; status?: string; faturaTipi?: string; }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -165,37 +164,25 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
   // K7 / H1: indirme kapısı İKİ YÖNDE de aynı — belgenin yönü koşula girmez.
   const pdfIndirebilir = ucKapisindanGecer(rol, 'POST /api/mikro/ebelge/pdf');
   const xmlIndirebilir = ucKapisindanGecer(rol, 'POST /api/mikro/ebelge/xml');
-  // LUCA uçları (2026-10-17, iç rol daraltma L1 / L2): kontör kartı `eBelgeler` okuma, «e-Fatura Gönder» `invoices` yazma —
-  // kapı entegrasyon tablosundan. Geçemeyen rolde kart / düğme ÇİZİLMEZ ve istek HİÇ atılmaz.
+  // LUCA kontör kartı (2026-10-17, iç rol daraltma L1): `eBelgeler` okuma — kapı entegrasyon tablosundan. Geçemeyen rolde kart
+  // ÇİZİLMEZ ve istek HİÇ atılmaz.
   const kontorOkuyabilir = entegrasyonUcKapisindanGecer(rol, 'GET /api/luca/kontor');
-  const eFaturaGonderebilir = entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/fatura-gonder');
 
-  // ── VKN Sorgulama + Luca Kontör + Gönderim Bekleyen Faturalar (2026-08-13) ──
+  // ── VKN Sorgulama + Luca Kontör (2026-08-13) ──
   // Muhasebe'deki eski "e-Fatura" sekmesinden buraya taşındı — iki ayrı ekran
   // aynı "e-Fatura" işini gösteriyordu (kullanıcı bulgusu, kafa karıştırıcı).
-  // Bu bölüm Luca entegrasyonu (VKN sorgu + kontör) ve native `invoices`
-  // koleksiyonundan e-Fatura gönderimini kapsar — GİB/Mikro belge takibinden
-  // (yukarısı) AYRI bir kaynak, o yüzden ayrı bölüm olarak kaldı, silinmedi.
+  // Bu bölüm Luca entegrasyonunu (VKN sorgu + kontör) kapsar — GİB/Mikro belge takibinden (yukarısı) AYRI bir kaynak.
+  // «Gönderim Bekleyen Faturalar» kartı ve «e-Fatura Gönder» düğmesi KALKTI (2026-10-19, şartname «takip kodu + LUCA reddi» LA):
+  // `invoices` kaydı LUCA e-Fatura'ya AYNEN gidiyordu (kayıt Mikro'yla bağsız, kiracı / tekrar denetimi yok); fatura artık yalnız
+  // Mikro'dan kesilir ve LUCA'ya Mikro'dan aktarılır, sunucu ucu 400 döner. Kartın düğmeden başka işi yoktu (ölçüldü): «gönderim
+  // bekleyen» listesi gönderim yolu kalmayınca yanıltıcı olurdu, `invoices` dinleyicisi de yalnız bu kart içindi.
   const [vknSearch, setVknSearch] = useState('');
   const [vknResult, setVknResult] = useState<VknSonuc | null>(null);
   const [vknLoading, setVknLoading] = useState(false);
   const [lucaKontor, setLucaKontor] = useState<LucaKontor | null>(null);
   const [lucaNotConfigured, setLucaNotConfigured] = useState(false);
-  const [sendingInvoiceId, setSendingInvoiceId] = useState<string | null>(null);
-  const [invoices, setInvoices] = useState<NativeInvoice[]>([]);
   const [lucaApiKey, setLucaApiKey] = useState('');
   const [lucaCompanyId, setLucaCompanyId] = useState('');
-
-  useEffect(() => {
-    // Kasıtlı olarak isAuthenticated (=hasFullAccess('ebelge')) ile kapatılmadı —
-    // orijinali (AccountingModule'deki eski e-Fatura sekmesi) koşulsuzdu, salt-okunur
-    // kullanıcılar da bekleyen fatura listesini görebiliyordu (2026-08-13 code review
-    // bulgusu: taşırken yanlışlıkla kısıtlanmıştı).
-    const unsub = onSnapshot(query(collection(db, 'invoices')), snap => {
-      setInvoices(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<NativeInvoice, 'id'>) })));
-    });
-    return unsub;
-  }, [isAuthenticated]);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'settings', 'luca'), snap => {
@@ -238,43 +225,6 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
       showToast('Sorgulama hatası', 'error');
     } finally {
       setVknLoading(false);
-    }
-  };
-
-  const handleeFaturaGonder = async (invId: string) => {
-    if (!eFaturaGonderebilir) return;   // düğme bu rolde çizilmez; çağrı da yapılmaz (İ3)
-    const inv = invoices.find(i => i.id === invId);
-    if (!inv) return;
-    const ok = await confirmAction({
-      title: 'e-Fatura Gönder',
-      message: `${inv.faturaNo} numaralı fatura Luca üzerinden e-Fatura olarak gönderilecektir. Devam etmek istiyor musunuz?`,
-      confirmLabel: 'Gönder',
-    });
-    if (!ok) return;
-    setSendingInvoiceId(invId);
-    try {
-      const res = await authFetch('/api/luca/fatura-gonder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoiceId: invId, invoiceData: inv }),
-      });
-      const data = await res.json();
-      if (data.success && data.ettn) {
-        showToast(data.message, 'success');
-        await updateDoc(doc(db, 'invoices', invId), {
-          status: 'e-Fatura Gönderildi',
-          ettn: data.ettn,
-          eFaturaGonderimTarihi: new Date().toISOString(),
-        });
-      } else if (data.notConfigured) {
-        showToast('LUCA_API_KEY yapılandırılmamış. e-Fatura gönderilemedi.', 'error');
-      } else {
-        showToast(data.error || 'Gönderim başarısız', 'error');
-      }
-    } catch {
-      showToast('Gönderim hatası', 'error');
-    } finally {
-      setSendingInvoiceId(null);
     }
   };
 
@@ -531,7 +481,7 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
         </button>
       )}
 
-      {/* ── VKN Sorgulama + Luca Kontör + Gönderim Bekleyen Faturalar ──
+      {/* ── VKN Sorgulama + Luca Kontör ──
           (2026-08-13, Muhasebe'nin eski "e-Fatura" sekmesinden taşındı) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="apple-card p-5">
@@ -594,45 +544,6 @@ export default function EBelgeMerkezi({ isAuthenticated, onGoToFaturalar, leads 
         </div>
         )}
       </div>
-
-      {invoices.filter(i => i.status === 'Kesildi' && i.faturaTipi === 'e-fatura').length > 0 && (
-        <div className="apple-card overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-            <div className="flex items-center gap-2"><FileUp size={18} className="text-gray-400" /><h3 className="font-bold text-gray-900 text-sm">Gönderim Bekleyen Faturalar</h3></div>
-            <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full uppercase">
-              {invoices.filter(i => i.status === 'Kesildi' && i.faturaTipi === 'e-fatura').length} adet beklemede
-            </span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50/50">
-                  <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase">Tarih / No</th>
-                  <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase">Müşteri</th>
-                  <th className="px-5 py-3 text-left text-[10px] font-bold text-gray-400 uppercase">Tutar</th>
-                  <th className="px-5 py-3 text-right text-[10px] font-bold text-gray-400 uppercase">İşlem</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {invoices.filter(i => i.status === 'Kesildi' && i.faturaTipi === 'e-fatura').map(inv => (
-                  <tr key={inv.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-3 whitespace-nowrap"><div className="font-semibold text-gray-900">{inv.faturaNo}</div><div className="text-xs text-gray-500">{inv.date}</div></td>
-                    <td className="px-5 py-3"><div className="font-medium text-gray-900 truncate max-w-[200px]">{inv.customerName}</div><div className="text-xs text-gray-500 font-mono">{inv.taxId}</div></td>
-                    <td className="px-5 py-3 whitespace-nowrap font-bold text-gray-900">{paraYaz(inv.totalPrice)}</td>
-                    <td className="px-5 py-3 text-right">
-                      {eFaturaGonderebilir && (
-                      <button onClick={() => handleeFaturaGonder(inv.id)} disabled={sendingInvoiceId === inv.id} className="px-3 py-2 rounded-xl bg-blue-50 text-blue-600 font-bold hover:bg-blue-100 transition-colors disabled:opacity-50 text-xs flex items-center gap-1.5 ml-auto">
-                        {sendingInvoiceId === inv.id ? (<><RefreshCw size={14} className="animate-spin" /> Gönderiliyor</>) : (<><FileUp size={14} /> e-Fatura Gönder</>)}
-                      </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {/* Sub-tabs + Actions */}
       <div className="flex items-center justify-between gap-3 flex-wrap">

@@ -60,7 +60,7 @@ import { izinliTaban, genelHttpsTaban, genelAdresMi, TabanAdresHatasi, LUCA_TABA
 import { shopifyRoutes, shopifyIsiIsle } from './src/server/routes/shopifyRoutes.js';
 import { BAGLANTI_KOLEKSIYONU, baglantiKaydi } from './src/server/kanal/shopifyBaglanti.js';
 import { MAGAZA_KAYNAGI } from './src/server/kanal/shopifyEsleme.js';
-import { takipAdresi, teslimatAdresiMetni } from './src/utils/siparisler/teslimatAdresi.js';
+import { takipAdresi } from './src/utils/siparisler/teslimatAdresi.js';
 import pg from "pg";
 // vite is imported dynamically below — only in development, never in production
 import path from "path";
@@ -102,6 +102,8 @@ import {
 import { smtpYapilandirmasi } from "./src/server/smtpPosta.js";
 import { ortamdanKiraci, taramadanKiraci } from "./src/server/kiraciOrtami.js";
 import { DOCS_INDEKS_DDL, DOCS_TABLOSU_DDL } from "./src/server/docsSema.js";
+import { takipKoduMu, eskiTakipYoluAcik, gorunenTakipNo } from './src/lib/takipKodu.js';
+import { takipKoduAlVeyaUret, takipKoduylaSiparis } from './src/server/takipKodu.js';
 
 dotenv.config();
 
@@ -874,6 +876,47 @@ function maskAddress(addr: unknown): string | null {
   return parts.slice(-2).join(', ');
 }
 
+/**
+ * Kimliksiz takip ucunun (`GET /api/track/:orderId`) yanıt gövdesi — TEK işlev (2026-10-19, şartname «takip kodu + LUCA reddi» TC).
+ * Yalnız güvenli alanlar: e-posta, ödeme, iç referans YOK; ad kısaltılır, adres maskelenir. Bağlantı paylaşılabilir / iletilebilir
+ * olduğu için PII asgaridir; tam adres ve e-posta oturum açmış personelde kalır.
+ *   • KOD YOLU (`eskiYolKimligi` yok): yanıtta doküman kimliği HİÇBİR alanda yoktur — `id` alanı yok, `orderNo` siparişin GÖRÜNEN
+ *     numarası (`orderNumber` metni → `shopifyOrderId` → `null`; istemci `null`'da satırı çizmez). MF kimliği
+ *     (`mikrofat__<cid>__<seri>-<sıra>`) kiracıyı ve fatura sırasını verirdi.
+ *   • ESKİ YOL (`eskiYolKimligi` = isteğin kimliği): gövde 2026-10-19 öncesiyle BİREBİR (`id`, `orderNo` kimlikten türer) —
+ *     müşterinin elindeki eski rastgele kimlikli bağlantılar aynı sayfayı görür. Ayrılmış (`__`) kimlik bu yola hiç gelmez.
+ * ADRES (2026-10-10, sipariş penceresinde ülke / il seçimi): kayıt YAPISAL adres taşıyorsa (`teslimatSehri` ya da `teslimatUlke`
+ * dolu) yanıtın adresi YALNIZ il + (yurt dışıysa) ülke adıdır; `shippingAddress` bu dala HİÇ girmez — o kayıtta alan «kalan»dır
+ * (ilçe, mahalle, sokak, kapı no) ve «son iki parça» maskesi sokak düzeyini dışarı verirdi. İl seçilmemiş yurt içi yeni siparişte
+ * `metin` null'dur: takip sayfası adres satırı göstermez (bilerek). Yapısal DEĞİLSE (eski kayıt) maske bugünkü hâliyle çalışır —
+ * yanıt birebir aynı. Karar tek yerde: utils/siparisler/teslimatAdresi `takipAdresi`; çit: src/server/teslimatAdresi.degismez.test.ts.
+ * Kalem `quantity ?? 1` / `price ?? 0`: 2026-10-19 öncesi gövdeden AYNEN taşındı (eski yol birebir kalmalı — TC); takip sayfası
+ * tutar hesaplamaz, yalnız gösterir.
+ */
+function takipYaniti(o: Record<string, unknown>, eskiYolKimligi?: string): Record<string, unknown> {
+  const adres = takipAdresi(o);
+  const kimlikAlanlari = eskiYolKimligi !== undefined
+    ? {
+        id:      eskiYolKimligi,
+        orderNo: (o.shopifyOrderId as string | undefined) ?? eskiYolKimligi.slice(0, 8).toUpperCase(),
+      }
+    : { orderNo: gorunenTakipNo(o) };   // görünen numara — lib/takipKodu (e-posta ucuyla TEK tanım)
+  return {
+    ...kimlikAlanlari,
+    customerName:      maskName(o.customerName as string | undefined),
+    status:            o.status,
+    trackingNumber:    o.trackingNumber ?? null,
+    shippingAddress:   adres.yapisal ? adres.metin : maskAddress(o.shippingAddress),
+    estimatedDelivery: o.estimatedDelivery ?? null,
+    lineItems:         (o.lineItems as unknown[] | undefined)?.map((l: unknown) => {
+      const li = l as Record<string, unknown>;
+      return { name: li.name ?? li.title ?? li.sku, quantity: li.quantity ?? 1, price: li.price ?? 0 };
+    }) ?? [],
+    updatedAt: (o.syncedAt as { toDate?: () => Date } | null)?.toDate?.()?.toISOString() ?? null,
+    createdAt: (o.createdAt as { toDate?: () => Date } | null)?.toDate?.()?.toISOString() ?? null,
+  };
+}
+
 
 
 // ── Çoklu kiracı izolasyonu (companyId / userId kapsamı) ─────────────────────
@@ -1114,6 +1157,20 @@ console.log(pgPool ? 'adminDb → PostgreSQL shim ✓' : 'adminDb → Firestore 
 
 const LUCA_API_URL = process.env.LUCA_API_URL || "https://api.luca.com.tr/v1";
 const LUCA_API_KEY = process.env.LUCA_API_KEY || "";
+/**
+ * CETPA'DAN LUCA'YA FATURA GÖNDERİLMEZ (2026-10-19, şartname «takip kodu + LUCA reddi» LA; kullanıcı: «LUCA'daki her şey aslında
+ * Mikro'da mevcut», «Q serisi LUCA'da yok, olmayacak»). Fatura Mikro'dan kesilir; muhasebeci LUCA'ya Mikro'dan aktarır. İki yol bu
+ * gövdeyle kapanır: `POST /api/luca/sync/fatura` (siparişi LUCA'ya satış faturası olarak yollardı — Mikro faturalı / MF siparişi
+ * de ikinci kez gidebiliyordu, uç idempotent değildi) ve `POST /api/luca/fatura-gonder` (`invoices` gövdesini LUCA e-Fatura'ya
+ * AYNEN iletiyordu — kayıt okunmuyor, kiracı / durum / tekrar denetimi yoktu). Uçlar KAYITLI kalır (eski istemci anlaşılır ileti
+ * alır); kapılar ve 503 «yapılandırılmamış» denetimi önde. LUCA'ya istek GİTMEZ. Geri açılırsa Q kaydı (`faturali === false`)
+ * yine hiçbir yoldan gitmez (Q şartnamesi). Çit: src/server/takipKoduVeLuca.zincir.test.ts («LA»).
+ */
+const LUCA_FATURA_KAPALI = {
+  success: false,
+  kod: 'LUCA_FATURA_KAPALI',
+  error: "Fatura Mikro'dan kesilir ve LUCA'ya Mikro'dan aktarılır; Cetpa'dan LUCA'ya fatura gönderilmez.",
+} as const;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2808,13 +2865,10 @@ async function startServer() {
     }
   });
 
-  // ── Luca e-Fatura Gönderimi ──────────────────────────────────────────────
-  // Rol kapısı (2026-10-17, iç rol daraltma L2): resmî belge muhasebenindir (İ5) — `invoices` yazma. Eskiden yalnız kimlik + MFA:
-  // Lojistik, Kalite, İK dâhil her iç rol LUCA'ya e-Fatura gönderebiliyordu.
-  app.post("/api/luca/fatura-gonder", requireAuth, requireMfaVerified, requireCollectionAccess('invoices', 'write'), async (req: Request, res: Response) => {
-    const { invoiceId, invoiceData } = req.body;
-    console.log(`e-Fatura gönderimi başlatıldı: ${invoiceId}`);
-
+  // ── Luca e-Fatura Gönderimi — KAPALI (2026-10-19, LA: `LUCA_FATURA_KAPALI`) ─────────────────────────────────────────────
+  // Rol kapısı (2026-10-17, iç rol daraltma L2): resmî belge muhasebenindir (İ5) — `invoices` yazma. Kapı ve 503 önde kalır
+  // (entegrasyonUcKapilari.zincir matrisi); ardından her istek 400. Gövde OKUNMAZ, LUCA'ya istek GİTMEZ.
+  app.post("/api/luca/fatura-gonder", requireAuth, requireMfaVerified, requireCollectionAccess('invoices', 'write'), async (_req: Request, res: Response) => {
     if (!LUCA_API_KEY) {
       return res.status(503).json({
         success: false,
@@ -2822,22 +2876,7 @@ async function startServer() {
         error: 'LUCA_API_KEY ortam değişkeni ayarlanmamış. Fatura gönderilemedi.'
       });
     }
-
-    try {
-      const r = await fetch(`${LUCA_API_URL}/einvoice/send`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${LUCA_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoiceId, ...invoiceData })
-      });
-      const data = await r.json();
-      if (!r.ok) return res.status(r.status).json({ success: false, error: data.message || 'Luca fatura gönderim hatası' });
-      // Real Luca response should include ettn field
-      await writeAuditLog(reqActor(req), 'Luca e-Fatura Gönderim', `ETTN: ${data.ettn || data.uuid || data.id}`);
-      res.json({ success: true, message: 'Fatura Luca e-Fatura sistemine iletildi.', ettn: data.ettn || data.uuid || data.id });
-    } catch (err) {
-      console.error('Luca fatura-gonder error:', err);
-      res.status(500).json({ success: false, error: 'Luca API bağlantı hatası' });
-    }
+    res.status(400).json(LUCA_FATURA_KAPALI);
   });
 
   // POST /api/inventory/auto-reorder — scan inventory, create draft POs for low-stock items
@@ -3227,7 +3266,7 @@ async function startServer() {
         { id: 'stripe',      name: 'Stripe',                configured: has('STRIPE_SECRET_KEY'),                    requiredKeys: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'], affects: 'Abonelik ve online ödeme' },
         { id: 'iyzico',      name: 'İyzico',                configured: has('IYZICO_API_KEY', 'IYZICO_SECRET_KEY'),  requiredKeys: ['IYZICO_API_KEY', 'IYZICO_SECRET_KEY'],  affects: 'Ödeme linki oluşturma' },
         { id: 'whatsapp',    name: 'WhatsApp',              configured: has('WHATSAPP_360DIALOG_API_KEY') || has('TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN'), requiredKeys: ['WHATSAPP_360DIALOG_API_KEY (veya Twilio çifti)'], affects: 'Müşteri mesajları ve sipariş bildirimleri' },
-        { id: 'luca',        name: 'Luca Muhasebe',         configured: has('LUCA_API_KEY'),                         requiredKeys: ['LUCA_API_KEY', 'LUCA_COMPANY_ID'],      affects: 'e-Fatura gönderim, yevmiye/stok sync' },
+        { id: 'luca',        name: 'Luca Muhasebe',         configured: has('LUCA_API_KEY'),                         requiredKeys: ['LUCA_API_KEY', 'LUCA_COMPANY_ID'],      affects: 'kontör sorgusu, yevmiye/stok sync (fatura gönderimi kapalı — Mikro)' },
         { id: 'trendyol',    name: 'Trendyol',              configured: has('TRENDYOL_SUPPLIER_ID', 'TRENDYOL_API_KEY', 'TRENDYOL_API_SECRET'), requiredKeys: ['TRENDYOL_SUPPLIER_ID', 'TRENDYOL_API_KEY', 'TRENDYOL_API_SECRET'], affects: 'Pazaryeri sipariş senkronizasyonu' },
         { id: 'hepsiburada', name: 'Hepsiburada',           configured: has('HEPSIBURADA_MERCHANT_ID', 'HEPSIBURADA_USERNAME', 'HEPSIBURADA_PASSWORD'), requiredKeys: ['HEPSIBURADA_MERCHANT_ID', 'HEPSIBURADA_USERNAME', 'HEPSIBURADA_PASSWORD'], affects: 'Pazaryeri sipariş senkronizasyonu' },
         { id: 'dhl',         name: 'DHL Takip',             configured: has('DHL_API_KEY'),                          requiredKeys: ['DHL_API_KEY'],                          affects: 'DHL kargo takibi' },
@@ -3805,54 +3844,62 @@ async function startServer() {
 
 
   // ── Public Order Tracking ──────────────────────────────────────────────────
-  // GET /api/track/:orderId — no auth required
-  // Returns sanitised order data safe to expose to customers
-
+  // GET /api/track/:orderId — kimlik doğrulaması YOK. Parametre: takip kodu YA DA eski rastgele kimlik (2026-10-19, şartname
+  // «takip kodu + LUCA reddi» TC; rota adı çitler için `:orderId` kalır). Tek sır parametrenin kendisidir:
+  //   (1) `TAKIP_KODU_BICIMI`'ne uyuyorsa kodla TEK SQL (server/takipKodu — pgShim `where` koleksiyonu belleğe çekerdi; havuz
+  //       yoksa bu yol atlanır). Kod küresel tekil, ~131 bit, yalnız sunucu yazar;
+  //   (2) bulunamadıysa ve parametre `__` İÇERMİYORSA eski yol: doküman kimliğiyle okuma (müşterinin elindeki eski bağlantılar);
+  //   (3) `__` içeren kimlik (`mikrofat__<cid>__…`, `shopify__…` — sunucu üretir, MF'ninki tahmin edilebilir) → 404, «yok» ile AYNI
+  //       yanıt (varlık sızmaz). Biçime uymayan parametre kod olarak veritabanına SORULMAZ.
+  // Hız sınırı `trackLimiter` (IP başına). Yanıt gövdesi tek işlevde: `takipYaniti`.
   app.get('/api/track/:orderId', trackLimiter, async (req: Request, res: Response) => {
     if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
-    const orderId = req.params['orderId'] as string;
+    const orderId = req.params['orderId'] as string;   // takip kodu YA DA eski rastgele kimlik
     try {
-      const snap = await adminDb.collection('orders').doc(orderId).get();
-      if (!snap.exists) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
-      const o = snap.data() as Record<string, unknown>;
-      // Çevrim içi mağaza siparişi bu KİMLİKSİZ uçtan gösterilmez: takip bağlantısını Shopify kendi yollar; doküman kimliği
-      // tahmin edilemez kurulsa da (shopifyEsleme) uç hiç yanıt vermez — 'bulunamadı' ile aynı yanıt, varlık sızmaz.
+      let o: Record<string, unknown> | undefined;
+      let eskiYolKimligi: string | undefined;
+      const kodla = pgPool && takipKoduMu(orderId) ? await takipKoduylaSiparis(pgPool, orderId) : null;
+      if (kodla) o = kodla.data;
+      else if (eskiTakipYoluAcik(orderId)) {
+        const snap = await adminDb.collection('orders').doc(orderId).get();
+        if (snap.exists) { o = snap.data() as Record<string, unknown>; eskiYolKimligi = orderId; }
+      }
+      if (!o) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+      // Çevrim içi mağaza siparişi bu KİMLİKSİZ uçtan İKİ YOLDA da gösterilmez: takip bağlantısını Shopify kendi yollar; doküman
+      // kimliği tahmin edilemez kurulsa da (shopifyEsleme) uç hiç yanıt vermez — 'bulunamadı' ile aynı yanıt, varlık sızmaz.
       if (o.source === MAGAZA_KAYNAGI) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
-      // Return only safe fields — no email, payment info, or internal refs.
-      // Kimlik doğrulaması YOK: tek sır sipariş id'sinin kendisi (genDocId, 20
-      // karakter × 62'lik alfabe ≈ 119 bit — sayımla bulunamaz). Ama bağlantı
-      // paylaşılabilir/iletilebilir olduğu için PII asgariye indirilir: ad
-      // kısaltılır, adresin yalnız ilçe/il kuyruğu gösterilir. Tam adres ve
-      // e-posta oturum açmış personelde kalır.
-      // ADRES (2026-10-10, sipariş penceresinde ülke / il seçimi): kayıt YAPISAL adres taşıyorsa (`teslimatSehri` ya da
-      // `teslimatUlke` dolu) yanıtın adresi YALNIZ il + (yurt dışıysa) ülke adıdır; `shippingAddress` bu dala HİÇ girmez —
-      // o kayıtta alan «kalan»dır (ilçe, mahalle, sokak, kapı no) ve «son iki parça» maskesi sokak düzeyini dışarı verirdi.
-      // İl seçilmemiş yurt içi yeni siparişte `metin` null'dur: takip sayfası adres satırı göstermez (bilerek).
-      // Yapısal DEĞİLSE (eski kayıt) maske bugünkü hâliyle çalışır — yanıt birebir aynı. Karar tek yerde:
-      // utils/siparisler/teslimatAdresi `takipAdresi`; çit: src/server/teslimatAdresi.degismez.test.ts.
-      const adres = takipAdresi(o);
-      res.json({
-        success: true,
-        order: {
-          id:                orderId,
-          orderNo:           (o.shopifyOrderId as string | undefined) ?? orderId.slice(0, 8).toUpperCase(),
-          customerName:      maskName(o.customerName as string | undefined),
-          status:            o.status,
-          trackingNumber:    o.trackingNumber ?? null,
-          shippingAddress:   adres.yapisal ? adres.metin : maskAddress(o.shippingAddress),
-          estimatedDelivery: o.estimatedDelivery ?? null,
-          lineItems:         (o.lineItems as unknown[] | undefined)?.map((l: unknown) => {
-            const li = l as Record<string, unknown>;
-            return { name: li.name ?? li.title ?? li.sku, quantity: li.quantity ?? 1, price: li.price ?? 0 };
-          }) ?? [],
-          updatedAt: (o.syncedAt as { toDate?: () => Date } | null)?.toDate?.()?.toISOString() ?? null,
-          createdAt: (o.createdAt as { toDate?: () => Date } | null)?.toDate?.()?.toISOString() ?? null,
-        },
-      });
+      res.json({ success: true, order: takipYaniti(o, eskiYolKimligi) });
     } catch (e) {
       // Kimliksiz uç — ham hata metni (SQL/şema ipuçları) dışarı verilmez.
       console.error('[/api/track]', e instanceof Error ? e.message : String(e));
       res.status(500).json({ success: false, error: 'Sipariş bilgisi alınamadı.' });
+    }
+  });
+
+  // ── Takip kodu alma (2026-10-19, şartname «takip kodu + LUCA reddi» T2 / TB) ──────────────────────────────────────────────────
+  // POST /api/siparis/:orderId/takip-kodu → `{ success: true, takipKodu }`. Siparişler ekranının iki takip bağlantısı üreticisi
+  // (lib/takipBaglantisi) bunu çağırır; sipariş durum e-postası aynı işlevi sunucuda kendisi çağırır (routes/epostaRoutes).
+  // Kapı: siparişi GÖREBİLEN iç rol — kimlik + MFA + personel + `orders` okuma + `siparisGorebilir` (kiracı); dış rol yok (boğaz).
+  // Yok / yabancı kiracı → 404 (varlık sızmaz); mağaza siparişi → 400 (bağlantıyı mağaza kendisi yollar; takip ucu ona 404 döner).
+  // Kod varsa o, yoksa koşullu atomik SQL ile yeni kod (iki eşzamanlı istek AYNI kodu alır). Denetim satırı YOK (gizli değer).
+  app.post('/api/siparis/:orderId/takip-kodu', requireAuth, requireMfaVerified, requireStaff, requireCollectionAccess('orders', 'read'), async (req: Request, res: Response) => {
+    if (!adminDb || !pgPool) return res.status(503).json({ success: false, error: 'Takip kodu bu kurulumda üretilemez (veritabanı bağlı değil).' });
+    const orderId = req.params['orderId'] as string;
+    const uid = (req as Request & { uid?: string }).uid || '';
+    const cid = await reqCompanyId(req);
+    const snap = await adminDb.collection('orders').doc(orderId).get();
+    const o = snap.exists ? snap.data() as Record<string, unknown> : undefined;
+    if (!siparisGorebilir(await getUserRole(uid), { uid, cid }, o)) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+    if (o?.source === MAGAZA_KAYNAGI) {
+      return res.status(400).json({ success: false, error: 'Çevrim içi mağaza siparişinin takip bağlantısını mağaza kendisi gönderir.' });
+    }
+    try {
+      const kod = await takipKoduAlVeyaUret(pgPool, cid, orderId);
+      if (!kod) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+      res.json({ success: true, takipKodu: kod });
+    } catch (e) {
+      console.error('[takip-kodu]', e instanceof Error ? e.message : String(e));
+      res.status(500).json({ success: false, error: 'Takip kodu alınamadı.' });
     }
   });
 
@@ -3953,91 +4000,16 @@ async function startServer() {
     }
   });
 
-  // POST /api/luca/sync/fatura
-  // Body: { orderId } — reads order from Firestore, pushes to Luca as sales invoice
-  // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu.
-  // Rol kapısı (2026-10-17, iç rol daraltma L5 / K4): `requireStaff`'ın yerine `invoices` yazma — resmî belge muhasebenindir (İ5).
-  // `orders:write` İSTENMEZ, bilerek: başarıda `orders`'a yalnız sunucuda türetilen alanlar (fatura no, eşitleme damgası,
-  // `hasInvoice`, kiracı denetiminden sonra `companyId`) merge edilir; İ5 İ1'e baskındır. Kural dış rolü içermez (süzgeç aşılmaz).
-  app.post('/api/luca/sync/fatura', requireAuth, requireMfaVerified, requireCollectionAccess('invoices', 'write'), async (req: Request, res: Response) => {
+  // POST /api/luca/sync/fatura — KAPALI (2026-10-19, LA: `LUCA_FATURA_KAPALI`).
+  // Eskiden siparişi okuyup LUCA'ya satış faturası olarak yollar, başarıda siparişe `lucaFaturaNo` / `lucaSynced` / `lucaSyncedAt`
+  // / `hasInvoice` yazardı. O işaretlerin tek yazıcısı buydu; bugün yalnız eski kayıtlarda kalırlar ve `/api/db` yazamaz
+  // (collections.SUNUCU_TURETILEN_ALANLAR). e-Fatura talebi onlarla Mikro'ya ikinci faturayı reddeder (LB).
+  // requireStaff (2026-10-02, sipariş satır süzgeci) → rol kapısı (2026-10-17, iç rol daraltma L5 / K4): `invoices` yazma. Kapı ve
+  // 503 «yapılandırılmamış» önde kalır; ardından her istek 400. Sipariş OKUNMAZ, LUCA'ya istek GİTMEZ.
+  app.post('/api/luca/sync/fatura', requireAuth, requireMfaVerified, requireCollectionAccess('invoices', 'write'), async (_req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
-    if (!adminDb) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
-
-    const { orderId } = req.body as { orderId: string };
-    if (!orderId) return res.status(400).json({ success: false, error: 'orderId gerekli.' });
-
-    const orderDoc = await adminDb.collection('orders').doc(orderId).get();
-    if (!orderDoc.exists) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
-    const order = orderDoc.data() as Record<string, unknown>;
-    // KİRACI SAHİPLİĞİ (2026-10-02): `orderId` istemciden gelir ve eskiden hiç denetlenmiyordu — başka kiracının siparişi
-    // Luca'ya fatura olarak gönderilip üstüne çağıranın `companyId`'si damgalanabiliyordu. 'Yok' ile aynı yanıt (varlık sızmaz).
-    {
-      const uid = (req as Request & { uid?: string }).uid || '';
-      if (!siparisGorebilir(await getUserRole(uid), { uid, cid: await reqCompanyId(req) }, order)) {
-        return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
-      }
-    }
-    // Çevrim içi mağaza siparişi LUCA'ya fatura olarak GİTMEZ: kalemde `price` yok (tutar `total`da — shopifyEsleme), `kdvOran`
-    // ve vergi no da yok → aşağıdaki varsayılanlarla ₺0 birim fiyatlı resmî kayıt + `hasInvoice: true` yazılırdı.
-    if (order.source === MAGAZA_KAYNAGI) return res.status(400).json({ success: false, error: "Mağaza siparişi LUCA'ya fatura olarak aktarılamaz." });
-
-    const lines = ((order.lineItems as Record<string, unknown>[] | undefined) ?? []).map((l, i) => ({
-      siraNo:       i + 1,
-      malHizmetAdi: l.title ?? l.name ?? l.sku ?? 'Ürün',
-      miktar:       l.quantity ?? 1,
-      birim:        'Adet',
-      birimFiyat:   l.price ?? 0,
-      kdvOrani:     order.kdvOran ?? 20,
-    }));
-
-    const payload = {
-      faturaTipi:   order.faturaTipi ?? 'SATIS',
-      seriNo:       order.shopifyOrderId ?? orderId.slice(0, 8),
-      faturaTarihi: new Date().toISOString().split('T')[0],
-      vadeGunu:     30,
-      musteri: {
-        ad:         order.customerName,
-        vergiNo:    (order.taxId as string | undefined) ?? '11111111111',
-        // TAM adres tek yerden (utils/siparisler/teslimatAdresi): kalan + il + (yurt dışıysa) Türkçe ülke adı. Alanı doğrudan
-        // okumak (`order.shippingAddress`) pencereden seçilen ili / ülkeyi faturadaki adresten düşürürdü (2026-10-10).
-        adres:      teslimatAdresiMetni(order),
-      },
-      satirlar: lines,
-      // Kalem `price`'ı pencereden açılan ve Mikro faturasından türeyen siparişte KDV HARİÇ net birimdir
-      // (utils/siparisler/siparisKalemFiyati). Eskiden `true`: Luca faturası KDV kadar eksik kesilirdi (3.600 yerine 3.000).
-      // Mağaza (webhook) siparişinde kalem fiyatının anlamı mağazanın vergi ayarına bağlıdır — o kaynak bu uçta ayrıca
-      // reddedilir (çevrim içi sipariş dalı).
-      kdvDahil: false,
-    };
-
-    try {
-      const t0 = Date.now();
-      const r = await fetch(`${creds.baseUrl}/v1/faturalar`, {
-        method: 'POST',
-        headers: lucaHeaders(creds),
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(15000),
-      });
-      const data = await r.json() as Record<string, unknown>;
-      const success = r.ok && data.success !== false;
-      const lucaFaturaNo = (data.faturaNo ?? data.id ?? null) as string | null;
-      const duration = Date.now() - t0;
-
-      if (success) {
-        await adminDb.collection('orders').doc(orderId).set({
-          companyId: await reqCompanyId(req),
-          lucaFaturaNo,
-          lucaSynced:   true,
-          lucaSyncedAt: pgServerTimestamp(),
-          hasInvoice:   true,
-        }, { merge: true });
-      }
-      await writeAuditLog(reqActor(req), 'Luca Fatura Sync', success ? `Fatura ${lucaFaturaNo ?? ''} Luca'ya aktarıldı` : 'HATA: Luca fatura aktarımı başarısız');
-      res.json({ success, lucaFaturaNo, data, duration });
-    } catch (e) {
-      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
-    }
+    res.status(400).json(LUCA_FATURA_KAPALI);
   });
 
   // POST /api/luca/sync/stok — pull products from Luca → Firebase inventory (upsert)
@@ -4574,6 +4546,8 @@ async function startServer() {
 
   epostaRoutes(app, {
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireAdmin, requireStaff,
+    // Sipariş durum e-postasının takip bağlantısı (2026-10-19, TF): `orders` okuma kapısı + takip kodu havuzu (server/takipKodu).
+    requireCollectionAccess, getPgPool: () => pgPool,
     authLimiter, reqActor, reqCompanyId, writeAuditLog, pgServerTimestamp, validate,
     getResendKey, sendEmail,
     // «Yönetici rolüne yalnız Yönetici dokunur» (D11) ve iki adımlı doğrulama sıfırlama ucu (D10) — ayrıntı modülde.

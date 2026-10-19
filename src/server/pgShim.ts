@@ -17,6 +17,7 @@
  * buyutup riskli hale getirirdi. Bu modul sinifi saglar, server.ts ornekler.
  */
 import { EventEmitter } from 'events';
+import { randomInt } from 'node:crypto';
 import pg from 'pg';
 import { FieldValue } from 'firebase-admin/firestore';
 import { ayarSahibi, satirSahibiAlani, sunucuAlanKorumaSql, sunucuKorumaVar } from '../lib/tenantErisim.js';
@@ -82,9 +83,16 @@ const DOC_ID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345
 export const dbEvents = new EventEmitter();
 dbEvents.setMaxListeners(0);
 
+/**
+ * Yeni doküman kimliği: 20 karakter × 62'lik alfabe (≈ 119 bit). KRİPTOGRAFİK üreteçle (`crypto.randomInt`, sapmasız) — 2026-10-19
+ * (şartname «takip kodu + LUCA reddi» TD): eskiden `Math.random` idi; kimlik kimliksiz takip ucunun eski yolunda (doküman kimliğiyle
+ * okuma) tek sır olduğu için tahmin edilebilir üreteç kabul edilemez. Biçim ve uzunluk DEĞİŞMEDİ. Kalıntı risk: bu değişiklikten
+ * ÖNCE `Math.random` ile açılmış (Trendyol / Hepsiburada senkronu gibi sunucu yazıcılarının) siparişler eski yolda okunmaya devam
+ * eder; yeni bağlantılar takip koduyla üretilir (server/takipKodu).
+ */
 export function genDocId(): string {
   let s = '';
-  for (let i = 0; i < 20; i++) s += DOC_ID_CHARS[Math.floor(Math.random() * DOC_ID_CHARS.length)];
+  for (let i = 0; i < 20; i++) s += DOC_ID_CHARS[randomInt(DOC_ID_CHARS.length)];
   return s;
 }
 

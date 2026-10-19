@@ -21,6 +21,7 @@
 import { FATURA_GONDERIM_ALANI } from './faturaGonderimi';
 import { MF_KAYNAGI } from './mfKaynagi';
 import { MAGAZA_KAYNAGI } from './magazaKaynagi';
+import { TAKIP_KODU_ALANI } from './takipKodu';
 
 /** İş verisi — `companyId` ile kiracı bazında izole edilir. */
 export const TENANT_COLLECTIONS: readonly string[] = [
@@ -193,9 +194,18 @@ export const SAHIP_SATIR_ALANI: ReadonlyMap<string, string> = new Map([
  * `sonuc mikrodaVar` ve `sonuc ettnEkle`; üçü de doğrudan SQL (server/mikro/faturaGonderimi). pgShim `set` / `update` üzerinden
  * `orders.ettn` yazan sunucu yolu yok (grep ölçümü 2026-10-19) — olsaydı bu korumayla sessizce düşerdi. Önceki «meşru istemci
  * yazıcısı» istisnası ölçüyle çürüdü. `mikroFaturaNo` / `hasInvoice` listeye ALINMAZ.
+ *
+ * 2026-10-19 (şartname «takip kodu + LUCA reddi» TA / LB):
+ *   • `takipKodu` (lib/takipKodu) — kimliksiz takip bağlantısının tek sırrı: istemci yazabilseydi bilinen bir kodu başka bir
+ *     siparişe koyup o siparişi kimliksiz okuyabilir ya da müşterinin elindeki bağlantıyı öldürebilirdi. Tek yazıcı doğrudan SQL
+ *     (server/takipKodu `takipKoduAlVeyaUret`); sunucu içi pgShim yazıcıları değeri korur (silemez).
+ *   • `lucaSynced`, `lucaFaturaNo`, `lucaSyncedAt` — LUCA'ya Cetpa'dan aktarılmış siparişin işaretleri; e-Fatura talebi
+ *     (server/mikro/faturaGonderimi `FATURA_TALEP_SQL`) bunlarla Mikro'ya ikinci faturayı REDDEDER. Ölçüm 2026-10-19: istemcide bu
+ *     alanları YAZAN yer yok (yalnız okuyanlar: MuhasebePage, faturaDurumu, faturaUstBilgisi); sunucunun TEK yazıcısı
+ *     `/api/luca/sync/fatura` idi ve LA ile kapandı (uç kayıtlı, 400 döner). İşaretler bundan sonra yalnız eski kayıtlarda kalır.
  */
 export const SUNUCU_TURETILEN_ALANLAR: ReadonlyMap<string, readonly string[]> = new Map([
-  ['orders', [FATURA_GONDERIM_ALANI, 'ettn']],
+  ['orders', [FATURA_GONDERIM_ALANI, 'ettn', TAKIP_KODU_ALANI, 'lucaSynced', 'lucaFaturaNo', 'lucaSyncedAt']],
 ]);
 
 /**

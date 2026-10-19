@@ -101,10 +101,10 @@ type Halka = 'requireAuth' | 'requireMfaVerified' | 'requireStaff' | `${string}:
 /** Yeni zincir (§ 2 + § 7). Rol kapısı `requireStaff`'ın YERİNE geçer; MFA bugün olduğu her uçta kalır. */
 const BEKLENEN: Record<string, readonly Halka[]> = {
   'GET /api/luca/kontor': ['requireAuth', 'eBelgeler:read'],                                         // L1 — MFA'sız (GET kalıbı)
-  'POST /api/luca/fatura-gonder': ['requireAuth', 'requireMfaVerified', 'invoices:write'],           // L2
+  'POST /api/luca/fatura-gonder': ['requireAuth', 'requireMfaVerified', 'invoices:write'],           // L2 — LA (2026-10-19): kapı aynen, uç 400
   'POST /api/luca/sync/yevmiye': ['requireAuth', 'requireMfaVerified', 'journalEntries:write'],      // L3
   'POST /api/luca/sync/stok': ['requireAuth', 'requireMfaVerified', 'inventory:write'],              // L4
-  'POST /api/luca/sync/fatura': ['requireAuth', 'requireMfaVerified', 'invoices:write'],             // L5 / K4
+  'POST /api/luca/sync/fatura': ['requireAuth', 'requireMfaVerified', 'invoices:write'],             // L5 / K4 — LA: kapı aynen, uç 400
   'POST /api/parasut/fatura': ['requireAuth', 'requireMfaVerified', 'invoices:write'],               // P1 / K3
   'POST /api/ai/satis-ajani': ['requireAuth', 'invoices:read', 'requireMfaVerified'],                // Y2
   'POST /api/ai/satinalma-ajani': ['requireAuth', 'purchaseOrders:read', 'requireMfaVerified'],      // Y3
@@ -496,7 +496,9 @@ describe('çalışma zamanı zinciri — kayıtlı rota = BEKLENEN; rol katmanı
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('rol matrisi — gerçek HTTP, 12 uç × 10 iç rol (geçen: 2xx ya da 503 «yapılandırılmamış»; kilitli: kapının 403\'ü)', () => {
-  /** Geçen rolün yanıtı. LUCA / Paraşüt kimliği YOK → 503 (kapıdan geçtiğinin kanıtı); Shopify belirteci ve Gemini sahte → 200. */
+  /** Geçen rolün yanıtı. LUCA / Paraşüt kimliği YOK → 503 (kapıdan geçtiğinin kanıtı); Shopify belirteci ve Gemini sahte → 200.
+   *  İki LUCA fatura ucu 2026-10-19'dan beri (LA) kimlik TANIMLIYKEN 400 `LUCA_FATURA_KAPALI` döner — 503 bu sınamada kapının
+   *  geçildiğini göstermeye yeter; kapanış davranışı takipKoduVeLuca.zincir.test «LA»da (kimlik tanımlı, LUCA'ya istek 0). */
   const MATRIS: ReadonlyArray<{ anahtar: EntegrasyonKapiliUc; govde: unknown; gecen: number }> = [
     { anahtar: 'GET /api/luca/kontor', govde: undefined, gecen: 503 },
     { anahtar: 'POST /api/luca/fatura-gonder', govde: { invoiceId: 'f-1', invoiceData: {} }, gecen: 503 },

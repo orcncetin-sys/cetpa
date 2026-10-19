@@ -89,6 +89,7 @@ import { useAppStore } from '../store/appStore';
 import { useMagazaTalepleri, useMagazaYeniSayaci, magazaSonGorulenAnahtari, magazaIlkKaynakSekmesi, yeniAsamaSayisi } from '../hooks/useMagazaTalepleri';
 import MagazaTalepleri, { MagazaYeniRozeti } from '../components/siparis/MagazaTalepleri';
 import { magazaTalepDurumuYaz, magazaKalemTeslimYaz, magazaBildirimGonder, magazaTalepIcerigiYaz, magazaTalepSil, magazaElleTalepAc } from '../services/magazaTalepIstemcisi';
+import { takipBaglantisiAl, panoyaSozle, TakipKoduHatasi, takipKoduHataMetni } from '../lib/takipBaglantisi';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -285,6 +286,11 @@ export default function OrdersPage({
   const [orderCustomerFilter, setOrderCustomerFilter] = useState<string|null>(null);
   const [orderDateRange, setOrderDateRange] = useState<'all'|'today'|'week'|'month'|'quarter'>('all');
   const [expandedOrderId, setExpandedOrderId] = useState<string|null>(null);
+  /** Süren takip bağlantısı isteği: HANGİ siparişin HANGİ düğmesi (lib/takipBaglantisi; şartname «takip kodu» TE). Sayfada aynı anda
+   *  TEK istek: beklerken iki düğme de pasif (başka siparişe geçilse de) — bekleme yazısı / `aria-busy` yalnız isteği başlatan
+   *  siparişin o düğmesinde; `finally` yalnız KENDİ isteğini temizler (2026-10-20 — eskiden durum siparişe bağlı değildi: A beklerken
+   *  B açılınca B'de «Bağlantı alınıyor…» görünüyordu). */
+  const [takipBekleyen, setTakipBekleyen] = useState<{ orderId: string; dugme: 'baglanti' | 'ozet' } | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   // Lojistik → "Aktif Sevkiyatlar": yalnız sevkiyatı SÜREN siparişler (rota kurucuyla aynı tanım); teslim edilenler isteğe bağlı.
   const [teslimEdilenleriGoster, setTeslimEdilenleriGoster] = useState(false);
@@ -2538,32 +2544,41 @@ export default function OrdersPage({
                       </button>
                       {/* Copy public tracking link — ÇEVRİM İÇİ MAĞAZA siparişinde ÇİZİLMEZ (2026-10-07): sunucu `/api/track`
                           o siparişe bilerek 404 döner (takip bağlantısını mağaza kendi yollar); düğme «kopyalandı» deyip
-                          müşteriye ölü bağlantı gönderiyordu. Kapı, teslim iletisindekiyle (App.tsx) AYNI işlev. */}
+                          müşteriye ölü bağlantı gönderiyordu. Kapı, teslim iletisindekiyle (App.tsx) AYNI işlev.
+                          TAKİP KODU (2026-10-19, şartname «takip kodu + LUCA reddi» TE): bağlantı doküman kimliğini DEĞİL, sunucunun
+                          verdiği takip kodunu taşır (lib/takipBaglantisi). Pano yazımı İLK `await`'ten ÖNCE başlar (`panoyaSozle`
+                          — tarayıcı izni tıklamanın içinde); kod alınırken düğme pasif; kod hatası ↔ pano izni ayrı ileti. */}
                       {!magazaSiparisiMi(selectedOrder) && (
                       <button
                         onClick={() => {
-                          const url = `${window.location.origin}/?track=${selectedOrder.id}`;
-                          navigator.clipboard.writeText(url).then(() =>
-                            toast(op(currentLanguage).takip_linki_kopyalandi, 'success')
-                          ).catch(() => toast(oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'));
+                          if (takipBekleyen !== null) return;
+                          // Tıklama anındaki sipariş: geç gelen başarı iletisi HANGİ siparişin bağlantısının kopyalandığını söyler.
+                          const o = selectedOrder;
+                          const istek = { orderId: o.id, dugme: 'baglanti' as const };
+                          const no = gorunenSiparisNo(o);
+                          setTakipBekleyen(istek);
+                          panoyaSozle(takipBaglantisiAl(o.id))
+                            .then(() => toast(`${no} — ${op(currentLanguage).takip_linki_kopyalandi}`, 'success'))
+                            .catch((e: unknown) => toast(e instanceof TakipKoduHatasi ? takipKoduHataMetni(e, currentLanguage) : oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'))
+                            .finally(() => setTakipBekleyen(b => b === istek ? null : b));
                         }}
-                        className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors"
+                        disabled={takipBekleyen !== null}
+                        aria-busy={takipBekleyen?.orderId === selectedOrder.id && takipBekleyen.dugme === 'baglanti'}
+                        className="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
                         title={op(currentLanguage).musteri_takip_linkini_kopyala}
                       >
                         <Link className="w-4 h-4" />
-                        {op(currentLanguage).takip_linki}
+                        {takipBekleyen?.orderId === selectedOrder.id && takipBekleyen.dugme === 'baglanti' ? (currentLanguage === 'tr' ? 'Bağlantı alınıyor…' : 'Fetching link…') : op(currentLanguage).takip_linki}
                       </button>
                       )}
                       {/* Phase 57: Copy Order Summary (WhatsApp-ready) */}
                       <button
                         onClick={() => {
+                          if (takipBekleyen !== null) return;
                           const o = selectedOrder;
-                          // Mağaza siparişinde takip satırı YAZILMAZ (yukarıdaki düğmeyle aynı gerekçe: bağlantı 404 verir).
-                          // Özetin kalanı (no, durum, tutar, kargo takip no) mağaza siparişinde de doğrudur — düğme kalır.
-                          // Şablonda satır sonları satırın BAŞINDA: düşen satırın ardında boş satır kalmasın.
-                          const takipUrl = magazaSiparisiMi(o) ? null : `${window.location.origin}/?track=${o.id}`;
                           // Tutar ya da kur bilinmiyorsa mesaj HİÇ üretilmez: ne '—' ne de "₺0" müşteriye giden
-                          // metne akar. Eski `||0` tutarı bilinmeyen siparişi "₺0" diye müşteriye yazıyordu.
+                          // metne akar. Eski `||0` tutarı bilinmeyen siparişi "₺0" diye müşteriye yazıyordu. Ön denetim
+                          // EŞZAMANLI ve kod isteğinden ÖNCE (tutarı bilinmeyen siparişe boşuna kod üretilmez).
                           const _waAmt = mesajTutari(o, kpiCurrency, exchangeRates);
                           if (_waAmt === BILINMIYOR) {
                             toast(currentLanguage === 'tr'
@@ -2571,18 +2586,29 @@ export default function OrdersPage({
                               : 'Amount or exchange rate unknown — summary not copied.', 'error');
                             return;
                           }
-                          const summary = currentLanguage === 'tr'
+                          // Şablonda satır sonları satırın BAŞINDA: düşen satırın ardında boş satır kalmasın.
+                          const ozetMetni = (takipUrl: string | null): string => currentLanguage === 'tr'
                             ? `📦 *Sipariş Özeti*\nSipariş No: ${gorunenSiparisNo(o)}\nMüşteri: ${o.customerName}\nDurum: ${o.status}\nTutar: ${_waAmt}${o.trackingNumber ? `\nKargo Takip: ${o.trackingNumber}` : ''}${takipUrl ? `\nTakip Linki: ${takipUrl}` : ''}`
                             : `📦 *Order Summary*\nOrder: ${gorunenSiparisNo(o)}\nCustomer: ${o.customerName}\nStatus: ${o.status}\nTotal: ${_waAmt}${o.trackingNumber ? `\nTracking: ${o.trackingNumber}` : ''}${takipUrl ? `\nLink: ${takipUrl}` : ''}`;
-                          navigator.clipboard.writeText(summary).then(() =>
-                            toast(op(currentLanguage).siparis_ozeti_kopyalandi, 'success')
-                          ).catch(() => toast(oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'));
+                          // Mağaza siparişinde takip satırı YAZILMAZ ve kod İSTENMEZ (yukarıdaki düğmeyle aynı gerekçe: bağlantı 404
+                          // verir). Özetin kalanı (no, durum, tutar, kargo takip no) mağaza siparişinde de doğrudur — düğme kalır.
+                          // Öteki siparişte bağlantı takip koduyla (2026-10-19, TE); pano yazımı ilk `await`'ten ÖNCE başlar.
+                          const metin = magazaSiparisiMi(o) ? Promise.resolve(ozetMetni(null)) : takipBaglantisiAl(o.id).then(ozetMetni);
+                          const istek = { orderId: o.id, dugme: 'ozet' as const };
+                          const no = gorunenSiparisNo(o);
+                          setTakipBekleyen(istek);
+                          panoyaSozle(metin)
+                            .then(() => toast(`${no} — ${op(currentLanguage).siparis_ozeti_kopyalandi}`, 'success'))
+                            .catch((e: unknown) => toast(e instanceof TakipKoduHatasi ? takipKoduHataMetni(e, currentLanguage) : oc(currentLanguage).kopyalanamadi_tarayici_pano_iznini_engelledi, 'error'))
+                            .finally(() => setTakipBekleyen(b => b === istek ? null : b));
                         }}
-                        className="bg-white hover:bg-green-50 text-gray-700 hover:text-green-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-green-200 transition-colors"
+                        disabled={takipBekleyen !== null}
+                        aria-busy={takipBekleyen?.orderId === selectedOrder.id && takipBekleyen.dugme === 'ozet'}
+                        className="bg-white hover:bg-green-50 text-gray-700 hover:text-green-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-sm border border-gray-200 hover:border-green-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
                         title={op(currentLanguage).whatsapp_ozeti_kopyala}
                       >
                         <MessageSquare className="w-4 h-4" />
-                        {op(currentLanguage).ozet_kopyala}
+                        {takipBekleyen?.orderId === selectedOrder.id && takipBekleyen.dugme === 'ozet' ? (currentLanguage === 'tr' ? 'Özet hazırlanıyor…' : 'Preparing summary…') : op(currentLanguage).ozet_kopyala}
                       </button>
                       {/* Phase 511: Payment Reminder copy button */}
                       {!selectedOrder.paid && odemeTakipli(selectedOrder) && (

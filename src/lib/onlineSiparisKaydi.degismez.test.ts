@@ -183,12 +183,16 @@ describe('Siparişler detayı — çevrim içi mağaza siparişine takip bağlan
     expect(oku('server.ts')).toMatch(/if \(o\.source === MAGAZA_KAYNAGI\) return res\.status\(404\)/);
   });
 
-  it('`/?track=` üreten yer sayısı İKİ ve ikisi de `magazaSiparisiMi` kapısında (kapısız üçüncü bir üretici eklenirse kırılır)', () => {
-    expect(siparisler.split('/?track=').length - 1).toBe(2);
-    // «Takip linki» düğmesi: tümü kapının içinde — mağaza siparişinde ÇİZİLMEZ.
-    expect(siparisler).toMatch(/\{!magazaSiparisiMi\(selectedOrder\) && \(\s*<button\s+onClick=\{\(\) => \{\s*const url = `\$\{window\.location\.origin\}\/\?track=\$\{selectedOrder\.id\}`;/);
-    // «Özet kopyala»: adres mağaza siparişinde hiç kurulmaz.
-    expect(siparisler).toMatch(/const takipUrl = magazaSiparisiMi\(o\) \? null : `\$\{window\.location\.origin\}\/\?track=\$\{o\.id\}`;/);
+  it('takip bağlantısı üreten yer sayısı İKİ ve ikisi de `magazaSiparisiMi` kapısında (kapısız üçüncü bir üretici eklenirse kırılır)', () => {
+    // 2026-10-19 (şartname «takip kodu + LUCA reddi» TE): bağlantı sayfada kurulmaz — `lib/takipBaglantisi.takipBaglantisiAl`
+    // sunucudan takip kodunu alıp `/?track=<kod>` döner. Doküman kimliğiyle bağlantı kalmadı.
+    expect(siparisler.split('/?track=').length - 1).toBe(0);
+    expect(siparisler.split('takipBaglantisiAl(').length - 1).toBe(2);
+    // «Takip linki» düğmesi: tümü kapının içinde — mağaza siparişinde ÇİZİLMEZ. 2026-10-20: bekleme durumu siparişe bağlı ve sayfada
+    // tek istek (ön denetim + istek nesnesi + tıklama anındaki siparişin numarası) — kod isteği yine işleyicinin ilk işi.
+    expect(siparisler).toMatch(/\{!magazaSiparisiMi\(selectedOrder\) && \(\s*<button\s+onClick=\{\(\) => \{\s*if \(takipBekleyen !== null\) return;\s*(?:\/\/[^\n]*\n\s*)*const o = selectedOrder;\s*const istek = \{ orderId: o\.id, dugme: 'baglanti' as const \};\s*const no = gorunenSiparisNo\(o\);\s*setTakipBekleyen\(istek\);\s*panoyaSozle\(takipBaglantisiAl\(o\.id\)\)/);
+    // «Özet kopyala»: mağaza siparişinde kod hiç istenmez, adres kurulmaz.
+    expect(siparisler).toMatch(/const metin = magazaSiparisiMi\(o\) \? Promise\.resolve\(ozetMetni\(null\)\) : takipBaglantisiAl\(o\.id\)\.then\(ozetMetni\);/);
   });
 
   it('özet metninde takip satırı KOŞULLU (iki dilde); koşulsuz satır kalmadı', () => {
@@ -202,13 +206,14 @@ describe('Siparişler detayı — çevrim içi mağaza siparişine takip bağlan
 
   it('«Özet kopyala» düğmesi mağaza siparişinde de ÇİZİLİR: takip düğmesinin kapısı ondan ÖNCE kapanıyor', () => {
     const kapi = siparisler.indexOf('{!magazaSiparisiMi(selectedOrder) && (');
-    const ozet = siparisler.indexOf('const takipUrl = magazaSiparisiMi(o)');
+    const ozet = siparisler.indexOf('const metin = magazaSiparisiMi(o)');
     expect(kapi).toBeGreaterThan(-1);
     expect(ozet).toBeGreaterThan(kapi);
     const arasi = siparisler.slice(kapi, ozet);
-    expect(arasi).toMatch(/\{op\(currentLanguage\)\.takip_linki\}\s*<\/button>\s*\)\}/);
+    // Etiket bekleme durumunda «Bağlantı alınıyor…» olur (2026-10-19, TE); kapanış sırası aynı.
+    expect(arasi).toMatch(/: op\(currentLanguage\)\.takip_linki\}\s*<\/button>\s*\)\}/);
     expect(arasi.split('<button').length - 1).toBe(2);   // takip düğmesi + (kapı kapandıktan sonra) özet düğmesi
-    expect(siparisler.slice(ozet)).toMatch(/\{op\(currentLanguage\)\.ozet_kopyala\}/);
+    expect(siparisler.slice(ozet)).toMatch(/: op\(currentLanguage\)\.ozet_kopyala\}/);
   });
 });
 

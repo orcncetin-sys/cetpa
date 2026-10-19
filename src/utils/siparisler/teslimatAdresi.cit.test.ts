@@ -92,9 +92,9 @@ describe('teslimat adresi — BAĞLANDI çiti (eski okumayı kaldırmak yetmez)'
     expect(metin).toMatch(/import \{[^}]*\bteslimatAdresiMetni\b[^}]*\} from '[./a-zA-Z]*teslimatAdresi';/);
   });
 
-  it('(a) + (b) tablolarındaki 12 dosyanın TAMAMI çağırır (11 istemci dosyası + `server.ts` LUCA gövdesi)', () => {
-    const hepsi = [...ISTEMCI_OKUYUCULARI.map(([dosya]) => dosya), 'server.ts'];
-    expect(hepsi).toHaveLength(12);
+  it('(a) + (b) tablolarındaki 11 istemci dosyasının TAMAMI çağırır (`server.ts` LUCA gövdesi 2026-10-19\'da kalktı — LA)', () => {
+    const hepsi = ISTEMCI_OKUYUCULARI.map(([dosya]) => dosya);
+    expect(hepsi).toHaveLength(11);
     expect(hepsi.filter(d => !/\bteslimatAdresiMetni\(/.test(kod(d)))).toEqual([]);
   });
 
@@ -167,8 +167,9 @@ describe('teslimat adresi — sunucu okuyucuları (`server.ts`)', () => {
     expect(sunucu).toMatch(/\btakipAdresi\(/);
   });
 
-  it('LUCA gövdesi `musteri.adres` için `teslimatAdresiMetni(` çağırır', () => {
-    expect(sunucu).toMatch(/adres:\s+teslimatAdresiMetni\(order\)/);
+  it('LUCA fatura gövdesi KALKTI (2026-10-19, şartname «takip kodu + LUCA reddi» LA): `server.ts` tam adres kurmaz', () => {
+    // Eskiden `musteri.adres: teslimatAdresiMetni(order)`; uç artık her isteğe 400 döner, sipariş okunmaz.
+    expect(sunucu).not.toMatch(/\bteslimatAdresiMetni\b/);
   });
 });
 

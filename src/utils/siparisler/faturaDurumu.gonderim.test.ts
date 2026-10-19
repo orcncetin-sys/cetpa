@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   faturaKesilebilir, faturaSonucuCozulebilir, faturaTakipFaturaVar, mikroFaturaDurumMetni, mikroFaturasiKesilmisOlabilir, mikroyaFaturaGonderilebilir,
+  lucayaAktarildi,
 } from './faturaDurumu';
 import { FATURA_GONDERIM_BAYATLIK_MS, faturaGonderimDurumu, faturaIsareti, gonderimBayatMi } from '../../lib/faturaGonderimi';
 import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi';
@@ -69,6 +70,22 @@ describe('B5 — işaret × kural tablosu (tek yüklem: mikroFaturasiKesilmisOla
     expect(mikroyaFaturaGonderilebilir({ hasInvoice: true }, SIMDI)).toBe(true);
     // Reddedilen MF / mağaza siparişi yine kapalı (işaret öteki koşulları açmaz).
     expect(mikroyaFaturaGonderilebilir({ ...isaret('reddedildi'), source: MAGAZA_KAYNAGI }, SIMDI)).toBe(false);
+  });
+
+  it('LB (2026-10-19, «takip kodu + LUCA reddi») — LUCA\'ya Cetpa\'dan aktarılmış sipariş Mikro\'ya gönderilemez (sunucu talebiyle aynı ölçüt)', () => {
+    // Sunucu: `(data->'lucaSynced') IS DISTINCT FROM 'true'::jsonb AND btrim(coalesce(data->>'lucaFaturaNo','')) = ''`.
+    expect(mikroyaFaturaGonderilebilir({ lucaSynced: true }, SIMDI)).toBe(false);
+    expect(mikroyaFaturaGonderilebilir({ lucaFaturaNo: 'LF-2026-0001' }, SIMDI)).toBe(false);
+    expect(mikroyaFaturaGonderilebilir({ lucaSynced: true, hasInvoice: true }, SIMDI)).toBe(false);
+    expect(mikroyaFaturaGonderilebilir({ lucaSynced: false }, SIMDI)).toBe(true);
+    expect(mikroyaFaturaGonderilebilir({ lucaFaturaNo: '   ' }, SIMDI)).toBe(true);
+    expect(mikroyaFaturaGonderilebilir({ lucaFaturaNo: '' }, SIMDI)).toBe(true);
+    expect(lucayaAktarildi({ lucaSynced: true })).toBe(true);
+    expect(lucayaAktarildi({ lucaFaturaNo: 'L1' })).toBe(true);
+    expect(lucayaAktarildi({})).toBe(false);
+    expect(lucayaAktarildi(null)).toBe(false);
+    // `reddedildi` işareti LUCA kapısını açmaz.
+    expect(mikroyaFaturaGonderilebilir({ ...isaret('reddedildi'), lucaSynced: true }, SIMDI)).toBe(false);
   });
 
   it('numara yalnız işarette kaldıysa rozet numarayı gösterir (uydurma yok); İngilizce metinler', () => {

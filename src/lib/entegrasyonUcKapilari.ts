@@ -31,14 +31,16 @@ export const ENTEGRASYON_UC_KAPILARI = {
   // L1 — e-belge gönderim kredisi; e-Belge Merkezi'nin okuma kümesi (karar turu H2). MFA'sız (GET kalıbı).
   'GET /api/luca/kontor': ['eBelgeler', 'read'],
   // L2 — resmî belge (İ5). Kilitlenen: Satış, Lojistik, Satın Alma, İK, Hukuk, Kurumsal, Kalite (arayüzde kilit yok: e-Belge
-  //      sekmesi zaten Yönetici, Müdür, Muhasebe).
+  //      sekmesi zaten Yönetici, Müdür, Muhasebe). 2026-10-19 (LA): uç KAPALI — kapı aynen önde, ardından her isteğe 400
+  //      `LUCA_FATURA_KAPALI`; istemcide çağıranı YOK (düğme kalktı).
   'POST /api/luca/fatura-gonder': ['invoices', 'write'],
   // L3 — yevmiye (İ5). İstemcide çağıranı YOK.
   'POST /api/luca/sync/yevmiye': ['journalEntries', 'write'],
   // L4 — `inventory`'ye yazar (İ1) + kiracı sınırı (yabancı kiracının kartı ezilmez, sayaçla atlanır).
   'POST /api/luca/sync/stok': ['inventory', 'write'],
   // L5 / K4 — siparişi LUCA'ya fatura olarak gönderir (İ5). Başarıda `orders`'a yalnız sunucuda türetilen alanlar merge edilir;
-  //      `orders:write` İSTENMEZ (İ5 İ1'e baskın, bilerek).
+  //      `orders:write` İSTENMEZ (İ5 İ1'e baskın, bilerek). 2026-10-19 (LA): uç KAPALI — kapı aynen önde, ardından her isteğe 400;
+  //      sipariş okunmaz, alan yazılmaz; istemcide çağıranı YOK (LUCA panelinin fatura kartı kalktı).
   'POST /api/luca/sync/fatura': ['invoices', 'write'],
   // P1 / K3 — Paraşüt'te satış faturası açar (İ5, L5'in kardeşi). İstemcide çağıranı YOK (ölçüldü 2026-10-17).
   'POST /api/parasut/fatura': ['invoices', 'write'],

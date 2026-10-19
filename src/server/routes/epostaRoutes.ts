@@ -24,7 +24,7 @@
  *
  * server.ts'ten AYRILDI (2026-08-26). Onceki rota gruplariyla AYNI desen.
  */
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, RequestHandler, Response } from 'express';
 import { davetKoduUret } from '../davetKodu.js';
 import { DAVET_POSTASI } from '../davetPostasi.js';
 import type { AdminDbLike } from '../adminDbTypes.js';
@@ -33,6 +33,10 @@ import { EmailSendSchema } from '../schemas.js';
 // Yaprak moduller — dongu yok.
 import { resendGonderici, escapeHtml, isValidEmail } from '../eposta.js';
 import { APP_ROLES, YONETICI_GEREKLI_YANITI, yalnizYoneticiMi, yoneticiRoluneDokunabilir, type AppRole } from '../../lib/rbac.js';
+import { siparisGorebilir } from '../../lib/tenantErisim.js';
+import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi.js';
+import { takipKoduAlVeyaUret, type TakipHavuzu } from '../takipKodu.js';
+import { gorunenTakipNo } from '../../lib/takipKodu.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface EpostaRouteCtx {
@@ -41,6 +45,10 @@ export interface EpostaRouteCtx {
   requireMfaVerified: any;
   requireAdmin: any;
   requireStaff: any;
+  /** Koleksiyon kuralı kapısı (server.ts `requireCollectionAccess`) — sipariş durum e-postası `orders` okuma ister (TF). */
+  requireCollectionAccess: (coll: string, op: 'read' | 'write') => RequestHandler;
+  /** PostgreSQL havuzu (takip kodu — server/takipKodu); bağlı değilse `null`. */
+  getPgPool: () => TakipHavuzu | null;
   authLimiter: any;
   reqActor: (req: Request) => { uid: string; email: string };
   reqCompanyId: (req: Request) => Promise<string>;
@@ -95,15 +103,39 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
   // POST /api/email/order-notification
   // Body: { orderId, status, customerEmail } — sends branded status email
   // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu (firmanın alan adından keyfi alıcıya ileti).
-  app.post('/api/email/order-notification', C.requireAuth, C.requireMfaVerified, C.requireStaff, async (req: Request, res: Response) => {
-    const { orderId, status, customerEmail, customerName, orderNo, lang = 'tr' } =
+  // TAKİP BAĞLANTISI (2026-10-19, şartname «takip kodu + LUCA reddi» TF): uç siparişi hiç OKUMUYORDU ve bağlantıya doküman kimliğini
+  // koyuyordu (MF kimliği kiracıyı verir; mağaza siparişine ölü bağlantı giderdi). Artık sipariş okunur — yok / yabancı kiracı /
+  // görünmez → 404 ve e-posta GİTMEZ —, bağlantı takip koduyla kurulur (server/takipKodu `takipKoduAlVeyaUret`, kod alma ucuyla
+  // AYNI işlev). Mağaza siparişinde e-postada takip bağlantısı YOK. Kod üretmek kod alma ucunun işiyle eşdeğer olduğundan kapıya
+  // aynı `orders` okuma kuralı eklendi (ucu çağıran durum güncellemesi `orders` yazma ister — o rollerin hepsi okur).
+  // SİPARİŞ NUMARASI (2026-10-20): konu satırı ve «SİPARİŞ NO» bloğu takip sayfasının kod yolundakiyle AYNI numarayı basar
+  // (lib/takipKodu `gorunenTakipNo` — tek tanım). İstemcinin gönderdiği `orderNo` ve `orderId.slice(0, 8)` KULLANILMAZ: MF'de
+  // kimliğin ilk 8 karakteri «MIKROFAT»tı, bağlantının açtığı sayfa ise `MF-…` gösteriyordu. Görünen numarası olmayan siparişte
+  // konu numarasız, blok çizilmez (doküman kimliğinden numara türetilmez).
+  app.post('/api/email/order-notification', C.requireAuth, C.requireMfaVerified, C.requireStaff, C.requireCollectionAccess('orders', 'read'), async (req: Request, res: Response) => {
+    // `orderNo` gövde tipinde kalır (istemci App.tsx hâlâ gönderiyor) ama OKUNMAZ — numara siparişten (yukarıdaki not).
+    const { orderId, status, customerEmail, customerName, lang = 'tr' } =
       req.body as { orderId: string; status: string; customerEmail: string; customerName: string; orderNo?: string; lang?: string };
     if (!customerEmail) return res.status(400).json({ success: false, error: 'customerEmail gerekli.' });
+    if (typeof orderId !== 'string' || orderId.trim() === '') return res.status(400).json({ success: false, error: 'orderId gerekli.' });
 
-    const trackUrl = `${req.protocol}://${req.get('host')}/?track=${encodeURIComponent(orderId)}`;
+    const havuz = C.getPgPool();
+    if (!havuz) return res.status(503).json({ success: false, error: 'Takip bağlantısı bu kurulumda üretilemez (veritabanı bağlı değil).' });
+    const uid = C.reqActor(req).uid;
+    const cid = await C.reqCompanyId(req);
+    const siparisBelgesi = await C.getAdminDb().collection('orders').doc(orderId).get();
+    const siparis = siparisBelgesi.exists ? siparisBelgesi.data() as Record<string, unknown> : undefined;
+    if (!siparisGorebilir(await C.getUserRole(uid), { uid, cid }, siparis)) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+    let trackUrl: string | null = null;
+    if (siparis?.source !== MAGAZA_KAYNAGI) {
+      const kod = await takipKoduAlVeyaUret(havuz, cid, orderId);
+      if (!kod) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+      trackUrl = `${req.protocol}://${req.get('host')}/?track=${encodeURIComponent(kod)}`;
+    }
     const tr = lang === 'tr';
     const eName = escapeHtml(customerName); // HTML injection engeli
-    const eOrderNo = escapeHtml(orderNo ?? orderId.slice(0, 8).toUpperCase());
+    const gorunenNo = siparis ? gorunenTakipNo(siparis) : null;
+    const eOrderNo = gorunenNo === null ? null : escapeHtml(gorunenNo);
 
     const statusLabel: Record<string, { tr: string; en: string; color: string }> = {
       Pending:    { tr: 'Sipariş Alındı',   en: 'Order Received',  color: '#f59e0b' },
@@ -114,8 +146,8 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
     };
     const lbl = statusLabel[status] ?? { tr: status, en: status, color: '#6b7280' };
     const subjectText = tr
-      ? `Siparişiniz güncellendi: ${lbl.tr} — #${orderNo ?? orderId.slice(0, 8)}`
-      : `Order update: ${lbl.en} — #${orderNo ?? orderId.slice(0, 8)}`;
+      ? `Siparişiniz güncellendi: ${lbl.tr}${gorunenNo ? ` — #${gorunenNo}` : ''}`
+      : `Order update: ${lbl.en}${gorunenNo ? ` — #${gorunenNo}` : ''}`;
 
     const html = `
 <!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -136,17 +168,17 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
         ${tr ? lbl.tr : lbl.en}
       </span>
     </div>
-    <!-- Order no -->
+    ${eOrderNo !== null ? `<!-- Order no -->
     <div style="background:#f9fafb;border-radius:12px;padding:16px;margin-bottom:24px;text-align:center;">
       <p style="margin:0;font-size:11px;color:#9ca3af;font-weight:700;letter-spacing:.08em;">${tr ? 'SİPARİŞ NO' : 'ORDER NO'}</p>
       <p style="margin:4px 0 0;font-size:20px;font-weight:800;color:#1a3a5c;font-family:monospace;">#${eOrderNo}</p>
-    </div>
-    <!-- CTA -->
+    </div>` : ''}
+    ${trackUrl ? `<!-- CTA -->
     <div style="text-align:center;margin-bottom:24px;">
       <a href="${trackUrl}" style="display:inline-block;background:#1a3a5c;color:#fff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:999px;text-decoration:none;">
         ${tr ? '📦 Siparişimi Takip Et' : '📦 Track My Order'}
       </a>
-    </div>
+    </div>` : ''}
     <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">${tr ? 'Sorularınız için bize ulaşabilirsiniz.' : 'Feel free to contact us with any questions.'}</p>
   </div>
   <div style="background:#f9fafb;padding:16px 32px;text-align:center;">

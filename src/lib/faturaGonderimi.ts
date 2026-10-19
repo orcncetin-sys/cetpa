@@ -71,8 +71,9 @@ export type FaturaYanitKodu =
   /** 409 — fatura aynasına göre ETTN aynı carinin talep sınırından ÖNCEKİ (bu siparişin olamayacak) bir faturasının. */
   | 'FATURA_ETTN_ONCEKI_FATURA';
 
-/** `FATURA_KESILEMEZ` nedeni (D1 öncelik 2). */
-export type FaturaKesilemezNedeni = 'mikro-fatura' | 'magaza' | 'faturasiz';
+/** `FATURA_KESILEMEZ` nedeni (D1 öncelik 2). `luca-gonderildi` (2026-10-19, şartname «takip kodu + LUCA reddi» LB): sipariş LUCA'ya
+ *  Cetpa'dan aktarılmış (`lucaSynced` / `lucaFaturaNo`) — Mikro'da da kesilirse muhasebecinin aktarımıyla LUCA'da çift kayıt. */
+export type FaturaKesilemezNedeni = 'mikro-fatura' | 'magaza' | 'faturasiz' | 'luca-gonderildi';
 
 /** `POST /api/mikro/fatura/sonuc` kararı (E3 / D6). `ettnEkle` (§ 9.B B2, 2026-10-19): `gonderildi` ama geçerli ETTN'si olmayan
  *  siparişe sonradan ETTN yazar — aynı uç, aynı kapı. */

@@ -57,6 +57,7 @@ function kesilemezMetni(neden: FaturaKesilemezNedeni | undefined, dil: ArayuzDil
   if (neden === 'mikro-fatura') return tr ? 'Bu kayıt Mikro faturasından türetildi — ikinci fatura kesilemez.' : 'This record was derived from a Mikro invoice — a second invoice cannot be issued.';
   if (neden === 'magaza') return tr ? 'Çevrim içi mağaza siparişine buradan fatura kesilemez.' : 'An invoice cannot be issued here for an online store order.';
   if (neden === 'faturasiz') return tr ? 'Faturasız satışa fatura kesilemez.' : 'An invoice cannot be issued for a sale without invoice.';
+  if (neden === 'luca-gonderildi') return tr ? 'Bu sipariş LUCA\'ya Cetpa\'dan aktarıldı; Mikro\'ya ikinci fatura kesilemez.' : 'This order was already transferred to LUCA from Cetpa; a second invoice cannot be issued in Mikro.';
   return tr ? 'Bu siparişe fatura kesilemez.' : 'An invoice cannot be issued for this order.';
 }
 

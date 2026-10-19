@@ -3,8 +3,10 @@
  *
  * Provides UI for:
  * - Testing Luca API connection  (GET  /api/luca/status)
- * - Pushing an order invoice     (POST /api/luca/sync/fatura)
  * - Pulling Luca stock → Firebase (POST /api/luca/sync/stok)
+ *
+ * «Fatura Gönder (Luca)» kartı KALKTI (2026-10-19, şartname «takip kodu + LUCA reddi» LA): fatura Mikro'dan kesilir ve LUCA'ya
+ * Mikro'dan aktarılır; `POST /api/luca/sync/fatura` kayıtlı kalır ama her isteğe 400 döner (ölü düğme bırakılmaz).
  *
  * Stores a lightweight sync log in the `lucaSyncLog` Firestore collection
  * (written server-side on every sync call; read here for display).
@@ -14,7 +16,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { authFetch } from '../services/authFetch';
 import {
   RefreshCw, CheckCircle2, XCircle, AlertCircle,
-  Package, FileText, Activity, Clock, ChevronDown, ChevronUp,
+  Package, Activity, Clock, ChevronDown, ChevronUp,
   Plug,
 } from 'lucide-react';
 import { collection, query, limit, onSnapshot } from '../lib/dbClient';
@@ -121,20 +123,16 @@ function SyncCard({
 
 export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLanguage?: string }) {
   const lang = currentLanguage === 'tr';
-  // Kapı ortak tablodan (2026-10-17, iç rol daraltma L4 / L5 — İ3, İ4): fatura gönderimi `invoices` yazma, stok çekme
-  // `inventory` yazma. Geçemeyen rolde kart ÇİZİLMEZ, çağrı HİÇ yapılmaz. Panel Ayarlar sekmesinde (Yönetici, Müdür) — bugün
-  // iki rol de geçer; koşul sekme tablosuna güvenmez.
+  // Kapı ortak tablodan (2026-10-17, iç rol daraltma L4 — İ3, İ4): stok çekme `inventory` yazma. Geçemeyen rolde kart ÇİZİLMEZ,
+  // çağrı HİÇ yapılmaz. Panel Ayarlar sekmesinde (Yönetici, Müdür) — bugün iki rol de geçer; koşul sekme tablosuna güvenmez.
   const rol = useAppStore(s => s.userRole);
-  const faturaGonderebilir = entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/sync/fatura');
   const stokCekebilir = entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/sync/stok');
 
   const [status,       setStatus]       = useState<LucaStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
-  const [faturaSync,   setFaturaSync]   = useState<SyncState>(EMPTY_SYNC);
   const [stokSync,     setStokSync]     = useState<SyncState>(EMPTY_SYNC);
   const [logs,         setLogs]         = useState<LogEntry[]>([]);
   const [showLogs,     setShowLogs]     = useState(false);
-  const [orderIdInput, setOrderIdInput] = useState('');
 
   // ── Connection status ──────────────────────────────────────────────────────
 
@@ -167,33 +165,6 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
   }, []);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-
-  const runFaturaSync = async () => {
-    if (!faturaGonderebilir) return;   // kart bu rolde çizilmez (İ3)
-    const id = orderIdInput.trim();
-    if (!id) {
-      setFaturaSync(prev => ({ ...prev, error: lang ? 'Sipariş ID girin.' : 'Enter an order ID.' }));
-      return;
-    }
-    setFaturaSync({ running: true, result: null, error: null });
-    try {
-      const r = await authFetch('/api/luca/sync/fatura', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ orderId: id }),
-      });
-      const d = await r.json() as { success: boolean; lucaFaturaNo?: string; notConfigured?: boolean; error?: string; duration?: number };
-      if (d.notConfigured) {
-        setFaturaSync({ running: false, result: null, error: lang ? 'Luca yapılandırılmamış.' : 'Luca not configured.' });
-      } else if (d.success) {
-        setFaturaSync({ running: false, result: `✓ Fatura No: ${d.lucaFaturaNo ?? '—'} (${d.duration ?? '?'}ms)`, error: null });
-      } else {
-        setFaturaSync({ running: false, result: null, error: d.error ?? (lang ? 'Bilinmeyen hata' : 'Unknown error') });
-      }
-    } catch (e) {
-      setFaturaSync({ running: false, result: null, error: e instanceof Error ? e.message : String(e) });
-    }
-  };
 
   const runStokSync = async () => {
     if (!stokCekebilir) return;   // kart bu rolde çizilmez (İ3)
@@ -262,54 +233,6 @@ export default function LucaSyncPanel({ currentLanguage = 'tr' }: { currentLangu
         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
           {lang ? 'Senkronizasyon İşlemleri' : 'Sync Operations'}
         </p>
-
-        {/* Fatura sync — needs an order ID */}
-        {faturaGonderebilir && (
-        <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm flex-shrink-0">
-              <FileText className="w-4 h-4 text-[#1a3a5c]" />
-            </div>
-            <div className="flex-1">
-              <p className="text-sm font-bold text-gray-800">
-                {lang ? 'Fatura Gönder (Luca)' : 'Push Invoice to Luca'}
-              </p>
-              <p className="text-[11px] text-gray-500 mt-0.5">
-                {lang
-                  ? 'Seçilen siparişi Luca\'ya fatura olarak ilet.'
-                  : 'Send the selected order as a sales invoice to Luca.'}
-              </p>
-            </div>
-          </div>
-          <input
-            type="text"
-            value={orderIdInput}
-            onChange={e => setOrderIdInput(e.target.value)}
-            placeholder={lang ? 'Sipariş ID…' : 'Order ID…'}
-            className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#1a3a5c] focus:ring-2 focus:ring-[#1a3a5c]/10 font-mono transition-all"
-          />
-          <button
-            onClick={() => void runFaturaSync()}
-            disabled={faturaSync.running}
-            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-[#1a3a5c] hover:bg-[#1a3a5c]/90 text-white text-xs font-bold transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${faturaSync.running ? 'animate-spin' : ''}`} />
-            {faturaSync.running ? (lang ? 'Gönderiliyor…' : 'Sending…') : (lang ? 'Fatura Gönder' : 'Send Invoice')}
-          </button>
-          {faturaSync.result && (
-            <div className="flex items-start gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 rounded-lg px-2.5 py-2">
-              <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-              {faturaSync.result}
-            </div>
-          )}
-          {faturaSync.error && (
-            <div className="flex items-start gap-1.5 text-[11px] text-red-600 bg-red-50 rounded-lg px-2.5 py-2">
-              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-              {faturaSync.error}
-            </div>
-          )}
-        </div>
-        )}
 
         {/* Stok sync */}
         {stokCekebilir && (

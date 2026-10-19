@@ -31,8 +31,6 @@ vi.mock('../lib/dbClient', async () => ({
   ...(await import('../hooks/useArkaPlanIsi.testDuzenegi')).dbClientSahtesi,
   addDoc: vi.fn(), updateDoc: vi.fn(), deleteDoc: vi.fn(), setDoc: vi.fn(), serverTimestamp: () => 'TS',
 }));
-// Onay penceresi (GlobalConfirm) bu düzenekte bağlı değil: «e-Fatura Gönder» onayı «evet» sayılır (yalnız onay — kapı DEĞİL).
-vi.mock('../lib/confirm', async (orig) => ({ ...(await orig<typeof import('../lib/confirm')>()), confirmAction: vi.fn(() => Promise.resolve(true)) }));
 vi.mock('../services/mikroService', () => ({
   getMikroStatus: vi.fn(() => Promise.resolve({ configured: true, connected: true, mode: 'local' })),
 }));
@@ -62,14 +60,14 @@ const BELGELER = [
 ];
 
 const json = (govde: unknown, ok = true) => Promise.resolve({ ok, json: () => Promise.resolve(govde) });
-/** LUCA'ya gönderim bekleyen yerel fatura (e-Fatura, «Kesildi») — «e-Fatura Gönder» düğmesinin satırı. */
+/** Eski «Gönderim Bekleyen Faturalar» kartının satırı (yerel e-Fatura, «Kesildi»). Kart 2026-10-19'da kalktı (LA): bu kayıt
+ *  varken de ne kart ne düğme çizilir. */
 const BEKLEYEN_FATURA = { id: 'fat-1', veri: { faturaNo: 'CTP-2026-000777', date: '2026-10-15', customerName: 'ŞİRİN YAPI A.Ş.', taxId: '1234567890', totalPrice: 3600, status: 'Kesildi', faturaTipi: 'e-fatura' } };
 const PDF_B64 = btoa('%PDF-1.4 '.repeat(80));
 const XML_DUZ = `<?xml version="1.0" encoding="UTF-8"?><Invoice>${'<Satir>ÇİMENTO</Satir>'.repeat(20)}</Invoice>`;
 function yonlendir() {
   authFetch.mockImplementation((url: string) => {
     if (url === '/api/luca/kontor') return json({ success: false, notConfigured: true });
-    if (url === '/api/luca/fatura-gonder') return json({ success: true, message: 'Fatura Luca e-Fatura sistemine iletildi.', ettn: 'ETTN-1' });
     if (CEKIM.some(c => c.yol === url)) return json({ success: true, total: 3 });
     if (url === '/api/mikro/ebelge/pdf') return json({ success: true, data: PDF_B64 });
     if (url === '/api/mikro/ebelge/xml') return json({ success: true, data: XML_DUZ });
@@ -214,44 +212,30 @@ describe('e-Belge Merkezi — K7 / H1: satırdaki PDF / XML indirme düğmeleri 
 });
 
 // ── Kaynak çiti: «yazıldı ama bağlanmadı» / yarım düzeltme ────────────────────────────────────────────────────────────
-describe('e-Belge Merkezi — LUCA uçları (2026-10-17, iç rol daraltma L1 / L2): kontör kartı ve «e-Fatura Gönder» ortak tablodan', () => {
-  /** § 2 L1 (`eBelgeler` okuma) ve L2 (`invoices` yazma) — ELLE. İkisi de bugün e-Belge sekmesinin kümesiyle aynı. */
+describe('e-Belge Merkezi — LUCA: kontör kartı ortak tablodan (L1); «e-Fatura Gönder» ve bekleyen fatura kartı KALKTI (2026-10-19, LA)', () => {
+  /** § 2 L1 (`eBelgeler` okuma) — ELLE. Bugün e-Belge sekmesinin kümesiyle aynı. */
   const LUCA_GECEN = [UserRole.Admin, UserRole.Manager, UserRole.Accounting];
   const lucaIstekleri = () => authFetch.mock.calls.map(c => String(c[0])).filter(u => u.startsWith('/api/luca/'));
 
-  it.each([UserRole.Sales, UserRole.Logistics, UserRole.Purchasing, UserRole.HR, UserRole.Quality])(
-    'kilitli rol %s: bekleyen fatura listede, ama «e-Fatura Gönder» düğmesi ve kontör kartı ÇİZİLMEZ; LUCA\'ya HİÇ istek atılmaz',
-    async (rol) => {
-      koleksiyonAyarla('invoices', [BEKLEYEN_FATURA]);
-      await ciz(rol);
-      expect(await screen.findByText('CTP-2026-000777')).toBeTruthy();                // liste yerinde (boş çizim yanlış yeşil vermesin)
-      expect(screen.queryByRole('button', { name: /e-Fatura Gönder/ })).toBeNull();
-      expect(screen.queryByText('Luca Kontör Bakiyesi')).toBeNull();
-      expect(lucaIstekleri()).toEqual([]);
-    },
-  );
-
-  it.each(LUCA_GECEN)('geçen rol %s: kontör sorulur, düğme çizilir ve tıklama `/api/luca/fatura-gonder`\'a gider', async (rol) => {
-    koleksiyonAyarla('invoices', [BEKLEYEN_FATURA]);
-    await ciz(rol);
-    expect(screen.getByText('Luca Kontör Bakiyesi')).toBeTruthy();
-    fireEvent.click(await screen.findByRole('button', { name: /e-Fatura Gönder/ }));
-    await waitFor(() => expect(lucaIstekleri()).toEqual(['/api/luca/kontor', '/api/luca/fatura-gonder']));
-  });
-
-  it('12 rolün HEPSİ: düğme ⇔ `POST /api/luca/fatura-gonder` kapısı, kart ⇔ `GET /api/luca/kontor` kapısı (bileşende kopya rol listesi yok)', async () => {
+  it('12 rolün HEPSİ: «e-Fatura Gönder» düğmesi ve «Gönderim Bekleyen Faturalar» kartı YOK (bekleyen yerel fatura varken de); `/api/luca/fatura-gonder`\'a HİÇ istek atılmaz; kontör kartı ⇔ `GET /api/luca/kontor` kapısı', async () => {
     for (const rol of TUM_ROLLER) {
       koleksiyonAyarla('invoices', [BEKLEYEN_FATURA]);
       authFetch.mockClear();
       const { unmount } = await ciz(rol);
-      await screen.findByText('CTP-2026-000777');
-      expect(screen.queryByRole('button', { name: /e-Fatura Gönder/ }) !== null, `düğme × ${rol}`).toBe(entegrasyonUcKapisindanGecer(rol, 'POST /api/luca/fatura-gonder'));
-      expect(screen.queryByText('Luca Kontör Bakiyesi') !== null, `kart × ${rol}`).toBe(entegrasyonUcKapisindanGecer(rol, 'GET /api/luca/kontor'));
-      expect(lucaIstekleri().includes('/api/luca/kontor'), `istek × ${rol}`).toBe(entegrasyonUcKapisindanGecer(rol, 'GET /api/luca/kontor'));
+      expect(screen.queryByRole('button', { name: /e-Fatura Gönder/ }), `düğme × ${rol}`).toBeNull();
+      expect(screen.queryByText('Gönderim Bekleyen Faturalar'), `kart × ${rol}`).toBeNull();
+      expect(screen.queryByText('CTP-2026-000777'), `satır × ${rol}`).toBeNull();
+      expect(screen.queryByText('Luca Kontör Bakiyesi') !== null, `kontör × ${rol}`).toBe(entegrasyonUcKapisindanGecer(rol, 'GET /api/luca/kontor'));
+      expect(lucaIstekleri(), `istek × ${rol}`).toEqual(entegrasyonUcKapisindanGecer(rol, 'GET /api/luca/kontor') ? ['/api/luca/kontor'] : []);
       unmount();
     }
-    expect(TUM_ROLLER.filter(r => entegrasyonUcKapisindanGecer(r, 'POST /api/luca/fatura-gonder')).sort()).toEqual([...LUCA_GECEN].sort());
     expect(TUM_ROLLER.filter(r => entegrasyonUcKapisindanGecer(r, 'GET /api/luca/kontor')).sort()).toEqual([...LUCA_GECEN].sort());
+  });
+
+  it('kaynak çiti: bileşen `invoices` koleksiyonunu dinlemez, LUCA fatura ucunun yolunu ve kapısını KOD satırında geçirmez', () => {
+    const k = kodSatirlari(join(SRC_KOK, 'components', 'EBelgeMerkezi.tsx')).map(s => s.kod).join('\n');
+    expect(k).not.toMatch(/\/api\/luca\/fatura-gonder|eFaturaGonderebilir|handleeFaturaGonder|collection\(db, 'invoices'\)/);
+    expect(k).toMatch(/const kontorOkuyabilir = entegrasyonUcKapisindanGecer\(rol, 'GET \/api\/luca\/kontor'\);/);
   });
 });
 

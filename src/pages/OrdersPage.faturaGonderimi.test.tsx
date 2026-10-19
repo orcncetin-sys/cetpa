@@ -117,6 +117,18 @@ describe('B1 / B9 (D6, D8) — ayrıntı CANLI kayıttan; belirsiz siparişte d�
     expect(handleMikroFaturaSonuc).toHaveBeenCalledTimes(2);
   });
 
+  it('LB (2026-10-19, «takip kodu + LUCA reddi») — LUCA\'ya Cetpa\'dan aktarılmış siparişte (`lucaSynced` / `lucaFaturaNo`) kesim düğmesi ÇİZİLMEZ (sunucu 400 `luca-gonderildi`)', async () => {
+    for (const ek of [{ lucaSynced: true }, { lucaFaturaNo: 'LF-2026-0001' }] as Partial<Order>[]) {
+      const r = ciz(siparis(), [siparis(ek)]);
+      await act(async () => {});
+      expect(dugmeler(r.container), JSON.stringify(ek)).toEqual([]);
+      r.unmount();
+    }
+    const acik = ciz(siparis(), [siparis({ lucaSynced: false, lucaFaturaNo: '  ' })]);
+    await act(async () => {});
+    expect(dugmeler(acik.container).length).toBeGreaterThan(0);
+  });
+
   it('kesim / çözüm yetkisi yoksa (İ3) ne düğme ne seçenek çizilir', async () => {
     const r1 = ciz(siparis(), [siparis()], { mikroFaturaKesebilir: false });
     await act(async () => {});

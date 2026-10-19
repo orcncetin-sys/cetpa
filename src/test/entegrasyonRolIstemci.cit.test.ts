@@ -8,7 +8,8 @@
  *
  *   Ç-E1  `ENTEGRASYON_UC_KAPILARI`'ndaki yollardan birini KOD satırında geçiren her istemci dosyası ortak tablodan içe aktarım
  *         yapar ve çağırdığı ucun KENDİ anahtarını (`'YÖNTEM /yol'`) taşır. İstisnalar ADIYLA ve gerekçesiyle.
- *   Ç-E2  Çağıranı OLMAYAN uçlar (L3 yevmiye, P1 Paraşüt fatura) adıyla: yol tablo dışında hiçbir istemci dosyasında geçmez.
+ *   Ç-E2  Çağıranı OLMAYAN uçlar (L3 yevmiye, P1 Paraşüt fatura; 2026-10-19'dan beri LA ile kapanan L2 LUCA e-Fatura ve L5 LUCA
+ *         sipariş faturası) adıyla: yol tablo dışında hiçbir istemci dosyasında geçmez.
  *   Ç-E3  Kilit çakışması (İ3): ucu çağıran ekranı GÖREN roller (App.tsx sekme tablosundan OKUNUR) − kapıdan geçen roller =
  *         bilerek kilitlenenler (`KARAR_KILIDI`, elle). Sekme kümesi kapıdan genişse fark burada adıyla yazılıdır.
  *   Ç-E4  Bağlantı: her yüzeyi AÇAN kod var (bileşen gerçekten bir sekmede çizilir — «yazıldı ama bağlanmadı» çiti).
@@ -55,9 +56,7 @@ const ISTISNA: Record<string, { yollar: EntegrasyonKapiliUc[]; gerekce: string }
 /** Ucu çağıran yüzey(ler) — dosya + yüzeyin göründüğü sekme(ler). ELLE (ölçüldü 2026-10-17). */
 const YUZEY: Record<string, { dosyalar: string[]; sekmeler: string[] }> = {
   'GET /api/luca/kontor': { dosyalar: ['src/components/EBelgeMerkezi.tsx'], sekmeler: ['ebelge'] },
-  'POST /api/luca/fatura-gonder': { dosyalar: ['src/components/EBelgeMerkezi.tsx'], sekmeler: ['ebelge'] },
   'POST /api/luca/sync/stok': { dosyalar: ['src/components/LucaSyncPanel.tsx'], sekmeler: ['settings'] },
-  'POST /api/luca/sync/fatura': { dosyalar: ['src/components/LucaSyncPanel.tsx'], sekmeler: ['settings'] },
   'POST /api/ai/satis-ajani': { dosyalar: ['src/components/SatisAjaniPanel.tsx'], sekmeler: ['crm'] },
   'POST /api/ai/satinalma-ajani': { dosyalar: ['src/components/SatinAlmaAjaniPanel.tsx'], sekmeler: ['satin-alma'] },
   'POST /api/shopify/draft-order': { dosyalar: ['src/components/B2BPortal.tsx'], sekmeler: ['b2b', 'crm'] },
@@ -65,8 +64,12 @@ const YUZEY: Record<string, { dosyalar: string[]; sekmeler: string[] }> = {
   'POST /api/sku-mapping/auto-match': { dosyalar: ['src/components/SkuMappingPanel.tsx'], sekmeler: ['settings'] },
   'POST /api/inventory/auto-reorder': { dosyalar: ['src/components/InventoryView.tsx'], sekmeler: ['inventory'] },
 };
-/** İstemcide çağıranı OLMAYAN uçlar (ölçüldü 2026-10-17). Çağıran eklenince `YUZEY`'e taşınır. */
-const CAGIRANI_YOK: EntegrasyonKapiliUc[] = ['POST /api/luca/sync/yevmiye', 'POST /api/parasut/fatura'];
+/** İstemcide çağıranı OLMAYAN uçlar (ölçüldü 2026-10-17). Çağıran eklenince `YUZEY`'e taşınır.
+ *  2026-10-19 (şartname «takip kodu + LUCA reddi» LA): iki LUCA fatura ucu KAPANDI (kayıtlı, her isteğe 400) — e-Belge
+ *  Merkezi'nin «e-Fatura Gönder» düğmesi ve LUCA panelinin «Fatura Gönder» kartı kalktı (ölü düğme yok); YÜZEY'den buraya geçti. */
+const CAGIRANI_YOK: EntegrasyonKapiliUc[] = [
+  'POST /api/luca/sync/yevmiye', 'POST /api/parasut/fatura', 'POST /api/luca/fatura-gonder', 'POST /api/luca/sync/fatura',
+];
 /**
  * KİLİTLENENLER — ekranı (sekmeyi) görüp kapıdan geçemeyen iç roller: § 7 K5 «bilerek kilitlenenler» + A1 ölçümü. ELLE.
  * Bu roller düğmeyi / paneli artık GÖRMEZ (İ3) ve doğrudan istek 403 alır. Satır eklemek ya da çıkarmak kullanıcı kararıdır.
@@ -138,7 +141,7 @@ describe('Ç-E1 — entegrasyon ucunun yolunu çağıran her istemci dosyası ka
 });
 
 describe('Ç-E2 — çağıranı olmayan uçlar adıyla (kilitlenecek ekran yok)', () => {
-  it('L3 yevmiye ve P1 Paraşüt fatura: yol tablo dışında hiçbir istemci dosyasının KOD satırında geçmez', () => {
+  it('L3 yevmiye, P1 Paraşüt fatura ve LA ile kapanan iki LUCA fatura ucu: yol tablo dışında hiçbir istemci dosyasının KOD satırında geçmez', () => {
     for (const a of CAGIRANI_YOK) {
       expect(ISTEMCI.filter(d => d.ad !== TABLO && d.kod.some(k => yolDeseni(a).test(k))).map(d => d.ad), a).toEqual([]);
     }

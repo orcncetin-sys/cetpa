@@ -34,6 +34,9 @@
  *    (`ettn`: sunucu talebiyle AYNI kural — ETTN'li siparişe sunucu 409 döner; düğme ölü kalmasın.)
  *  - `faturaSonucuCozulebilir`: `belirsiz` ya da bayat `gonderiliyor` → «Mikro'da var / yok» seçenekleri (D6).
  *  - `mikroFaturaDurumMetni`: rozet metni (D12).
+ *
+ * LUCA (2026-10-19, şartname «takip kodu + LUCA reddi» LB): LUCA'ya Cetpa'dan aktarılmış sipariş (`lucayaAktarildi`) Mikro'ya
+ * e-Fatura olarak GÖNDERİLEMEZ — sunucu talebiyle aynı ölçüt.
  */
 import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi';
 import { faturaGonderimDurumu, faturaIsareti } from '../../lib/faturaGonderimi';
@@ -44,6 +47,8 @@ export interface FaturaDurumuGirdisi {
   mikroFaturaNo?: string;
   ettn?: string;
   lucaFaturaNo?: string;
+  /** LUCA'ya Cetpa'dan aktarıldı işareti (eski `/api/luca/sync/fatura` yazardı; yalnız sunucu — collections.SUNUCU_TURETILEN_ALANLAR). */
+  lucaSynced?: boolean;
   faturali?: boolean;
   /** Sunucunun gönderim işareti — bilinmeyen biçim `faturaIsareti` ile süzülür. */
   mikroFaturaGonderimi?: unknown;
@@ -81,7 +86,18 @@ export function mikroyaFaturaGonderilebilir(o: FaturaDurumuGirdisi | null | unde
   if (o.faturali === false) return false;
   if (o.source === 'mikro-fatura') return false;
   if (o.source === MAGAZA_KAYNAGI) return false;
+  if (lucayaAktarildi(o)) return false;
   return !mikroFaturasiKesilmisOlabilir(o, simdiMs);
+}
+
+/**
+ * LUCA'ya Cetpa'dan aktarılmış mı (2026-10-19, şartname «takip kodu + LUCA reddi» LB): `lucaSynced === true` YA DA `lucaFaturaNo`
+ * dolu. Sunucu e-Fatura talebi (server/mikro/faturaGonderimi `FATURA_TALEP_SQL`) AYNI ölçütle 400 `luca-gonderildi` döner —
+ * Mikro'da da kesilirse muhasebecinin Mikro → LUCA aktarımı LUCA'da çift kayıt üretirdi. Düğme bu siparişte çizilmez (ölü düğme yok).
+ */
+export function lucayaAktarildi(o: FaturaDurumuGirdisi | null | undefined): boolean {
+  if (!o) return false;
+  return o.lucaSynced === true || doluMetin(o.lucaFaturaNo);
 }
 
 /** «Mikro'da var / yok» ile çözülebilir mi (D6): işaret `belirsiz` ya da bayat `gonderiliyor`. Sunucu kabulüyle AYNI kural. */

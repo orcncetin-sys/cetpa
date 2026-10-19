@@ -406,6 +406,29 @@ describe('D1 — talep koşulu: siparişte Mikro faturası YOKSA', () => {
     expect([r2.sonuc.s, r2.sonuc.j.success, r2.n]).toEqual([200, true, 1]);
   });
 
+  it('LB (2026-10-19, «takip kodu + LUCA reddi») — LUCA\'ya Cetpa\'dan aktarılmış (`lucaSynced: true` ya da `lucaFaturaNo` dolu) → 400 (neden luca-gonderildi), Mikro 0, işaret YOK', async () => {
+    for (const ek of [{ lucaSynced: true }, { lucaFaturaNo: 'LF-2026-0001' }, { lucaSynced: true, lucaFaturaNo: 'LF-2', hasInvoice: true }, { lucaFaturaNo: '\tLF-3' }] as Array<Record<string, unknown>>) {
+      const id = await siparisKur(ek);
+      const { n, sonuc } = await mikroSay(() => kes(YONETICI, id));
+      expect([JSON.stringify(ek), sonuc.s, sonuc.j.kod, sonuc.j.neden, n]).toEqual([JSON.stringify(ek), 400, 'FATURA_KESILEMEZ', 'luca-gonderildi', 0]);
+      expect(sonuc.j.error).toBe('Bu sipariş LUCA\'ya Cetpa\'dan aktarıldı; Mikro\'ya ikinci fatura kesilemez.');
+      expect(await belgeOku('orders', id), JSON.stringify(ek)).not.toHaveProperty(FATURA_GONDERIM_ALANI);
+    }
+  });
+
+  it('LB — öncelik: faturasız dalından SONRA, numara dalından ÖNCE; `lucaSynced` JSON true değilse (`false`, metin) ve numara boşluksa talep geçer', async () => {
+    const r1 = await mikroSay(async () => kes(YONETICI, await siparisKur({ faturali: false, lucaSynced: true })));
+    expect([r1.sonuc.s, r1.sonuc.j.neden, r1.n]).toEqual([400, 'faturasiz', 0]);
+    const r2 = await mikroSay(async () => kes(YONETICI, await siparisKur({ lucaSynced: true, mikroFaturaNo: 'CTP2026000000123' })));
+    expect([r2.sonuc.s, r2.sonuc.j.kod, r2.sonuc.j.neden, r2.n]).toEqual([400, 'FATURA_KESILEMEZ', 'luca-gonderildi', 0]);
+    const r3 = await mikroSay(async () => kes(YONETICI, await siparisKur({ source: 'mikro-fatura', lucaSynced: true })));
+    expect([r3.sonuc.s, r3.sonuc.j.neden, r3.n]).toEqual([400, 'mikro-fatura', 0]);
+    for (const ek of [{ lucaSynced: false }, { lucaSynced: 'true' }, { lucaFaturaNo: '   ' }, { lucaFaturaNo: null }] as Array<Record<string, unknown>>) {
+      const { n, sonuc } = await mikroSay(async () => kes(YONETICI, await siparisKur(ek)));
+      expect([JSON.stringify(ek), sonuc.s, sonuc.j.success, n]).toEqual([JSON.stringify(ek), 200, true, 1]);
+    }
+  });
+
   it('T6 — `hasInvoice: true`, numara / ETTN yok → talep geçer, Mikro 1 (Cetpa-içi fatura kapıya girmez)', async () => {
     const id = await siparisKur({ hasInvoice: true });
     const { n, sonuc } = await mikroSay(() => kes(YONETICI, id));
@@ -996,7 +1019,9 @@ describe('D3 — istemci `/api/db` ile işareti yazamaz (rolden bağımsız, ses
     expect(kod.join('\n')).toMatch(/\.\.\.\[\.\.\.SUNUCU_TURETILEN_ALANLAR\.keys\(\)\]\.flatMap\(c => sunucuTuretilenAlanlar\(c\)\)/);
     // Korunan ad TEK kaynaktan: işaret alanı listede ve server.ts adı metin olarak YAZMIYOR. `ettn` 2026-10-19'dan beri listede
     // (şartname «fatura gövde + gece MF» § 9.B B1 — G3a / H1 onu MF türetme kararında okur; davranış çiti aşağıda «B1»).
-    expect(SUNUCU_TURETILEN_ALANLAR.get('orders')).toEqual([FATURA_GONDERIM_ALANI, 'ettn']);
+    // 2026-10-19 (şartname «takip kodu + LUCA reddi» TA / LB): takip kodu ve üç LUCA işareti de listede (davranış çiti:
+    // takipKoduVeLuca.zincir.test «TA / LB»).
+    expect(SUNUCU_TURETILEN_ALANLAR.get('orders')).toEqual([FATURA_GONDERIM_ALANI, 'ettn', 'takipKodu', 'lucaSynced', 'lucaFaturaNo', 'lucaSyncedAt']);
     expect(kod.filter(k => k.includes(FATURA_GONDERIM_ALANI))).toEqual([]);
   });
 });

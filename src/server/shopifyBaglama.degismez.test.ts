@@ -67,25 +67,23 @@ describe('Shopify uçları server.ts\'e bağlı ve ara katman sırası doğru', 
     expect(kalan).toEqual([]);
   });
   it('kimliksiz takip ucu mağaza siparişini göstermez — yanıt gövdesinden ÖNCE reddedilir', () => {
+    // 2026-10-19 (şartname «takip kodu + LUCA reddi» TC): uç iki yoldan (takip kodu / eski kimlik) TEK siparişe varır, ret ikisinden
+    // sonra ve yanıt kurucusundan (`takipYaniti`) önce — iki yolda da geçerli. Uç gövdesi bu yüzden birkaç satır uzadı.
     const uc = tek(/^\s*app\.get\('\/api\/track\/:orderId', trackLimiter, async/);
     const kapi = tek(/if \(o\.source === MAGAZA_KAYNAGI\) return res\.status\(404\)\.json\(\{ success: false, error: 'Sipariş bulunamadı\.' \}\);/);
+    const yanit = tek(/^\s*res\.json\(\{ success: true, order: takipYaniti\(o, eskiYolKimligi\) \}\);$/);
     expect(kapi).toBeGreaterThan(uc);
-    expect(kapi - uc).toBeLessThan(15);
+    expect(kapi).toBeLessThan(yanit);
+    expect(kapi - uc).toBeLessThan(20);
   });
-  it('LUCA fatura aktarımı mağaza siparişini reddeder — kalemler / gövde kurulmadan ve dış çağrıdan ÖNCE', () => {
-    // Mağaza siparişinin kaleminde `price` yok: kapı olmasa ₺0 birim fiyatlı resmî kayıt + `hasInvoice: true` yazılırdı.
-    // Rol kapısı 2026-10-17'den beri `invoices` yazma (iç rol daraltma L5); bu çit yalnız rota satırının YERİNİ arar.
+  it('LUCA fatura aktarımı KAPALI (2026-10-19, LA): mağaza siparişi dâhil hiçbir sipariş LUCA\'ya gitmez — uç gövdesiz 400', () => {
+    // Eskiden yalnız mağaza siparişi reddediliyordu (₺0 birim fiyatlı resmî kayıt); şimdi uç hiçbir siparişi okumaz ve dışarı
+    // çıkmaz (davranış: takipKoduVeLuca.zincir.test «LA»).
     const uc = tek(/^\s*app\.post\('\/api\/luca\/sync\/fatura', requireAuth, requireMfaVerified, requireCollectionAccess\('invoices', 'write'\), async/);
-    const kapi = tek(/if \(order\.source === MAGAZA_KAYNAGI\) return res\.status\(400\)\.json\(\{ success: false, error: "Mağaza siparişi LUCA'ya fatura olarak aktarılamaz\." \}\);/);
-    const kalemler = satirNo(/^\s*const lines = \(\(order\.lineItems as /).filter(n => n > uc)[0];
-    const disCagri = satirNo(/fetch\(`\$\{creds\.baseUrl\}\/v1\/faturalar`/).filter(n => n > uc)[0];
-    expect(kapi).toBeGreaterThan(uc);
-    expect(kapi).toBeLessThan(kalemler);
-    expect(kalemler).toBeLessThan(disCagri);
-    // Kiracı sahipliği denetimi (satır süzgeci, 404) kapıdan ÖNCE gelir — başka kiracının mağaza siparişi 400 ile varlığını sızdırmasın.
-    const sahiplik = satirNo(/if \(!siparisGorebilir\(await getUserRole\(uid\), \{ uid, cid: await reqCompanyId\(req\) \}, order\)\) \{/).filter(n => n > uc)[0];
-    expect(sahiplik).toBeLessThan(kapi);
-    expect(kapi - uc).toBeLessThan(30);
+    const kapanis = satirNo(/^\s*res\.status\(400\)\.json\(LUCA_FATURA_KAPALI\);$/).filter(n => n > uc)[0];
+    expect(kapanis - uc).toBeLessThan(6);
+    expect(satirNo(/fetch\(`\$\{creds\.baseUrl\}\/v1\/faturalar`/)).toEqual([]);
+    expect(satirNo(/LUCA'ya fatura olarak aktarılamaz/)).toEqual([]);
     // Tek kaynak: sabit `src/lib/magazaKaynagi`'ndan gelir (eşleyici onu yeniden dışa aktarır) — server.ts kendi dizgisini yazmaz.
     expect(satirNo(/'shopify_webhook'/)).toEqual([]);
   });

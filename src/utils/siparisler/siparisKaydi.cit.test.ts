@@ -148,9 +148,12 @@ describe('dış sistem gövdeleri — kalem fiyatı KDV HARİÇ net birimdir (20
     expect(rota).toMatch(/price: amountStr,\s+paidPrice: amountStr,/);
     expect(rota).not.toMatch(/amount\.toFixed\(/);
   });
-  it('Luca fatura gövdesi kalem fiyatını KDV HARİÇ bildirir', () => {
+  it('Luca fatura gövdesi KALKTI (2026-10-19, şartname «takip kodu + LUCA reddi» LA): server.ts\'te KDV bayraklı fatura gövdesi yok', () => {
+    // Eskiden `kdvDahil: false` (kalem fiyatı KDV hariç) tek satırla sabitti; uç artık her isteğe 400 döner, gövde kurulmaz.
+    // Yeniden açılırsa kalem fiyatının KDV hariç net birim olduğu kuralı (utils/siparisler/siparisKalemFiyati) yine geçerlidir.
     const sunucu = kodSatirlari(join(SRC_KOK, '..', 'server.ts')).map(s => s.kod).join('\n');
-    expect((sunucu.match(/kdvDahil: (true|false),/g) ?? [])).toEqual(['kdvDahil: false,']);
+    expect((sunucu.match(/kdvDahil: (true|false),/g) ?? [])).toEqual([]);
+    expect(sunucu).toMatch(/res\.status\(400\)\.json\(LUCA_FATURA_KAPALI\);/);
   });
   it('fatura isteği kalemin SATIR KDV\'sini taşır (yazılan KDV dâhil toplam belgede de korunsun); sunucu şeması alanı düşürmez', () => {
     const g = govde('const handleMikroFatura = async (order: Order) => {');

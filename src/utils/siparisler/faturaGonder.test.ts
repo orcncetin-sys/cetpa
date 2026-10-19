@@ -48,6 +48,9 @@ describe('B3 — faturaYanitMesaji', () => {
     expect(faturaYanitMesaji(400, { success: false, kod: 'FATURA_KESILEMEZ', neden: 'mikro-fatura' }, 'tr').metin).toBe('Bu kayıt Mikro faturasından türetildi — ikinci fatura kesilemez.');
     expect(faturaYanitMesaji(400, { success: false, kod: 'FATURA_KESILEMEZ', neden: 'magaza' }, 'tr').metin).toBe('Çevrim içi mağaza siparişine buradan fatura kesilemez.');
     expect(faturaYanitMesaji(400, { success: false, kod: 'FATURA_KESILEMEZ', neden: 'faturasiz' }, 'tr').metin).toBe('Faturasız satışa fatura kesilemez.');
+    // LB (2026-10-19): sunucu iletisiyle aynı metin (server/mikro/faturaGonderimi `talepRetKarari`).
+    expect(faturaYanitMesaji(400, { success: false, kod: 'FATURA_KESILEMEZ', neden: 'luca-gonderildi' }, 'tr').metin).toBe('Bu sipariş LUCA\'ya Cetpa\'dan aktarıldı; Mikro\'ya ikinci fatura kesilemez.');
+    expect(faturaYanitMesaji(400, { success: false, kod: 'FATURA_KESILEMEZ', neden: 'luca-gonderildi' }, 'en').metin).toMatch(/LUCA/);
   });
 
   it('aynı `kod` HTTP 200 ve 502 ile AYNI metni verir (ileti HTTP durumuna bağlı değil)', () => {

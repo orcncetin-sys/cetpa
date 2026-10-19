@@ -29,4 +29,9 @@ export const DOCS_INDEKS_DDL = [
   `CREATE INDEX IF NOT EXISTS idx_docs_coll_company ON docs (coll, (data->>'companyId'))`,
   `CREATE INDEX IF NOT EXISTS idx_docs_coll_untagged ON docs (coll) WHERE NOT (data ? 'companyId')`,
   `CREATE INDEX IF NOT EXISTS idx_docs_coll_user ON docs (coll, (data->>'userId'))`,
+  // SİPARİŞ TAKİP KODU (2026-10-19, şartname «takip kodu + LUCA reddi» TA): kod KÜRESEL tekil (kimliksiz takip ucu kiracı
+  // ayırmadan kodla okur) ve kodla arama bu dizinden gelir (server/takipKodu `TAKIP_KODU_ARA_SQL` dizinin yüklemini yazar).
+  // Kısmi: yalnız kodu olan sipariş satırları — dizin küçük kalır. Kurulamazsa boot düşmez (yukarıdaki not): tekillik o zaman
+  // ~131 bitlik rastgeleliğe kalır; çakışma yeniden denemesi (23505) yalnız dizin varken tetiklenir.
+  `CREATE UNIQUE INDEX IF NOT EXISTS docs_orders_takip_kodu ON docs ((data->>'takipKodu')) WHERE coll = 'orders' AND data ? 'takipKodu'`,
 ] as const;

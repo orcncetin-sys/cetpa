@@ -4,6 +4,10 @@
  * Rendered when the URL contains `?track=<orderId>`.
  * Fetches from GET /api/track/:orderId (public Express route)
  * and shows a branded status timeline to the customer.
+ *
+ * Parametre (2026-10-19, şartname «takip kodu + LUCA reddi» TC): siparişin TAKİP KODU (yeni bağlantılar — lib/takipBaglantisi) YA DA
+ * eski bağlantıların rastgele doküman kimliği. Olduğu gibi, `encodeURIComponent` ile gönderilir. Kod yolunda yanıt `id` taşımaz ve
+ * `orderNo` `null` olabilir (siparişin görünen numarası yoksa) — o zaman numara satırı ÇİZİLMEZ («#—» basılmaz).
  */
 
 import { useEffect, useState } from 'react';
@@ -18,8 +22,9 @@ import { oc } from '../i18n/ortak';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface TrackingOrder {
-  id:                string;
-  orderNo:           string;
+  /** Yalnız eski bağlantının yanıtında (doküman kimliği); kod yolunda YOK. */
+  id?:               string;
+  orderNo:           string | null;
   customerName:      string;
   status:            string;
   trackingNumber?:   string;
@@ -61,7 +66,7 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
   const load = async () => {
     setLoading(true); setError(null);
     try {
-      const r = await fetch(`/api/track/${orderId}`);
+      const r = await fetch(`/api/track/${encodeURIComponent(orderId)}`);
       const d = await r.json() as { success: boolean; order?: TrackingOrder; error?: string };
       if (!d.success || !d.order) throw new Error(d.error || 'Sipariş bulunamadı.');
       setOrder(d.order);
@@ -124,10 +129,12 @@ export default function OrderTrackingView({ orderId, currentLanguage = 'tr', onB
             {/* Order summary card */}
             <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
               <div className="flex items-start justify-between">
+                {order.orderNo ? (
                 <div>
                   <p className="text-[10px] font-bold text-gray-400 uppercase">{oc(tr).siparis_no}</p>
                   <p className="font-bold text-lg text-brand">#{order.orderNo}</p>
                 </div>
+                ) : <div />}
                 <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
                   isCancelled           ? 'bg-gray-100 text-gray-500' :
                   order.status === 'Delivered'  ? 'bg-emerald-100 text-emerald-700' :

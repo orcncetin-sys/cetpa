@@ -64,6 +64,9 @@ const ISARET = `data->'${A}'`;
 /** D15 + Y2: çağıranın kiracısı YA DA etiketsiz (alan yok / JSON `null` / boş dize — `companyId || ''` kalıbı). */
 const KIRACI = `(data->>'companyId' = $2 OR coalesce(data->>'companyId', '') = '')`;
 
+/** LB — sipariş LUCA'ya Cetpa'dan aktarılMAMIŞ: `lucaSynced` JSON `true` değil VE `lucaFaturaNo` boş (`btrim`, numarayla aynı). */
+const LUCA_GONDERILMEDI = `((data->'lucaSynced') IS DISTINCT FROM 'true'::jsonb AND btrim(coalesce(data->>'lucaFaturaNo', '')) = '')`;
+
 /** Bayat `gonderiliyor` (D5): `zaman` + eşik < sunucu saati (SQL `now()`). Zamanı okunamayan işaret bayattır (güvenli yön).
  *  `esik` = ms cinsinden eşiğin parametre yeri. CASE: biçim denetimi dönüşümden ÖNCE (bozuk metin sorguyu düşürmesin). */
 const bayatSql = (esik: string): string =>
@@ -74,6 +77,10 @@ const bayatSql = (esik: string): string =>
  * D1 — TALEP: siparişte Mikro faturası YOKSA `gonderiliyor` yazılır. «İşaret yok» = anahtar yok YA DA nesne değil (JSON `null`
  * dâhil); `reddedildi` yeniden gönderilebilir; bayat `gonderiliyor` GEÇMEZ. `hasInvoice` kapıya girmez (Cetpa-içi fatura).
  * `btrim` yalnız boşluğu kırpar: sekme / satır sonu içeren numara «dolu» sayılır (güvenli yön).
+ * LUCA'YA AKTARILMIŞ SİPARİŞ (2026-10-19, şartname «takip kodu + LUCA reddi» LB): `lucaSynced` JSON `true` YA DA `lucaFaturaNo`
+ * dolu → talep GEÇMEZ. Muhasebeci Mikro'daki faturaları LUCA'ya aktarır; Cetpa'dan LUCA'ya gitmiş siparişe Mikro'da da fatura
+ * kesilirse LUCA'da aynı satış iki kez olurdu. İşaretlerin tek yazıcısı (`/api/luca/sync/fatura`) LA ile kapandı; `/api/db`
+ * yazamaz (collections.SUNUCU_TURETILEN_ALANLAR). İstemci düğmesi aynı ölçütle gizlenir (faturaDurumu.mikroyaFaturaGonderilebilir).
  * $3 işaret (jsonb), $4 mağaza kaynağı (`MAGAZA_KAYNAGI` — metin kopyası yok). MF kaynağı `MF_KAYNAGI`'dan gömülür (lib/mfKaynagi).
  */
 export const FATURA_TALEP_SQL = `UPDATE docs SET data = data || jsonb_build_object('${A}', $3::jsonb, 'companyId', $2::text), updated_at = now()
@@ -81,6 +88,7 @@ export const FATURA_TALEP_SQL = `UPDATE docs SET data = data || jsonb_build_obje
    AND coalesce(data->>'source', '') NOT IN ('${MF_KAYNAGI}', $4::text)
    AND btrim(coalesce(data->>'mikroFaturaNo', '')) = '' AND btrim(coalesce(data->>'ettn', '')) = ''
    AND (data->'faturali') IS DISTINCT FROM 'false'::jsonb
+   AND ${LUCA_GONDERILMEDI}
    AND (jsonb_typeof(${ISARET}) IS DISTINCT FROM 'object' OR ${ISARET}->>'durum' = 'reddedildi')
  RETURNING data`;
 
@@ -91,6 +99,7 @@ export const FATURA_OKU_SQL = `SELECT data,
    btrim(coalesce(data->>'mikroFaturaNo', '')) <> '' AS no_dolu,
    btrim(coalesce(data->>'ettn', '')) <> '' AS ettn_dolu,
    coalesce((data->'faturali') = 'false'::jsonb, false) AS faturasiz,
+   NOT ${LUCA_GONDERILMEDI} AS luca_gonderildi,
    data->>'mikroFaturaNo' AS no_metin,
    data->>'ettn' AS ettn_metin
  FROM docs WHERE coll = 'orders' AND id = $1 AND ${KIRACI}`;
@@ -206,6 +215,8 @@ export interface FaturaOkunan {
   noDolu: boolean;
   ettnDolu: boolean;
   faturasiz: boolean;
+  /** LB: `lucaSynced` JSON `true` YA DA `lucaFaturaNo` dolu (talep koşuluyla AYNI ifade). */
+  lucaGonderildi: boolean;
   noMetin: string | null;
   ettnMetin: string | null;
 }
@@ -227,8 +238,9 @@ function gonderildiRet(o: FaturaOkunan, isaret: MikroFaturaGonderimi | null): Fa
 
 /**
  * D1 — talep tutmadı (0 satır): yanıt şu ÖNCELİKLE seçilir; hiçbir dalda Mikro'ya istek GİTMEZ.
- *   2. Mikro faturasından türeyen / mağaza / faturasız satış → 400 `FATURA_KESILEMEZ` (MF siparişi HER ZAMAN numara taşır:
- *      numara önce gelseydi bu kol ölü olurdu).
+ *   2. Mikro faturasından türeyen / mağaza / faturasız satış / LUCA'ya Cetpa'dan aktarılmış (LB) → 400 `FATURA_KESILEMEZ` (MF
+ *      siparişi HER ZAMAN numara taşır: numara önce gelseydi bu kol ölü olurdu; LUCA'ya giden siparişte de numara dalı «zaten
+ *      kesildi» derdi — asıl neden LUCA'dır).
  *   3. `mikroFaturaNo` ya da `ettn` dolu → 409 `FATURA_GONDERILDI`.
  *   4. İşaret `gonderildi` → 409 `FATURA_GONDERILDI`; `belirsiz` ya da bayat `gonderiliyor` → 409 `FATURA_SONUCU_BILINMIYOR`;
  *      taze `gonderiliyor` → 409 `FATURA_GONDERILIYOR`.
@@ -240,11 +252,13 @@ export function talepRetKarari(o: FaturaOkunan): FaturaRetKarari {
   // Sol yan kaynak DEĞERİ (lib/mfKaynagi); sağdaki 'mikro-fatura' RET NEDENİ KODUDUR (`FaturaKesilemezNedeni`) — sabite bağlanmaz.
   const neden: FaturaKesilemezNedeni | null = o.kaynak === MF_KAYNAGI ? 'mikro-fatura'
     : o.kaynak === MAGAZA_KAYNAGI ? 'magaza'
-    : o.faturasiz ? 'faturasiz' : null;
+    : o.faturasiz ? 'faturasiz'
+    : o.lucaGonderildi ? 'luca-gonderildi' : null;
   if (neden) {
     const metin = neden === 'mikro-fatura' ? 'Bu kayıt Mikro faturasından türetildi — ikinci fatura kesilemez.'
       : neden === 'magaza' ? 'Çevrim içi mağaza siparişine buradan fatura kesilemez.'
-      : 'Faturasız satışa fatura kesilemez.';
+      : neden === 'faturasiz' ? 'Faturasız satışa fatura kesilemez.'
+      : 'Bu sipariş LUCA\'ya Cetpa\'dan aktarıldı; Mikro\'ya ikinci fatura kesilemez.';
     return ret(400, 'FATURA_KESILEMEZ', metin, isaret, { neden });
   }
   if (o.noDolu || o.ettnDolu) return gonderildiRet(o, isaret);
@@ -275,6 +289,7 @@ async function yeniden(b: FaturaBaglami): Promise<FaturaOkunan | null> {
   return {
     data: r.data, bayat: r.bayat === true, kaynak: typeof r.kaynak === 'string' ? r.kaynak : '',
     noDolu: r.no_dolu === true, ettnDolu: r.ettn_dolu === true, faturasiz: r.faturasiz === true,
+    lucaGonderildi: r.luca_gonderildi === true,
     noMetin: metinVeyaNull(r.no_metin), ettnMetin: metinVeyaNull(r.ettn_metin),
   };
 }

@@ -234,8 +234,11 @@ describe('siparişe dokunan özel uçlar personel kapılı (ya da dış rolü İ
     const eksik = UCLAR.filter(([yol, desen]) => say(yol, desen) !== 1).map(([yol, desen]) => `${gorece(yol)} ${desen}`);
     expect(eksik).toEqual([]);
   });
-  it('istemciden gelen sipariş kimliği sahiplikten geçer (Luca: siparisGorebilir; iyzico: kiracı denetimi dış çağrıdan ÖNCE)', () => {
-    tek(SERVER, /if \(!siparisGorebilir\(await getUserRole\(uid\), \{ uid, cid: await reqCompanyId\(req\) \}, order\)\) \{/);
+  it('istemciden gelen sipariş kimliği sahiplikten geçer (takip kodu ucu + durum e-postası: siparisGorebilir; iyzico: kiracı denetimi dış çağrıdan ÖNCE)', () => {
+    // 2026-10-19: LUCA fatura ucu siparişi artık OKUMAZ (LA — her isteğe 400); sahiplik denetimi taşıyan sipariş okuyucuları takip
+    // kodu ucu (T2) ve sipariş durum e-postası (TF) — ikisi de kodu `takipKoduAlVeyaUret` ile almadan ÖNCE sorar.
+    tek(SERVER, /if \(!siparisGorebilir\(await getUserRole\(uid\), \{ uid, cid \}, o\)\) return res\.status\(404\)\.json\(\{ success: false, error: 'Sipariş bulunamadı\.' \}\);/);
+    tek(R('epostaRoutes.ts'), /if \(!siparisGorebilir\(await C\.getUserRole\(uid\), \{ uid, cid \}, siparis\)\) return res\.status\(404\)\.json\(\{ success: false, error: 'Sipariş bulunamadı\.' \}\);/);
     const P = R('paymentRoutes.ts');
     const kapi = tek(P, /if \(dc === null \|\| \(dc !== '' && dc !== await C\.reqCompanyId\(req\)\)\) \{/);
     const disCagri = tek(P, /const r = await fetch\(`\$\{creds\.baseUrl\}\/payment\/initialize\/checkout`, \{/);
@@ -249,7 +252,9 @@ describe('sunucuda `orders` okuyan / yazan yerlerin SAYISI sabit', () => {
   const BEKLENEN: Record<string, number> = {
     // 9 → 5 (2026-10-08): eski Shopify webhook yazıcıları server.ts'ten çıktı; yenisi kanal/shopifyWebhook.ts'te TEK yazıcı
     // (imzası doğrulanmış sunucu içi yol; doküman başka kiracıya aitse YAZMAZ — kullanıcıya satır okutmaz).
-    'server.ts': 5,
+    // 5 → 4 (2026-10-19, şartname «takip kodu + LUCA reddi»): LUCA fatura ucunun okuma + yazımı kalktı (LA, −2); takip kodu
+    // alma ucunun okuması geldi (T2, +1 — `requireStaff` + `orders` okuma + `siparisGorebilir`).
+    'server.ts': 4,
     'src/server/kanal/shopifyWebhook.ts': 1,
     'src/server/routes/kanalRoutes.ts': 4,
     // 14 → 13 + yeni modül 6 (2026-10-17, e-Fatura çift kesim D1 / D4 / D6): fatura rotasının pgShim set-merge yazımı kalktı;
@@ -264,6 +269,13 @@ describe('sunucuda `orders` okuyan / yazan yerlerin SAYISI sabit', () => {
     'src/server/routes/paymentRoutes.ts': 2,
     'src/server/routes/reportsRoutes.ts': 1,
     'src/server/crons.ts': 1,
+    // 2026-10-19 (takip kodu): tekil kısmi dizin DDL'i (`WHERE coll = 'orders'` — okuma / yazma değil).
+    'src/server/docsSema.ts': 1,
+    // 2026-10-19 (TF): durum e-postası siparişi okur — `requireStaff` + `orders` okuma + `siparisGorebilir`.
+    'src/server/routes/epostaRoutes.ts': 1,
+    // 2026-10-19 (TB / TC): koşullu yazım + yeniden okuma (çağıranın kiracısı YA DA etiketsiz) ve kimliksiz takip ucunun kodla
+    // araması (kiracısız — kod küresel tekil ve ~131 bit; yanıt maskeli, mağaza siparişi 404).
+    'src/server/takipKodu.ts': 3,
   };
   it('dosya başına sayım', () => {
     const desen = /collection\('orders'\)|loadCompanyDocs\('orders'|tenantSnap\('orders'|coll = 'orders'/g;
