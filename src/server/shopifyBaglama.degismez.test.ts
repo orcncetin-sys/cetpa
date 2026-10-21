@@ -80,7 +80,8 @@ describe('Shopify uçları server.ts\'e bağlı ve ara katman sırası doğru', 
     // Eskiden yalnız mağaza siparişi reddediliyordu (₺0 birim fiyatlı resmî kayıt); şimdi uç hiçbir siparişi okumaz ve dışarı
     // çıkmaz (davranış: takipKoduVeLuca.zincir.test «LA»).
     const uc = tek(/^\s*app\.post\('\/api\/luca\/sync\/fatura', requireAuth, requireMfaVerified, requireCollectionAccess\('invoices', 'write'\), async/);
-    const kapanis = satirNo(/^\s*res\.status\(400\)\.json\(LUCA_FATURA_KAPALI\);$/).filter(n => n > uc)[0];
+    // 2026-10-21: kapanış yanıtı ortak yardımcıda (`lucaYazimiKapali` — fatura ve yevmiye uçları aynı kalıp; takipKoduVeLuca «LY»).
+    const kapanis = satirNo(/^\s*lucaYazimiKapali\(res, 'fatura'\);$/).filter(n => n > uc)[0];
     expect(kapanis - uc).toBeLessThan(6);
     expect(satirNo(/fetch\(`\$\{creds\.baseUrl\}\/v1\/faturalar`/)).toEqual([]);
     expect(satirNo(/LUCA'ya fatura olarak aktarılamaz/)).toEqual([]);

@@ -497,8 +497,9 @@ describe('çalışma zamanı zinciri — kayıtlı rota = BEKLENEN; rol katmanı
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('rol matrisi — gerçek HTTP, 12 uç × 10 iç rol (geçen: 2xx ya da 503 «yapılandırılmamış»; kilitli: kapının 403\'ü)', () => {
   /** Geçen rolün yanıtı. LUCA / Paraşüt kimliği YOK → 503 (kapıdan geçtiğinin kanıtı); Shopify belirteci ve Gemini sahte → 200.
-   *  İki LUCA fatura ucu 2026-10-19'dan beri (LA) kimlik TANIMLIYKEN 400 `LUCA_FATURA_KAPALI` döner — 503 bu sınamada kapının
-   *  geçildiğini göstermeye yeter; kapanış davranışı takipKoduVeLuca.zincir.test «LA»da (kimlik tanımlı, LUCA'ya istek 0). */
+   *  İki LUCA fatura ucu 2026-10-19'dan beri (LA) ve yevmiye ucu 2026-10-21'den beri (LY) kimlik TANIMLIYKEN 400
+   *  `LUCA_FATURA_KAPALI` / `LUCA_YEVMIYE_KAPALI` döner — 503 bu sınamada kapının geçildiğini göstermeye yeter; kapanış davranışı
+   *  takipKoduVeLuca.zincir.test «LA» / «LY»de (kimlik tanımlı, LUCA'ya istek 0). */
   const MATRIS: ReadonlyArray<{ anahtar: EntegrasyonKapiliUc; govde: unknown; gecen: number }> = [
     { anahtar: 'GET /api/luca/kontor', govde: undefined, gecen: 503 },
     { anahtar: 'POST /api/luca/fatura-gonder', govde: { invoiceId: 'f-1', invoiceData: {} }, gecen: 503 },

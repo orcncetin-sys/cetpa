@@ -19,7 +19,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { join } from 'path';
-import { SRC_KOK as SRC, kaynakDosyalari, kodSatirlari, gorece } from '../test/kaynakTarama';
+import { SRC_KOK as SRC, kaynakDosyalari, kodSatirlari, gorece, suclular } from '../test/kaynakTarama';
 import { DIS_ROL_SATIR_ALANI, DIS_ROL_YAZAMAZ } from '../lib/collections';
 import { EXTERNAL_ROLES, STAFF_ROLES, isAllowed } from '../lib/rbac';
 import { satirAlani, satirGorunur } from '../lib/tenantErisim';
@@ -234,11 +234,24 @@ describe('siparişe dokunan özel uçlar personel kapılı (ya da dış rolü İ
     const eksik = UCLAR.filter(([yol, desen]) => say(yol, desen) !== 1).map(([yol, desen]) => `${gorece(yol)} ${desen}`);
     expect(eksik).toEqual([]);
   });
-  it('istemciden gelen sipariş kimliği sahiplikten geçer (takip kodu ucu + durum e-postası: siparisGorebilir; iyzico: kiracı denetimi dış çağrıdan ÖNCE)', () => {
+  it('istemciden gelen sipariş kimliği sahiplikten geçer (takip kodu ucu + durum e-postası + durum WhatsApp: tek işlev; iyzico: kiracı denetimi dış çağrıdan ÖNCE)', () => {
     // 2026-10-19: LUCA fatura ucu siparişi artık OKUMAZ (LA — her isteğe 400); sahiplik denetimi taşıyan sipariş okuyucuları takip
     // kodu ucu (T2) ve sipariş durum e-postası (TF) — ikisi de kodu `takipKoduAlVeyaUret` ile almadan ÖNCE sorar.
-    tek(SERVER, /if \(!siparisGorebilir\(await getUserRole\(uid\), \{ uid, cid \}, o\)\) return res\.status\(404\)\.json\(\{ success: false, error: 'Sipariş bulunamadı\.' \}\);/);
-    tek(R('epostaRoutes.ts'), /if \(!siparisGorebilir\(await C\.getUserRole\(uid\), \{ uid, cid \}, siparis\)\) return res\.status\(404\)\.json\(\{ success: false, error: 'Sipariş bulunamadı\.' \}\);/);
+    // 2026-10-21: durum WhatsApp iletisi de siparişi okur (numara `gorunenTakipNo`). Sahiplik denetimi TEK işlevde
+    // (server/gorulebilirSiparis `gorulebilirSiparisOku`: oku → `siparisGorebilir`); üç çağıran `null`'u HEMEN altındaki satırda
+    // «bulunamadı» ile geri çevirir. Sunucuda `siparisGorebilir`'i o işlevden başka hiçbir yer çağırmaz (kopya kalıp yok).
+    const YARDIMCI = join(SRC, 'server', 'gorulebilirSiparis.ts');
+    tek(YARDIMCI, /^\s*return siparis && siparisGorebilir\(rol, k, siparis\) \? siparis : null;$/);
+    const sunucuDosyalari = [SERVER, ...kaynakDosyalari(join(SRC, 'server'))].filter(y => !/\.test\.ts$|testDuzenegi/.test(y));
+    expect(suclular(sunucuDosyalari, /\bsiparisGorebilir\(/).map(s => s.site.replace(/:\d+$/, ''))).toEqual(['src/server/gorulebilirSiparis.ts']);
+    expect(suclular(sunucuDosyalari, /\bgorulebilirSiparisOku\(/).map(s => s.site.replace(/:\d+$/, '')).sort())
+      .toEqual(['server.ts', 'server.ts', 'src/server/gorulebilirSiparis.ts', 'src/server/routes/epostaRoutes.ts']);
+    const t2 = tek(SERVER, /^\s*const o = await gorulebilirSiparisOku\(adminDb, await getUserRole\(uid\), \{ uid, cid \}, orderId\);$/);
+    ardindan(SERVER, t2, [/^\s*if \(!o\) return res\.status\(404\)\.json\(\{ success: false, error: 'Sipariş bulunamadı\.' \}\);$/]);
+    const wa = tek(SERVER, /^\s*const siparis = await gorulebilirSiparisOku\(adminDbZorunlu\(\), await getUserRole\(uid\), \{ uid, cid \}, orderId\);$/);
+    ardindan(SERVER, wa, [/^\s*if \(!siparis\) return res\.json\(\{ success: false, error: 'Sipariş bulunamadı\.' \}\);$/]);
+    const ep = tek(R('epostaRoutes.ts'), /^\s*const siparis = await gorulebilirSiparisOku\(C\.getAdminDb\(\), await C\.getUserRole\(uid\), \{ uid, cid \}, orderId\);$/);
+    ardindan(R('epostaRoutes.ts'), ep, [/^\s*if \(!siparis\) return res\.status\(404\)\.json\(\{ success: false, error: 'Sipariş bulunamadı\.' \}\);$/]);
     const P = R('paymentRoutes.ts');
     const kapi = tek(P, /if \(dc === null \|\| \(dc !== '' && dc !== await C\.reqCompanyId\(req\)\)\) \{/);
     const disCagri = tek(P, /const r = await fetch\(`\$\{creds\.baseUrl\}\/payment\/initialize\/checkout`, \{/);
@@ -254,7 +267,9 @@ describe('sunucuda `orders` okuyan / yazan yerlerin SAYISI sabit', () => {
     // (imzası doğrulanmış sunucu içi yol; doküman başka kiracıya aitse YAZMAZ — kullanıcıya satır okutmaz).
     // 5 → 4 (2026-10-19, şartname «takip kodu + LUCA reddi»): LUCA fatura ucunun okuma + yazımı kalktı (LA, −2); takip kodu
     // alma ucunun okuması geldi (T2, +1 — `requireStaff` + `orders` okuma + `siparisGorebilir`).
-    'server.ts': 4,
+    // 4 → 3 (2026-10-21): takip kodu ucunun okuması ortak işleve taşındı (server/gorulebilirSiparis, −1). Durum WhatsApp iletisi
+    // siparişi o işlevle okur (sayıya girmez — okuma satırı işlevde).
+    'server.ts': 3,
     'src/server/kanal/shopifyWebhook.ts': 1,
     'src/server/routes/kanalRoutes.ts': 4,
     // 14 → 13 + yeni modül 6 (2026-10-17, e-Fatura çift kesim D1 / D4 / D6): fatura rotasının pgShim set-merge yazımı kalktı;
@@ -271,8 +286,11 @@ describe('sunucuda `orders` okuyan / yazan yerlerin SAYISI sabit', () => {
     'src/server/crons.ts': 1,
     // 2026-10-19 (takip kodu): tekil kısmi dizin DDL'i (`WHERE coll = 'orders'` — okuma / yazma değil).
     'src/server/docsSema.ts': 1,
-    // 2026-10-19 (TF): durum e-postası siparişi okur — `requireStaff` + `orders` okuma + `siparisGorebilir`.
-    'src/server/routes/epostaRoutes.ts': 1,
+    // 2026-10-19 (TF): durum e-postası siparişi okur — `requireStaff` + `orders` okuma + `siparisGorebilir`. 2026-10-21: okuma ortak
+    // işleve taşındı (dosyada 0 — satır düştü).
+    // 2026-10-21: `/api/db` dışındaki uçların sipariş okuması TEK işlevde — kimlikle oku + `siparisGorebilir` (kiracı, dış rolde
+    // satır). Çağıranlar: takip kodu ucu, durum e-postası, durum WhatsApp iletisi (üçü de `requireStaff` + `orders` okuma kapılı).
+    'src/server/gorulebilirSiparis.ts': 1,
     // 2026-10-19 (TB / TC): koşullu yazım + yeniden okuma (çağıranın kiracısı YA DA etiketsiz) ve kimliksiz takip ucunun kodla
     // araması (kiracısız — kod küresel tekil ve ~131 bit; yanıt maskeli, mağaza siparişi 404).
     'src/server/takipKodu.ts': 3,

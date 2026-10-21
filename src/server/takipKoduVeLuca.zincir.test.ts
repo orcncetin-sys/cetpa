@@ -3,6 +3,8 @@
  * takipKoduVeLuca.zincir.test.ts — şartname `.wf/SARTNAME-takip-kodu-ve-luca-reddi.md` (2026-10-19), GERÇEK `server.ts` + GERÇEK
  * express zinciriyle: tahmin edilemez takip kodu (T1–T4, TA–TF) ve Cetpa'dan LUCA'ya fatura yollarının kapanışı (LA) + LUCA
  * işaretlerinin `/api/db` ile yazılamaması (LB). LB'nin e-Fatura talebi kolu (Mikro sahtesiyle) `faturaCiftKesim.zincir.test.ts`'te.
+ * 2026-10-21 kullanıcı kararları: sipariş durum WhatsApp iletisi numarayı siparişten basar — MF'de «MIKROFAT» yerine `MF-…` (TW);
+ * Cetpa'dan LUCA'ya yevmiye gönderen yol da kapalı (LY).
  *
  * NEDEN GERÇEK ZİNCİR: kod alma ucunun kapısı, takip ucunun iki yolu, e-posta ucunun sipariş okuması ve korunan alan listesi
  * «yazıldı ama bağlanmadı» sınıfındandır: saf testler (takipKodu.pglite.test, lib testleri) kuralı kanıtlar, bağlantıyı kanıtlamaz.
@@ -11,8 +13,8 @@
  * SAHTE OLANLAR (yalnız süreç dışına çıkanlar): Firebase belirteç doğrulayıcısı (belirteç = "<uid>|<e-posta>|<1|0>"), `pg`
  * havuzu (süreç içi PGlite; her sorgunun metni ve parametreleri kaydedilir), pg-boss, node-cron, vite, `dotenv` (hiçbir ortam
  * dosyası YÜKLENMEZ) ve dışarı giden `fetch` (kaydedilir, hiçbir yere gitmez). LUCA kimliği bu dosyada bilerek TANIMLI (sahte
- * değer): iki LUCA ucu 503'ü geçip kapanış yanıtına ulaşsın — LUCA'ya istek gitmediği `fetch` kaydından ölçülür. Canlıya,
- * Firebase'e, Mikro'ya, LUCA'ya istek YOK.
+ * değer): üç LUCA yazma ucu 503'ü geçip kapanış yanıtına ulaşsın — LUCA'ya istek gitmediği `fetch` kaydından ölçülür. WhatsApp
+ * kimliği (sahte) yalnız TW sınamalarının süresince tanımlıdır. Canlıya, Firebase'e, Mikro'ya, LUCA'ya, Meta'ya istek YOK.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import http from 'node:http';
@@ -455,25 +457,28 @@ describe('T3 / TC — `GET /api/track/:orderId`: takip kodu YA DA eski rastgele 
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Durum e-postası yardımcıları (TF ve TW — WhatsApp iletisiyle birebirlik sınaması — ikisi de kullanır).
+const postalar = (once: number) => disari.slice(once).filter(d => d.url === 'https://api.resend.com/emails')
+  .map(d => JSON.parse(d.govde) as { to: string[]; subject: string; html: string });
+const epostaGonder = async (b: Record<string, string>, orderId: string, ek: Record<string, unknown> = {}) => {
+  process.env.RESEND_API_KEY = 'sinama-resend-anahtari';
+  const once = disari.length;
+  try {
+    const r = await istek('POST', '/api/email/order-notification', b, { orderId, status: 'Shipped', customerEmail: 'musteri@example.test', customerName: 'Orçun Çetin', ...ek });
+    return { r, posta: postalar(once) };
+  } finally { delete process.env.RESEND_API_KEY; }
+};
+/** E-postanın «SİPARİŞ NO» bloğundaki numara (`#…`); blok yoksa `null`. */
+const postadakiNo = (html: string): string | null =>
+  html.match(/font-family:monospace;">#([^<]*)<\/p>/)?.[1] ?? null;
+const postadakiKod = (html: string): string => {
+  const m = html.match(/\/\?track=([0-9A-Za-z]{22})"/);
+  if (!m) throw new Error('e-postada takip bağlantısı yok');
+  return m[1];
+};
+
 describe('TF — `/api/email/order-notification`: siparişi okur, bağlantı takip kodunu taşır', () => {
-  const postalar = (once: number) => disari.slice(once).filter(d => d.url === 'https://api.resend.com/emails')
-    .map(d => JSON.parse(d.govde) as { to: string[]; subject: string; html: string });
-  const gonder = async (b: Record<string, string>, orderId: string, ek: Record<string, unknown> = {}) => {
-    process.env.RESEND_API_KEY = 'sinama-resend-anahtari';
-    const once = disari.length;
-    try {
-      const r = await istek('POST', '/api/email/order-notification', b, { orderId, status: 'Shipped', customerEmail: 'musteri@example.test', customerName: 'Orçun Çetin', ...ek });
-      return { r, posta: postalar(once) };
-    } finally { delete process.env.RESEND_API_KEY; }
-  };
-  /** E-postanın «SİPARİŞ NO» bloğundaki numara (`#…`); blok yoksa `null`. */
-  const postadakiNo = (html: string): string | null =>
-    html.match(/font-family:monospace;">#([^<]*)<\/p>/)?.[1] ?? null;
-  const postadakiKod = (html: string): string => {
-    const m = html.match(/\/\?track=([0-9A-Za-z]{22})"/);
-    if (!m) throw new Error('e-postada takip bağlantısı yok');
-    return m[1];
-  };
+  const gonder = epostaGonder;
 
   it('bağlantı `?track=<takip kodu>`; doküman kimliği bağlantıda YOK; kod siparişe yazılır ve kod alma ucuyla AYNI', async () => {
     const id = await yeniSiparis();
@@ -604,6 +609,153 @@ describe('TF — `/api/email/order-notification`: siparişi okur, bağlantı tak
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+describe('TW — `/api/whatsapp/order-notification`: siparişi okur, numara `gorunenTakipNo` (MF\'de `MF-…`, «MIKROFAT» yok; 2026-10-21)', () => {
+  /** WhatsApp Cloud API ileti adresi (server.ts `sendWhatsApp`). */
+  const WA_ADRESI = /^https:\/\/graph\.facebook\.com\/v19\.0\/[^/]+\/messages$/;
+  interface WaGovdesi { to: string; template: { components: Array<{ type: string; parameters: Array<{ type: string; text: string }> }> } }
+  const iletiler = (once: number): WaGovdesi[] => disari.slice(once).filter(d => WA_ADRESI.test(d.url)).map(d => JSON.parse(d.govde) as WaGovdesi);
+  /** Meta'ya giden HER istek (ileti de, başka bir graph çağrısı da). */
+  const metaIstekleri = (once: number) => disari.slice(once).filter(d => /graph\.facebook\.com/i.test(d.url));
+  /** Şablonun ilk gövde parametresi = sipariş numarası (`{{1}}`). */
+  const iletidekiNo = (g: WaGovdesi): string => g.template.components[0].parameters[0].text;
+  const gonder = async (b: Record<string, string>, orderId: string | undefined, ek: Record<string, unknown> = {}) => {
+    process.env.WA_PHONE_NUMBER_ID = 'sinama-wa-numarasi';
+    process.env.WA_ACCESS_TOKEN = 'sinama-wa-belirteci';
+    const once = disari.length;
+    try {
+      const r = await istek('POST', '/api/whatsapp/order-notification', b, {
+        ...(orderId === undefined ? {} : { orderId }), status: 'Shipped', phone: '0532 000 00 00', customerName: 'Orçun Çetin', lang: 'tr', ...ek,
+      });
+      return { r, ileti: iletiler(once), meta: metaIstekleri(once) };
+    } finally { delete process.env.WA_PHONE_NUMBER_ID; delete process.env.WA_ACCESS_TOKEN; }
+  };
+  const kayitDefteri = async (orderId: string): Promise<Array<Record<string, unknown>>> =>
+    (await pg().query("SELECT data FROM docs WHERE coll = 'waMessageLog' AND data->>'orderId' = $1", [orderId])).rows.map(x => x.data as Record<string, unknown>);
+  const BULUNAMADI = { success: false, error: 'Sipariş bulunamadı.' };
+
+  it('zincir: kimlik → MFA → personel → `orders` okuma (durum e-postasıyla eşdeğer); uç tam bir kez kayıtlı', () => {
+    const u = rotalar().filter(r => r.yontem === 'POST' && r.desen === '/api/whatsapp/order-notification');
+    expect(u).toHaveLength(1);
+    expect(u[0].adlar.slice(0, 3)).toEqual(['requireAuth', 'requireMfaVerified', 'requireStaff']);
+    expect(u[0].adlar).toHaveLength(5);   // + koleksiyon kuralı (adsız kapanış) + işleyici
+    const e = rotalar().filter(r => r.yontem === 'POST' && r.desen === '/api/email/order-notification');
+    expect(u[0].adlar.slice(0, 4)).toEqual(e[0].adlar.slice(0, 4));
+  });
+
+  it('MF siparişi: ileti numarası `MF-CTP77`; `MIKROFAT` / `mikrofat` iletinin HİÇBİR yerinde yok; istemcinin `orderNo`\'su yok sayılır', async () => {
+    for (const ek of [{}, { orderNo: 'ISTEMCI-97' }, { orderNo: 5013 }] as const) {
+      const { r, ileti } = await gonder(ic('Sales'), MF_ID, ek);
+      expect([r.s, r.j], r.metin).toEqual([200, { success: true }]);
+      expect(ileti).toHaveLength(1);
+      expect(iletidekiNo(ileti[0])).toBe('MF-CTP77');
+      const metin = JSON.stringify(ileti[0]);
+      expect(metin).not.toMatch(/mikrofat/i);
+      expect(metin).not.toContain(KIRACI);
+      expect(metin).not.toContain('ISTEMCI-97');
+      expect(metin).not.toContain('5013');
+    }
+    const log = await kayitDefteri(MF_ID);
+    expect(log.length).toBeGreaterThanOrEqual(3);
+    for (const satir of log) expect(satir.orderNo).toBe('MF-CTP77');
+  });
+
+  it('düz sipariş: numara siparişin `orderNumber`\'ı (istemci `orderNo` OKUNMAZ); kayıt defterine aynı numara ve çağıranın kiracısı', async () => {
+    const id = await yeniSiparis();
+    const kayitNo = String((await belgeOku('orders', id))?.orderNumber);
+    const { r, ileti } = await gonder(ic('Logistics'), id, { orderNo: 'ISTEMCI-96' });
+    expect([r.s, r.j], r.metin).toEqual([200, { success: true }]);
+    expect(ileti.map(iletidekiNo)).toEqual([kayitNo]);
+    expect(JSON.stringify(ileti[0])).not.toContain('ISTEMCI-96');
+    const log = await kayitDefteri(id);
+    expect(log).toHaveLength(1);
+    expect(log[0]).toMatchObject({ orderId: id, orderNo: kayitNo, companyId: KIRACI, status: 'Shipped' });
+  });
+
+  it('görünen numarası olmayan sipariş: numara «—»; doküman kimliğinden numara türetilmez (istemci `orderNo` gönderse de)', async () => {
+    const id = await yeniSiparis({ orderNumber: undefined });
+    for (const ek of [{}, { orderNo: 'ISTEMCI-95' }]) {
+      const { r, ileti } = await gonder(ic('Sales'), id, ek);
+      expect([r.s, r.j], r.metin).toEqual([200, { success: true }]);
+      expect(ileti.map(iletidekiNo)).toEqual(['—']);
+      const metin = JSON.stringify(ileti[0]);
+      expect(metin).not.toContain(id.slice(0, 8));
+      expect(metin).not.toContain(id.slice(0, 8).toUpperCase());
+      expect(metin).not.toContain('ISTEMCI-95');
+    }
+  });
+
+  it('e-posta, takip sayfası ve WhatsApp AYNI numarayı basar (BİREBİR): MF, düz, sayısal `shopifyOrderId`', async () => {
+    const duz = await yeniSiparis();
+    const sayisal = await yeniSiparis({ orderNumber: '  ', shopifyOrderId: 5014 });
+    for (const id of [MF_ID, duz, sayisal]) {
+      const { r: er, posta } = await epostaGonder(ic('Sales'), id);
+      expect(er.s, er.metin).toBe(200);
+      const t = await takip(postadakiKod(posta[0].html));
+      expect(t.s, t.metin).toBe(200);
+      const sayfaNo = (t.j.order as Record<string, unknown>).orderNo;
+      expect(typeof sayfaNo, id).toBe('string');
+      const { r, ileti } = await gonder(ic('Sales'), id);
+      expect([r.s, r.j], r.metin).toEqual([200, { success: true }]);
+      expect([id, iletidekiNo(ileti[0])]).toEqual([id, sayfaNo]);
+      expect([id, postadakiNo(posta[0].html)]).toEqual([id, sayfaNo]);
+    }
+  });
+
+  it('başka kiracının siparişi / yabancı kiracının kullanıcısı / olmayan sipariş → 200 «bulunamadı»; ileti GİTMEZ (Meta\'ya istek 0), kayıt defterine satır yok', async () => {
+    const yabanciMf = MF_ID.replace(KIRACI, BASKA_KIRACI);
+    await belgeKoy('orders', yabanciMf, { ...SIPARIS, companyId: BASKA_KIRACI, orderNumber: 'MF-BASKA1', source: MF_KAYNAGI, mikroFaturaNo: 'CTP-77' });
+    for (const [b, id] of [[ic('Sales'), 'baska-siparis'], [ic('Sales'), yabanciMf], [YABANCI, ESKI_ID], [YABANCI, MF_ID], [ic('Sales'), 'OlmayanSiparis000005']] as const) {
+      const once = (await kayitDefteri(id)).length;
+      const { r, ileti, meta } = await gonder(b, id);
+      expect([id, r.s, r.j]).toEqual([id, 200, BULUNAMADI]);
+      expect(ileti, id).toEqual([]);
+      expect(meta, id).toEqual([]);
+      expect((await kayitDefteri(id)).length, id).toBe(once);
+    }
+  });
+
+  it('`orderId` ZORUNLU: yoksa / boşsa / metin değilse 200 «orderId zorunludur.»; ileti gitmez', async () => {
+    for (const orderId of [undefined, '', '   ', 42] as const) {
+      const ek = orderId === undefined ? {} : { orderId };
+      const { r, ileti, meta } = await gonder(ic('Sales'), undefined, ek);
+      expect([String(orderId), r.s, r.j]).toEqual([String(orderId), 200, { success: false, error: 'orderId zorunludur.' }]);
+      expect(ileti).toEqual([]);
+      expect(meta).toEqual([]);
+    }
+  });
+
+  it('kapı durum e-postasıyla eşdeğer: `orders` okuma yetkisi olmayan iç rol (İK, Kalite) 403; dış rol 403 — ileti gitmez', async () => {
+    for (const b of [ic('HR'), ic('Quality')]) {
+      const { r, ileti } = await gonder(b, ESKI_ID);
+      expect([r.s, r.j]).toEqual([403, { error: 'Bu veri için yetkiniz yok.' }]);
+      expect(ileti).toEqual([]);
+    }
+    const { r, ileti } = await gonder(BAYI, ESKI_ID);
+    expect(r.s).toBe(403);
+    expect(ileti).toEqual([]);
+  });
+
+  it('WhatsApp yapılandırılmamışsa bugünkü yanıt (200 `notConfigured`) — sipariş okunmadan, ileti yok', async () => {
+    const once = disari.length;
+    const r = await istek('POST', '/api/whatsapp/order-notification', ic('Sales'), { orderId: MF_ID, status: 'Shipped', phone: '05320000000' });
+    expect([r.s, r.j]).toEqual([200, { success: false, notConfigured: true }]);
+    expect(metaIstekleri(once)).toEqual([]);
+  });
+
+  it('kaynak: uç numarayı istemci gövdesinden ya da kimlikten KURMAZ; numara `gorunenTakipNo` (TEK tanım), sipariş ortak işlevle okunur', () => {
+    const kod = kodSatirlari(path.join(__dirname, '..', '..', 'server.ts')).map(k => k.kod);
+    const bas = kod.findIndex(k => k.includes("app.post('/api/whatsapp/order-notification'"));
+    expect(bas).toBeGreaterThan(-1);
+    const son = kod.findIndex((k, i) => i > bas && /^\s*\}\);\s*$/.test(k));
+    const govde = kod.slice(bas, son + 1).join('\n');
+    expect(govde).not.toMatch(/orderId\??\.slice\(|\borderNo\s*\?\?|toUpperCase\(\)/);
+    expect(govde).toMatch(/const no = gorunenTakipNo\(siparis\) \?\? '—';/);
+    expect(govde).toMatch(/await gorulebilirSiparisOku\(/);
+    expect(govde).not.toMatch(/collection\('orders'\)/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('LA — Cetpa\'dan LUCA\'ya fatura gönderen iki yol kapalı (kapı ve 503 önde; ardından 400; LUCA\'ya istek YOK)', () => {
   const KAPALI = { success: false, kod: 'LUCA_FATURA_KAPALI', error: "Fatura Mikro'dan kesilir ve LUCA'ya Mikro'dan aktarılır; Cetpa'dan LUCA'ya fatura gönderilmez." };
   const lucaIstekleri = (once: number) => disari.slice(once).filter(d => LUCA_ADRESI.test(d.url));
@@ -644,5 +796,89 @@ describe('LA — Cetpa\'dan LUCA\'ya fatura gönderen iki yol kapalı (kapı ve 
       expect([yol, satis.s, satis.j]).toEqual([yol, 403, { error: 'Bu veri için yetkiniz yok.' }]);
       expect((await istek('POST', yol, BAYI, { orderId: ESKI_ID })).s).toBe(403);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+describe('LY — Cetpa\'dan LUCA\'ya yevmiye gönderen yol kapalı (2026-10-21 kullanıcı kararı «kapat»; kapı ve 503 önde; ardından 400; LUCA\'ya istek YOK)', () => {
+  const KAPALI = { success: false, kod: 'LUCA_YEVMIYE_KAPALI', error: "Yevmiye Mikro'da tutulur ve LUCA'ya Mikro'dan aktarılır; Cetpa'dan LUCA'ya yevmiye gönderilmez." };
+  const YOL = '/api/luca/sync/yevmiye';
+  const lucaIstekleri = (once: number) => disari.slice(once).filter(d => LUCA_ADRESI.test(d.url));
+  const FISLER = [
+    { id: 'y-1', date: '2026-10-21', fiş: 'F-1', aciklama: 'Şirin Yapı tahsilatı', debitHesap: '100', alacakHesap: '120.01.001', borc: 3600, alacak: 3600 },
+    { id: 'y-2', date: '2026-10-21', fisNo: 'F-2', aciklama: 'İzmir Fırça alışı', debitHesap: '153', alacakHesap: '320.01.002', borc: 812.5, alacak: 812.5 },
+  ];
+  const denetimSatirlari = async (): Promise<number> =>
+    (await pg().query("SELECT count(*)::int AS n FROM docs WHERE coll = 'auditLog' AND data->>'action' = 'Luca Yevmiye Sync'")).rows[0].n as number;
+
+  it('uç KAYITLI, kapısı aynen (kimlik → MFA → `journalEntries` yazma)', () => {
+    const u = rotalar().filter(r => r.yontem === 'POST' && r.desen === YOL);
+    expect(u).toHaveLength(1);
+    expect(u[0].adlar.slice(0, 2)).toEqual(['requireAuth', 'requireMfaVerified']);
+    expect(u[0].adlar).toHaveLength(4);   // + koleksiyon kuralı (adsız kapanış) + işleyici
+  });
+
+  it('gövde ne olursa olsun (fişli, boş dizi, gövdesiz, biçimsiz) 400 KAPALI; LUCA fetch 0; denetim satırı yazılmaz', async () => {
+    const denetimOnce = await denetimSatirlari();
+    for (const govde of [{ entries: FISLER }, { entries: [] }, {}, { entries: 'y-1' }, undefined]) {
+      for (const b of [ic('Accounting'), ic('Admin')]) {
+        const once = disari.length;
+        const r = await istek('POST', YOL, b, govde);
+        expect([JSON.stringify(govde), r.s, r.j]).toEqual([JSON.stringify(govde), 400, KAPALI]);
+        expect(lucaIstekleri(once), JSON.stringify(govde)).toEqual([]);
+      }
+    }
+    expect(await denetimSatirlari()).toBe(denetimOnce);
+  });
+
+  it('503 «yapılandırılmamış» kapanıştan ÖNCE: LUCA kimliği yokken 503 (fatura ucuyla aynı gövde); LUCA fetch 0', async () => {
+    const firma = process.env.LUCA_COMPANY_ID;
+    delete process.env.LUCA_COMPANY_ID;   // getLucaCreds ortamı çağrı anında okur; `settings/luca` belgesi yok
+    try {
+      for (const [yol, govde] of [[YOL, { entries: FISLER }], ['/api/luca/sync/fatura', { orderId: ESKI_ID }]] as const) {
+        const once = disari.length;
+        const r = await istek('POST', yol, ic('Accounting'), govde);
+        expect([yol, r.s, r.j]).toEqual([yol, 503, { success: false, notConfigured: true }]);
+        expect(lucaIstekleri(once), yol).toEqual([]);
+      }
+    } finally { process.env.LUCA_COMPANY_ID = firma; }
+  });
+
+  it('kapı önde kalır: `journalEntries` yazma yetkisi olmayan iç rol (Satış, Müdür, Lojistik) 403, dış rol 403 — kapanış iletisi görülmez', async () => {
+    for (const rol of ['Sales', 'Manager', 'Logistics'] as const) {
+      const once = disari.length;
+      const r = await istek('POST', YOL, ic(rol), { entries: FISLER });
+      expect([rol, r.s, r.j]).toEqual([rol, 403, { error: 'Bu veri için yetkiniz yok.' }]);
+      expect(lucaIstekleri(once)).toEqual([]);
+    }
+    const bayi = await istek('POST', YOL, BAYI, { entries: FISLER });
+    expect(bayi.s).toBe(403);
+    expect(bayi.j).not.toHaveProperty('kod');
+  });
+
+  it('LUCA\'dan Cetpa\'ya OKUYAN uçlar DEĞİŞMEDİ: durum, kontör ve stok çekme LUCA\'ya gider (kapanış onlara dokunmaz)', async () => {
+    for (const [yontem, yol] of [['GET', '/api/luca/status'], ['GET', '/api/luca/kontor'], ['POST', '/api/luca/sync/stok']] as const) {
+      const once = disari.length;
+      const r = await istek(yontem, yol, ic('Admin'), yontem === 'POST' ? {} : undefined);
+      expect([yol, r.s], r.metin).toEqual([yol, 200]);
+      expect(r.j.kod, yol).toBeUndefined();
+      expect(lucaIstekleri(once).length, yol).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('kapanış TEK yerde: ileti ve 400 yalnız `LUCA_YAZIMI_KAPALI` / `lucaYazimiKapali`; üç LUCA yazma ucu onu çağırır (kopya ileti / kalıp yok)', () => {
+    const kod = kodSatirlari(path.join(__dirname, '..', '..', 'server.ts')).map(k => k.kod.trimEnd());
+    const say = (d: RegExp): number => kod.filter(k => d.test(k)).length;
+    expect(say(/res\.status\(400\)\.json\(LUCA_YAZIMI_KAPALI\[tur\]\);/)).toBe(1);
+    expect(say(/LUCA_YAZIMI_KAPALI/)).toBe(3);   // tanım + yardımcının imzası + yardımcının gövdesi
+    expect(say(/LUCA'ya fatura gönderilmez/)).toBe(1);
+    expect(say(/LUCA'ya yevmiye gönderilmez/)).toBe(1);
+    expect(say(/'LUCA_(FATURA|YEVMIYE)_KAPALI'/)).toBe(2);
+    expect(say(/^\s*lucaYazimiKapali\(res, 'fatura'\);$/)).toBe(2);
+    expect(say(/^\s*lucaYazimiKapali\(res, 'yevmiye'\);$/)).toBe(1);
+    // Kapalı yevmiye ucunun gövdesinde LUCA'ya istek yok.
+    const bas = kod.findIndex(k => k.includes("app.post('/api/luca/sync/yevmiye'"));
+    const son = kod.findIndex((k, i) => i > bas && /^\s*\}\);$/.test(k));
+    expect(kod.slice(bas, son + 1).join('\n')).not.toMatch(/fetch\(|req\.body/);
   });
 });

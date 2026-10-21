@@ -34,7 +34,8 @@ export const ENTEGRASYON_UC_KAPILARI = {
   //      sekmesi zaten Yönetici, Müdür, Muhasebe). 2026-10-19 (LA): uç KAPALI — kapı aynen önde, ardından her isteğe 400
   //      `LUCA_FATURA_KAPALI`; istemcide çağıranı YOK (düğme kalktı).
   'POST /api/luca/fatura-gonder': ['invoices', 'write'],
-  // L3 — yevmiye (İ5). İstemcide çağıranı YOK.
+  // L3 — yevmiye (İ5). İstemcide çağıranı YOK. 2026-10-21 (kullanıcı kararı «kapat»): uç KAPALI — kapı aynen önde, ardından her
+  //      isteğe 400 `LUCA_YEVMIYE_KAPALI` (yevmiye Mikro'da tutulur, LUCA'ya Mikro'dan aktarılır); LUCA'ya istek gitmez.
   'POST /api/luca/sync/yevmiye': ['journalEntries', 'write'],
   // L4 — `inventory`'ye yazar (İ1) + kiracı sınırı (yabancı kiracının kartı ezilmez, sayaçla atlanır).
   'POST /api/luca/sync/stok': ['inventory', 'write'],

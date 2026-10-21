@@ -33,7 +33,7 @@ import { EmailSendSchema } from '../schemas.js';
 // Yaprak moduller — dongu yok.
 import { resendGonderici, escapeHtml, isValidEmail } from '../eposta.js';
 import { APP_ROLES, YONETICI_GEREKLI_YANITI, yalnizYoneticiMi, yoneticiRoluneDokunabilir, type AppRole } from '../../lib/rbac.js';
-import { siparisGorebilir } from '../../lib/tenantErisim.js';
+import { gorulebilirSiparisOku } from '../gorulebilirSiparis.js';
 import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi.js';
 import { takipKoduAlVeyaUret, type TakipHavuzu } from '../takipKodu.js';
 import { gorunenTakipNo } from '../../lib/takipKodu.js';
@@ -123,18 +123,17 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
     if (!havuz) return res.status(503).json({ success: false, error: 'Takip bağlantısı bu kurulumda üretilemez (veritabanı bağlı değil).' });
     const uid = C.reqActor(req).uid;
     const cid = await C.reqCompanyId(req);
-    const siparisBelgesi = await C.getAdminDb().collection('orders').doc(orderId).get();
-    const siparis = siparisBelgesi.exists ? siparisBelgesi.data() as Record<string, unknown> : undefined;
-    if (!siparisGorebilir(await C.getUserRole(uid), { uid, cid }, siparis)) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+    const siparis = await gorulebilirSiparisOku(C.getAdminDb(), await C.getUserRole(uid), { uid, cid }, orderId);   // kiracı + siparisGorebilir (tek kalıp)
+    if (!siparis) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
     let trackUrl: string | null = null;
-    if (siparis?.source !== MAGAZA_KAYNAGI) {
+    if (siparis.source !== MAGAZA_KAYNAGI) {
       const kod = await takipKoduAlVeyaUret(havuz, cid, orderId);
       if (!kod) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
       trackUrl = `${req.protocol}://${req.get('host')}/?track=${encodeURIComponent(kod)}`;
     }
     const tr = lang === 'tr';
     const eName = escapeHtml(customerName); // HTML injection engeli
-    const gorunenNo = siparis ? gorunenTakipNo(siparis) : null;
+    const gorunenNo = gorunenTakipNo(siparis);
     const eOrderNo = gorunenNo === null ? null : escapeHtml(gorunenNo);
 
     const statusLabel: Record<string, { tr: string; en: string; color: string }> = {

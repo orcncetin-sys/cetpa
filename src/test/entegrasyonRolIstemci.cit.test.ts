@@ -8,8 +8,8 @@
  *
  *   Ç-E1  `ENTEGRASYON_UC_KAPILARI`'ndaki yollardan birini KOD satırında geçiren her istemci dosyası ortak tablodan içe aktarım
  *         yapar ve çağırdığı ucun KENDİ anahtarını (`'YÖNTEM /yol'`) taşır. İstisnalar ADIYLA ve gerekçesiyle.
- *   Ç-E2  Çağıranı OLMAYAN uçlar (L3 yevmiye, P1 Paraşüt fatura; 2026-10-19'dan beri LA ile kapanan L2 LUCA e-Fatura ve L5 LUCA
- *         sipariş faturası) adıyla: yol tablo dışında hiçbir istemci dosyasında geçmez.
+ *   Ç-E2  Çağıranı OLMAYAN uçlar (L3 yevmiye — 2026-10-21'den beri o da kapalı, her isteğe 400 —, P1 Paraşüt fatura; 2026-10-19'dan
+ *         beri LA ile kapanan L2 LUCA e-Fatura ve L5 LUCA sipariş faturası) adıyla: yol tablo dışında hiçbir istemci dosyasında geçmez.
  *   Ç-E3  Kilit çakışması (İ3): ucu çağıran ekranı GÖREN roller (App.tsx sekme tablosundan OKUNUR) − kapıdan geçen roller =
  *         bilerek kilitlenenler (`KARAR_KILIDI`, elle). Sekme kümesi kapıdan genişse fark burada adıyla yazılıdır.
  *   Ç-E4  Bağlantı: her yüzeyi AÇAN kod var (bileşen gerçekten bir sekmede çizilir — «yazıldı ama bağlanmadı» çiti).

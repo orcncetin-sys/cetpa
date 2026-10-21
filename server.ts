@@ -53,7 +53,7 @@ import {
   SAHIP_SATIR_ALANI,
   SUNUCU_TURETILEN_ALANLAR,
 } from "./src/lib/collections.js";
-import { kiraciWhere, kiraciDamgala, sunucuAlanKorumaSql, sunucuKorumaVar, sunucuTuretilenAlanlar, baskasininSahipKaydiMi, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, siparisGorebilir, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
+import { kiraciWhere, kiraciDamgala, sunucuAlanKorumaSql, sunucuKorumaVar, sunucuTuretilenAlanlar, baskasininSahipKaydiMi, dokumanSahibiMi, sahiplikDenetimli, akisSatiriGorunur, akisKovalari, ayarSahibi, ayarAnahtari, ayarSatirlari, AYAR_AYRACI, satirAlani, ayrilmisKimlikMi, ayrilmisKimlikAdayi, sahipsizDurumKodu, akisOlayKarari, type KiraciKimligi } from './src/lib/tenantErisim.js';
 import { rolIcinMaskele, maskeyiGeriYukle, farkDegeriMaskele, ayarAdresAlaniDegisti } from './src/lib/sirMaske.js';
 import { kimlikYuzeyiKarari, KIMLIK_YUZEYI_RETLERI, ROL_OKUNAMADI_YANITI } from './src/lib/kimlikYuzeyi.js';
 import { izinliTaban, genelHttpsTaban, genelAdresMi, TabanAdresHatasi, LUCA_TABAN, IYZICO_TABAN } from './src/lib/guvenliTaban.js';
@@ -104,6 +104,7 @@ import { ortamdanKiraci, taramadanKiraci } from "./src/server/kiraciOrtami.js";
 import { DOCS_INDEKS_DDL, DOCS_TABLOSU_DDL } from "./src/server/docsSema.js";
 import { takipKoduMu, eskiTakipYoluAcik, gorunenTakipNo } from './src/lib/takipKodu.js';
 import { takipKoduAlVeyaUret, takipKoduylaSiparis } from './src/server/takipKodu.js';
+import { gorulebilirSiparisOku } from './src/server/gorulebilirSiparis.js';
 
 dotenv.config();
 
@@ -1158,19 +1159,39 @@ console.log(pgPool ? 'adminDb → PostgreSQL shim ✓' : 'adminDb → Firestore 
 const LUCA_API_URL = process.env.LUCA_API_URL || "https://api.luca.com.tr/v1";
 const LUCA_API_KEY = process.env.LUCA_API_KEY || "";
 /**
- * CETPA'DAN LUCA'YA FATURA GÖNDERİLMEZ (2026-10-19, şartname «takip kodu + LUCA reddi» LA; kullanıcı: «LUCA'daki her şey aslında
- * Mikro'da mevcut», «Q serisi LUCA'da yok, olmayacak»). Fatura Mikro'dan kesilir; muhasebeci LUCA'ya Mikro'dan aktarır. İki yol bu
- * gövdeyle kapanır: `POST /api/luca/sync/fatura` (siparişi LUCA'ya satış faturası olarak yollardı — Mikro faturalı / MF siparişi
- * de ikinci kez gidebiliyordu, uç idempotent değildi) ve `POST /api/luca/fatura-gonder` (`invoices` gövdesini LUCA e-Fatura'ya
- * AYNEN iletiyordu — kayıt okunmuyor, kiracı / durum / tekrar denetimi yoktu). Uçlar KAYITLI kalır (eski istemci anlaşılır ileti
- * alır); kapılar ve 503 «yapılandırılmamış» denetimi önde. LUCA'ya istek GİTMEZ. Geri açılırsa Q kaydı (`faturali === false`)
- * yine hiçbir yoldan gitmez (Q şartnamesi). Çit: src/server/takipKoduVeLuca.zincir.test.ts («LA»).
+ * CETPA'DAN LUCA'YA YAZIM YOK — LUCA'daki her şey Mikro'dan gelir; Cetpa'dan da gönderilen kayıt LUCA'da ÇİFT kayıt olur.
+ *
+ * FATURA (2026-10-19, şartname «takip kodu + LUCA reddi» LA; kullanıcı: «LUCA'daki her şey aslında Mikro'da mevcut», «Q serisi
+ * LUCA'da yok, olmayacak»). Fatura Mikro'dan kesilir; muhasebeci LUCA'ya Mikro'dan aktarır. İki yol kapandı:
+ * `POST /api/luca/sync/fatura` (siparişi LUCA'ya satış faturası olarak yollardı — Mikro faturalı / MF siparişi de ikinci kez
+ * gidebiliyordu, uç idempotent değildi) ve `POST /api/luca/fatura-gonder` (`invoices` gövdesini LUCA e-Fatura'ya AYNEN
+ * iletiyordu — kayıt okunmuyor, kiracı / durum / tekrar denetimi yoktu). Geri açılırsa Q kaydı (`faturali === false`) yine
+ * hiçbir yoldan gitmez (Q şartnamesi).
+ * YEVMİYE (2026-10-21, kullanıcı kararı: «Cetpa'daki yevmiye kayıtlarını LUCA'ya gönderen yol da kapatılsın mı? — kapat»).
+ * `POST /api/luca/sync/yevmiye` gövdedeki fişleri tek tek LUCA `/yevmiye`'ye yollardı; yevmiye Mikro'da tutulur ve LUCA'ya
+ * Mikro'dan aktarılır.
+ *
+ * ÜÇ UÇ AYNI KALIP: uçlar KAYITLI kalır (eski istemci anlaşılır ileti alır); kapılar ve 503 «yapılandırılmamış» denetimi önde,
+ * ardından `lucaYazimiKapali` — 400 + aşağıdaki gövde. Gövde okunmaz, LUCA'ya istek GİTMEZ. İleti ve durum kodu YALNIZ burada
+ * (kopya yok). LUCA'dan Cetpa'ya OKUYAN uçlar (`/api/luca/status`, `/api/luca/kontor`, `/api/luca/sync/stok`) açık.
+ * Çit: src/server/takipKoduVeLuca.zincir.test.ts («LA», «LY»).
  */
-const LUCA_FATURA_KAPALI = {
-  success: false,
-  kod: 'LUCA_FATURA_KAPALI',
-  error: "Fatura Mikro'dan kesilir ve LUCA'ya Mikro'dan aktarılır; Cetpa'dan LUCA'ya fatura gönderilmez.",
+const LUCA_YAZIMI_KAPALI = {
+  fatura: {
+    success: false,
+    kod: 'LUCA_FATURA_KAPALI',
+    error: "Fatura Mikro'dan kesilir ve LUCA'ya Mikro'dan aktarılır; Cetpa'dan LUCA'ya fatura gönderilmez.",
+  },
+  yevmiye: {
+    success: false,
+    kod: 'LUCA_YEVMIYE_KAPALI',
+    error: "Yevmiye Mikro'da tutulur ve LUCA'ya Mikro'dan aktarılır; Cetpa'dan LUCA'ya yevmiye gönderilmez.",
+  },
 } as const;
+/** LUCA'ya yazan kapalı ucun yanıtı (kapı ve 503 denetiminden SONRA çağrılır). */
+function lucaYazimiKapali(res: Response, tur: keyof typeof LUCA_YAZIMI_KAPALI): void {
+  res.status(400).json(LUCA_YAZIMI_KAPALI[tur]);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2865,7 +2886,7 @@ async function startServer() {
     }
   });
 
-  // ── Luca e-Fatura Gönderimi — KAPALI (2026-10-19, LA: `LUCA_FATURA_KAPALI`) ─────────────────────────────────────────────
+  // ── Luca e-Fatura Gönderimi — KAPALI (2026-10-19, LA: `LUCA_YAZIMI_KAPALI.fatura`) ─────────────────────────────────────────
   // Rol kapısı (2026-10-17, iç rol daraltma L2): resmî belge muhasebenindir (İ5) — `invoices` yazma. Kapı ve 503 önde kalır
   // (entegrasyonUcKapilari.zincir matrisi); ardından her istek 400. Gövde OKUNMAZ, LUCA'ya istek GİTMEZ.
   app.post("/api/luca/fatura-gonder", requireAuth, requireMfaVerified, requireCollectionAccess('invoices', 'write'), async (_req: Request, res: Response) => {
@@ -2876,7 +2897,7 @@ async function startServer() {
         error: 'LUCA_API_KEY ortam değişkeni ayarlanmamış. Fatura gönderilemedi.'
       });
     }
-    res.status(400).json(LUCA_FATURA_KAPALI);
+    lucaYazimiKapali(res, 'fatura');
   });
 
   // POST /api/inventory/auto-reorder — scan inventory, create draft POs for low-stock items
@@ -3266,7 +3287,7 @@ async function startServer() {
         { id: 'stripe',      name: 'Stripe',                configured: has('STRIPE_SECRET_KEY'),                    requiredKeys: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'], affects: 'Abonelik ve online ödeme' },
         { id: 'iyzico',      name: 'İyzico',                configured: has('IYZICO_API_KEY', 'IYZICO_SECRET_KEY'),  requiredKeys: ['IYZICO_API_KEY', 'IYZICO_SECRET_KEY'],  affects: 'Ödeme linki oluşturma' },
         { id: 'whatsapp',    name: 'WhatsApp',              configured: has('WHATSAPP_360DIALOG_API_KEY') || has('TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN'), requiredKeys: ['WHATSAPP_360DIALOG_API_KEY (veya Twilio çifti)'], affects: 'Müşteri mesajları ve sipariş bildirimleri' },
-        { id: 'luca',        name: 'Luca Muhasebe',         configured: has('LUCA_API_KEY'),                         requiredKeys: ['LUCA_API_KEY', 'LUCA_COMPANY_ID'],      affects: 'kontör sorgusu, yevmiye/stok sync (fatura gönderimi kapalı — Mikro)' },
+        { id: 'luca',        name: 'Luca Muhasebe',         configured: has('LUCA_API_KEY'),                         requiredKeys: ['LUCA_API_KEY', 'LUCA_COMPANY_ID'],      affects: 'kontör sorgusu, stok çekme (fatura ve yevmiye gönderimi kapalı — Mikro)' },
         { id: 'trendyol',    name: 'Trendyol',              configured: has('TRENDYOL_SUPPLIER_ID', 'TRENDYOL_API_KEY', 'TRENDYOL_API_SECRET'), requiredKeys: ['TRENDYOL_SUPPLIER_ID', 'TRENDYOL_API_KEY', 'TRENDYOL_API_SECRET'], affects: 'Pazaryeri sipariş senkronizasyonu' },
         { id: 'hepsiburada', name: 'Hepsiburada',           configured: has('HEPSIBURADA_MERCHANT_ID', 'HEPSIBURADA_USERNAME', 'HEPSIBURADA_PASSWORD'), requiredKeys: ['HEPSIBURADA_MERCHANT_ID', 'HEPSIBURADA_USERNAME', 'HEPSIBURADA_PASSWORD'], affects: 'Pazaryeri sipariş senkronizasyonu' },
         { id: 'dhl',         name: 'DHL Takip',             configured: has('DHL_API_KEY'),                          requiredKeys: ['DHL_API_KEY'],                          affects: 'DHL kargo takibi' },
@@ -3887,10 +3908,9 @@ async function startServer() {
     const orderId = req.params['orderId'] as string;
     const uid = (req as Request & { uid?: string }).uid || '';
     const cid = await reqCompanyId(req);
-    const snap = await adminDb.collection('orders').doc(orderId).get();
-    const o = snap.exists ? snap.data() as Record<string, unknown> : undefined;
-    if (!siparisGorebilir(await getUserRole(uid), { uid, cid }, o)) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
-    if (o?.source === MAGAZA_KAYNAGI) {
+    const o = await gorulebilirSiparisOku(adminDb, await getUserRole(uid), { uid, cid }, orderId);   // kiracı + siparisGorebilir (tek kalıp)
+    if (!o) return res.status(404).json({ success: false, error: 'Sipariş bulunamadı.' });
+    if (o.source === MAGAZA_KAYNAGI) {
       return res.status(400).json({ success: false, error: 'Çevrim içi mağaza siparişinin takip bağlantısını mağaza kendisi gönderir.' });
     }
     try {
@@ -3932,51 +3952,18 @@ async function startServer() {
     };
   }
 
-  /** POST /api/luca/sync/yevmiye — yevmiye fişlerini Luca'ya aktar.
-   *  Body: { entries: Array<{id, date, fiş, aciklama, debitHesap, alacakHesap, borc, alacak}> }
-   *  Yalnızca Luca'nın kabul ettiği kayıtların id'leri synced olarak döner —
-   *  client isSynced işaretini SADECE gerçek başarıda atar.
-   *  Rol kapısı (2026-10-17, iç rol daraltma L3): yevmiye muhasebenindir (İ5) — `journalEntries` yazma. İstemcide çağıranı yok.
+  /** POST /api/luca/sync/yevmiye — KAPALI (2026-10-21, kullanıcı kararı «… yevmiye kayıtlarını LUCA'ya gönderen yol da kapatılsın
+   *  mı? — kapat»; `LUCA_YAZIMI_KAPALI.yevmiye`). Eskiden gövdedeki `entries` fişlerini tek tek LUCA `/yevmiye`'ye yollar, kabul
+   *  edilenlerin kimliklerini (`syncedIds`) döner ve denetim satırı yazardı. Yevmiye Mikro'da tutulur ve LUCA'ya Mikro'dan aktarılır —
+   *  buradan da gitseydi LUCA'da çift kayıt olurdu. Rol kapısı (2026-10-17, iç rol daraltma L3): yevmiye muhasebenindir (İ5) —
+   *  `journalEntries` yazma. Kapı ve 503 «yapılandırılmamış» önde kalır (entegrasyonUcKapilari.zincir matrisi); ardından her istek
+   *  400. Gövde OKUNMAZ, LUCA'ya istek GİTMEZ, denetim satırı yazılmaz. Uç kayıtlı kalır; istemcide çağıranı YOK
+   *  (entegrasyonRolIstemci.cit Ç-E2).
    */
-  app.post('/api/luca/sync/yevmiye', requireAuth, requireMfaVerified, requireCollectionAccess('journalEntries', 'write'), async (req: Request, res: Response) => {
+  app.post('/api/luca/sync/yevmiye', requireAuth, requireMfaVerified, requireCollectionAccess('journalEntries', 'write'), async (_req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
-    const { entries } = req.body as { entries: Record<string, unknown>[] };
-    if (!Array.isArray(entries) || entries.length === 0) {
-      return res.status(400).json({ success: false, error: 'entries dizisi zorunlu.' });
-    }
-    const t0 = Date.now();
-    const syncedIds: string[] = [];
-    const errors: { id: string; error: string }[] = [];
-    try {
-      for (const e of entries) {
-        try {
-          const r = await fetch(`${LUCA_API_URL}/yevmiye`, {
-            method: 'POST',
-            headers: lucaHeaders(creds),
-            body: JSON.stringify({
-              fisNo:       e.fiş ?? e.fisNo,
-              tarih:       e.date,
-              aciklama:    e.aciklama,
-              borcHesap:   e.debitHesap,
-              alacakHesap: e.alacakHesap,
-              borcTutar:   e.borc,
-              alacakTutar: e.alacak,
-            }),
-            signal: AbortSignal.timeout(15000),
-          });
-          if (r.ok) syncedIds.push(String(e.id));
-          else errors.push({ id: String(e.id), error: `HTTP ${r.status}` });
-        } catch (err) {
-          errors.push({ id: String(e.id), error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-      await writeAuditLog(reqActor(req), 'Luca Yevmiye Sync',
-        `${syncedIds.length}/${entries.length} fiş aktarıldı${errors.length ? `, ${errors.length} hata` : ''}`);
-      res.json({ success: errors.length === 0, syncedIds, errors, duration: Date.now() - t0 });
-    } catch (err) {
-      res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err), syncedIds, errors });
-    }
+    lucaYazimiKapali(res, 'yevmiye');
   });
 
   // GET /api/luca/status — test connection
@@ -4000,7 +3987,7 @@ async function startServer() {
     }
   });
 
-  // POST /api/luca/sync/fatura — KAPALI (2026-10-19, LA: `LUCA_FATURA_KAPALI`).
+  // POST /api/luca/sync/fatura — KAPALI (2026-10-19, LA: `LUCA_YAZIMI_KAPALI.fatura`).
   // Eskiden siparişi okuyup LUCA'ya satış faturası olarak yollar, başarıda siparişe `lucaFaturaNo` / `lucaSynced` / `lucaSyncedAt`
   // / `hasInvoice` yazardı. O işaretlerin tek yazıcısı buydu; bugün yalnız eski kayıtlarda kalırlar ve `/api/db` yazamaz
   // (collections.SUNUCU_TURETILEN_ALANLAR). e-Fatura talebi onlarla Mikro'ya ikinci faturayı reddeder (LB).
@@ -4009,7 +3996,7 @@ async function startServer() {
   app.post('/api/luca/sync/fatura', requireAuth, requireMfaVerified, requireCollectionAccess('invoices', 'write'), async (_req: Request, res: Response) => {
     const creds = await getLucaCreds();
     if (!creds) return res.status(503).json({ success: false, notConfigured: true });
-    res.status(400).json(LUCA_FATURA_KAPALI);
+    lucaYazimiKapali(res, 'fatura');
   });
 
   // POST /api/luca/sync/stok — pull products from Luca → Firebase inventory (upsert)
@@ -4201,17 +4188,33 @@ async function startServer() {
   });
 
   // POST /api/whatsapp/order-notification
-  // Body: { orderId, status, phone, customerName, orderNo, lang }
-  // Fire-and-forget safe — always 200 even if WA not configured
+  // Body: { orderId, status, phone, customerName, orderNo?, lang } — `orderNo` gövde tipinde kalır (istemci App.tsx hâlâ gönderiyor)
+  // ama OKUNMAZ (aşağıdaki not).
+  // Fire-and-forget safe — always 200 even if WA not configured (istemci App.tsx yanıtı durum koduna bakmadan `r.json()` ile okur,
+  // yalnız `success`'te bildirim gösterir; ret de 200 + `success: false` döner).
   // requireStaff (2026-10-02, sipariş satır süzgeci): yalnız requireAuth'tu — dış rol (B2B / Bayi) /api/db süzgecini bu uçtan aşıyordu.
-  app.post('/api/whatsapp/order-notification', requireAuth, requireMfaVerified, requireStaff, async (req: Request, res: Response) => {
+  // SİPARİŞ NUMARASI (2026-10-21, kullanıcı: «WhatsApp durum mesajında Mikro faturası siparişlerinin numarası hâlâ «MIKROFAT» —
+  // tamamla»): uç siparişi OKUMUYORDU; numara istemcinin `orderNo`'su (App.tsx `shopifyOrderId` yollar — MF'de yok) ya da
+  // `orderId.slice(0, 8).toUpperCase()` idi: MF kimliği `mikrofat__<cid>__…` olduğundan müşteri «MIKROFAT» görüyordu. Artık sipariş
+  // okunur (server/gorulebilirSiparis — takip kodu alma ucu ve durum e-postasıyla AYNI işlev: kiracı + `siparisGorebilir`); yok /
+  // yabancı kiracının / görünmez → ileti GİTMEZ, `{ success: false, error: 'Sipariş bulunamadı.' }`. Numara lib/takipKodu
+  // `gorunenTakipNo` (e-postadaki «SİPARİŞ NO» ve takip sayfasıyla BİREBİR); görünen numarası yoksa '—' (kimlikten numara
+  // türetilmez). `orderId` ZORUNLU (istemcinin tek çağrısı her zaman verir — `handleUpdateOrderStatus(orderId: string)`).
+  // Uç artık siparişi okuduğu için kapısı durum e-postasıyla eşit: `orders` okuma kuralı (çağıran durum güncellemesi `orders`
+  // yazma ister — o rollerin hepsi okur).
+  app.post('/api/whatsapp/order-notification', requireAuth, requireMfaVerified, requireStaff, requireCollectionAccess('orders', 'read'), async (req: Request, res: Response) => {
     const creds = await getWACreds();
     if (!creds) return res.json({ success: false, notConfigured: true });
 
-    const { orderId, status, phone, customerName, orderNo, lang = 'tr' } = req.body as {
+    const { orderId, status, phone, customerName, lang = 'tr' } = req.body as {
       orderId?: string; status: string; phone: string; customerName?: string; orderNo?: string; lang?: string;
     };
     if (!phone || !status) return res.json({ success: false, error: 'phone ve status zorunludur.' });
+    if (typeof orderId !== 'string' || orderId.trim() === '') return res.json({ success: false, error: 'orderId zorunludur.' });
+    const uid = reqActor(req).uid;
+    const cid = await reqCompanyId(req);
+    const siparis = await gorulebilirSiparisOku(adminDbZorunlu(), await getUserRole(uid), { uid, cid }, orderId);   // kiracı + siparisGorebilir (tek kalıp)
+    if (!siparis) return res.json({ success: false, error: 'Sipariş bulunamadı.' });
 
     const statusLabels: Record<string, { tr: string; en: string }> = {
       Pending:    { tr: 'Sipariş Alındı',    en: 'Order Received'  },
@@ -4221,7 +4224,7 @@ async function startServer() {
       Cancelled:  { tr: 'İptal Edildi',       en: 'Cancelled'       },
     };
     const statusLabel = (statusLabels[status]?.[lang as 'tr' | 'en']) ?? status;
-    const no = orderNo ?? orderId?.slice(0, 8).toUpperCase() ?? '—';
+    const no = gorunenTakipNo(siparis) ?? '—';
 
     const components = [{
       type:       'body',
@@ -4236,8 +4239,8 @@ async function startServer() {
       const result = await sendWhatsApp(creds, phone, components);
       if (adminDb) {
         await adminDb.collection('waMessageLog').add({
-          companyId: await reqCompanyId(req),
-          to: phone, orderId: orderId ?? null, orderNo: no, status,
+          companyId: cid,
+          to: phone, orderId, orderNo: no, status,
           messageId:  result.messageId ?? null,
           error:      result.error ?? null,
           sentAt:     pgServerTimestamp(),

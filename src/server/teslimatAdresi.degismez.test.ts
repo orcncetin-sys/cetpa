@@ -97,7 +97,8 @@ describe('LUCA fatura gövdesi KALKTI (2026-10-19, LA) — uç siparişi okumaz,
   const g = isleyici(/^ {2}app\.post\('\/api\/luca\/sync\/fatura', requireAuth, requireMfaVerified, requireCollectionAccess\('invoices', 'write'\), async \(_req: Request, res: Response\) => \{$/);
 
   it('işleyici: 503 «yapılandırılmamış» + 400 kapanış; adres yardımcısı, sipariş okuması ve LUCA çağrısı YOK', () => {
-    expect(metin(g)).toMatch(/res\.status\(400\)\.json\(LUCA_FATURA_KAPALI\);/);
+    // 2026-10-21: 400 kapanışı ortak yardımcıda (`lucaYazimiKapali` — fatura ve yevmiye uçları aynı kalıp; takipKoduVeLuca «LY»).
+    expect(metin(g)).toMatch(/^\s*lucaYazimiKapali\(res, 'fatura'\);$/m);
     expect(metin(g)).not.toMatch(/teslimatAdresiMetni|shippingAddress|collection\('orders'\)|fetch\(/);
     expect(adet(kodSatirlari(SERVER), /\bteslimatAdresiMetni\b/g)).toBe(0);
   });

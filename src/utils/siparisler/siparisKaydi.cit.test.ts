@@ -153,7 +153,8 @@ describe('dış sistem gövdeleri — kalem fiyatı KDV HARİÇ net birimdir (20
     // Yeniden açılırsa kalem fiyatının KDV hariç net birim olduğu kuralı (utils/siparisler/siparisKalemFiyati) yine geçerlidir.
     const sunucu = kodSatirlari(join(SRC_KOK, '..', 'server.ts')).map(s => s.kod).join('\n');
     expect((sunucu.match(/kdvDahil: (true|false),/g) ?? [])).toEqual([]);
-    expect(sunucu).toMatch(/res\.status\(400\)\.json\(LUCA_FATURA_KAPALI\);/);
+    // 2026-10-21: 400 kapanışı ortak yardımcıda (`lucaYazimiKapali` — fatura ve yevmiye uçları aynı kalıp; takipKoduVeLuca «LY»).
+    expect(sunucu).toMatch(/^\s*lucaYazimiKapali\(res, 'fatura'\);$/m);
   });
   it('fatura isteği kalemin SATIR KDV\'sini taşır (yazılan KDV dâhil toplam belgede de korunsun); sunucu şeması alanı düşürmez', () => {
     const g = govde('const handleMikroFatura = async (order: Order) => {');
