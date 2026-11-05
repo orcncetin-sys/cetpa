@@ -22,7 +22,7 @@
  * istemci kurallı yazımı kullanır (dbClient, lib/mfa, lib/invite), meşru akış etkilenmez. Tersi mümkün değildir: metni listedeki
  * kurallı yola EŞİT olan istek Express'te de o yolun işleyicisine gider (kaçış, nokta parçası, çift eğik çizgi içeremez).
  */
-import { EXTERNAL_ROLES, STAFF_ROLES } from './rbac';
+import { STAFF_ROLES, disRolDegeriMi } from './rbac';
 
 /** İç rolü olmayan hesabın aldığı ret kodu: rolsüz (ya da rol alanı bilinmeyen değer) → `ROL_YOK`; B2B / Bayi → `DIS_ROL`. */
 export type KimlikYuzeyiKodu = 'ROL_YOK' | 'DIS_ROL';
@@ -64,6 +64,31 @@ export const ROLSUZ_IZINLI_YOLLAR: readonly RolsuzIzinliYol[] = Object.freeze(([
   { yontemler: ['GET'], yol: '/api/superadmin/me', neden: 'açılışta sorulur; yalnız çağıranın kendi süper yönetici durumunu söyler' },
 ] satisfies RolsuzIzinliYol[]).map(izin => Object.freeze({ ...izin, yontemler: Object.freeze([...izin.yontemler]) })));
 
+/** Yalnız DIŞ ROLE (B2B / Bayi) açık uç: rolsüz hesaba AÇILMAZ, `:uid` yer tutucusu TAŞIMAZ. */
+export interface DisRolIzinliYol {
+  yontemler: readonly IzinliYontem[];
+  yol: string;
+  neden: string;
+}
+
+/**
+ * YALNIZ DIŞ ROL İZİN LİSTESİ (2026-10-21, şartname «müşteri siparişlerim» H4) — müşteri / bayi ekranı köprüsünün ERP kökenindeki
+ * iki ucu. Bu uçlar dış role açık olmak ZORUNDA (müşteri ERP hesabıyla girer) ama giriş ekranından hesap açan ROLSÜZ hesaba
+ * açılmamalı: o yüzden `ROLSUZ_IZINLI_YOLLAR`'a satır EKLENMEDİ; karar adımı `disRolMu(rol)` doğruysa bu listeye bakar. Uçların
+ * kendi kapısı ayrıca bağ kaydını, kiracıyı, giriş sağlayıcısını ve giriş anını ölçer (routes/magazaErpRoutes `bayiKopruYetkisi`).
+ * Liste değişince kimlikYuzeyi.test.ts (TAMAMI sabitlenmiş) ve zincir testi kırılır.
+ */
+export const DIS_ROL_IZINLI_YOLLAR: readonly DisRolIzinliYol[] = Object.freeze(([
+  { yontemler: ['POST'], yol: '/api/magaza-bayi/yetki-kodu', neden: 'müşteri ekranı köprüsü: bağlı carinin hesabı için tek kullanımlık yetki kodu' },
+  { yontemler: ['GET'], yol: '/api/magaza-bayi/hesap', neden: 'müşteri ekranı köprüsünün onay sayfası: bağ kaydındaki firma adı (yalnız `firma`)' },
+] satisfies DisRolIzinliYol[]).map(izin => Object.freeze({ ...izin, yontemler: Object.freeze([...izin.yontemler]) })));
+
+/** (yöntem, yol) yalnız-dış-rol listesinde mi? Karşılaştırma karakteri karakterine (rolsüz listeyle aynı kural; uid yok). */
+export function disRolIzinliMi(yontem: string, yol: string): boolean {
+  if (typeof yontem !== 'string' || typeof yol !== 'string') return false;
+  return DIS_ROL_IZINLI_YOLLAR.some(izin => izin.yol === yol && izin.yontemler.some(y => y === yontem));
+}
+
 /**
  * Yola gömülebilen uid: yalnız kaçış GEREKTİRMEYEN karakterler. Firebase'in verdiği kimlikler bu kümededir. Başka karakter
  * taşıyan uid için «kendi belgesi» satırı eşleşmez (kapalı başarısızlık): öyle bir uid yolda yüzde kaçışıyla taşınırdı ve ham
@@ -102,9 +127,9 @@ export function icRolMu(rol: unknown): boolean {
   return typeof rol === 'string' && (STAFF_ROLES as readonly string[]).includes(rol);
 }
 
-/** Rol alanının DEĞERİ dış rol mü (B2B / Bayi)? */
+/** Rol alanının DEĞERİ dış rol mü (B2B / Bayi)? Kural tek yerde: lib/rbac `disRolDegeriMi`. */
 export function disRolMu(rol: unknown): boolean {
-  return typeof rol === 'string' && (EXTERNAL_ROLES as readonly string[]).includes(rol);
+  return disRolDegeriMi(rol);
 }
 
 export interface KimlikYuzeyiGirdisi {
@@ -120,14 +145,18 @@ export interface KimlikYuzeyiGirdisi {
 }
 
 export type KimlikYuzeyiKarari =
-  | { gecer: true; neden: 'super-yonetici' | 'ic-rol' | 'izin-listesi' }
+  | { gecer: true; neden: 'super-yonetici' | 'ic-rol' | 'izin-listesi' | 'dis-rol-izin-listesi' }
   | { gecer: false; kod: KimlikYuzeyiKodu };
 
-/** TEK BOĞAZ kararı. Sıra sözleşmedir: süper yönetici → iç rol → izin listesi → ret. */
+/**
+ * TEK BOĞAZ kararı. Sıra sözleşmedir: süper yönetici → iç rol → izin listesi → (yalnız dış rol) dış rol izin listesi → ret.
+ * Dış rol listesi rolsüz hesaba hiçbir koşulda açılmaz: `disRolMu(rol)` yanlışsa bu adıma hiç bakılmaz.
+ */
 export function kimlikYuzeyiKarari(g: KimlikYuzeyiGirdisi): KimlikYuzeyiKarari {
   if (g.superAdmin === true) return { gecer: true, neden: 'super-yonetici' };
   if (icRolMu(g.rol)) return { gecer: true, neden: 'ic-rol' };
   if (rolsuzIzinliMi(g.yontem, istekYolu(g.hedef), g.uid)) return { gecer: true, neden: 'izin-listesi' };
+  if (disRolMu(g.rol) && disRolIzinliMi(g.yontem, istekYolu(g.hedef))) return { gecer: true, neden: 'dis-rol-izin-listesi' };
   return { gecer: false, kod: disRolMu(g.rol) ? 'DIS_ROL' : 'ROL_YOK' };
 }
 

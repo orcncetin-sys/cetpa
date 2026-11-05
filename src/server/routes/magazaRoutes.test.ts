@@ -79,6 +79,8 @@ interface Ayar {
   takip?: (params: unknown[]) => Array<Record<string, unknown>>;
   /** `/panel` alt zinciri; verilmezse isteği sayan ve sonlandıran sahte zincir. */
   panelZinciri?: RequestHandler;
+  /** `/bayi` alt zinciri (2026-10-21); verilmezse isteği sayan ve sonlandıran sahte zincir. */
+  bayiZinciri?: RequestHandler;
 }
 interface Duzenek {
   taban: string;
@@ -89,6 +91,8 @@ interface Duzenek {
   olaylar: string[];
   /** Sahte `/panel` alt zincirine ulaşan istekler (`YÖNTEM yol`; yol alt zincire göre). */
   panelIstekleri: string[];
+  /** Sahte `/bayi` alt zincirine ulaşan istekler. */
+  bayiIstekleri: string[];
   sayim: { kiraci: number; havuz: number; apiLimiter: number };
   /** Zincirden KAÇAN istekler: hepsi 0 kalmalı (kontrol testleri hariç). */
   kacan: { sonrakiAraKatman: number; genelAyristirici: number; genel404: number; genelYakalayici: number };
@@ -109,7 +113,7 @@ const sinirlayici = (tavan: number): RequestHandler => rateLimit({
 
 async function kur(a: Ayar = {}): Promise<Duzenek> {
   const d: Duzenek = {
-    taban: '', saat: { ms: SAAT_0 }, sorgular: [], yayinlar: [], bildirimler: [], olaylar: [], panelIstekleri: [],
+    taban: '', saat: { ms: SAAT_0 }, sorgular: [], yayinlar: [], bildirimler: [], olaylar: [], panelIstekleri: [], bayiIstekleri: [],
     sayim: { kiraci: 0, havuz: 0, apiLimiter: 0 },
     kacan: { sonrakiAraKatman: 0, genelAyristirici: 0, genel404: 0, genelYakalayici: 0 },
     kontrolTesti: false,
@@ -132,6 +136,7 @@ async function kur(a: Ayar = {}): Promise<Duzenek> {
     talepSinirlayici: sinirlayici(a.talepTavani ?? 1000),
     durumSinirlayici: sinirlayici(a.durumTavani ?? 1000),
     panelZinciri: a.panelZinciri ?? ((istek, yanit) => { d.panelIstekleri.push(`${istek.method} ${istek.url}`); yanit.status(404).json({ ok: false, panel: true }); }),
+    bayiZinciri: a.bayiZinciri ?? ((istek, yanit) => { d.bayiIstekleri.push(`${istek.method} ${istek.url}`); yanit.status(404).json({ ok: false, bayi: true }); }),
     getPgPool: () => { d.sayim.havuz += 1; return a.havuzYok ? null : havuz; },
     serverTenantId: () => { d.sayim.kiraci += 1; return a.kiraci ? a.kiraci() : Promise.resolve('kiraci-1'); },
     broadcastDocChange: (...argumanlar) => {
@@ -1357,15 +1362,46 @@ describe('`/panel` alt zinciri — bağlandığı YER (dilim 2a)', () => {
   });
 });
 
+describe('`/bayi` alt zinciri — bağlandığı YER (2026-10-21, şartname «müşteri siparişlerim» H11)', () => {
+  it('`/bayi` altındaki her istek (GET ön uçuşu dâhil) alt zincire gider: dış köken kapısına (`Allow-Methods: POST`), genel sınırlayıcıya, mağaza sayaçlarına ULAŞMAZ', async () => {
+    const d = await kur();
+    const yollar: Array<[string, Istek]> = [
+      ['/bayi/siparisler', { method: 'GET' }],
+      ['/BAYI/ben', { method: 'GET' }],
+      ['/bayi/oturum', { govde: {} }],
+      ['/bayi/siparisler', { method: 'OPTIONS' }],
+    ];
+    for (const [yol, o] of yollar) {
+      const y = await iste(d, yol, o);
+      expect(y.json, yol).toEqual({ ok: false, bayi: true });
+      expect(y.baslik('access-control-allow-methods'), yol).toBeNull();
+    }
+    expect(d.bayiIstekleri).toEqual(['GET /siparisler', 'GET /ben', 'POST /oturum', 'OPTIONS /siparisler']);
+    expect(d.panelIstekleri).toEqual([]);
+    expect(d.sayim.apiLimiter).toBe(0);
+    expect(magazaSayaclari()).toEqual(SIFIR_SAYACLAR);
+  });
+  it('`/bayix` dış zincirde kalır (zincirin 404\'ü); panel ve bayi istekleri karışmaz', async () => {
+    const d = await kur();
+    expect((await iste(d, '/bayix', { govde: {} })).metin).toBe('{"ok":false}');
+    await iste(d, '/panel/siparisler', { method: 'GET' });
+    expect(d.bayiIstekleri).toEqual([]);
+    expect(d.panelIstekleri).toEqual(['GET /siparisler']);
+  });
+});
+
 describe('zincir içi 404 — /api/magaza altındaki her başka yol', () => {
   it('bilinmeyen alt yol → 404 { ok: false } (genel 404\'ün gövdesi DEĞİL); genel 404\'e düşmez', async () => {
     const d = await kur();
-    for (const yol of ['/bilinmeyen', '/bayi/giris', '/', '/siparis-talebi/ek', '/siparis-talebix']) {
+    // 2026-10-21: `/bayi/…` artık alt zincirdir (kendi 404'ünü verir — yukarıdaki «`/bayi` alt zinciri» bölümü); burada dış
+    // zincirin 404'ü için `/bayix` kullanılır (bilerek değişen çit).
+    for (const yol of ['/bilinmeyen', '/bayix/giris', '/', '/siparis-talebi/ek', '/siparis-talebix']) {
       const y = await iste(d, yol, { govde: govde() });
       expect(y.kod, yol).toBe(404);
       expect(y.metin, yol).toBe('{"ok":false}');
     }
     expect(d.sorgular).toEqual([]);
+    expect(d.bayiIstekleri).toEqual([]);
     expect(magazaSayaclari()).toEqual({ ...SIFIR_SAYACLAR, r404: 5 });
   });
   it('rota yolunda POST dışı yöntem → 404', async () => {
@@ -1543,6 +1579,8 @@ describe('kaynak çiti — magazaRoutes.ts', () => {
     expect(kayitlar).toEqual([
       // Dilim 2a: `/panel` alt zinciri köken kapısından ve genel sınırlayıcıdan ÖNCE; bağlamla gelir (bu modül kurmaz).
       "r.use('/panel', C.panelZinciri);",
+      // 2026-10-21 (H11): `/bayi` alt zinciri panelin ALTINDA, köken kapısından ÖNCE (sonra olsaydı GET ön uçuşu dış kapıda biterdi).
+      "r.use('/bayi', C.bayiZinciri);",
       'r.use(kokenKapisi);',
       'r.use(C.apiLimiter);',
       "r.use('/siparis-talebi', C.talepSinirlayici);",
@@ -1557,6 +1595,7 @@ describe('kaynak çiti — magazaRoutes.ts', () => {
     // Tek yönlendirici (panel alt zinciri AYRI modülde kurulur), tek ayrıştırıcı; `app.` üzerinden kayıt yok.
     expect(kod.match(/\bRouter\(/g)).toHaveLength(1);
     expect(kod.match(/C\.panelZinciri\b/g)).toHaveLength(1);
+    expect(kod.match(/C\.bayiZinciri\b/g)).toHaveLength(1);
     // Alt zincire yönlendirme yol METNİYLE yapılmaz (iki kez yaşanmış arıza sınıfı).
     expect(kod).not.toMatch(/req\.(path|originalUrl|url|baseUrl)\b/);
     expect(kod.match(/express\.(json|urlencoded|text|raw)\(/g)).toEqual(['express.json(']);
@@ -1670,10 +1709,18 @@ describe('kaynak çiti — magazaRoutes.ts', () => {
     expect(kod).toContain('const KIRACI_DOLU_MS = 60_000;');
     expect(kod).toContain('const KIRACI_BOS_MS = 10_000;');
   });
-  it('köken: `Allow-Credentials` ve joker köken yazılmaz', () => {
+  it('köken: `Allow-Credentials` ve joker köken yazılmaz; kapı TEK ortak işlev (dış zincir, panel, bayi — 2026-10-21 H11)', () => {
     expect(kod).not.toMatch(/Allow-Credentials/i);
     expect(kod).not.toMatch(/Access-Control-Allow-Origin',\s*'\*'/);
+    // Ortak işlev bu modülde durur (panel ve bayi alt zincirleri buradan içe aktarır): başlık satırı TEK yerde.
     expect(kod).toContain("res.setHeader('Access-Control-Allow-Origin', koken);");
+    expect(kod.match(/Access-Control-Allow-Origin/g)).toHaveLength(1);
+    expect(kod).toContain("const kokenKapisi = magazaKokenKapisiKur({ izinliKokenler, yontemler: 'POST', basliklar: 'Content-Type', reddet });");
+    for (const dosya of ['magazaPanelZinciri.ts', 'magazaBayiZinciri.ts']) {
+      const alt = kodSatirlari(join(SRC_KOK, 'server', 'routes', dosya)).map(x => x.kod).join('\n');
+      expect(alt, dosya).not.toMatch(/Access-Control-Allow-Origin/);
+      expect(alt, dosya).toContain("const kokenKapisi = magazaKokenKapisiKur({ izinliKokenler, yontemler: 'GET, POST', basliklar: 'Authorization, Content-Type', reddet });");
+    }
   });
   it('sayısal varsayılan ve harf dönüşümü yok; tip kaçağı yok', () => {
     expect(kod).not.toMatch(/(\?\?|\|\|)\s*0\b/);

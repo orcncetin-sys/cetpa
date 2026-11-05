@@ -36,8 +36,18 @@
  *
  * YANIT GÖVDELERİ SABİTTİR (`{ ok, kod?, durum?, surum?, icerikSurum? }`; `yapilandirilmamis`'ta ek `kip` + eksik ortam
  * değişkeni ADLARI). zod ayrıntısı, hata iletisi, sır / değer DÖNMEZ; günlüğe yalnız sabit metin + hata kodu yazılır.
+ *
+ * MÜŞTERİ / BAYİ EKRANI KÖPRÜSÜ (2026-10-21, şartname «müşteri siparişlerim» H1, H4):
+ *   GET  /api/magaza-bayi/hesap       — onay sayfasının firma adı (`{ firma }`, başka alan YOK)
+ *   POST /api/magaza-bayi/yetki-kodu  — bayi ekranı için tek kullanımlık yetki kodu (AYRI depo; dönüş `bayi.html#kod=…&tur=…`)
+ * İki uç AYNI yetki işlevinden geçer (`bayiKopruYetkisi`): yalnız DIŞ ROL (kimlik yüzeyi `DIS_ROL_IZINLI_YOLLAR` — rolsüze kapalı),
+ * yalnız e-posta + şifre girişi (`sifre-gerekli`), ERP girişi en çok 12 saatlik ve son iptalden SONRA (`yeniden-giris`; giriş
+ * bilgisi `requireAuth`'un yerel doğrulamasından), açık bağ kaydı (`bag-yok` / `kapali`), kiracı eşleşmesi. İptal denetimli
+ * doğrulama (`iptalKapisiKur`) bayide KAPALI BAŞARISIZDIR: denetlenemezse `503 { kod: 'denetlenemedi' }` ve kod VERİLMEZ (panel
+ * davranışı DEĞİŞMEDİ: `'gec'`). Sayaçlar bayi kümesindedir (`magazaBayiSay`); panel kümesine sayılmaz.
  */
 import type { Express, Request, RequestHandler, Response } from 'express';
+import { disRolMu } from '../../lib/kimlikYuzeyi.js';
 import { magazaTalepIslemYetkisi, magazaTalepSilmeYetkisi } from '../../lib/rbac.js';
 import type { AppRole } from '../../lib/rbac.js';
 import { yetkiBelirteci } from '../istemciIp.js';
@@ -45,14 +55,17 @@ import { bildirimiYenidenKuyrugaAl, kalemTeslimYaz, talepDurumunuDegistir } from
 import type { MagazaDurumDeps, MagazaIcerikDeps } from '../kanal/magazaDurum.js';
 import { elleTalepAc, talepGeriAl, talepIcerigiDegistir, talepSil, urunKdvOkumaHatasiMi } from '../kanal/magazaIcerik.js';
 import type { IcerikDegistirSonucu, TalepGeriAlSonucu, TalepSilSonucu } from '../kanal/magazaIcerik.js';
-import { MAGAZA_PANEL_KOD_OMRU_MS, kodOzetiHesapla, panelKoduUret } from '../kanal/magazaPanelKod.js';
+import type { PanelIptalCifti } from '../kanal/magazaPanelIptal.js';
+import { MAGAZA_BAYI_KOD_OMRU_MS, MAGAZA_PANEL_KOD_OMRU_MS, kodOzetiHesapla, panelKoduUret } from '../kanal/magazaPanelKod.js';
 import type { PanelKodDeposu } from '../kanal/magazaPanelKod.js';
 import type { PanelKullanicisi } from '../kanal/magazaPanelKullanici.js';
+import type { MusteriHesabi } from '../musteriHesap.js';
 import {
   BildirimGonderGovdesi, BildirimGonderSorgusu, ErpDurumGovdesi, ErpElleTalepGovdesi, ErpIcerikGovdesi, ErpSilGovdesi, KalemTeslimGovdesi,
   YetkiKoduGovdesi,
 } from '../schemas.js';
 import type { SmtpKipi } from '../smtpPosta.js';
+import { magazaBayiSay } from './magazaBayiZinciri.js';
 import { eleAlinmamisSonuc, magazaPanelSay } from './magazaPanelZinciri.js';
 import { hataKodu } from './magazaRoutes.js';
 import type { MagazaPgHavuzu } from './magazaRoutes.js';
@@ -102,6 +115,24 @@ export interface MagazaErpRouteCtx {
    * yapılandırılmamış (dönüş adresi geçersiz ya da panel anahtarı yok): kod üretilmez, 503 `panel-yapilandirilmamis`.
    */
   panelDonus: string | null;
+  /**
+   * İptal çifti — panel zinciri, bayi zinciri ve ERP çıkış işleyicisiyle ORTAK örnek (server.ts `magazaPanelIptal`; yeni örnek
+   * KURULMAZ). Bayi yetki kodu ucu ERP giriş anını (`auth_time`) bununla karşılaştırır: çıkıştan / erişim kapatmadan önceki
+   * girişle kod alınamaz (Firebase yenileme iptali yazılamamış olsa da).
+   */
+  iptal: PanelIptalCifti;
+  /** Bayi köprüsünün iki ucunun kovaları (AYRI: sayfa açılışı kod kotasını yemez) — kullanıcı anahtarlı; 429'u bu modül yazar. */
+  magazaBayiYetkiKoduLimiter: RequestHandler;
+  magazaBayiHesapLimiter: RequestHandler;
+  /** Bayi yetki kodu deposu — `/api/magaza/bayi/oturum` ile AYNI örnek, panel deposundan AYRI (panel kodu bayi oturumunda geçersiz). */
+  bayiKodDeposu: PanelKodDeposu;
+  /** Bağ okuyucu (server.ts `musteriHesapOkuyucu` — bayi zinciriyle AYNI örnek); hatayı YUTMAZ. */
+  musteriHesabi: (uid: string) => Promise<MusteriHesabi | null>;
+  /**
+   * Bayi ekranının dönüş adresi — doğrulanmış KURALLI biçim. `null` = bayi yapılandırılmamış (dönüş adresi geçersiz ya da anahtar
+   * yok): kod üretilmez, 503 `bayi-yapilandirilmamis`.
+   */
+  bayiDonus: string | null;
   /** Saat (test için). */
   simdi?: () => Date;
   /**
@@ -138,6 +169,27 @@ function sureli<T>(soz: Promise<T>, ms: number): Promise<T> {
     const sayac = setTimeout(() => { reddet(Object.assign(new Error('zaman aşımı'), { code: 'ETIMEDOUT' })); }, ms);
     void soz.then(coz, reddet).finally(() => { clearTimeout(sayac); });
   });
+}
+
+/**
+ * Bayi köprüsü: ERP girişi bundan eskiyse yeni kod alınamaz (`401 yeniden-giris`) — ortak bilgisayarda açık kalmış ERP oturumuyla
+ * müşteri ekranı açılmasın. Çıkıştan sonraki köprüyü bu kural DEĞİL, `auth_time > gecersizOnce` kuralı kapatır (giriş anı çıkışta
+ * değişmez).
+ */
+export const MAGAZA_BAYI_GIRIS_OMRU_MS = 12 * 60 * 60 * 1000;
+
+/** `magazaBayiYetkiKoduLimiter`'ın `handler` seçeneği: bayi sayacı + sabit `429 { ok: false, kod: 'sinir' }`. */
+export function magazaBayiYetkiKodu429(_req: Request, res: Response): void {
+  magazaBayiSay('yetkiKoduRet');
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(429).json({ ok: false, kod: 'sinir' });
+}
+
+/** `magazaBayiHesapLimiter`'ın `handler` seçeneği: bayi sayacı + sabit `429 { ok: false, kod: 'sinir' }`. */
+export function magazaBayiHesap429(_req: Request, res: Response): void {
+  magazaBayiSay('hesapRet');
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(429).json({ ok: false, kod: 'sinir' });
 }
 
 /** `magazaYetkiKoduLimiter`'ın `handler` seçeneği: sayaç + sabit `429 { ok: false, kod: 'sinir' }`. */
@@ -224,25 +276,42 @@ export function magazaErpRoutes(app: Express, C: MagazaErpRouteCtx): void {
   // ── § 3.2 İptal edilmiş Firebase belirteci kod ALAMAZ (inceleme 2026-10-10; dosya başı «EK KAPI») ────────────────
   //  • Firebase «iptal / devre dışı / kullanıcı yok / süresi doldu» derse → `401 { ok: false }` (onay sayfası «oturum»
   //    metnini basar: çıkış yapıp yeniden giriş). Kod ÜRETİLMEZ.
-  //  • Denetim YAPILAMAZSA (ağ, süre aşımı, sunucuda Firebase hizmet hesabı kimliği yok) kod YİNE verilir — bu kapı
-  //    eklenmeden önceki davranış. Gerekçe: denetim ek bir savunma katmanıdır; Google'a erişimin kesilmesi ya da hizmet
-  //    hesabı kimliğinin bulunmaması «ERP ile bağlan»ı bütünüyle durdurmasın (çıkıştan önce alınmış kodu `oturum` ucu
-  //    zaten yerel denetimle öldürür). SESSİZ DEĞİL: her seferinde sayaç (`yetkiKoduIptalDenetimsiz`, bekçi yazar) + uyarı.
+  //  • Denetim YAPILAMAZSA (ağ, süre aşımı, sunucuda Firebase hizmet hesabı kimliği yok):
+  //    - PANEL (`denetimsizse: 'gec'`) kodu YİNE verir — bu kapı eklenmeden önceki davranış. Gerekçe: denetim ek bir savunma
+  //      katmanıdır; Google'a erişimin kesilmesi ya da hizmet hesabı kimliğinin bulunmaması «ERP ile bağlan»ı bütünüyle durdurmasın
+  //      (çıkıştan önce alınmış kodu `oturum` ucu zaten yerel denetimle öldürür). SESSİZ DEĞİL: sayaç + uyarı.
+  //    - BAYİ (`denetimsizse: 'reddet'`, 2026-10-21 H1) kapalı başarısızdır: `503 { ok: false, kod: 'denetlenemedi' }`, istek
+  //      işleyiciye VARMAZ (müşteri hesabı dış kişidir; personelin «bağlan»ı kadar kesintiye dayanıklı olması gerekmez).
+  // Kurucu TEK; iki örnek kurulur (sayaç kümeleri ayrı). Firebase çağrısı yalnız burada ve süre tavanının içinde.
   const iptalDenetimiSuresi = C.iptalDenetimiSuresiMs === undefined ? MAGAZA_IPTAL_DENETIMI_SURESI_MS : C.iptalDenetimiSuresiMs;
-  const iptalKapisi: RequestHandler = async (req, res, next) => {
+  const iptalKapisiKur = (g: { say: (olay: 'ret' | 'denetimsiz') => void; denetimsizse: 'gec' | 'reddet' }): RequestHandler => async (req, res, next) => {
     // Ayıklama `requireAuth` ile AYNI işlevden: denetlenen belirteç, kapının az önce kabul ettiği belirteçtir.
     const belirtec = yetkiBelirteci(req.headers.authorization);
-    if (belirtec === '') { magazaPanelSay('yetkiKoduRet'); res.status(401).json({ ok: false }); return; }
+    if (belirtec === '') { g.say('ret'); res.status(401).json({ ok: false }); return; }
     try {
       await sureli(C.belirtecIptalDenetle(belirtec), iptalDenetimiSuresi);
     } catch (e) {
       const err = { code: firebaseKodu(e) };
-      if (FIREBASE_IPTAL_KODLARI.has(err.code)) { magazaPanelSay('yetkiKoduRet'); res.status(401).json({ ok: false }); return; }
-      magazaPanelSay('yetkiKoduIptalDenetimsiz');
+      if (FIREBASE_IPTAL_KODLARI.has(err.code)) { g.say('ret'); res.status(401).json({ ok: false }); return; }
+      g.say('denetimsiz');
+      if (g.denetimsizse === 'reddet') {
+        console.warn('[magaza-erp] bayi yetki kodu: belirteç iptali denetlenemedi, kod VERİLMEDİ:', hataKodu(err));
+        res.status(503).json({ ok: false, kod: 'denetlenemedi' });
+        return;
+      }
       console.warn('[magaza-erp] yetki kodu: belirteç iptali denetlenemedi, kod yine verilir:', hataKodu(err));
     }
     next();
   };
+  const iptalKapisi = iptalKapisiKur({
+    say: (olay) => { magazaPanelSay(olay === 'ret' ? 'yetkiKoduRet' : 'yetkiKoduIptalDenetimsiz'); },
+    denetimsizse: 'gec',
+  });
+  // Bayi köprüsünün İKİ ucu (hesap + yetki kodu) aynı örnekten geçer; retler bayi kümesinin yetki kodu sayaçlarına yazılır.
+  const bayiIptalKapisi = iptalKapisiKur({
+    say: (olay) => { magazaBayiSay(olay === 'ret' ? 'yetkiKoduRet' : 'yetkiKoduIptalDenetlenemedi'); },
+    denetimsizse: 'reddet',
+  });
 
   // ── § 3.2 Yetki kodu ────────────────────────────────────────────────────────────────────────────────────────────
   // Sayfa (`/magaza-panel-baglan`) kullanıcı düğmeye basınca çağırır. İstekten dönüş adresine HİÇBİR parça alınmaz (açık
@@ -280,6 +349,95 @@ export function magazaErpRoutes(app: Express, C: MagazaErpRouteCtx): void {
     } catch (e) {
       magazaPanelSay('yetkiKoduRet');
       hata500(res, e, 'yetki kodu');
+    }
+  };
+
+  // ── Müşteri / bayi ekranı köprüsü (2026-10-21, H1 + H4) ────────────────────────────────────────────────────────────
+  // TEK yetki işlevi: ret yanıtını KENDİSİ yazar ve `null` döner; geçerse kimlik + o an okunan kullanıcı ve bağ. Sıra sözleşmedir
+  // (testli): uid → kullanıcı (dış rol) → kiracı → giriş sağlayıcısı → giriş anı (12 saat + son iptal) → bağ. Giriş bilgisi
+  // `requireAuth`'un YEREL doğrulamasından (`girisSaglayici`, `girisZamaniSn`) okunur — iptal denetiminin sonucundan DEĞİL.
+  const bayiKopruYetkisi = async (
+    req: Request, res: Response, ret: (kod: number, govde: Record<string, unknown>) => void,
+  ): Promise<{ uid: string; eposta: string; kullanici: PanelKullanicisi; bag: MusteriHesabi } | null> => {
+    const { uid, eposta } = kimlik(req);
+    if (uid === '') { ret(401, { ok: false }); return null; }
+    let kullanici: PanelKullanicisi | null;
+    try {
+      kullanici = await C.panelKullanicisi(uid);
+    } catch (e) {
+      console.error('[magaza-erp] bayi köprüsü: kullanıcı okunamadı:', hataKodu(e));
+      ret(503, { ok: false });
+      return null;
+    }
+    if (kullanici === null || !disRolMu(kullanici.rol)) { ret(403, { ok: false, kod: 'rol' }); return null; }
+    const kiraci = await sunucuKiracisi();
+    if (kiraci === '') { ret(503, { ok: false }); return null; }
+    if (kullanici.cid !== kiraci || kullanici.firmaDurumu === 'suspended') { ret(403, { ok: false, kod: 'kiraci' }); return null; }
+    const giris = req as Request & { girisSaglayici?: unknown; girisZamaniSn?: unknown };
+    if (giris.girisSaglayici !== 'password') { ret(403, { ok: false, kod: 'sifre-gerekli' }); return null; }
+    const girisSn = typeof giris.girisZamaniSn === 'number' && Number.isFinite(giris.girisZamaniSn) ? giris.girisZamaniSn : 0;
+    if (girisSn <= 0 || simdi().getTime() - girisSn * 1000 > MAGAZA_BAYI_GIRIS_OMRU_MS) { ret(401, { ok: false, kod: 'yeniden-giris' }); return null; }
+    let gecersizOnce: number;
+    try {
+      gecersizOnce = await C.iptal.gecersizOnce(uid);
+    } catch (e) {
+      console.error('[magaza-erp] bayi köprüsü: iptal okunamadı:', hataKodu(e));
+      ret(503, { ok: false });
+      return null;
+    }
+    // Çıkıştan (ERP / mağaza) ya da erişim kapatmadan önceki girişle köprü AÇILMAZ: giriş anı son iptalden BÜYÜK olmalı (eşit an
+    // rettir). Firebase yenileme iptali yazılamamış olsa da yenilenen belirteç eski `auth_time`'ı taşır.
+    if (!(girisSn * 1000 > gecersizOnce)) { ret(401, { ok: false, kod: 'yeniden-giris' }); return null; }
+    let bag: MusteriHesabi | null;
+    try {
+      bag = await C.musteriHesabi(uid);
+    } catch (e) {
+      console.error('[magaza-erp] bayi köprüsü: bağ okunamadı:', hataKodu(e));
+      ret(503, { ok: false });
+      return null;
+    }
+    if (bag === null) { ret(403, { ok: false, kod: 'bag-yok' }); return null; }
+    if (bag.durum !== 'acik') { ret(403, { ok: false, kod: 'kapali' }); return null; }
+    if (bag.companyId !== kiraci) { ret(403, { ok: false, kod: 'kiraci' }); return null; }
+    return { uid, eposta, kullanici, bag };
+  };
+
+  // Onay sayfasının firma adı. Yalnız `firma` döner (lead / cari / kiracı kimliği DÖNMEZ). Bayi yapılandırılmamışsa yetki kodu
+  // ucuyla AYNI sırada 503 `bayi-yapilandirilmamis` (belge: env.example / RUNBOOK / server.ts): onay sayfası düğmeyi hiç çizmez —
+  // `{ firma }` dönseydi etkin «Onayla ve giriş yap» çizilir, ret ancak tıklayınca gelirdi.
+  const bayiHesap = async (req: Request, res: Response): Promise<void> => {
+    const ret = (kod: number, govde: Record<string, unknown>): void => { magazaBayiSay('hesapRet'); res.status(kod).json(govde); };
+    try {
+      if (C.bayiDonus === null) { ret(503, { ok: false, kod: 'bayi-yapilandirilmamis' }); return; }
+      const y = await bayiKopruYetkisi(req, res, ret);
+      if (!y) return;
+      magazaBayiSay('hesap');
+      res.status(200).json({ firma: y.bag.firma });
+    } catch (e) {
+      magazaBayiSay('hesapRet');
+      hata500(res, e, 'bayi hesap okuma');
+    }
+  };
+
+  // Bayi yetki kodu. İstekten dönüş adresine HİÇBİR parça alınmaz: `donus = bayiDonus + '#kod=' + kod + '&tur=' + tur`.
+  const bayiYetkiKodu = async (req: Request, res: Response): Promise<void> => {
+    const ret = (kod: number, govde: Record<string, unknown>): void => { magazaBayiSay('yetkiKoduRet'); res.status(kod).json(govde); };
+    try {
+      const cozum = YetkiKoduGovdesi.safeParse(req.body);
+      if (!cozum.success) { ret(400, { ok: false }); return; }
+      if (C.bayiDonus === null) { ret(503, { ok: false, kod: 'bayi-yapilandirilmamis' }); return; }
+      const y = await bayiKopruYetkisi(req, res, ret);
+      if (!y) return;
+      const kod = panelKoduUret();
+      C.bayiKodDeposu.ver({
+        kodOzeti: kodOzetiHesapla(kod), meydan: cozum.data.meydan, uid: y.uid, cid: y.kullanici.cid, ad: y.kullanici.ad, eposta: y.eposta,
+        mfa: y.kullanici.mfaAcik, bitis: simdi().getTime() + MAGAZA_BAYI_KOD_OMRU_MS,
+      });
+      magazaBayiSay('yetkiKodu');
+      res.status(200).json({ donus: `${C.bayiDonus}#kod=${kod}&tur=${cozum.data.tur}` });
+    } catch (e) {
+      magazaBayiSay('yetkiKoduRet');
+      hata500(res, e, 'bayi yetki kodu');
     }
   };
 
@@ -567,6 +725,8 @@ export function magazaErpRoutes(app: Express, C: MagazaErpRouteCtx): void {
   };
 
   app.post('/api/magaza-panel/yetki-kodu', onbelleksiz, C.requireAuth, C.requireMfaVerified, C.magazaYetkiKoduLimiter, iptalKapisi, yetkiKodu);
+  app.get('/api/magaza-bayi/hesap', onbelleksiz, C.requireAuth, C.requireMfaVerified, C.magazaBayiHesapLimiter, bayiIptalKapisi, bayiHesap);
+  app.post('/api/magaza-bayi/yetki-kodu', onbelleksiz, C.requireAuth, C.requireMfaVerified, C.magazaBayiYetkiKoduLimiter, bayiIptalKapisi, bayiYetkiKodu);
   app.post('/api/magaza-talepleri/:id/durum', C.requireAuth, C.requireMfaVerified, C.dbLimiter, durum);
   app.post('/api/magaza-talepleri/:id/kalem-teslim', C.requireAuth, C.requireMfaVerified, C.dbLimiter, kalemTeslim);
   app.post('/api/magaza-talepleri/:id/bildirim-gonder', C.requireAuth, C.requireMfaVerified, C.dbLimiter, bildirimGonder);

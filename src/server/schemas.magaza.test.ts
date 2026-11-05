@@ -94,7 +94,10 @@ describe('YetkiKoduGovdesi / PanelOturumGovdesi (§ 3.2, 3.3)', () => {
     // Dilim 2a: 6 nesne şeması. Dilim 2b (bilerek değişen çit, § 10.3): + 7 — `BildirimGonderSorgusu`, içerik gövdesinin müşteri
     // bloğu, teyit kalemi, `ErpIcerikGovdesi` (dış nesne + `teyit`), `ErpSilGovdesi`, `PanelSilGovdesi`. `ErpElleTalepGovdesi` yeni
     // `z.object(` YAZMAZ: mağaza talebi şemasından `.omit(…)` ile türer (kopya gövde yok).
-    expect(satirlar.slice(bas).filter(s => /z\.object\(/.test(s))).toHaveLength(13);
+    // 2026-10-21 (şartname «müşteri siparişlerim» H9 — bilerek değişen çit, 13 → 15): + `MusteriBagGovdesi` (`{ leadId }`) ve
+    // `MusteriDurumGovdesi` (`{ durum }`), ikisi de `.strict()`; varsayılan / dönüştürme yok (yukarıdaki satır onları da kapsar).
+    expect(satirlar.slice(bas).filter(s => /z\.object\(/.test(s))).toHaveLength(15);
+    expect(satirlar.filter(s => /^export const Musteri(Bag|Durum)Govdesi = z\.object\(\{$/.test(s))).toHaveLength(2);
     // (Kuruş kararı 2026-10-17, B1 — bilerek değişen çit) elle talep kalemi kimliksiz talebin kalem nesnesini `.extend` ile
     // genişletir; yalnız `birimFiyat` kuruşla sınırlanır (yeni `z.object(` yok, kalem gövdesi kopyalanmaz).
     const elle = satirlar.findIndex(s => /export const ErpElleTalepGovdesi = /.test(s));

@@ -306,7 +306,7 @@ else
   # `xRoutes(app, ...)` cagrisiyla kaydolur ve o cagri zincirde yanlis yere
   # konabilir. 2026-08-24'te kirilan yalniz mikro grubuydu; digerleri dogruydu
   # ve tek sondali kontrol bu farki goremezdi.
-  BODY_PROBES="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul /api/tracking/fedex /api/ops/watchdog/run /api/dynamics/export/siparis /api/superadmin/tenants/test/status /api/parasut/import/stok /api/ai/lead-score /api/shopify/sync /api/shopify/baglanti /api/iyzico/payment-link /api/email/send /api/magaza-panel/yetki-kodu /api/magaza-talepleri/mt-00000000000000000000000000000000/durum /api/magaza-talepleri/mt-00000000000000000000000000000000/kalem-teslim /api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder /api/magaza-talepleri /api/magaza-talepleri/mt-00000000000000000000000000000000/icerik /api/magaza-talepleri/mt-00000000000000000000000000000000/sil}"
+  BODY_PROBES="${VERIFY_BODY_PROBE:-/api/mikro/gelen-fatura/kabul /api/tracking/fedex /api/ops/watchdog/run /api/dynamics/export/siparis /api/superadmin/tenants/test/status /api/parasut/import/stok /api/ai/lead-score /api/shopify/sync /api/shopify/baglanti /api/iyzico/payment-link /api/email/send /api/magaza-panel/yetki-kodu /api/magaza-talepleri/mt-00000000000000000000000000000000/durum /api/magaza-talepleri/mt-00000000000000000000000000000000/kalem-teslim /api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder /api/magaza-talepleri /api/magaza-talepleri/mt-00000000000000000000000000000000/icerik /api/magaza-talepleri/mt-00000000000000000000000000000000/sil /api/magaza-bayi/yetki-kodu}"
   for BODY_PROBE in $BODY_PROBES; do
     PCODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
       -X POST -H 'Content-Type: application/json' --data-binary '{bozuk' \
@@ -330,9 +330,10 @@ else
   # Authorization'sız gönderilir:
   #   401 = rota kayıtlı ve kimlik kapısı arkasında · 404 = rota deploy'da YOK
   # (magazaErpRoutes(app, …) çağrısı server.ts'te yok ya da uç adı değişmiş).
-  # Son üç yol dilim 2b'dir (elle talep, içerik düzenleme, yumuşak silme / geri alma): 404 = 2b sunucusu
-  # canlıda değil. Hiçbiri kayıt okumaz / yazmaz (kimlik kapısı gövdeden ve veritabanından ÖNCE reddeder).
-  MAGAZA_ERP_PROBES="/api/magaza-panel/yetki-kodu /api/magaza-talepleri/mt-00000000000000000000000000000000/durum /api/magaza-talepleri/mt-00000000000000000000000000000000/kalem-teslim /api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder /api/magaza-talepleri /api/magaza-talepleri/mt-00000000000000000000000000000000/icerik /api/magaza-talepleri/mt-00000000000000000000000000000000/sil"
+  # Beşinci-yedinci yollar dilim 2b'dir (elle talep, içerik düzenleme, yumuşak silme / geri alma): 404 = 2b sunucusu
+  # canlıda değil. Sekizinci yol müşteri / bayi ekranının ERP köprüsüdür (2026-10-21, şartname «müşteri siparişlerim» H19):
+  # 404 = bayi sunucusu canlıda değil. Hiçbiri kayıt okumaz / yazmaz (kimlik kapısı gövdeden ve veritabanından ÖNCE reddeder).
+  MAGAZA_ERP_PROBES="/api/magaza-panel/yetki-kodu /api/magaza-talepleri/mt-00000000000000000000000000000000/durum /api/magaza-talepleri/mt-00000000000000000000000000000000/kalem-teslim /api/magaza-talepleri/mt-00000000000000000000000000000000/bildirim-gonder /api/magaza-talepleri /api/magaza-talepleri/mt-00000000000000000000000000000000/icerik /api/magaza-talepleri/mt-00000000000000000000000000000000/sil /api/magaza-bayi/yetki-kodu"
   for ERP_PROBE in $MAGAZA_ERP_PROBES; do
     ECODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
       -X POST -H 'Content-Type: application/json' --data-binary '{}' \
@@ -361,6 +362,19 @@ else
     404) fail "MAĞAZA ERP UCU KAYITLI DEĞİL: $REVIZE_PROBE -> 404 (server.ts: magazaErpRoutes(app, …) çağrısı / uç adı)" ;;
     429) fail "$REVIZE_PROBE -> 429 (hız sınırı: bu IP kimliksiz tavanı doldurdu — bekleyip yeniden çalıştırın)" ;;
     *)   fail "revize bildirimi sondası beklenmedik yanıt: $RCODE ($REVIZE_PROBE; 200/403 = kimlik kapısı zincirde değil)" ;;
+  esac
+
+  # 4d) BAYİ ONAY SAYFASININ FİRMA OKUMA UCU (GET /api/magaza-bayi/hesap; 2026-10-21, H19)
+  #
+  # Yukarıdaki iki liste POST içindir; bu uç GET'tir (gövdesiz). Kimliksiz: 401 = rota kayıtlı ve kimlik kapısı arkasında ·
+  # 404 = bayi sunucusu canlıda değil. Kayıt okumaz (kimlik kapısı veritabanından ÖNCE reddeder).
+  BAYI_HESAP_PROBE="/api/magaza-bayi/hesap"
+  BHKOD=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "$BASE_URL$BAYI_HESAP_PROBE" 2>/dev/null || echo 000)
+  case "$BHKOD" in
+    401) pass "bayi ERP ucu kayıtlı ve kimlik kapısı arkasında: GET $BAYI_HESAP_PROBE (kimliksiz -> 401)" ;;
+    404) fail "BAYİ ERP UCU KAYITLI DEĞİL: GET $BAYI_HESAP_PROBE -> 404 (server.ts: magazaErpRoutes(app, …) çağrısı / uç adı)" ;;
+    429) fail "GET $BAYI_HESAP_PROBE -> 429 (hız sınırı: bu IP kimliksiz tavanı doldurdu — bekleyip yeniden çalıştırın)" ;;
+    *)   fail "bayi ERP ucu sondası beklenmedik yanıt: $BHKOD (GET $BAYI_HESAP_PROBE; 200/403 = kimlik kapısı zincirde değil)" ;;
   esac
 
   # 5) HIZ SINIRI IP BAŞINA MI SAYIYOR? (2026-10-08'de canlıda ölçülen arıza)
@@ -489,34 +503,45 @@ else
   esac
 
   # 7) SİTE PANELİ ALT ZİNCİRİ (www.cetpa.com.tr/panel.html → /api/magaza/panel/*) — mağaza dilim 2a
+  #    + SİTE BAYİ EKRANI ALT ZİNCİRİ (www.cetpa.com.tr/bayi.html → /api/magaza/bayi/*) — 2026-10-21, H19
   #
   # Hepsi belirteçsiz (kimliksiz) ölçülür; hiçbiri kayıt okumaz / yazmaz. Başlıklar satırın
   # TAMAMINDA aranır (grep -i): değer virgüllü listedir, yalnız ilk sözcüğe bakmak yetmez.
-  #   503 + panel-yapilandirilmamis = panel HİÇ çalışmıyor: MAGAZA_PANEL_DONUS kökeni izinli
-  #   listede değil / https değil ya da oturum sırrı yok (bekçi de kırmızı gösterir).
+  #   503 + <tür>-yapilandirilmamis = o alt zincir HİÇ çalışmıyor: dönüş adresi (MAGAZA_PANEL_DONUS /
+  #   MAGAZA_BAYI_DONUS) kökeni izinli listede değil / https değil ya da oturum sırrı yok (bekçi de kırmızı gösterir).
+  # İki alt zincir AYNI kalıpla ölçülür (`zincir_sonda <tür> <ad> <beklenen kod> <curl…>`); türe özgü olan yalnız
+  # etiket, yapılandırma işareti, ortam adı ve magazaRoutes'taki `r.use` yoludur.
   PU="$MU/panel"
+  BU="$MU/bayi"
   PANEL_SIFIR="mt-00000000000000000000000000000000"
-  panel_sonda() {  # $1 = ad, $2 = beklenen kod, $3.. = curl bağımsız değişkenleri
-    PAD="$1"; PBEK="$2"; shift 2
+  zincir_sonda() {  # $1 = tür (panel | bayi), $2 = ad, $3 = beklenen kod, $4.. = curl bağımsız değişkenleri
+    case "$1" in
+      panel) ZET="site paneli"; ZETB="SİTE PANELİ"; ZISARET="panel-yapilandirilmamis"; ZORTAM="MAGAZA_PANEL_DONUS"; ZRUSE="/panel"; ZMODUL="magazaPanelZinciri" ;;
+      bayi)  ZET="site bayi ekranı"; ZETB="SİTE BAYİ EKRANI"; ZISARET="bayi-yapilandirilmamis"; ZORTAM="MAGAZA_BAYI_DONUS"; ZRUSE="/bayi"; ZMODUL="magazaBayiZinciri" ;;
+      *)     fail "zincir_sonda: bilinmeyen tür '$1'"; return ;;
+    esac
+    PAD="$2"; PBEK="$3"; shift 3
     PY=$(curl -s --max-time 20 -w '\n%{http_code}' -H "Origin: $MK" "$@" 2>/dev/null)
     PKOD=$(printf '%s\n' "$PY" | tail -n 1)
     if [ "$PKOD" = "$PBEK" ]; then
-      pass "site paneli $PAD: $PKOD"
-    elif [ "$PKOD" = "503" ] && printf '%s' "$PY" | grep -q 'panel-yapilandirilmamis'; then
-      fail "SİTE PANELİ YAPILANDIRILMAMIŞ ($PAD -> 503 panel-yapilandirilmamis): MAGAZA_PANEL_DONUS kökeni
+      pass "$ZET $PAD: $PKOD"
+    elif [ "$PKOD" = "503" ] && printf '%s' "$PY" | grep -q "$ZISARET"; then
+      fail "$ZETB YAPILANDIRILMAMIŞ ($PAD -> 503 $ZISARET): $ZORTAM kökeni
       MAGAZA_IZINLI_KOKENLER listesinde değil / https değil ya da SESSION_TOKEN_SECRET ve FIREBASE_PRIVATE_KEY yok."
     elif [ "$PKOD" = "404" ]; then
-      fail "site paneli $PAD: 404 — alt zincir bağlı değil ya da uç kayıtlı değil (magazaRoutes: r.use('/panel', …); magazaPanelZinciri kayıt sırası)"
+      fail "$ZET $PAD: 404 — alt zincir bağlı değil ya da uç kayıtlı değil (magazaRoutes: r.use('$ZRUSE', …); $ZMODUL kayıt sırası)"
     elif [ "$PKOD" = "400" ] || [ "$PKOD" = "415" ]; then
-      fail "site paneli $PAD: $PKOD — belirteç kapısı gövdeden SONRA çalışıyor (kayıt sırası bozuk; belirteçsiz istek 401 almalı)"
+      fail "$ZET $PAD: $PKOD — belirteç kapısı gövdeden SONRA çalışıyor (kayıt sırası bozuk; belirteçsiz istek 401 almalı)"
     elif [ "$PKOD" = "403" ]; then
-      fail "site paneli $PAD: 403 — '$MK' sunucuda izinli köken değil (MAGAZA_IZINLI_KOKENLER); MAGAZA_KOKEN ile doğru kökeni verin"
+      fail "$ZET $PAD: 403 — '$MK' sunucuda izinli köken değil (MAGAZA_IZINLI_KOKENLER); MAGAZA_KOKEN ile doğru kökeni verin"
     elif [ "$PKOD" = "429" ]; then
-      fail "site paneli $PAD ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)"
+      fail "$ZET $PAD ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)"
     else
-      fail "site paneli $PAD: beklenen $PBEK, gelen $PKOD"
+      fail "$ZET $PAD: beklenen $PBEK, gelen $PKOD"
     fi
   }
+  panel_sonda() { zincir_sonda panel "$@"; }
+  bayi_sonda() { zincir_sonda bayi "$@"; }
   panel_sonda "liste (belirteçsiz)" 401 "$PU/siparisler"
   panel_sonda "oturum (geçersiz kod)" 401 -X POST -H "Content-Type: application/json" \
     -d '{"kod":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","dogrulayici":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}' "$PU/oturum"
@@ -538,6 +563,40 @@ else
     fail "site paneli ön uçuşu: beklenen 204 + Allow-Methods GET + Allow-Headers Authorization — gelen kod '${POPTKOD:-yok}'.
       Tarayıcı belirteçli isteği HİÇ göndermez. Başlıklar yoksa OPTIONS'ı IIS yanıtlıyor ya da alt zincir bağlı değil."
   fi
+  # Site bayi ekranı (H19): panel sondalarıyla AYNI kalıp. Belirteçsiz `ben` / `siparisler` / `cikis` 401 (kapı gövdeden ve
+  # veritabanından ÖNCE); verilmemiş kodla `oturum` 401 (gövde şemaya UYAR — ret kod aramasından gelir, şema 400'ünden değil).
+  # 404 = alt zincir bağlı değil (Tur 1 sunucusu yayında değil) · 503 bayi-yapilandirilmamis = MAGAZA_BAYI_DONUS / sır.
+  bayi_sonda "hesap özeti (belirteçsiz)" 401 "$BU/ben"
+  bayi_sonda "liste (belirteçsiz)" 401 "$BU/siparisler"
+  bayi_sonda "oturum (geçersiz kod)" 401 -X POST -H "Content-Type: application/json" \
+    -d '{"kod":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","dogrulayici":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}' "$BU/oturum"
+  bayi_sonda "çıkış (belirteçsiz)" 401 -X POST -H "Content-Type: application/json" -d '{}' "$BU/cikis"
+  # Bayi ön uçuşu: GET + Authorization izinli olmalı (site belirteçli GET atar; başlık yoksa tarayıcı isteği HİÇ göndermez).
+  BOPT=$(curl -s -o /dev/null -D - --max-time 20 -X OPTIONS -H "Origin: $MK" \
+    -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: authorization,content-type" \
+    "$BU/siparisler" 2>/dev/null | tr -d '\r')
+  BOPTKOD=$(printf '%s\n' "$BOPT" | awk '/^HTTP\//{k=$2} END{print k}')
+  if [ "$BOPTKOD" = "204" ] && printf '%s\n' "$BOPT" | grep -i '^access-control-allow-methods:' | grep -qi 'GET' \
+     && printf '%s\n' "$BOPT" | grep -i '^access-control-allow-headers:' | grep -qi 'authorization'; then
+    pass "site bayi ekranı ön uçuşu: 204 + Allow-Methods GET + Allow-Headers Authorization"
+  elif [ "$BOPTKOD" = "429" ]; then
+    fail "site bayi ekranı ön uçuşu ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)"
+  else
+    fail "site bayi ekranı ön uçuşu: beklenen 204 + Allow-Methods GET + Allow-Headers Authorization — gelen kod '${BOPTKOD:-yok}'.
+      Tarayıcı belirteçli isteği HİÇ göndermez. Allow-Methods yalnız POST ise bayi alt zinciri bağlı değil (istek dış zincirin
+      köken kapısında bitiyor; magazaRoutes: r.use('/bayi', …) dış köken kapısından ÖNCE olmalı); başlık yoksa OPTIONS'ı IIS yanıtlıyor."
+  fi
+  # Kökensiz POST -> 403: bayi alt zincirinin KENDİ köken kapısı belirteç kapısından ÖNCE (401 = köken kapısı yok ya da sonra).
+  # Alt zincir bağlı değilse de dış zincir 403 verir: bu satır «bağlı mı»yı değil «köken önce mi»yi ölçer (bağı yukarıdakiler ölçer).
+  BKOKENSIZ=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST -H "Content-Type: application/json" -d '{}' "$BU/cikis" 2>/dev/null)
+  case "$BKOKENSIZ" in
+    403) pass "site bayi ekranı köken kapısı: kökensiz POST -> 403" ;;
+    429) fail "site bayi ekranı köken kapısı ÖLÇÜLEMEDİ: 429 (bekleyip yeniden çalıştırın)" ;;
+    401) fail "site bayi ekranı köken kapısı: kökensiz POST -> 401 — belirteç kapısı köken kapısından ÖNCE (magazaBayiZinciri kayıt sırası)" ;;
+    *)   fail "site bayi ekranı köken kapısı: kökensiz POST beklenen 403, gelen $BKOKENSIZ" ;;
+  esac
+  # İstemci paketi sondası (/magaza-bayi-baglan, bayi onay sayfası — H16) 8. adımdadır: aynı ana betikte panel yolunun yanında aranır.
+
   # Dış zincirin ön uçuşu DEĞİŞMEDİ: aynı istek başlığıyla Authorization İZİNLİ DEĞİL (ret tarayıcıda, başlık değerinden olur).
   DOPT=$(curl -s -o /dev/null -D - --max-time 20 -X OPTIONS -H "Origin: $MK" \
     -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: authorization,content-type" \
@@ -567,11 +626,20 @@ else
     IKOD=$(curl -s --compressed --max-time 40 -o "$IDOSYA" -w '%{http_code}' "$BASE_URL$IBETIK" 2>/dev/null)
     if [ "$IKOD" != "200" ] || [ ! -s "$IDOSYA" ]; then
       fail "istemci derlemesi sondası ÖLÇÜLEMEDİ: ana betik indirilemedi ($IBETIK -> ${IKOD:-yanıt yok})"
-    elif grep -q '/magaza-panel-baglan' "$IDOSYA"; then
-      pass "istemci derlemesi «ERP ile bağlan» sayfasının yolunu taşıyor ($IBETIK içinde /magaza-panel-baglan)"
     else
-      fail "İSTEMCİ DERLEMESİNDE /magaza-panel-baglan YOK ($IBETIK): dilim 2 istemcisi yayında değil ya da onay sayfası
+      if grep -q '/magaza-panel-baglan' "$IDOSYA"; then
+        pass "istemci derlemesi «ERP ile bağlan» sayfasının yolunu taşıyor ($IBETIK içinde /magaza-panel-baglan)"
+      else
+        fail "İSTEMCİ DERLEMESİNDE /magaza-panel-baglan YOK ($IBETIK): dilim 2 istemcisi yayında değil ya da onay sayfası
       App.tsx'e bağlanmamış — site panelindeki «ERP ile giriş yap» boş sayfaya düşer."
+      fi
+      # Müşteri / bayi ekranının onay sayfası (2026-10-21, H16 + H19): aynı ana betikte; bayi sunucusuyla TEK yayında çıkar.
+      if grep -q '/magaza-bayi-baglan' "$IDOSYA"; then
+        pass "istemci derlemesi bayi ekranı onay sayfasının yolunu taşıyor ($IBETIK içinde /magaza-bayi-baglan)"
+      else
+        fail "İSTEMCİ DERLEMESİNDE /magaza-bayi-baglan YOK ($IBETIK): müşteri / bayi istemcisi yayında değil ya da onay sayfası
+      App.tsx'e bağlanmamış — bayi ekranındaki «ERP ile giriş» boş sayfaya düşer."
+      fi
     fi
     rm -f "$IDOSYA"
   fi

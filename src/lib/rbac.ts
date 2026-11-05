@@ -521,3 +521,43 @@ export const YONETICI_GEREKLI_YANITI = {
   error: 'Yönetici rolündeki hesaplarla ilgili işlemleri yalnız Yönetici yapabilir.',
   code: 'YONETICI_GEREKLI',
 } as const;
+
+/**
+ * Rol alanının DEĞERİ dış rol mü (B2B / Bayi)? Tam eşleşme; ham değer (sayı, uydurma dizge, null) verilebilir. TEK tanım:
+ * lib/kimlikYuzeyi `disRolMu` bunu çağırır (kimlik yüzeyi rbac'ı içe aktarır; tersi döngü olurdu).
+ */
+export function disRolDegeriMi(rol: unknown): boolean {
+  return typeof rol === 'string' && EXTERNAL_ROLES.some(r => r === rol);
+}
+
+/**
+ * «Dış rol (B2B / Bayi) hesabına yalnız Yönetici dokunur» (2026-10-21, şartname «müşteri siparişlerim» K3 / H6) —
+ * `yoneticiRoluneDokunabilir`'in EŞİ, onu değiştirmeden yanında durur. Müşteri hesabı bir carinin siparişlerine açılan kapıdır:
+ * hesabı açmak, silmek ve belgesini yazmak YALNIZ Yönetici (rol `Admin`) ya da süper yöneticinin işidir; Müdür (`requireAdmin`'i
+ * geçer) dış rol hesabı AÇAMAZ, SİLEMEZ, belgesini YAZAMAZ. `ilgiliRol` ham değerdir (gövdeden / belgeden): tam olarak `B2B` ya da
+ * `Dealer` dizgisi aranır (rolü okuyan her yer tam eşleşmeyle karar verir); başka her değer için karar bu işlevin değildir → `true`.
+ * Çağıranlar: `/api/admin/users` (POST, DELETE — routes/epostaRoutes `disRolYonetebilir`) ve server.ts `yoneticiKaydiYazimEngeli`.
+ */
+export function disRolHesabinaDokunabilir(cagiranRol: AppRole | null, superAdmin: boolean, ilgiliRol: unknown): boolean {
+  if (!disRolDegeriMi(ilgiliRol)) return true;
+  return yalnizYoneticiMi(cagiranRol, superAdmin);
+}
+
+/** `disRolHesabinaDokunabilir` reddinin TEK gövdesi (HTTP 403); `code` Yönetici kuralıyla aynı (istemci aynı kodla tanır). */
+export const DIS_ROL_YONETICI_GEREKLI_YANITI = {
+  success: false,
+  error: 'Müşteri (B2B / Bayi) hesaplarını yalnız Yönetici yönetebilir.',
+  code: 'YONETICI_GEREKLI',
+} as const;
+
+/**
+ * Dış rol (B2B / Bayi) hesabı DAVETLE AÇILMAZ (2026-10-21, şartname «müşteri siparişlerim» H7): davet yolu Google girişi üretir
+ * (server/davetPostasi), müşteri ekranı köprüsü ise yalnız e-posta + şifre kabul eder; ayrıca davetle açılan hesabın cari bağı
+ * olmazdı. Hesap «Kullanıcı Ekle (manuel)» ile cari seçilerek açılır. İki davet ucu 400, eski dış rollü davetin kabulü 409 ile bu
+ * gövdeyi döner (`code` istemcinin kalıcı hüküm listesinde — lib/invite).
+ */
+export const DIS_ROL_DAVETLE_ACILMAZ_YANITI = {
+  success: false,
+  code: 'DIS_ROL_DAVETLE_ACILMAZ',
+  error: 'Müşteri / bayi hesabı davetle açılmaz; «Kullanıcı Ekle (manuel)» ile açın ve cari seçin.',
+} as const;

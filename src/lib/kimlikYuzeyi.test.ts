@@ -9,8 +9,8 @@ import { join } from 'path';
 import { SRC_KOK, kaynakDosyalari, kodSatirlari } from '../test/kaynakTarama';
 import { EXTERNAL_ROLES, STAFF_ROLES } from './rbac';
 import {
-  KENDI_UID, KIMLIK_YUZEYI_RETLERI, ROLSUZ_IZINLI_YOLLAR, ROL_OKUNAMADI_YANITI, disRolMu, icRolMu, istekYolu, kimlikYuzeyiKarari,
-  rolsuzIzinliMi, type KimlikYuzeyiGirdisi,
+  DIS_ROL_IZINLI_YOLLAR, KENDI_UID, KIMLIK_YUZEYI_RETLERI, ROLSUZ_IZINLI_YOLLAR, ROL_OKUNAMADI_YANITI, disRolIzinliMi, disRolMu, icRolMu, istekYolu,
+  kimlikYuzeyiKarari, rolsuzIzinliMi, type KimlikYuzeyiGirdisi,
 } from './kimlikYuzeyi';
 
 const UID = 'u1AbC-_9';
@@ -202,6 +202,70 @@ describe('kimlikYuzeyiKarari — süper yönetici → iç rol → izin listesi �
     expect(KIMLIK_YUZEYI_RETLERI.DIS_ROL.error).toBe('Bu hesap bayi hesabıdır. ERP ekranı bayi hesaplarına kapalıdır.');
     expect(KIMLIK_YUZEYI_RETLERI.ROL_YOK.error.length).toBeGreaterThan(10);
     expect(ROL_OKUNAMADI_YANITI.code).toBe('ROL_OKUNAMADI');
+  });
+});
+
+// ── Yalnız dış rol izin listesi (2026-10-21, şartname «müşteri siparişlerim» H4) ─────────────────────────────────────────────
+describe('yalnız dış rol izin listesi — müşteri ekranı köprüsünün iki ERP ucu; rolsüze AÇILMAZ', () => {
+  const g = (ek: Partial<KimlikYuzeyiGirdisi>): KimlikYuzeyiGirdisi => ({ superAdmin: false, rol: null, yontem: 'GET', hedef: '/api/db/inventory', uid: UID, ...ek });
+  const IKI_UC: Array<[string, string]> = [['POST', '/api/magaza-bayi/yetki-kodu'], ['GET', '/api/magaza-bayi/hesap']];
+
+  it('liste TAM iki satır, `:uid` yer tutucusu yok, dondurulmuş; rolsüz liste DEĞİŞMEDİ (dokuz satır)', () => {
+    expect(DIS_ROL_IZINLI_YOLLAR.map(i => `${i.yontemler.join('|')} ${i.yol}`)).toEqual([
+      'POST /api/magaza-bayi/yetki-kodu',
+      'GET /api/magaza-bayi/hesap',
+    ]);
+    for (const i of DIS_ROL_IZINLI_YOLLAR) { expect(i.yol, i.yol).not.toContain(KENDI_UID); expect(i.neden.length, i.yol).toBeGreaterThan(10); }
+    expect(Object.isFrozen(DIS_ROL_IZINLI_YOLLAR)).toBe(true);
+    for (const i of DIS_ROL_IZINLI_YOLLAR) { expect(Object.isFrozen(i)).toBe(true); expect(Object.isFrozen(i.yontemler)).toBe(true); }
+    expect(() => (DIS_ROL_IZINLI_YOLLAR as unknown as unknown[]).push({ yontemler: ['GET'], yol: '/api/db/orders', neden: 'x' })).toThrow();
+    expect(ROLSUZ_IZINLI_YOLLAR).toHaveLength(9);
+    for (const [, yol] of IKI_UC) expect(ROLSUZ_IZINLI_YOLLAR.some(i => i.yol === yol), yol).toBe(false);
+  });
+
+  it('dış rol (B2B, Bayi) iki uçtan GEÇER — neden `dis-rol-izin-listesi`; sorgu dizesi yok sayılır', () => {
+    for (const rol of EXTERNAL_ROLES) for (const [yontem, hedef] of IKI_UC) {
+      expect(kimlikYuzeyiKarari(g({ rol, yontem, hedef })), `${rol} ${yontem} ${hedef}`).toEqual({ gecer: true, neden: 'dis-rol-izin-listesi' });
+      expect(kimlikYuzeyiKarari(g({ rol, yontem, hedef: `${hedef}?x=1` })), `${rol} ${hedef}?`).toEqual({ gecer: true, neden: 'dis-rol-izin-listesi' });
+    }
+  });
+
+  it('rolsüz ve rol alanı bozuk hesap (null, \'\', \'b2b\', \'DEALER\', \'B2B \', 123, {}) iki uçta → ROL_YOK (liste rolsüze AÇILMAZ)', () => {
+    for (const rol of [null, undefined, '', 'b2b', 'DEALER', 'B2B ', ' Dealer', 123, {}, ['Dealer']] as unknown[]) {
+      for (const [yontem, hedef] of IKI_UC) {
+        expect(kimlikYuzeyiKarari(g({ rol, yontem, hedef })), `${JSON.stringify(rol)} ${yontem} ${hedef}`).toEqual({ gecer: false, kod: 'ROL_YOK' });
+      }
+    }
+  });
+
+  it('dış rolde yanlış yöntem, sondaki eğik çizgi, büyük harfli yol, ek parça → DIS_ROL (karakteri karakterine)', () => {
+    for (const rol of EXTERNAL_ROLES) {
+      for (const [yontem, hedef] of [
+        ['GET', '/api/magaza-bayi/yetki-kodu'], ['POST', '/api/magaza-bayi/hesap'], ['PUT', '/api/magaza-bayi/yetki-kodu'],
+        ['POST', '/api/magaza-bayi/yetki-kodu/'], ['GET', '/api/magaza-bayi/hesap/'], ['POST', '/api/MAGAZA-BAYI/yetki-kodu'],
+        ['GET', '/API/magaza-bayi/hesap'], ['GET', '/api/magaza-bayi/hesap/x'], ['GET', '/api/magaza-bayi'], ['GET', '/api/magaza-bayi//hesap'],
+        ['GET', '/api/magaza-bayi/%68esap'],
+      ] as const) {
+        expect(kimlikYuzeyiKarari(g({ rol, yontem, hedef })), `${rol} ${yontem} ${hedef}`).toEqual({ gecer: false, kod: 'DIS_ROL' });
+      }
+    }
+    expect(disRolIzinliMi('POST', '/api/magaza-bayi/yetki-kodu')).toBe(true);
+    expect(disRolIzinliMi('post', '/api/magaza-bayi/yetki-kodu')).toBe(false);
+    const bozuk: unknown = 7;
+    expect(disRolIzinliMi(bozuk as string, '/api/magaza-bayi/hesap')).toBe(false);
+  });
+
+  it('iç rol iki uçtan `ic-rol` nedeniyle geçer (köprü ucu iç rolü KENDİSİ reddeder — kimlik yüzeyi rol kapısı değildir)', () => {
+    for (const rol of STAFF_ROLES) for (const [yontem, hedef] of IKI_UC) {
+      expect(kimlikYuzeyiKarari(g({ rol, yontem, hedef }))).toEqual({ gecer: true, neden: 'ic-rol' });
+    }
+  });
+
+  it('listedeki HER (yöntem, yol) gerçek bir rota kaydına karşılık gelir (bayat satır = ölü izin)', () => {
+    const metin = kaynakDosyalari(join(SRC_KOK, 'server', 'routes')).map(y => kodSatirlari(y).map(s => s.kod).join('\n')).join('\n');
+    for (const izin of DIS_ROL_IZINLI_YOLLAR) for (const y of izin.yontemler) {
+      expect(new RegExp(String.raw`app\.${y.toLowerCase()}\(\s*'${izin.yol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'\s*,`).test(metin), `${y} ${izin.yol}`).toBe(true);
+    }
   });
 });
 

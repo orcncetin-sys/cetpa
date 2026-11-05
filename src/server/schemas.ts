@@ -347,3 +347,16 @@ export const PanelOturumGovdesi = z.object({
   kod:         z.string().regex(MAGAZA_PANEL_43_DESENI),
   dogrulayici: z.string().regex(MAGAZA_PANEL_43_DESENI),
 }).strict();
+
+/**
+ * `PUT /api/admin/musteri-hesaplari/:uid` — müşteri hesabının cari bağı (2026-10-21, şartname «müşteri siparişlerim» H9). Gövde
+ * YALNIZ `leadId`; cari kodu ve firma adı sunucuda lead'den türer (istemciden ALINMAZ). Aynı `leadId` = cari kodunu tazeleme.
+ */
+export const MusteriBagGovdesi = z.object({
+  leadId: z.string().min(1).max(128),
+}).strict();
+
+/** `POST /api/admin/musteri-hesaplari/:uid/durum` — müşteri erişimini kapatma / açma (H9). */
+export const MusteriDurumGovdesi = z.object({
+  durum: z.enum(['acik', 'kapali']),
+}).strict();

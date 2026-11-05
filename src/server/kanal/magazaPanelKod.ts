@@ -17,6 +17,12 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /** Kod ömrü (ms). */
 export const MAGAZA_PANEL_KOD_OMRU_MS = 60_000;
+/**
+ * Müşteri / bayi ekranı köprüsünün kod ömrü (2026-10-21) — TEK sabit: yazan uç (`magazaErpRoutes` bayi yetki kodu) `bitis =
+ * veriliş + ömür` yazar, okuyan uç (`magazaBayiZinciri` `/oturum`) veriliş anını `bitis − ömür` ile geri türetir. Bayi kodları
+ * AYRI depo örneğindedir (server.ts ikinci `kodDeposuKur()`): panel kodu bayi oturumunda, bayi kodu panel oturumunda bulunmaz.
+ */
+export const MAGAZA_BAYI_KOD_OMRU_MS = 60_000;
 
 export interface PanelKodKaydi {
   /** sha256(kod) onaltılık — kodun KENDİSİ saklanmaz. */

@@ -31,8 +31,8 @@ import { join } from 'node:path';
 import { kodSatirlari, SRC_KOK } from '../test/kaynakTarama';
 import { EXTERNAL_ROLES, STAFF_ROLES } from '../lib/rbac';
 import { TOP_LEVEL_TABS } from '../lib/topLevelTabs';
-import { MAGAZA_PANEL_BAGLAN_YOLU } from '../lib/magazaPanelBaglan';
-import { CIKIS_UCU } from '../lib/oturumCikisi';
+import { MAGAZA_BAYI_BAGLAN_YOLU, MAGAZA_PANEL_BAGLAN_YOLU } from '../lib/magazaPanelBaglan';
+import { CIKIS_BELIRTEC_SURE_SINIRI_MS, CIKIS_SURE_SINIRI_MS, CIKIS_UCU } from '../lib/oturumCikisi';
 import { UserRole } from '../types';
 
 const UID = 'uid-deneme-1';
@@ -116,14 +116,22 @@ vi.mock('./ProfilYuklenemediEkrani', async (asilAl) => {
   const Sarmal = (p: Ozellikler) => { durum.profilEkrani = p; return createElement(asil.default, p); };
   return { ...asil, default: Sarmal };
 });
+/** Tembel sayfalardan GERÇEK çizilen tek sayfa: bayi onay sayfası (H16; `beforeAll`da yüklenir). */
+const sayfalar = vi.hoisted(() => ({ bayi: null as null | ((p: import('../pages/MagazaBayiBaglanPage').MagazaBayiBaglanPageProps) => React.ReactNode) }));
 vi.mock('react', async (asilAl) => {
-  // App `React.lazy(…)` yazar (varsayılan dışa aktarım); adlı `lazy` de aynı vekile bağlanır.
+  // App `React.lazy(…)` yazar (varsayılan dışa aktarım); adlı `lazy` de aynı vekile bağlanır. Tembel sayfalar boş çizilir — TEK istisna
+  // bayi onay sayfası (2026-10-21, H16): dış rolün bu yolda kilit ekranı yerine onay sayfasını gördüğü ve firma adını okuduğu DAVRANIŞLA
+  // ölçülür. Sayfa `beforeAll`da yüklenir, çizim eşzamanlıdır (ölçüm sayfa paketinin yüklenme zamanlamasına bağlanmaz). Yükleyici
+  // kaynağındaki modül adıyla tanınır (dönüştürülmüş `import('./pages/MagazaBayiBaglanPage')` metni).
   const asil = await asilAl<typeof import('react') & { default: typeof import('react') }>();
-  const lazy = () => () => null;
+  const lazy = (yukle: () => Promise<unknown>) => (String(yukle).includes('MagazaBayiBaglanPage')
+    ? (p: import('../pages/MagazaBayiBaglanPage').MagazaBayiBaglanPageProps) => (sayfalar.bayi ? asil.createElement(sayfalar.bayi, p) : null)
+    : () => null);
   return { ...asil, lazy, default: { ...asil.default, lazy } };
 });
 
-interface Istek { yontem: string; yol: string }
+/** `yetki`: isteğin `Authorization` başlığı (yoksa `undefined`); `oturumKapanmisti`: istek atılırken `signOut` kaç kez çağrılmıştı. */
+interface Istek { yontem: string; yol: string; yetki?: string; oturumKapanmisti: number }
 let istekler: Istek[] = [];
 let akislar: string[] = [];
 let araliklar: number[] = [];
@@ -138,7 +146,7 @@ function sahteFetch(girdi: RequestInfo | URL, init?: RequestInit): Promise<Respo
   const basliklar = (init?.headers ?? {}) as Record<string, string>;
   const yontem = (basliklar['X-Cetpa-Method'] ?? init?.method ?? 'GET').toUpperCase();
   const yol = ham.split('?')[0];
-  istekler.push({ yontem, yol });
+  istekler.push({ yontem, yol, yetki: basliklar.Authorization, oturumKapanmisti: durum.cikisSayisi });
   const anahtar = `${yontem} ${yol}`;
   if (durum.askiyaAl.has(anahtar)) {
     return new Promise<Response>(coz => { (durum.askida[anahtar] ??= []).push(coz); });
@@ -176,6 +184,7 @@ let tazele: () => void;
 let appDeposu: typeof import('../store/appStore').useAppStore;
 beforeAll(async () => {
   App = (await import('../App')).default;
+  sayfalar.bayi = (await import('../pages/MagazaBayiBaglanPage')).default;
   const { resetStream } = await import('../lib/dbClient');
   const { resetLazyCollections } = await import('../lib/lazyCollections');
   const { useAppStore } = await import('../store/appStore');
@@ -367,6 +376,51 @@ describe.each(EXTERNAL_ROLES.map(r => [r]))('dış rol %s: ERP kabuğu çizilmez
     expect(durum.cikisSayisi).toBe(1);
     expect(bayiBasligi(container)).toBeNull();
     expect(kabukVar(container)).toBe(false);   // çıkıştan sonra kabuk DEĞİL, oturumsuz sayfa
+  });
+
+  // H17 (2026-10-21): dış rolde oturum çerezi yok (akış açılmaz); sunucu çıkışı kullanıcıyı ancak Bearer'dan tanır. Sayfanın «Çıkış»ı
+  // App'in `handleLogout`unu çağırır (aynı işleyici — burada davranışla ölçülür).
+  it('dış rol çıkışı: `POST /api/db/session/logout` isteği `Authorization: Bearer <kimlik belirteci>` taşır ve `signOut`tan ÖNCE gider; istek kalan 3 sn ile sınırlı', async () => {
+    const { getByRole } = await ac(rol, '/dashboard');
+    istekler = [];
+    const sure = vi.spyOn(AbortSignal, 'timeout');
+    fireEvent.click(getByRole('button', { name: 'Çıkış' }));
+    await bekle();
+    const cikislar = istekler.filter(i => i.yol === CIKIS_UCU);
+    expect(cikislar.map(i => [i.yontem, i.yetki, i.oturumKapanmisti])).toEqual([['POST', 'Bearer belirtec-deneme', 0]]);
+    expect(durum.cikisSayisi).toBe(1);
+    // Toplam en çok 5 sn: belirteç en çok 2 sn bekler, istek kalan 3 sn'lik sinyalle gider (5 sn'lik sinyal toplamı 7 sn'ye çıkarırdı).
+    expect(sure.mock.calls).toEqual([[CIKIS_SURE_SINIRI_MS - CIKIS_BELIRTEC_SURE_SINIRI_MS]]);
+    expect(CIKIS_SURE_SINIRI_MS - CIKIS_BELIRTEC_SURE_SINIRI_MS).toBe(3_000);
+  });
+
+  it('dış rol çıkışı: kimlik belirteci ASILI kalırsa istek 2 sn sonra belirteçsiz gider, çıkış tamamlanır (toplam 5 sn içinde)', async () => {
+    const { container, getByRole } = await ac(rol, '/dashboard');
+    const asili: typeof durum.kullanici = { ...durum.kullanici, getIdToken: () => new Promise<string>(() => { /* hiç sonuçlanmaz */ }) };
+    durum.hesap = asili;
+    istekler = [];
+    fireEvent.click(getByRole('button', { name: 'Çıkış' }));
+    await ilerlet(1_999);
+    expect(istekler.filter(i => i.yol === CIKIS_UCU)).toEqual([]);          // belirteç bekleniyor (en çok 2 sn)
+    expect(durum.cikisSayisi).toBe(0);
+    await ilerlet(1);
+    expect(istekler.filter(i => i.yol === CIKIS_UCU).map(i => [i.yontem, i.yetki, i.oturumKapanmisti])).toEqual([['POST', undefined, 0]]);
+    await ilerlet(0);
+    expect(durum.cikisSayisi).toBe(1);
+    expect(bayiBasligi(container)).toBeNull();
+  });
+
+  it('dış rol çıkışı: kimlik belirteci alınamazsa (ret) istek HEMEN belirteçsiz gider, çıkış tamamlanır', async () => {
+    const { container, getByRole } = await ac(rol, '/dashboard');
+    const reddeden: typeof durum.kullanici = { ...durum.kullanici, getIdToken: () => Promise.reject(new Error('auth/network-request-failed')) };
+    durum.hesap = reddeden;
+    istekler = [];
+    fireEvent.click(getByRole('button', { name: 'Çıkış' }));
+    await ilerlet(0);
+    expect(istekler.filter(i => i.yol === CIKIS_UCU).map(i => [i.yontem, i.yetki, i.oturumKapanmisti])).toEqual([['POST', undefined, 0]]);
+    await bekle();
+    expect(durum.cikisSayisi).toBe(1);
+    expect(bayiBasligi(container)).toBeNull();
   });
 
   it('klavye kısayolları (sekme değiştiren harfler, arama, yeni kayıt) sayfadayken veri efekti tetiklemez', async () => {
@@ -983,7 +1037,7 @@ describe('App.tsx kaynağı — dış rol kapısı bağlı', () => {
 
   it('çizim kapısı: oturum çözülünce, karşılama / giriş / kabuktan ÖNCE; tek yerde', () => {
     const kapi = sira('if (disRolEkraniGosterilir({ oturumVar: !!user, rol: userRole, ikiAdimBekliyor: mfaChallenge })) {');
-    expect(satirlar[kapi + 1].trim()).toBe('return <DisRolEkrani dil={currentLanguage} onCikis={handleLogout} />;');
+    expect(satirlar[kapi + 1].trim()).toBe('return <DisRolEkrani dil={currentLanguage} onCikis={handleLogout} davetHatasi={inviteError} />;');
     expect(say(/disRolEkraniGosterilir\(/)).toBe(1);
     expect(say(/<DisRolEkrani\b/)).toBe(1);
     expect(kapi).toBeGreaterThan(sira('if (!isAuthReady) return ('));
@@ -992,6 +1046,11 @@ describe('App.tsx kaynağı — dış rol kapısı bağlı', () => {
     expect(kapi).toBeLessThan(sira('const uygulamaYolundaMi ='));
     expect(kapi).toBeLessThan(sira('if (!user && !isGuestMode) {'));
     expect(kapi).toBeLessThan(sira('if (baglanSayfasi && user) {'));
+    // Bayi onay sayfası (H16): rol bloğundan SONRA, dış rol kapısından ÖNCE (dış rol bu yolda kilit ekranını değil onay sayfasını görür).
+    const bayiKapisi = sira('if (bayiBaglanSayfasi && user && !mfaChallenge) {');
+    expect(bayiKapisi).toBeGreaterThan(sira("if (user && rolDurumu !== 'cozuldu') {"));
+    expect(bayiKapisi).toBeLessThan(kapi);
+    expect(say(/<MagazaBayiBaglanPage\b/)).toBe(1);
   });
 
   it('R — veri kapısı TEK türetilmiş değer; rol kapısı ve «Profiliniz yüklenemedi.» sayfası bağlı (yazıldı ama bağlanmadı çiti)', () => {
@@ -1106,5 +1165,197 @@ describe('kendiliğinden yenileme YOK (S4): eksik parça hatası sayfayı yenile
     const kod = kodSatirlari(join(SRC_KOK, 'App.tsx')).map(s => s.kod).join('\n');
     expect(kod.match(/<YeniSurumSeridi \/>/g)).toHaveLength(1);
     expect(kod).toMatch(/<\/ErrorBoundary>\n\s+<YeniSurumSeridi \/>\n\s+<\/>/);
+  });
+});
+
+// ═══ H16 — müşteri / bayi ekranı onay sayfası GERÇEK App'te (2026-10-21, şartname «müşteri siparişlerim») ═════════════════════════
+// Bayi ekranının «ERP ile giriş»i müşteri hesabını `/magaza-bayi-baglan#meydan=…&tur=…` adresine yollar. Burada ölçülen: dış rol bu yolda
+// kilit ekranını DEĞİL onay sayfasını görür, firma adını okur ve ERP verisi istemez; onay tıklaması yetki kodunu ister; yeniden giriş
+// reddinde «Çıkış yap» App'in çıkış işleyicisini koşar, yeniden girişten sonra sayfa (adres parçasıyla) yerindedir; iç rol uyarı görür;
+// oturumsuz kişi giriş sayfasını; iki adımlı doğrulama bekleyen oturum doğrulama penceresini görür. Sayfanın kendi kuralları
+// `pages/MagazaBayiBaglanPage.test.tsx`'te.
+describe('H16 — bayi onay sayfası GERÇEK App\'te', () => {
+  const PARCA = `#meydan=${'M'.repeat(43)}&tur=${'T'.repeat(22)}`;
+  const BAYI_YOLU = `${MAGAZA_BAYI_BAGLAN_YOLU}${PARCA}`;
+  const HESAP = 'GET /api/magaza-bayi/hesap';
+  const YETKI = 'POST /api/magaza-bayi/yetki-kodu';
+  const FIRMA = 'Şirin Yapı Malzemeleri Ltd. Şti.';
+  const ONAY_BASLIGI = 'Bayi ekranına giriş';
+  const onaySayfasi = (kap: HTMLElement) => [...kap.querySelectorAll('h1')].some(h => h.textContent === ONAY_BASLIGI);
+  const giden = () => istekler.map(i => `${i.yontem} ${i.yol}`);
+  beforeEach(() => { durum.kalici[HESAP] = [200, { firma: FIRMA }]; });
+
+  describe.each(EXTERNAL_ROLES.map(r => [r]))('dış rol %s', (rol) => {
+    it('onay sayfası çizilir (kilit ekranı ve kabuk YOK), firma adı görünür; açılışta izin dışı tek istek `GET hesap`, yetki kodu İSTENMEZ, veri yok', async () => {
+      const { container } = await ac(rol, BAYI_YOLU);
+      expect(onaySayfasi(container)).toBe(true);
+      expect(bayiBasligi(container)).toBeNull();
+      expect(container.textContent).not.toContain(METIN);
+      expect(kabukVar(container)).toBe(false);
+      expect(container.textContent).toContain(FIRMA);
+      expect(container.textContent).toContain('deneme@ornek.test');
+      expect(izinDisi()).toEqual([HESAP]);
+      expect(giden().filter(i => i === HESAP)).toHaveLength(1);
+      expect(giden()).not.toContain(YETKI);
+      expect(istekler.filter(i => i.yol.startsWith('/api/db/') && i.yol !== kendiYolu())).toEqual([]);
+      expect(durum.dinleyiciler).toEqual([]);
+      expect(akislar).toEqual([]);
+      expect(window.location.pathname + window.location.hash).toBe(BAYI_YOLU);   // adres parçası yerinde
+    });
+
+    it('«Onayla ve giriş yap» → `POST yetki-kodu` (kimlik belirteciyle) ve dönüşe yönlenir', async () => {
+      durum.kalici[YETKI] = [200, { donus: `https://www.cetpa.com.tr/bayi.html#kod=${'K'.repeat(43)}&tur=${'T'.repeat(22)}` }];
+      const { getByRole } = await ac(rol, BAYI_YOLU);
+      fireEvent.click(getByRole('button', { name: 'Onayla ve giriş yap' }));
+      await bekle();
+      expect(istekler.filter(i => `${i.yontem} ${i.yol}` === YETKI).map(i => i.yetki)).toEqual(['Bearer belirtec-deneme']);
+      // Yönlenme dalı: düğme «Bağlanıyor…» ile kilitli kalır (`location.replace` hemen ardından; jsdom gezinmeyi uygulamaz).
+      expect((getByRole('button', { name: 'Bağlanıyor…' }) as HTMLButtonElement).disabled).toBe(true);
+      expect(izinDisi()).toEqual([HESAP, YETKI].sort());
+    });
+
+    it('`yeniden-giris` → «Çıkış yap»: App\'in çıkış işleyicisi (Bearer\'lı sunucu çıkışı + oturum kapatma) → giriş sayfası; yeniden girişten sonra onay sayfası adres parçasıyla yerinde', async () => {
+      durum.kalici[YETKI] = [401, { ok: false, kod: 'yeniden-giris' }];
+      const { container, getByRole } = await ac(rol, BAYI_YOLU);
+      fireEvent.click(getByRole('button', { name: 'Onayla ve giriş yap' }));
+      await bekle();
+      expect(container.textContent).toContain('Güvenlik için çıkış yapıp e-posta ve şifrenizle yeniden girin.');
+      expect(container.textContent).not.toContain('Bir süre sonra yeniden deneyin');
+      istekler = [];
+      fireEvent.click(getByRole('button', { name: 'Çıkış yap' }));
+      await bekle();
+      expect(istekler.filter(i => i.yol === CIKIS_UCU).map(i => [i.yontem, i.yetki, i.oturumKapanmisti])).toEqual([['POST', 'Bearer belirtec-deneme', 0]]);
+      expect(durum.cikisSayisi).toBe(1);
+      expect(onaySayfasi(container)).toBe(false);
+      expect(container.querySelector('input[type="password"]')).not.toBeNull();   // pazarlama değil GİRİŞ sayfası
+      expect(window.location.pathname + window.location.hash).toBe(BAYI_YOLU);
+      // Aynı sekmede e-posta + şifreyle yeniden giriş.
+      delete durum.kalici[YETKI];
+      durum.hesap = durum.kullanici;
+      istekler = [];
+      await act(async () => { await durum.oturumDinleyicisi?.(durum.kullanici); });
+      await bekle();
+      expect(onaySayfasi(container)).toBe(true);
+      expect(container.textContent).toContain(FIRMA);
+      expect(giden().filter(i => i === HESAP)).toHaveLength(1);
+      expect(getByRole('button', { name: 'Onayla ve giriş yap' })).toBeTruthy();   // parça yerinde: düğme çizildi
+      expect(window.location.pathname + window.location.hash).toBe(BAYI_YOLU);
+    });
+
+    it('`bag-yok` → «Hesabınız bir firmaya bağlı değil…»; onay düğmesi yok; kilit ekranına düşmez', async () => {
+      durum.kalici[HESAP] = [403, { ok: false, kod: 'bag-yok' }];
+      const { container, queryByRole } = await ac(rol, BAYI_YOLU);
+      expect(onaySayfasi(container)).toBe(true);
+      expect(container.textContent).toContain('Hesabınız bir firmaya bağlı değil ya da erişiminiz kapalı — Cetpa ile görüşün.');
+      expect(queryByRole('button', { name: 'Onayla ve giriş yap' })).toBeNull();
+      expect(bayiBasligi(container)).toBeNull();
+    });
+
+    it('iki adımlı doğrulama bekleyen oturum: onay sayfası ÇİZİLMEZ (istek yok), doğrulama penceresi; adres ve parça yerinde (doğrulamanın `reload`\'u aynı yola döner)', async () => {
+      durum.ikiAdim = { enabled: true, verified: false };
+      const { container } = await ac(rol, BAYI_YOLU);
+      expect(container.textContent).toContain('İki Faktörlü Doğrulama');
+      expect(onaySayfasi(container)).toBe(false);
+      expect(giden()).not.toContain(HESAP);
+      expect(giden()).not.toContain(YETKI);
+      await ilerlet(5_000);
+      expect(window.location.pathname + window.location.hash).toBe(BAYI_YOLU);
+    });
+  });
+
+  it('iç rol (Satış) aynı yolda: onay sayfası, sunucunun `rol` hükmüyle «Bu bağlantı yalnız müşteri hesapları içindir.»; onay düğmesi yok', async () => {
+    durum.kalici[HESAP] = [403, { ok: false, kod: 'rol' }];
+    const { container, queryByRole } = await ac('Sales', BAYI_YOLU);
+    expect(onaySayfasi(container)).toBe(true);
+    expect(container.textContent).toContain('Bu bağlantı yalnız müşteri hesapları içindir.');
+    expect(queryByRole('button', { name: 'Onayla ve giriş yap' })).toBeNull();
+    expect(giden()).not.toContain(YETKI);
+  });
+
+  it('oturumsuz kişi bu yolda pazarlama sayfasını değil GİRİŞ sayfasını görür; köprü uçlarına istek yok', async () => {
+    durum.hesap = null; durum.yuklendi = false;
+    istekler = [];
+    window.history.pushState({}, '', BAYI_YOLU);
+    tazele();
+    const { container } = render(<BrowserRouter><App /></BrowserRouter>);
+    await bekle();
+    expect(container.querySelector('input[type="password"]')).not.toBeNull();
+    expect(onaySayfasi(container)).toBe(false);
+    expect(giden().filter(i => i.includes('/api/magaza-bayi/'))).toEqual([]);
+    expect(window.location.pathname + window.location.hash).toBe(BAYI_YOLU);
+  });
+});
+
+describe('dış rol hesabına davet UYGULANMAZ (409 `DIS_ROL_DAVETLE_ACILMAZ`): gerekçe kilit ekranında görünür, belirteç atılır', () => {
+  const REDEEM = 'POST /api/invites/redeem';
+  const GEREKCE = 'Bu hesap müşteri / bayi hesabı; davet bu hesaba uygulanmaz. Rol değişikliği için Yöneticinize başvurun.';
+
+  describe.each(EXTERNAL_ROLES.map(r => [r]))('dış rol %s', (rol) => {
+    it('bekleyen davet 409 alır → kilit ekranı (kabuk YOK) «Davet bağlantısı işlenemedi: …» gerekçesini gösterir; belirteç sessionStorage\'dan silinir', async () => {
+      sessionStorage.setItem('cetpa_pending_invite', 'davet-belirteci');
+      durum.kalici[REDEEM] = [409, { success: false, code: 'DIS_ROL_DAVETLE_ACILMAZ', error: GEREKCE }];
+      const { container } = await ac(rol, '/');
+      expect(istekler.filter(i => `${i.yontem} ${i.yol}` === REDEEM)).toHaveLength(1);
+      expect(bayiBasligi(container)).not.toBeNull();
+      expect(kabukVar(container)).toBe(false);
+      expect(container.textContent).toContain(`Davet bağlantısı işlenemedi: ${GEREKCE}`);
+      expect(sessionStorage.getItem('cetpa_pending_invite')).toBeNull();
+    });
+  });
+
+  it('davet yoksa kilit ekranında davet satırı ÇİZİLMEZ (boş gerekçe kutusu yok)', async () => {
+    const { container } = await ac(EXTERNAL_ROLES[0], '/');
+    expect(bayiBasligi(container)).not.toBeNull();
+    expect(container.textContent).not.toContain('Davet bağlantısı işlenemedi');
+    expect(container.querySelector('main [role="status"]')).toBeNull();
+  });
+
+  // Önceki oturumun gerekçesi TAŞINMAZ: iki çıkış yolu (düğme = `handleLogout`; başka sekme / belirteç iptali = yalnız dinleyici `null`).
+  it.each([['Çıkış düğmesi'], ['oturum dinleyicisi (null)']])('%s → aynı sekmede davetsiz başka dış rol hesabı: davet satırı ÇİZİLMEZ', async (yol) => {
+    sessionStorage.setItem('cetpa_pending_invite', 'davet-belirteci');
+    durum.kalici[REDEEM] = [409, { success: false, code: 'DIS_ROL_DAVETLE_ACILMAZ', error: GEREKCE }];
+    const sonuc = await ac(EXTERNAL_ROLES[0], '/');
+    expect(sonuc.container.textContent).toContain(`Davet bağlantısı işlenemedi: ${GEREKCE}`);
+    if (yol === 'Çıkış düğmesi') {
+      fireEvent.click(sonuc.getByRole('button', { name: 'Çıkış' }));
+      await bekle();
+      expect(durum.cikisSayisi).toBe(1);
+    } else {
+      durum.hesap = null;
+      await act(async () => { await durum.oturumDinleyicisi?.(null); });
+      await bekle();
+      expect(durum.cikisSayisi).toBe(0);
+    }
+    expect(bayiBasligi(sonuc.container)).toBeNull();
+    durum.rol = EXTERNAL_ROLES[EXTERNAL_ROLES.length - 1];
+    durum.hesap = durum.kullanici;
+    istekler = [];
+    await act(async () => { await durum.oturumDinleyicisi?.(durum.kullanici); });
+    await bekle();
+    expect(istekler.filter(i => `${i.yontem} ${i.yol}` === REDEEM)).toEqual([]);   // ikinci girişte bekleyen davet yok
+    expect(bayiBasligi(sonuc.container)).not.toBeNull();
+    expect(sonuc.container.textContent).not.toContain('Davet bağlantısı işlenemedi');
+  });
+
+  // Bayi onay sayfası dalı kilit ekranından ÖNCE döner (H16); açılış daveti yoldan bağımsız kullanılır, gerekçe burada da görünür.
+  describe.each(EXTERNAL_ROLES.map(r => [r]))('bayi onay sayfası, dış rol %s', (rol) => {
+    const BAYI_YOLU = `${MAGAZA_BAYI_BAGLAN_YOLU}#meydan=${'M'.repeat(43)}&tur=${'T'.repeat(22)}`;
+    beforeEach(() => { durum.kalici['GET /api/magaza-bayi/hesap'] = [200, { firma: 'Şirin Yapı Malzemeleri Ltd. Şti.' }]; });
+
+    it('bekleyen davet 409 → onay sayfası (kilit ekranı YOK) gerekçeyi gösterir, onay düğmesi yerinde; belirteç silinir', async () => {
+      sessionStorage.setItem('cetpa_pending_invite', 'davet-belirteci');
+      durum.kalici[REDEEM] = [409, { success: false, code: 'DIS_ROL_DAVETLE_ACILMAZ', error: GEREKCE }];
+      const { container, getByRole } = await ac(rol, BAYI_YOLU);
+      expect([...container.querySelectorAll('h1')].some(h => h.textContent === 'Bayi ekranına giriş')).toBe(true);
+      expect(bayiBasligi(container)).toBeNull();
+      expect(container.textContent).toContain(`Davet bağlantısı işlenemedi: ${GEREKCE}`);
+      expect(getByRole('button', { name: 'Onayla ve giriş yap' })).toBeTruthy();
+      expect(sessionStorage.getItem('cetpa_pending_invite')).toBeNull();
+    });
+
+    it('davet yoksa onay sayfasında davet satırı ÇİZİLMEZ', async () => {
+      const { container } = await ac(rol, BAYI_YOLU);
+      expect(container.textContent).not.toContain('Davet bağlantısı işlenemedi');
+    });
   });
 });

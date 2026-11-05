@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { cikisIstegiGonder, CIKIS_UCU, CIKIS_SURE_SINIRI_MS } from './oturumCikisi';
+import { cikisBelirteciAl, cikisIstegiGonder, CIKIS_BELIRTEC_SURE_SINIRI_MS, CIKIS_UCU, CIKIS_SURE_SINIRI_MS } from './oturumCikisi';
 import { kodSatirlari, SRC_KOK } from '../test/kaynakTarama';
 
 type Cagri = [string, RequestInit];
@@ -37,6 +37,17 @@ describe('cikisIstegiGonder — çıkış isteği belirteçsiz, çerezli, gövde
     expect(Object.keys(cagrilar[0][1].headers as Record<string, string>).map(k => k.toLowerCase())).not.toContain('authorization');
     const kaynak = kodSatirlari(join(SRC_KOK, 'lib', 'oturumCikisi.ts')).map(s => s.kod).join('\n');
     expect(kaynak).not.toMatch(/authedFetch|authFetch|getToken|getIdToken|currentUser/);
+  });
+
+  it('(2026-10-21, H2) kimlik belirteci VERİLİRSE `Authorization: Bearer …` taşır; `null` / boş / verilmezse taşımaz; modül yine `auth` içe aktarmaz', async () => {
+    const { fn, cagrilar } = sahte({ ok: true });
+    await cikisIstegiGonder(fn, 5000, 'tok');
+    expect(cagrilar[0][1].headers).toEqual({ 'Content-Type': 'application/json', Authorization: 'Bearer tok' });
+    for (const bos of [null, '', undefined]) {
+      await cikisIstegiGonder(fn, 5000, bos);
+      expect(cagrilar[cagrilar.length - 1][1].headers, String(bos)).toEqual({ 'Content-Type': 'application/json' });
+    }
+    expect(cagrilar[0][1].credentials).toBe('same-origin');   // çerez yine gider (personel çerezle de tanınır)
   });
 
   it('sunucu 4xx / 5xx dönerse `false`, fırlatmaz; sessiz DEĞİL: tam bir uyarı (durum koduyla, gövdesiz)', async () => {
@@ -99,6 +110,55 @@ describe('cikisIstegiGonder — çıkış isteği belirteçsiz, çerezli, gövde
   });
 });
 
+describe('cikisBelirteciAl — çıkış isteğine eklenecek belirteç: en çok 2 sn, asla fırlatmaz (2026-10-21, H17)', () => {
+  it('süre bütçesi: belirteç 2 sn + istek 3 sn = toplam 5 sn', () => {
+    expect(CIKIS_BELIRTEC_SURE_SINIRI_MS).toBe(2_000);
+    expect(CIKIS_SURE_SINIRI_MS - CIKIS_BELIRTEC_SURE_SINIRI_MS).toBe(3_000);
+  });
+
+  it('belirteç gelirse aynen döner; oturum yoksa (`getir` yok) `null` ve hiçbir şey çağrılmaz', async () => {
+    await expect(cikisBelirteciAl(async () => 'tok')).resolves.toBe('tok');
+    await expect(cikisBelirteciAl(undefined)).resolves.toBeNull();
+  });
+
+  it('reddedilen, eşzamanlı fırlatan ya da boş / metin olmayan sonuç → `null` (fırlatmaz)', async () => {
+    await expect(cikisBelirteciAl(() => Promise.reject(new Error('ağ')))).resolves.toBeNull();
+    await expect(cikisBelirteciAl(() => { throw new Error('eşzamanlı'); })).resolves.toBeNull();
+    await expect(cikisBelirteciAl(async () => '')).resolves.toBeNull();
+    await expect(cikisBelirteciAl((async () => 42) as unknown as () => Promise<string>)).resolves.toBeNull();
+  });
+
+  it('asılı kalan `getir`: TAM 2 sn sonra `null` (1 ms önce hâlâ bekliyor); hızlı sonuçta zamanlayıcı temizlenir', async () => {
+    vi.useFakeTimers();
+    try {
+      let bitti = false;
+      const p = cikisBelirteciAl(() => new Promise<string>(() => { /* hiç sonuçlanmaz */ })).then((v) => { bitti = true; return v; });
+      await vi.advanceTimersByTimeAsync(CIKIS_BELIRTEC_SURE_SINIRI_MS - 1);
+      expect(bitti).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(bitti).toBe(true);
+      await expect(p).resolves.toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+      await expect(cikisBelirteciAl(async () => 'tok')).resolves.toBe('tok');
+      expect(vi.getTimerCount()).toBe(0);                     // süre zamanlayıcısı askıda KALMAZ
+      await expect(cikisBelirteciAl(() => Promise.reject(new Error('x')))).resolves.toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('verilen süre kullanılır (varsayılan dışında)', async () => {
+    vi.useFakeTimers();
+    try {
+      let bitti = false;
+      void cikisBelirteciAl(() => new Promise<string>(() => {}), 50).then(() => { bitti = true; });
+      await vi.advanceTimersByTimeAsync(49);
+      expect(bitti).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(bitti).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
 // ── «Yazıldı ama bağlanmadı» çiti: App.tsx'teki çıkış akışı bu modülü GERÇEKTEN kullanıyor ───────────
 describe('App.tsx handleLogout — çıkış isteği belirteç isteyen sarmalayıcıyla DEĞİL, bu modülle gider', () => {
   const satirlar = kodSatirlari(join(SRC_KOK, 'App.tsx'));
@@ -113,8 +173,11 @@ describe('App.tsx handleLogout — çıkış isteği belirteç isteyen sarmalay�
   const no = (desen: RegExp): number[] => govde.filter(s => desen.test(s.kod)).map(s => s.n);
 
   it('modül içe aktarılıyor ve handleLogout içinde tam 1 kez çağrılıyor', () => {
-    expect(satirlar.filter(s => /^import \{ cikisIstegiGonder \} from '\.\/lib\/oturumCikisi';$/.test(s.kod))).toHaveLength(1);
-    expect(no(/\bcikisIstegiGonder\(\)/)).toHaveLength(1);
+    expect(satirlar.filter(s => /^import \{ CIKIS_BELIRTEC_SURE_SINIRI_MS, CIKIS_SURE_SINIRI_MS, cikisBelirteciAl, cikisIstegiGonder \} from '\.\/lib\/oturumCikisi';$/.test(s.kod))).toHaveLength(1);
+    expect(no(/\bcikisIstegiGonder\(/)).toHaveLength(1);
+    expect(no(/\bcikisBelirteciAl\(/)).toHaveLength(1);
+    // App.tsx'te başka yerde çağrılmıyor (çıkış TEK işleyicide).
+    expect(satirlar.filter(s => /\bcikisIstegiGonder\(|\bcikisBelirteciAl\(/.test(s.kod))).toHaveLength(2);
   });
 
   it('çıkış ucu handleLogout içinde sarmalayıcıyla çağrılmıyor; uç adresi App.tsx\'te hiç geçmiyor (tek kaynak: modül)', () => {
@@ -122,8 +185,20 @@ describe('App.tsx handleLogout — çıkış isteği belirteç isteyen sarmalay�
     expect(satirlar.filter(s => /session\/logout/.test(s.kod))).toEqual([]);
   });
 
+  it('(H17) kimlik belirteci süre sınırlı alınır ve İSTEĞE verilir; istek kalan süreyle sınırlı; ikisi de `signOut`tan ÖNCE', () => {
+    const kullanici = no(/^\s*const cikanKullanici = auth\.currentUser;$/);
+    const belirtec = no(/^\s*const belirtec = await cikisBelirteciAl\(cikanKullanici \? \(\) => cikanKullanici\.getIdToken\(\) : undefined\);$/);
+    const istek = no(/^\s*const sunucuCikisi = await cikisIstegiGonder\(fetch, CIKIS_SURE_SINIRI_MS - CIKIS_BELIRTEC_SURE_SINIRI_MS, belirtec\);$/);
+    const cikis = no(/^\s*await signOut\(auth\);/);
+    expect([kullanici.length, belirtec.length, istek.length, cikis.length]).toEqual([1, 1, 1, 1]);
+    expect(kullanici[0]).toBeLessThan(belirtec[0]);
+    expect(belirtec[0]).toBeLessThan(istek[0]);
+    expect(istek[0]).toBeLessThan(cikis[0]);
+    expect(no(/\bgetIdToken\(/)).toEqual(belirtec);              // belirteç başka yoldan (süresiz) alınmıyor
+  });
+
   it('istek `signOut`tan ÖNCE BEKLENİR (küresel belirteç iptali yeni oturumu yakalamasın); başarısızlık uyarı üretir', () => {
-    const bekle = no(/^\s*const sunucuCikisi = await cikisIstegiGonder\(\);$/);
+    const bekle = no(/^\s*const sunucuCikisi = await cikisIstegiGonder\(fetch, CIKIS_SURE_SINIRI_MS - CIKIS_BELIRTEC_SURE_SINIRI_MS, belirtec\);$/);
     const uyari = no(/^\s*if \(!sunucuCikisi\) console\.warn\(/);
     const cikis = no(/^\s*await signOut\(auth\);/);
     expect(bekle).toHaveLength(1);
@@ -136,7 +211,7 @@ describe('App.tsx handleLogout — çıkış isteği belirteç isteyen sarmalay�
 
   it('misafir kipinde istek atılmaz (sunucuda oturum yok)', () => {
     const misafir = no(/^\s*if \(isGuestMode\) \{$/);
-    const baslat = no(/cikisIstegiGonder\(\)/);
+    const baslat = no(/\bcikisBelirteciAl\(/);                   // çıkışın ilk ağ / kimlik adımı (belirteç, sonra istek)
     expect(baslat).toHaveLength(1);
     expect(misafir).toHaveLength(1);
     expect(baslat[0]).toBeGreaterThan(misafir[0]);

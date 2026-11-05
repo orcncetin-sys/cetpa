@@ -48,6 +48,12 @@ describe('her sınırlayıcı anahtar üreticisini AÇIKÇA seçer — doğru ol
     // Mağaza dilim 2b (2026-10-10): ERP kökenindeki elle talep / içerik / silme uçları kimliklidir — kullanıcı anahtarı
     // (bu uçlar e-posta bildirimi üretir; aynı ofis tek kovaya girmesin, tek kullanıcı da kutuyu dolduramasın).
     magazaIcerikLimiter: 'userOrIpKey',
+    // Müşteri / bayi ekranı (2026-10-21, şartname «müşteri siparişlerim» H11): site kökenindeki iki kova (bayi belirteci `mb1-…`
+    // Firebase kimliği DEĞİL) yalnız IP; ERP kökenindeki köprü uçları (yetki kodu, firma okuma) kimlikli — kullanıcı anahtarı.
+    magazaBayiOturumLimiter: 'yalnizIpAnahtari',
+    magazaBayiLimiter: 'yalnizIpAnahtari',
+    magazaBayiYetkiKoduLimiter: 'userOrIpKey',
+    magazaBayiHesapLimiter: 'userOrIpKey',
     // «Yeni sürüm var» denetimi (2026-10-17): kimliksiz uç, istemci çerezsiz sorar — yalnız IP (bir ofisin sekmeleri tek kova).
     surumLimiter: 'yalnizIpAnahtari',
   };

@@ -30,7 +30,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { generateSync as totpKodu } from 'otplib';
 import { EXTERNAL_ROLES, STAFF_ROLES, type AppRole } from '../lib/rbac';
-import { ROLSUZ_IZINLI_YOLLAR, istekYolu, rolsuzIzinliMi, type KimlikYuzeyiKodu } from '../lib/kimlikYuzeyi';
+import { DIS_ROL_IZINLI_YOLLAR, ROLSUZ_IZINLI_YOLLAR, disRolIzinliMi, disRolMu, istekYolu, rolsuzIzinliMi, type KimlikYuzeyiKodu } from '../lib/kimlikYuzeyi';
 
 // ── Sahteler (yalnız süreç dışına çıkanlar) ────────────────────────────────────────────────────────────────────────────────
 vi.mock('dotenv', () => ({ default: { config: () => ({ parsed: {} }) }, config: () => ({ parsed: {} }) }));
@@ -344,6 +344,9 @@ describe('D8 — zincirinde `requireAuth` olan HER uç: rolsüz hesap ve dış r
       const { uid, b } = await kimlik(k, `tarama-${Math.floor(i / 20)}`);
       const yol = somutYol(u.desen);
       if (rolsuzIzinliMi(u.yontem, istekYolu(yol), uid)) return null;                       // izin listesi: aşağıda ayrıca
+      // 2026-10-21 (müşteri siparişlerim H4): yalnız dış rol listesindeki iki köprü ucu dış rolde boğazdan geçer (uç kendi kapısıyla
+      // karar verir — magazaBayi.zincir.test.ts); rolsüz üç tür bu iki uçta da ROL_YOK alır (aşağıda ayrıca).
+      if (disRolMu(k) && disRolIzinliMi(u.yontem, istekYolu(yol))) return null;
       const r = await istek(u.yontem, yol, b, u.yontem === 'GET' || u.yontem === 'DELETE' ? undefined : {});
       return r.s === 403 && r.j.code === beklenenKod(k) ? null : `${k} ${u.yontem} ${yol} → ${r.s} ${JSON.stringify(r.j).slice(0, 160)}`;
     });
@@ -683,6 +686,29 @@ describe('T7 — izin listesi: rolsüz hesapta oturum açılışı, iki adımlı
     expect(JSON.stringify(stok.j)).toContain('DYO Boya 15 L');
   });
 
+  it('davet kabulü: B2B ve Bayi HESABI iç rol davetini kullanamaz → 409 `DIS_ROL_DAVETLE_ACILMAZ`, `users.role` değişmez, davet kullanılmış SAYILMAZ (H6)', async () => {
+    // Yol: Müdür müşterinin e-postasına iç rol daveti açar (davet ucu yalnız Yönetici rolünü engeller) ya da Yönetici yanlış davetten
+    // sonra hesabı elle açar; müşteri `?invite=` bağlantısıyla girince istemci daveti her rolde kullandırır. Uç izin listesinde (dış rol
+    // de geçer); kabul, kabul edenin rolünü okumadan yazsaydı dış rol hesabı iç role geçerdi.
+    for (const [k, davetRolu] of [['B2B', 'Manager'], ['Dealer', 'Sales']] as const) {
+      const { uid, b } = await kimlik(k, 'ic-davet');
+      const token = `ic-davet-${k}`;
+      await belgeKoy('invites', token, { email: eposta(uid), role: davetRolu, companyId: KIRACI, used: false, expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+      const once = await belgeOku('users', uid);
+      expect([k, once?.role]).toEqual([k, k]);
+      const r = await istek('POST', '/api/invites/redeem', b, { token });
+      expect([k, r.s, r.j.success, r.j.code], r.metin).toEqual([k, 409, false, 'DIS_ROL_DAVETLE_ACILMAZ']);
+      expect(String(r.j.error)).toMatch(/müşteri \/ bayi hesabı; davet bu hesaba uygulanmaz/);
+      expect(r.j.role).toBeUndefined();
+      expect(await belgeOku('users', uid)).toEqual(once);                           // rol de kiracı da yazılmadı
+      const davet = await belgeOku('invites', token);
+      expect([k, davet?.used, davet?.usedBy]).toEqual([k, false, undefined]);
+      // Boğaz da AÇILMADI: hesap hâlâ dış rol (iş verisi kapalı).
+      const stok = await istek('GET', '/api/db/inventory', b);
+      expect([k, stok.s, stok.j.code]).toEqual([k, 403, 'DIS_ROL']);
+    }
+  });
+
   it('izin listesindeki HER satır gerçek zincirde karşılık buluyor (rolsüz hesap boğazın reddini ALMAZ)', async () => {
     const { uid, b } = await kimlik('rolsuz', 'liste');
     for (const izin of ROLSUZ_IZINLI_YOLLAR) for (const yontem of izin.yontemler) {
@@ -807,5 +833,40 @@ describe('rol OKUNAMADI → 503 (ret değil); başarılı okuma önbelleği payl
       expect((await istek('GET', '/api/db/inventory', belirtec(uid))).s).toBe(200);
     } finally { arizaKur(undefined); }
     expect(okuma).toBe(0);
+  });
+});
+
+// ── 2026-10-21 (şartname «müşteri siparişlerim» H4): yalnız dış rol izin listesi ─────────────────────────────────────────────
+describe('H4 — yalnız dış rol izin listesi: müşteri ekranı köprüsünün iki ucu (gerçek HTTP)', () => {
+  const IKI_UC = DIS_ROL_IZINLI_YOLLAR.flatMap(i => i.yontemler.map(y => [y, i.yol] as const));
+
+  it('liste iki uç ve ikisi de gerçek zincirde `requireAuth`\'lı (rota dökümü)', () => {
+    expect(IKI_UC.map(([y, yol]) => `${y} ${yol}`)).toEqual(['POST /api/magaza-bayi/yetki-kodu', 'GET /api/magaza-bayi/hesap']);
+    const { uclar } = rotaDokumu();
+    for (const [y, yol] of IKI_UC) expect(uclar.filter(u => u.yontem === y && u.desen === yol), `${y} ${yol}`).toHaveLength(1);
+  });
+
+  it('üç rolsüz tür (belgesiz, rolsüz, rol alanı bozuk) iki uçta 403 `ROL_YOK` — boğaz reddeder, işleyici koşmaz (yanıt köprünün `kod`unu taşımaz)', async () => {
+    for (const k of ['belgesiz', 'rolsuz', 'cop'] as const) {
+      const { b } = await kimlik(k, 'kopru');
+      for (const [y, yol] of IKI_UC) {
+        const r = await istek(y, yol, b, y === 'POST' ? { meydan: 'A'.repeat(43), tur: 'B'.repeat(22) } : undefined);
+        expect([k, y, r.s, r.j.code, r.j.kod], r.metin).toEqual([k, y, 403, 'ROL_YOK', undefined]);
+      }
+    }
+  });
+
+  it('dış rol (Bayi, B2B) iki uçta boğazdan GEÇER: yanıt boğazın `DIS_ROL` reddi değil, köprünün kendi hükmüdür', async () => {
+    for (const k of ['Dealer', 'B2B'] as const) {
+      const { b } = await kimlik(k, 'kopru');
+      for (const [y, yol] of IKI_UC) {
+        const r = await istek(y, yol, b, y === 'POST' ? { meydan: 'A'.repeat(43), tur: 'B'.repeat(22) } : undefined);
+        expect(r.j.code, `${k} ${y} ${yol}: ${r.metin}`).not.toBe('DIS_ROL');
+        expect(typeof r.j.kod === 'string' || r.s === 503, `${k} ${y} ${yol}: ${r.metin}`).toBe(true);
+      }
+      // Aynı hesap listede OLMAYAN uçta yine boğazın reddini alır.
+      const ret = await istek('GET', '/api/magaza-bayi/hesap/', b);
+      expect([ret.s, ret.j.code]).toEqual([403, 'DIS_ROL']);
+    }
   });
 });

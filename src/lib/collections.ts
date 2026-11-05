@@ -273,6 +273,12 @@ export const SERVER_ONLY_COLLECTIONS: readonly string[] = [
   // 2026-10-09 (mağaza dilim 2a, § 3.6): panel belirteci iptali — `magazaPanelIptal/{uid}` = `{ gecersizOnce, companyId }`.
   // Yalnız `src/server/kanal/magazaPanelIptal.ts` okur / yazar (adminDb upsert); /api/db ve akışa kapalı.
   'magazaPanelIptal',
+  // 2026-10-21 (şartname «müşteri siparişlerim» K2 / H15): müşteri / bayi hesabının cari BAĞI — `musteriHesaplari/{uid}` =
+  // `{ companyId, leadId, cariKod, firma, durum, olusturan, olusturma, guncelleme }`. Yalnız sunucu yazar (src/server/musteriHesap.ts
+  // `musteriBagiKur` — `/api/admin/users` ve `/api/admin/musteri-hesaplari/*`) ve okur (mağaza bayi köprüsü). Kiracı yedeğine
+  // GİRMEZ (bilinçli): yedekten dönüşte erişim kapalı başlar, Yönetici yeniden bağlar — yedeğe alınsaydı yedekten SONRA kapatılmış
+  // erişimler dönüşte yeniden açılırdı. `users` belgesine cari alanı KONMAZ (kişi kendi `users` belgesini yazabiliyor).
+  'musteriHesaplari',
   'mikroGonderimleri',   // 2026-10-18 Mikro gönderim defteri (src/server/mikro/gonderimDefteri.ts; şartname yeniden-deneme v3) — yalnız sunucu
 ];
 

@@ -17,11 +17,12 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import fs from 'fs';
 import path from 'path';
 import {
-  initOpsWatchdog, runOpsWatchdog, magazaTalepSayimSql, MAGAZA_PANEL_SAYAC_ETIKETLERI, MAGAZA_TAKIP_SAYAC_ETIKETLERI, type OpsDeps,
+  initOpsWatchdog, runOpsWatchdog, magazaTalepSayimSql, MAGAZA_BAYI_SAYAC_ETIKETLERI, MAGAZA_PANEL_SAYAC_ETIKETLERI, MAGAZA_TAKIP_SAYAC_ETIKETLERI, type OpsDeps,
 } from './opsWatchdog';
 import { smtpYapilandirmasi, smtpDogrula } from './smtpPosta.js';
 import { magazaSayaclari, magazaTakipSayaclari } from './routes/magazaRoutes.js';
 import { magazaPanelSayaclari } from './routes/magazaPanelZinciri.js';
+import { magazaBayiSayaclari } from './routes/magazaBayiZinciri.js';
 import { ortamdanKiraci } from './kiraciOrtami.js';
 import { MAGAZA_ACIK_SAYIM_SQL, MAGAZA_SILINMIS_SAYIM_SQL } from './kanal/magazaAcikSayim';
 import { MAGAZA_ACIK_SQL, MAGAZA_SILINMEMIS_SQL, MAGAZA_SILINMIS_SQL } from './kanal/magazaDurum';
@@ -34,6 +35,7 @@ import {
 vi.mock('./smtpPosta.js', () => ({ smtpYapilandirmasi: vi.fn(), smtpDogrula: vi.fn() }));
 vi.mock('./routes/magazaRoutes.js', () => ({ magazaSayaclari: vi.fn(), magazaTakipSayaclari: vi.fn() }));
 vi.mock('./routes/magazaPanelZinciri.js', () => ({ magazaPanelSayaclari: vi.fn() }));
+vi.mock('./routes/magazaBayiZinciri.js', () => ({ magazaBayiSayaclari: vi.fn() }));
 // Kiracının KAYNAĞI (ortam değişkeni mi, tarama mı): gerçek ortam OKUNMAZ; her test kendi değerini verir.
 vi.mock('./kiraciOrtami.js', () => ({ ortamdanKiraci: vi.fn() }));
 // Gerçek dışa aktarımlar KALIR (yalnız ağ okuyan ikisi taklit): gerçek `smtpPosta` (aşağıdaki sözleşme testi `importActual` ile
@@ -96,6 +98,12 @@ const SIFIR_PANEL = {
 };
 const PANEL_SAYAC_ADEDI = Object.keys(SIFIR_PANEL).length;
 const SIFIR_TAKIP = { bulundu: 0, bulunamadi: 0, silindi: 0 };
+/** Müşteri / bayi ekranı sayaçları (2026-10-21; AYRI küme — gerçek anahtar kümesiyle eşitliği aşağıdaki sözleşme testinde). */
+const SIFIR_BAYI = {
+  oturum: 0, oturum401: 0, oturum503: 0, yetkiKodu: 0, yetkiKoduRet: 0, yetkiKoduIptalDenetlenemedi: 0, hesap: 0, hesapRet: 0,
+  ben: 0, siparisler: 0, siparisAdayFazla: 0, cikis: 0, cikisFirebaseIptalYazilamadi: 0,
+  r401: 0, r403: 0, r404: 0, r429: 0, r500: 0, r503: 0,
+};
 
 interface HavuzAyari {
   /** Sayım sorgusunun tek satırı; `Error` ise sorgu fırlatır; `null` ise satır dönmez. */
@@ -164,7 +172,10 @@ const durum: {
   /** Site paneli yapılandırması (server.ts'in verdiği varlık çifti). */
   panel: { anahtarVar: boolean; donusVar: boolean };
   panelHatasi: Error | null;
-} = { havuz: null, havuzHatasi: null, kiraci: '', kiraciHatasi: null, panel: PANEL_HAZIR, panelHatasi: null };
+  /** Müşteri / bayi ekranı yapılandırması (2026-10-21): aynı varlık çifti. */
+  bayi: { anahtarVar: boolean; donusVar: boolean };
+  bayiHatasi: Error | null;
+} = { havuz: null, havuzHatasi: null, kiraci: '', kiraciHatasi: null, panel: PANEL_HAZIR, panelHatasi: null, bayi: PANEL_HAZIR, bayiHatasi: null };
 
 const BAGIMLILIKLAR: OpsDeps = {
   getPgPool: () => { if (durum.havuzHatasi) throw durum.havuzHatasi; return durum.havuz; },
@@ -175,6 +186,7 @@ const BAGIMLILIKLAR: OpsDeps = {
   getAiHealthProbe: () => null,
   serverTenantId: async () => { if (durum.kiraciHatasi) throw durum.kiraciHatasi; return durum.kiraci; },
   magazaPanelYapilandirmasi: () => { if (durum.panelHatasi) throw durum.panelHatasi; return durum.panel; },
+  magazaBayiYapilandirmasi: () => { if (durum.bayiHatasi) throw durum.bayiHatasi; return durum.bayi; },
 };
 
 /** Bekçiyi koşturur; `magaza_talep` sonucunun TAM BİR tane olduğunu doğrulayıp döndürür. */
@@ -200,6 +212,9 @@ beforeEach(() => {
   durum.kiraciHatasi = null;
   durum.panel = PANEL_HAZIR;
   durum.panelHatasi = null;
+  durum.bayi = PANEL_HAZIR;
+  durum.bayiHatasi = null;
+  vi.mocked(magazaBayiSayaclari).mockReset().mockReturnValue(SIFIR_BAYI);
   vi.mocked(smtpYapilandirmasi).mockReset().mockReturnValue({ tamam: true, eksik: [], kip: 'kimlikli' });
   vi.mocked(smtpDogrula).mockReset().mockResolvedValue({ ok: true });
   vi.mocked(magazaSayaclari).mockReset().mockReturnValue(TAM_SAYACLAR);
@@ -251,10 +266,13 @@ describe('magaza_talep — hepsi temiz', () => {
     // Dilim 2a: dilim 1'in dört parçası (kiracı · SMTP · sayım · uç sayaçları) + site paneli yapılandırması + açık talepler
     // + panel sayaçları + takip sayaçları. Dilim 2b: + revize bildirimi sayımı (ilk bildirim sayımının hemen ardında) +
     // silinmiş talepler (açık taleplerin hemen ardında). Sıra da sabit; başka parça yok (500 sayacı 0: kırmızı parça eklenmez).
+    // 2026-10-21 (müşteri siparişlerim H3): + bayi ekranı yapılandırması (panel yapılandırmasının hemen ardında, AYNI işlev) +
+    // bayi sayaçları (takip sayaçlarının ardında, AYRI küme) — bilerek değişen çit (10 → 12 parça).
     expect(m.detail.split(' · ')).toEqual([
       'kiracı çözüldü',
       'SMTP hazır (bağlantı ve kimlik doğrulandı)',
       'site paneli yapılandırılmış (anahtar ve dönüş adresi var)',
+      'site bayi ekranı yapılandırılmış (anahtarlar ve dönüş adresi var)',
       '42 talep, son 24 saatte 3 — bildirim: gönderilemedi 0, yapılandırılmamış 0, 10 dk+ bekleyen 0, 7 günden eski gitmeyen 0 (bilgi)',
       'revize bildirimi: gönderilemedi 0, yapılandırılmamış 0, 10 dk+ bekleyen 0, 7 günden eski gitmeyen 0 (bilgi)',
       expect.stringMatching(/^açık talep 7 \(yeni 2, teyit 1, hazırlanıyor 3, sevk 1, aşaması bilinmeyen 0\) — en eski açığın yaşı \d+ (gün|sa)$/),
@@ -262,6 +280,7 @@ describe('magaza_talep — hepsi temiz', () => {
       'uç sayaçları (süreç başından beri) — eklenen: 3, çakışan: 1, 400: 0, 403: 2, 404: 0, 413: 0, 415: 0, 429: 0, 500: 0, 503: 4',
       'panel sayaçları (süreç başından beri) — hepsi 0 (44 sayaç)',
       'takip sayaçları (süreç başından beri) — hepsi 0 (3 sayaç)',
+      `bayi sayaçları (süreç başından beri) — hepsi 0 (${Object.keys(SIFIR_BAYI).length} sayaç)`,
     ]);
     expect(m.detail).not.toContain('500 DÖNDÜ');
     expect(smtpDogrula).toHaveBeenCalledTimes(1);
@@ -758,9 +777,9 @@ describe('magaza_talep — (c) kullanılabilirlik', () => {
     expect(m.ok).toBe(false);
     expect(m.detail).toContain('PG HAVUZU YOK');
     expect(m.detail).toContain('SMTP hazır');
-    // havuz · SMTP · site paneli · uç sayaçları · panel sayaçları · takip sayaçları — olmayan havuzda sorgu DENENMEZ
-    // (bildirim sayımı, revize sayımı, açık ve silinmiş talep sayımı için ayrı hata parçası yok).
-    expect(m.detail.split(' · ')).toHaveLength(6);
+    // havuz · SMTP · site paneli · bayi ekranı · uç sayaçları · panel sayaçları · takip sayaçları · bayi sayaçları — olmayan
+    // havuzda sorgu DENENMEZ (bildirim sayımı, revize sayımı, açık ve silinmiş talep sayımı için ayrı hata parçası yok).
+    expect(m.detail.split(' · ')).toHaveLength(8);
     expect(m.detail).not.toContain('açık talep');
     expect(m.detail).not.toContain('revize bildirimi');
     expect(m.detail).not.toContain('silinmiş');
@@ -821,8 +840,9 @@ describe('magaza_talep — uç sayaçları', () => {
     expect(m.detail.startsWith(`UÇ ${adet} KEZ 500 DÖNDÜ (süreç başından beri)`)).toBe(true);   // bozuk parça başta
     expect(m.detail).toContain('süreç günlüğünde «[magaza]» satırlarına bak');
     expect(m.detail).toContain(`429: 0, 500: ${adet}, 503: 4`);
-    // 500 · kiracı · SMTP · site paneli · sayım · revize sayımı · açık talepler · silinmiş · uç sayaçları · panel sayaçları · takip sayaçları — kırmızı olan YALNIZ 500 parçası
-    expect(m.detail.split(' · ')).toHaveLength(11);
+    // 500 · kiracı · SMTP · site paneli · bayi ekranı · sayım · revize sayımı · açık talepler · silinmiş · uç sayaçları · panel
+    // sayaçları · takip sayaçları · bayi sayaçları — kırmızı olan YALNIZ 500 parçası
+    expect(m.detail.split(' · ')).toHaveLength(13);
     expect(m.detail).toContain('kiracı çözüldü');
     expect(m.detail).toContain('SMTP hazır');
   });
@@ -857,7 +877,7 @@ describe('magaza_talep — (d) site paneli yapılandırması', () => {
     expect(m.detail).toContain(neden);
     expect(m.detail).toContain('panel uçları 503 «panel-yapilandirilmamis» döner');
     expect(m.detail).not.toContain('site paneli yapılandırılmış');
-    expect(m.detail.split(' · ')).toHaveLength(10);                       // parça sayısı aynı: yeşil panel parçasının yerine kırmızısı
+    expect(m.detail.split(' · ')).toHaveLength(12);                       // parça sayısı aynı: yeşil panel parçasının yerine kırmızısı
     expect(m.detail).toContain('kiracı çözüldü');
     expect(m.detail).toContain('SMTP hazır');
   });
@@ -1039,7 +1059,7 @@ describe('magaza_talep — panel ve takip sayaçları (AYRI okuyucular, AYRI par
     const panel = parca(m.detail, 'panel sayaçları');
     const takip = parca(m.detail, 'takip sayaçları');
     expect(panel).toBe('panel sayaçları (süreç başından beri) — panel oturumu: 3, kalem teslim (panel): 4, kalem teslim 409 (ERP): 1, etiket basıldı: 1, '
-      + `elle bildirim: 2, elle bildirim 409: 6, ERP çıkışında panel iptali atlandı (oturum çerezi yok): 1, panel 401: 9; diğer ${PANEL_SAYAC_ADEDI - 8} sayaç 0`);
+      + `elle bildirim: 2, elle bildirim 409: 6, ERP çıkışında panel iptali atlandı (çıkış kimliği çözülemedi): 1, panel 401: 9; diğer ${PANEL_SAYAC_ADEDI - 8} sayaç 0`);
     expect(takip).toBe('takip sayaçları (süreç başından beri) — bulundu: 12, bulunamadı: 5');   // `silindi` taklitte yok: yalnız dönen anahtarlar yazılır
     // Dilim 1 parçası DEĞİŞMEZ ve panel / takip sayaçlarını taşımaz (`magazaSayaclari()` sabit on anahtarıyla kalır).
     expect(uc).toBe('uç sayaçları (süreç başından beri) — eklenen: 3, çakışan: 1, 400: 0, 403: 2, 404: 0, 413: 0, 415: 0, 429: 0, 500: 0, 503: 4');
@@ -1085,7 +1105,7 @@ describe('magaza_talep — panel ve takip sayaçları (AYRI okuyucular, AYRI par
     expect(m.detail.startsWith(`${ad} okunamadı (Error)`)).toBe(true);
     expect(m.detail).not.toContain('AHMET');
     expect(m.detail).toContain('uç sayaçları (süreç başından beri)');
-    expect(m.detail.split(' · ').filter(p => p.includes('sayaçları'))).toHaveLength(3);
+    expect(m.detail.split(' · ').filter(p => p.includes('sayaçları'))).toHaveLength(4);   // + bayi sayaçları (2026-10-21)
   });
 
   it.each([['null', null], ['dizi', [1, 2]], ['sayı', 7], ['boş nesne', {}]] as const)(
@@ -1194,6 +1214,75 @@ describe('sayım SQL üreticisi — magazaTalepSayimSql (§ 6; kapı 3 K2, kapı
       expect(sql, yol).not.toContain(`'gitti'`);
       expect(sql, yol).toContain(`'durum' IN ('gonderilemedi', 'yapilandirilmamis', 'bekliyor')`);
     }
+  });
+});
+
+// ── Müşteri / bayi ekranı (2026-10-21, şartname «müşteri siparişlerim» H3) ─────────────────────────────────────────────────
+describe('magaza_talep — (d) müşteri / bayi ekranı yapılandırması ve bayi sayaçları', () => {
+  it.each([
+    ['dönüş adresi yok', { anahtarVar: false, donusVar: false }, 'dönüş adresi geçersiz: MAGAZA_BAYI_DONUS https olmalı, sorgu / parça taşımamalı, kökeni MAGAZA_IZINLI_KOKENLER listesinde olmalı'],
+    ['dönüş adresi yok, anahtar «var»', { anahtarVar: true, donusVar: false }, 'MAGAZA_BAYI_DONUS'],
+    ['anahtar yok', { anahtarVar: false, donusVar: true }, 'oturum sırrı yok (SESSION_TOKEN_SECRET ya da FIREBASE_PRIVATE_KEY tanımlı değil)'],
+  ] as const)('%s → KIRMIZI; panel parçası yeşil kalır, parça sayısı aynı', async (_ad, bayi, neden) => {
+    durum.bayi = bayi;
+    const m = await kos();
+    expect(m.ok).toBe(false);
+    expect(m.detail.startsWith('SİTE BAYİ EKRANI ÇALIŞMIYOR — ')).toBe(true);
+    expect(m.detail).toContain(neden);
+    expect(m.detail).toContain('bayi uçları 503 «bayi-yapilandirilmamis» döner');
+    expect(m.detail).toContain('site paneli yapılandırılmış (anahtar ve dönüş adresi var)');
+    expect(m.detail).not.toContain('site bayi ekranı yapılandırılmış');
+    expect(m.detail.split(' · ')).toHaveLength(12);
+  });
+
+  it('dönüş adresi yokken «oturum sırrı yok» DENMEZ (kök neden adres)', async () => {
+    durum.bayi = { anahtarVar: false, donusVar: false };
+    expect((await kos()).detail).not.toContain('oturum sırrı yok');
+  });
+
+  it('okuyucu fırlatırsa → KIRMIZI «kontrol edilemedi», ileti yazılmaz; sözleşme dışı değer → «OKUNAMADI»', async () => {
+    durum.bayiHatasi = new Error(`bayi: ${GIZLI}`);
+    const m = await kos();
+    expect(m.ok).toBe(false);
+    expect(m.detail).toContain('site bayi ekranı yapılandırması kontrol edilemedi (Error)');
+    expect(m.detail).not.toContain('AHMET');
+    durum.bayiHatasi = null;
+    const bozuk: unknown = { anahtarVar: 'evet' };
+    durum.bayi = bozuk as { anahtarVar: boolean; donusVar: boolean };
+    const k = await kos();
+    expect(k.ok).toBe(false);
+    expect(k.detail).toContain('site bayi ekranı yapılandırması OKUNAMADI');
+  });
+
+  it('bayi sayaçları AYRI parçada adıyla; büyük sayı kırmızı YAPMAZ (yalnız bilgi); okuyucu fırlatırsa kırmızı', async () => {
+    vi.mocked(magazaBayiSayaclari).mockReturnValue({ ...SIFIR_BAYI, oturum: 2, yetkiKoduIptalDenetlenemedi: 1, r401: 900 });
+    const m = await kos();
+    expect(m.ok).toBe(true);
+    const bayi = String(m.detail.split(' · ').find(p => p.startsWith('bayi sayaçları')));
+    expect(bayi).toBe(`bayi sayaçları (süreç başından beri) — bayi oturumu: 2, bayi yetki kodu Firebase iptal denetimi YAPILAMADI (kod verilmedi): 1, bayi 401: 900; diğer ${Object.keys(SIFIR_BAYI).length - 3} sayaç 0`);
+    // Panel parçası bayi sayaçlarını TAŞIMAZ.
+    expect(String(m.detail.split(' · ').find(p => p.startsWith('panel sayaçları')))).not.toContain('bayi');
+    vi.mocked(magazaBayiSayaclari).mockImplementation(() => { throw new Error(`sayaç: ${GIZLI}`); });
+    const k = await kos();
+    expect(k.ok).toBe(false);
+    expect(k.detail.startsWith('bayi sayaçları okunamadı (Error)')).toBe(true);
+  });
+
+  it('etiketler ayrı, boş değil, ayraç taşımaz; GERÇEK `magazaBayiSayaclari()` anahtar kümesi etiket tablosuyla ve taklitle EŞİT; panel / takip kümesiyle ortak anahtar yok', async () => {
+    const etiketler = Object.values(MAGAZA_BAYI_SAYAC_ETIKETLERI);
+    expect(new Set(etiketler).size).toBe(etiketler.length);
+    for (const [ad, etiket] of Object.entries(MAGAZA_BAYI_SAYAC_ETIKETLERI)) {
+      expect(etiket.trim(), ad).not.toBe('');
+      expect(etiket, ad).not.toMatch(/ · |, |; | — |: /);
+    }
+    const gercek = await vi.importActual<typeof import('./routes/magazaBayiZinciri')>('./routes/magazaBayiZinciri.js');
+    const sayaclar = gercek.magazaBayiSayaclari();
+    expect(Object.keys(sayaclar).sort()).toEqual(Object.keys(MAGAZA_BAYI_SAYAC_ETIKETLERI).sort());
+    expect(Object.keys(sayaclar).sort()).toEqual(Object.keys(SIFIR_BAYI).sort());
+    for (const ad of ['yetkiKoduRet', 'yetkiKoduIptalDenetlenemedi']) expect(Object.hasOwn(sayaclar, ad), ad).toBe(true);
+    // Etiket metinleri panel etiketleriyle çakışmaz (iki parça ayrıntıda karışmasın).
+    const panelEtiketleri = new Set(Object.values(MAGAZA_PANEL_SAYAC_ETIKETLERI));
+    expect(etiketler.filter(e => panelEtiketleri.has(e))).toEqual([]);
   });
 });
 
@@ -1332,12 +1421,21 @@ describe('bekçi kaynak çitleri', () => {
     expect(metin).toMatch(/panelDonus: [^,\n]*\bmagazaPanelDonusTabani\b/);
     // Bekçide ortam değişkeninden ikinci bir türetme yok.
     const bekci = kodSatirlari(path.resolve(__dirname, 'opsWatchdog.ts')).map(k => k.kod).join('\n');
-    for (const yasak of ['MAGAZA_PANEL_DONUS', 'SESSION_TOKEN_SECRET', 'donusTabaniCoz', 'panelAnahtariTuret']) {
+    // 2026-10-21 (H3): bayi ekranının ortam adı ve tür parametreli türetme işlevleri de bekçide OKUNMAZ / ÇAĞRILMAZ.
+    for (const yasak of ['MAGAZA_PANEL_DONUS', 'SESSION_TOKEN_SECRET', 'donusTabaniCoz', 'panelAnahtariTuret', 'MAGAZA_BAYI_DONUS', 'donusTabaniCozTur', 'anahtarTuret']) {
       // Ayrıntı İLETİSİNDE ortam değişkeninin ADI geçer (operatöre yol); OKUMA (`process.env.X`) geçmez.
       expect(bekci, yasak).not.toContain(`process.env.${yasak}`);
       expect(bekci, yasak).not.toMatch(new RegExp(`\\b${yasak}\\(`));
     }
     expect(bekci).toContain('deps().magazaPanelYapilandirmasi()');
+    // Bayi eşi (2026-10-21, H3): bağlam satırı bayinin tanımlayıcılarından; iki anahtar + dönüş adresi.
+    const bayiBag = sunucu.filter(k => k.includes('magazaBayiYapilandirmasi:'));
+    expect(bayiBag).toHaveLength(1);
+    expect(bayiBag[0].trim()).toBe('magazaBayiYapilandirmasi: () => ({ anahtarVar: magazaBayiAnahtari !== null && magazaBayiKimlikAnahtari !== null, donusVar: magazaBayiDonusTabani !== null }),');
+    expect(init.slice(0, init.indexOf('});'))).toContain('magazaBayiYapilandirmasi:');
+    expect(bekci).toContain('deps().magazaBayiYapilandirmasi()');
+    // Ortak yapılandırma işlevi TEK, iki çağrı.
+    expect(bekci.match(/\byapilandirmaParcasi\(\{/g)).toHaveLength(2);
   });
 
   it('dilim 1\'in «dilim 2» diye ertelediği atıf bekçide KALMADI: «Yeniden gönder» artık var ve yorum onu gösterir', () => {
@@ -1385,7 +1483,8 @@ describe('bekçi kaynak çitleri', () => {
     // dilim 2b: bildirim durumu kümesinin tek tanımı (`kanal/magazaBildirimSayim.ts`); inceleme 2b (bulgu 8): «silinmemiş»
     // ölçütünün tek sabiti (`kanal/magazaDurum.ts` — açık sayımı üzerinden zaten dolaylı erişiliyordu, artık doğrudan da).
     const dogrudan = komsular(bekci);
-    for (const modul of ['smtpPosta.ts', 'routes/magazaRoutes.ts', 'routes/magazaPanelZinciri.ts', 'kanal/magazaAcikSayim.ts', 'kanal/magazaBildirimSayim.ts', 'kanal/magazaDurum.ts']) {
+    // 2026-10-21: + bayi alt zinciri (sayaçları bekçi okur).
+    for (const modul of ['smtpPosta.ts', 'routes/magazaRoutes.ts', 'routes/magazaPanelZinciri.ts', 'routes/magazaBayiZinciri.ts', 'kanal/magazaAcikSayim.ts', 'kanal/magazaBildirimSayim.ts', 'kanal/magazaDurum.ts']) {
       const yol = path.resolve(__dirname, modul);
       expect(dogrudan, modul).toContain(yol);
       const ulasilan = erisilen(yol);

@@ -90,6 +90,7 @@ const BAGIMLILIKLAR: OpsDeps = {
   getAiHealthProbe: () => null,
   serverTenantId: async () => 'kiraci-1',
   magazaPanelYapilandirmasi: () => ({ anahtarVar: true, donusVar: true }),
+  magazaBayiYapilandirmasi: () => ({ anahtarVar: true, donusVar: true }),
 };
 
 /** `kim`in kuyruğa koyduğu iş (kimlik sahibinin sonekini taşır; sunucu damgalamış). */

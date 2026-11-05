@@ -11,6 +11,12 @@
 import { MAGAZA_PANEL_43_DESENI, MAGAZA_PANEL_TUR_DESENI } from './magazaTalep';
 
 export const MAGAZA_PANEL_BAGLAN_YOLU = '/magaza-panel-baglan';
+/**
+ * Müşteri / bayi ekranının (`www.cetpa.com.tr/bayi.html`) onay sayfası (2026-10-21, şartname «müşteri siparişlerim» H16). Parametre
+ * ve dönüş doğrulaması panelle ORTAKTIR (aşağıdaki iki işlev; bayi.js köprü parametreleri panel kalıbıyla aynı). Sabit App.tsx,
+ * useRouteSync ve dağıtım sondası için aynı nedenle STATİK içe aktarılır (sonda bu metni de ana betikte arar).
+ */
+export const MAGAZA_BAYI_BAGLAN_YOLU = '/magaza-bayi-baglan';
 
 export interface BaglanParametreleri { meydan: string; tur: string }
 

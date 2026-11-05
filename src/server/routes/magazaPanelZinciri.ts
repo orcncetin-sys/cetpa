@@ -61,7 +61,7 @@ import { MAGAZA_PANEL_KOD_OMRU_MS, kodOzetiHesapla, meydanEslesiyor } from '../k
 import type { PanelKodDeposu } from '../kanal/magazaPanelKod.js';
 import type { PanelKullanicisi } from '../kanal/magazaPanelKullanici.js';
 import { EtiketBasildiGovdesi, KalemTeslimGovdesi, PanelDurumGovdesi, PanelOturumGovdesi, PanelSilGovdesi } from '../schemas.js';
-import { MAGAZA_GOVDE_SINIRI_BAYT, hataKodu, magazaIzinliKokenleriCoz, magazaKiraciCozucuKur } from './magazaRoutes.js';
+import { MAGAZA_GOVDE_SINIRI_BAYT, hataKodu, magazaIzinliKokenleriCoz, magazaKiraciCozucuKur, magazaKokenKapisiKur } from './magazaRoutes.js';
 import type { MagazaPgHavuzu } from './magazaRoutes.js';
 
 /** server.ts'ten ihtiyaç duyulan HER ŞEY — açık liste (import DEĞİL; döngü olurdu). Örnekler server.ts'te BİR kez kurulur. */
@@ -134,7 +134,7 @@ const sayaclar = {
   silPanel: 0, silPanel409: 0, silErp: 0, silErp409: 0, geriAl: 0, geriAl409: 0,
   /** (2b) Elle talep (ERP): tamam / üretilen numara üst üste çakıştı (503). */
   elleTalep: 0, elleTalepCakisti: 0,
-  /** ERP çıkışında oturum çerezi yok / süresi dolmuş → panel iptali YAZILAMADI. */
+  /** ERP çıkışında kimlik çözülemedi (geçerli Bearer belirteci de oturum çerezi de yok) → panel iptali YAZILAMADI. */
   cikisUidsiz: 0,
   /** Panel zincirinin retleri: kapı 401, köken 403, 404, sınırlayıcı 429, 500, 503. */
   r401: 0, r403: 0, r404: 0, r429: 0, r500: 0, r503: 0,
@@ -182,9 +182,11 @@ export function magazaPanel429(_req: Request, res: Response): void {
 }
 
 /**
- * ERP çıkışı (`POST /api/db/session/logout`) o kullanıcının BÜTÜN panel belirteçlerini öldürür (§ 3.6, V8). `uid` oturum
- * ÇEREZİNDEN okunur (uç `requireAuth` taşımaz): çerez yoksa / süresi dolmuşsa iptal YAZILMAZ, sayaç artar. Yazım başarısız
- * olursa çıkış YİNE tamamlanır — ASLA fırlatmaz; süreç içi iptal değeri «şimdi» kalır (`magazaPanelIptal.ts`), günlüğe yalnız kod.
+ * ERP çıkışı (`POST /api/db/session/logout`) o kullanıcının BÜTÜN panel (ve 2026-10-21'den beri bayi) belirteçlerini öldürür
+ * (§ 3.6, V8; ortak iptal örneği). `uid` önce `Authorization: Bearer` belirtecinden, yoksa oturum ÇEREZİNDEN çözülür (uç
+ * `requireAuth` taşımaz; dış rol akış açmadığı için çerezi yoktur — şartname «müşteri siparişlerim» H2): ikisi de yoksa iptal
+ * YAZILMAZ, sayaç artar. Yazım başarısız olursa çıkış YİNE tamamlanır — ASLA fırlatmaz; süreç içi iptal değeri «şimdi» kalır
+ * (`magazaPanelIptal.ts`), günlüğe yalnız kod.
  */
 export async function erpCikisindaPanelIptalEt(iptal: PanelIptalCifti, uid: string | null): Promise<void> {
   if (uid === null || uid === '') { sayaclar.cikisUidsiz += 1; return; }
@@ -477,22 +479,9 @@ export function magazaPanelZinciri(C: MagazaPanelCtx): Router {
     next();
   };
 
-  // 1. Panel köken kapısı. Dış zincirin kapısı DEĞİŞMEZ (`POST` + `Content-Type`); `Authorization` yalnız burada izinlidir.
-  const kokenKapisi: RequestHandler = (req, res, next) => {
-    res.vary('Origin');
-    const koken = req.headers.origin;
-    const izinli = typeof koken === 'string' && izinliKokenler().includes(koken);
-    if (izinli) {
-      res.setHeader('Access-Control-Allow-Origin', koken);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
-      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-      res.setHeader('Access-Control-Max-Age', '600');
-    }
-    // Ön uçuş burada BİTER: yapılandırma kapısına ve sınırlayıcılara ulaşmaz.
-    if (req.method === 'OPTIONS') { res.status(204).end(); return; }
-    if (!izinli) { reddet(res, 403); return; }
-    next();
-  };
+  // 1. Panel köken kapısı (ortak işlev `magazaKokenKapisiKur`). Dış zincirin kapısı DEĞİŞMEZ (`POST` + `Content-Type`);
+  // `Authorization` yalnız alt zincirlerde izinlidir. Ön uçuş kapıda BİTER: yapılandırma kapısına ve sınırlayıcılara ulaşmaz.
+  const kokenKapisi = magazaKokenKapisiKur({ izinliKokenler, yontemler: 'GET, POST', basliklar: 'Authorization, Content-Type', reddet });
 
   // 1b. Yapılandırma kapısı (kovaya sayılmaz).
   const yapilandirmaYok = (res: Response): void => {

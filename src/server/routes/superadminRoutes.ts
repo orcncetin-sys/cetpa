@@ -19,6 +19,7 @@ import { davetKoduUret } from '../davetKodu.js';
 import { DAVET_POSTASI } from '../davetPostasi.js';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import type { Express, Request, Response } from 'express';
+import { DIS_ROL_DAVETLE_ACILMAZ_YANITI, EXTERNAL_ROLES } from '../../lib/rbac.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface SuperadminRouteCtx {
@@ -412,6 +413,8 @@ export function superadminRoutes(app: Express, C: SuperadminRouteCtx): void {
     if (!(C.APP_ROLES as readonly string[]).includes(role)) {
       return res.status(400).json({ success: false, error: `Geçersiz rol. Geçerli roller: ${C.APP_ROLES.join(', ')}` });
     }
+    // Dış rol (B2B / Bayi) davetle açılmaz (2026-10-21, şartname «müşteri siparişlerim» H7) — davet YAZILMADAN önce.
+    if ((EXTERNAL_ROLES as readonly string[]).includes(role)) return res.status(400).json(DIS_ROL_DAVETLE_ACILMAZ_YANITI);
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin unavailable.' });
     // Davet kodu güvenli rastgele kaynaktan (2026-10-11, şartname «dış rol kapanışı» D11): `/api/admin/invite` ile AYNI üreteç
     // (davetKodu.ts). Burada `Math.random().toString(36)` × 2 kalmıştı — ilk düzeltme yalnız öbür uca uygulanmıştı.

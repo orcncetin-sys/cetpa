@@ -32,7 +32,12 @@ import type { Sema } from '../schemas.js';
 import { EmailSendSchema } from '../schemas.js';
 // Yaprak moduller — dongu yok.
 import { resendGonderici, escapeHtml, isValidEmail } from '../eposta.js';
-import { APP_ROLES, YONETICI_GEREKLI_YANITI, yalnizYoneticiMi, yoneticiRoluneDokunabilir, type AppRole } from '../../lib/rbac.js';
+import {
+  APP_ROLES, DIS_ROL_DAVETLE_ACILMAZ_YANITI, DIS_ROL_YONETICI_GEREKLI_YANITI, YONETICI_GEREKLI_YANITI, disRolDegeriMi, disRolHesabinaDokunabilir,
+  yalnizYoneticiMi, yoneticiRoluneDokunabilir, type AppRole,
+} from '../../lib/rbac.js';
+import type { PanelIptalCifti } from '../kanal/magazaPanelIptal.js';
+import { musteriBagiKur, musteriHesapDurumuYaz, musteriLeadiDogrula, type MusteriHesapDeps } from '../musteriHesap.js';
 import { gorulebilirSiparisOku } from '../gorulebilirSiparis.js';
 import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi.js';
 import { takipKoduAlVeyaUret, type TakipHavuzu } from '../takipKodu.js';
@@ -75,12 +80,22 @@ export interface EpostaRouteCtx {
    * `true` = kayıt vardı, `false` = yoktu, `null` = bu kurulumda tablo yok (PostgreSQL bağlı değil). Hata fırlatır (yutmaz).
    */
   mfaSifirla: (uid: string) => Promise<boolean | null>;
+  /**
+   * İptal çifti — mağaza panel / bayi zincirleri ve ERP çıkışıyla ORTAK örnek (2026-10-21, H8). Dış rol hesabı silinirken önce
+   * bağ kapatılır, sonra bu örnekle o kişinin mağaza belirteçleri öldürülür, en son Auth hesabı ve `users` belgesi silinir.
+   */
+  iptal: PanelIptalCifti;
 }
 
 export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
   /** Çağıran, `ilgiliRol` rolünü verebilir / o roldeki hesabı silebilir mi (D11)? Yalnız `Admin` için Yönetici / süper yönetici arar. */
   const yoneticiyeDokunabilir = async (req: Request, ilgiliRol: unknown): Promise<boolean> =>
     yoneticiRoluneDokunabilir(await C.getUserRole(C.reqActor(req).uid), C.isSuperAdmin(req), ilgiliRol);
+  /** Çağıran, dış rol (B2B / Bayi) hesabını açabilir / silebilir mi (2026-10-21, H6)? Yalnız Yönetici / süper yönetici. */
+  const disRolYonetebilir = async (req: Request, ilgiliRol: unknown): Promise<boolean> =>
+    disRolHesabinaDokunabilir(await C.getUserRole(C.reqActor(req).uid), C.isSuperAdmin(req), ilgiliRol);
+  /** Müşteri bağı çekirdeğinin bağımlılığı (src/server/musteriHesap.ts). */
+  const musteriDeps: MusteriHesapDeps = { adminDb: () => C.getAdminDb() };
 
   // GET /api/email/status
   // requireAuth + requireStaff (2026-10-02): durum uçları kimliksizdi — internetteki herkes saklı kimlik bilgisiyle dış çağrı tetikleyip ayar türevi bilgi alıyordu.
@@ -240,6 +255,20 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
       if (!inv.role || !(APP_ROLES as readonly string[]).includes(inv.role)) {
         return res.status(422).json({ success: false, error: 'Davetteki rol artık geçerli değil. Yöneticinizden yeni davet isteyin.' });
       }
+      // Dış rol (B2B / Bayi) davetle açılmaz (2026-10-21, H7): bu kuraldan ÖNCE yazılmış eski davet de uygulanmaz — `users`
+      // yazılmaz, davet `used` YAPILMAZ (Yönetici hesabı «Kullanıcı Ekle» ile, cari seçerek açar). 409: istemci yeniden denemez.
+      // (Gövde açık yazılır: kalıcı hüküm çiti — invite.test — her reddin `success: false` taşıdığını kaynakta okur.)
+      if (disRolDegeriMi(inv.role)) {
+        return res.status(409).json({ success: false, code: DIS_ROL_DAVETLE_ACILMAZ_YANITI.code, error: DIS_ROL_DAVETLE_ACILMAZ_YANITI.error });
+      }
+      // Dış rol HESABI iç rol davetini kullanamaz (H6: dış rol hesabına yalnız Yönetici dokunur). Müdür müşterinin e-postasına Satış /
+      // Müdür daveti açabilir (davet ucu yalnız Yönetici rolünü engeller) ya da Yönetici yanlış davetten sonra hesabı elle açmış olabilir;
+      // kabul, kabul edenin rolünü okumadan yazsaydı B2B / Bayi hesabı iç role geçerdi. Aynı kod (istemci kalıcı hüküm sayar, belirteci
+      // atar); metin bu duruma özgü. `users` yazılmaz, davet `used` YAPILMAZ.
+      const mevcutSnap = await C.getAdminDb().collection('users').doc(uid).get();
+      if (mevcutSnap.exists && disRolDegeriMi((mevcutSnap.data() as { role?: unknown } | undefined)?.role)) {
+        return res.status(409).json({ success: false, code: DIS_ROL_DAVETLE_ACILMAZ_YANITI.code, error: 'Bu hesap müşteri / bayi hesabı; davet bu hesaba uygulanmaz. Rol değişikliği için Yöneticinize başvurun.' });
+      }
 
       const guncelleme: Record<string, unknown> = { role: inv.role };
       // companyId davet dokumanindan gelir — istemciden ASLA alinmaz, aksi
@@ -268,28 +297,57 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
   // gerekmez. Parola akışı Resend'e BAĞIMLI DEĞİL (canlıdaki anahtar geçersiz
   // çıkmıştı): rastgele parolayla açılır, dönen parola-belirleme LİNKİNİ admin
   // istediği kanaldan (WhatsApp vb.) iletir. Parola hiçbir yerde görünmez.
+  // MÜŞTERİ HESABI (2026-10-21, şartname «müşteri siparişlerim» H6 / H8): dış rol (B2B / Bayi) hesabını YALNIZ Yönetici açar ve
+  // gövdede `leadId` (cari) ZORUNLUDUR (yoksa 400). Lead doğrulaması (yok / `companyId`'siz / başka kiracı → 404) Auth hesabı
+  // AÇILMADAN önce yapılır: geçmezse hesap açılmaz. Bağ AYNI işleyicide ortak çekirdekle yazılır (`musteriBagiKur`); bağ yazımı
+  // hata verirse hesap kalır ve yanıt `{ success: true, uid, bagYok: true }` olur (Yönetici ekranı «Cari bağla» gösterir).
   app.post('/api/admin/users', C.authLimiter, C.requireAuth, C.requireMfaVerified, C.requireAdmin, async (req: Request, res: Response) => {
-    const { email, displayName = '', role = 'Sales' } = req.body as { email?: string; displayName?: string; role?: string };
+    const { email, displayName = '', role = 'Sales', leadId } = req.body as { email?: string; displayName?: string; role?: string; leadId?: unknown };
     if (!email || !isValidEmail(email)) { res.status(400).json({ success: false, error: 'Geçerli e-posta gerekli.' }); return; }
     if (!(APP_ROLES as readonly string[]).includes(role)) {
       res.status(400).json({ success: false, error: `Geçersiz rol. Geçerli roller: ${APP_ROLES.join(', ')}` }); return;
     }
     // Yönetici rollü hesabı yalnız Yönetici (ya da süper yönetici) açar — hesap AÇILMADAN önce (D11).
     if (!(await yoneticiyeDokunabilir(req, role))) { res.status(403).json(YONETICI_GEREKLI_YANITI); return; }
+    // Dış rol hesabını da yalnız Yönetici (ya da süper yönetici) açar — Müdür AÇAMAZ (H6).
+    if (!(await disRolYonetebilir(req, role))) { res.status(403).json(DIS_ROL_YONETICI_GEREKLI_YANITI); return; }
+    const disRol = disRolDegeriMi(role);
+    const kiraci = await C.reqCompanyId(req);
+    if (disRol) {
+      if (!(typeof leadId === 'string' && leadId.trim() !== '')) {
+        res.status(400).json({ success: false, code: 'CARI_GEREKLI', error: 'Müşteri (B2B / Bayi) hesabı için cari seçilmeli.' }); return;
+      }
+      const lead = await musteriLeadiDogrula(musteriDeps, { kiraci, leadId });
+      if (!lead.ok) { res.status(lead.kod).json({ success: false, error: lead.kod === 400 ? 'Geçerli bir cari seçin.' : 'Seçilen cari bulunamadı.' }); return; }
+    }
     try {
       // Rastgele parola — kimseye gösterilmez; kullanıcı linkle kendininkini koyar.
       const geciciParola = Array.from(crypto.getRandomValues(new Uint8Array(24)), b => 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'[b % 55]).join('');
       const yeni = await C.authYonetimi.createUser({ email, displayName: displayName || undefined, password: geciciParola });
       await C.getAdminDb().collection('users').doc(yeni.uid).set({
         email, displayName, role,
-        companyId: await C.reqCompanyId(req),
+        companyId: kiraci,
         status: 'active',
         createdAt: C.pgServerTimestamp(),
         createdBy: C.reqActor(req).uid,
       }, { merge: true });
+      // Dış rol: cari bağı (ortak çekirdek; lead YENİDEN okunur). Yazım hatası hesabı geri ALMAZ — `bagYok` işareti döner.
+      let bagYok = false;
+      if (disRol) {
+        try {
+          const bag = await musteriBagiKur(musteriDeps, { uid: yeni.uid, kiraci, leadId, olusturan: C.reqActor(req).uid });
+          bagYok = bag.sonuc !== 'tamam';
+          if (bag.sonuc === 'tamam') {
+            await C.writeAuditLog(C.reqActor(req), 'musteri_hesap_bag', `${yeni.uid}: lead — → ${bag.kayit.leadId} · cari — → ${bag.kayit.cariKod ?? '—'}`);
+          }
+        } catch (e) {
+          bagYok = true;
+          console.error('[admin/users] müşteri bağı yazılamadı:', e instanceof Error ? e.message : String(e));
+        }
+      }
       const parolaLinki = await C.authYonetimi.generatePasswordResetLink(email);
       await C.writeAuditLog(req, 'admin_user_create', { email, role, uid: yeni.uid });
-      res.json({ success: true, uid: yeni.uid, parolaLinki });
+      res.json({ success: true, uid: yeni.uid, parolaLinki, ...(bagYok ? { bagYok: true } : {}) });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // Firebase 'email-already-exists' gibi hataları olduğu gibi göster — admin
@@ -319,7 +377,15 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
     }
     // Yönetici'nin hesabını yalnız Yönetici (ya da süper yönetici) siler — Müdür silemez (D11).
     if (!(await yoneticiyeDokunabilir(req, veri.role))) { res.status(403).json(YONETICI_GEREKLI_YANITI); return; }
+    // Dış rol hesabını da yalnız Yönetici (ya da süper yönetici) siler (H6).
+    if (!(await disRolYonetebilir(req, veri.role))) { res.status(403).json(DIS_ROL_YONETICI_GEREKLI_YANITI); return; }
     try {
+      // Dış rol (H8): ÖNCE erişim kapanır — bağ `kapali` → o kişinin mağaza belirteçleri ölür (ortak iptal) → Auth hesabı → `users`.
+      // Yarıda kesilirse erişim zaten kapalıdır; bağ SİLİNMEZ (denetim izi). Bağ yoksa yazım da yoktur.
+      if (disRolDegeriMi(veri.role)) {
+        await musteriHesapDurumuYaz(musteriDeps, { uid, durum: 'kapali' });
+        await C.iptal.iptalEt(uid, cid);
+      }
       try { await C.authYonetimi.deleteUser(uid); }
       catch (e) {
         // Auth'ta yoksa (yalniz doc kalmis yetim kayit) devam — doc silinsin.
@@ -387,6 +453,8 @@ export function epostaRoutes(app: Express, C: EpostaRouteCtx): void {
     if (!(APP_ROLES as readonly string[]).includes(role)) {
       return res.status(400).json({ success: false, error: `Geçersiz rol. Geçerli roller: ${APP_ROLES.join(', ')}` });
     }
+    // Dış rol davetle açılmaz (2026-10-21, H7) — davet YAZILMADAN önce.
+    if (disRolDegeriMi(role)) return res.status(400).json(DIS_ROL_DAVETLE_ACILMAZ_YANITI);
     // Yönetici rollü daveti yalnız Yönetici (ya da süper yönetici) açar — davet YAZILMADAN önce (D11).
     if (!(await yoneticiyeDokunabilir(req, role))) return res.status(403).json(YONETICI_GEREKLI_YANITI);
 

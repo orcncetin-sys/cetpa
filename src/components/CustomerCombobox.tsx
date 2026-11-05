@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Search } from 'lucide-react';
 import type { Lead } from '../types';
+import { eslesir } from '../utils/arama';
 
 interface CustomerComboboxProps {
   leads: Lead[];
@@ -37,9 +38,10 @@ export default function CustomerCombobox({
 }: CustomerComboboxProps) {
   const [open, setOpen] = useState(false);
 
-  const q = value.trim().toLowerCase();
+  // Türkçe-duyarlı + ASCII-bağışlayıcı arama (utils/arama): Mikro'dan büyük harfle gelen «ÖZ YAPI İNŞAAT» «yapı», «inşaat», «yapi»
+  // aramalarında bulunur. Dil ayarsız `toLowerCase` bulmuyordu (I → i, İ → i + birleşik nokta). Boş / yalnız boşluk sorgu süzmez.
   const matches = leads
-    .filter(l => !q || l.name.toLowerCase().includes(q) || l.company?.toLowerCase().includes(q))
+    .filter(l => eslesir(value, l.name, l.company))
     .slice(0, maxResults);
 
   const handleSelect = (lead: Lead) => {

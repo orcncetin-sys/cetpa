@@ -17,6 +17,10 @@ import { twMerge } from 'tailwind-merge';
 import DocumentDesigner from '../components/DocumentDesigner';
 import SuperAdminPanel from '../components/SuperAdminPanel';
 import MfaSifirlaDugmesi from '../components/MfaSifirlaDugmesi';
+import {
+  BOS_CARI_SECIMI, MusteriCariSecimi, MusteriHesapHucresi, musteriRolAdi, useMusteriHesaplari, type CariSecimi,
+} from '../components/MusteriHesabiYonetimi';
+import { disRolDegeriMi, rolMu, yalnizYoneticiMi } from '../lib/rbac';
 import { authFetch } from '../services/authFetch';
 import { UserRole, type LucaConfig, type MikroConfig } from '../types';
 import type { Lead, Order, InventoryItem, InventoryMovement, Employee } from '../types';
@@ -110,6 +114,14 @@ export default function AdminPage({
   const [yeniKullanici, setYeniKullanici] = useState({ email: '', ad: '', rol: 'Sales' });
   const [yeniKullaniciDurum, setYeniKullaniciDurum] = useState<{ tip: 'ok' | 'hata'; mesaj: string; link?: string } | null>(null);
   const [yeniKullaniciMesgul, setYeniKullaniciMesgul] = useState(false);
+  // Müşteri / bayi hesabı (2026-10-21, şartname «müşteri siparişlerim» H18): «Kullanıcı Ekle»de dış rol (B2B / Bayi) seçilince cari
+  // seçimi ZORUNLU (listeden seçilmeden düğme pasif; serbest yazım kabul edilmez). Müşteri hesabı bağları ve «Erişimi kapat / aç»,
+  // «Cari kodunu tazele» YALNIZ Yönetici / süper yönetici için (sunucu kapısıyla aynı kural, `yalnizYoneticiMi`); başkasına liste
+  // isteği de gitmez.
+  const [yeniCari, setYeniCari] = useState<CariSecimi>(BOS_CARI_SECIMI);
+  const yeniKullaniciDisRol = disRolDegeriMi(yeniKullanici.rol);
+  const musteriYonetici = yalnizYoneticiMi(rolMu(userRole) ? userRole : null, isSuperAdmin);
+  const musteriHesaplari = useMusteriHesaplari(musteriYonetici && adminTab === 'users');
   /** Detayı açık kullanıcı satırı (Göster). */
   const [acikKullanici, setAcikKullanici] = useState<string | null>(null);
   const [inviteRole, setInviteRole] = useState('Sales');
@@ -342,19 +354,35 @@ export default function AdminPage({
                     </td>
                     <td className="py-2.5 px-3 text-gray-500 text-xs hidden sm:table-cell">{(u.email as string)||'—'}</td>
                     <td className="py-2.5 px-3 text-center">
-                      <select
-                        value={(u.role as string)||'Sales'}
-                        onChange={async (e) => {
-                          try {
-                            await updateDoc(doc(db, 'users', u.id as string), { role: e.target.value });
-                          } catch { console.debug('error updating role'); }
-                        }}
-                        className="text-[10px] font-bold px-2 py-1 rounded-lg bg-gray-100 border-none cursor-pointer"
-                      >
-                        {(['Admin','Manager','Accounting','Sales','Logistics','HR','Purchasing','B2B','Dealer'] as string[]).map(r => (
-                          <option key={r} value={r}>{r}</option>
-                        ))}
-                      </select>
+                      {/* Dış rol (B2B / Bayi) satırı: rol seçicisi YERİNE müşteri hücresi (rozet + firma + cari kodu durumu + «Erişimi
+                          kapat / aç» + «Cari bağla / Cari kodunu tazele»; H18). Satır içi seçici dış rol seçeneği TAŞIMAZ: dış rol
+                          `/api/db` ile verilemez, müşteri hesabı yalnız aşağıdaki «Kullanıcı Ekle» ile cari seçilerek açılır. */}
+                      {disRolDegeriMi(u.role) ? (
+                        <MusteriHesapHucresi
+                          uid={u.id as string}
+                          rolAdi={musteriRolAdi(u.role, currentLanguage)}
+                          dil={currentLanguage}
+                          yonetici={musteriYonetici}
+                          okuma={musteriHesaplari.okuma}
+                          leads={leads}
+                          openConfirm={openConfirm}
+                          onDegisti={musteriHesaplari.yenile}
+                        />
+                      ) : (
+                        <select
+                          value={(u.role as string)||'Sales'}
+                          onChange={async (e) => {
+                            try {
+                              await updateDoc(doc(db, 'users', u.id as string), { role: e.target.value });
+                            } catch { console.debug('error updating role'); }
+                          }}
+                          className="text-[10px] font-bold px-2 py-1 rounded-lg bg-gray-100 border-none cursor-pointer"
+                        >
+                          {(['Admin','Manager','Accounting','Sales','Logistics','HR','Purchasing'] as string[]).map(r => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </select>
+                      )}
                     </td>
                     <td className="py-2.5 px-3 text-center">
                       {u.id !== user?.uid && (
@@ -454,23 +482,39 @@ export default function AdminPage({
             <input type="text" placeholder={currentLanguage==='tr'?'Ad Soyad':'Full name'} value={yeniKullanici.ad}
               onChange={e => setYeniKullanici(k => ({ ...k, ad: e.target.value }))}
               className="apple-input flex-1 text-sm" />
-            <select value={yeniKullanici.rol} onChange={e => setYeniKullanici(k => ({ ...k, rol: e.target.value }))}
+            <select value={yeniKullanici.rol} onChange={e => { setYeniKullanici(k => ({ ...k, rol: e.target.value })); setYeniCari(BOS_CARI_SECIMI); }}
               className="apple-input text-sm">
               {(['Admin','Manager','Accounting','Sales','Logistics','HR','Purchasing','B2B','Dealer'] as string[]).map(r => <option key={r}>{r}</option>)}
             </select>
             <button
-              disabled={yeniKullaniciMesgul || !yeniKullanici.email.trim()}
+              disabled={yeniKullaniciMesgul || !yeniKullanici.email.trim() || (yeniKullaniciDisRol && yeniCari.leadId === null)}
               onClick={async () => {
+                // Dış rol: seçili cari (`leadId`) gövdeye girer; seçilmemişse istek GİTMEZ (düğme zaten pasif; sunucu da 400 verir).
+                const leadId = yeniKullaniciDisRol ? yeniCari.leadId : null;
+                if (yeniKullaniciDisRol && leadId === null) return;
                 setYeniKullaniciMesgul(true); setYeniKullaniciDurum(null);
                 try {
                   const r = await authFetch('/api/admin/users', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: yeniKullanici.email.trim(), displayName: yeniKullanici.ad.trim(), role: yeniKullanici.rol }),
+                    body: JSON.stringify({
+                      email: yeniKullanici.email.trim(), displayName: yeniKullanici.ad.trim(), role: yeniKullanici.rol,
+                      ...(leadId !== null ? { leadId } : {}),
+                    }),
                   });
-                  const d = await r.json() as { success: boolean; parolaLinki?: string; error?: string };
+                  const d = await r.json() as { success: boolean; parolaLinki?: string; error?: string; bagYok?: boolean };
                   if (!d.success) throw new Error(d.error || 'Hata');
-                  setYeniKullaniciDurum({ tip: 'ok', mesaj: currentLanguage==='tr' ? 'Kullanıcı oluşturuldu. Parola belirleme linkini iletin:' : 'User created. Share the password link:', link: d.parolaLinki });
+                  setYeniKullaniciDurum({
+                    tip: 'ok',
+                    mesaj: d.bagYok === true
+                      ? (currentLanguage==='tr'
+                        ? 'Kullanıcı oluşturuldu ama cari bağı yazılamadı: kullanıcı satırındaki «Cari bağla» ile bağlayın. Parola belirleme linkini iletin:'
+                        : 'User created but the customer link could not be saved: link it with “Link customer” on the user’s row. Share the password link:')
+                      : (currentLanguage==='tr' ? 'Kullanıcı oluşturuldu. Parola belirleme linkini iletin:' : 'User created. Share the password link:'),
+                    link: d.parolaLinki,
+                  });
                   setYeniKullanici({ email: '', ad: '', rol: 'Sales' });
+                  setYeniCari(BOS_CARI_SECIMI);
+                  if (leadId !== null) musteriHesaplari.yenile();
                 } catch (e) {
                   setYeniKullaniciDurum({ tip: 'hata', mesaj: e instanceof Error ? e.message : String(e) });
                 } finally { setYeniKullaniciMesgul(false); }
@@ -480,6 +524,9 @@ export default function AdminPage({
               {yeniKullaniciMesgul ? '…' : (oc(currentLanguage).olustur)}
             </button>
           </div>
+          {yeniKullaniciDisRol && (
+            <MusteriCariSecimi leads={leads} dil={currentLanguage} secim={yeniCari} onSecim={setYeniCari} />
+          )}
           {yeniKullaniciDurum && (
             <div className={`mt-3 text-xs rounded-xl px-3 py-2 border ${yeniKullaniciDurum.tip==='ok' ? 'bg-green-50 border-green-100 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
               <p>{yeniKullaniciDurum.mesaj}</p>
@@ -548,7 +595,8 @@ export default function AdminPage({
               onChange={e => setInviteRole(e.target.value)}
               className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand transition-colors"
             >
-              {(['Admin','Manager','Sales','Logistics','Accounting','HR','Purchasing','B2B','Dealer'] as string[]).map(r => (
+              {/* Dış rol (B2B / Bayi) davetle AÇILMAZ (sunucu 409 `DIS_ROL_DAVETLE_ACILMAZ`; H7 / H18): seçenek de yok. */}
+              {(['Admin','Manager','Sales','Logistics','Accounting','HR','Purchasing'] as string[]).map(r => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>

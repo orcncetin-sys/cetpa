@@ -170,6 +170,9 @@ const OnboardingFlow = React.lazy(() => import('./components/OnboardingFlow'));
 // Mağaza paneli «ERP ile bağlan» onay sayfası (şartname § 5.3). Sayfa tembel; YOL SABİTİ ise aşağıda STATİK içe aktarılır
 // (doğrulama betiğinin 7. sondası yol metnini ana betikte arar).
 const MagazaPanelBaglanPage = React.lazy(() => import('./pages/MagazaPanelBaglanPage'));
+// Müşteri / bayi ekranı «ERP ile giriş» onay sayfası (2026-10-21, şartname «müşteri siparişlerim» H16) — aynı kalıp: sayfa tembel, yol
+// sabiti STATİK.
+const MagazaBayiBaglanPage = React.lazy(() => import('./pages/MagazaBayiBaglanPage'));
 const PricingPage = React.lazy(() => import('./components/PricingPage'));
 
 // ── Kimlik gerektirmeyen tanıtım/yasal sayfalar ───────────────────────────
@@ -292,8 +295,9 @@ import { useKonumYayini } from './hooks/useKonumYayini';
 import { birlesikAraclar } from './utils/filo';
 import { publicPageKey, type PublicPageKey } from './lib/publicPaths';
 import { MAGAZA_PANEL_BAGLAN_YOLU } from './lib/magazaPanelBaglan';
+import { MAGAZA_BAYI_BAGLAN_YOLU } from './lib/magazaPanelBaglan';
 import { TOP_LEVEL_TABS } from './lib/topLevelTabs';
-import { cikisIstegiGonder } from './lib/oturumCikisi';
+import { CIKIS_BELIRTEC_SURE_SINIRI_MS, CIKIS_SURE_SINIRI_MS, cikisBelirteciAl, cikisIstegiGonder } from './lib/oturumCikisi';
 import DisRolEkrani, { disRolMu, disRolEkraniGosterilir, veriSekmesi } from './components/DisRolEkrani';
 import ProfilYuklenemediEkrani from './components/ProfilYuklenemediEkrani';
 import { ROL_YENIDEN_DENEME_MS, profilHatasiSinifi, veriOturumuSec, type RolDurumu } from './lib/rolCozumu';
@@ -876,6 +880,9 @@ function AppContent() {
   // Mağaza paneli «ERP ile bağlan» onay sayfası (§ 5.3): sekme DEĞİLDİR; bu yolda pazarlama sayfası çizilmez (oturumsuz
   // kullanıcı doğrudan giriş sayfasına düşer), oturumlu kullanıcı onay sayfasını görür. `ilkYol`dan türer (kanca değil).
   const baglanSayfasi = ilkYol === MAGAZA_PANEL_BAGLAN_YOLU;
+  // Müşteri / bayi ekranı onay sayfası (H16): aynı kural — oturumsuz kullanıcı giriş sayfasına düşer; oturumlu kullanıcı (dış rol dâhil)
+  // onay sayfasını görür. Kapı rol bloğundan SONRA, dış rol dalından ÖNCE (aşağıda).
+  const bayiBaglanSayfasi = ilkYol === MAGAZA_BAYI_BAGLAN_YOLU;
   // <html lang> dil secimini izlesin: EN icerik acikken lang="tr" kalirsa
   // ekran okuyucu Ingilizceyi Turkce fonetikle okur (WCAG 3.1.1, a11y teshisi).
   useEffect(() => { document.documentElement.lang = currentLanguage; }, [currentLanguage]);
@@ -2675,6 +2682,7 @@ function AppContent() {
       setUserRole(UserRole.Sales);
       storeSetRole(UserRole.Sales);
       setRoleMissing(false);
+      setInviteError(null);   // önceki oturumun davet gerekçesi de taşınmaz (aynı sekmede giren başka hesabın ekranında görünmesin)
       setRolDurumu('bekliyor');
       if (!u) {
         setUser(null);
@@ -2867,11 +2875,16 @@ function AppContent() {
     // Süren açılış turu (ya da «Yeniden dene») BAYATLAR ve bekleyen yeniden denemesi iptal edilir (R2″): çıkış sürerken dönen bir
     // profil okuması kapanmış oturumu geri açmaz. Çıkış bayrağı turdan ÖNCE kurulur: çıkış sürerken basılan «Yeniden dene» yeni tur
     // ALMAZ (İ2-a; yoksa çıkışın bayatlattığı turu geçip Yönetici kabuğunu açıyordu). Bayrak `finally`de sıfırlanır (hata verse de).
+    // Kimlik belirteci isteğe eklenir (H17, 2026-10-21): dış rol akış açmadığı için oturum çerezi YOK; sunucu kullanıcıyı Bearer'dan
+    // tanır, iptali ve yenileme belirteci iptalini ancak böyle yazar. Belirteç en çok 2 sn beklenir (alınamazsa istek belirteçsiz
+    // gider), istek kalan 3 sn ile sınırlı: toplam en çok 5 sn. `authedFetch` KULLANILMAZ (2026-10-09 gerekçesi, yukarıda).
     cikisSuruyorRef.current = true;
     try {
       acilisTuruRef.current += 1;
       yenidenDenemeRef.current?.iptal();
-      const sunucuCikisi = await cikisIstegiGonder();
+      const cikanKullanici = auth.currentUser;
+      const belirtec = await cikisBelirteciAl(cikanKullanici ? () => cikanKullanici.getIdToken() : undefined);
+      const sunucuCikisi = await cikisIstegiGonder(fetch, CIKIS_SURE_SINIRI_MS - CIKIS_BELIRTEC_SURE_SINIRI_MS, belirtec);
       if (!sunucuCikisi) console.warn('[handleLogout] sunucu çıkışı başarısız — oturum çerezi silinmemiş / yenileme belirteçleri iptal edilmemiş olabilir');
       try {
         await signOut(auth); // await: oturum kapanışı tamamlanmadan state temizlenmesin
@@ -2887,6 +2900,7 @@ function AppContent() {
       setUserRole(UserRole.Sales);
       storeSetRole(UserRole.Sales);
       setRoleMissing(false);
+      setInviteError(null);
       setRolDurumu('bekliyor');   // R1: çıkışta rol durumu da başa döner
     } finally {
       cikisSuruyorRef.current = false;
@@ -4198,11 +4212,23 @@ function AppContent() {
     return yukleniyorGorunumu;
   }
 
+  // ─── Müşteri / bayi ekranı onay sayfası (2026-10-21, H16): rol bloğundan SONRA, dış rol dalından ÖNCE ───
+  // Bayi ekranının «ERP ile giriş»i müşteri hesabını (B2B / Bayi) buraya yollar: dış rol bu yolda kilit ekranını DEĞİL onay sayfasını görür.
+  // Rol çözülmeden (yukarıdaki kapı) ve iki adımlı doğrulama beklerken çizilmez. İstemci rol kapısı YOK: hüküm sunucudan (iç rol, rolsüz
+  // hesap, bağsız hesap sayfada sunucunun koduyla uyarı alır). Sayfa ERP verisi İSTEMEZ (yalnız firma okuma ucu ve yetki kodu).
+  if (bayiBaglanSayfasi && user && !mfaChallenge) {
+    return (
+      <React.Suspense fallback={<div className="fixed inset-0 flex items-center justify-center bg-white"><div className="w-8 h-8 rounded-full border-2 border-[#ff4000] border-t-transparent animate-spin" /></div>}>
+        <MagazaBayiBaglanPage currentLanguage={currentLanguage} eposta={user.email ?? ''} onCikis={handleLogout} davetHatasi={inviteError} />
+      </React.Suspense>
+    );
+  }
+
   // ─── Dış rol (B2B / Bayi): ERP kabuğu ÇİZİLMEZ — tek sayfa (şartname dış-rol-kapanışı D5) ───
   // Karşılama sayfasından, giriş sonrası kapılardan (mağaza paneli onayı, kurulum, fiyatlandırma) ve kabuktan ÖNCE: dış rol
   // hesabı oturum açıkken bunların hiçbirine ulaşmaz. Herkese açık sayfalar ve sipariş takibi yukarıda, etkilenmez.
   if (disRolEkraniGosterilir({ oturumVar: !!user, rol: userRole, ikiAdimBekliyor: mfaChallenge })) {
-    return <DisRolEkrani dil={currentLanguage} onCikis={handleLogout} />;
+    return <DisRolEkrani dil={currentLanguage} onCikis={handleLogout} davetHatasi={inviteError} />;
   }
 
   // --- Entrance Logic: Landing vs Login vs App ---
@@ -4217,7 +4243,7 @@ function AppContent() {
     setEnteredApp(true);
   }
   if (!enteredApp && !isGuestMode && !(user && uygulamaYolundaMi)) {
-    if ((!showLoginPage || user) && !baglanSayfasi) {
+    if ((!showLoginPage || user) && !baglanSayfasi && !bayiBaglanSayfasi) {
       const handleDemoSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!demoForm.name || !demoForm.email) return;

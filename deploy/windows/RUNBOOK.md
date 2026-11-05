@@ -86,6 +86,7 @@ scp /root/cetpa_db_*.dump "administrator@78.111.111.185:C:/cetpa/cetpa_db.dump"
 & "C:\Program Files\PostgreSQL\15\bin\psql.exe" -U postgres -c "CREATE DATABASE <DBADI> OWNER <KULLANICI>;"
 & "C:\Program Files\PostgreSQL\15\bin\pg_restore.exe" -h localhost -U <KULLANICI> -d <DBADI> --no-owner "C:\cetpa\cetpa_db.dump"
 ```
+> Tam veritabanı dökümü (`pg_dump` / `pg_restore`) her şeyi taşır. **Kiracı yedeğinden** (süper yönetici kiracı yedeği — `src/lib/tenantBackup`) dönüşte ise müşteri / bayi hesaplarının cari bağları (`musteriHesaplari`) GELMEZ (bilerek, SERVER_ONLY): bütün müşteri erişimi kapalı başlar; Yönetici ekranından her müşteri hesabına cari yeniden bağlanır.
 > Kurulumda geçici verilen `postgres` süper-kullanıcı parolasını (`postgres/postgres`) da burada güçlü bir parolayla değiştir:
 ```powershell
 & "C:\Program Files\PostgreSQL\15\bin\psql.exe" -U postgres -c "ALTER USER postgres WITH PASSWORD '<GUCLU_PAROLA>';"
@@ -193,6 +194,7 @@ Görev Zamanlayıcı, Windows Update ve PG gösterimi OS dilimine bağlı kalır
 
 ### Ortam ayarı
 - `MAGAZA_PANEL_DONUS`: site panelinin dönüş adresi. Varsayılan `https://www.cetpa.com.tr/panel.html` doğrudur; canlı `.env`'e yazmak GEREKMEZ. Yazılacaksa: https zorunlu, kullanıcı adı / sorgu (`?`) / parça (`#`) taşıyamaz, kökeni `MAGAZA_IZINLI_KOKENLER` listesinde bulunmalı (liste boşsa varsayılan köken `https://www.cetpa.com.tr`).
+- `MAGAZA_BAYI_DONUS` (2026-10-21): müşteri / bayi ekranının dönüş adresi. Varsayılan `https://www.cetpa.com.tr/bayi.html` doğrudur; canlı `.env`'e yazmak GEREKMEZ (boş ya da boşluklu değer panel.html'e DEĞİL bayi.html'e düşer). Kurallar panelle aynı. Geçersizse ya da iki sır da yoksa `POST /api/magaza-bayi/yetki-kodu`, `GET /api/magaza-bayi/hesap` ve bütün `/api/magaza/bayi/*` uçları `503 bayi-yapilandirilmamis` döner; bekçi «SİTE BAYİ EKRANI ÇALIŞMIYOR» yazar. Bayi belirteci (`mb1-…`) anahtarı panelinkinden AYRI etiketle türer; sipariş kimliği anahtarı ayrıca türer — yeni sır GEREKMEZ.
 - Panel belirteci anahtarı `SESSION_TOKEN_SECRET` (o yoksa `FIREBASE_PRIVATE_KEY`), dönüş adresi ve `APP_URL`'den türer: yeni bir sır GEREKMEZ. Üçünden biri değişirse açık panel oturumları düşer (personel panelden yeniden bağlanır). Hazırlık (staging) ortamının `APP_URL`'i farklı olduğu için oradan alınan belirteç canlıda geçmez (bilerek).
 - Dönüş adresi geçersizse ya da iki sır da yoksa panel HİÇ çalışmaz: `POST /api/magaza-panel/yetki-kodu` ve bütün `/api/magaza/panel/*` uçları `503 panel-yapilandirilmamis` döner. Üç yerden görünür: bekçi `magaza_talep` ayrıntısında «SİTE PANELİ ÇALIŞMIYOR» (kırmızı), `scripts/verify-deploy.sh post` FAIL, panelin kendi ekranı.
 - `SERVER_TENANT_COMPANY_ID` tanımlı olmalı (dilim 1 ön koşulu): kiracı çözülemezse sipariş talebi ucu da panel de 503 verir; bekçi «KİRACI ÇÖZÜLEMİYOR» yazar.
@@ -246,3 +248,22 @@ Görev Zamanlayıcı, Windows Update ve PG gösterimi OS dilimine bağlı kalır
 - Hizmet yeniden başlarsa gitmemiş revize bildirimleri de (yapılandırılmamış / 3 saatten eski bekliyor) teslim sondası geçerse kendiliğinden revize kuyruğuna alınır ([12]'deki kuralın aynısı; günlük satırı `[magaza-bildirim] revize: kaçanlar: …`).
 - Aynı talep art arda revize edilirse ve ilk posta henüz gitmemişse TEK posta gider (değişen alan adları birleşik). İlk posta gittikten sonra gelen revizyon ikinci postayı üretir.
 - Silme ve geri alma yalnız Yönetici rolündedir (ERP ve site paneli); panelden geri alma yoktur. Aşama değişimi, kalem teslim, silme ve geri alma bildirim ÜRETMEZ.
+
+## [15] Müşteri / bayi ekranı (www.cetpa.com.tr/bayi.html) — dağıtım sondası (2026-10-21)
+
+### Yayın
+- Sunucu (bayi alt zinciri + ERP köprüsü), istemci (bayi onay sayfası, Yönetici ekranı) ve bu sondalar TEK yayında çıkar (şartname «müşteri siparişlerim» H19): sonda sunucudan önce giderse ara yayınlar kırmızı olur, sonra giderse «yazıldı ama bağlanmadı» görünmez.
+- Yeni ortam ayarı yalnız `MAGAZA_BAYI_DONUS` ([13] «Ortam ayarı»; varsayılan doğru, yazmak GEREKMEZ).
+
+### Yayından sonra doğrulama
+- `scripts/verify-deploy.sh post` — [13] ve [14]'teki sondalara ek (hiçbiri kayıt okumaz / yazmaz, oturum açmaz; bayi sondaları panel sondalarıyla AYNI işlevden geçer):
+  - ERP köprüsü: `POST /api/magaza-bayi/yetki-kodu` bozuk JSON → 400 / 500 ve geçerli `{}` kimliksiz → 401; `GET /api/magaza-bayi/hesap` kimliksiz → 401 (404 = bayi sunucusu canlıda değil);
+  - belirteçsiz `GET /api/magaza/bayi/ben`, `GET …/bayi/siparisler`, `POST …/bayi/cikis` ve verilmemiş kodla `POST …/bayi/oturum` → 401 (404 = bayi alt zinciri bağlı değil, `r.use('/bayi', …)`; `503 bayi-yapilandirilmamis` = `MAGAZA_BAYI_DONUS` / sır);
+  - bayi ön uçuşu (`OPTIONS …/bayi/siparisler`) → 204 + `Allow-Methods` GET + `Allow-Headers` Authorization (`Allow-Methods` yalnız POST = istek dış zincirde bitiyor, alt zincir bağlı değil);
+  - kökensiz `POST …/bayi/cikis` → 403 (401 = belirteç kapısı köken kapısından önce). Alt zincir bağlı olmasa da dış zincir 403 verir: bu satır yalnız sırayı ölçer.
+  - istemci derlemesi: ana betikte (`/assets/index-….js`) `/magaza-bayi-baglan` metni ([13]'teki `/magaza-panel-baglan` sondasının eşi, aynı 8. adımda, aynı indirilen dosyada). Yoksa bayi onay sayfası yayında değil ya da App.tsx'e bağlanmamış: bayi ekranındaki «ERP ile giriş» boş sayfaya düşer. `GET /magaza-bayi-baglan` İSTENMEZ (SPA yedeği her yola 200 verir, kanıt değildir).
+
+### Bayi onay sayfası (app.cetpa.com.tr/magaza-bayi-baglan)
+- Bayi ekranı müşteriyi bu adrese yollar. Dış rol (B2B / Bayi) hesabı burada kilit ekranını DEĞİL onay sayfasını görür: firma adı (`GET /api/magaza-bayi/hesap`) ve «Onayla ve giriş yap». Onay sayfası ERP verisi istemez.
+- Sayfadaki uyarılar sunucunun hükmündendir: «Hesabınız bir firmaya bağlı değil ya da erişiminiz kapalı» = bağ yok ya da Yönetici erişimi kapattı (Yönetim → Kullanıcılar, müşteri satırı); «Güvenlik için çıkış yapıp e-posta ve şifrenizle yeniden girin» = Google ile girilmiş ya da ERP girişi 12 saatten eski / son çıkıştan önce (kişi «Çıkış yap»a basar, e-posta + şifreyle yeniden girer; şifresi yoksa «Şifremi Unuttum»); «Bu bağlantı yalnız müşteri hesapları içindir» = personel hesabıyla açılmış.
+- Müşteri hesabı yalnız Yönetici ekranındaki «Kullanıcı Ekle (manuel)» ile, cari seçilerek açılır (davetle açılmaz). «Erişimi kapat / aç» ve «Cari kodunu tazele» aynı ekrandaki müşteri satırındadır ve onay ister. Erişimi kapatmak kişinin açık bayi ekranı oturumunu hemen kapatır; tazeleme yalnız cari kodu değiştiyse kapatır; erişimi açınca kişi e-posta ve şifresiyle yeniden girer.

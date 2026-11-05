@@ -43,7 +43,8 @@ import {
 } from "./src/server/opsWatchdog.js";
 import {
   type AppRole, type DbOp, ADMIN_ROLES, STAFF_ROLES, APPEND_ONLY_COLLECTIONS, PUBLIC_WRITE_COLLECTIONS,
-  isAllowed, isSelfDocAccess, blocksRoleEscalation, APP_ROLES, yoneticiRoluneDokunabilir, YONETICI_GEREKLI_YANITI } from "./src/lib/rbac.js";
+  isAllowed, isSelfDocAccess, blocksRoleEscalation, APP_ROLES, yoneticiRoluneDokunabilir, YONETICI_GEREKLI_YANITI,
+  EXTERNAL_ROLES, disRolHesabinaDokunabilir, DIS_ROL_YONETICI_GEREKLI_YANITI } from "./src/lib/rbac.js";
 import {
   TENANT_COLLECTIONS as TENANT_COLLECTION_LIST,
   USER_SCOPED_COLLECTIONS as USER_SCOPED_COLLECTION_LIST,
@@ -90,11 +91,18 @@ import { magaza429, magazaIzinliKokenleriCoz, magazaZinciri } from "./src/server
 // Mağaza dilim 2a (2026-10-10): site paneli alt zinciri + ERP kökenindeki mağaza uçları. Panel modülü de bekçiyle AYNI yoldan
 // içe aktarılır (`magazaPanelSayaclari()` modül düzeyi sayaç okur — yukarıdaki notla aynı gerekçe).
 import { erpCikisindaPanelIptalEt, magazaPanel429, magazaPanelZinciri } from "./src/server/routes/magazaPanelZinciri.js";
-import { magazaErpRoutes, magazaIcerik429, magazaYetkiKodu429 } from "./src/server/routes/magazaErpRoutes.js";
+import { magazaBayiHesap429, magazaBayiYetkiKodu429, magazaErpRoutes, magazaIcerik429, magazaYetkiKodu429 } from "./src/server/routes/magazaErpRoutes.js";
+// Müşteri / bayi ekranı (2026-10-21, şartname «müşteri siparişlerim»): alt zincir bekçiyle AYNI yoldan içe aktarılır
+// (`magazaBayiSayaclari()` modül düzeyi sayaç okur). Bağ uçları ve bağ okuyucu ayrı modüllerde.
+import { magazaBayi429, magazaBayiZinciri } from "./src/server/routes/magazaBayiZinciri.js";
+import { musteriHesapRoutes } from "./src/server/routes/musteriHesapRoutes.js";
+import { musteriHesapOkuyucuKur, MUSTERI_HESAP_KOLEKSIYONU } from "./src/server/musteriHesap.js";
 import { panelKullanicisiKur } from "./src/server/kanal/magazaPanelKullanici.js";
 import { kodDeposuKur } from "./src/server/kanal/magazaPanelKod.js";
 import { iptalKur } from "./src/server/kanal/magazaPanelIptal.js";
-import { donusTabaniCoz, panelAnahtariTuret, panelSirriVar } from "./src/server/kanal/magazaPanelBelirtec.js";
+import {
+  BAYI_BELIRTECI, anahtarTuret, bayiKimlikAnahtariTuret, donusTabaniCoz, donusTabaniCozTur, panelAnahtariTuret, panelSirriVar,
+} from "./src/server/kanal/magazaPanelBelirtec.js";
 import {
   MAGAZA_BILDIRIM_ISCI_SECENEKLERI, MAGAZA_BILDIRIM_KUYRUGU, magazaBildirimIscisi, magazaBildirimIsteyici, magazaBildirimKacanlariKuyrukla, type MagazaBildirimDeps,
   MAGAZA_REVIZE_KUYRUGU, magazaRevizeBildirimIscisi, magazaRevizeBildirimIsteyici, magazaRevizeKacanlariKuyrukla,
@@ -243,6 +251,11 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
     (req as Request & { uid: string; userEmail?: string; emailVerified?: boolean }).uid = decoded.uid;
     (req as Request & { uid: string; userEmail?: string; emailVerified?: boolean }).userEmail = decoded.email;
     (req as Request & { uid: string; userEmail?: string; emailVerified?: boolean }).emailVerified = decoded.email_verified === true;
+    // Giriş bilgisi (2026-10-21, şartname «müşteri siparişlerim» H1): sağlayıcı ve ERP giriş anı YEREL doğrulamadan — yalnız müşteri
+    // ekranı köprüsü okur (routes/magazaErpRoutes `bayiKopruYetkisi`: e-posta + şifre, 12 saat, son iptalden sonra); personel uçları
+    // OKUMAZ. Alan yoksa '' / 0 (köprü ikisini de reddeder).
+    (req as Request & { girisSaglayici?: string }).girisSaglayici = typeof decoded.firebase?.sign_in_provider === 'string' ? decoded.firebase.sign_in_provider : '';
+    (req as Request & { girisZamaniSn?: number }).girisZamaniSn = typeof decoded.auth_time === 'number' ? decoded.auth_time : 0;
     // Askıya alınmış kiracı firmanın kullanıcıları engellenir (süper-admin hariç).
     if (!isSuperAdmin(req)) {
       const cid = await getUserCompanyId(decoded.uid);
@@ -508,6 +521,13 @@ const magazaRevizeBildirimIste = magazaRevizeBildirimIsteyici(() => (magazaReviz
 const magazaPanelKullanici = panelKullanicisiKur({ adminDb: () => adminDb, pgPool: () => pgPool });
 const magazaPanelKodDeposu = kodDeposuKur();
 const magazaPanelIptal = iptalKur({ adminDb: () => adminDb });
+// Müşteri / bayi ekranı köprüsü (2026-10-21): bayi kodları AYRI depo örneğinde (panel kodu bayi oturumunda, bayi kodu panel
+// oturumunda bulunmaz); iptal çifti ve kullanıcı okuyucu panelle ORTAK (ERP çıkışı bayi belirteçlerini de öldürür). Bağ okuyucu
+// (`musteriHesaplari/{uid}`) önbelleği aşağıdaki `dbEvents` dinleyicisinde `users` ve `musteriHesaplari` olaylarında düşer.
+const magazaBayiKodDeposu = kodDeposuKur();
+const musteriHesapOkuyucu = musteriHesapOkuyucuKur({ adminDb: () => adminDb });
+/** Firebase yenileme belirteçlerinin iptali — TEK yardımcı: ERP çıkışı, mağaza bayi çıkışı ve müşteri erişimini kapatma. */
+const firebaseYenilemeIptal = (uid: string): Promise<void> => getAuth().revokeRefreshTokens(uid);
 
 
 // ── Webhook Processors ───────────────────────────────────────────────────
@@ -781,6 +801,18 @@ const magazaPanelDonusTabani = donusTabaniCoz(process.env.MAGAZA_PANEL_DONUS, {
 const magazaPanelAnahtari = panelAnahtariTuret({
   sirVar: panelSirriVar(process.env), oturumSirri: SESSION_TOKEN_SECRET, donusTabani: magazaPanelDonusTabani, appUrl: process.env.APP_URL,
 });
+// ── Müşteri / bayi ekranı: dönüş adresi, belirteç anahtarı, sipariş kimliği anahtarı (2026-10-21, şartname H3) ─────────────────
+// Panel satırlarıyla AYNI kurallar, AYRI tür (`BAYI_BELIRTECI`: `mb1-`, `magaza-bayi-v1`, varsayılan bayi.html — boş / boşluklu
+// `MAGAZA_BAYI_DONUS` panel.html'e DÜŞMEZ). Sipariş kimliği anahtarı imza anahtarından AYRI türer. Biri `null` ise bayi köprüsünün
+// ERP uçları ve bütün `/api/magaza/bayi/*` uçları 503 `bayi-yapilandirilmamis` döner; bekçi kırmızı gösterir.
+const magazaBayiDonusTabani = donusTabaniCozTur(BAYI_BELIRTECI, process.env.MAGAZA_BAYI_DONUS, {
+  uretim: process.env.NODE_ENV === 'production',
+  izinliKokenler: magazaIzinliKokenleriCoz(process.env.MAGAZA_IZINLI_KOKENLER),
+});
+const magazaBayiAnahtari = anahtarTuret(BAYI_BELIRTECI, {
+  sirVar: panelSirriVar(process.env), oturumSirri: SESSION_TOKEN_SECRET, donusTabani: magazaBayiDonusTabani, appUrl: process.env.APP_URL,
+});
+const magazaBayiKimlikAnahtari = bayiKimlikAnahtariTuret({ sirVar: panelSirriVar(process.env), oturumSirri: SESSION_TOKEN_SECRET, appUrl: process.env.APP_URL });
 
 function signSessionToken(uid: string): string {
   const exp = Date.now() + SESSION_TOKEN_MAX_AGE;
@@ -961,6 +993,9 @@ dbEvents.on('change', (ev: { coll?: string; id?: string }) => {
   if (ev.coll === 'users' && ev.id) { roleCache.delete(ev.id); companyIdCache.delete(ev.id); }
   if (ev.coll === 'users' && ev.id) magazaPanelKullanici.dusur(ev.id);
   if (ev.coll === 'companyStatus') magazaPanelKullanici.temizle();
+  // Müşteri bağı (2026-10-21): bağ yazımı (SERVER_ONLY yazımı da süreç içi olay üretir) ve `users` değişimi bağ önbelleğini düşürür —
+  // erişim kapatma / rol düşürme bayi belirtecini 60 sn beklemeden öldürür (kapı bağı ve kullanıcıyı her istekte yeniden okur).
+  if ((ev.coll === 'users' || ev.coll === MUSTERI_HESAP_KOLEKSIYONU) && ev.id) musteriHesapOkuyucu.dusur(ev.id);
 });
 
 // İstek bağlamında çağıranın firması (sunucu-tarafı doğrudan yazımlara companyId
@@ -1548,6 +1583,8 @@ async function startServer() {
     serverTenantId,
     // Panelin gördüğü AYNI tanımlayıcıların VARLIĞI (değer değil — anahtar sırdır); bekçi ortamdan yeniden türetmez.
     magazaPanelYapilandirmasi: () => ({ anahtarVar: magazaPanelAnahtari !== null, donusVar: magazaPanelDonusTabani !== null }),
+    // Müşteri / bayi ekranının AYNI kalıbı: imza + sipariş kimliği anahtarı (ikisi de sırdan) ve dönüş adresi — yalnız VARLIK.
+    magazaBayiYapilandirmasi: () => ({ anahtarVar: magazaBayiAnahtari !== null && magazaBayiKimlikAnahtari !== null, donusVar: magazaBayiDonusTabani !== null }),
   });
 
   const app = express();
@@ -1723,21 +1760,29 @@ async function startServer() {
       });
       res.json({ ok: true });
     });
+    // Çıkışın kimliği ÖNCE `Authorization: Bearer` belirtecinden (2026-10-21, şartname «müşteri siparişlerim» H2): dış rol akış
+    // açmaz (App.tsx), oturum çerezi hiç kurulmaz — çerezden uid bulunamıyor, iptal yazılmıyordu. YEREL doğrulama (`checkRevoked`
+    // YOK: çıkış ağ çağrısını beklemesin); bozuk / süresi geçmiş belirteç `null` → çereze düşer. Bearer ÖNCE: başarısız eski bir
+    // çıkıştan kalan 5 günlük bayat çerez iptali başka bir uid'ye yazmasın. ASLA fırlatmaz.
+    const cikisBearerUid = async (req: Request): Promise<string | null> => {
+      const b = yetkiBelirteci(req.headers.authorization);
+      if (!b) return null;
+      try { return (await getAuth().verifyIdToken(b)).uid || null; } catch { return null; }
+    };
     app.post('/api/db/session/logout', dbLimiter, async (req: Request, res: Response) => {
       res.clearCookie(SESSION_COOKIE, { path: '/api/db' });
       res.clearCookie(MFA_COOKIE, { path: '/' });
-      // Kimlik ÇEREZDEN (uç `requireAuth` taşımaz); yalnız geçerli bir oturum token'ı varsa dolu. İki okuyucu da fırlatmaz.
-      const cikisUid = verifySessionTokenUid(parseCookie(req.headers.cookie, SESSION_COOKIE));
-      // Mağaza paneli (dilim 2a, § 3.6): ERP çıkışı o kullanıcının BÜTÜN site paneli belirteçlerini de öldürür. Çerez yoksa /
-      // süresi dolmuşsa iptal yazılmaz (sayaç artar); yazım başarısız olsa da çıkış tamamlanır (yardımcı fırlatmaz). Refresh
-      // token iptalinden BAĞIMSIZ ve ondan ÖNCE: Firebase arızası panel iptalini atlatmasın.
+      // Kimlik önce Bearer'dan, yoksa ÇEREZDEN (uç `requireAuth` taşımaz); okuyucuların hiçbiri fırlatmaz.
+      const cikisUid = (await cikisBearerUid(req)) ?? verifySessionTokenUid(parseCookie(req.headers.cookie, SESSION_COOKIE));
+      // Mağaza paneli (dilim 2a, § 3.6) ve müşteri ekranı (2026-10-21): ERP çıkışı o kullanıcının BÜTÜN site paneli ve bayi
+      // belirteçlerini öldürür (ortak iptal). Kimlik çözülemezse iptal yazılmaz (sayaç artar); yazım başarısız olsa da çıkış
+      // tamamlanır (yardımcı fırlatmaz). Refresh token iptalinden BAĞIMSIZ ve ondan ÖNCE: Firebase arızası iptali atlatmasın.
       await erpCikisindaPanelIptalEt(magazaPanelIptal, cikisUid);
       // P2-2: çerezi silmek yetmiyordu — elde kalan Firebase ID token'ı süresi
       // (≤1sa) dolana dek geçerli kalıyordu. Refresh token'ları iptal et ki
-      // çalınan/eski oturum YENİ token üretemesin. Best-effort: uid yalnız
-      // geçerli bir oturum token'ı varsa okunur; çıkışı asla başarısız yapma.
+      // çalınan/eski oturum YENİ token üretemesin. Best-effort: çıkışı asla başarısız yapma.
       try {
-        if (cikisUid) await getAuth().revokeRefreshTokens(cikisUid);
+        if (cikisUid) await firebaseYenilemeIptal(cikisUid);
       } catch (e) { console.warn('[logout] revokeRefreshTokens başarısız:', (e as Error).message); }
       res.json({ ok: true });
     });
@@ -2097,8 +2142,16 @@ async function startServer() {
     // (ön kayıtla ele geçirilen adres muaf DEĞİL); başkasının belgesine rol yazımı muaf DEĞİL. Sunucu süper yöneticiyi zaten rolüne
     // bakmadan geçirir (tek boğaz; `src/lib/mikroUcKapilari.ts` SINIR notu) — muafiyet bunu kurtarma yoluna da taşır. Başka hiçbir
     // hesap için davranış değişmez. Dört çağıran (PUT, PATCH, `/increment`, `/cas`) aynı işlevi kullanır.
+    // DIŞ ROL YALNIZ HESAP AÇILIRKEN (2026-10-21, şartname «müşteri siparişlerim» H8): `users` belgesine dış rol (B2B / Bayi)
+    // yazmak `/api/db` yolundan HERKESE (Yönetici ve süper yönetici DÂHİL) kapalı — müşteri rolü yalnız `POST /api/admin/users`
+    // ile, cari bağıyla birlikte verilir; var olan personel hesabı bu dilimde müşteri hesabına çevrilmez. Süper yönetici
+    // muafiyetinden ÖNCE; dört yazma yolu (PUT, PATCH, `/cas`, `/increment`) bu işlevden geçer.
     const guardRoleEscalation = async (req: Request, res: Response, coll: string, docId: string, body: Record<string, unknown>): Promise<boolean> => {
       const uid = (req as Request & { uid?: string }).uid || '';
+      if (coll === 'users' && typeof body.role === 'string' && (EXTERNAL_ROLES as readonly string[]).includes(body.role)) {
+        res.status(403).json({ error: 'Müşteri rolü yalnız «Kullanıcı Ekle» ekranından, cariyle birlikte verilir.', code: 'DIS_ROL_UCLA' });
+        return true;
+      }
       if (coll === 'users' && docId === uid && isSuperAdmin(req)) return false;
       const role = await getUserRole(uid);
       if (!blocksRoleEscalation(coll, role, body)) return false;
@@ -2221,9 +2274,13 @@ async function startServer() {
       if (coll !== 'users') return false;
       const uid = (req as Request & { uid?: string }).uid || '';
       if (isSelfDocAccess(coll, realId, uid, op)) return false;
-      if (yoneticiRoluneDokunabilir(await getUserRole(uid), isSuperAdmin(req), before?.role)) return false;
-      res.status(403).json(YONETICI_GEREKLI_YANITI);
-      return true;
+      // Çağıranın rolü BİR kez okunur; iki kural sırayla: Yönetici kaydı (D11) → dış rol kaydı (2026-10-21, H6 — Müdür bayi /
+      // müşteri belgesini yazamaz / silemez; `lib/rbac.disRolHesabinaDokunabilir`).
+      const cagiranRol = await getUserRole(uid);
+      const superAdmin = isSuperAdmin(req);
+      if (!yoneticiRoluneDokunabilir(cagiranRol, superAdmin, before?.role)) { res.status(403).json(YONETICI_GEREKLI_YANITI); return true; }
+      if (!disRolHesabinaDokunabilir(cagiranRol, superAdmin, before?.role)) { res.status(403).json(DIS_ROL_YONETICI_GEREKLI_YANITI); return true; }
+      return false;
     };
     // KENDİ KAYDINI AÇMA (2026-10-17, şartname «kayıt kapanışı» A4 — derinlemesine savunma): `users/<kendi uid'i>` belgesi YOKSA PUT
     // ve PATCH onu OLUŞTURURDU (ikisi de upsert). Herkese açık kayıt kapandı (A1 / A2): hesabı yönetici açar ve belgeyi SUNUCU yazar
@@ -2729,6 +2786,43 @@ async function startServer() {
     keyGenerator: userOrIpKey,
     handler: magazaIcerik429,
   });
+  // Müşteri / bayi ekranı (2026-10-21, şartname «müşteri siparişlerim» H11) — DÖRT kova, panelinkilerle PAYLAŞILMAZ:
+  //  • site kökeni (kimliksiz kod takası + belirteçli uçlar): `oturum` 20 / 15 dk, öbürleri 600 / 15 dk — yalnız IP (belirteç
+  //    `mb1-…` Firebase doğrulayıcısına gitmez); 429'u `magazaBayi429` yazar (bayi sayacı);
+  //  • ERP kökeni (kimlikli köprü): yetki kodu 10 / 15 dk, firma okuma 60 / 15 dk — kullanıcı anahtarlı; ayrı kovalar (onay
+  //    sayfasının açılışı kod kotasını yemez). `magazaYetkiKoduLimiter` paylaşılmaz.
+  const magazaBayiOturumLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: yalnizIpAnahtari,
+    handler: magazaBayi429,
+  });
+  const magazaBayiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 600,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: yalnizIpAnahtari,
+    handler: magazaBayi429,
+  });
+  const magazaBayiYetkiKoduLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userOrIpKey,
+    handler: magazaBayiYetkiKodu429,
+  });
+  const magazaBayiHesapLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userOrIpKey,
+    handler: magazaBayiHesap429,
+  });
   // Panel alt zinciri AYRI modüldedir (`magazaPanelZinciri.ts`); mağaza zinciri onu yalnız `/panel` önekine bağlar — köken
   // kapısından ve genel sınırlayıcıdan ÖNCE (panel kendi köken kapısını ve kovalarını taşır, her isteği kendisi sonlandırır).
   const magazaPanel = magazaPanelZinciri({
@@ -2737,8 +2831,18 @@ async function startServer() {
     getPgPool: () => pgPool, serverTenantId, broadcastDocChange, writeAuditLog, bildirimIste: magazaBildirimIste,
     degisiklikDinle: (dinleyici) => { dbEvents.on('change', dinleyici); },
   });
+  // Bayi alt zinciri de AYRI modüldedir (`magazaBayiZinciri.ts`); mağaza zinciri onu `/bayi` önekine panelin ALTINDA, köken
+  // kapısından ÖNCE bağlar. Kod deposu bayiye özgü; iptal çifti ve kullanıcı okuyucu panelle ORTAK örnek.
+  const magazaBayi = magazaBayiZinciri({
+    bayiOturumSinirlayici: magazaBayiOturumLimiter, bayiSinirlayici: magazaBayiLimiter,
+    bayiAnahtari: magazaBayiAnahtari, bayiKimlikAnahtari: magazaBayiKimlikAnahtari,
+    panelKullanicisi: magazaPanelKullanici.panelKullanicisi, musteriHesabi: musteriHesapOkuyucu.musteriHesabi,
+    kodDeposu: magazaBayiKodDeposu, iptal: magazaPanelIptal, firebaseYenilemeIptal,
+    getPgPool: () => pgPool, serverTenantId, writeAuditLog,
+  });
   app.use('/api/magaza', magazaZinciri({
     apiLimiter, talepSinirlayici: magazaTalepLimiter, durumSinirlayici: magazaDurumLimiter, panelZinciri: magazaPanel,
+    bayiZinciri: magazaBayi,
     getPgPool: () => pgPool, serverTenantId, broadcastDocChange, bildirimIste: magazaBildirimIste,
   }));
 
@@ -4491,6 +4595,8 @@ async function startServer() {
   // `belirtecIptalDenetle`: Firebase belirtecinin İPTAL denetimli doğrulaması (ağ çağrısı) — YALNIZ yetki kodu ucunda,
   // sınırlayıcıdan sonra çağrılır; `requireAuth` yerel doğrulamada kalır (inceleme 2026-10-10; ayrıntı modül başlığında).
   // `revizeBildirimiIste`: revize bildiriminin AYRI kuyruğunun isteyicisi (modül düzeyinde, kendi «hazır» bayrağıyla kurulur).
+  // Müşteri / bayi ekranı köprüsü (2026-10-21): bayi kod deposu (AYRI), bağ okuyucu ve ORTAK iptal çifti açıkça verilir; `bayiDonus`
+  // bayi yapılandırılmamışsa (dönüş adresi ya da iki anahtardan biri yok) `null`.
   magazaErpRoutes(app, {
     requireAuth, requireMfaVerified, dbLimiter, magazaYetkiKoduLimiter, magazaIcerikLimiter,
     belirtecIptalDenetle: (belirtec) => getAuth().verifyIdToken(belirtec, true),
@@ -4498,6 +4604,9 @@ async function startServer() {
     getPgPool: () => pgPool, broadcastDocChange, writeAuditLog, bildirimIste: magazaBildirimIste, revizeBildirimiIste: magazaRevizeBildirimIste,
     smtpYapilandirmasi: () => smtpYapilandirmasi(), serverTenantId,
     panelDonus: magazaPanelAnahtari === null ? null : magazaPanelDonusTabani,
+    iptal: magazaPanelIptal, magazaBayiYetkiKoduLimiter, magazaBayiHesapLimiter,
+    bayiKodDeposu: magazaBayiKodDeposu, musteriHesabi: musteriHesapOkuyucu.musteriHesabi,
+    bayiDonus: magazaBayiAnahtari === null || magazaBayiKimlikAnahtari === null ? null : magazaBayiDonusTabani,
   });
 
   opsRoutes(app, {
@@ -4560,6 +4669,16 @@ async function startServer() {
       deleteUser: (uid) => getAuth().deleteUser(uid),
       generatePasswordResetLink: (email) => getAuth().generatePasswordResetLink(email),
     },
+    // Müşteri hesabı (2026-10-21, H8): dış rol hesabı cari bağıyla açılır; silinirken önce erişim kapanır (ortak iptal örneği).
+    iptal: magazaPanelIptal,
+  });
+
+  // Müşteri / bayi hesabının cari bağı — YALNIZ Yönetici (2026-10-21, şartname «müşteri siparişlerim» H9; ayrıntı modülde).
+  // KONUM: öbür rota modülleriyle AYNI nokta (genel gövde ayrıştırıcıdan SONRA). İptal çifti ve Firebase yenileme iptali ORTAK.
+  musteriHesapRoutes(app, {
+    getAdminDb: adminDbZorunlu, getPgPool: () => pgPool, authLimiter, requireAuth, requireMfaVerified,
+    getUserRole, isSuperAdmin, reqActor, reqCompanyId, writeAuditLog,
+    iptal: magazaPanelIptal, firebaseYenilemeIptal,
   });
 
   reportsRoutes(app, {

@@ -254,6 +254,8 @@ async function kur(a: Ayar = {}): Promise<Duzenek> {
   app.use('/api/magaza', magazaZinciri({
     apiLimiter: (_i, _y, sonraki) => { d.sayim.apiLimiter += 1; sonraki(); },
     talepSinirlayici: sinirlayici(a.talepTavani ?? 1000, magaza429), durumSinirlayici: sinirlayici(1000, magaza429), panelZinciri,
+    // Müşteri / bayi alt zinciri (2026-10-21) bu düzenekte yok: davranışı magazaBayi.zincir.test.ts'te (gerçek server.ts).
+    bayiZinciri: (_i, y) => { y.status(404).json({ ok: false }); },
     getPgPool, serverTenantId, broadcastDocChange, bildirimIste, izinliKokenler: () => [IZINLI], simdi,
   }));
   app.use(express.json({ verify: () => { d.kacan.genelAyristirici += 1; } }));
@@ -292,6 +294,9 @@ async function kur(a: Ayar = {}): Promise<Duzenek> {
     smtpYapilandirmasi: () => a.smtp ?? { tamam: true, eksik: [], kip: 'kimlikli' }, serverTenantId,
     panelDonus: a.panelDonus === undefined ? DONUS : a.panelDonus, simdi,
     ...(a.elleNoUret !== undefined ? { elleNoUret: a.elleNoUret } : {}),
+    // Bayi köprüsü (2026-10-21): bu düzenek yalnız panel / ERP talep uçlarını sınar; bayi alanları yapılandırılmamış (503) verilir.
+    iptal: d.iptal, magazaBayiYetkiKoduLimiter: sinirlayici(1000, magazaYetkiKodu429), magazaBayiHesapLimiter: sinirlayici(1000, magazaYetkiKodu429),
+    bayiKodDeposu: kodDeposuKur({ simdi }), musteriHesabi: async () => null, bayiDonus: null,
   });
   app.use((_req, res) => { d.kacan.genel404 += 1; res.status(404).json({ error: 'Not found' }); });
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -2889,6 +2894,9 @@ describe('kaynak çitleri — magazaPanelZinciri.ts ve magazaErpRoutes.ts', () =
   it('ERP uçları: üç 2a talep ucu AYNI zincirde (`requireAuth` + `requireMfaVerified` + `C.dbLimiter`), üç 2b ucu `C.magazaIcerikLimiter` ile, yetki kodu kendi sınırlayıcısıyla; başka `app.` kaydı yok', () => {
     expect(erpSatirlari.map(s => s.trim()).filter(s => /^app\.\w+\(/.test(s))).toEqual([
       "app.post('/api/magaza-panel/yetki-kodu', onbelleksiz, C.requireAuth, C.requireMfaVerified, C.magazaYetkiKoduLimiter, iptalKapisi, yetkiKodu);",
+      // 2026-10-21 (müşteri siparişlerim H4): bayi köprüsünün iki ucu — kimlik + MFA → kendi kovaları → bayi iptal kapısı (kapalı başarısız).
+      "app.get('/api/magaza-bayi/hesap', onbelleksiz, C.requireAuth, C.requireMfaVerified, C.magazaBayiHesapLimiter, bayiIptalKapisi, bayiHesap);",
+      "app.post('/api/magaza-bayi/yetki-kodu', onbelleksiz, C.requireAuth, C.requireMfaVerified, C.magazaBayiYetkiKoduLimiter, bayiIptalKapisi, bayiYetkiKodu);",
       "app.post('/api/magaza-talepleri/:id/durum', C.requireAuth, C.requireMfaVerified, C.dbLimiter, durum);",
       "app.post('/api/magaza-talepleri/:id/kalem-teslim', C.requireAuth, C.requireMfaVerified, C.dbLimiter, kalemTeslim);",
       "app.post('/api/magaza-talepleri/:id/bildirim-gonder', C.requireAuth, C.requireMfaVerified, C.dbLimiter, bildirimGonder);",
@@ -2898,10 +2906,16 @@ describe('kaynak çitleri — magazaPanelZinciri.ts ve magazaErpRoutes.ts', () =
       "app.post('/api/magaza-talepleri/:id/sil', C.requireAuth, C.requireMfaVerified, C.magazaIcerikLimiter, sil);",
     ]);
     // Her uçta iki kapı da var ve sınırlayıcıdan ÖNCE (reddedilen istek kovaya sayılmaz).
-    for (const kayit of erpSatirlari.map(x => x.trim()).filter(x => /^app\.post\(/.test(x))) expect(kayit).toMatch(/C\.requireAuth, C\.requireMfaVerified, C\.(dbLimiter|magazaIcerikLimiter|magazaYetkiKoduLimiter), /);
+    for (const kayit of erpSatirlari.map(x => x.trim()).filter(x => /^app\.(post|get)\(/.test(x))) expect(kayit).toMatch(/C\.requireAuth, C\.requireMfaVerified, C\.(dbLimiter|magazaIcerikLimiter|magazaYetkiKoduLimiter|magazaBayiYetkiKoduLimiter|magazaBayiHesapLimiter), /);
     // İptal denetimi YALNIZ yetki kodu zincirinde, sınırlayıcıdan SONRA (tanım + zincir satırı); Firebase çağrısı TEK yerde ve
     // süre tavanının içinde. Panel zinciri Firebase belirteci görmez.
     expect(erpKodu.match(/\biptalKapisi\b/g)).toHaveLength(2);
+    // 2026-10-21: kapı TEK kurucudan (`iptalKapisiKur`) iki örnek — panel `'gec'`, bayi `'reddet'`; Firebase çağrısı yine TEK yerde.
+    expect(erpKodu.match(/\biptalKapisiKur\(/g)).toHaveLength(2);   // iki örnek
+    expect(erpKodu.match(/const iptalKapisiKur = /g)).toHaveLength(1);
+    expect(erpKodu).toMatch(/const iptalKapisi = iptalKapisiKur\(\{[\s\S]*?denetimsizse: 'gec',\s*\}\);/);
+    expect(erpKodu).toMatch(/const bayiIptalKapisi = iptalKapisiKur\(\{[\s\S]*?denetimsizse: 'reddet',\s*\}\);/);
+    expect(erpKodu.match(/\bbayiIptalKapisi\b/g)).toHaveLength(3);  // tanım + iki zincir
     expect(erpKodu.match(/belirtecIptalDenetle\(/g)).toHaveLength(1);
     expect(erpKodu).toContain('await sureli(C.belirtecIptalDenetle(belirtec), iptalDenetimiSuresi);');
     expect(panelKodu).not.toMatch(/belirtecIptalDenetle|iptalKapisi/);

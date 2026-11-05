@@ -12,6 +12,7 @@ import OpsWatchdogCard from './OpsWatchdogCard';
 import TrafikKarti from './TrafikKarti';
 import ModuleStatusBoard from './ModuleStatusBoard';
 import { oc } from '../i18n/ortak';
+import { EXTERNAL_ROLES } from '../lib/rbac';
 
 /** Kiracının KENDİ yedek kurulumu (2026-08-21: "her şirket kendi setup'ı"). */
 interface TenantBackup {
@@ -598,8 +599,9 @@ export default function SuperAdminPanel({ currentLanguage, toast }: Props) {
                       placeholder={tr ? 'yeni@kullanici.com' : 'new@user.com'}
                       className="apple-input flex-1 text-sm py-1.5"
                     />
+                    {/* Dış rol (B2B / Bayi) davetle AÇILMAZ (sunucu 400 `DIS_ROL_DAVETLE_ACILMAZ`, superadminRoutes; H7): seçenek de yok. */}
                     <select value={inviteRole} onChange={e => setInviteRole(e.target.value)} aria-label={tr ? 'Davet rolü' : 'Invite role'} className="apple-input text-sm py-1.5 w-28">
-                      {USER_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                      {USER_ROLES.filter(r => !(EXTERNAL_ROLES as readonly string[]).includes(r)).map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                     </select>
                     <button onClick={() => void inviteUser()} disabled={inviting || !inviteEmail.trim()} className="apple-button-secondary text-xs px-3 py-1.5 flex items-center gap-1 disabled:opacity-50 shrink-0">
                       <UserPlus className="w-3.5 h-3.5" />{inviting ? (oc(tr).gonderiliyor) : (tr ? 'Davet Et' : 'Invite')}

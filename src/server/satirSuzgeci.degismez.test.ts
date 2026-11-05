@@ -285,7 +285,13 @@ describe('sunucuda `orders` okuyan / yazan yerlerin SAYISI sabit', () => {
     'src/server/routes/reportsRoutes.ts': 1,
     'src/server/crons.ts': 1,
     // 2026-10-19 (takip kodu): tekil kısmi dizin DDL'i (`WHERE coll = 'orders'` — okuma / yazma değil).
-    'src/server/docsSema.ts': 1,
+    // 1 → 3 (2026-10-21, şartname «müşteri siparişlerim» H5): müşteri listesinin iki kısmi dizini (DDL — okuma / yazma değil).
+    'src/server/docsSema.ts': 3,
+    // 2026-10-21 (şartname «müşteri siparişlerim» H5 / H9 / H12): müşteri / bayi ekranının iki aşamalı liste okuması + Yönetici
+    // uyarısının MF sayımı — üçü de SALT OKUMA. Satır süzgeci `siparisGorebilir` DEĞİL, daha dar: bayi belirteç kapısı (dış rol,
+    // kiracı, açık bağ) + yüklemde bağdaki SABİT `leadId` / cari kodu + `companyId = kiracı` (başka cari / kiracı satırı gelmez);
+    // MF sayımı yalnız Yönetici kapılı `PUT /api/admin/musteri-hesaplari/:uid`'den çağrılır, yalnız sayı döner.
+    'src/server/kanal/magazaBayiSiparis.ts': 3,
     // 2026-10-19 (TF): durum e-postası siparişi okur — `requireStaff` + `orders` okuma + `siparisGorebilir`. 2026-10-21: okuma ortak
     // işleve taşındı (dosyada 0 — satır düştü).
     // 2026-10-21: `/api/db` dışındaki uçların sipariş okuması TEK işlevde — kimlikle oku + `siparisGorebilir` (kiracı, dış rolde

@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import { MAGAZA_PANEL_BAGLAN_YOLU } from '../lib/magazaPanelBaglan';
+import { MAGAZA_BAYI_BAGLAN_YOLU, MAGAZA_PANEL_BAGLAN_YOLU } from '../lib/magazaPanelBaglan';
 
 const sayfaGoruntulendi = vi.hoisted(() => vi.fn());
 vi.mock('../lib/trafik', () => ({ sayfaGoruntulendi }));
@@ -58,6 +58,28 @@ describe('useRouteSync — `/magaza-panel-baglan` yolunda adrese DOKUNMAZ', () =
 
   it('koruma TAM yol eşleşmesidir: alt yol ya da benzer ad korunmaz', () => {
     ciz(`${MAGAZA_PANEL_BAGLAN_YOLU}-x${PARCA}`, 'dashboard');
+    expect(konum()).toBe('/');
+  });
+});
+
+// Müşteri / bayi ekranı onay sayfası (2026-10-21, H16): aynı koruma. Bayi yolunda `#meydan=…&tur=…` girişten, «Çıkış yap» + yeniden girişten
+// ve iki adımlı doğrulamanın `reload`'undan sonra da yerinde kalmalı (yoksa onay düğmesi çizilmez).
+describe('useRouteSync — `/magaza-bayi-baglan` yolunda da adrese DOKUNMAZ', () => {
+  afterEach(() => { cleanup(); setActiveTab.mockReset(); sayfaGoruntulendi.mockReset(); });
+
+  it('açılışta ve sekme durumu değişse de (pano, siparişler) yol ve parça YERİNDE; adresten sekme türetilmez; sayaca yalnız yol gider', () => {
+    const { rerender } = ciz(`${MAGAZA_BAYI_BAGLAN_YOLU}${PARCA}`, 'dashboard');
+    expect(konum()).toBe(`/magaza-bayi-baglan${PARCA}`);
+    expect(setActiveTab).not.toHaveBeenCalled();
+    for (const sekme of ['orders', 'dashboard', 'admin']) {
+      rerender(<MemoryRouter initialEntries={[`${MAGAZA_BAYI_BAGLAN_YOLU}${PARCA}`]}><Sarmal sekme={sekme} /></MemoryRouter>);
+      expect(konum(), sekme).toBe(`/magaza-bayi-baglan${PARCA}`);
+    }
+    expect(sayfaGoruntulendi.mock.calls[0]).toEqual(['/magaza-bayi-baglan']);
+  });
+
+  it('koruma TAM yol eşleşmesidir: alt yol ya da benzer ad korunmaz (karşı örnek)', () => {
+    ciz(`${MAGAZA_BAYI_BAGLAN_YOLU}-x${PARCA}`, 'dashboard');
     expect(konum()).toBe('/');
   });
 });

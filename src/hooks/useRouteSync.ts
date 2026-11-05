@@ -16,6 +16,7 @@ import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { publicPageKey } from '../lib/publicPaths';
 import { MAGAZA_PANEL_BAGLAN_YOLU } from '../lib/magazaPanelBaglan';
+import { MAGAZA_BAYI_BAGLAN_YOLU } from '../lib/magazaPanelBaglan';
 import { TOP_LEVEL_TABS } from '../lib/topLevelTabs';
 import { sayfaGoruntulendi } from '../lib/trafik';
 
@@ -74,6 +75,9 @@ export function useRouteSync({ activeTab, setActiveTab }: RouteState) {
     // `#meydan=…&tur=…` parçasını siler; sayfa tembel yüklendiği için parametreleri girişten SONRA, ilk çiziminde okur —
     // parça o ana kadar yerinde kalmalı. Sekme durumu ne olursa olsun (klavye kısayolu, yetkisiz sekmeden panoya dönüş) geçerli.
     if (location.pathname === MAGAZA_PANEL_BAGLAN_YOLU) return;
+    // Müşteri / bayi ekranı onay sayfası (H16): aynı neden — `#meydan=…&tur=…` girişten (ya da «Çıkış yap» + yeniden girişten, iki adımlı
+    // doğrulamanın `reload`'undan) sonra da yerinde kalmalı; yoksa onay düğmesi çizilmez.
+    if (location.pathname === MAGAZA_BAYI_BAGLAN_YOLU) return;
     if (!TOP_LEVEL_TABS.has(activeTab)) return; // sub-tabs / modals: no URL change
     const target = tabToPath(activeTab);
     if (location.pathname !== target) {

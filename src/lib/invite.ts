@@ -43,7 +43,8 @@ export function clearPendingInvite(): void {
   try { sessionStorage.removeItem(ANAHTAR); } catch { /* yok say */ }
 }
 
-/** `/api/invites/redeem` İŞLEYİCİSİNİN davet hakkındaki kalıcı hükümleri: kod yok / başka e-posta / bulunamadı / kullanılmış / süresi dolmuş / rol geçersiz.
+/** `/api/invites/redeem` İŞLEYİCİSİNİN davet hakkındaki kalıcı hükümleri: kod yok / başka e-posta / bulunamadı / kullanılmış / süresi dolmuş / rol geçersiz
+ *  / dış rollü eski davet (409 `DIS_ROL_DAVETLE_ACILMAZ` — 2026-10-21: müşteri hesabı davetle açılmaz; istemci yeniden denemez, belirteci atar).
  *  Aynı durum kodu zincirdeki başka bir kapıdan da gelebilir (403: askıya alınmış firma) — ayırt edici gövdedeki `success: false`'tur. */
 const KALICI_RET: ReadonlySet<number> = new Set([400, 403, 404, 409, 410, 422]);
 

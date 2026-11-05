@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import { gorece, kaynakDosyalari, kodSatirlari, SRC_KOK } from '../test/kaynakTarama';
-import { MAGAZA_PANEL_BAGLAN_YOLU } from '../lib/magazaPanelBaglan';
+import { MAGAZA_BAYI_BAGLAN_YOLU, MAGAZA_PANEL_BAGLAN_YOLU } from '../lib/magazaPanelBaglan';
 
 const APP = kodSatirlari(join(SRC_KOK, 'App.tsx'));
 const KANCA = kodSatirlari(join(SRC_KOK, 'hooks', 'useRouteSync.ts'));
@@ -48,8 +48,10 @@ describe('onay sayfası App.tsx\'e bağlı — dört dokunuş (§ 5.3)', () => {
   });
 
   it('3. dokunuş — OTURUMSUZ → giriş sayfası: pazarlama sayfası koşulu `&& !baglanSayfasi` taşır; giriş bloğu hemen ardındaki dönüştür', () => {
-    const kosul = tek(APP, /^\s*if \(\(!showLoginPage \|\| user\) && !baglanSayfasi\) \{$/);
+    // 2026-10-21 (H16, bilerek değişti): koşul bayi onay sayfasını da taşır (`&& !bayiBaglanSayfasi`); panel kuralı aynen.
+    const kosul = tek(APP, /^\s*if \(\(!showLoginPage \|\| user\) && !baglanSayfasi && !bayiBaglanSayfasi\) \{$/);
     expect(satirNo(APP, /^\s*if \(!showLoginPage \|\| user\) \{$/)).toEqual([]);   // eski koşul kalmadı
+    expect(satirNo(APP, /^\s*if \(\(!showLoginPage \|\| user\) && !baglanSayfasi\) \{$/)).toEqual([]);
     const pazarlama = tek(APP, /^\s*<LandingPage$/);
     const giris = tek(APP, /^\s*if \(!user && !isGuestMode\) \{$/);
     expect(kosul).toBeGreaterThan(tek(APP, /^\s*if \(!isAuthReady\) return \($/));
@@ -90,5 +92,52 @@ describe('useRouteSync onay sayfası yolunda adrese dokunmaz — koruma «durum 
     expect(koruma).toBeLessThan(sekme);
     expect(sekme).toBeLessThan(gezin);
     expect(satirNo(KANCA, /\bnavigate\(/)).toEqual([gezin]);   // adresi değiştiren TEK çağrı korumanın arkasında
+  });
+});
+
+// ── Müşteri / bayi ekranı onay sayfası (2026-10-21, şartname «müşteri siparişlerim» H16) — panelin eşi, kendi kapısıyla ───────────────
+// Panelden FARKI: kapı giriş bloğundan sonra değil, ROL BLOĞUNDAN SONRA ve DIŞ ROL DALINDAN ÖNCE (dış rol hesabı bu yolda kilit ekranı
+// yerine onay sayfasını görür; rol çözülmeden çizilmez). Uygulama düzeyi davranış GERÇEK App ile `components/DisRolEkrani.uygulama.test.tsx`.
+describe('bayi onay sayfası App.tsx\'e bağlı (H16)', () => {
+  it('yol sabiti STATİK, sayfa TEMBEL; `bayiBaglanSayfasi` ilk yoldan türer ve üç kez geçer (türetim, pazarlama koşulu, kapı)', () => {
+    tek(APP, /^import \{ MAGAZA_BAYI_BAGLAN_YOLU \} from '\.\/lib\/magazaPanelBaglan';$/);
+    tek(APP, /^const MagazaBayiBaglanPage = React\.lazy\(\(\) => import\('\.\/pages\/MagazaBayiBaglanPage'\)\);$/);
+    expect(satirNo(APP, /from ['"]\.\/pages\/MagazaBayiBaglanPage['"]/)).toEqual([]);
+    expect(satirNo(APP, /\bMAGAZA_BAYI_BAGLAN_YOLU\b/)).toHaveLength(2);
+    expect(satirNo(APP, /magaza-bayi-baglan/)).toEqual([]);
+    const ilkYol = tek(APP, /^\s*const \[ilkYol\] = useState\(\(\) => window\.location\.pathname\);$/);
+    const sabit = tek(APP, /^\s*const bayiBaglanSayfasi = ilkYol === MAGAZA_BAYI_BAGLAN_YOLU;$/);
+    expect(sabit).toBeGreaterThan(ilkYol);
+    expect(sabit).toBeLessThan(tek(APP, /^\s*if \(!isAuthReady\) return \($/));
+    expect(satirNo(APP, /\bbayiBaglanSayfasi\b/)).toHaveLength(3);
+  });
+
+  it('kapı rol bloğundan SONRA, dış rol dalından ÖNCE; iki adımlı doğrulama beklerken çizilmez; sayfa yalnız dil + e-posta + çıkış işleyicisi alır', () => {
+    const rolBlogu = tek(APP, /^\s*if \(user && rolDurumu !== 'cozuldu'\) \{$/);
+    const kapi = tek(APP, /^\s*if \(bayiBaglanSayfasi && user && !mfaChallenge\) \{$/);
+    const sayfa = tek(APP, /<MagazaBayiBaglanPage\b/);
+    const disRol = tek(APP, /^\s*if \(disRolEkraniGosterilir\(/);
+    expect(kapi).toBeGreaterThan(rolBlogu);
+    expect(kapi).toBeLessThan(disRol);
+    expect(sayfa).toBeGreaterThan(kapi);
+    expect(sayfa).toBeLessThan(kapi + 5);
+    expect(APP[sayfa - 1].kod.trim()).toBe("<MagazaBayiBaglanPage currentLanguage={currentLanguage} eposta={user.email ?? ''} onCikis={handleLogout} davetHatasi={inviteError} />");
+    // Kapı ile dış rol dalı arasında başka koşul yok.
+    expect(satirNo(APP, /^\s*if \(/).filter(n => n >= kapi && n < disRol)).toEqual([kapi]);
+    expect(satirNo(APP, /disRolEkraniGosterilir\(/)).toHaveLength(1);
+  });
+
+  it('yol metni üretim kaynağında TEK yerde yazılır (sabit)', () => {
+    const tasiyanlar = kaynakDosyalari(SRC_KOK).filter(yol => kodSatirlari(yol).some(s => s.kod.includes(MAGAZA_BAYI_BAGLAN_YOLU)));
+    expect(tasiyanlar.map(gorece)).toEqual(['src/lib/magazaPanelBaglan.ts']);
+  }, 60_000);
+
+  it('useRouteSync bayi yolunda da adrese dokunmaz: koruma panel korumasının hemen ardında, sekme denetiminden önce', () => {
+    tek(KANCA, /^import \{ MAGAZA_BAYI_BAGLAN_YOLU \} from '\.\.\/lib\/magazaPanelBaglan';$/);
+    const panel = tek(KANCA, /^\s*if \(location\.pathname === MAGAZA_PANEL_BAGLAN_YOLU\) return;$/);
+    const bayi = tek(KANCA, /^\s*if \(location\.pathname === MAGAZA_BAYI_BAGLAN_YOLU\) return;$/);
+    const sekme = tek(KANCA, /^\s*if \(!TOP_LEVEL_TABS\.has\(activeTab\)\) return;/);
+    expect(bayi).toBeGreaterThan(panel);
+    expect(bayi).toBeLessThan(sekme);
   });
 });

@@ -34,4 +34,10 @@ export const DOCS_INDEKS_DDL = [
   // Kısmi: yalnız kodu olan sipariş satırları — dizin küçük kalır. Kurulamazsa boot düşmez (yukarıdaki not): tekillik o zaman
   // ~131 bitlik rastgeleliğe kalır; çakışma yeniden denemesi (23505) yalnız dizin varken tetiklenir.
   `CREATE UNIQUE INDEX IF NOT EXISTS docs_orders_takip_kodu ON docs ((data->>'takipKodu')) WHERE coll = 'orders' AND data ? 'takipKodu'`,
+  // MÜŞTERİ SİPARİŞLERİM (2026-10-21, şartname «müşteri siparişlerim» H5 / H12): müşteri ekranının liste yüklemi iki kollu
+  // (`leadId` ile Cetpa siparişi VEYA sabit cari koduyla Mikro faturası siparişi) — her kol kendi kısmi dizininden gelir (BitmapOr).
+  // WHERE metni sorgununkiyle BİREBİR (server/kanal/magazaBayiSiparis `BAYI_SIPARIS_YUKLEMI`): `data ? '…'` yazılmazsa planlayıcı
+  // kısmi dizini kullanamaz. İki dizinin de 1. kolonu `companyId`'dir.
+  `CREATE INDEX IF NOT EXISTS docs_orders_sirket_lead ON docs ((data->>'companyId'), (data->>'leadId')) WHERE coll = 'orders' AND data ? 'leadId'`,
+  `CREATE INDEX IF NOT EXISTS docs_orders_sirket_cari ON docs ((data->>'companyId'), (data->>'mikroCariKod')) WHERE coll = 'orders' AND data ? 'mikroCariKod'`,
 ] as const;

@@ -25,6 +25,7 @@ import { smtpYapilandirmasi, smtpDogrula } from './smtpPosta.js';
 import { ortamdanKiraci } from './kiraciOrtami.js';
 import { magazaSayaclari, magazaTakipSayaclari } from './routes/magazaRoutes.js';
 import { magazaPanelSayaclari } from './routes/magazaPanelZinciri.js';
+import { magazaBayiSayaclari } from './routes/magazaBayiZinciri.js';
 import {
   magazaAcikSayimi, magazaSilinmisSayimi, magazaYasMetni, MAGAZA_SILINMIS_PENCERESI_GUN, type MagazaAcikSayimi,
 } from './kanal/magazaAcikSayim.js';
@@ -69,6 +70,12 @@ export interface OpsDeps {
    * Biri yoksa `yetki-kodu` ve bütün `/api/magaza/panel/*` uçları 503 `panel-yapilandirilmamis` döner.
    */
   magazaPanelYapilandirmasi: () => { anahtarVar: boolean; donusVar: boolean };
+  /**
+   * Müşteri / bayi ekranı (2026-10-21, şartname «müşteri siparişlerim» H3) — AYNI kalıp: imza + sipariş kimliği anahtarı ikisi de
+   * VAR mı (`anahtarVar`) ve dönüş adresi (`MAGAZA_BAYI_DONUS`, varsayılan bayi.html) geçerli mi (`donusVar`). Yalnız varlık.
+   * Biri yoksa bayi köprüsünün ERP uçları ve bütün `/api/magaza/bayi/*` uçları 503 `bayi-yapilandirilmamis` döner.
+   */
+  magazaBayiYapilandirmasi: () => { anahtarVar: boolean; donusVar: boolean };
 }
 
 /** Kayit saklama sureleri. Hem bekci (asim var mi?) hem saklamaSuresiUygula
@@ -392,8 +399,21 @@ export const MAGAZA_PANEL_SAYAC_ETIKETLERI: Readonly<Record<string, string>> = {
   silPanel: 'silme (panel)', silPanel409: 'silme 409 (panel)', silErp: 'silme (ERP)', silErp409: 'silme 409 (ERP)',
   geriAl: 'geri alma', geriAl409: 'geri alma 409',
   elleTalep: 'elle talep', elleTalepCakisti: 'elle talep numara çakışması (503)',
-  cikisUidsiz: 'ERP çıkışında panel iptali atlandı (oturum çerezi yok)',
+  cikisUidsiz: 'ERP çıkışında panel iptali atlandı (çıkış kimliği çözülemedi)',
   r401: 'panel 401', r403: 'panel 403', r404: 'panel 404', r429: 'panel 429', r500: 'panel 500', r503: 'panel 503',
+};
+/**
+ * Müşteri / bayi ekranı sayaçları (2026-10-21; sözleşme: routes/magazaBayiZinciri.ts `magazaBayiSayaclari()` — panel kümesinden
+ * AYRI). `yetkiKoduIptalDenetlenemedi` sıfırdan büyükse bayi köprüsü Firebase iptal denetimini YAPAMAMIŞ ve kod VERMEMİŞTİR (503).
+ */
+export const MAGAZA_BAYI_SAYAC_ETIKETLERI: Readonly<Record<string, string>> = {
+  oturum: 'bayi oturumu', oturum401: 'bayi oturum reddi (401)', oturum503: 'bayi oturum 503',
+  yetkiKodu: 'bayi yetki kodu', yetkiKoduRet: 'bayi yetki kodu reddi',
+  yetkiKoduIptalDenetlenemedi: 'bayi yetki kodu Firebase iptal denetimi YAPILAMADI (kod verilmedi)',
+  hesap: 'bayi firma okuma', hesapRet: 'bayi firma okuma reddi',
+  ben: 'bayi hesap özeti', siparisler: 'bayi sipariş listesi', siparisAdayFazla: 'bayi listesi aday sınırı aşıldı',
+  cikis: 'bayi çıkışı', cikisFirebaseIptalYazilamadi: 'bayi çıkışında Firebase yenileme iptali yazılamadı',
+  r401: 'bayi 401', r403: 'bayi 403', r404: 'bayi 404', r429: 'bayi 429', r500: 'bayi 500', r503: 'bayi 503',
 };
 export const MAGAZA_TAKIP_SAYAC_ETIKETLERI: Readonly<Record<string, string>> = { bulundu: 'bulundu', bulunamadi: 'bulunamadı', silindi: 'silinmiş' };
 
@@ -478,26 +498,39 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
     parcalar.push({ ok: false, metin: `SMTP kontrol edilemedi (${hataKodu(e)})` });
   }
 
-  // (d) Site paneli yapılandırması. Anahtar dönüş adresinden türer (kanal/magazaPanelBelirtec.ts `panelAnahtariTuret`):
-  // adres geçersizse anahtar da yoktur — o durumda kök neden adrestir, sır hakkında hüküm verilmez. Ayrıntıya DEĞER
-  // yazılmaz (anahtar sırdır, adres ortam ayarıdır); yalnız hangisinin eksik olduğu ve ortam değişkeninin ADI.
-  try {
-    const panel: unknown = deps().magazaPanelYapilandirmasi();
-    const alan = (ad: string): unknown => (typeof panel === 'object' && panel !== null ? (panel as Record<string, unknown>)[ad] : undefined);
-    const donusVar = alan('donusVar');
-    const anahtarVar = alan('anahtarVar');
-    if (typeof donusVar !== 'boolean' || typeof anahtarVar !== 'boolean') {
-      parcalar.push({ ok: false, metin: 'site paneli yapılandırması OKUNAMADI' });
-    } else if (!donusVar) {
-      parcalar.push({ ok: false,
-        metin: 'SİTE PANELİ ÇALIŞMIYOR — dönüş adresi geçersiz: MAGAZA_PANEL_DONUS https olmalı, kullanıcı adı / sorgu / parça taşımamalı ve kökeni MAGAZA_IZINLI_KOKENLER listesinde bulunmalı; panel uçları 503 «panel-yapilandirilmamis» döner' });
-    } else if (!anahtarVar) {
-      parcalar.push({ ok: false,
-        metin: 'SİTE PANELİ ÇALIŞMIYOR — oturum sırrı yok (SESSION_TOKEN_SECRET ya da FIREBASE_PRIVATE_KEY tanımlı değil); panel uçları 503 «panel-yapilandirilmamis» döner' });
-    } else parcalar.push({ ok: true, metin: 'site paneli yapılandırılmış (anahtar ve dönüş adresi var)' });
-  } catch (e) {
-    parcalar.push({ ok: false, metin: `site paneli yapılandırması kontrol edilemedi (${hataKodu(e)})` });
-  }
+  // (d) Site paneli ve müşteri / bayi ekranı yapılandırması — TEK işlev, iki çağrı (2026-10-21, H3). Anahtar dönüş adresinden
+  // türer (kanal/magazaPanelBelirtec.ts `anahtarTuret`): adres geçersizse anahtar da yoktur — o durumda kök neden adrestir, sır
+  // hakkında hüküm verilmez. Ayrıntıya DEĞER yazılmaz (anahtar sırdır, adres ortam ayarıdır); yalnız hangisinin eksik olduğu ve
+  // ortam değişkeninin ADI. Okuyucu fırlatırsa ya da sözleşme dışı değer dönerse kırmızı.
+  const yapilandirmaParcasi = (g: { ad: string; baslik: string; oku: () => unknown; donusMetni: string; ucMetni: string; yesilMetni: string }): void => {
+    try {
+      const yapi: unknown = g.oku();
+      const alan = (ad: string): unknown => (typeof yapi === 'object' && yapi !== null ? (yapi as Record<string, unknown>)[ad] : undefined);
+      const donusVar = alan('donusVar');
+      const anahtarVar = alan('anahtarVar');
+      if (typeof donusVar !== 'boolean' || typeof anahtarVar !== 'boolean') {
+        parcalar.push({ ok: false, metin: `${g.ad} yapılandırması OKUNAMADI` });
+      } else if (!donusVar) {
+        parcalar.push({ ok: false, metin: `${g.baslik} — ${g.donusMetni}; ${g.ucMetni}` });
+      } else if (!anahtarVar) {
+        parcalar.push({ ok: false, metin: `${g.baslik} — oturum sırrı yok (SESSION_TOKEN_SECRET ya da FIREBASE_PRIVATE_KEY tanımlı değil); ${g.ucMetni}` });
+      } else parcalar.push({ ok: true, metin: g.yesilMetni });
+    } catch (e) {
+      parcalar.push({ ok: false, metin: `${g.ad} yapılandırması kontrol edilemedi (${hataKodu(e)})` });
+    }
+  };
+  yapilandirmaParcasi({
+    ad: 'site paneli', baslik: 'SİTE PANELİ ÇALIŞMIYOR', oku: () => deps().magazaPanelYapilandirmasi(),
+    donusMetni: 'dönüş adresi geçersiz: MAGAZA_PANEL_DONUS https olmalı, kullanıcı adı / sorgu / parça taşımamalı ve kökeni MAGAZA_IZINLI_KOKENLER listesinde bulunmalı',
+    ucMetni: 'panel uçları 503 «panel-yapilandirilmamis» döner',
+    yesilMetni: 'site paneli yapılandırılmış (anahtar ve dönüş adresi var)',
+  });
+  yapilandirmaParcasi({
+    ad: 'site bayi ekranı', baslik: 'SİTE BAYİ EKRANI ÇALIŞMIYOR', oku: () => deps().magazaBayiYapilandirmasi(),
+    donusMetni: 'dönüş adresi geçersiz: MAGAZA_BAYI_DONUS https olmalı, sorgu / parça taşımamalı, kökeni MAGAZA_IZINLI_KOKENLER listesinde olmalı',
+    ucMetni: 'bayi uçları 503 «bayi-yapilandirilmamis» döner',
+    yesilMetni: 'site bayi ekranı yapılandırılmış (anahtarlar ve dönüş adresi var)',
+  });
 
   // (b) Sayım. Kırmızı penceresindeki (son 7 gün ya da yaşı okunamayan) üç gitmeyen sayısından biri > 0 ise kırmızı;
   // pencereden eski gitmeyenler yalnız bilgi. Okunamayan sayı (bilgi sütunu dâhil) da kırmızıdır. İKİ alan AYRI sorguyla
@@ -595,6 +628,7 @@ async function magazaTalepKontrolu(): Promise<{ ok: boolean; detail: string }> {
   };
   sayacParcasi('panel sayaçları', magazaPanelSayaclari, MAGAZA_PANEL_SAYAC_ETIKETLERI);
   sayacParcasi('takip sayaçları', magazaTakipSayaclari, MAGAZA_TAKIP_SAYAC_ETIKETLERI);
+  sayacParcasi('bayi sayaçları', magazaBayiSayaclari, MAGAZA_BAYI_SAYAC_ETIKETLERI);
 
   // Bozuk parçalar başa: uyarı e-postasında satırın ilk okunan yeri neden olsun.
   const sirali = [...parcalar.filter(p => !p.ok), ...parcalar.filter(p => p.ok)];

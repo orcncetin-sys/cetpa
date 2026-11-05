@@ -2,7 +2,10 @@
 /**
  * scripts/verify-deploy.sh `post` — mağaza dilim 2a sondaları UÇTAN UCA (şartname § 7 «Yayın sonrası sondalar» 1-9) +
  * dilim 2b sondaları (§ 10.8 «Sondalar»: üç yeni ERP ucu iki listede, `bildirim-gonder?tur=revize`, panel silme ucu) +
- * «yeni sürüm» sondası (9; `.wf/SARTNAME-yeni-surum-bildirimi.md` S2) — aynı düzeneği kullandığı için bu dosyada.
+ * «yeni sürüm» sondası (9; `.wf/SARTNAME-yeni-surum-bildirimi.md` S2) — aynı düzeneği kullandığı için bu dosyada. +
+ * müşteri / bayi ekranı sondaları (2026-10-21, `.wf/SARTNAME-musteri-siparislerim.md` H19: ERP köprüsünün iki ucu, `/api/magaza/bayi/*`
+ * alt zinciri panel sondalarıyla AYNI kalıpla, ön uçuş, kökensiz POST) + bayi onay sayfasının istemci paketi sondası (`/magaza-bayi-baglan`,
+ * H16: 8. adımda panel yolunun yanında, aynı ana betikte).
  *
  * Betiğin `post` kipi GERÇEKTEN koşturulur (`bash scripts/verify-deploy.sh post`); `BASE_URL` bu dosyanın açtığı YEREL bir
  * sunucuyu gösterir (`listen(0)`), `gh` ve `git` PATH'e konan sahteleriyle değiştirilir. Canlıya / GitHub'a istek YOK.
@@ -39,9 +42,16 @@ const ERP_UCLARI = [
   '/api/magaza-talepleri',
   `/api/magaza-talepleri/${KIMLIK}/icerik`,
   `/api/magaza-talepleri/${KIMLIK}/sil`,
+  // Müşteri / bayi ekranının ERP köprüsü (2026-10-21, H19): yetki kodu.
+  '/api/magaza-bayi/yetki-kodu',
 ];
 /** Dilim 2b'nin üç yeni ERP ucu (2a sunucusunda YOK). */
-const ERP_UCLARI_2B = ERP_UCLARI.slice(4);
+const ERP_UCLARI_2B = ERP_UCLARI.slice(4, 7);
+/** Bayi köprüsünün POST ucu ve firma okuma ucu (GET; gövdesiz, POST listelerinde DEĞİL). */
+const BAYI_YETKI_UCU = ERP_UCLARI[7];
+const BAYI_HESAP_UCU = '/api/magaza-bayi/hesap';
+/** Belirteçsiz 401 beklenen bayi sondaları (H19; panel kalıbı). */
+const BAYI_SONDALARI = ['hesap özeti', 'liste', 'oturum', 'çıkış'];
 /** `bildirim-gonder` ucunun sorgu dizeli varyantı (2b): kimliksiz `{}` → 401 (400 = `tur` kapıdan önce ayrıştırılıyor). */
 const REVIZE_UCU = `/api/magaza-talepleri/${KIMLIK}/bildirim-gonder?tur=revize`;
 /** Belirteçsiz 401 beklenen panel sondaları (son ad dilim 2b). */
@@ -89,8 +99,17 @@ function saglikli(i: Istek): Yanit {
   if (i.yol === '/api/health') return json(200, { status: 'ok', postgres: true, uptime: 5 }, { 'ratelimit-remaining': String(kalanHak--) });
   if (i.yol === '/api/ops/runtime') return json(401, { error: 'Invalid or expired token.' });
   if (i.yol === '/') return { kod: 200, govde: ANA_SAYFA, basliklar: { 'content-type': 'text/html; charset=utf-8' } };
-  if (i.yol === ANA_BETIK) return { kod: 200, govde: 'const yollar=["/siparisler","/magaza-panel-baglan"],s="/api/surum";export{yollar,s};', basliklar: { 'content-type': 'text/javascript' } };
+  if (i.yol === ANA_BETIK) return { kod: 200, govde: 'const yollar=["/siparisler","/magaza-panel-baglan","/magaza-bayi-baglan"],s="/api/surum";export{yollar,s};', basliklar: { 'content-type': 'text/javascript' } };
   if (i.yol === '/api/surum' && i.yontem === 'GET') return json(200, { surum: SURUM }, { 'cache-control': 'no-store' });
+  // Bayi alt zinciri (H19): panelle aynı biçim — köken kapısı (kendi başlıkları) → [oturum] → belirteç kapısı (her şeye 401).
+  if (i.yol.startsWith('/api/magaza/bayi/')) {
+    if (!izinli) return json(403, { ok: false });
+    const cors = { 'access-control-allow-origin': KOKEN, 'cache-control': 'no-store' };
+    if (i.yontem === 'OPTIONS') return { kod: 204, basliklar: { ...cors, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'Authorization, Content-Type', 'access-control-max-age': '600' } };
+    return json(401, { ok: false }, cors);
+  }
+  // Bayi onay sayfasının firma okuma ucu (ERP kökeni, GET): kimlik kapısı arkasında.
+  if (i.yol === BAYI_HESAP_UCU && i.yontem === 'GET') return json(401, { error: 'Missing Authorization header.' });
   // Site paneli alt zinciri: köken kapısı (kendi başlıkları) → [oturum] → belirteç kapısı (her şeye 401).
   if (i.yol.startsWith('/api/magaza/panel/')) {
     if (!izinli) return json(403, { ok: false });
@@ -174,7 +193,7 @@ async function post(s: Senaryo = () => null): Promise<Kosu> {
 }
 
 const iceren = (satirlar: string[], ...parcalar: string[]): string[] => satirlar.filter(l => parcalar.every(p => l.includes(p)));
-const magazaIstekleri = (): Istek[] => istekler.filter(i => /^\/api\/magaza(-panel|-talepleri)?(\/|$)/.test(i.yol));
+const magazaIstekleri = (): Istek[] => istekler.filter(i => /^\/api\/magaza(-panel|-talepleri|-bayi)?(\/|$)/.test(i.yol));
 const sirali = (liste: string[]): string[] => [...liste].sort();
 
 // Betik bash ister; Windows'ta (yayın sunucusu) koşulmaz — CI derleme işi ubuntu'da koşturur.
@@ -197,10 +216,21 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
       expect(iceren(k.pass, 'gövde ayrıştırma zincirde', `${uc} (bozuk JSON -> 400)`), uc).toHaveLength(1);
       expect(iceren(k.pass, 'mağaza ERP ucu kayıtlı', `${uc} (kimliksiz {} -> 401)`), uc).toHaveLength(1);
     }
-    expect(ERP_UCLARI).toHaveLength(7);
+    expect(ERP_UCLARI).toHaveLength(8);
+    // Müşteri / bayi ekranı (H19): ERP köprüsünün GET ucu, dört belirteçsiz sonda, ön uçuş, kökensiz POST.
+    expect(iceren(k.pass, 'bayi ERP ucu kayıtlı', `GET ${BAYI_HESAP_UCU} (kimliksiz -> 401)`)).toHaveLength(1);
+    for (const ad of BAYI_SONDALARI) expect(iceren(k.pass, `site bayi ekranı ${ad}`, ': 401'), ad).toHaveLength(1);
+    expect(iceren(k.pass, 'site bayi ekranı ön uçuşu', 'Allow-Methods GET', 'Allow-Headers Authorization')).toHaveLength(1);
+    expect(iceren(k.pass, 'site bayi ekranı köken kapısı', 'kökensiz POST -> 403')).toHaveLength(1);
+    // Panel çıktısı ortak işleve geçince DEĞİŞMEDİ («site paneli <ad>: <kod>»).
+    expect(k.pass.filter(l => l.startsWith('PASS  site paneli ')).map(l => l.replace(/^PASS  /, '')).slice(0, 5)).toEqual([
+      'site paneli liste (belirteçsiz): 401', 'site paneli oturum (geçersiz kod): 401', 'site paneli kalem teslim (belirteçsiz): 401',
+      'site paneli etiket basıldı (belirteçsiz): 401', 'site paneli silme (belirteçsiz): 401',
+    ]);
     // Dilim 2b: sorgu dizeli varyant AYRI sondadır (kendi satırı, kendi teşhisi).
     expect(iceren(k.pass, 'revize bildirimi kimlik kapısı arkasında', `${REVIZE_UCU} (kimliksiz {} -> 401)`)).toHaveLength(1);
     expect(iceren(k.pass, 'istemci derlemesi', ANA_BETIK, '/magaza-panel-baglan')).toHaveLength(1);
+    expect(iceren(k.pass, 'istemci derlemesi bayi ekranı onay sayfasının yolunu taşıyor', ANA_BETIK, '/magaza-bayi-baglan')).toHaveLength(1);   // H16
   });
 
   it('sondalar canlıya YAZMAZ: hiçbir mağaza / panel / ERP isteği kimlik, belirteç ya da çerez taşımaz; gövdeler sabittir; istek kümesi kapalıdır', async () => {
@@ -234,13 +264,22 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
       'OPTIONS /api/magaza/siparis-talebi ',
       ...ERP_UCLARI.map(uc => `POST ${uc} {bozuk`),
       ...ERP_UCLARI.map(uc => `POST ${uc} {}`),
+      // müşteri / bayi ekranı (H19): köprünün GET ucu + alt zincirin dört belirteçsiz sondası + ön uçuş + kökensiz POST
+      `GET ${BAYI_HESAP_UCU} `,
+      'GET /api/magaza/bayi/ben ',
+      'GET /api/magaza/bayi/siparisler ',
+      `POST /api/magaza/bayi/oturum {"kod":"${'A'.repeat(43)}","dogrulayici":"${'A'.repeat(43)}"}`,
+      'POST /api/magaza/bayi/cikis {}',
+      'OPTIONS /api/magaza/bayi/siparisler ',
+      'POST /api/magaza/bayi/cikis {}',
     ]));
     // Ön uçuşlar şartnamedeki istek başlıklarıyla: panel ve dış zincir AYNI başlıkla sorulur (fark yanıttadır).
     const onUcus = m.filter(i => i.yontem === 'OPTIONS' && i.basliklar['access-control-request-method'] === 'GET');
-    expect(sirali(onUcus.map(i => i.yol))).toEqual(['/api/magaza/panel/siparisler', '/api/magaza/siparis-talebi']);
+    expect(sirali(onUcus.map(i => i.yol))).toEqual(['/api/magaza/bayi/siparisler', '/api/magaza/panel/siparisler', '/api/magaza/siparis-talebi']);
     for (const i of onUcus) expect(i.basliklar['access-control-request-headers']).toBe('authorization,content-type');
-    // Kökensiz tek istek dilim 1'in köken kapısı sondasıdır; panel sondalarının hepsi izinli kökenle gider.
-    expect(m.filter(i => i.yol.startsWith('/api/magaza/') && i.basliklar.origin !== KOKEN).map(i => `${i.yontem} ${i.yol} ${i.govde}`)).toEqual(['POST /api/magaza/siparis-talebi {}']);
+    // Kökensiz iki istek: dilim 1'in ve bayi alt zincirinin köken kapısı sondaları; panel ve öbür bayi sondaları izinli kökenle gider.
+    expect(m.filter(i => i.yol.startsWith('/api/magaza/') && i.basliklar.origin !== KOKEN).map(i => `${i.yontem} ${i.yol} ${i.govde}`))
+      .toEqual(['POST /api/magaza/siparis-talebi {}', 'POST /api/magaza/bayi/cikis {}']);
     // Sabit sonda kimliği gerçek bir talep kimliği BİÇİMİNDE (rota kimlik denetimine takılmaz), ama hiçbir talebe karşılık gelmez.
     expect(MAGAZA_TALEP_KIMLIK_DESENI.test(KIMLIK)).toBe(true);
   });
@@ -249,17 +288,21 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     const k = await post((i): Yanit | null => {
       const cors = { 'access-control-allow-origin': KOKEN };
       if (i.yol === '/api/magaza/siparis-durumu' && i.basliklar.origin === KOKEN && jsonMu(i.govde)) return json(503, { ok: false, kod: 'hazir-degil' }, cors);
-      // Dilim 1'de `/panel` alt zinciri yok: istek dış zincirin köken kapısına düşer (ön uçuş POST + Content-Type), rota-yok 404.
-      if (i.yol.startsWith('/api/magaza/panel/') && i.basliklar.origin === KOKEN) {
+      // Dilim 1'de `/panel` ve `/bayi` alt zinciri yok: istek dış zincirin köken kapısına düşer (ön uçuş POST + Content-Type), rota-yok 404.
+      if (/^\/api\/magaza\/(panel|bayi)\//.test(i.yol) && i.basliklar.origin === KOKEN) {
         if (i.yontem === 'OPTIONS') return { kod: 204, basliklar: { ...cors, 'access-control-allow-methods': 'POST', 'access-control-allow-headers': 'Content-Type' } };
         return json(404, { ok: false }, cors);
       }
       if ((ERP_UCLARI.includes(i.yol) || i.yol === REVIZE_UCU) && jsonMu(i.govde)) return json(404, { error: 'yok' });
+      if (i.yol === BAYI_HESAP_UCU) return json(404, { error: 'yok' });
       if (i.yol === ANA_BETIK) return { kod: 200, govde: 'const yollar=["/siparisler"];export{yollar};', basliklar: { 'content-type': 'text/javascript' } };
       return null;
     });
     expect(k.kod).toBe(1);
     expect(k.cikti).toContain('== verify-deploy post: BASARISIZ KONTROL VAR ==');
+    for (const ad of BAYI_SONDALARI) expect(iceren(k.fail, `site bayi ekranı ${ad}`, '404', 'alt zincir bağlı değil', "r.use('/bayi'"), ad).toHaveLength(1);
+    expect(iceren(k.fail, 'site bayi ekranı ön uçuşu', 'beklenen 204')).toHaveLength(1);
+    expect(iceren(k.fail, 'BAYİ ERP UCU KAYITLI DEĞİL', `GET ${BAYI_HESAP_UCU} -> 404`)).toHaveLength(1);
     expect(iceren(k.fail, 'takip ucu', 'hazir-degil', 'dilim 1 hâlâ canlıda')).toHaveLength(1);
     for (const ad of PANEL_SONDALARI) expect(iceren(k.fail, `site paneli ${ad}`, '404', 'alt zincir bağlı değil'), ad).toHaveLength(1);
     expect(iceren(k.fail, 'MAĞAZA ERP UCU KAYITLI DEĞİL', `${REVIZE_UCU} -> 404`)).toHaveLength(1);
@@ -270,9 +313,15 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
       expect(iceren(k.pass, 'gövde ayrıştırma zincirde', `${uc} (bozuk JSON -> 400)`), uc).toHaveLength(1);
     }
     expect(iceren(k.fail, 'İSTEMCİ DERLEMESİNDE /magaza-panel-baglan YOK', ANA_BETIK)).toHaveLength(1);
+    expect(iceren(k.fail, 'İSTEMCİ DERLEMESİNDE /magaza-bayi-baglan YOK', ANA_BETIK)).toHaveLength(1);
     // Dış zincir ön uçuşu dilim 1'de de doğrudur (Authorization yok): yanlış FAIL yazılmaz.
     expect(iceren(k.pass, 'dış zinciri ön uçuşu')).toHaveLength(1);
     expect(k.pass.filter(l => /takip ucu|site paneli|istemci derlemesi|ERP ucu kayıtlı|revize bildirimi/.test(l))).toEqual([]);
+    // Bayi tarafında yalnız köken kapısı satırı yeşil: kökensiz POST dış zincirde de 403'tür (o satır «bağlı mı»yı ölçmez). Bozuk JSON
+    // sondası da yeşildir: rotanın yokluğunu göremez (gövde hatası rota eşleşmesinden önce fırlar) — o yüzden iki liste de var.
+    expect(k.pass.filter(l => /bayi/.test(l))).toEqual([
+      `PASS  gövde ayrıştırma zincirde: ${BAYI_YETKI_UCU} (bozuk JSON -> 400)`, 'PASS  site bayi ekranı köken kapısı: kökensiz POST -> 403',
+    ]);
   });
 
   it('canlıda hâlâ DİLİM 2a (2b yayınlanmamış): üç yeni ERP ucu 404 → her biri FAIL «KAYITLI DEĞİL»; 2a sondaları yeşil kalır — belirteçsiz panel silme ve kimliksiz `?tur=revize` 2a\'da da 401\'dir (kapı rota eşleşmesinden önce)', async () => {
@@ -368,13 +417,21 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
       if (i.yontem === 'OPTIONS' && i.yol === '/api/magaza/panel/siparisler' && i.basliklar.origin === KOKEN) {
         return { kod: 204, basliklar: { 'access-control-allow-origin': KOKEN, 'access-control-allow-methods': 'POST, GET', 'access-control-allow-headers': 'content-type, authorization' } };
       }
-      if (i.yol === ANA_BETIK) return { kod: 200, govde: `${'x'.repeat(300_000)};const p="/magaza-panel-baglan#meydan",s="/api/surum";${'y'.repeat(1000)}`, basliklar: { 'content-type': 'text/javascript' } };
+      if (i.yol === ANA_BETIK) return { kod: 200, govde: `${'x'.repeat(300_000)};const p="/magaza-panel-baglan#meydan",s="/api/surum";${'y'.repeat(1000)};const b="/magaza-bayi-baglan#meydan";`, basliklar: { 'content-type': 'text/javascript' } };
       return null;
     });
     expect(k.fail, k.cikti).toEqual([]);
     expect(k.kod).toBe(0);
     expect(iceren(k.pass, 'site paneli ön uçuşu')).toHaveLength(1);
-    expect(iceren(k.pass, 'istemci derlemesi')).toHaveLength(1);
+    expect(iceren(k.pass, 'istemci derlemesi')).toHaveLength(2);   // panel + bayi (H16)
+  });
+
+  it('(H16) bayi onay sayfası istemciye bağlanmamış (ana betikte panel yolu VAR, bayi yolu YOK) → TEK FAIL «/magaza-bayi-baglan YOK»; panel sondası yeşil kalır', async () => {
+    const k = await post((i): Yanit | null => (i.yol === ANA_BETIK ? { kod: 200, govde: 'const yollar=["/siparisler","/magaza-panel-baglan"],s="/api/surum";export{yollar,s};', basliklar: { 'content-type': 'text/javascript' } } : null));
+    expect(k.kod).toBe(1);
+    expect(k.fail).toHaveLength(1);
+    expect(iceren(k.fail, 'İSTEMCİ DERLEMESİNDE /magaza-bayi-baglan YOK', ANA_BETIK, 'onay sayfası')).toHaveLength(1);
+    expect(iceren(k.pass, 'istemci derlemesi «ERP ile bağlan» sayfasının yolunu taşıyor', '/magaza-panel-baglan')).toHaveLength(1);
   });
 
   it('SPA yedeği tuzağı: ana betik adresi 200 + index.html dönse de (dosya yok, yedek devrede) yol metni olmadığı için FAIL; `GET /magaza-panel-baglan` HİÇ istenmez (200 kanıt değildir)', async () => {
@@ -382,9 +439,10 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     const k = await post((i): Yanit | null => (i.yol === ANA_BETIK ? { kod: 200, govde: sayfa, basliklar: { 'content-type': 'text/html' } } : null));
     expect(k.kod).toBe(1);
     expect(iceren(k.fail, 'İSTEMCİ DERLEMESİNDE /magaza-panel-baglan YOK')).toHaveLength(1);
+    expect(iceren(k.fail, 'İSTEMCİ DERLEMESİNDE /magaza-bayi-baglan YOK')).toHaveLength(1);                             // H16: aynı tuzak, kendi satırı
     expect(iceren(k.fail, 'sürüm ucu', 'ana betikte /api/surum YOK')).toHaveLength(1);                                   // 9: yedek HTML şeridin bağını da taşımaz
-    expect(k.fail).toHaveLength(2);
-    expect(istekler.filter(i => i.yol.startsWith('/magaza-panel-baglan'))).toEqual([]);
+    expect(k.fail).toHaveLength(3);   // 2026-10-21: bayi istemci sondası eklendi (bilerek 2 → 3)
+    expect(istekler.filter(i => i.yol.startsWith('/magaza-panel-baglan') || i.yol.startsWith('/magaza-bayi-baglan'))).toEqual([]);
   });
 
   it('429 (bu IP kovayı doldurdu) PASS sayılmaz ama «bozuk» da denmez: ÖLÇÜLEMEDİ', async () => {
@@ -396,6 +454,81 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — mağaza
     expect(iceren(k.fail, 'takip ucu ÖLÇÜLEMEDİ: 429')).toHaveLength(1);
     expect(iceren(k.fail, 'site paneli', 'ÖLÇÜLEMEDİ: 429')).toHaveLength(PANEL_SONDALARI.length);
     expect(k.fail).toHaveLength(6);
+  });
+});
+
+// ── Müşteri / bayi ekranı sondaları (H19): aynı düzenek; bayi zinciri sahte sunucudan çıkarılınca betik KIRMIZI ──────────────
+describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — müşteri / bayi ekranı sondaları (H19)', { timeout: 60_000 }, () => {
+  /** Bayi alt zinciri hiç bağlı değil (Tur 1 sunucusu yayında değil): istek dış zincirin köken kapısına düşer, köprü uçları 404. */
+  const bayiZinciriYok = (i: Istek): Yanit | null => {
+    const cors = { 'access-control-allow-origin': KOKEN };
+    if (i.yol.startsWith('/api/magaza/bayi/') && i.basliklar.origin === KOKEN) {
+      if (i.yontem === 'OPTIONS') return { kod: 204, basliklar: { ...cors, 'access-control-allow-methods': 'POST', 'access-control-allow-headers': 'Content-Type' } };
+      return json(404, { ok: false }, cors);
+    }
+    if ((i.yol === BAYI_YETKI_UCU && jsonMu(i.govde)) || i.yol === BAYI_HESAP_UCU) return json(404, { error: 'yok' });
+    return null;
+  };
+
+  it('bayi zinciri YOK (sahte sunucudan çıkarıldı): dört bayi sondası 404 «alt zincir bağlı değil» + `r.use(\'/bayi\'`, ön uçuş FAIL, iki köprü ucu 404 → betik KIRMIZI; panel sondaları yeşil', async () => {
+    const k = await post(bayiZinciriYok);
+    expect(k.kod).toBe(1);
+    expect(k.cikti).toContain('== verify-deploy post: BASARISIZ KONTROL VAR ==');
+    for (const ad of BAYI_SONDALARI) {
+      expect(iceren(k.fail, `site bayi ekranı ${ad}`, '404', 'alt zincir bağlı değil', "r.use('/bayi', …)", 'magazaBayiZinciri'), ad).toHaveLength(1);
+    }
+    expect(iceren(k.fail, 'site bayi ekranı ön uçuşu', 'beklenen 204', "gelen kod '204'")).toHaveLength(1);
+    expect(k.cikti).toContain("Allow-Methods yalnız POST ise bayi alt zinciri bağlı değil");
+    expect(iceren(k.fail, 'MAĞAZA ERP UCU KAYITLI DEĞİL', `${BAYI_YETKI_UCU} -> 404`)).toHaveLength(1);
+    expect(iceren(k.fail, 'BAYİ ERP UCU KAYITLI DEĞİL', `GET ${BAYI_HESAP_UCU} -> 404`)).toHaveLength(1);
+    expect(k.fail).toHaveLength(BAYI_SONDALARI.length + 3);           // başka hiçbir sonda düşmedi
+    for (const ad of PANEL_SONDALARI) expect(iceren(k.pass, `site paneli ${ad}`), ad).toHaveLength(1);
+  });
+
+  it('bayi YAPILANDIRILMAMIŞ: dört sonda 503 bayi-yapilandirilmamis → FAIL ve `MAGAZA_BAYI_DONUS`u anar (panel ortam adı DEĞİL); ön uçuş yapılandırma kapısından ÖNCE biter (yeşil)', async () => {
+    const k = await post((i): Yanit | null => {
+      if (i.yol.startsWith('/api/magaza/bayi/') && i.basliklar.origin === KOKEN && i.yontem !== 'OPTIONS') {
+        return json(503, { ok: false, kod: 'bayi-yapilandirilmamis' }, { 'access-control-allow-origin': KOKEN, 'cache-control': 'no-store' });
+      }
+      return null;
+    });
+    expect(k.kod).toBe(1);
+    const bayi = iceren(k.fail, 'SİTE BAYİ EKRANI YAPILANDIRILMAMIŞ', '503 bayi-yapilandirilmamis', 'MAGAZA_BAYI_DONUS');
+    expect(bayi).toHaveLength(BAYI_SONDALARI.length);
+    for (const ad of BAYI_SONDALARI) expect(bayi.filter(l => l.includes(ad)), ad).toHaveLength(1);
+    expect(k.cikti).not.toMatch(/SİTE BAYİ EKRANI[^\n]*MAGAZA_PANEL_DONUS/);
+    expect(k.fail).toHaveLength(BAYI_SONDALARI.length);
+    expect(iceren(k.pass, 'site bayi ekranı ön uçuşu')).toHaveLength(1);
+  });
+
+  it('bayi tekil arızalar: kökensiz POST 401 (belirteç kapısı köken kapısından önce) · `cikis` 415 (kapı gövdeden sonra) · ön uçuşta Authorization yok · `oturum` 500 → her biri kendi teşhisiyle FAIL', async () => {
+    const k = await post((i): Yanit | null => {
+      const cors = { 'access-control-allow-origin': KOKEN };
+      if (i.yol === '/api/magaza/bayi/cikis' && i.basliklar.origin === undefined) return json(401, { ok: false });
+      if (i.yol === '/api/magaza/bayi/cikis' && i.basliklar.origin === KOKEN) return json(415, { ok: false }, cors);
+      if (i.yontem === 'OPTIONS' && i.yol === '/api/magaza/bayi/siparisler') return { kod: 204, basliklar: { ...cors, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'Content-Type' } };
+      if (i.yol === '/api/magaza/bayi/oturum' && i.yontem === 'POST') return json(500, { ok: false }, cors);
+      return null;
+    });
+    expect(k.kod).toBe(1);
+    expect(iceren(k.fail, 'site bayi ekranı köken kapısı', 'kökensiz POST -> 401', 'köken kapısından ÖNCE')).toHaveLength(1);
+    expect(iceren(k.fail, 'site bayi ekranı çıkış', '415', 'belirteç kapısı gövdeden SONRA')).toHaveLength(1);
+    expect(iceren(k.fail, 'site bayi ekranı ön uçuşu', 'beklenen 204')).toHaveLength(1);
+    expect(iceren(k.fail, 'site bayi ekranı oturum', 'beklenen 401, gelen 500')).toHaveLength(1);
+    expect(k.fail).toHaveLength(4);
+    for (const ad of ['hesap özeti', 'liste']) expect(iceren(k.pass, `site bayi ekranı ${ad}`), ad).toHaveLength(1);
+  });
+
+  it('bayi 429 → ÖLÇÜLEMEDİ (bozuk denmez); köprünün GET ucu 200 (kimlik kapısı yok) → FAIL', async () => {
+    const k = await post((i): Yanit | null => {
+      if (i.yol.startsWith('/api/magaza/bayi/') && i.yontem !== 'OPTIONS' && i.basliklar.origin === KOKEN) return json(429, { ok: false }, { 'access-control-allow-origin': KOKEN });
+      if (i.yol === BAYI_HESAP_UCU) return json(200, { firma: 'x' });
+      return null;
+    });
+    expect(k.kod).toBe(1);
+    expect(iceren(k.fail, 'site bayi ekranı', 'ÖLÇÜLEMEDİ: 429')).toHaveLength(BAYI_SONDALARI.length);
+    expect(iceren(k.fail, 'bayi ERP ucu sondası beklenmedik yanıt: 200', BAYI_HESAP_UCU)).toHaveLength(1);
+    expect(k.fail).toHaveLength(BAYI_SONDALARI.length + 1);
   });
 });
 
@@ -448,7 +581,7 @@ describe.skipIf(process.platform === 'win32')('verify-deploy.sh post — «yeni 
   });
 
   it('ana betik /api/surum\'u sormuyor (şerit istemciye bağlanmamış) → FAIL', async () => {
-    tekFail(await post((i): Yanit | null => (i.yol === ANA_BETIK ? { kod: 200, govde: 'const yollar=["/siparisler","/magaza-panel-baglan"];export{yollar};', basliklar: { 'content-type': 'text/javascript' } } : null)),
+    tekFail(await post((i): Yanit | null => (i.yol === ANA_BETIK ? { kod: 200, govde: 'const yollar=["/siparisler","/magaza-panel-baglan","/magaza-bayi-baglan"];export{yollar};', basliklar: { 'content-type': 'text/javascript' } } : null)),
       'ana betikte /api/surum YOK', 'bağlanmamış');
   });
 });
@@ -493,6 +626,34 @@ describe('verify-deploy.sh — mağaza dilim 2a + 2b sondaları (kaynak çitleri
     expect(MAGAZA_PANEL_43_DESENI.test('A'.repeat(43))).toBe(true);
   });
 
+  it('(H19) bayi oturum sondasının gövdesi panelinkiyle AYNI ve rota şemasına UYAR; bayi sondaları ortak işlevden, panel kalıbıyla', () => {
+    const panel = /-d '(\{"kod":"[^']+\})' "\$PU\/oturum"/.exec(metin);
+    const bayi = /-d '(\{"kod":"[^']+\})' "\$BU\/oturum"/.exec(metin);
+    expect(bayi).not.toBeNull();
+    expect(bayi?.[1]).toBe(panel?.[1]);
+    expect(PanelOturumGovdesi.safeParse(JSON.parse(bayi?.[1] ?? '{}')).success).toBe(true);
+    expect(metin).toContain('BU="$MU/bayi"');
+    // Türe özgü dört değer TEK tabloda; panel satırı eski metinleri AYNEN üretir.
+    expect(metin).toContain(`panel) ZET="site paneli"; ZETB="SİTE PANELİ"; ZISARET="panel-yapilandirilmamis"; ZORTAM="MAGAZA_PANEL_DONUS"; ZRUSE="/panel"; ZMODUL="magazaPanelZinciri" ;;`);
+    expect(metin).toContain(`bayi)  ZET="site bayi ekranı"; ZETB="SİTE BAYİ EKRANI"; ZISARET="bayi-yapilandirilmamis"; ZORTAM="MAGAZA_BAYI_DONUS"; ZRUSE="/bayi"; ZMODUL="magazaBayiZinciri" ;;`);
+    expect(kod.filter(s => /^\s*(panel|bayi)_sonda\(\) \{ zincir_sonda (panel|bayi) "\$@"; \}$/.test(s))).toHaveLength(2);
+    expect(kod.filter(s => /^\s*PY=\$\(curl /.test(s))).toHaveLength(1);   // tek curl satırı: iki tür AYNI istekle ölçülür
+    expect(metin.split('bayi_sonda "').length - 1).toBe(BAYI_SONDALARI.length);
+    expect(metin).toContain(`bayi_sonda "çıkış (belirteçsiz)" 401 -X POST -H "Content-Type: application/json" -d '{}' "$BU/cikis"`);
+    expect(metin).toContain(`BAYI_HESAP_PROBE="${BAYI_HESAP_UCU}"`);
+  });
+
+  // 2026-10-21 (B parçası, H16 — BİLEREK ÇEVRİLDİ): A parçasında bu çit «istemci kaynağında yol YOK, betikte sonda YOK» diyordu ve yol
+  // yazılınca kırmızıya dönüp sondayı hatırlatacaktı. Yol artık istemcide (tek yer: lib/magazaPanelBaglan); sonda 8. adımda.
+  it('(H19 + H16) bayi onay sayfasının istemci paketi sondası 8. adımda: yol metni ANA BETİKTE aranır (SPA yedeğine güvenilmez), yol istemci kaynağında TEK yerde', () => {
+    const YOL = '/magaza-bayi-baglan';
+    const istemci = kaynakDosyalari(SRC_KOK).filter(d => !/\/src\/(server|test)\//.test(d));
+    expect(istemci.filter(d => kodSatirlari(d).some(k => k.kod.includes(YOL))).map(gorece)).toEqual(['src/lib/magazaPanelBaglan.ts']);
+    expect(metin).toContain(`grep -q '/magaza-bayi-baglan' "$IDOSYA"`);
+    expect(metin).not.toMatch(/curl[^\n]*"\$BASE_URL\/magaza-bayi-baglan/);
+    expect(metin.split("'/magaza-bayi-baglan'").length - 1).toBe(1);
+  }, 60_000);
+
   it('panel sondaları sabit sahte talep kimliğiyle ve izinli kökenle gider; takip sondasının gövdesi tek yerde', () => {
     expect(metin).toContain(`PANEL_SIFIR="${KIMLIK}"`);
     expect(metin).toContain('"$PU/siparisler/$PANEL_SIFIR/kalem-teslim"');
@@ -510,14 +671,13 @@ describe('verify-deploy.sh — mağaza dilim 2a + 2b sondaları (kaynak çitleri
     expect(metin).toContain('rm -f "$IDOSYA"');
   });
 
-  it('istemci sondasının VARSAYIMI: yol metni giriş betiğinin STATİK içe aktarım kapanışındadır (yalnız tembel yüklenen bir sayfada dursaydı sonda canlıda yanlış FAIL verirdi)', () => {
-    const YOL = '/magaza-panel-baglan';
+  it.each(['/magaza-panel-baglan', '/magaza-bayi-baglan'])('istemci sondasının VARSAYIMI (%s): yol metni giriş betiğinin STATİK içe aktarım kapanışındadır (yalnız tembel yüklenen bir sayfada dursaydı sonda canlıda yanlış FAIL verirdi)', (YOL) => {
     const yoluTasiyan = (dosya: string): boolean => kodSatirlari(dosya).some(k => k.kod.includes(YOL));
     // İstemci kaynakları: `src/` altında sunucu ve test yardımcıları dışındaki her şey.
     const istemci = kaynakDosyalari(SRC_KOK).filter(d => !/\/src\/(server|test)\//.test(d));
     const tasiyanlar = istemci.filter(yoluTasiyan);
     // Onay sayfası (§ 5.3) yoksa çit KIRMIZIDIR (atlanmaz): sonda 7 bunu canlıda ancak kesintili yayından SONRA görürdü.
-    expect(tasiyanlar.map(gorece), 'istemci kaynağında /magaza-panel-baglan yok: onay sayfası (§ 5.3) yazılmadı ya da yol sabiti istemci kaynağından çıktı — sonda 7 canlıda FAIL verir').not.toEqual([]);
+    expect(tasiyanlar.map(gorece), `istemci kaynağında ${YOL} yok: onay sayfası yazılmadı ya da yol sabiti istemci kaynağından çıktı — sonda canlıda FAIL verir`).not.toEqual([]);
     // Giriş betiğinden (`index.html` → `src/main.tsx`) STATİK içe aktarımlarla erişilen dosyalar: Vite bunları ana betiğe
     // (`/assets/index-….js`) ya da onun ön yüklediği parçalara koyar; `import(…)` / `lazy(…)` hedefleri ayrı parçadır.
     const coz = (kimden: string, hedef: string): string | null => {

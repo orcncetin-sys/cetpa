@@ -66,7 +66,8 @@ describe('zincirin YERİ', () => {
   });
   it('zincire giden bağlam: genel sınırlayıcının KENDİSİ, iki AYRI mağaza sınırlayıcısı, panel alt zinciri, ham havuz, kiracı çözümleyici, yayın, bildirim', () => {
     // Dilim 2a: + `panelZinciri` (BİREBİR yeniden yazıldı; takip sayaçları için geri çağrı YOK — işlev rota modülünde).
-    expect(kod).toMatch(/magazaZinciri\(\{\s*apiLimiter, talepSinirlayici: magazaTalepLimiter, durumSinirlayici: magazaDurumLimiter, panelZinciri: magazaPanel,\s*getPgPool: \(\) => pgPool, serverTenantId, broadcastDocChange, bildirimIste: magazaBildirimIste,\s*\}\)\);/);
+    // 2026-10-21 (müşteri siparişlerim H11): + `bayiZinciri: magazaBayi,` (bilerek değişen çit).
+    expect(kod).toMatch(/magazaZinciri\(\{\s*apiLimiter, talepSinirlayici: magazaTalepLimiter, durumSinirlayici: magazaDurumLimiter, panelZinciri: magazaPanel,\s*bayiZinciri: magazaBayi,\s*getPgPool: \(\) => pgPool, serverTenantId, broadcastDocChange, bildirimIste: magazaBildirimIste,\s*\}\)\);/);
   });
   it('`/panel` dışındaki mağaza uçları genel sınırlayıcıdan MUAF değil (KOD taranır, yorumdaki anma sayılmaz); rota modülleri bekçiyle AYNI yoldan içe aktarılır (sayaçlar tek modül örneğinde)', () => {
     // `istemciIp.ts` yolların muafiyet durumunu yorumda tek tek anlatır; oraya mağaza için bir cümle eklemek çiti kırmamalı.
@@ -76,6 +77,9 @@ describe('zincirin YERİ', () => {
     expect(oku(join(SRC_KOK, 'server', 'opsWatchdog.ts'))).toMatch(/from '\.\/routes\/magazaRoutes\.js';/);
     tek(/from "\.\/src\/server\/routes\/magazaPanelZinciri\.js";/);
     expect(oku(join(SRC_KOK, 'server', 'opsWatchdog.ts'))).toMatch(/from '\.\/routes\/magazaPanelZinciri\.js';/);
+    // 2026-10-21: bayi alt zinciri de bekçiyle AYNI yoldan (sayaçları `magazaBayiSayaclari()` modül düzeyindedir).
+    tek(/from "\.\/src\/server\/routes\/magazaBayiZinciri\.js";/);
+    expect(oku(join(SRC_KOK, 'server', 'opsWatchdog.ts'))).toMatch(/from '\.\/routes\/magazaBayiZinciri\.js';/);
   });
 });
 
@@ -98,7 +102,8 @@ describe('sınırlayıcılar: sel koruması (iş sınırı DEĞİL), ayrı koval
     }
     // Mağaza için sınırlayıcı sayısı SABİT: talep, takip, panel oturumu, panel, yetki kodu + (dilim 2b) içerik — üç 2a ERP talep ucu
     // `dbLimiter` kovasında kalır; panelin silme ucu panel kovasındadır (ayrı kova yok). 5 → 6 bilerek değişen çittir.
-    expect(satirNo(/const magaza\w+Limiter = rateLimit\(\{/)).toHaveLength(6);
+    // 2026-10-21 (müşteri siparişlerim H11): + dört bayi kovası (site: oturum, genel; ERP: yetki kodu, firma okuma) — 6 → 10.
+    expect(satirNo(/const magaza\w+Limiter = rateLimit\(\{/)).toHaveLength(10);
   });
   it('yetki kodu (ERP kökeni): 10 / 15 dk, KULLANICI anahtarlı, 429\'u `magazaYetkiKodu429` yazar (`kod: \'sinir\'`)', () => {
     expect(govde('magazaYetkiKoduLimiter')).toMatch(/windowMs: 15 \* 60 \* 1000,\s+max: 10,/);
@@ -110,7 +115,8 @@ describe('sınırlayıcılar: sel koruması (iş sınırı DEĞİL), ayrı koval
     expect(govde('magazaIcerikLimiter')).toMatch(/keyGenerator: userOrIpKey,\s+handler: magazaIcerik429,/);
     expect(govde('magazaIcerikLimiter')).not.toMatch(/skip|message/);
     // 429 yazıcısı rota modülünden içe aktarılır (sayaç tek modül örneğinde); tanım `magazaErpRoutes` bağlamından ÖNCE.
-    tek(/^import \{ magazaErpRoutes, magazaIcerik429, magazaYetkiKodu429 \} from "\.\/src\/server\/routes\/magazaErpRoutes\.js";$/);
+    // 2026-10-21: + iki bayi köprüsü 429 yazıcısı (aynı içe aktarım satırı; bilerek değişen çit).
+    tek(/^import \{ magazaBayiHesap429, magazaBayiYetkiKodu429, magazaErpRoutes, magazaIcerik429, magazaYetkiKodu429 \} from "\.\/src\/server\/routes\/magazaErpRoutes\.js";$/);
     expect(tek(/const magazaIcerikLimiter = rateLimit\(\{/)).toBeLessThan(tek(/^\s*magazaErpRoutes\(app, \{\s*$/));
   });
   it('her sınırlayıcı YALNIZ kendi bağlamına verilir (başka yere bağlanırsa istek iki kez sayılır)', () => {
@@ -120,6 +126,15 @@ describe('sınırlayıcılar: sel koruması (iş sınırı DEĞİL), ayrı koval
     expect(satirNo(/magazaPanelLimiter/)).toHaveLength(2);
     expect(satirNo(/magazaYetkiKoduLimiter/)).toHaveLength(2);     // tanım + `magazaErpRoutes` bağlamı
     expect(satirNo(/magazaIcerikLimiter/)).toHaveLength(2);        // tanım + `magazaErpRoutes` bağlamı
+    // 2026-10-21: bayi kovaları — site kovaları bayi alt zinciri bağlamına, ERP kovaları `magazaErpRoutes` bağlamına; panelinkiler paylaşılmaz.
+    expect(satirNo(/magazaBayiOturumLimiter/)).toHaveLength(2);
+    expect(satirNo(/magazaBayiLimiter\b/)).toHaveLength(2);
+    expect(satirNo(/magazaBayiYetkiKoduLimiter/)).toHaveLength(2);
+    expect(satirNo(/magazaBayiHesapLimiter/)).toHaveLength(2);
+    expect(kod).toMatch(/const magazaBayiOturumLimiter = rateLimit\(\{\s*windowMs: 15 \* 60 \* 1000,\s*max: 20,\s*standardHeaders: true,\s*legacyHeaders: false,\s*keyGenerator: yalnizIpAnahtari,\s*handler: magazaBayi429,\s*\}\);/);
+    expect(kod).toMatch(/const magazaBayiLimiter = rateLimit\(\{\s*windowMs: 15 \* 60 \* 1000,\s*max: 600,\s*standardHeaders: true,\s*legacyHeaders: false,\s*keyGenerator: yalnizIpAnahtari,\s*handler: magazaBayi429,\s*\}\);/);
+    expect(kod).toMatch(/const magazaBayiYetkiKoduLimiter = rateLimit\(\{\s*windowMs: 15 \* 60 \* 1000,\s*max: 10,\s*standardHeaders: true,\s*legacyHeaders: false,\s*keyGenerator: userOrIpKey,\s*handler: magazaBayiYetkiKodu429,\s*\}\);/);
+    expect(kod).toMatch(/const magazaBayiHesapLimiter = rateLimit\(\{\s*windowMs: 15 \* 60 \* 1000,\s*max: 60,\s*standardHeaders: true,\s*legacyHeaders: false,\s*keyGenerator: userOrIpKey,\s*handler: magazaBayiHesap429,\s*\}\);/);
     // Sınırlayıcılar `app.use` ile öneke DEĞİL, yalnız bağlamla verilir.
     expect(satirNo(/app\.use\([^;]*\bmagaza\w*Limiter\b/)).toEqual([]);
   });
@@ -140,6 +155,17 @@ describe('site paneli ve ERP mağaza uçları — bağlama (dilim 2a)', () => {
     expect(satirNo(/\bmagazaPanel\b/)).toEqual([panel, tek(ZINCIR) + 1]);   // tanım + mağaza zincirinin bağlam satırı
     expect(satirNo(/app\.use\([^;]*\bmagazaPanel\b/)).toEqual([]);
   });
+  it('(2026-10-21, H11) bayi alt zinciri TEK kez kurulur — panelden SONRA, mağaza zincirinden hemen ÖNCE; bağlamı BİREBİR; uygulamaya doğrudan bağlanmaz', () => {
+    const bayi = tek(/^\s*const magazaBayi = magazaBayiZinciri\(\{\s*$/);
+    expect(satirNo(/magazaBayiZinciri\(/)).toEqual([bayi]);
+    expect(bayi).toBeGreaterThan(tek(/^\s*const magazaPanel = magazaPanelZinciri\(\{\s*$/));
+    expect(bayi).toBeLessThan(tek(ZINCIR));
+    expect(tek(/const magazaBayiOturumLimiter = rateLimit\(\{/)).toBeLessThan(bayi);
+    expect(tek(/const magazaBayiLimiter = rateLimit\(\{/)).toBeLessThan(bayi);
+    expect(kod).toMatch(/magazaBayiZinciri\(\{\s*bayiOturumSinirlayici: magazaBayiOturumLimiter, bayiSinirlayici: magazaBayiLimiter,\s*bayiAnahtari: magazaBayiAnahtari, bayiKimlikAnahtari: magazaBayiKimlikAnahtari,\s*panelKullanicisi: magazaPanelKullanici\.panelKullanicisi, musteriHesabi: musteriHesapOkuyucu\.musteriHesabi,\s*kodDeposu: magazaBayiKodDeposu, iptal: magazaPanelIptal, firebaseYenilemeIptal,\s*getPgPool: \(\) => pgPool, serverTenantId, writeAuditLog,\s*\}\);/);
+    expect(satirNo(/\bmagazaBayi\b/)).toEqual([bayi, tek(ZINCIR) + 2]);   // tanım + mağaza zincirinin bağlam satırı
+    expect(satirNo(/app\.use\([^;]*\bmagazaBayi\b/)).toEqual([]);
+  });
   it('`magazaErpRoutes` TEK kez, KOŞULSUZ, genel gövde ayrıştırıcıdan ve genel sınırlayıcıdan SONRA; bağlamı BİREBİR', () => {
     const erp = tek(ERP);
     expect(satirNo(/magazaErpRoutes\(/)).toEqual([erp]);
@@ -150,7 +176,9 @@ describe('site paneli ve ERP mağaza uçları — bağlama (dilim 2a)', () => {
     expect(girinti(erp)).toBe(girinti(tek(/^\s*trackingRoutes\(app, \{/)));
     // Dilim 2b: + `magazaIcerikLimiter` (elle talep / içerik / silme kovası) ve `revizeBildirimiIste` (revize kuyruğunun isteyicisi) —
     // bağlam BİREBİR yeniden yazıldı. İki bildirim isteyicisi AYRI örneklerdir (ayrı kuyruk, ayrı «hazır» bayrağı).
-    expect(kod).toMatch(/magazaErpRoutes\(app, \{\s*requireAuth, requireMfaVerified, dbLimiter, magazaYetkiKoduLimiter, magazaIcerikLimiter,\s*belirtecIptalDenetle: \(belirtec\) => getAuth\(\)\.verifyIdToken\(belirtec, true\),\s*panelKullanicisi: magazaPanelKullanici\.panelKullanicisi, kodDeposu: magazaPanelKodDeposu,\s*getPgPool: \(\) => pgPool, broadcastDocChange, writeAuditLog, bildirimIste: magazaBildirimIste, revizeBildirimiIste: magazaRevizeBildirimIste,\s*smtpYapilandirmasi: \(\) => smtpYapilandirmasi\(\), serverTenantId,\s*panelDonus: magazaPanelAnahtari === null \? null : magazaPanelDonusTabani,\s*\}\);/);
+    // 2026-10-21 (müşteri siparişlerim H1 / H4): + ORTAK iptal örneği AÇIKÇA, iki bayi kovası, bayi kod deposu (AYRI), bağ
+    // okuyucu ve bayi dönüş adresi (iki anahtardan biri yoksa `null`) — bilerek değişen çit.
+    expect(kod).toMatch(/magazaErpRoutes\(app, \{\s*requireAuth, requireMfaVerified, dbLimiter, magazaYetkiKoduLimiter, magazaIcerikLimiter,\s*belirtecIptalDenetle: \(belirtec\) => getAuth\(\)\.verifyIdToken\(belirtec, true\),\s*panelKullanicisi: magazaPanelKullanici\.panelKullanicisi, kodDeposu: magazaPanelKodDeposu,\s*getPgPool: \(\) => pgPool, broadcastDocChange, writeAuditLog, bildirimIste: magazaBildirimIste, revizeBildirimiIste: magazaRevizeBildirimIste,\s*smtpYapilandirmasi: \(\) => smtpYapilandirmasi\(\), serverTenantId,\s*panelDonus: magazaPanelAnahtari === null \? null : magazaPanelDonusTabani,\s*iptal: magazaPanelIptal, magazaBayiYetkiKoduLimiter, magazaBayiHesapLimiter,\s*bayiKodDeposu: magazaBayiKodDeposu, musteriHesabi: musteriHesapOkuyucu\.musteriHesabi,\s*bayiDonus: magazaBayiAnahtari === null \|\| magazaBayiKimlikAnahtari === null \? null : magazaBayiDonusTabani,\s*\}\);/);
     // Revize isteyicisi YALNIZ ERP bağlamına gider: panel alt zinciri ve kimliksiz mağaza zinciri içerik yazmaz, revize bildirimi istemez.
     expect(satirNo(/revizeBildirimiIste: /)).toEqual([erp + 4]);
   });
@@ -171,13 +199,23 @@ describe('site paneli ve ERP mağaza uçları — bağlama (dilim 2a)', () => {
     const okuyucu = tek(/^const magazaPanelKullanici = panelKullanicisiKur\(\{ adminDb: \(\) => adminDb, pgPool: \(\) => pgPool \}\);$/);
     const depo = tek(/^const magazaPanelKodDeposu = kodDeposuKur\(\);$/);
     const iptal = tek(/^const magazaPanelIptal = iptalKur\(\{ adminDb: \(\) => adminDb \}\);$/);
-    expect(satirNo(/panelKullanicisiKur\(|kodDeposuKur\(|iptalKur\(/)).toEqual([okuyucu, depo, iptal]);
+    // 2026-10-21: + bayi kod deposu (AYRI örnek; panel kodu bayi oturumunda geçersiz) — bilerek değişen çit.
+    const bayiDepo = tek(/^const magazaBayiKodDeposu = kodDeposuKur\(\);$/);
+    expect(satirNo(/panelKullanicisiKur\(|kodDeposuKur\(|iptalKur\(/)).toEqual([okuyucu, depo, iptal, bayiDepo]);
     // Kod deposu: yazan (`magazaErpRoutes`) + okuyup silen (`magazaPanelZinciri`). Ayrı `Map` olsaydı her değişim 401 dönerdi.
     expect(satirNo(/kodDeposu: magazaPanelKodDeposu/)).toHaveLength(2);
-    // İptal çifti: panel alt zinciri (kapı + `cikis`) + ERP çıkış işleyicisi.
-    expect(satirNo(/\bmagazaPanelIptal\b(?!\.js)/)).toHaveLength(3);   // tanım + iki çağıran (içe aktarım satırındaki dosya adı sayılmaz)
-    // Kullanıcı okuyucu: iki rota bağlamı.
-    expect(satirNo(/panelKullanicisi: magazaPanelKullanici\.panelKullanicisi/)).toHaveLength(2);
+    // Bayi deposu: yazan (`magazaErpRoutes` — `bayiKodDeposu:`) + okuyup silen (bayi alt zinciri — `kodDeposu:`).
+    expect(satirNo(/bayiKodDeposu: magazaBayiKodDeposu/)).toHaveLength(1);
+    expect(satirNo(/(?<!bayiK)kodDeposu: magazaBayiKodDeposu/)).toHaveLength(1);
+    // İptal çifti TEK örnek: panel alt zinciri (kapı + `cikis`) + ERP çıkış işleyicisi + (2026-10-21) bayi alt zinciri, ERP bayi
+    // köprüsü, hesap silme (epostaRoutes) ve bağ uçları (musteriHesapRoutes) — yeni örnek KURULMAZ.
+    expect(satirNo(/\bmagazaPanelIptal\b(?!\.js)/)).toHaveLength(7);   // tanım + altı çağıran (içe aktarım satırındaki dosya adı sayılmaz)
+    expect(satirNo(/\biptal: magazaPanelIptal\b/)).toHaveLength(5);
+    // Kullanıcı okuyucu: üç rota bağlamı (panel, ERP, bayi).
+    expect(satirNo(/panelKullanicisi: magazaPanelKullanici\.panelKullanicisi/)).toHaveLength(3);
+    // Bağ okuyucu TEK örnek: bayi alt zinciri + ERP köprüsü.
+    tek(/^const musteriHesapOkuyucu = musteriHesapOkuyucuKur\(\{ adminDb: \(\) => adminDb \}\);$/);
+    expect(satirNo(/musteriHesabi: musteriHesapOkuyucu\.musteriHesabi/)).toHaveLength(2);
     // Dinleyici modül yüklenirken kaydedilir: okuyucu ondan ÖNCE tanımlı.
     expect(okuyucu).toBeLessThan(tek(/^dbEvents\.on\('change', \(ev: \{ coll\?: string; id\?: string \}\) => \{$/));
   });
@@ -187,6 +225,10 @@ describe('site paneli ve ERP mağaza uçları — bağlama (dilim 2a)', () => {
     expect(tek(/^ {2}if \(ev\.coll === 'users' && ev\.id\) magazaPanelKullanici\.dusur\(ev\.id\);$/)).toBe(dinleyici + 2);
     expect(tek(/^ {2}if \(ev\.coll === 'companyStatus'\) magazaPanelKullanici\.temizle\(\);$/)).toBe(dinleyici + 3);
     expect(satirNo(/magazaPanelKullanici\.temizle\(/)).toHaveLength(1);
+    // 2026-10-21: bağ okuyucu da AYNI dinleyicide düşer — `users` ve `musteriHesaplari` olaylarında (rol düşürme / erişim kapatma
+    // bayi belirtecini 60 sn beklemeden öldürür).
+    expect(tek(/^ {2}if \(\(ev\.coll === 'users' \|\| ev\.coll === MUSTERI_HESAP_KOLEKSIYONU\) && ev\.id\) musteriHesapOkuyucu\.dusur\(ev\.id\);$/)).toBe(dinleyici + 6);
+    expect(satirNo(/musteriHesapOkuyucu\.dusur\(/)).toHaveLength(1);
     // `mfa_secrets` yazımı `docs` olayı ÜRETMEZ: `mfaStatusCache.delete(` geçen her satır panel önbelleğini de düşürür.
     // Dört yazan: kayıt başlat, kayıt doğrula, kapat + Yönetici sıfırlaması (`mfaKaydiniSil`, 2026-10-11 — şartname «dış rol kapanışı» D10).
     const mfa = satirlar.filter(s => /mfaStatusCache\.delete\(/.test(s.kod));
@@ -194,11 +236,20 @@ describe('site paneli ve ERP mağaza uçları — bağlama (dilim 2a)', () => {
     for (const s of mfa) expect(s.kod, `server.ts:${s.n}`).toMatch(/mfaStatusCache\.delete\((r\.uid|uid)\); magazaPanelKullanici\.dusur\(\1\);/);
     expect(satirNo(/magazaPanelKullanici\.dusur\(/)).toHaveLength(5);
   });
-  it('ERP çıkış işleyicisi panel iptalini ÇEREZDEN okunan kimlikle çağırır — refresh token iptalinden BAĞIMSIZ ve ondan ÖNCE', () => {
+  it('ERP çıkış işleyicisi panel iptalini ÖNCE Bearer, yoksa ÇEREZDEN çözülen kimlikle çağırır — refresh token iptalinden BAĞIMSIZ ve ondan ÖNCE', () => {
     const rota = tek(/app\.post\('\/api\/db\/session\/logout', dbLimiter, async \(req: Request, res: Response\) => \{/);
-    const kimlik = tek(/^\s*const cikisUid = verifySessionTokenUid\(parseCookie\(req\.headers\.cookie, SESSION_COOKIE\)\);$/);
+    // 2026-10-21 (müşteri siparişlerim H2): kimlik önce `Authorization: Bearer`'dan (yerel doğrulama, iptal denetimi yok), yoksa
+    // çerezden — dış rolün çerezi yoktur; bayat çerez Bearer'ı ezmesin diye Bearer ÖNCE (bilerek değişen çit). Ad `cikisUid` kalır.
+    const bearer = tek(/^\s*const cikisBearerUid = async \(req: Request\): Promise<string \| null> => \{$/);
+    expect(kod).toMatch(/const cikisBearerUid = async \(req: Request\): Promise<string \| null> => \{\s*const b = yetkiBelirteci\(req\.headers\.authorization\);\s*if \(!b\) return null;\s*try \{ return \(await getAuth\(\)\.verifyIdToken\(b\)\)\.uid \|\| null; \} catch \{ return null; \}\s*\};/);
+    expect(bearer).toBeLessThan(rota);
+    const kimlik = tek(/^\s*const cikisUid = \(await cikisBearerUid\(req\)\) \?\? verifySessionTokenUid\(parseCookie\(req\.headers\.cookie, SESSION_COOKIE\)\);$/);
     const iptal = tek(/^\s*await erpCikisindaPanelIptalEt\(magazaPanelIptal, cikisUid\);$/);
-    const refresh = tek(/if \(cikisUid\) await getAuth\(\)\.revokeRefreshTokens\(cikisUid\);/);
+    // Firebase yenileme iptali TEK yardımcıdan (ERP çıkışı, bayi çıkışı, erişim kapatma); `revokeRefreshTokens(` dosyada TAM bir kez.
+    const refresh = tek(/if \(cikisUid\) await firebaseYenilemeIptal\(cikisUid\);/);
+    tek(/^const firebaseYenilemeIptal = \(uid: string\): Promise<void> => getAuth\(\)\.revokeRefreshTokens\(uid\);$/);
+    expect(satirNo(/revokeRefreshTokens\(/)).toHaveLength(1);
+    expect((oku(SERVER).match(/revokeRefreshTokens\(/g) ?? []).length).toBe(1);
     expect(rota).toBeLessThan(kimlik);
     expect(kimlik).toBeLessThan(iptal);
     expect(iptal).toBeLessThan(refresh);
@@ -221,6 +272,21 @@ describe('site paneli ve ERP mağaza uçları — bağlama (dilim 2a)', () => {
     expect(satirNo(/\bmagazaPanelAnahtari\b/)).toHaveLength(4);       // tanım, bekçi, panel bağlamı, ERP `panelDonus` koşulu
     expect(satirNo(/\bmagazaPanelDonusTabani\b/)).toHaveLength(4);    // tanım, anahtar türetme, bekçi, ERP `panelDonus`
   });
+  it('(2026-10-21, H3) bayi dönüş adresi, imza anahtarı ve sipariş kimliği anahtarı modül düzeyinde BİR kez, TÜR parametreli işlevlerle; `MAGAZA_BAYI_DONUS` tek satırda ve panel çözücüsüne GİTMEZ', () => {
+    const donus = tek(/^const magazaBayiDonusTabani = donusTabaniCozTur\(BAYI_BELIRTECI, process\.env\.MAGAZA_BAYI_DONUS, \{$/);
+    const anahtar = tek(/^const magazaBayiAnahtari = anahtarTuret\(BAYI_BELIRTECI, \{$/);
+    const kimlik = tek(/^const magazaBayiKimlikAnahtari = bayiKimlikAnahtariTuret\(\{ sirVar: panelSirriVar\(process\.env\), oturumSirri: SESSION_TOKEN_SECRET, appUrl: process\.env\.APP_URL \}\);$/);
+    expect(tek(/^const SESSION_TOKEN_SECRET = /)).toBeLessThan(donus);
+    expect(donus).toBeLessThan(anahtar);
+    expect(anahtar).toBeLessThan(kimlik);
+    expect(kod).toMatch(/anahtarTuret\(BAYI_BELIRTECI, \{\s*sirVar: panelSirriVar\(process\.env\), oturumSirri: SESSION_TOKEN_SECRET, donusTabani: magazaBayiDonusTabani, appUrl: process\.env\.APP_URL,\s*\}\);/);
+    expect(satirNo(/MAGAZA_BAYI_DONUS/)).toEqual([donus]);
+    expect(satirNo(/donusTabaniCoz\([^)]*MAGAZA_BAYI_DONUS/)).toEqual([]);
+    // Bayi tanımlayıcıları yalnız beklenen yerlerde (ham sır rota bağlamına gitmez).
+    expect(satirNo(/\bmagazaBayiAnahtari\b/)).toHaveLength(4);        // tanım, bekçi, bayi zinciri bağlamı, ERP `bayiDonus` koşulu
+    expect(satirNo(/\bmagazaBayiKimlikAnahtari\b/)).toHaveLength(4);  // tanım, bekçi, bayi zinciri bağlamı, ERP `bayiDonus` koşulu
+    expect(satirNo(/\bmagazaBayiDonusTabani\b/)).toHaveLength(4);     // tanım, anahtar türetme, bekçi, ERP `bayiDonus`
+  });
   it('`env.example` (ASCII): `MAGAZA_PANEL_DONUS` belgeli; izinli köken açıklaması «GET / POST»', () => {
     const ornek = oku(join(SRC_KOK, '..', 'deploy', 'windows', 'env.example'));
     expect(ornek).toMatch(/^MAGAZA_PANEL_DONUS=$/m);
@@ -228,6 +294,10 @@ describe('site paneli ve ERP mağaza uçları — bağlama (dilim 2a)', () => {
     expect(ornek).not.toContain('(POST /api/magaza/*)');
     const blok = ornek.slice(ornek.indexOf('# Site paneli ("ERP ile baglan")'), ornek.indexOf('MAGAZA_PANEL_DONUS='));
     for (const beklenen of ['https://www.cetpa.com.tr/panel.html', 'https zorunlu', 'MAGAZA_IZINLI_KOKENLER', 'panel-yapilandirilmamis']) expect(blok, beklenen).toContain(beklenen);
+    // 2026-10-21 (H3): müşteri / bayi ekranının dönüş adresi — boş satır, varsayılan bayi.html, 503 kodu.
+    expect(ornek).toMatch(/^MAGAZA_BAYI_DONUS=$/m);
+    const bayiBlok = ornek.slice(ornek.indexOf('# Musteri / bayi ekrani'), ornek.indexOf('MAGAZA_BAYI_DONUS='));
+    for (const beklenen of ['https://www.cetpa.com.tr/bayi.html', 'MAGAZA_PANEL_DONUS ile ayni', 'bayi-yapilandirilmamis']) expect(bayiBlok, beklenen).toContain(beklenen);
     // PowerShell 5.1 + Windows-1252: dosya salt ASCII kalır.
     // eslint-disable-next-line no-control-regex -- ASCII dışı karakter taraması
     expect(ornek.match(/[^\x00-\x7F]/g)).toBeNull();

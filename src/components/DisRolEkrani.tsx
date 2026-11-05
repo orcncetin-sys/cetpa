@@ -53,10 +53,15 @@ interface DisRolEkraniProps {
   dil: string;
   /** Uygulamanın mevcut çıkış işleyicisi (sunucu çıkışı + oturum kapatma). */
   onCikis: () => void | Promise<void>;
+  /**
+   * Davet bağlantısı işlenemediyse sunucunun gerekçesi (`App.tsx` `inviteError`). Dış rol hesabına personel daveti
+   * UYGULANMAZ (409 `DIS_ROL_DAVETLE_ACILMAZ`, belirteç atılır); kişi bağlantının neden işe yaramadığını burada görür.
+   */
+  davetHatasi?: string | null;
 }
 
 /** Yerleşim ve stil «hesabınıza rol atanmamış» ekranının kalıbıdır (`App.tsx` `roleMissing`); fark: kabuğun ÜSTÜNDE değil, YERİNE çizilir. */
-export default function DisRolEkrani({ dil, onCikis }: DisRolEkraniProps) {
+export default function DisRolEkrani({ dil, onCikis, davetHatasi }: DisRolEkraniProps) {
   const t = disRolMetni(dil);
   const baslik = useRef<HTMLHeadingElement>(null);
   const [cikiyor, setCikiyor] = useState(false);
@@ -89,6 +94,13 @@ export default function DisRolEkrani({ dil, onCikis }: DisRolEkraniProps) {
         <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
           {t.erp_bayi_hesaplarina_kapali}
         </p>
+        {/* Kalıp «rol atanmamış» penceresindeki davet hatasıyla aynı (`App.tsx` `roleMissing`). */}
+        {davetHatasi && (
+          <p role="status" className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 leading-relaxed">
+            {dil === 'tr' ? 'Davet bağlantısı işlenemedi: ' : 'Invite link could not be applied: '}
+            <span className="font-semibold">{davetHatasi}</span>
+          </p>
+        )}
         <button type="button" onClick={cik} disabled={cikiyor} aria-busy={cikiyor} className="apple-button-primary w-full justify-center py-2.5 text-sm">
           {t.cikis}
         </button>

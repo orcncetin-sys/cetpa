@@ -7,7 +7,8 @@
  * `cid !== yük.cid` görür ve 503 yerine 401 verirdi (kapı ölçümü 57P01: pgShim `PgDocRef.get` fırlatır — fırlatma kapıda
  * `503 { ok: false }` olur, panel oturumu DÜŞMEZ).
  *
- * KENDİ önbelleği vardır (uid → sonuç, 60 sn; yalnız BAŞARILI ve DOLU okuma yazılır); `roleCache` / `companyIdCache` /
+ * KENDİ önbelleği vardır (uid → sonuç, 60 sn; yalnız BAŞARILI ve DOLU okuma yazılır; okuma sürerken düşürme gelirse sonuç
+ * yazılmaz — `../surumluOnbellek`); `roleCache` / `companyIdCache` /
  * `companyStatusCache` / `mfaStatusCache` OKUNMAZ. Düşürme ÜÇ yerdedir (server.ts bağlar): (a) `dbEvents` `users` olayında
  * `dusur(ev.id)`; (b) `companyStatus` olayında `temizle()` (cid anahtarlı olay uid anahtarlı önbelleği tek tek düşüremez);
  * (c) `mfaStatusCache.delete(…)` geçen üç satırın yanında `dusur(uid)` (`mfa_secrets` yazımı `docs` olayı üretmez).
@@ -22,6 +23,7 @@ import { MAGAZA_PANEL_AD_SINIRI } from '../../lib/magazaTalep.js';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import { magazaMetniKirp, magazaMetniTemizle } from './magazaTalep.js';
 import type { MagazaPgHavuzu } from '../routes/magazaRoutes.js';
+import { surumluOnbellekKur } from '../surumluOnbellek.js';
 
 export interface PanelKullanicisi {
   rol: AppRole;
@@ -61,8 +63,13 @@ export function panelAdiTuret(name: unknown, email: unknown, uid: string): strin
 }
 
 export function panelKullanicisiKur(D: PanelKullaniciDeps): PanelKullaniciOkuyucu {
-  const onbellek = new Map<string, { sonuc: PanelKullanicisi; bitis: number }>();
-  const simdiMs = (): number => (D.simdi?.() ?? new Date()).getTime();
+  // Yalnız BAŞARILI ve DOLU okuma yazılır; okuma sürerken gelen düşürme (rol / firma / MFA olayı) eski sonucu önbelleğe
+  // YAZDIRMAZ — sürüm sayacı ortak yardımcıda (`../surumluOnbellek`, bağ okuyucusuyla aynı; kopya yok).
+  const onbellek = surumluOnbellekKur<PanelKullanicisi | null>({
+    omurMs: MAGAZA_PANEL_KULLANICI_ONBELLEK_MS,
+    simdiMs: () => (D.simdi?.() ?? new Date()).getTime(),
+    saklansinMi: (sonuc) => sonuc !== null,
+  });
 
   const oku = async (uid: string): Promise<PanelKullanicisi | null> => {
     const db = D.adminDb();
@@ -87,14 +94,8 @@ export function panelKullanicisiKur(D: PanelKullaniciDeps): PanelKullaniciOkuyuc
   };
 
   return {
-    async panelKullanicisi(uid) {
-      const c = onbellek.get(uid);
-      if (c && c.bitis > simdiMs()) return c.sonuc;
-      const sonuc = await oku(uid);
-      if (sonuc) onbellek.set(uid, { sonuc, bitis: simdiMs() + MAGAZA_PANEL_KULLANICI_ONBELLEK_MS });
-      return sonuc;
-    },
-    dusur(uid) { onbellek.delete(uid); },
-    temizle() { onbellek.clear(); },
+    panelKullanicisi: (uid) => onbellek.get(uid, () => oku(uid)),
+    dusur: (uid) => { onbellek.dusur(uid); },
+    temizle: () => { onbellek.temizle(); },
   };
 }

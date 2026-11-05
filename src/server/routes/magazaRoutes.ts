@@ -10,6 +10,11 @@
  *   0. `/panel` alt zinciri (dilim 2a; `magazaPanelZinciri.ts`, bağlamla gelir) — köken kapısından ve genel sınırlayıcıdan ÖNCE
  *      bağlanır ve her isteği KENDİSİ sonlandırır (kendi köken kapısı `GET, POST` + `Authorization`; kendi kovaları). Eşleşmeyi
  *      Express yapar: `req.path` / `originalUrl` karşılaştırması YOK (`/PANEL/siparisler` de alt zincire gider).
+ *   0b. `/bayi` alt zinciri (müşteri / bayi ekranı, 2026-10-21; `magazaBayiZinciri.ts`, bağlamla gelir) — panelle AYNI kural,
+ *      panelin hemen ALTINDA ve köken kapısından ÖNCE. Sonra bağlansaydı `GET` ön uçuşu dış kapıda `Allow-Methods: POST` ile
+ *      biterdi ve tarayıcı `GET /bayi/siparisler`'i engellerdi (supertest bunu görmez — şartname H11).
+ *   Köken kapısı TEK işlevdir (`magazaKokenKapisiKur`): dış zincir, panel ve bayi alt zincirleri yalnız yöntem / başlık listesini
+ *   ve ret yazıcısını verir (bugüne dek iki kopyaydı).
  *   1. köken kapısı (CORS) — `OPTIONS` burada 204 ile BİTER, hiçbir kovaya sayılmaz; izinsiz köken 403
  *   2. genel sınırlayıcı (`C.apiLimiter`; mağaza muaf DEĞİL)
  *   3. mağaza sınırlayıcıları — talep ve durum AYRI kova, her biri BİR kez (server.ts kurar, bağlamla gelir)
@@ -83,6 +88,11 @@ export interface MagazaRouteCtx {
    * Köken kapısından ve genel sınırlayıcıdan ÖNCE koşar, her isteği KENDİSİ sonlandırır (bu zincire geri dönmez).
    */
   panelZinciri: RequestHandler;
+  /**
+   * Müşteri / bayi ekranı alt zinciri (`magazaBayiZinciri(…)`, 2026-10-21): server.ts kurar, burada yalnız `/bayi` önekine
+   * bağlanır — panelle aynı kural (köken kapısından ve genel sınırlayıcıdan ÖNCE; her isteği kendisi sonlandırır).
+   */
+  bayiZinciri: RequestHandler;
   /** PostgreSQL havuzu; yoksa (yerel Firestore yedeği) uç 503 döner, `adminDb`'ye DÜŞÜLMEZ. */
   getPgPool: () => MagazaPgHavuzu | null;
   /** Kiracı çözümleyici (server.ts `serverTenantId`); boş dizge = çözülemedi → 503, yazma yok. */
@@ -163,6 +173,38 @@ export function magazaIzinliKokenleriCoz(ham: string | undefined): string[] {
     .map(parca => parca.trim().replace(/\/+$/, ''))
     .filter(parca => parca !== '' && parca !== '*' && parca !== 'null');
   return liste.length > 0 ? liste : [MAGAZA_VARSAYILAN_KOKEN];
+}
+
+/**
+ * Köken kapısı — dış zincir, panel ve bayi alt zincirlerinin TEK işlevi. Elle (yeni paket yok). `Access-Control-Allow-Credentials`
+ * YOK (uçlar çerez / oturum okumaz) ve joker köken yazılmaz. İzinli kökene `Allow-Origin` (köken AYNEN) + yöntem / başlık listesi
+ * + `Max-Age: 600`; `OPTIONS` burada 204 ile BİTER (sınırlayıcılara ulaşmaz, kovaya sayılmaz); izinsiz / kökensiz istek 403 —
+ * ret yanıtını çağıranın yazıcısı yazar (sayaç kümesi zincire özgüdür). Yazıcı türü `(res, kod: 403)`: dış zincirin `RetKodu`'lu
+ * ve panelin `number`'lı yazıcısı ikisi de buna uyar.
+ */
+export function magazaKokenKapisiKur(g: {
+  izinliKokenler: () => readonly string[];
+  /** `Access-Control-Allow-Methods` değeri (`'POST'` · `'GET, POST'`). */
+  yontemler: string;
+  /** `Access-Control-Allow-Headers` değeri (`'Content-Type'` · `'Authorization, Content-Type'`). */
+  basliklar: string;
+  reddet: (res: Response, kod: 403) => void;
+}): RequestHandler {
+  return (req, res, next) => {
+    res.vary('Origin'); // ezmez, ekler
+    const koken = req.headers.origin;
+    const izinli = typeof koken === 'string' && g.izinliKokenler().includes(koken);
+    if (izinli) {
+      res.setHeader('Access-Control-Allow-Origin', koken);
+      res.setHeader('Access-Control-Allow-Methods', g.yontemler);
+      res.setHeader('Access-Control-Allow-Headers', g.basliklar);
+      res.setHeader('Access-Control-Max-Age', '600');
+    }
+    // Ön uçuş burada BİTER: sınırlayıcılara ulaşmaz (kovaya sayılmaz), sayaçlara işlenmez.
+    if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+    if (!izinli) { g.reddet(res, 403); return; }
+    next();
+  };
 }
 
 // ── Günlük ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -296,22 +338,9 @@ export function magazaZinciri(C: MagazaRouteCtx): Router {
   const izinliKokenler = (): readonly string[] => C.izinliKokenler?.() ?? magazaIzinliKokenleriCoz(process.env.MAGAZA_IZINLI_KOKENLER);
   const kiraciCoz = magazaKiraciCozucuKur(() => C.serverTenantId(), simdi);
 
-  // 1. Köken kapısı. Elle (yeni paket yok). `Access-Control-Allow-Credentials` YOK: uç çerez / oturum okumaz.
-  const kokenKapisi: RequestHandler = (req, res, next) => {
-    res.vary('Origin'); // ezmez, ekler
-    const koken = req.headers.origin;
-    const izinli = typeof koken === 'string' && izinliKokenler().includes(koken);
-    if (izinli) {
-      res.setHeader('Access-Control-Allow-Origin', koken);
-      res.setHeader('Access-Control-Allow-Methods', 'POST');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-      res.setHeader('Access-Control-Max-Age', '600');
-    }
-    // Ön uçuş burada BİTER: sınırlayıcılara ulaşmaz (kovaya sayılmaz), sayaçlara işlenmez.
-    if (req.method === 'OPTIONS') { res.status(204).end(); return; }
-    if (!izinli) { reddet(res, 403); return; }
-    next();
-  };
+  // 1. Köken kapısı (ortak işlev; dış zincir yalnız `POST` + `Content-Type`). `Access-Control-Allow-Credentials` YOK: uç çerez /
+  // oturum okumaz.
+  const kokenKapisi = magazaKokenKapisiKur({ izinliKokenler, yontemler: 'POST', basliklar: 'Content-Type', reddet });
 
   // 4. 415: POST gövdesi JSON değilse (ya da gövde / tür başlığı yoksa) ayrıştırıcıya hiç verilmez.
   const jsonDegilse415: RequestHandler = (req, res, next) => {
@@ -413,7 +442,7 @@ export function magazaZinciri(C: MagazaRouteCtx): Router {
     }
   };
 
-  // 7. `/api/magaza` altındaki her başka yol ve yöntem (bayi uçları ayrı dilim).
+  // 7. `/api/magaza` altındaki her başka yol ve yöntem (`/panel` ve `/bayi` alt zincirleri kendi 404'lerini verir).
   const bulunamadi = (_req: Request, res: Response): void => { reddet(res, 404); };
 
   // 8. Zincir içi hata yakalayıcı. DÖRT parametre şart: Express hata yakalayıcıyı parametre sayısından tanır.
@@ -434,6 +463,7 @@ export function magazaZinciri(C: MagazaRouteCtx): Router {
 
   const r = Router();
   r.use('/panel', C.panelZinciri);
+  r.use('/bayi', C.bayiZinciri);
   r.use(kokenKapisi);
   r.use(C.apiLimiter);
   r.use('/siparis-talebi', C.talepSinirlayici);
