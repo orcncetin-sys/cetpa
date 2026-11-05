@@ -6,14 +6,14 @@ import { bilinenSayi, ekranTutari, sayiSirala, tamTutar } from '../utils/para';
 import {
   cetpaEvrakNolari, cariAdHaritasi, mikroSatisSatirlari as mikroSatisSatirlariHesapla,
   cetpaSatisSatirlari, satisKayitlari as satisKayitlariHesapla, satisKpi,
-  satisIkizAnahtarlari, satisYerelListesi, satisCiftSayimOzeti,
+  satisIkizAnahtarlari, satisYerelListesi, satisCiftSayimOzeti, satisKaynaksizDisi,
 } from '../utils/muhasebe/satislar';
 import { faturaTutarlari, mikroFaturaSatirlari as mikroFaturaSatirlariHesapla } from '../utils/muhasebe/faturalar';
 import { mikroMizanSatirlari, mizanHesapla, fisDogrula } from '../utils/muhasebe/mizan';
-import { faturasizDisiNotu } from '../utils/muhasebe/faturasizDisi';
+import { faturasizDisiNotu, mfKaynaksizNotu } from '../utils/muhasebe/faturasizDisi';
 import { kdvDonemi } from '../utils/muhasebe/kdvBeyan';
 import { gelirGiderOzeti, grafikTavani } from '../utils/muhasebe/gelirGider';
-import { dovizBakiyeleri, hareketleriAyikla } from '../utils/muhasebe/bankaHesap';
+import { bankaKayitGovdesi, dovizBakiyeleri, hareketleriAyikla } from '../utils/muhasebe/bankaHesap';
 import { mikroCarileriAyir, bakiyeliCariKodlari, cariKarsilastirici, cariEslesir, cariKodu, musteridenTedarikci } from '../utils/muhasebe/cariImport';
 // Hesap tek kaynakta (utils/muhasebe/isletmeSermayesi.ts) — ön-doldurmanın alacak süzgeci (odemeTakipli)
 // ve stok değeri (depoDeger.depoToplamlari) artık oradan gelir; bu dosyada kopya yok.
@@ -879,10 +879,12 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
 
   const saveBank = async () => {
     if (!isAuthenticated) return showToast(t.loginRequired, 'error');
-    if (!bankForm.bankName.trim()) return showToast(t.bankNameRequired, 'error');
-    // Bilinmeyen bakiye KAYDEDİLMEZ: boş alan eskiden `Number('') === 0` ile sessizce ₺0 yazıyordu
-    if (!bilinenSayi(bankForm.balance)) return showToast(ac(currentLanguage).bakiye_sayi_olmali_bos_birakilirsa_kaydedilmez_b, 'error');
-    const kayit = { ...bankForm, balance: Number(bankForm.balance) };
+    // Kayıt gövdesi tek kaynakta (utils/muhasebe/bankaHesap.bankaKayitGovdesi): elle hesapta bilinmeyen bakiye KAYDEDİLMEZ (boş alan
+    // eskiden `Number('') === 0` ile ₺0 yazıyordu); Mikro hesabında bakiye gövdeye girmez ve zorunlu değildir (şartname «Mikro
+    // bağlantı B» § 3.6: bakiye gece Mikro'dan; null bakiyeli Mikro hesabının IBAN'ı kaydedilemiyordu).
+    const sonuc = bankaKayitGovdesi(bankForm, editingBank);
+    if (!sonuc.tamam) return showToast(sonuc.neden === 'ad' ? t.bankNameRequired : ac(currentLanguage).bakiye_sayi_olmali_bos_birakilirsa_kaydedilmez_b, 'error');
+    const kayit = sonuc.kayit;
     try {
       if (editingBank) {
         await updateDoc(doc(db, 'bankAccounts', editingBank.id), { ...kayit, updatedAt: serverTimestamp() });
@@ -1592,6 +1594,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const satisYerel = satisYerelListesi(orders, { mikroDahil, ikizAnahtarlari: satisIkizleri });
   // Ekran notu (QH2-10): kaç MF sayılmadı ve tutarı — aynı yüklem, sahte kesinlik yok.
   const satisCiftSayim = mikroDahil ? satisCiftSayimOzeti(orders, satisIkizleri) : null;
+  // Kaynaksız MF notu (şartname «Mikro bağlantı B» B2 #1): «Tümü»'nde ayrık sayaçtan (ikizli + işaretli olan yalnız ikiz notunda,
+  // BH8), «Cetpa»da işaretli MF'lerin hepsi (yerel liste onları süzdü).
+  const satisKaynaksizNotu = mfKaynaksizNotu(satisKaynaksizDisi(orders, satisCiftSayim), currentLanguage);
   // Hesap tek kaynakta (utils/muhasebe/satislar.satisKpi) — additive toplama, Mikro
   // payı, müşteri/oran kırılımları; bilinmeyen tutar 0 sayılmaz, SAYILIR.
   const satisOzet = satisKpi(satisYerel, mikroSatisSatirlari, mikroDahil);
@@ -2048,7 +2053,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
           t={t} currentLanguage={currentLanguage} satisKayitlari={satisKayitlari}
           setDrillDown={setDrillDown} formatConv={formatConv} kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency}
           satisKaynak={satisKaynak} setSatisKaynak={setSatisKaynak}
-          satisOzet={satisOzet} mikroDahil={mikroDahil} mikroSatisSatirlari={mikroSatisSatirlari} satisCiftSayim={satisCiftSayim}
+          satisOzet={satisOzet} mikroDahil={mikroDahil} mikroSatisSatirlari={mikroSatisSatirlari} satisCiftSayim={satisCiftSayim} satisKaynaksizNotu={satisKaynaksizNotu}
           satisSearch={satisSearch} setSatisSearch={setSatisSearch} satisYil={satisYil} setSatisYil={setSatisYil}
           satisSortKey={satisSortKey} satisSortDir={satisSortDir} toggleSatisSort={toggleSatisSort}
           displayedSatis={displayedSatis}

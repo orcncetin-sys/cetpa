@@ -54,6 +54,7 @@ import { useMemo } from 'react';
 import { type ReportsCtx } from '../useReportsData';
 import { type OrderLineItem } from '../../../types';
 import { odemeTakipli, siparisIptalMi, siparisTutari } from '../../../utils/siparis';
+import { mfKaynaksizMi } from '../../../lib/mfKaynagi';
 import { tryDisiMi, magazaSiparisiMi } from '../../../utils/siparisler/magazaSiparisi';
 import { siparisSehri } from '../../../utils/siparisler/teslimatAdresi';
 import { paraYaz } from '../../../utils/currency';
@@ -371,7 +372,9 @@ export default function GenelBloklar4({ reportsTab, orders, inventory, employees
       })()}
 
       {reportsTab === 'genel' && orders.length >= 5 && (() => {
-        const faturaliHepsi = iptalsiz.filter(o => o.hasInvoice || o.faturali);
+        // Kaynaksız MF (şartname «Mikro bağlantı B» B2 #7): Mikro'da satış faturası yok → faturalı tahsilat kümesine girmez. Raporlar
+        // listesi bunu zaten süzer (RaporlarPage `mfKaynaksizMi` kapısı, not orada TEK kez); kapı burada da durur (ayrı çağıran).
+        const faturaliHepsi = iptalsiz.filter(o => (o.hasInvoice || o.faturali) && !mfKaynaksizMi(o));
         if (faturaliHepsi.length === 0) return null;
         // O21: fatura süzgeci TEK yerde; TL ↔ dövizli bölünmesi.
         const faturali = faturaliHepsi.filter(o => !tryDisiMi(o));

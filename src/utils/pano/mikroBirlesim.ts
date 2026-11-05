@@ -62,7 +62,7 @@
  */
 import { bilinenSayi, toplaBilinen, ekranTutari, tutarBirlestir, type Tutar } from '../para';
 import { odemeTakipli, siparisTutari, type SiparisKaynakAlani, type SiparisTutarAlanlari } from '../siparis';
-import { MF_KAYNAGI, mikroFaturaAnahtari } from '../../lib/mfKaynagi';
+import { MF_KAYNAGI, mikroFaturaAnahtari, mfKaynaksizMi } from '../../lib/mfKaynagi';
 
 /** Mikro SIPARISLER satırının pano için OKUNAN alanları (yapısal — hook tipine bağlı değil). */
 export interface PanoMikroSiparis {
@@ -199,6 +199,8 @@ export function mikroTurevi(o: SiparisKaynakAlani): boolean {
 /** MF siparişinin ikiz anahtarını taşıyan alanlar (eslemeFatura.faturadanSiparis `source` + `mikroEvrak`). */
 export interface MfIkizAlanlari extends SiparisKaynakAlani {
   mikroEvrak?: { seri?: unknown; sira?: unknown } | null;
+  /** Kaynaksız MF işareti (sunucu yazar; lib/mfKaynagi.mfKaynaksizMi). */
+  mfKaynaksiz?: unknown;
 }
 
 /**
@@ -211,11 +213,24 @@ export interface MfIkizAlanlari extends SiparisKaynakAlani {
  * MF listede KALIR. Anahtar tek kaynakta (`mikroFaturaAnahtari`); `mikroFaturaNo` ('Q1') anahtar DEĞİLDİR.
  * Kaynak işareti sunucuya özel (`orders.source` istemciye kapalı — QH7): yerel sipariş MF gibi gösterilip gizlenemez.
  * Dilim 2a (Cetpa'nın yazdığı Q, `qYazildi`) ikinci koşulu buraya ekleyecek — imza ona açık bırakıldı (QH3-5).
+ * B2 NOTU (şartname «Mikro bağlantı B» § 4.3 / BH8, 05.11.2026): «ikizi olmayan MF listede kalır» kuralı artık YALNIZ İŞARETSİZ
+ * sipariş içindir. Gece kontrolünün `mfKaynaksiz` işaretlediği MF (Mikro'da aynı numarada satış faturası yok) yerel listeden düşer;
+ * bu işlev DEĞİŞMEZ, ciro okuyucuları `mfYerelDisi`'ni (aşağıda) çağırır.
  */
 export function mfIkiziListede(o: MfIkizAlanlari, anahtarlar: ReadonlySet<string>): boolean {
   if (o.source !== MF_KAYNAGI || !o.mikroEvrak) return false;
   const anahtar = mikroFaturaAnahtari(o.mikroEvrak.seri, o.mikroEvrak.sira);
   return anahtar !== '' && anahtarlar.has(anahtar);
+}
+
+/**
+ * MF siparişi yerel listeden (Satışlar «Tümü», Finans sayaçları) DÜŞER mi (şartname «Mikro bağlantı B» BH8, 05.11.2026): ikizi
+ * Mikro'da (`mfIkiziListede`, QH2-1) YA DA Mikro'da satış faturası yok (`mfKaynaksizMi`, B2 «ciro dışı»). `mfIkiziListede`
+ * DEĞİŞMEZ (Dilim 2a imzası). QH2-1'in «ikizi olmayan MF listede kalır» kuralı yalnız İŞARETSİZ sipariş için sürer (fatura henüz
+ * içe aktarılmamış, gece kontrolü koşmamış); işaretli olan düşer. Sayaçlar ayrıktır (satislar.satisCiftSayimOzeti).
+ */
+export function mfYerelDisi(o: MfIkizAlanlari, anahtarlar: ReadonlySet<string>): boolean {
+  return mfIkiziListede(o, anahtarlar) || mfKaynaksizMi(o);
 }
 
 export interface PanoCiro {

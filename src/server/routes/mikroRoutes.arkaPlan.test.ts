@@ -627,13 +627,17 @@ describe('(d) cron paritesi: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DO�
     expect(sorgular.filter(s => /BETWEEN/.test(s))).toEqual([]);
     expect(arkaPlanIsiBaslat).not.toHaveBeenCalled();
     // 13 tanım (2026-09-25: + iptal-faturalar) → cari bakiye (2026-11-05, «Mikro bağlantı A» A3: SQL döngüsünden SONRA; boş
-    // `Data` → «satır yok», true) → GİB durum taraması (2026-10-02) → faturadan sipariş (2026-10-18, «fatura gövde + gece MF» G3;
-    // satış faturası yok → «bulunamadı», true) → stok miktarı (A1 / AH1, SON adım; yoklama false → «geçmedi», false).
-    expect(dc.syncLog).toHaveBeenCalledTimes(17);
+    // `Data` → «satır yok», true) → banka / kasa bakiyesi (2026-11-05, «Mikro bağlantı B» BH17: cari bakiyeden SONRA, GİB'den ÖNCE;
+    // bu düzenekte PG havuzu YOK → 0 → null geçişi yapılamaz, TEK başarısız satır) → GİB durum taraması (2026-10-02) → faturadan
+    // sipariş (2026-10-18, «fatura gövde + gece MF» G3; satış faturası yok → «bulunamadı», true) → stok miktarı (A1 / AH1, SON adım;
+    // yoklama false → «geçmedi», false).
+    expect(dc.syncLog).toHaveBeenCalledTimes(18);
     expect(dc.syncLog).toHaveBeenNthCalledWith(14, 'SQL:CARI_HESAP_HAREKETLERI', 'cariBalances', 'satır yok; bakiye yazılmadı', true, null, null, expect.any(Number),
       { uid: 'system', email: '' }, undefined, { denetimKiracisi: 'A' });
-    expect(dc.syncLog).toHaveBeenNthCalledWith(15, 'EBelgeDurumSorgulamaV2', 'mikroFaturalar', expect.stringContaining('GİB durum taraması'), true, null, null, expect.any(Number), expect.anything());
-    expect(dc.syncLog).toHaveBeenNthCalledWith(16, 'faturadan-siparis', 'orders', expect.stringContaining('Satış faturası bulunamadı'), true, null, null, expect.any(Number),
+    expect(dc.syncLog).toHaveBeenNthCalledWith(15, 'banka-kasa-bakiye', 'bankAccounts', 'gece senkronu', false, null, 'PG havuzu yok: 0 → null geçişi yapılmadı',
+      expect.any(Number), { uid: 'system', email: '' }, undefined, { denetimKiracisi: 'A' });
+    expect(dc.syncLog).toHaveBeenNthCalledWith(16, 'EBelgeDurumSorgulamaV2', 'mikroFaturalar', expect.stringContaining('GİB durum taraması'), true, null, null, expect.any(Number), expect.anything());
+    expect(dc.syncLog).toHaveBeenNthCalledWith(17, 'faturadan-siparis', 'orders', expect.stringContaining('Satış faturası bulunamadı'), true, null, null, expect.any(Number),
       { uid: 'system', email: '' }, undefined, { denetimKiracisi: 'A' });
     expect(dc.syncLog).toHaveBeenLastCalledWith('GenelAmacliMaliyetListesiV2', 'inventory', 'gece senkronu', false, null, 'V17 yoklaması geçmedi; stok miktarı çekilmedi',
       expect.any(Number), { uid: 'system', email: '' }, undefined, { denetimKiracisi: 'A' });
@@ -1126,6 +1130,9 @@ describe('03:20 gece: cari bakiye (A3) + SON adım stok miktarı (A1 / AH1 / AH4
     expect(arkaPlanIsiBaslat).not.toHaveBeenCalled();
     expect(stokSatirlari(dc).map(c => [c[3], c[5]])).toEqual([[false, 'bakım kilidi: lead birleştirme']]);
     expect(bakiyeSatirlari(dc).map(c => [c[3], c[5]])).toEqual([[false, 'bakım kilidi: lead birleştirme']]);
+    // Banka / kasa adımı da yazıcıdır (şartname «Mikro bağlantı B» BH17): TEK «bakım kilidi» satırı, 0 → null geçişi YAPILMAZ.
+    expect(satirlar(dc, 'banka-kasa-bakiye', 'bankAccounts').map(c => [c[2], c[3], c[5]])).toEqual([['gece senkronu', false, 'bakım kilidi: lead birleştirme']]);
+    expect(vi.mocked(dc.C.broadcastDocChange).mock.calls.filter(c => c[0] === 'bankAccounts' || c[0] === 'kasalar')).toEqual([]);
     expect(vi.mocked(mikroPost).mock.calls.filter(bakiyeSorgusuMu)).toEqual([]);   // bakiye Mikro'ya hiç sorulmadı
     expect([dc.koleksiyon('inventory'), dc.koleksiyon('cariBalances')]).toEqual([[], []]);
   });

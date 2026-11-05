@@ -22,14 +22,17 @@ const okuyucular = (desen: RegExp): string[] =>
 describe('T-OKUYUCU — okuyucu kümeleri SABİT (yeni okuyucu Q kuralına göre gözden geçirilir)', () => {
   it('`faturali` okuyucuları', () => {
     expect(okuyucular(/\bfaturali\b/)).toEqual([
-    'src/App.tsx', 'src/components/AddOrderModal.tsx', 'src/components/FinancePanel.tsx', 'src/components/VergiTakvimi.tsx',
+    // 2026-11-05 «Mikro bağlantı B» B2: VergiTakvimi'nin KDV önerisi `utils/muhasebe/vergiTakvimiKdv.ts`'e taşındı (kaynaksız MF
+    // kapısıyla) ve B2 kuralını bilir.
+    'src/App.tsx', 'src/components/AddOrderModal.tsx', 'src/components/FinancePanel.tsx',
     'src/components/accounting/SatislarTab.tsx', 'src/components/reports/genel/GenelBloklar4.tsx', 'src/i18n/orders.ts',
     'src/pages/MuhasebePage.tsx', 'src/pages/OrdersPage.tsx', 'src/pages/RaporlarPage.tsx', 'src/server/mikro/eslemeFatura.ts',
     'src/server/mikro/seriOzet.ts', 'src/server/routes/mikroRoutes.ts', 'src/server/schemas.ts', 'src/types.ts',
     'src/utils/durumEtiketi.ts', 'src/utils/export.ts', 'src/utils/muhasebe/arYaslandirma.ts', 'src/utils/muhasebe/butceVaryans.ts',
     'src/utils/muhasebe/faturaTakipTahmin.ts', 'src/utils/muhasebe/faturalar.ts', 'src/utils/muhasebe/karZarar.ts',
     'src/utils/muhasebe/kdvAylik.ts', 'src/utils/muhasebe/mikroCiro.ts', 'src/utils/muhasebe/mutabakatMasraf.ts',
-    'src/utils/muhasebe/nakitBilanco.ts', 'src/utils/muhasebe/satislar.ts', 'src/utils/siparisler/faturaDurumu.ts',
+    'src/utils/muhasebe/nakitBilanco.ts', 'src/utils/muhasebe/satislar.ts', 'src/utils/muhasebe/vergiTakvimiKdv.ts',
+    'src/utils/siparisler/faturaDurumu.ts',
     'src/utils/siparisler/formKayit.ts', 'src/utils/siparisler/irsaliyeGonder.ts', 'src/utils/siparisler/tahsilatVade.ts',
     ]);
   });
@@ -175,11 +178,22 @@ describe('BAĞLANTI — sayfa düzeyi çağıranlar (yazıldı ama bağlanmadı 
     expect(k).toMatch(/\{faturasizTutarsiz > 0 && <span className="text-amber-600"> · \{tutarsiz617\(faturasizTutarsiz\)\}<\/span>\}/);
     expect(k).not.toMatch(/ekranTutari\(m617\.faturasizTutar\)/);
   });
-  it('OrdersPage: MF rozeti (liste + mobil) seriden — `faturasizEtiketi` MF dalında İKİ kez koşul, faturasız dalında metin', () => {
+  // Şartname «Mikro bağlantı B» BH16 (05.11.2026): MF rozet dalı `components/orders/MfKaynakRozeti`'ne ÇIKTI (kaynaksız → Q → MİKRO
+  // FATURA); Q Dilim 1 çiti yeni dosyada sürer. OrdersPage liste + mobilde bileşeni çağırır, satır içi Q dalı kalmaz.
+  // Mutasyon: OrdersPage'de çağrı eski satır içi dala döndürülürse ilk iki iddia kırmızı.
+  it('OrdersPage: MF rozeti (liste + mobil) `<MfKaynakRozeti` ile; satır içi `data-faturasiz-rozet` dalı YOK; faturasız (MF dışı) dalında metin', () => {
     const k = kodu('pages/OrdersPage.tsx');
-    expect(k).toMatch(/faturasizEtiketi\(order, currentLanguage\) \? \(\s*<span data-faturasiz-rozet=\{order\.id\}/);
-    expect(k).toMatch(/faturasizEtiketi\(order, currentLanguage\) \? \(\s*<span className="text-\[8px\]/);
-    expect(k.match(/\{faturasizEtiketi\(order, currentLanguage\)\}/g)?.length).toBe(3);
+    expect(k.match(/<MfKaynakRozeti order=\{order\} currentLanguage=\{currentLanguage\}/g)?.length).toBe(2);
+    expect(k).toContain('<MfKaynakRozeti order={order} currentLanguage={currentLanguage} boyut="mobil" />');
+    expect(k).not.toContain('data-faturasiz-rozet');
+    expect(k.match(/\{faturasizEtiketi\(order, currentLanguage\)\}/g)?.length).toBe(1);
+  });
+  it('MfKaynakRozeti: Q dalı seriden (`faturasizEtiketi`) ve `data-faturasiz-rozet` taşır; kaynaksız dalı ÖNCE gelir', () => {
+    const k = kodu('components/orders/MfKaynakRozeti.tsx');
+    expect(k).toContain('const qEtiketi = faturasizEtiketi(order, currentLanguage);');
+    expect(k).toMatch(/if \(qEtiketi\) \{\s*return <span data-faturasiz-rozet=\{order\.id\}/);
+    expect(k.indexOf('if (mfKaynaksizMi(order))')).toBeGreaterThan(-1);
+    expect(k.indexOf('if (mfKaynaksizMi(order))')).toBeLessThan(k.indexOf('if (qEtiketi)'));
   });
   it('FinancePanel: üç sayaç `finansSiparisSayaclari` çıktısını basar (eski formül yok)', () => {
     const k = kodu('components/FinancePanel.tsx');

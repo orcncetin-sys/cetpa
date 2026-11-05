@@ -539,6 +539,7 @@ import { basHarf } from './utils/buyukHarf';
 import { oc } from './i18n/ortak';
 import { osc } from './i18n/onlineSiparis';
 import { SATIN_ALMA_MENU } from './lib/satinAlmaMenu';
+import { mfKaynaksizMi } from './lib/mfKaynagi';
 
 // ── Eski hash yönlendirmesi GÖÇÜ — Router mount olmadan ÖNCE ─────────────────
 // Path yönlendirmesine geçmeden önceki linkler/yer imleri `/#crm` biçimindeydi
@@ -6856,7 +6857,8 @@ function AppContent() {
         businessContext={(() => {
           const buAy = bugunAnahtari().slice(0, 7);
           const thisMonth = orders.filter(o => ayAnahtari(o.createdAt) === buAy); // çözülemeyen tarih → null → bu aya sayılmaz
-          const totalRev = thisMonth.filter(o=>o.status!=='Cancelled').reduce((s,o)=>s+(o.totalPrice||0),0);
+          // B2 (şartname «Mikro bağlantı B»): işaretli kaynaksız MF ciro dışı; sipariş sayıları ham listeden.
+          const totalRev = thisMonth.filter(o=>o.status!=='Cancelled' && !mfKaynaksizMi(o)).reduce((s,o)=>s+(o.totalPrice||0),0);
           const pendingOrders = orders.filter(o=>o.status==='Pending').length;
           const processingOrders = orders.filter(o=>o.status==='Processing').length;
           const lowStockItems = inventory.filter(i=>(i.stockLevel||0)<=(i.lowStockThreshold||5)).length;

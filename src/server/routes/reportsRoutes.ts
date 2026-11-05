@@ -16,6 +16,8 @@ import { bilinenSayi } from '../../utils/para.js';
 import { cariBakiyeToplamlari } from '../../utils/muhasebe/finansalOranlar.js';
 import { sonGuncellemeMs } from '../../utils/zaman.js';
 import { siparisIptalMi } from '../../utils/siparis.js';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi.js';
+import { mfKaynaksizSay } from '../../utils/muhasebe/faturasizDisi.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
 export interface ReportsRouteCtx {
@@ -62,7 +64,9 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
       const thisOrders = iptalsiz.filter(o => dateOf(o) >= d30 && dateOf(o) <= now);
       const prevOrders = iptalsiz.filter(o => dateOf(o) >= d60 && dateOf(o) < d30);
 
-      const revenue = (arr: typeof orders) => arr.reduce((s, o) => s + ((o.totalPrice as number) || 0), 0);
+      // B2 (şartname «Mikro bağlantı B», 2026-11-05): işaretli kaynaksız MF ciroya GİRMEZ (sipariş SAYISI ham); bu dönemin dışlananı
+      // `revenue.kaynaksizDisi`'nde.
+      const revenue = (arr: typeof orders) => arr.filter(o => !mfKaynaksizMi(o)).reduce((s, o) => s + ((o.totalPrice as number) || 0), 0);
       const thisRevenue = revenue(thisOrders);
       const prevRevenue = revenue(prevOrders);
 
@@ -71,7 +75,7 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
       res.json({
         period: { start: d30.toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) },
         orders:     { count: thisOrders.length, prevCount: prevOrders.length, delta: thisOrders.length - prevOrders.length },
-        revenue:    { total: thisRevenue, prev: prevRevenue, delta: thisRevenue - prevRevenue },
+        revenue:    { total: thisRevenue, prev: prevRevenue, delta: thisRevenue - prevRevenue, kaynaksizDisi: mfKaynaksizSay(thisOrders) },
         leads:      { total: leads.length, new30: leads.filter(l => dateOf(l) >= d30).length },
         inventory:  { total: inventory.length, lowStock: lowStock.length },
         delivered:  thisOrders.filter(o => o.status === 'Delivered').length,

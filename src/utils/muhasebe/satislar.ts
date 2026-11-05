@@ -46,8 +46,9 @@
  */
 import { bilinenSayi, toplaBilinen, tutarBirlestir, tamTutar, ekranTutari, sayiSirala, type Tutar } from '../para';
 import { siparisTarihMs, type SiparisTarihAlanlari } from '../siparis';
-import { mfIkiziListede, type MfIkizAlanlari } from '../pano/mikroBirlesim';
-import { MF_KAYNAGI } from '../../lib/mfKaynagi';
+import { mfIkiziListede, mfYerelDisi, type MfIkizAlanlari } from '../pano/mikroBirlesim';
+import { MF_KAYNAGI, mfKaynaksizMi } from '../../lib/mfKaynagi';
+import { mfKaynaksizSay, type MfKaynaksizDisi } from './faturasizDisi';
 
 // ── Girdi tipleri: MİNİMAL ve yapısal — kanonik Order / Customer / MikroFatura uyar, bağımlı değil ──
 /** Cetpa siparişi (Order'ın Satışlar sekmesinde okunan alanları; DB'den null gelebilir → `unknown`). */
@@ -266,8 +267,9 @@ export interface SatisYerelSecenek {
  * değişmez (yeni dizi).
  */
 export function satisYerelListesi<T extends SatisSiparisi>(orders: readonly T[], s: SatisYerelSecenek): T[] {
-  if (!s.mikroDahil) return [...orders];
-  return orders.filter(o => !mfIkiziListede(o, s.ikizAnahtarlari));
+  // Kaynaksız MF (şartname «Mikro bağlantı B» B2 / BH8): Mikro'da satış faturası yok → «Cetpa» görünümünde de ciro dışı.
+  if (!s.mikroDahil) return orders.filter(o => !mfKaynaksizMi(o));
+  return orders.filter(o => !mfYerelDisi(o, s.ikizAnahtarlari));
 }
 
 export interface SatisCiftSayimOzeti {
@@ -277,8 +279,11 @@ export interface SatisCiftSayimOzeti {
   eslesenTutar: Tutar;
   /** Düşenlerden `faturali` olmayan adet (bugün «Faturasız» kartında sayılanlar). */
   eslesenFaturasizAdet: number;
-  /** İkizi kümede OLMAYAN MF adedi — listede kalır, bir kez sayılır. */
+  /** İkizi kümede OLMAYAN ve kaynaksız İŞARETİ taşımayan MF adedi — listede kalır, bir kez sayılır (QH2-1). */
   ikizsizMfAdet: number;
+  /** İkizi kümede OLMAYAN, kaynaksız işaretli MF (B2 / BH8; ayrık: ikizli + işaretli olan yalnız `eslesen`'de). */
+  kaynaksizAdet: number;
+  kaynaksizTutar: Tutar;
 }
 
 /**
@@ -287,12 +292,25 @@ export interface SatisCiftSayimOzeti {
  */
 export function satisCiftSayimOzeti(orders: readonly SatisSiparisi[], ikizAnahtarlari: ReadonlySet<string>): SatisCiftSayimOzeti {
   const eslesen = orders.filter(o => mfIkiziListede(o, ikizAnahtarlari));
+  // Ayrık sayaçlar (BH8): QH4-1 değişmezi `eskiCiro − yeniCiro = eslesenTutar + kaynaksizTutar`; yerel liste `mfYerelDisi` ile süzülür.
+  const kaynaksiz = orders.filter(o => mfKaynaksizMi(o) && !mfIkiziListede(o, ikizAnahtarlari));
   return {
     eslesenAdet: eslesen.length,
     eslesenTutar: toplaBilinen(eslesen, o => o.totalPrice),
     eslesenFaturasizAdet: eslesen.filter(o => !o.faturali).length,
-    ikizsizMfAdet: orders.filter(o => o.source === MF_KAYNAGI && !mfIkiziListede(o, ikizAnahtarlari)).length,
+    ikizsizMfAdet: orders.filter(o => o.source === MF_KAYNAGI && !mfIkiziListede(o, ikizAnahtarlari) && !mfKaynaksizMi(o)).length,
+    kaynaksizAdet: kaynaksiz.length,
+    kaynaksizTutar: toplaBilinen(kaynaksiz, o => o.totalPrice),
   };
+}
+
+/**
+ * Satışlar sekmesinin kaynaksız MF notunun sayacı (şartname «Mikro bağlantı B» B2 #1 / BH8): «Tümü»nde AYRIK sayaçtan (ikizli +
+ * işaretli sipariş yalnız ikiz notunda görünür), «Cetpa»da (özet `null`) listedeki işaretli MF'lerin hepsi (`satisYerelListesi`
+ * onları süzdü). Ekran `mfKaynaksizNotu`; AccountingModule ve sekme testi AYNI işlevi çağırır.
+ */
+export function satisKaynaksizDisi(orders: readonly SatisSiparisi[], ozet: SatisCiftSayimOzeti | null): MfKaynaksizDisi {
+  return ozet ? { adet: ozet.kaynaksizAdet, tutar: ozet.kaynaksizTutar } : mfKaynaksizSay(orders);
 }
 
 // ── KPI ──────────────────────────────────────────────────────────────────────────────────────────

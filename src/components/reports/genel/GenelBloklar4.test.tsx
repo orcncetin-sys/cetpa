@@ -140,3 +140,18 @@ describe('P238 Şehir paneli — (6) tutarı okunamayan sayacı TÜM şehirlerde
     expect(p.filter(x => /tutarı okunamadı/.test(x))).toHaveLength(0);
   });
 });
+
+// Şartname «Mikro bağlantı B» B2 #7 (T-B2-5g): kaynaksız MF (Mikro'da satış faturası yok, sunucu işareti) faturalı tahsilat
+// kümesine girmez; işaretsiz MF bugünkü gibi «izlenmeyen» sayılır. Mutasyon: GenelBloklar4'teki `!mfKaynaksizMi(o)` kapısı
+// kaldırılırsa «Paid» 3 olur → kırmızı.
+describe('P189 Fatura Ödeme Durumu · kaynaksız MF faturalı kümeye girmez (B2 #7)', () => {
+  it('işaretli MF (paid) «Paid» sayısına girmez; işaretsiz MF ve yerel sipariş girer', () => {
+    const isaretli = siparis({ source: 'mikro-fatura', faturali: true, paid: true, mfKaynaksiz: true });
+    const isaretsiz = siparis({ source: 'mikro-fatura', faturali: true, paid: true });
+    const yerel = siparis({ faturali: true, paid: true });
+    ciz([isaretli, isaretsiz, yerel, ...eskiDolgu()]);
+    const k = panel('Fatura Ödeme Durumu');
+    // Kutudaki etiket (lejantta da «Paid» var): sayı etiketin hemen önündeki öğede.
+    expect(within(k).getAllByText('Paid')[0].previousElementSibling?.textContent).toBe('2');
+  });
+});

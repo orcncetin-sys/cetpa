@@ -34,7 +34,8 @@ import { bilinenSayi, toplaBilinen, satirTutari, type Tutar, tamTutar } from '..
 import { odemeTakipli, siparisTutari } from '../siparis';
 import { ayAnahtari } from '../zaman';
 import { tlyeCevir } from '../currency';
-import { faturasizDisiSay, faturasizMi, type FaturasizDisi } from './faturasizDisi';
+import { faturasizDisiSay, faturasizMi, mfKaynaksizSay, type FaturasizDisi, type MfKaynaksizDisi } from './faturasizDisi';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
 
 /** kdvAylik `Tutar` ile aynı şekil (toplam + bilinen + bilinmeyen) — dışarıya bu adla açık kalır. */
 export type Toplam = Tutar;
@@ -207,7 +208,7 @@ export function ticariBorc(alislar: readonly AlisSiparisi[], mikroAp: unknown): 
   return disToplamEkle(toplaBilinen(acik, po => po.totalAmount), mikroAp);
 }
 
-export interface KdvSiparisi { faturali?: boolean; kdvTutari?: unknown }
+export interface KdvSiparisi { faturali?: boolean; kdvTutari?: unknown; source?: unknown; mfKaynaksiz?: unknown; totalPrice?: unknown }
 export interface KdvFaturasi {
   tarih?: unknown; yon?: unknown; kdv?: unknown;
   /** Meblağ — yalnız dışlanan faturasız (Q) sayacı için. */
@@ -220,6 +221,8 @@ export interface KdvBorcu extends Toplam {
   mikroNet: number;
   /** Cari ayın DIŞLANAN faturasız (Q) Mikro faturaları (K3). Sipariş tarafı DEĞİŞMEZ. */
   faturasizDisi: FaturasizDisi;
+  /** Sipariş tarafından DIŞLANAN kaynaksız MF (Mikro'da satış faturası yok; şartname «Mikro bağlantı B» B2 #5). */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 /**
@@ -232,7 +235,9 @@ export interface KdvBorcu extends Toplam {
  * çözüm tam yeniden import.)
  */
 export function kdvBorcu(siparisler: readonly KdvSiparisi[], faturalar: readonly KdvFaturasi[], ay: string): KdvBorcu {
-  const s = toplaBilinen(siparisler.filter(o => o.faturali === true), o => o.kdvTutari);
+  // Kaynaksız MF (B2 #5) sipariş tarafından KDV borcuna girmez; ayrıca sayılır.
+  const faturalilar = siparisler.filter(o => o.faturali === true);
+  const s = toplaBilinen(faturalilar.filter(o => !mfKaynaksizMi(o)), o => o.kdvTutari);
   let mikroNet = 0, bilinenFatura = 0, bilinmeyenFatura = 0;
   const disi: KdvFaturasi[] = [];
   for (const f of faturalar) {
@@ -244,7 +249,8 @@ export function kdvBorcu(siparisler: readonly KdvSiparisi[], faturalar: readonly
     bilinenFatura++;
     mikroNet += f.yon === 'giden' ? k : -k;
   }
-  return { toplam: s.toplam + Math.max(0, mikroNet), bilinen: s.bilinen + bilinenFatura, bilinmeyen: s.bilinmeyen + bilinmeyenFatura, mikroNet, faturasizDisi: faturasizDisiSay(disi) };
+  return { toplam: s.toplam + Math.max(0, mikroNet), bilinen: s.bilinen + bilinenFatura, bilinmeyen: s.bilinmeyen + bilinmeyenFatura, mikroNet,
+    faturasizDisi: faturasizDisiSay(disi), kaynaksizDisi: mfKaynaksizSay(faturalilar) };
 }
 
 export interface BilancoGirdisi {

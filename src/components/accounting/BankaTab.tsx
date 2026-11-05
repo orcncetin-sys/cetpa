@@ -4,6 +4,7 @@ import { type BankAccount, type BankTransaction } from '../../types';
 import { SortHeader, formatTRY, type AccountingT } from './shared';
 import { paraYaz } from '../../utils/currency';
 import { bilinenSayi, sayiSirala } from '../../utils/para';
+import { mikroHesabiMi } from '../../utils/muhasebe/bankaHesap';
 import { oc } from '../../i18n/ortak';
 import { ac } from '../../i18n/accounting';
 
@@ -397,9 +398,20 @@ export default function BankaTab({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).bakiye}</label>
-                    {/* Boş alan 0 DEĞİL bilinmiyordur: '' olarak tutulur, saveBank kaydetmez (eski: Number('') → ₺0) */}
-                    <input type="number" value={bankForm.balance} onChange={e => setBankForm(prev => ({ ...prev, balance: bilinenSayi(e.target.value) ? Number(e.target.value) : '' }))} placeholder={ac(currentLanguage).orn_125000} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                    <label htmlFor="banka-formu-bakiye" className="block text-xs font-medium text-gray-600 mb-1">{oc(currentLanguage).bakiye}</label>
+                    {/* Boş alan 0 DEĞİL bilinmiyordur: '' olarak tutulur, saveBank kaydetmez (eski: Number('') → ₺0).
+                        Mikro hesabında SALT OKUNUR (şartname «Mikro bağlantı B» § 3.6): bakiye gece Mikro'dan gelir, kayıt gövdesine
+                        girmez (bankaHesap.bankaKayitGovdesi). */}
+                    {mikroHesabiMi(editingBank) ? (
+                      <>
+                        <input id="banka-formu-bakiye" type="text" readOnly aria-readonly="true" data-mikro-bakiye-kilitli
+                          value={bilinenSayi(bankForm.balance) ? paraYaz(Number(bankForm.balance), { birim: bankForm.currency }) : '—'}
+                          className="w-full bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-500 outline-none cursor-not-allowed" />
+                        <p className="mt-1 text-[11px] text-gray-500">{ac(currentLanguage).mikro_hesabi_bakiye_geceden}</p>
+                      </>
+                    ) : (
+                      <input id="banka-formu-bakiye" type="number" value={bankForm.balance} onChange={e => setBankForm(prev => ({ ...prev, balance: bilinenSayi(e.target.value) ? Number(e.target.value) : '' }))} placeholder={ac(currentLanguage).orn_125000} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff4000]" />
+                    )}
                   </div>
                 </div>
                 <div>

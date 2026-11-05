@@ -18,11 +18,12 @@ import {
   huniKazanmaOrani,
 } from '../utils/pano/finansKpi';
 import { gunAnahtari, zamanDate, zamanMs, ayAnahtari, tarihYaz, bugunAnahtari } from '../utils/zaman';
+import { mfKaynaksizNotu, mfKaynaksizBirlestir } from '../utils/muhasebe/faturasizDisi';
 import { siparisDurumEtiketi } from '../utils/durumEtiketi';
 import KurUyarisi from '../components/KurUyarisi';
 import EBelgeDurumKarti from '../components/pano/EBelgeDurumKarti';
 import {
-  stokDegeriOzeti, dusukStokKalemleri, stokEsikYaz, enCokSatanlar,
+  stokDegeriOzeti, dusukStokKalemleri, stokEsikYaz, panoEnCokSatanlar,
   durumDagilimi, haftaIciIsiHaritasi, sonSevkiyatlar, PANO_DURUMLARI,
 } from '../utils/pano/stokSevkiyat';
 import { oranYuzde } from '../utils/siparisler/lojistikKpi';
@@ -205,6 +206,10 @@ export default function DashboardPage(props: Props) {
   const ciro = panoCirosu(iptalsizSiparisler, filteredMikroFaturalar);
   const revenueT = ciro.tutar;
   const combinedRevenue = ciro.ekran;   // hiç bilinen yoksa NaN → fmtKpi '—'
+  // B2 (şartname «Mikro bağlantı B», 2026-11-05): işaretli kaynaksız MF pano ciro işlevlerinde (hedefButce, musteriAnaliz,
+  // finansKpi — kapı işlevlerin içinde) ciroya girmez. Not, B2'nin değiştirdiği HER panelde, o işlevin KENDİ penceresinden
+  // dönen `kaynaksizDisi` sayacıyla basılır (`data-mf-kaynaksiz-notu="pano-…"`). Ciro kartı (`panoCirosu`) §4.3
+  // «Değişmeyenler»de: `mikroTurevi` MF'yi zaten dışlıyor, kartın altında kaynaksız notu YOK.
   // 'orders' ve 'mikroFaturalar' SSE ile KADEMELİ akıyor (mikroFaturalar 600+
   // fatura olabiliyor). onSnapshot abone olur olmaz boş diziyle bile tetiklenir;
   // ilk anlık görüntü tam gelene kadar burada okunan toplam bir ARA DEĞERdir.
@@ -705,6 +710,8 @@ export default function DashboardPage(props: Props) {
                 // TÜRETME KAPISI (utils/pano/finansKpi): iki ayın birinde tek kayıt bile okunamadıysa
                 // yüzde ÜRETİLMEZ — eski `?? 0` toplamları kısmi veriden kesin bir artış oranı basıyordu.
                 const aylik90 = aylikCiroDegisimi(orders, Date.now());
+                // B2: iki ayın dışlanan işaretli kaynaksız MF'si; not yalnız ciro içgörüsü basılınca (oran ekrandayken).
+                let ciroNotu90: string | null = null;
                 if (aylik90.belirginArtis && aylik90.yuzde !== null) {
                   insights.push({
                     icon: '📈',
@@ -715,6 +722,7 @@ export default function DashboardPage(props: Props) {
                     bg: 'bg-emerald-50',
                     borderColor: 'border-emerald-200',
                   });
+                  ciroNotu90 = mfKaynaksizNotu(aylik90.kaynaksizDisi, currentLanguage);
                 }
 
                 if (insights.length === 0) return null;
@@ -732,6 +740,7 @@ export default function DashboardPage(props: Props) {
                         </div>
                       ))}
                     </div>
+                    {ciroNotu90 && <p data-mf-kaynaksiz-notu="pano-icgoru" className="mt-2 text-[10px] text-amber-700">{ciroNotu90}</p>}
                   </div>
                 );
               })()}
@@ -882,6 +891,7 @@ export default function DashboardPage(props: Props) {
                 const now = new Date();
                 const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
                 const ay99 = donemCirosu(orders, thisMonthStart);
+                const kaynaksizNotu99 = mfKaynaksizNotu(ay99.kaynaksizDisi, currentLanguage);   // B2: bu ayın penceresi
                 const hedef99 = hedefGerceklesme(ay99.ciro, monthlyTarget);
                 const pct99 = hedef99.oranYuzde;   // null = hedef yok YA DA ciroda tutarsız kayıt var → '—', çubuk çizilmez
                 const barColor99 = pct99 === null ? 'bg-gray-200' : pct99 >= 100 ? 'bg-emerald-400' : pct99 >= 70 ? 'bg-brand' : pct99 >= 40 ? 'bg-amber-400' : 'bg-red-400';
@@ -950,6 +960,7 @@ export default function DashboardPage(props: Props) {
                       {pct99 !== null && pct99 >= 100 && <span className="text-[10px] font-bold text-emerald-600">🎯 {dc(currentLanguage).hedefe_ulasildi}</span>}
                       <span className={cn("text-[10px]", darkMode ? "text-white/60" : "text-gray-400")}>{hedef99.hedef !== null ? fmtKpi(hedef99.hedef) : '—'}</span>
                     </div>
+                    {kaynaksizNotu99 && <p data-mf-kaynaksiz-notu="pano-p99" className="mt-1 text-[10px] text-amber-700">{kaynaksizNotu99}</p>}
                   </div>
                 );
               })()}
@@ -957,15 +968,18 @@ export default function DashboardPage(props: Props) {
               {/* ── Phase 174: Sales vs Budget – Last 3 Months ── */}
               {monthlyTarget > 0 && orders.length > 0 && (() => {
                 const now174 = new Date();
-                const months174 = butceKarsilastir(Array.from({ length: 3 }, (_, i) => {
+                const aylar174 = Array.from({ length: 3 }, (_, i) => {
                   const d = new Date(now174.getFullYear(), now174.getMonth() - (2 - i), 1);
-                  return {
-                    etiket: tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en'),
-                    // PARİTE: Phase 174 yalnız `createdAt` okur (ayCirosu varsayılanı tarihYedegi=false).
-                    ciro: ayCirosu(orders, ayAnahtari(d) ?? '').ciro,
-                    hedef: monthlyTarget,   // sayfadaki mevcut davranış: üç aya da İÇİNDE BULUNULAN AYIN hedefi (bkz. açık sorular)
-                  };
-                }));
+                  // PARİTE: Phase 174 yalnız `createdAt` okur (ayCirosu varsayılanı tarihYedegi=false).
+                  return { d, pencere: ayCirosu(orders, ayAnahtari(d) ?? '') };
+                });
+                const months174 = butceKarsilastir(aylar174.map(({ d, pencere }) => ({
+                  etiket: tarihYaz(d, { month: 'short' }, currentLanguage === 'tr' ? 'tr' : 'en'),
+                  ciro: pencere.ciro,
+                  hedef: monthlyTarget,   // sayfadaki mevcut davranış: üç aya da İÇİNDE BULUNULAN AYIN hedefi (bkz. açık sorular)
+                })));
+                // B2: üç ay AYRIK pencere (bir sipariş tek aya düşer) — sayaçlar birleşir, çift sayım yok.
+                const kaynaksizNotu174 = mfKaynaksizNotu(mfKaynaksizBirlestir(...aylar174.map(a => a.pencere.kaynaksizDisi)), currentLanguage);
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
                     <h3 className={cn("text-[10px] font-bold uppercase tracking-wider mb-3", darkMode ? "text-white/50" : "text-gray-400")}>
@@ -991,6 +1005,7 @@ export default function DashboardPage(props: Props) {
                       })}
                     </div>
                     <p className="text-[10px] text-gray-400 mt-1 text-center">{dc(currentLanguage).kesikli_cizgi_hedef}</p>
+                    {kaynaksizNotu174 && <p data-mf-kaynaksiz-notu="pano-p174" className="mt-1 text-[10px] text-amber-700 text-center">{kaynaksizNotu174}</p>}
                   </div>
                 );
               })()}
@@ -1004,6 +1019,7 @@ export default function DashboardPage(props: Props) {
                 // Ortalama sipariş tutarı iptal hariç (K2; 2026-09-25). Teslimat/tahsilat/tekrar alıcı oranları ciro değil — `orders`.
                 const kpi42 = finansKpilari({ filtreliSiparisler: iptalsizSiparisler, siparisler: orders, adaylar: leads });
                 const aov = kpi42.aov, teslimat = kpi42.teslimat, donusum = kpi42.donusum, tekrar = kpi42.tekrarAlici;
+                const kaynaksizNotu42 = mfKaynaksizNotu(aov.kaynaksizDisi, currentLanguage);   // B2: AOV'nin girdisi (iptalsizSiparisler)
                 return (
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {/* ── AOV card — with currency toggle ── */}
@@ -1032,6 +1048,7 @@ export default function DashboardPage(props: Props) {
                           {aov.bilinmeyen} {dc(currentLanguage).kaydin_tutari_okunamadi_ortalamaya_girmedi}
                         </p>
                       )}
+                      {kaynaksizNotu42 && <p data-mf-kaynaksiz-notu="pano-p42" className="text-[10px] text-amber-700 mt-0.5">{kaynaksizNotu42}</p>}
                       <p className="text-[10px] font-semibold text-gray-500 mt-1">{dc(currentLanguage).ort_siparis_degeri}</p>
                       <p className="text-[10px] text-gray-400">AOV</p>
                     </div>
@@ -1173,6 +1190,7 @@ export default function DashboardPage(props: Props) {
                 // kesişir (bugün açılan sipariş çoğu zaman ödenmemiştir) ve tek kayıt "2 kayıt"
                 // diye raporlanıyordu (Faz 3 5/n hakem bulgusu).
                 const tutarsiz130 = nakit130.tutarsizKayit;
+                const kaynaksizNotu130 = mfKaynaksizNotu(nakit130.kaynaksizDisi, currentLanguage);   // B2: günün penceresi
                 return (
                   <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
@@ -1205,6 +1223,7 @@ export default function DashboardPage(props: Props) {
                         {tutarsiz130} {dc(currentLanguage).kaydin_tutari_okunamadi_kismi_toplam}
                       </p>
                     )}
+                    {kaynaksizNotu130 && <p data-mf-kaynaksiz-notu="pano-p130" className="text-[10px] text-amber-700 mt-2 text-center">{kaynaksizNotu130}</p>}
                   </div>
                 );
               })()}
@@ -1222,6 +1241,9 @@ export default function DashboardPage(props: Props) {
                 // Weekly sparkline (last 8 weeks)
                 const weeks = haftalikCiro(orders, now159);
                 const maxWeek = enBuyukHafta(weeks);   // null = hiç bilinen değer yok → çubuk çizilmez ('Math.max(..., 1)' sahte ölçeği kalktı)
+                // B2: son 30 + önceki 30 gün AYRIK pencere ([d60ago, d30ago) ∪ [d30ago, …)) — 8 haftalık kovaları da kapsar
+                // (kovalar en çok 56 gün geriye bakar); hafta başına sayaç çubuğun ipucunda.
+                const kaynaksizNotu159 = mfKaynaksizNotu(mfKaynaksizBirlestir(son30.kaynaksizDisi, onceki30.kaynaksizDisi), currentLanguage);
                 // Tek kaynak (2026-09-05): kur cevirisi + bicim tlYaz'da (kur yoksa '—').
                 // Eskiden calisma zamani yereliyle (`toLocaleString(undefined)`) basiyordu;
                 // artik birime gore yerel gruplama (TRY -> ₺1.234, USD -> $1,234).
@@ -1245,9 +1267,10 @@ export default function DashboardPage(props: Props) {
                         {currentLanguage === 'tr' ? `${hiz30.bilinmeyen} siparişin tutarı okunamadı — günlük hız hesaplanamıyor` : `${hiz30.bilinmeyen} order(s) unpriced — daily velocity unavailable`}
                       </p>
                     )}
+                    {kaynaksizNotu159 && <p data-mf-kaynaksiz-notu="pano-p159" className="text-[10px] text-amber-700 -mt-2 mb-2">{kaynaksizNotu159}</p>}
                     <div className="flex items-end gap-0.5 h-10">
                       {weeks.map((w, i) => (
-                        <div key={i} className="flex-1 flex flex-col justify-end">
+                        <div key={i} className="flex-1 flex flex-col justify-end" title={mfKaynaksizNotu(w.kaynaksizDisi, currentLanguage) ?? undefined}>
                           {w.deger !== null && maxWeek !== null && (
                             <div className={`w-full rounded-sm transition-all ${i === 7 ? 'bg-brand' : 'bg-brand/25'}`}
                               style={{ height: `${Math.max(Math.round((w.deger / maxWeek) * 100), 4)}%` }} />
@@ -1579,6 +1602,7 @@ export default function DashboardPage(props: Props) {
                 // ÇİZİLMEZ, yerine "N siparişin tutarı bilinmiyor" notu yazılır.
                 const s79 = segmentCirosu(iptalsizSiparisler, b2bSegmenti, ['B2B', 'Diger']);   // iptal hariç (K2)
                 const b2bSeg = s79.segmentler[0], perakendeSeg = s79.segmentler[1];
+                const kaynaksizNotu79 = mfKaynaksizNotu(s79.kaynaksizDisi, currentLanguage);   // B2: girdinin kendisinden
                 const b2bRev = b2bSeg.ciro, retailRev = perakendeSeg.ciro;
                 if (s79.toplam === 0) return null;   // gerçek ₺0 — eski davranış
                 const b2bPct    = b2bSeg.yuzde === null ? null : Math.round(b2bSeg.yuzde);
@@ -1607,6 +1631,7 @@ export default function DashboardPage(props: Props) {
                           : `${s79.tutarsiz} order(s) have no amount — share cannot be computed.`}
                       </p>
                     )}
+                    {kaynaksizNotu79 && <p data-mf-kaynaksiz-notu="pano-p79" className="mb-2 text-[10px] text-amber-700">{kaynaksizNotu79}</p>}
                     <div className="grid grid-cols-2 gap-3">
                       <div className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 flex-shrink-0" />
@@ -1630,6 +1655,7 @@ export default function DashboardPage(props: Props) {
               {/* ── Phase 106: Revenue Donut by Customer Type ── */}
               {orders.length > 0 && (() => {
                 const s106 = segmentCirosu(orders.filter(o => !siparisIptalMi(o)), donutSegmenti, ['B2B', 'Dealer', 'Retail']);   // iptal hariç (K2)
+                const kaynaksizNotu106 = mfKaynaksizNotu(s106.kaynaksizDisi, currentLanguage);   // B2: girdinin kendisinden
                 const etiket106: Record<string, { label: string; color: string }> = {
                   B2B:    { label: 'B2B',                          color: '#3b82f6' },
                   Dealer: { label: oc(currentLanguage).bayi,       color: '#ff4000' },
@@ -1725,6 +1751,7 @@ export default function DashboardPage(props: Props) {
                               : `${s106.tutarsiz} order(s) have no amount — shares cannot be computed.`}
                           </p>
                         )}
+                        {kaynaksizNotu106 && <p data-mf-kaynaksiz-notu="pano-p106" className="text-[10px] text-amber-700">{kaynaksizNotu106}</p>}
                       </div>
                     </div>
                   </div>
@@ -1750,6 +1777,7 @@ export default function DashboardPage(props: Props) {
                 const k124 = segmentKarliligi(orders, tipSegmenti, o => siparisKarliligi<OrderLineItem>(o, kalemMaliyeti124));
                 const segs = k124.segmentler;
                 if (segs.length === 0) return null;
+                const kaynaksizNotu124 = mfKaynaksizNotu(k124.kaynaksizDisi, currentLanguage);   // B2: iptal hariç girdi
                 const colors = { 'B2B': '#3b82f6', 'Retail': '#10b981', 'Dealer': '#f59e0b', 'Other': '#8b5cf6' };
                 return (
                   <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
@@ -1793,6 +1821,7 @@ export default function DashboardPage(props: Props) {
                         );
                       })}
                     </div>
+                    {kaynaksizNotu124 && <p data-mf-kaynaksiz-notu="pano-p124" className="px-5 py-2 border-t border-gray-100 text-[10px] text-amber-700">{kaynaksizNotu124}</p>}
                     <div className="px-5 py-2 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-400">
                       {currentLanguage === 'tr'
                         ? 'Maliyet: siparişin kendi kayıtlı maliyeti, yoksa stok kartı × miktar. Bir kalemin maliyeti bilinmiyorsa o segmentin marjı hesaplanmaz.'
@@ -2098,7 +2127,10 @@ export default function DashboardPage(props: Props) {
                 // müşteri/segment panelleri (musteriAnaliz) tam tersi kuralı uyguluyordu.
                 // Sürüm-2 Mikro kalemi (2026-09-25) `price` taşımaz — satır cirosu KDV hariç net (K-KALEM, K3 Mikro dâhil);
                 // eski Mikro kalemi (yalnız KDV dâhil total) BİLİNMEZ sayılır, KDV dâhil tutar listeye karışmaz.
-                const top5 = enCokSatanlar(orders, 5, satirCirosu);
+                // B2 (Y29 bulgu 1): işaretli kaynaksız MF ürün cirosuna girmez; kapı ve sayaç `panoEnCokSatanlar`da (girdinin kendisinden).
+                const urun5 = panoEnCokSatanlar(orders, 5, satirCirosu);
+                const top5 = urun5.urunler;
+                const kaynaksizNotuUrun = mfKaynaksizNotu(urun5.kaynaksizDisi, currentLanguage);
 
                 const toplamT = donemToplami(aylar);
                 const totalRevAll = ekranTutari(toplamT);
@@ -2169,6 +2201,7 @@ export default function DashboardPage(props: Props) {
                       <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">
                         {dc(currentLanguage).en_cok_satan_urunler}
                       </h3>
+                      {kaynaksizNotuUrun && <p data-mf-kaynaksiz-notu="pano-urun" className="-mt-2 mb-3 text-[10px] text-amber-700">{kaynaksizNotuUrun}</p>}
                       {top5.length === 0 ? (
                         <p className="text-xs text-gray-400 text-center py-6">{dc(currentLanguage).siparis_verisi_yok}</p>
                       ) : (
@@ -2335,6 +2368,7 @@ export default function DashboardPage(props: Props) {
                 const m77 = enIyiMusteriler(orders, 5);
                 const top5 = m77.musteriler;
                 if (top5.length === 0) return null;
+                const kaynaksizNotu77 = mfKaynaksizNotu(m77.kaynaksizDisi, currentLanguage);   // B2: girdi listesi geneli
                 return (
                   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
@@ -2382,6 +2416,7 @@ export default function DashboardPage(props: Props) {
                             : `${m77.tutarsiz} order(s) have no amount — excluded from the total.`}
                         </p>
                       )}
+                      {kaynaksizNotu77 && <p data-mf-kaynaksiz-notu="pano-p77" className="text-[10px] text-amber-700">{kaynaksizNotu77}</p>}
                     </div>
                   </div>
                 );

@@ -161,6 +161,10 @@ export interface Order {
    *  'shopify_webhook' = çevrim içi mağaza siparişi (POST /api/shopify/webhook). */
   source?: string;
   mikroEvrak?: { seri: string; sira: string };
+  /** Kaynaksız MF işareti: Mikro'da aynı numarada SATIŞ faturası yok (şartname «Mikro bağlantı B» B2). YALNIZ sunucu yazar / siler
+   *  (collections.SUNUCU_TURETILEN_ALANLAR); okuyucular `lib/mfKaynagi.mfKaynaksizMi` ile sorar. `mfKaynaksizGoruldu`: ilk görülme (ISO). */
+  mfKaynaksiz?: boolean;
+  mfKaynaksizGoruldu?: string;
   customerName: string;
   /**
    * TL tutar. Tip zorunlu diyor ama çalışma anında YOK olabilir: TRY dışı çevrim içi mağaza siparişinde sunucu bu alanı
@@ -560,7 +564,16 @@ export interface BankAccount {
   accountNumber: string;
   iban: string;
   currency: 'TRY' | 'USD' | 'EUR';
-  balance: number;
+  /** Bakiye; `null` / yok = BİLİNMİYOR (ekran «—», toplama girmez). Mikro hesabında (`source: 'mikro'`) yalnız gece adımı yazar
+   *  (form kilitli; şartname «Mikro bağlantı B» § 3.6). Eski tip `number` yalan söylüyordu: Mikro'nun açtığı hesap `null` taşır. */
+  balance?: number | null;
+  /** `'mikro'`: Mikro banka tanımından açıldı (import). Elle açılan hesapta yok. */
+  source?: string;
+  /** Mikro banka hesap kodu (import yazar; gece bakiye eşleşmesinin anahtarı). */
+  mikroKod?: string;
+  /** Gece bakiye adımının izi (yalnız sunucu yazar — collections.BAKIYE_TURETILEN_ALANLAR). */
+  bakiyeZamani?: unknown;
+  bakiyeNotu?: string | null;
   accountType: 'Vadesiz' | 'Vadeli' | 'Kredi' | 'Kasa';
   openingBalance?: number;   // dönem/hesap açılış (devir) bakiyesi — hesabın kendi para biriminde
   openingDate?: string;      // açılış bakiyesinin geçerli olduğu tarih (YYYY-MM-DD)

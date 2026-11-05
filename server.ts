@@ -11,6 +11,8 @@ import { trackingRoutes } from "./src/server/routes/trackingRoutes.js";
 import { opsRoutes } from "./src/server/routes/opsRoutes.js";
 // Stok kodu göçü kuru koşusu (şartname «Mikro bağlantı D» D1): kendi gövde ayrıştırıcısı genel ayrıştırıcıdan ÖNCE bağlanır.
 import { STOK_KOD_GOCU_YOLLARI, stokKodGocuGovdeAyristiricisi, stokKodGocuRoutes } from "./src/server/routes/stokKodGocuRoutes.js";
+import { cariKodTaniRoutes } from "./src/server/routes/cariKodTaniRoutes.js";
+import { stokKodGocuAcilisTemizligi } from "./src/server/mikro/stokKodGocuUygula.js";
 import { trafikRoutes } from './src/server/routes/trafikRoutes.js';
 import { surumRoutes } from './src/server/routes/surumRoutes.js';
 import { SURUM_DOSYASI } from './src/lib/surumKimligi.js';
@@ -27,7 +29,7 @@ import { mikroRoutes } from "./src/server/routes/mikroRoutes.js";
 import { resendGonderici, resendSagligi, resendSagligiOnbellekten, escapeHtml, isValidEmail } from "./src/server/eposta.js";
 import type { AdminDbLike, DocDaralt } from "./src/server/adminDbTypes.js";
 import { initCrons } from "./src/server/crons.js";
-import { yetimIsleriKapat, surecBaslangiciMs } from "./src/server/mikro/arkaPlanIsi.js";
+import { yetimIsleriKapat, surecBaslangiciMs, bakimKilidiMesaji } from "./src/server/mikro/arkaPlanIsi.js";
 // Mikro gönderim defteri — açılış işareti (şartname yeniden-deneme v3 K0b; aynı `.js` yolu: uçuş kümesi mikroRoutes'la ortak).
 import { olcumAcilisIsareti } from "./src/server/mikro/gonderimDefteri.js";
 // Bu sürecin başlangıcı (epoch ms) — modül yüklenirken BİR KEZ. Açılış taraması bundan SONRA kaydolan yazıcı
@@ -115,6 +117,7 @@ import { DOCS_INDEKS_DDL, DOCS_TABLOSU_DDL } from "./src/server/docsSema.js";
 import { takipKoduMu, eskiTakipYoluAcik, gorunenTakipNo } from './src/lib/takipKodu.js';
 import { takipKoduAlVeyaUret, takipKoduylaSiparis } from './src/server/takipKodu.js';
 import { gorulebilirSiparisOku } from './src/server/gorulebilirSiparis.js';
+import { yaziciyiIstegeBagla } from './src/server/bakimKilidi.js';
 
 dotenv.config();
 
@@ -652,6 +655,11 @@ async function initDocsTable(): Promise<void> {
   console.log('PostgreSQL docs table ready ✓');
   await initMikroTables();
   await initMfaTable();
+  // Stok kodu göçü (şartname D, DH8): iş süreç içinde koşar; süreç öldüyse `stok-kod-gocu …` kilidi yarım kalır ve TTL'siz kilit
+  // saatlik senkronu sessizce durdururdu. Yalnız bu önekli kilit kaldırılır, çalışma başlığı «yarida» olur. Hata boot'u düşürmez.
+  // «yarida» işaretlenen çalışma tek denetim satırı bırakır (aktör ve kiracı başlıktan; MKD3 dizin 2).
+  try { await stokKodGocuAcilisTemizligi(pgPool, undefined, (aktor, eylem, ayrinti, kiraci) => writeAuditLog(aktor, eylem, ayrinti, undefined, kiraci)); }
+  catch (e) { console.warn('stok kodu göçü açılış temizliği yapılamadı:', (e as Error).message); }
   if (process.env.DATABASE_URL && !boss) {
     boss = new PgBoss(process.env.DATABASE_URL);
 
@@ -3135,6 +3143,16 @@ async function startServer() {
     // istemciler geri alınan stok değişimini görür.
     const pending: Array<() => void> = [];
 
+    // Bakım kilidi (Y29 son inceleme bulgu 4, 06.11.2026): stok kodu göçü (`stokKodGocuUygula`, DH8) kilit altındaki kuru koşunun
+    // görüntüsündeki `locationStocks` belgelerini taşır. Göç sürerken bu uç eski kart kimliğiyle konum belgesi açarsa belge
+    // görüntüde olmadığı için taşınmaz, silinen karta bağlı kalırdı. Kilit varken yazım YOK; istemci `error`'u gösterir.
+    // Uç YAZICI olarak kaydolur (Y29b delta): göçün `yazicilariBekle` beklemesi süren transferi görür; kayıt yanıt bitince silinir.
+    // Ad istek başına benzersiz (aynı milisaniyedeki iki istekte biri ötekinin kaydını silmesin). Metin öteki kilitli uçlarla aynı.
+    {
+      const kilit = await yaziciyiIstegeBagla(pgPool, `logistics-transfer:${randomUUID()}`, res);
+      if (kilit) return res.status(423).json({ success: false, error: bakimKilidiMesaji(kilit) });
+    }
+
     const client = await pgPool.connect();
     try {
       await client.query('BEGIN');
@@ -4619,10 +4637,15 @@ async function startServer() {
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireSuperAdmin, serverTenantId,
   });
 
-  // Stok kodu göçü KURU KOŞUSU (şartname «Mikro bağlantı D» D1; SALT OKUMA): ops jetonlu + Yönetici ucu, tek gövde.
+  // Stok kodu göçü (şartname «Mikro bağlantı D»): KURU KOŞU (D1, salt okuma) + UYGULAMA / GERİ ALMA / PASİF LİSTE (D4 / D5).
+  // Her biri ops jetonlu + Yönetici ucu, tek gövde. Denetim satırı ve açık istemci yayını server.ts'ten (ham SQL yazımı).
   stokKodGocuRoutes(app, {
     getPgPool: () => pgPool, requireAuth, requireMfaVerified, getUserRole, isSuperAdmin, reqCompanyId, mikroIdCozucuIds,
+    writeAuditLog, broadcastDocChange, reqActor,
   });
+
+  // Aynı VKN'li Mikro carileri ÖLÇÜSÜ (şartname «Mikro bağlantı B» B3-a; SALT OKUMA, ops jetonu): `GET /api/ops/cari-kod-tani`.
+  cariKodTaniRoutes(app, { getPgPool: () => pgPool });
 
   // Cerezsiz trafik sayaci - /api/hit (kimliksiz, kendi hiz limitiyle) +
   // /api/trafik/ozet (super-admin). Ayrinti: trafikRoutes.ts basligi.

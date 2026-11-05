@@ -75,6 +75,7 @@
  *   doldurmayı atlıyordu (code-review bulgusu).
  */
 import { bilinenSayi } from '../../utils/para.js';
+import { firmaAnahtari, isimAnahtari } from '../../lib/isimAnahtari.js';
 
 /** Bir alanın "hiçbir satırda okunamadı" sayılması için gereken en az satır sayısı.
  *  Altında iddia edilmez: 3 carili bir firmada hiç e-posta olmaması normaldir. */
@@ -398,4 +399,172 @@ export function adresOzeti(satirlar: readonly Satir[]): EslemeOzeti {
     listeler.push(ADRES_ALANLARI.filter(([, mikro]) => metin(satir[mikro]) === null).map(([lead]) => lead));
   }
   return ozetKur(listeler, ADRES_ALANLARI.map(([lead]) => lead), ADRES_KRITIK);
+}
+
+// ── B3: aynı VKN'li iki Mikro cari = iki ayrı lead (şartname «Mikro bağlantı B» § 5.2 + BH9 / BH10 / BH19, 05.11.2026) ─────────
+// Kullanıcı kararı «İki ayrı cari»: VKN ya da isim eşleşmesi YALNIZ `mikroCariKod`'u BOŞ olan lead'e bağlar; kodu dolu lead hiçbir
+// zaman başka bir koda geçmez (bugün üç yazıcı `byKod || byVkn || byName` zinciriyle kodu EZİYORDU: 239 kod, 236 lead). Bu turda
+// (B3-a) saf işlevler YAZICILARA BAĞLANMADI: yalnız `GET /api/ops/cari-kod-tani`'nin kuru koşusu (`cariKuruKosu`) çağırır. Üç
+// yazıcının (`/api/mikro/cari/listesi`, `/api/mikro/import/cari`, saatlik cron) bu işlevlere bağlanması B3-b'dedir (ölçü + S-B3).
+
+/** Saatlik cron'un `CariListesiV2` gövdesi (sayfalama alanları hariç). Kuru koşu AYNI gövdeyle okur (BH19.4: girdi cron'unkiyle aynı). */
+export const CARI_LISTESI_GOVDESI = {
+  FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi',
+  WhereStr: "cari_baglanti_tipi=0 and cari_lastup_date > '2000/01/01'",
+  Sort: 'cari_kod',
+} as const;
+
+/** VKN anahtarı: yalnız rakamlar (bugünkü iki kopya `normalizeVkn` / `normalizeVknCron` ile aynı kural; B3-b onları buna bağlar). */
+export const vknAnahtari = (v: unknown): string => (typeof v === 'string' || typeof v === 'number' ? String(v) : '').replace(/\D/g, '');
+
+export interface CariIndeksKaydi<R> { ref: R; kod: string }
+export interface CariIndeksi<R> {
+  /** Mikro kodu → lead (ilk görülen). */
+  byKod: Map<string, R>;
+  /** VKN / firma anahtarı → o anahtardaki TÜM lead'ler ve bugünkü kodları (`''` = kodsuz). */
+  byVkn: Map<string, Array<CariIndeksKaydi<R>>>;
+  byIsim: Map<string, Array<CariIndeksKaydi<R>>>;
+  /** lead → indeksteki kayıtları (bağlanınca kodu doldurmak için). */
+  kayitlar: Map<R, Array<CariIndeksKaydi<R>>>;
+  /** İndeks KURULDUĞUNDA kodlu lead sayısı: yeni lead eşiğinin «ilk import» muafiyeti (`byKod.size === 0`). */
+  ilkKodlu: number;
+}
+
+/**
+ * Lead indeksini kurar. Lead tarafının isim anahtarı `firmaAnahtari(data)` (company → name), VKN `vknAnahtari(taxId || taxNo)`.
+ * Kiracı süzgeci KENDİ İÇİNDE (girdinin `tenantSnap`'ten geldiğine güvenmez; CLAUDE.md deseni): yabancı kiracının lead'i atlanır,
+ * etiketsiz eski lead eşleşir.
+ */
+export function cariIndeksiKur<R>(leads: Iterable<{ ref: R; data: Record<string, unknown> }>, companyId: string): CariIndeksi<R> {
+  const byKod = new Map<string, R>(), byVkn = new Map<string, Array<CariIndeksKaydi<R>>>(), byIsim = new Map<string, Array<CariIndeksKaydi<R>>>();
+  const kayitlar = new Map<R, Array<CariIndeksKaydi<R>>>();
+  const ekle = (harita: Map<string, Array<CariIndeksKaydi<R>>>, anahtar: string, k: CariIndeksKaydi<R>): void => {
+    const l = harita.get(anahtar);
+    if (l) l.push(k); else harita.set(anahtar, [k]);
+    const r = kayitlar.get(k.ref);
+    if (r) r.push(k); else kayitlar.set(k.ref, [k]);
+  };
+  for (const { ref, data } of leads) {
+    const dc = typeof data.companyId === 'string' ? data.companyId : '';
+    if (dc && dc !== companyId) continue;
+    const kod = String(data.mikroCariKod ?? '').trim();
+    if (kod && !byKod.has(kod)) byKod.set(kod, ref);
+    const vkn = vknAnahtari(data.taxId || data.taxNo);
+    if (vkn) ekle(byVkn, vkn, { ref, kod });
+    const isim = firmaAnahtari(data);
+    if (isim) ekle(byIsim, isim, { ref, kod });
+  }
+  return { byKod, byVkn, byIsim, kayitlar, ilkKodlu: byKod.size };
+}
+
+export type CariHedef<R> = { yol: 'kod'; ref: R } | { yol: 'vkn' | 'isim'; ref: R; oncekiKod: string | null } | null;
+
+/**
+ * Gelen Mikro carisinin hedef lead'i: önce `byKod`; yoksa `byVkn` listesindeki İLK kodsuz lead; yoksa `byIsim` listesindeki ilk
+ * kodsuz lead; hiçbiri yoksa `null` (yeni lead). Gelen tarafın isim anahtarı `isimAnahtari(unvan)` (çağıran üretir).
+ * BH9: `canliKodlar` (Mikro'nun aynı koşuda okunan kod kümesi; okunamadıysa / boşsa `null` → dal KAPALI) verilirse, kodu canlı
+ * kümede OLMAYAN lead de kodsuz sayılır ve yeni koda bağlanır (`oncekiKod` eski kod). Kodu dolu lead başka bir CANLI koda geçmez.
+ */
+export function cariHedefi<R>(indeks: CariIndeksi<R>, gelen: { kod: string; vkn: string; nameKey: string }, canliKodlar: ReadonlySet<string> | null = null): CariHedef<R> {
+  const k = indeks.byKod.get(gelen.kod);
+  if (k !== undefined) return { yol: 'kod', ref: k };
+  const bagliDegil = (e: CariIndeksKaydi<R>): boolean => e.kod === '' || (canliKodlar !== null && canliKodlar.size > 0 && !canliKodlar.has(e.kod));
+  for (const [yol, liste] of [['vkn', gelen.vkn ? indeks.byVkn.get(gelen.vkn) : undefined], ['isim', gelen.nameKey ? indeks.byIsim.get(gelen.nameKey) : undefined]] as const) {
+    const e = liste?.find(bagliDegil);
+    if (e) return { yol, ref: e.ref, oncekiKod: e.kod === '' ? null : e.kod };
+  }
+  return null;
+}
+
+/**
+ * Bağlanan (ya da yeni açılan) lead'in kodu indekste DOLDURULUR: aynı koşuda aynı VKN'li ikinci kod aynı lead'i alamaz. Yeni lead
+ * (indekste yok) VKN ve isim anahtarıyla eklenir (bugün route ekliyor, cron eklemiyordu; fark kapanır).
+ */
+export function cariBaglandi<R>(indeks: CariIndeksi<R>, ref: R, kod: string, anahtar: { vkn: string; nameKey: string }): void {
+  const onceki = indeks.byKod.get(kod);
+  if (onceki === undefined) indeks.byKod.set(kod, ref);
+  const mevcut = indeks.kayitlar.get(ref);
+  if (mevcut) { for (const e of mevcut) e.kod = kod; return; }
+  const yeni: Array<CariIndeksKaydi<R>> = [];
+  const ekle = (harita: Map<string, Array<CariIndeksKaydi<R>>>, a: string): void => {
+    if (!a) return;
+    const k = { ref, kod };
+    yeni.push(k);
+    const l = harita.get(a);
+    if (l) l.push(k); else harita.set(a, [k]);
+  };
+  ekle(indeks.byVkn, anahtar.vkn);
+  ekle(indeks.byIsim, anahtar.nameKey);
+  indeks.kayitlar.set(ref, yeni);
+}
+
+/** Saatlik cron'un bir koşuda açabileceği yeni lead sınırı (BH19; koruma, iş kuralı değil). */
+export const YENI_LEAD_ESIGI = 5;
+/** Bir koşuda en çok bu kadar lead başka (canlı) koda yeniden bağlanabilir (BH9). */
+export const YENIDEN_BAGLAMA_ESIGI = 3;
+const kodListesi = (kodlar: readonly string[]): string => `${kodlar.slice(0, 20).join(', ')}${kodlar.length > 20 ? ' …' : ''}`;
+
+/**
+ * Yeni lead eşiği (saatlik cron; elle iki uç eşiksizdir): kiracının en az bir kodlu lead'i varken (`ilkKodlu > 0`) açılacak yeni
+ * lead sayısı eşiği AŞARSA o koşuda HİÇ yeni lead açılmaz (var olan güncellemeler sürer). İlk import (`ilkKodlu === 0`) muaftır.
+ * Not yalnız kod listesi taşır (unvan / VKN yok).
+ */
+export function yeniLeadKapisi(ilkKodlu: number, yeniKodlar: readonly string[]): { acilir: boolean; not: string | null } {
+  if (ilkKodlu === 0 || yeniKodlar.length <= YENI_LEAD_ESIGI) return { acilir: true, not: null };
+  return { acilir: false, not: `⚠ olağandışı: ${yeniKodlar.length} yeni lead açılacaktı (eşik ${YENI_LEAD_ESIGI}) · açılmadı · elle «Cari İçe Aktar» ile açılabilir · kodlar: ${kodListesi(yeniKodlar)}` };
+}
+
+/** Yeniden bağlama eşiği (BH9): eşikten fazlası çıkarsa HİÇBİRİ yapılmaz. */
+export function yenidenBaglamaKapisi(kodlar: readonly string[]): { yapilir: boolean; not: string | null } {
+  if (kodlar.length <= YENIDEN_BAGLAMA_ESIGI) return { yapilir: true, not: null };
+  return { yapilir: false, not: `⚠ olağandışı: ${kodlar.length} lead yeniden bağlanacaktı (eşik ${YENIDEN_BAGLAMA_ESIGI}) · yapılmadı · kodlar: ${kodListesi(kodlar)}` };
+}
+
+export interface KuruPlanSatiri { kod: string; yol: 'kod' | 'vkn' | 'isim' | 'yeni'; leadId: string | null; oncekiKod: string | null }
+export interface CariKuruKosu {
+  /** Kodla bulunan (değişmeyecek) cari sayısı. */
+  kodla: number;
+  /** Kodla bulunmayanların planı: VKN / isimle bağlanacak lead, yeniden bağlama ya da «yeni». */
+  plan: KuruPlanSatiri[];
+  yeniLead: { kodlar: string[]; kapi: { acilir: boolean; not: string | null } };
+  yenidenBaglama: { kodlar: string[]; kapi: { yapilir: boolean; not: string | null } };
+  /** Kod kümesi dalı açık mıydı (BH9; küme okunamadıysa kapalı). */
+  canliKumeDali: boolean;
+}
+
+/**
+ * KURU KOŞU (BH19.4): B3-b'nin kullanacağı AYNI saf işlevleri (`cariIndeksiKur`, `cariHedefi`, `cariBaglandi`, eşik kapıları) yazım
+ * yapmadan koşturur. Girdi: kiracının lead'leri (id + veri), cron ile AYNI `CariListesiV2` satırları, canlı kod kümesi (ya da null).
+ */
+export function cariKuruKosu(
+  leads: ReadonlyArray<{ id: string; data: Record<string, unknown> }>, companyId: string,
+  cariler: readonly Satir[], canliKodlar: ReadonlySet<string> | null,
+): CariKuruKosu {
+  const indeks = cariIndeksiKur(leads.map(l => ({ ref: l.id, data: l.data })), companyId);
+  const kume = canliKodlar !== null && canliKodlar.size > 0 ? canliKodlar : null;
+  const plan: KuruPlanSatiri[] = [];
+  let kodla = 0;
+  for (const c of cariler) {
+    const e = cariEsle(c, { companyId, zamanDamgasi: null });
+    if (!e) continue;
+    const vkn = vknAnahtari(e.alanlar.taxId);
+    const nameKey = isimAnahtari(e.alanlar.name);
+    const h = cariHedefi(indeks, { kod: e.cariKod, vkn, nameKey }, kume);
+    if (h && h.yol === 'kod') { kodla++; continue; }
+    if (h) {
+      cariBaglandi(indeks, h.ref, e.cariKod, { vkn, nameKey });
+      plan.push({ kod: e.cariKod, yol: h.yol, leadId: h.ref, oncekiKod: h.oncekiKod });
+    } else {
+      cariBaglandi(indeks, `yeni:${e.cariKod}`, e.cariKod, { vkn, nameKey });
+      plan.push({ kod: e.cariKod, yol: 'yeni', leadId: null, oncekiKod: null });
+    }
+  }
+  const yeniKodlar = plan.filter(p => p.yol === 'yeni').map(p => p.kod);
+  const yenidenKodlar = plan.filter(p => p.oncekiKod !== null).map(p => p.kod);
+  return {
+    kodla, plan,
+    yeniLead: { kodlar: yeniKodlar, kapi: yeniLeadKapisi(indeks.ilkKodlu, yeniKodlar) },
+    yenidenBaglama: { kodlar: yenidenKodlar, kapi: yenidenBaglamaKapisi(yenidenKodlar) },
+    canliKumeDali: kume !== null,
+  };
 }

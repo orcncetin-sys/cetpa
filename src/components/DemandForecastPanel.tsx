@@ -23,6 +23,7 @@ import { collection, getDocs, query, where, limit, Timestamp } from '../lib/dbCl
 import { zamanDate, ayAnahtari, bugunAnahtari } from '../utils/zaman';
 import { auth, db } from '../firebase';
 import { gibReddedildi } from '../lib/gibDurum';
+import { mfKaynaksizMi } from '../lib/mfKaynagi';
 import { oc } from '../i18n/ortak';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -102,7 +103,7 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
       ]);
 
       type RawOrder = {
-        id: string; customerName: string; totalPrice: number; status: string;
+        id: string; customerName: string; totalPrice: number; status: string; source?: unknown; mfKaynaksiz?: unknown;
         lineItems?: { title?: string; name?: string; sku?: string; quantity: number; price: number }[];
         syncedAt?: { toDate?: () => Date };
       };
@@ -133,7 +134,9 @@ export default function DemandForecastPanel({ currentLanguage = 'tr' }: DemandFo
         // Tarihsiz sipariş BUGÜN'e sayılmaz (eski `?? new Date()` cari ayı şişiriyordu) — hesaptan düşer.
         const mon = ayAnahtari(o.syncedAt);
         if (!mon) continue;
-        if (bilinenSayi(o.totalPrice)) monthlyRevenue[mon] = (monthlyRevenue[mon] ?? 0) + Number(o.totalPrice);
+        // B2 (şartname «Mikro bağlantı B»): işaretli kaynaksız MF ciro projeksiyonuna girmez (ürün talebi adedi aşağıda değişmez).
+        if (mfKaynaksizMi(o)) { /* ciro dışı */ }
+        else if (bilinenSayi(o.totalPrice)) monthlyRevenue[mon] = (monthlyRevenue[mon] ?? 0) + Number(o.totalPrice);
         else tutarsizSay(mon);
 
         for (const item of o.lineItems ?? []) {

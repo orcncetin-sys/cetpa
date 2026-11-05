@@ -176,16 +176,18 @@ describe('sayacOlcegi — adet/sayı serilerinin ölçeği (ADDITIVE, 6a)', () =
   it('çapraz parite: enBuyukHafta(h) === sayacOlcegi(h.map(x => x.deger))', () => {
     const tutar = (bilinenler: readonly number[], bilinmeyen = 0): Tutar =>
       toplaBilinen([...bilinenler, ...Array.from({ length: bilinmeyen }, () => null)], x => x);
+    // `kaynaksizDisi` (B2 kaynaksız MF sayacı) ölçeğe girmez; fikstürde boş.
+    const kaynaksizDisi = { adet: 0, tutar: tutar([]) };
     const haftalar: Hafta[] = [
-      { indeks: 0, ciro: tutar([]), deger: 0 },                 // sipariş yok → gerçek ₺0
-      { indeks: 1, ciro: tutar([12_000]), deger: 12_000 },
-      { indeks: 2, ciro: tutar([], 1), deger: null },           // yalnız tutarsız kayıt
-      { indeks: 3, ciro: tutar([50_000]), deger: 50_000 },      // tepe
+      { indeks: 0, ciro: tutar([]), kaynaksizDisi, deger: 0 },                 // sipariş yok → gerçek ₺0
+      { indeks: 1, ciro: tutar([12_000]), kaynaksizDisi, deger: 12_000 },
+      { indeks: 2, ciro: tutar([], 1), kaynaksizDisi, deger: null },           // yalnız tutarsız kayıt
+      { indeks: 3, ciro: tutar([50_000]), kaynaksizDisi, deger: 50_000 },      // tepe
     ];
     expect(sayacOlcegi(haftalar.map(h => h.deger))).toBe(50_000);
     expect(enBuyukHafta(haftalar)).toBe(sayacOlcegi(haftalar.map(h => h.deger)));
 
-    const bosSeri: Hafta[] = [{ indeks: 0, ciro: tutar([], 2), deger: null }];
+    const bosSeri: Hafta[] = [{ indeks: 0, ciro: tutar([], 2), kaynaksizDisi, deger: null }];
     expect(enBuyukHafta(bosSeri)).toBe(sayacOlcegi(bosSeri.map(h => h.deger)));
     expect(enBuyukHafta(bosSeri)).toBeNull();
   });

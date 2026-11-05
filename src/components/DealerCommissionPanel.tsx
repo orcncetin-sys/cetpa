@@ -19,6 +19,7 @@ import ModuleHeader from './ModuleHeader';
 import { confirmAction } from '../lib/confirm';
 import { cn } from '../lib/utils';
 import { sortByCreatedAt } from '../utils/fsSort';
+import { mfKaynaksizMi } from '../lib/mfKaynagi';
 import { oc } from '../i18n/ortak';
 
 interface CommissionRule {
@@ -47,6 +48,9 @@ interface Order {
   customerEmail?: string;
   totalPrice?: number;
   status?: string;
+  /** Kaynaksız MF kapısı (`lib/mfKaynagi.mfKaynaksizMi`) okur. */
+  source?: unknown;
+  mfKaynaksiz?: unknown;
   // Zaman damgasi bicimi SABIT DEGIL: Timestamp ornegi, ISO string veya epoch
   // olabilir (bkz. src/utils/zaman.ts). `unknown` birakip cozumlemeyi
   // zamanMs/ayAnahtari'na birakiyoruz - dar bir tip, gercekte gelen bicimleri
@@ -221,7 +225,8 @@ export default function DealerCommissionPanel({
         return anahtar === `${year}-${String(month).padStart(2, '0')}`;
       });
 
-      const actualSales = dealerOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+      // B2 (şartname «Mikro bağlantı B»): işaretli kaynaksız MF ciro dışı — komisyon tabanına girmez.
+      const actualSales = dealerOrders.filter(o => !mfKaynaksizMi(o)).reduce((s, o) => s + (o.totalPrice || 0), 0);
       const tier = dealer.priceTier || dealer.customerType || 'B2B Standard';
       const rule = commissionRules.find(r => r.tier === tier);
       const targetAmount = rule?.targetAmount || 100000;

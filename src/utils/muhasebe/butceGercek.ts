@@ -19,7 +19,10 @@
  * sayılır, ekranda '—' + "N kayıt tutarsız" notu. `paraYaz`/`tlYaz` NaN'ı zaten '—' basar.
  *
  * SAYFA PARİTESİ (bilinçli, değiştirilmedi): ay süzgeci `createdAt ?? syncedAt`; iptal/Mikro kaynaklı
- * kayıtlar dışlanmaz (sayfada da dışlanmıyordu — değiştirmek ayrı ürün kararı). Bölüm payları
+ * kayıtlar dışlanmaz (sayfada da dışlanmıyordu — değiştirmek ayrı ürün kararı). TEK İSTİSNA (şartname «Mikro
+ * bağlantı B» B2, 2026-11-05): İŞARETLİ kaynaksız MF (`lib/mfKaynagi.mfKaynaksizMi`) ciro dışıdır — kapı
+ * `aylikCiro`nun İÇİNDE, dışlanan ayın sayacı `kaynaksizDisi` (`mfKaynaksizSay`); işaretsiz MF bugünkü gibi
+ * sayılır (QH2-1). `ayinSiparisleri` değişmez (liste / sayım gösterimi). Bölüm payları
  * (%12/%6/%10/%8/%3/%5) sayfadaki sezgisel sabitler; gerçek ERP maliyet merkezi kullanır.
  *
  * Girdi tipleri MİNİMAL: yalnız gerçekten okunan alanlar; kanonik `Order` da yerel türevler de
@@ -27,8 +30,10 @@
  */
 import { bilinenSayi, toplaBilinen } from '../para';
 import { ayAnahtari } from '../zaman';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
+import { mfKaynaksizSay, type MfKaynaksizDisi } from './faturasizDisi';
 
-export interface ButceSiparisi { totalPrice?: unknown; createdAt?: unknown; syncedAt?: unknown }
+export interface ButceSiparisi { totalPrice?: unknown; createdAt?: unknown; syncedAt?: unknown; source?: unknown; mfKaynaksiz?: unknown }
 export interface ButceKalemi { dept?: string; budgetTRY?: unknown }
 
 /** Ciro → bölüm harcaması sezgisel payları (sayfadaki `actualSplit` sabitleri, toplam %44). */
@@ -47,9 +52,10 @@ export function ayinSiparisleri<T extends ButceSiparisi>(siparisler: readonly T[
   return siparisler.filter(o => ayAnahtari(o.createdAt ?? o.syncedAt) === ay);
 }
 
-/** Ayın cirosu: bilinen tutarlar toplanır, bilinmeyenler sayılır (eski `|| 0` reduce yerine). */
+/** Ayın cirosu: bilinen tutarlar toplanır, bilinmeyenler sayılır (eski `|| 0` reduce yerine). İşaretli kaynaksız MF
+ *  ciroya GİRMEZ (B2; kapı burada, çağıran süzmez) — sayacı `butceGercekOzeti().kaynaksizDisi`. */
 export function aylikCiro(siparisler: readonly ButceSiparisi[], ay: string): { toplam: number; bilinen: number; bilinmeyen: number } {
-  return toplaBilinen(ayinSiparisleri(siparisler, ay), o => o.totalPrice);
+  return toplaBilinen(ayinSiparisleri(siparisler, ay).filter(o => !mfKaynaksizMi(o)), o => o.totalPrice);
 }
 
 /** Ciroyu paylarla bölümlere dağıtır; ciro bilinmiyorsa her bölüm NaN. Payı olmayan bölüm sonuçta YOK. */
@@ -101,6 +107,8 @@ export interface ButceGercekOzeti {
   gerceklesen: { toplam: number; bilinmeyen: number; paysizBolum: number };
   /** Bölüm anahtarı → satır (sayfanın DEPTS sırasıyla). */
   satirlar: Record<string, ButceSatiri>;
+  /** Ayın ciroya GİRMEYEN işaretli kaynaksız MF siparişleri (B2); ekran `mfKaynaksizNotu` ile basar. */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 /**
@@ -140,5 +148,6 @@ export function butceGercekOzeti(
     butce: { toplam: butceToplam.toplam, bilinmeyen: butceToplam.bilinmeyen },
     gerceklesen: { toplam: gerceklesenToplam, bilinmeyen: ciro.bilinmeyen, paysizBolum },
     satirlar,
+    kaynaksizDisi: mfKaynaksizSay(ayinSiparisleri(siparisler, ay)),
   };
 }

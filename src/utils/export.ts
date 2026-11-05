@@ -11,6 +11,8 @@ import { gunAnahtari, bugunAnahtari } from './zaman';
 import type { Order, Lead, InventoryItem } from '../types';
 import { oc } from '../i18n/ortak';
 import { teslimatAdresiMetni } from './siparisler/teslimatAdresi';
+import { op } from '../i18n/orders';
+import { mfKaynaksizMi } from '../lib/mfKaynagi';
 
 // ── Generic download helper ───────────────────────────────────────────────────
 
@@ -29,6 +31,15 @@ function downloadCSV(csv: string, filename: string): void {
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 
+/**
+ * Sipariş CSV'sinin «Fatura tipi» hücresi. Kaynaksız MF (şartname «Mikro bağlantı B» B2 #8): satır KALIR, hücre «Mikro'da satış faturası
+ * yok» der (rozetle AYNI metin, i18n/orders). Öteki satırlarda bugünkü değer.
+ */
+export function faturaTipiHucresi(o: Pick<Order, 'faturaTipi' | 'faturali' | 'source' | 'mfKaynaksiz'>, tr: boolean): string {
+  if (mfKaynaksizMi(o)) return op(tr).mikroda_satis_faturasi_yok;
+  return o.faturaTipi ?? (o.faturali ? 'e-fatura' : '');
+}
+
 export function exportOrdersCSV(orders: Order[], lang: string = 'tr'): void {
   const tr = lang === 'tr';
   const rows = orders.map(o => ({
@@ -41,7 +52,7 @@ export function exportOrdersCSV(orders: Order[], lang: string = 'tr'): void {
     // alacak arızasının dışa aktarım yüzeyi.
     [tr ? 'Ödeme Durumu'       : 'Payment Status']:  !odemeTakipli(o) ? (tr ? 'Bilinmiyor (Mikro)' : 'Unknown (Mikro)') : o.paid ? (oc(tr).odendi) : (tr ? 'Bekliyor' : 'Unpaid'),
     [tr ? 'Toplam (₺)'         : 'Total (₺)']:       o.totalPrice,
-    [oc(tr).fatura_tipi]:    o.faturaTipi ?? (o.faturali ? 'e-fatura' : ''),
+    [oc(tr).fatura_tipi]:    faturaTipiHucresi(o, tr),
     [tr ? 'KDV %'              : 'VAT %']:           o.kdvOran ?? '',   // bilinmiyorsa BOŞ hücre, 0 değil (satır 94 dersi — yarım kalmıştı)
     [tr ? 'Kargo No'           : 'Tracking No']:     o.trackingNumber ?? '',
     [tr ? 'Kargo Firması'      : 'Carrier']:         o.cargoCompany ?? '',

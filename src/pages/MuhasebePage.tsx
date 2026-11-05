@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { mutabakatSatirlari, mutabakatDurumu, mutabakatOzeti, masrafOzeti } from '../utils/muhasebe/mutabakatMasraf';
 import { finansalOranlar, cariBakiyeToplamlari } from '../utils/muhasebe/finansalOranlar';
 import { arYaslandirma, toplamAlacak, kovaTutari, gecikmisSiparisler, KOVA_ADLARI, type KovaAdi } from '../utils/muhasebe/arYaslandirma';
-import { faturaYaslandirma, satisTahmini, karMerkezleri, karMerkeziToplami, tahminTutari } from '../utils/muhasebe/faturaTakipTahmin';
+import { faturaYaslandirma, satisTahmini, karMerkezleri, karMerkeziToplami, karMerkeziKaynaksizDisi, tahminTutari } from '../utils/muhasebe/faturaTakipTahmin';
 import { bankaMutabakati, bankaBakiyesiOku, odemeEslestir, odenmemisFaturalar, eslestirmeOzeti, tutariBilinmeyenFaturaSayisi } from '../utils/muhasebe/bankaMutabakat';
 import { kdvKaydiMi, kdvAylikOzet, tahsilatHatirlatma, yaslandirmaSeviyesi } from '../utils/muhasebe/kdvAylik';
 import { motion } from 'motion/react';
@@ -40,7 +40,7 @@ import { cariHareketleri, cariOzet, krediLimiti, krediKullanimi, onayBekleyenler
 import { butceGercekOzeti } from '../utils/muhasebe/butceGercek';
 import { butceGercekYili, kdvMutabakat, gelirButceYili, varyansAnalizi, type VaryansKalemi } from '../utils/muhasebe/butceVaryans';
 import { faturaTakipSiparisleri, faturaTakipMikroOzeti } from '../utils/muhasebe/faturalar';
-import { faturasizDisiNotu } from '../utils/muhasebe/faturasizDisi';
+import { faturasizDisiNotu, mfKaynaksizNotu } from '../utils/muhasebe/faturasizDisi';
 import { oc } from '../i18n/ortak';
 import { mc } from '../i18n/muhasebe';
 
@@ -387,6 +387,7 @@ export default function MuhasebePage(props: Props) {
                             <p className="text-xs text-gray-500">{oc(currentLanguage).toplam_kdv}</p>
                             <p className="text-2xl font-bold text-purple-600">{paraYaz(ekranTutari(ozet146.toplamKdv), { ondalik: 0 })}</p>
                             {ozet146.toplamKdv.bilinmeyen > 0 && <p className="text-[10px] text-amber-600">{ozet146.toplamKdv.bilinmeyen} {mc(currentLanguage).kayit_tutarsiz}</p>}
+                            {mfKaynaksizNotu(ozet146.kaynaksizDisi, currentLanguage) && <p data-mf-kaynaksiz-notu="kdv-aylik" className="text-[10px] text-amber-700">{mfKaynaksizNotu(ozet146.kaynaksizDisi, currentLanguage)}</p>}
                           </div>
                         </div>
                         <div className="grid grid-cols-3 gap-3 mb-5">
@@ -690,6 +691,7 @@ export default function MuhasebePage(props: Props) {
                                     {fmtButce(totalActual)}
                                   </p>
                                   {ozet.gerceklesen.bilinmeyen > 0 && <p className="text-[10px] text-amber-600">{ozet.gerceklesen.bilinmeyen} {mc(currentLanguage).siparisin_tutari_bilinmiyor}</p>}
+                                  {mfKaynaksizNotu(ozet.kaynaksizDisi, currentLanguage) && <p data-mf-kaynaksiz-notu="butce" className="text-[10px] text-amber-700">{mfKaynaksizNotu(ozet.kaynaksizDisi, currentLanguage)}</p>}
                                 </div>
                               </div>
                             </div>
@@ -1650,6 +1652,10 @@ export default function MuhasebePage(props: Props) {
                         {faturasizDisiNotu(kdvT547.faturasizDisi, currentLanguage) && (
                           <p data-faturasiz-notu="kdv-borcu" className="text-[11px] text-gray-500">{mc(tr547).kdv_borcu}: {faturasizDisiNotu(kdvT547.faturasizDisi, currentLanguage)}</p>
                         )}
+                        {/* Sipariş tarafı kaynaksız MF'yi saymaz (şartname «Mikro bağlantı B» B2 #5). */}
+                        {mfKaynaksizNotu(kdvT547.kaynaksizDisi, currentLanguage) && (
+                          <p data-mf-kaynaksiz-notu="kdv-borcu" className="text-[11px] text-amber-700">{mc(tr547).kdv_borcu}: {mfKaynaksizNotu(kdvT547.kaynaksizDisi, currentLanguage)}</p>
+                        )}
                         {/* KPI strip */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           {[
@@ -2076,6 +2082,7 @@ export default function MuhasebePage(props: Props) {
                     return (
                       <motion.div key="butce-senaryo" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className="space-y-4">
                         <ModuleHeader title={mc(tr557).butce_senaryo_planlamasi} subtitle={mc(tr557)._12_aylik_gelir_gider_tahmini_iyimser_baz_ve_kot} icon={BarChart3} />
+                        {mfKaynaksizNotu(temel.kaynaksizDisi, currentLanguage) && <p data-mf-kaynaksiz-notu="p557" className="text-[11px] text-amber-700">{mfKaynaksizNotu(temel.kaynaksizDisi, currentLanguage)}</p>}
                         {/* Scenario selector */}
                         <div className="flex gap-2 flex-wrap">
                           {(Object.entries(scenarios) as Array<[string,typeof scenarios[string]]>).map(([key,s])=>(
@@ -2844,6 +2851,10 @@ export default function MuhasebePage(props: Props) {
                           <TrendingUp className="w-4 h-4 text-emerald-500" />
                           <h4 className="font-bold text-gray-800 text-sm">{mc(tr565).satis_tahmini_agirlikli_hareketli_ortalama}</h4>
                         </div>
+                        {/* Kaynaksız MF tahmine girmedi (şartname «Mikro bağlantı B» BH15; sayaç işlevin kendisinden). */}
+                        {mfKaynaksizNotu(t565.kaynaksizDisi, currentLanguage) && (
+                          <p data-mf-kaynaksiz-notu="p565" className="-mt-2 mb-3 text-[11px] text-amber-700">{mfKaynaksizNotu(t565.kaynaksizDisi, currentLanguage)}</p>
+                        )}
 
                         {/* Combined chart: history + forecast */}
                         <div className="flex items-end gap-1" style={{height:'100px'}}>
@@ -2904,6 +2915,9 @@ export default function MuhasebePage(props: Props) {
                           <BarChart3 className="w-4 h-4 text-purple-500" />
                           <h4 className="font-bold text-gray-800 text-sm">{mc(tr566).kar_merkezi_raporu}</h4>
                         </div>
+                        {mfKaynaksizNotu(karMerkeziKaynaksizDisi(orders), currentLanguage) && (
+                          <p data-mf-kaynaksiz-notu="p566" className="-mt-2 mb-3 text-[11px] text-amber-700">{mfKaynaksizNotu(karMerkeziKaynaksizDisi(orders), currentLanguage)}</p>
+                        )}
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs">
                             <thead>
@@ -3741,6 +3755,9 @@ export default function MuhasebePage(props: Props) {
                             ))}
                           </div>
                         </div>
+                        {mfKaynaksizNotu(karMerkeziKaynaksizDisi(periodOrders), currentLanguage) && (
+                          <p data-mf-kaynaksiz-notu="p610" className="text-[11px] text-amber-700">{mfKaynaksizNotu(karMerkeziKaynaksizDisi(periodOrders), currentLanguage)}</p>
+                        )}
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs">
                             <thead><tr className="border-b border-gray-100 bg-gray-50">

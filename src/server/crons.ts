@@ -22,7 +22,7 @@
 import { resendGonderici } from './eposta.js';
 import type { AdminDbLike, AdminDocRef, DocDaralt } from './adminDbTypes.js';
 import { zamanla, IS_SAAT_DILIMI } from './zamanla.js';
-import { getMikroCreds, mikroPost, mikroData, mikroStokMiktari,
+import { getMikroCreds, mikroStokMiktari,
          mikroSatisFiyatlari, mikroVergiOranlari, vergiOraniCoz } from './mikroClient.js';
 import { mirrorMikroStoklar, mirrorMikroCariler } from './mikroMirror.js';
 // Cari eşlemesi TEK KAYNAK (saf + testli). 2026-09-19 delta bulgusu: bu dosya
@@ -31,12 +31,15 @@ import { mirrorMikroStoklar, mirrorMikroCariler } from './mikroMirror.js';
 // YAZILMAZ" sözleşmesini HER SAAT BAŞI geri alıyordu: elle girilmiş e-posta/
 // telefon/VKN `''` ile siliniyordu. İki yazıcının aynı `leads` dokümanına zıt
 // sözleşmeyle yazması "yarım düzeltme" sınıfının en pahalı hâli.
-import { cariEsle, cariEslemeOzeti, type CariEsleme } from './mikro/eslemeCari.js';
+import { cariEsle, cariEslemeOzeti, CARI_LISTESI_GOVDESI, type CariEsleme } from './mikro/eslemeCari.js';
+import { mikroListeTumu } from './mikro/listeSayfalari.js';
 import { sayacOlustur, sayacaEkle, okumaArizalari, STOK_KRITIK } from './mikro/eslemeStok.js';
 import { isimAnahtari, firmaAnahtari } from '../lib/isimAnahtari.js';
 // Sipariş tutarı TEK KAYNAK: bilinmeyen tutar 0 SAYILMAZ, ayrıca sayılır.
 import { toplaBilinen, donemKarsilastir } from '../utils/para.js';
 import { siparisTutari, siparisIptalMi } from '../utils/siparis.js';
+import { mfKaynaksizMi } from '../lib/mfKaynagi.js';
+import { mfKaynaksizNotu, mfKaynaksizSay } from '../utils/muhasebe/faturasizDisi.js';
 import { aktifYazicilar, bakimKilidiVar, yaziciOlarakCalistir, type SqlCalistirici } from './bakimKilidi.js';
 import { rolluKiracilar } from './kiraciOrtami.js';
 // Süreç-geneli arka plan işi (saf modül; mikroRoutes'u İÇE AKTARMAZ, döngü yok): saatlik senkron, koşan işle aynı belgelere yazmasın.
@@ -107,20 +110,10 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
     return '';
   };
 
+  // Sayfalama ortak gövdede (mikro/listeSayfalari; şartname «Mikro bağlantı B» BH19.4: cari-kod-tani kuru koşusu AYNI okumayı yapar).
   const cronPullAll = async (
     method: string, listKey: string, body: Record<string, unknown>,
-  ): Promise<Record<string, unknown>[]> => {
-    const out: Record<string, unknown>[] = [];
-    for (let index = 0; index < 100; index++) {
-      const { ok, data } = await mikroPost(method, { ...body, Size: '500', Index: index });
-      if (!ok || typeof data === 'string') break;
-      const rows = (mikroData(data)[listKey] ?? []) as Record<string, unknown>[];
-      if (!Array.isArray(rows) || rows.length === 0) break;
-      out.push(...rows);
-      if (rows.length < 500) break;
-    }
-    return out;
-  };
+  ): Promise<Record<string, unknown>[]> => (await mikroListeTumu(method, listKey, body)).satirlar;
 
   zamanla('0 * * * *', async () => {
     // ARKA PLAN İŞİ KAPISI (şartname «Mikro bağlantı A» AH1, 2026-11-05): koşan arka plan işi (gece stok miktarı adımı ya da gün
@@ -278,11 +271,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
       if (stokArizasi.length) console.warn(`[cron] stok okuma arızası: ${stokArizasi.join(', ')} hiçbir satırda okunamadı — Mikro kolon adı/şema kontrol edin`);
 
       // ── Cariler: tam sayfalama + upsert (tedarikçi tipi dahil) ─────────────
-      const cariler = await cronPullAll('CariListesiV2', 'CariListesi', {
-        FieldName: 'cari_kod,cari_unvan1,cari_unvan2,cari_vdaire_no,cari_vdaire_adi,cari_EMail,cari_CepTel,cari_efatura_fl,cari_hareket_tipi,cari_baglanti_tipi',
-        WhereStr: "cari_baglanti_tipi=0 and cari_lastup_date > '2000/01/01'",
-        Sort: 'cari_kod',
-      });
+      const cariler = await cronPullAll('CariListesiV2', 'CariListesi', { ...CARI_LISTESI_GOVDESI });
       void mirrorMikroCariler(cariler);
       const leadSnap = await deps().tenantSnap('leads', companyId);
       const leadByKod = new Map<string, AdminDocRef>();
@@ -402,8 +391,11 @@ if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
       // ciro düşük çıkıyor ve yönetici "ciro %18 düştü" oklarını gerçek sanıyordu.
       // Bilinenler toplanır, BİLİNMEYEN SAYISI rapora açıkça yazılır (CLAUDE.md: sahte
       // kesinlik yok — '—' ya da açık not).
-      const thisTutar = toplaBilinen(thisWeek, siparisTutari);
-      const prevTutar = toplaBilinen(prevWeek, siparisTutari);
+      // B2 (şartname «Mikro bağlantı B», 2026-11-05): işaretli kaynaksız MF (Mikro'da satış faturası yok) ciroya GİRMEZ; sipariş
+      // SAYISI ham haftalık listeden. Bu haftanın dışlananı not satırında.
+      const thisTutar = toplaBilinen(thisWeek.filter(o => !mfKaynaksizMi(o)), siparisTutari);
+      const prevTutar = toplaBilinen(prevWeek.filter(o => !mfKaynaksizMi(o)), siparisTutari);
+      const kaynaksizNotu = mfKaynaksizNotu(mfKaynaksizSay(thisWeek), 'tr');
       // EKRAN ≠ TÜRETME (para.donemKarsilastir): ciro kısmi toplam olabilir ('—' hiç bilinen yoksa), ama ok ve
       // yüzde iki haftadan birinde TEK sipariş bile bilinmiyorsa HİÇ basılmaz — ilk düzeltme toplamı `toplaBilinen`e
       // çevirmiş, sapmayı yine kısmi toplamdan türetmişti ("▼ %30" / "₺0 ▼ %100"; 2026-09-19 kapanış incelemesi).
@@ -444,6 +436,7 @@ if (process.env.WEEKLY_REPORT_ENABLED === 'true') {
             <span style="font-size:28px;font-weight:800;color:#1d1d1f;">${ciroMetni}</span>
             ${karsilastirma.yuzde !== null ? `<span style="color:${color};font-size:12px;font-weight:700;margin-left:8px;">${arrow} %${Math.abs(karsilastirma.yuzde)}</span>` : ''}
             ${tutarsizSiparis > 0 ? `<br><span style="color:#86868b;font-size:11px;">Bu hafta ${thisTutar.bilinmeyen}, geçen hafta ${prevTutar.bilinmeyen} siparişin tutarı bilinmiyor — toplama dâhil değil, karşılaştırma yapılmadı</span>` : ''}
+            ${kaynaksizNotu ? `<br><span style="color:#86868b;font-size:11px;">Bu hafta: ${kaynaksizNotu}</span>` : ''}
           </td>
         </tr>
         <tr>

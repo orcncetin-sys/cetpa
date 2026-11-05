@@ -38,6 +38,20 @@ export async function bakimKilidiKaldir(pool: SqlCalistirici): Promise<void> {
   await pool.query("DELETE FROM docs WHERE coll = $1 AND id = $2", [BAKIM_KILIDI.coll, BAKIM_KILIDI.id]);
 }
 
+/**
+ * Bekçi `bakim_kilidi` kontrolü (2026-11-05, stok kodu göçü şartnamesi DH8): kilitte TTL YOK — yarım kalan bakım (çöken script, ölen
+ * süreç) saatlik senkronu ve importları SESSİZCE durdurur. 2 saatten eski kilit FAIL; başlangıcı okunamayan kilit de FAIL.
+ */
+export const BAKIM_KILIDI_BAYAT_ESIGI_MS = 2 * 60 * 60 * 1000;
+export function bakimKilidiDenetimi(kilit: { aciklama: string; baslangic: string } | null, simdiMs: number): { ok: boolean; detail: string } {
+  if (!kilit) return { ok: true, detail: 'bakım kilidi yok' };
+  const t = Date.parse(kilit.baslangic);
+  if (!Number.isFinite(t)) return { ok: false, detail: `bakım kilidi var, başlangıcı okunamadı: ${kilit.aciklama}` };
+  const dk = Math.round((simdiMs - t) / 60000);
+  if (simdiMs - t > BAKIM_KILIDI_BAYAT_ESIGI_MS) return { ok: false, detail: `bakım kilidi ${dk} dk'dır duruyor (eşik 120 dk): ${kilit.aciklama} — saatlik senkron ve importlar atlanıyor` };
+  return { ok: true, detail: `bakım kilidi var (${dk} dk): ${kilit.aciklama}` };
+}
+
 // ── Yazıcı kaydı (2026-09-11, yeniden inceleme KRİTİK bulgusu) ─────────────────────────────
 // Kilit yalnız BAŞLANGIÇTA okunuyordu: kilit konduğunda zaten koşan cron/import T0 snapshot'ındaki
 // ref'lerle yazmaya devam eder ve silinen kopyayı aynı id ile diriltir. Bu yüzden uzun süren lead

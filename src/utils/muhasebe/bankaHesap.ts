@@ -55,6 +55,35 @@ export function dovizBakiyeleri(hesaplar: readonly BakiyeliHesap[]): Record<Bank
   return { TRY: birimde('TRY'), USD: birimde('USD'), EUR: birimde('EUR') };
 }
 
+// ── Hesap formu kaydı (şartname «Mikro bağlantı B» § 3.6 + BH2, T-B1-5) ───────────────────────────────────────────────
+
+/** Mikro'dan açılan hesap mı (import `source: 'mikro'`): bakiyesi Mikro'dan gece gelir (kullanıcı kararı 05.11.2026), form
+ *  bakiye girdisini KİLİTLER. Elle açılan hesapta (alan yok / başka değer) bakiye formdan girilir, bugünkü gibi zorunludur. */
+export const mikroHesabiMi = (h: { source?: unknown } | null | undefined): boolean => h?.source === 'mikro';
+
+/** Formun bu işlevin okuduğu alanları (BankaTab `BankForm` yapısal olarak uyar). */
+export interface BankaFormuAlanlari { bankName: string; balance: number | '' }
+export type BankaKayitSonucu<F extends BankaFormuAlanlari> =
+  | { tamam: true; kayit: Omit<F, 'balance'> & { balance?: number } }
+  | { tamam: false; neden: 'ad' | 'bakiye' };
+
+/**
+ * Hesap formunun kayıt gövdesi (saf). Mikro hesabında (`mikroHesabiMi(duzenlenen)`) gövdede `balance` anahtarı HİÇ yoktur ve
+ * bakiye zorunlu değildir: eskiden `balance: null` olan Mikro hesabının IBAN'ı «bakiye sayı olmalı» diye kaydedilemiyordu; bakiye
+ * gece Mikro'dan yazılır (BH2: Mikro hesabında elle değer gece adımına bırakılır). Elle hesapta bugünkü kural: bakiye bilinen
+ * sayı olmalı (boş alan ₺0 yazılmaz).
+ */
+export function bankaKayitGovdesi<F extends BankaFormuAlanlari>(form: F, duzenlenen: { source?: unknown } | null | undefined): BankaKayitSonucu<F> {
+  if (!form.bankName.trim()) return { tamam: false, neden: 'ad' };
+  if (mikroHesabiMi(duzenlenen)) {
+    const { balance, ...govde } = form;
+    void balance;   // bilerek düşer: Mikro hesabının bakiyesi formdan yazılmaz
+    return { tamam: true, kayit: govde };
+  }
+  if (!bilinenSayi(form.balance)) return { tamam: false, neden: 'bakiye' };
+  return { tamam: true, kayit: { ...form, balance: Number(form.balance) } };
+}
+
 // ── "Şimdi Çek": Mikro banka hareketi satırı → BankTransaction ─────────────────────────────────
 
 /** Mikro satırından üretilen kayıt — `Omit<BankTransaction,'id'>`e atanabilir; `balance` bilinmiyorsa anahtar YOK. */

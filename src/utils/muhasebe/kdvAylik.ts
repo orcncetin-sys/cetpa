@@ -20,13 +20,15 @@
 import { bilinenSayi, toplaBilinen, type Tutar } from '../para';
 import { odemeTakipli } from '../siparis';
 import { ayAnahtari, gunFarki } from '../zaman';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
+import { mfKaynaksizSay, type MfKaynaksizDisi } from './faturasizDisi';
 
 /** para.ts `Tutar` (toplaBilinen dönüşü) — eski importlar için yeniden dışa aktarım. Ekran köprüsü `ekranTutari` de para.ts'te (tek sözleşme). */
 export type { Tutar };
 
 // ── Phase 146: KDV aylık özet ───────────────────────────────────────────────────────────────
 
-export interface KdvKaydi { kdvTutari?: unknown; kdvHaricTutar?: unknown; faturali?: unknown; createdAt?: unknown }
+export interface KdvKaydi { kdvTutari?: unknown; kdvHaricTutar?: unknown; faturali?: unknown; createdAt?: unknown; source?: unknown; mfKaynaksiz?: unknown; totalPrice?: unknown }
 
 /**
  * KDV panosuna giren kayıt. Üretici (App.tsx AddOrder) faturasız siparişe `kdvTutari: 0` yazar;
@@ -58,6 +60,8 @@ export interface KdvAylikOzet {
   toplamNet: Tutar;
   /** ΣKDV / Σnet × 100 — yalnız İKİSİ DE bilinen kayıtlardan; net ≤ 0 ise null. Yuvarlama çağıranın işi. */
   efektifOran: number | null;
+  /** Penceredeki KDV kaydı olup DIŞLANAN kaynaksız MF (Mikro'da satış faturası yok; şartname «Mikro bağlantı B» B2 #6). */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 const bos = (): Tutar => ({ toplam: 0, bilinen: 0, bilinmeyen: 0 });
@@ -69,7 +73,9 @@ const ekle = (a: Tutar, b: Tutar): Tutar => ({ toplam: a.toplam + b.toplam, bili
  * İptal kaydı sayfadaki gibi dışlanmaz (ayrı iş kararı; bkz. bağlama notu).
  */
 export function kdvAylikOzet(siparisler: readonly KdvKaydi[], simdi: Date, ayAdedi = 6): KdvAylikOzet {
-  const kayitlar = siparisler.filter(kdvKaydiMi);
+  // Kaynaksız MF (B2 #6) KDV aylık özetine girmez; pencere içindekiler ayrıca sayılır (aşağıda).
+  const kdvKayitlari = siparisler.filter(kdvKaydiMi);
+  const kayitlar = kdvKayitlari.filter(o => !mfKaynaksizMi(o));
   const aylar: AyOzeti[] = [];
   for (let i = ayAdedi - 1; i >= 0; i--) {
     const tarih = new Date(simdi.getFullYear(), simdi.getMonth() - i, 1);
@@ -96,6 +102,7 @@ export function kdvAylikOzet(siparisler: readonly KdvKaydi[], simdi: Date, ayAde
     toplamKdv: aylar.reduce((t, a) => ekle(t, a.kdv), bos()),
     toplamNet: aylar.reduce((t, a) => ekle(t, a.net), bos()),
     efektifOran: oranNet > 0 ? (oranKdv / oranNet) * 100 : null,
+    kaynaksizDisi: mfKaynaksizSay(kdvKayitlari.filter(o => { const ay = ayAnahtari(o.createdAt); return ay !== null && pencere.has(ay); })),
   };
 }
 

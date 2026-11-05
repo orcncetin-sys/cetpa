@@ -19,6 +19,7 @@ import {
   type AlanYolu, type GocKarti, type GocSatiri, type KodKaniti, type KoleksiyonSayimi, type MikroEskiKodSayimlari, type PlanOzeti,
   type SiniflamaSonucu, type TabloCifti, type HarfFarkiUyarisi, type GocSinifi,
 } from './stokKodGocu.js';
+import { doluAlanSay } from './stokKodGocuTasima.js';
 
 /** Ham SQL çalıştıran en dar havuz yüzeyi (pg `Pool` buna uyar). */
 export interface KuruPgHavuzu {
@@ -69,10 +70,11 @@ const YETIM_LISTE_SINIRI = 500;
 
 const KIRACI_BELGELERI_SQL = "SELECT id, data FROM docs WHERE coll = $1 AND COALESCE(data->>'companyId', '') IN ($2, '')";
 
-interface Belge { id: string; veri: Record<string, unknown> }
+export interface Belge { id: string; veri: Record<string, unknown> }
 
-/** Kiracı belgeleri: süzgeç SQL'de, aynı kural JS'te bir kez daha (CLAUDE.md deseni: yabancı kiracı atlanır, etiketsiz dâhil — DH19). */
-async function kiraciBelgeleri(h: KuruPgHavuzu, coll: string, cid: string): Promise<Belge[]> {
+/** Kiracı belgeleri: süzgeç SQL'de, aynı kural JS'te bir kez daha (CLAUDE.md deseni: yabancı kiracı atlanır, etiketsiz dâhil — DH19).
+ *  Uygulama motoru (`stokKodGocuUygula.ts`) da AYNI süzgeçle okur. */
+export async function kiraciBelgeleri(h: KuruPgHavuzu, coll: string, cid: string): Promise<Belge[]> {
   const { rows } = await h.query(KIRACI_BELGELERI_SQL, [coll, cid]);
   const out: Belge[] = [];
   for (const r of rows) {
@@ -199,9 +201,62 @@ export interface KuruRaporu {
   };
   planOzeti: PlanOzeti;
   planImza: string;
+  /** D5: kiracıda `mikroPasif` işaretli kart sayısı (pasif liste: `GET …/stok-kod-gocu/pasif`). İmzaya GİRMEZ. */
+  pasifKart: number;
+  /**
+   * Y29 son inceleme bulgu 3 (canlı plan ölçüsü): arşive giden (D4'te silinecek) eski kartlardan elle girilmiş raf konumu
+   * (`location`) / depo (`warehouseId`) DOLU olanların SAYISI. Yalnız sayı; değer yanıta çıkmaz. D2 bu alanları kalan karta
+   * `bossa` kuralıyla katlar, kalan kartta dolu ve farklıysa çift özetinde `katlanmayan`. İmzaya GİRMEZ.
+   */
+  eskiKartElleAlan: { location: number; warehouseId: number };
 }
 
-export type KuruSonucu = { tamam: true; rapor: KuruRaporu } | { tamam: false; durum: number; error: string };
+/**
+ * Uygulama motorunun (`stokKodGocuUygula.ts`, D4) kuru koşudan devraldığı İÇ veri — yanıta ÇIKMAZ (uçlar yalnız `rapor`u yazar).
+ * Uygulama kuru koşuyu YENİDEN hesaplar (DH16) ve neyi taşıyacağını yalnız bundan okur: sınıflama, kiracı kartları, DH1 sayımının
+ * kod başına belge kimlikleri, warehouseItems kimlik eşleri, Mikro hareket kodları ve yetimlerin evrak eşi.
+ */
+export interface KuruIc {
+  evren: ReturnType<typeof gocEvreni>;
+  siniflama: SiniflamaSonucu;
+  /** `koduBasina` (eski kod → belge kimlikleri) DOLU. */
+  sayimlar: KoleksiyonSayimi[];
+  /** Eski kod → eski kart kimlikleri (evren + kartsız kod; kartsız kodda kimlik `stokKodEsleri`'nden). */
+  eskiKartlar: ReadonlyMap<string, readonly string[]>;
+  kartsizKodlar: readonly string[];
+  /** warehouseItems belge kimliği → eski kod (DH18; import ile aynı çözücü). */
+  depoKimlikleri: ReadonlyMap<string, string>;
+  /** Kiracının (etiketsizler dâhil) `locationStocks` belge kimlikleri — tam çiftte hedef konum çakışması kuru koşuda görünsün (MKD4 dizin 1). */
+  konumKimlikleri: ReadonlySet<string>;
+  /** Hareket GUID'i (`bicimliGuidAnahtari`) → Mikro'daki güncel `sth_stok_kod`; hareketler okunamadıysa `null`. */
+  mikroHareketKodu: ReadonlyMap<string, string> | null;
+  /** Eski kodlu yetim hareket kimliği → aynı evrak Mikro'da (yeni GUID'le) var mı; `null` = ÖLÇÜLEMEDİ (DH2). */
+  yetimEvrakEsi: ReadonlyMap<string, boolean | null>;
+  /** Eski kod → aynadaki `sto_Guid` (DH12 `stoGuid`); yalnız ayna kanıtı kullanılan kiracıda (DH13), yoksa boş. */
+  aynaStoGuid: ReadonlyMap<string, string>;
+  /** Kiracının `stokKodEsleri` belgeleri, eski kod anahtarına göre. */
+  esler: ReadonlyMap<string, StokKodEsiKaydi>;
+}
+
+/** `stokKodEsleri` belgesi (D3; uygulama yazar). `eskiKartlar` / `kalanKart`: geri alma ve kartsız kodun kart kimliği yolları için. */
+export interface StokKodEsiKaydi {
+  id: string;
+  eski: string;
+  yeni: string;
+  eskiKartlar: string[];
+  kalanKart: string | null;
+}
+
+export type KuruSonucu = { tamam: true; rapor: KuruRaporu; ic: KuruIc } | { tamam: false; durum: number; error: string };
+
+/** `stokKodEsleri` belgesinden okunabilen eş (kod anahtarı biçiminde); bozuk belge `null`. */
+function esKaydi(b: Belge): StokKodEsiKaydi | null {
+  const eski = kodAnahtari(b.veri.eski), yeni = kodAnahtari(b.veri.yeni);
+  if (!eski || !yeni) return null;
+  const ids = Array.isArray(b.veri.eskiKartlar) ? b.veri.eskiKartlar.filter((x): x is string => typeof x === 'string' && x !== '') : [];
+  const kalan = typeof b.veri.kalanKart === 'string' && b.veri.kalanKart ? b.veri.kalanKart : null;
+  return { id: b.id, eski, yeni, eskiKartlar: ids, kalanKart: kalan };
+}
 
 export async function stokKodGocuKuruKos(d: KuruBagimliliklari, g: KuruGirdisi): Promise<KuruSonucu> {
   const cid = g.companyId;
@@ -244,6 +299,20 @@ export async function stokKodGocuKuruKos(d: KuruBagimliliklari, g: KuruGirdisi):
     // Kartı Cetpa'da DURAN ama kaynağı Mikro dışı olan kod (elle açılmış kart; DH6 `mikroDisiKaynak`) kartsız DEĞİLDİR (MKD2 delta).
     if (k && !evren.mikroKumesi.has(k) && !eskiKartlar.has(k) && !evren.kodaGoreKartlar.has(k)) { eskiKartlar.set(k, []); kartsizKodlar.push(k); }
   }
+  // D4 sonrası (DH7): uygulama eski kartı siler, kimliğini `stokKodEsleri`'ne yazar. Eşin eski kodu artık kartsızdır: bağlı kaydı
+  // (yarım kalan ya da sonradan eski kodla yazılan referans) tablo verilmese de sayılır ve kart kimliği yolları SİLİNEN kimlikle
+  // ölçülür (`kartsizKimlikOlculmedi` yalnız eşi olmayan kartsız kodlar için dolar).
+  const esler = new Map<string, StokKodEsiKaydi>();
+  for (const b of await kiraciBelgeleri(d.havuz, 'stokKodEsleri', cid)) { const e = esKaydi(b); if (e) esler.set(e.eski, e); }
+  const kimligiBilinen = new Set<string>();
+  for (const e of esler.values()) {
+    const k = e.eski;
+    if (evren.mikroKumesi.has(k) || evren.kodaGoreKartlar.has(k)) continue;   // kart yeniden açıldı ya da kod Mikro'ya döndü: kartsız değil
+    const onceki = eskiKartlar.get(k);
+    if (onceki === undefined) kartsizKodlar.push(k);
+    eskiKartlar.set(k, [...new Set([...(onceki ?? []), ...e.eskiKartlar])].sort());
+    kimligiBilinen.add(k);
+  }
   kartsizKodlar.sort();
 
   // ── 3. DH2: Mikro'da eski kodla duran satırlar (hareket, fiyat listesi, barkod). Tablo ve kolon adları şemadan.
@@ -255,6 +324,7 @@ export async function stokKodGocuKuruKos(d: KuruBagimliliklari, g: KuruGirdisi):
 
   // ── 4. B2a / DH13: ayna GUID kanıtı. Ölçü her zaman; kanıt yalnız Mikro işlerinin kiracısında.
   const kanitlar: KodKaniti[] = [];
+  const aynaStoGuid = new Map<string, string>();
   const ayna: KuruRaporu['kanitOlcumu']['ayna'] = { okundu: false, neden: null, satir: null, guidliSatir: null, ayniGuidGrubu: null, ayniGuidCifti: null, guidAnahtarlari: {}, kanit: 0 };
   try {
     const sayi = await d.havuz.query('SELECT count(*)::int AS n FROM mikro_stoklar');
@@ -267,7 +337,19 @@ export async function stokKodGocuKuruKos(d: KuruBagimliliklari, g: KuruGirdisi):
       okundu: true, satir: Number(sayi.rows[0]?.n), ...a.olcu,
       guidAnahtarlari: Object.fromEntries(anahtarlar.rows.filter(r => typeof r.anahtar === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(r.anahtar)).map(r => [String(r.anahtar), Number(r.n)])),
     });
-    if (g.aynaKullan) { kanitlar.push(...a.kanitlar); ayna.kanit = a.kanitlar.length; }
+    if (g.aynaKullan) {
+      kanitlar.push(...a.kanitlar); ayna.kanit = a.kanitlar.length;
+      // DH12: eşe yazılacak `stoGuid` — eski kodun aynadaki GUID'i (ayna hiç silmez; eski satır durur). Aynı kodda iki farklı GUID
+      // görülürse belirsizdir, yazılmaz.
+      const belirsiz = new Set<string>();
+      for (const r of guidli.rows) {
+        const k = kodAnahtari(typeof r.kod === 'string' ? r.kod : ''), gk = bicimliGuidAnahtari(r.guid);
+        if (!k || !gk || !evren.eskiKodlar.has(k)) continue;
+        const onceki = aynaStoGuid.get(k);
+        if (onceki !== undefined && onceki !== gk) belirsiz.add(k); else aynaStoGuid.set(k, gk);
+      }
+      for (const k of belirsiz) aynaStoGuid.delete(k);
+    }
     else ayna.neden = 'çalışma kiracısı Mikro işlerinin kiracısı değil — ayna kanıtı yok sayıldı (DH13)';
   } catch (e) {
     ayna.neden = `ayna okunamadı: ${kisa(e instanceof Error ? e.message : String(e))}`;
@@ -278,10 +360,15 @@ export async function stokKodGocuKuruKos(d: KuruBagimliliklari, g: KuruGirdisi):
   const sthKolonlari = await m.kolonlar('STOK_HAREKETLERI');
   const sth = {
     guid: kolon(sthKolonlari, 'sth_Guid'), kod: kolon(sthKolonlari, 'sth_stok_kod'), seri: kolon(sthKolonlari, 'sth_evrakno_seri'),
-    sira: kolon(sthKolonlari, 'sth_evrakno_sira'), satir: kolon(sthKolonlari, 'sth_satir_no'), tip: kolon(sthKolonlari, 'sth_evraktip'),
+    // Satır numarası kolonu ŞEMADAN, iki yazımla (D2 turu sapması, 05.11.2026): canlı kuru koşu «evrak seri / sıra / satır / tip kolonu
+    // yok» dedi; seri / sıra / tip kodun 100+ yerinde okunuyor, `sth_satir_no` ise şemayla hiç doğrulanmamıştı (bellek
+    // `mikro-kolon-adi-tahmin-etme`). İkisi de yoksa yine «yok» raporlanır — ad uydurulmaz.
+    sira: kolon(sthKolonlari, 'sth_evrakno_sira'), satir: kolonSec(sthKolonlari, [/^sth_satir_no$/i, /^sth_satirno$/i]), tip: kolon(sthKolonlari, 'sth_evraktip'),
   };
   const hareket: KuruRaporu['kanitOlcumu']['hareket'] = { okundu: false, neden: null, cetpaHareket: hareketler.length, guidli: null, mikrodaBulunan: null, koduDegisen: null, yetim: null, kanit: 0 };
   const mikroYetim: KuruRaporu['mikroYetim'] = { eskiKodlu: null, liste: [], kesildi: false, evrakDenetimi: null };
+  let mikroHareketKodu: Map<string, string> | null = null;
+  const yetimEvrakEsi = new Map<string, boolean | null>();
   if (!sth.guid || !sth.kod) {
     hareket.neden = sthKolonlari.length ? 'STOK_HAREKETLERI şemasında sth_Guid / sth_stok_kod yok'
       : m.sureDoldu() ? KURU_SURE_DOLDU : 'STOK_HAREKETLERI şeması okunamadı';
@@ -300,6 +387,7 @@ export async function stokKodGocuKuruKos(d: KuruBagimliliklari, g: KuruGirdisi):
       const hk = hareketKanitlari(hareketler.map(h => ({ id: h.id, kod: h.veri.sth_stok_kod })), mikroHareket, evren.mikroKumesi);
       Object.assign(hareket, { okundu: true, ...hk.olcu, kanit: hk.kanitlar.length });
       kanitlar.push(...hk.kanitlar);
+      mikroHareketKodu = mikroHareket;
       // Yetim (GUID Mikro'da yok) + eski kodlu: aynı evrak seri / sıra / satır / tip Mikro'da yeni GUID'le var mı (DH2).
       const veriById = new Map(hareketler.map(h => [h.id, h.veri]));
       const eskiYetim = hk.yetimler.filter(y => evren.eskiKodlar.has(y.eski));
@@ -337,18 +425,23 @@ export async function stokKodGocuKuruKos(d: KuruBagimliliklari, g: KuruGirdisi):
         }
       }
       mikroYetim.liste = liste;
+      // Uygulama (D3 / DH2) yetimi YALNIZ evrak eşi Mikro'da YOKSA (`false`) yeni koda yazar; liste tavanı dışı = ölçülmedi (`null`).
+      for (const y of eskiYetim) yetimEvrakEsi.set(y.id, null);
+      for (const y of liste) yetimEvrakEsi.set(y.id, y.evrakEsiMikroda);
     }
   }
 
   // ── 6. DH1 tablosuyla bağlı kayıt sayımı. Tablodaki alanı olmayan koleksiyon (shipments, vehicles) okunmaz.
   const barkodAlani: AlanYolu[] = barkodSayimi.kolon ? [{ yol: barkodSayimi.kolon, tur: 'sku' }] : [];
   const depoKimlikleri = new Map<string, string>();
+  const konumKimlikleri = new Set<string>();
   const sayimlar: KoleksiyonSayimi[] = [];
   const okunmadi: string[] = [];
   for (const t of BAGLI_KAYIT_TABLOSU) {
     const ek = t.koleksiyon === 'barkodlar' ? barkodAlani : [];
     if (!t.alanlar.length && !ek.length) { okunmadi.push(t.koleksiyon); continue; }
     const belgeler = t.koleksiyon === 'inventoryMovements' ? hareketler : await kiraciBelgeleri(d.havuz, t.koleksiyon, cid);
+    if (t.koleksiyon === 'locationStocks') for (const b of belgeler) konumKimlikleri.add(b.id);
     if (t.kimlikKoddan) {
       // Kimlik import ile AYNI çözücüden: eski biçim `mikro-<kod>` belgede varsa o, yoksa `mikro-<kiracı8>-<kod>` (DH18).
       const coz = d.mikroIdCozucuIds(belgeler.map(b => b.id), cid);
@@ -372,6 +465,8 @@ export async function stokKodGocuKuruKos(d: KuruBagimliliklari, g: KuruGirdisi):
   }
   const plan = planOzeti(s, evren, sayimlar);
   const arsiv = new Set(plan.satirlar.flatMap(p => p.arsiveGiden));
+  const kartVerisi = new Map(envanter.map(b => [b.id, b.veri]));
+  const arsivVeri = [...arsiv].map(id => kartVerisi.get(id));   // Y29 bulgu 3: `eskiKartElleAlan` sayımı (değer çıkmaz)
   const bagliKod = (kod: string): Record<string, number> => {
     const b: Record<string, number> = {};
     for (const c of sayimlar) { const ids = c.koduBasina.get(kod); if (ids && ids.size) b[c.koleksiyon] = ids.size; }
@@ -411,7 +506,7 @@ export async function stokKodGocuKuruKos(d: KuruBagimliliklari, g: KuruGirdisi):
       mikroYetim,
       bagliKayit: Object.fromEntries(sayimlar.map(c => [c.koleksiyon, disari(c)])),
       kartsizBagli,
-      kartsizKimlikOlculmedi: kartsizKodlar.length
+      kartsizKimlikOlculmedi: kartsizKodlar.some(k => !kimligiBilinen.has(k))
         ? BAGLI_KAYIT_TABLOSU.flatMap(t => t.alanlar.filter(a => a.tur === 'kartKimligi').map(a => `${t.koleksiyon}.${a.yol}`)).sort()
         : [],
       okunanAlanlar: Object.fromEntries(sayimlar.map(c => [c.koleksiyon, c.alanlar])),
@@ -425,6 +520,18 @@ export async function stokKodGocuKuruKos(d: KuruBagimliliklari, g: KuruGirdisi):
       },
       planOzeti: plan,
       planImza: planImzasi(cid, s, evren, sayimlar),
+      pasifKart: kartlar.filter((_, i) => pasifMi(envanter[i].veri)).length,
+      eskiKartElleAlan: { location: doluAlanSay(arsivVeri, 'location'), warehouseId: doluAlanSay(arsivVeri, 'warehouseId') },
+    },
+    ic: {
+      evren, siniflama: s, sayimlar, eskiKartlar, kartsizKodlar, depoKimlikleri, konumKimlikleri,
+      mikroHareketKodu, yetimEvrakEsi, aynaStoGuid, esler,
     },
   };
+}
+
+/** D5: kart pasif listesinde mi (`inventory.mikroPasif` nesnesi; uygulama yazar). Bu dilimde hiçbir ekran bu alanı süzmez. */
+export function pasifMi(veri: Readonly<Record<string, unknown>>): boolean {
+  const p = veri.mikroPasif;
+  return !!p && typeof p === 'object' && !Array.isArray(p);
 }

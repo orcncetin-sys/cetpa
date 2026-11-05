@@ -30,6 +30,8 @@ import { zamanDate, zamanMs, tarihSaatYaz } from '../utils/zaman';
 import { oc } from '../i18n/ortak';
 import { noktaYolluYama } from '../utils/noktaYolluYama';
 import { sunucuHataMetni } from '../utils/sunucuHatasi';
+import { mfKaynaksizMi } from '../lib/mfKaynagi';
+import { mfKaynaksizNotu, mfKaynaksizSay } from '../utils/muhasebe/faturasizDisi';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -228,7 +230,9 @@ export default function AdminPage({
           })}
           {/* Revenue card with currency toggle */}
           {(() => {
-            const totalTRY = orders.reduce((s,o)=>s+(o.totalPrice||0),0);
+            // B2 (şartname «Mikro bağlantı B»): işaretli kaynaksız MF ciro dışı — not kartın altında; sipariş sayısı kartı ham liste.
+            const totalTRY = orders.filter(o => !mfKaynaksizMi(o)).reduce((s,o)=>s+(o.totalPrice||0),0);
+            const kaynaksizNotu = mfKaynaksizNotu(mfKaynaksizSay(orders), currentLanguage);
             // Kur yokken TL tutarı yabancı sembolle BASILMAZ: tlYaz null kurda '—'
             // döner (eski `|| 1` ₺40.000 → "$40.000", ~38× şişkin üretiyordu).
             return (
@@ -245,6 +249,7 @@ export default function AdminPage({
                   </div>
                 </div>
                 <div className="text-2xl font-bold text-green-600">{tlYaz(totalTRY, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 })}</div>
+                {kaynaksizNotu && <p data-mf-kaynaksiz-notu="admin-ciro" className="mt-1 text-[10px] text-amber-700">{kaynaksizNotu}</p>}
               </div>
             );
           })()}

@@ -29,3 +29,17 @@ export function kaynaksizAdetiOku(ozet: unknown): number | null {
   const m = KAYNAKSIZ_DESENI.exec(ozet);
   return m ? Number(m[1]) : null;
 }
+
+// ── Şartname «Mikro bağlantı B» B2 / BH21 (05.11.2026): kaynaksız İŞARETİNİN notları da bu modülde üretilir ───────────────────
+// `mfIptalEsle` metni kendisi kurmaz. İki not da `kaynaksizAdetiOku`'nun parça seçicisine UYMAZ (o yalnız adayların SAYISINI okur):
+// «N kaynaksız işaretlendi» ya da eşik notu tanıda ikinci bir sayı gibi okunmasın (çit: faturadanSiparisNotu.test).
+
+/** «N kaynaksız işaretlendi, M işaret kaldırıldı» (gece `faturadan-siparis` satırının parçası; ayrı satır açılmaz). */
+export function kaynaksizIsaretNotu(isaretlenen: number, kaldirilan: number): string {
+  return `${isaretlenen} kaynaksız işaretlendi, ${kaldirilan} işaret kaldırıldı`;
+}
+
+/** «⚠ olağandışı: N kaynaksız · işaret yazılmadı (eşik E)»: aday sayısı eşiği aştı, hiçbir işaret yazılmadı (kaldırma sürer). */
+export function kaynaksizEsikNotu(adet: number, esik: number): string {
+  return `⚠ olağandışı: ${adet} kaynaksız · işaret yazılmadı (eşik ${esik})`;
+}

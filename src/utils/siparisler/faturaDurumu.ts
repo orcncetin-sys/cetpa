@@ -40,6 +40,8 @@
  */
 import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi';
 import { faturaGonderimDurumu, faturaIsareti } from '../../lib/faturaGonderimi';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
+import { op } from '../../i18n/orders';
 
 export interface FaturaDurumuGirdisi {
   source?: string;
@@ -52,6 +54,8 @@ export interface FaturaDurumuGirdisi {
   faturali?: boolean;
   /** Sunucunun gönderim işareti — bilinmeyen biçim `faturaIsareti` ile süzülür. */
   mikroFaturaGonderimi?: unknown;
+  /** Kaynaksız MF işareti (sunucu yazar; lib/mfKaynagi.mfKaynaksizMi). */
+  mfKaynaksiz?: unknown;
 }
 
 const doluMetin = (v: unknown): boolean => typeof v === 'string' && v.trim() !== '';
@@ -123,6 +127,9 @@ export function faturaTakipFaturaVar(o: FaturaDurumuGirdisi | null | undefined, 
  */
 export function mikroFaturaDurumMetni(o: FaturaDurumuGirdisi | null | undefined, dil: 'tr' | 'en' = 'tr', simdiMs: number = Date.now()): string | null {
   if (!o) return null;
+  // Kaynaksız MF (şartname «Mikro bağlantı B» BH13 #10): Mikro'da satış faturası yok. Rozetle AYNI metin (i18n/orders).
+  // `siparisFaturaVar` BİLEREK değişmez (MF için true): `false` dönseydi bu sipariş için kesme / gönderme yolu açılırdı.
+  if (mfKaynaksizMi(o)) return op(dil).mikroda_satis_faturasi_yok;
   const durum = faturaGonderimDurumu(o, simdiMs);
   const tr = dil === 'tr';
   if (durum === 'gonderiliyor') return tr ? 'Fatura gönderiliyor' : 'Invoice being sent';

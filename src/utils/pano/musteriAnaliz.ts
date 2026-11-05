@@ -119,6 +119,12 @@ import { olcekReferansi, cubukOrani, type CubukSatiri } from './cubuk';
 import { siparisTutari, odemeTakipli, type SiparisTutarAlanlari } from '../siparis';
 import type { SiparisKarlilik } from '../siparisler/siparisKarlilik';
 import { odemeYontemiMi, type OdemeYontemi } from '../siparisler/odemeYontemi';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
+import { mfKaynaksizSay, type MfKaynaksizDisi } from '../muhasebe/faturasizDisi';
+
+/** Ciroya giren kayıt: işaretli kaynaksız MF DIŞARIDA (şartname «Mikro bağlantı B» B2, 2026-11-05; BH15 deseni — kapı işlevin
+ *  içinde). Yalnız TUTAR toplamlarını süzer; `siparisSayisi` ham grup. Kaynak alanı olmayan kayıt (ör. sipariş kalemi) etkilenmez. */
+const ciroya = <O,>(o: O): boolean => !mfKaynaksizMi(o as { source?: unknown; mfKaynaksiz?: unknown });
 
 /* ── Yapısal girdi tipleri ────────────────────────────────────────────────────
  * Kanonik `Order`a BAĞLI DEĞİL (bkz. siparis.ts): bazı bileşenler kendi daraltılmış
@@ -127,6 +133,9 @@ import { odemeYontemiMi, type OdemeYontemi } from '../siparisler/odemeYontemi';
 /** Ciro/segment hesaplarının okuduğu alanlar. */
 export interface SegmentSiparisi extends SiparisTutarAlanlari {
   status?: string;
+  /** Kaynaksız MF kapısı (`ciroya`) okur. */
+  source?: string;
+  mfKaynaksiz?: unknown;
 }
 
 /** Müşteri kırılımının okuduğu alanlar. */
@@ -238,7 +247,7 @@ function musteriKirilimi<O extends MusteriSiparisi>(siparisler: readonly O[], n:
   const satirlar: MusteriTutari[] = [];
   let tutarsiz = 0;
   for (const [ad, grup] of kovalar) {
-    const t = toplaBilinen(grup, siparisTutari);
+    const t = toplaBilinen(grup.filter(ciroya), siparisTutari);
     tutarsiz += t.bilinmeyen;
     satirlar.push({ ad, tutar: ekranTutari(t), siparisSayisi: grup.length, tutarsizSiparis: t.bilinmeyen });
   }
@@ -294,6 +303,8 @@ export interface SegmentCiroSonucu {
   yuzdelerGecerli: boolean;
   /** Halkanın merkezine yazılan en büyük segment; cirosu bilinmiyorsa `null`. */
   enBuyuk: SegmentCiro | null;
+  /** B2: girdide ciroya GİRMEYEN işaretli kaynaksız MF (işlev iptal elemez; çağıranlar iptali dışarıda eler). */
+  kaynaksizDisi: MfKaynaksizDisi;
   /**
    * YALNIZ 4 parametreli biçimde `anahtarsizSay: true` iken VAR (3 parametreli çağrının sonuç şekli DEĞİŞMEZ).
    * `segmentle`ın `null` döndürdüğü kayıtlar: hiçbir segmente girmez, yüzde paydasında (`tamToplam`) KALIR.
@@ -345,7 +356,7 @@ export function segmentCirosu<O>(
   // `secenek` yokken çağrı (1) numaralı aşırı yükten gelir; o biçim `O`'yu `SegmentSiparisi`'ne kısıtlar.
   // Genel toplam ve segment toplamı AYNI seçiciyi okur (farklı seçici yüzdeleri 100'ün üstüne taşırdı).
   const sec: (o: O) => unknown = secenek ? secenek.tutarSec : (o => siparisTutari(o as SiparisTutarAlanlari));
-  const genel = toplaBilinen(siparisler, sec);
+  const genel = toplaBilinen(siparisler.filter(ciroya), sec);
   const toplam = ekranTutari(genel);
   const tamToplam = tamTutar(genel);
   const yuzdelerGecerli = Number.isFinite(tamToplam) && tamToplam > 0;
@@ -361,7 +372,7 @@ export function segmentCirosu<O>(
     throw new Error('segmentCirosu: segmentle null döndü ama anahtarsizSay verilmedi');
   }
   const yap = (anahtar: string, grup: readonly O[]): SegmentCiro => {
-    const t = toplaBilinen(grup, sec);
+    const t = toplaBilinen(grup.filter(ciroya), sec);
     const ciro = ekranTutari(t);
     return {
       anahtar,
@@ -391,10 +402,12 @@ export function segmentCirosu<O>(
   }
   if (enBuyuk !== null && !Number.isFinite(enBuyuk.ciro)) enBuyuk = null;
 
-  const sonuc: SegmentCiroSonucu = { segmentler, toplam, tamToplam, tutarsiz: genel.bilinmeyen, yuzdelerGecerli, enBuyuk };
+  const sonuc: SegmentCiroSonucu = { segmentler, toplam, tamToplam, tutarsiz: genel.bilinmeyen, yuzdelerGecerli, enBuyuk,
+    // `ciroya` ile aynı yapısal okuma (O kısıtsız genel tür; aşırı yükler `SegmentSiparisi` verir).
+    kaynaksizDisi: mfKaynaksizSay(siparisler as readonly { source?: unknown; mfKaynaksiz?: unknown; totalPrice?: unknown }[]) };
   // `anahtarsiz` alanı bayrağa göre ya HİÇ konmaz (3 parametreli çağrının sonuç şekli aynen) ya da TAM konur.
   if (secenek?.anahtarsizSay === true) {
-    const a = toplaBilinen(anahtarsizlar, sec);
+    const a = toplaBilinen(anahtarsizlar.filter(ciroya), sec);
     sonuc.anahtarsiz = { adet: anahtarsizlar.length, ciro: ekranTutari(a), tutarsiz: a.bilinmeyen };
   }
   return sonuc;
@@ -419,6 +432,8 @@ export interface EnIyiMusterilerSonucu {
   olcekGecerli: boolean;
   /** Tutarı bilinmeyen sipariş sayısı (liste geneli). */
   tutarsiz: number;
+  /** B2: girdi listesinde ciroya GİRMEYEN işaretli kaynaksız MF (liste geneli; işlev iptal elemez) — Pano P77 notu. */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 /**
@@ -430,7 +445,7 @@ export function enIyiMusteriler<O extends MusteriSiparisi>(siparisler: readonly 
   const satirlar: Omit<MusteriCiro, 'barOrani'>[] = [];
   let tutarsiz = 0;
   for (const [ad, grup] of kovalar) {
-    const t = toplaBilinen(grup, siparisTutari);
+    const t = toplaBilinen(grup.filter(ciroya), siparisTutari);
     tutarsiz += t.bilinmeyen;
     satirlar.push({ ad, ciro: ekranTutari(t), siparisSayisi: grup.length, tutarsizSiparis: t.bilinmeyen });
   }
@@ -441,6 +456,7 @@ export function enIyiMusteriler<O extends MusteriSiparisi>(siparisler: readonly 
     musteriler: ilkN.map(s => ({ ...s, barOrani: cubukOrani(s, referans) })),
     olcekGecerli: Number.isFinite(referans),
     tutarsiz,
+    kaynaksizDisi: mfKaynaksizSay(siparisler),
   };
 }
 
@@ -470,6 +486,8 @@ export interface SegmentKarSonucu {
   segmentler: SegmentKar[];
   /** Çubuk ölçeği güvenilir mi? */
   olcekGecerli: boolean;
+  /** B2: iptal hariç girdide ciro / kâra GİRMEYEN işaretli kaynaksız MF — Pano P124 notu. */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 /**
@@ -493,9 +511,11 @@ export function segmentKarliligi<O extends SegmentSiparisi>(
   const kovalar = kovala(canli, segmentle);
 
   const segmentler: SegmentKar[] = [...kovalar.entries()].map(([anahtar, grup]) => {
-    const t = toplaBilinen(grup, siparisTutari);
+    // Ciro, kâr ve ortalama ciroya giren gruptan (kaynaksız MF dışarıda); `siparisSayisi` ham grup.
+    const ciroGrubu = grup.filter(ciroya);
+    const t = toplaBilinen(ciroGrubu, siparisTutari);
     const tam = tamTutar(t);
-    const karlar = grup.map(karHesapla);
+    const karlar = ciroGrubu.map(karHesapla);
 
     const maliyet = tamTutar(toplaBilinen(karlar, k => k.maliyet));
     const kalemCirosu = tamTutar(toplaBilinen(karlar, k => k.ciro));
@@ -511,7 +531,7 @@ export function segmentKarliligi<O extends SegmentSiparisi>(
       marjYuzde: Number.isFinite(kar) && Number.isFinite(kalemCirosu) && kalemCirosu > 0
         ? (kar / kalemCirosu) * 100
         : null,
-      ortalamaSiparis: Number.isFinite(tam) && grup.length > 0 ? tam / grup.length : null,
+      ortalamaSiparis: Number.isFinite(tam) && ciroGrubu.length > 0 ? tam / ciroGrubu.length : null,
       maliyetsizSiparis: karlar.reduce((s, k) => (Number.isFinite(k.maliyet) ? s : s + 1), 0),
       barOrani: null,   // ölçek tüm segmentler çıkınca belli olur (aşağıda doldurulur)
     };
@@ -521,5 +541,5 @@ export function segmentKarliligi<O extends SegmentSiparisi>(
   const referans = olcekReferansi(segmentler);
   for (const s of segmentler) s.barOrani = cubukOrani(s, referans);
 
-  return { segmentler, olcekGecerli: Number.isFinite(referans) };
+  return { segmentler, olcekGecerli: Number.isFinite(referans), kaynaksizDisi: mfKaynaksizSay(canli) };
 }

@@ -1021,7 +1021,8 @@ describe('D3 — istemci `/api/db` ile işareti yazamaz (rolden bağımsız, ses
     // (şartname «fatura gövde + gece MF» § 9.B B1 — G3a / H1 onu MF türetme kararında okur; davranış çiti aşağıda «B1»).
     // 2026-10-19 (şartname «takip kodu + LUCA reddi» TA / LB): takip kodu ve üç LUCA işareti de listede (davranış çiti:
     // takipKoduVeLuca.zincir.test «TA / LB»).
-    expect(SUNUCU_TURETILEN_ALANLAR.get('orders')).toEqual([FATURA_GONDERIM_ALANI, 'ettn', 'takipKodu', 'lucaSynced', 'lucaFaturaNo', 'lucaSyncedAt']);
+    // 2026-11-05 (şartname «Mikro bağlantı B» B2): kaynaksız MF işareti iki alanla listede (davranış çiti: turetilenAlanlar.b.zincir.test).
+    expect(SUNUCU_TURETILEN_ALANLAR.get('orders')).toEqual([FATURA_GONDERIM_ALANI, 'ettn', 'takipKodu', 'lucaSynced', 'lucaFaturaNo', 'lucaSyncedAt', 'mfKaynaksiz', 'mfKaynaksizGoruldu']);
     expect(kod.filter(k => k.includes(FATURA_GONDERIM_ALANI))).toEqual([]);
   });
 });

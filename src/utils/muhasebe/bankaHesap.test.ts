@@ -18,7 +18,7 @@ import { ekranTutari, tamTutar } from '../para';
 import { paraYaz } from '../currency';
 import type { BankTransaction } from '../../types';
 import {
-  dovizBakiyeleri, mikroBankaHareketiOku, hareketNedenleOku, hareketleriAyikla,
+  dovizBakiyeleri, mikroBankaHareketiOku, hareketNedenleOku, hareketleriAyikla, bankaKayitGovdesi, mikroHesabiMi,
   type BakiyeliHesap, type MikroBankaHareketi,
 } from './bankaHesap';
 
@@ -226,5 +226,32 @@ describe('hareketleriAyikla — liste', () => {
     if (!('kayit' in ok)) throw new Error('beklenmedik atlama');
     const kayit: MikroBankaHareketi = ok.kayit;
     expect(kayit.amount).toBe(1500);
+  });
+});
+
+// ── Şartname «Mikro bağlantı B» § 3.6 / T-B1-5: hesap formu kayıt gövdesi ───────────────────────────────────────────────
+// Mutasyon (yapılıp geri alındı): Mikro dalı kaldırılıp zorunluluk geri konursa «null bakiyeyle IBAN kaydedilir» kırmızı.
+describe('bankaKayitGovdesi · Mikro hesabında bakiye formdan yazılmaz (T-B1-5)', () => {
+  const FORM = { bankName: 'ZİRAAT', branch: '', accountHolder: 'X', accountNumber: '', iban: 'TR00 0001', currency: 'USD' as const, balance: '' as number | '', accountType: 'Vadesiz' as const };
+  it('Mikro hesabı (`source: mikro`), bakiye bilinmiyor → kayıt GEÇER, gövdede `balance` anahtarı YOK; IBAN / hesap sahibi / döviz gövdede', () => {
+    const s = bankaKayitGovdesi(FORM, { source: 'mikro' });
+    expect(s.tamam).toBe(true);
+    if (!s.tamam) return;
+    expect('balance' in s.kayit).toBe(false);
+    expect(s.kayit).toMatchObject({ iban: 'TR00 0001', accountHolder: 'X', currency: 'USD' });
+  });
+  it('Mikro hesabında formda sayı olsa da (eski açılış) gövdeye girmez', () => {
+    const s = bankaKayitGovdesi({ ...FORM, balance: 5 }, { source: 'mikro' });
+    expect(s.tamam && 'balance' in s.kayit).toBe(false);
+  });
+  it('elle hesap (yeni ya da `source` yok): bakiye bilinmiyorsa REDDEDİLİR, sayıysa yazılır; ad boşsa ret', () => {
+    expect(bankaKayitGovdesi(FORM, null)).toEqual({ tamam: false, neden: 'bakiye' });
+    expect(bankaKayitGovdesi(FORM, { source: 'manual' })).toEqual({ tamam: false, neden: 'bakiye' });
+    const s = bankaKayitGovdesi({ ...FORM, balance: 125000 }, null);
+    expect(s.tamam && s.kayit.balance).toBe(125000);
+    expect(bankaKayitGovdesi({ ...FORM, bankName: '  ' }, { source: 'mikro' })).toEqual({ tamam: false, neden: 'ad' });
+  });
+  it('mikroHesabiMi yalnız `source === mikro`', () => {
+    expect([mikroHesabiMi({ source: 'mikro' }), mikroHesabiMi({ source: 'mikro_sql' }), mikroHesabiMi({}), mikroHesabiMi(null)]).toEqual([true, false, false, false]);
   });
 });

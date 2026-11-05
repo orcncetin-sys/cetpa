@@ -33,7 +33,8 @@
  */
 import { bilinenSayi, toplaBilinen, type Tutar, tamTutar } from '../para';
 import { gunAnahtari } from '../zaman';
-import { faturasizDisiSay, faturasizMi, type FaturasizDisi } from './faturasizDisi';
+import { faturasizDisiSay, faturasizMi, mfKaynaksizSay, type FaturasizDisi, type MfKaynaksizDisi } from './faturasizDisi';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
 
 const bosTutar = (): Tutar => ({ toplam: 0, bilinen: 0, bilinmeyen: 0 });
 const tutarEkle = (a: Tutar, b: Tutar): Tutar => ({ toplam: a.toplam + b.toplam, bilinen: a.bilinen + b.bilinen, bilinmeyen: a.bilinmeyen + b.bilinmeyen });
@@ -123,7 +124,7 @@ export function babsFormu(
 
 // ── Phase 557: Senaryo Bütçesi ─────────────────────────────────────────────────────────────
 
-export interface CiroSiparisi { totalPrice?: unknown; status?: string; createdAt?: unknown }
+export interface CiroSiparisi { totalPrice?: unknown; status?: string; createdAt?: unknown; source?: unknown; mfKaynaksiz?: unknown }
 
 export interface AylikCiro {
   /** 'YYYY-MM'. */
@@ -144,16 +145,24 @@ export interface CiroTemeli {
   bilinmeyen: number;
   /** İptal olmayan ama tarihi çözülemeyen sipariş adedi — hiçbir aya giremez. */
   tarihsiz: number;
+  /** Penceredeki (son `ayAdedi` ay), iptal olmayan, tabana GİRMEYEN işaretli kaynaksız MF siparişleri (B2); ekran
+   *  `mfKaynaksizNotu` ile basar. Pencere dışındaki işaretli sipariş sayılmaz — her işlev dışladığını KENDİ dönem süzgeciyle
+   *  sayar (faturasizDisi sözleşmesi). */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 /**
  * Son `ayAdedi` ayın ciro tabanı. İptal (`status === 'Cancelled'`) dışarıda; kaynak (Mikro/Cetpa) ayrımı
- * YOK — sayfa da yapmıyordu, ciro ciro (tahsilat değil). Tarih alanı `createdAt` (sayfadaki gibi; Shopify
- * `syncedAt`/türetme `orderDate` için siparis.ts `siparisTarih` ayrı bir karar — bkz. bağlama notu).
+ * YOK — sayfa da yapmıyordu, ciro ciro (tahsilat değil). TEK İSTİSNA (şartname «Mikro bağlantı B» B2,
+ * 2026-11-05): İŞARETLİ kaynaksız MF (`mfKaynaksizMi`) tabana ve projeksiyona GİRMEZ — kapı burada, çağıran
+ * süzmez; penceredeki adedi `kaynaksizDisi`. İşaretsiz MF bugünkü gibi sayılır (QH2-1). Tarih alanı `createdAt`
+ * (sayfadaki gibi; Shopify `syncedAt`/türetme `orderDate` için siparis.ts `siparisTarih` ayrı bir karar — bkz.
+ * bağlama notu).
  */
 export function ciroTemeli(siparisler: readonly CiroSiparisi[], simdi: Date, ayAdedi = 6): CiroTemeli {
-  const anahtarli = siparisler
-    .filter(o => o.status !== 'Cancelled')
+  const iptalsiz = siparisler.filter(o => o.status !== 'Cancelled');
+  const anahtarli = iptalsiz
+    .filter(o => !mfKaynaksizMi(o))
     .map(o => ({ o, ay: donemAnahtari(o.createdAt) }));
   const aylar: AylikCiro[] = [];
   for (let i = ayAdedi - 1; i >= 0; i--) {
@@ -164,12 +173,14 @@ export function ciroTemeli(siparisler: readonly CiroSiparisi[], simdi: Date, ayA
   }
   const ciroluAy = aylar.filter(a => a.ciro.toplam > 0).length;
   const toplam = aylar.reduce((s, a) => s + a.ciro.toplam, 0);
+  const pencere = new Set(aylar.map(a => a.ay));
   return {
     aylar,
     ortalama: ciroluAy > 0 ? toplam / ciroluAy : null,
     ciroluAy,
     bilinmeyen: aylar.reduce((s, a) => s + a.ciro.bilinmeyen, 0),
     tarihsiz: anahtarli.filter(x => x.ay === null).length,
+    kaynaksizDisi: mfKaynaksizSay(iptalsiz.filter(o => { const ay = donemAnahtari(o.createdAt); return ay !== null && pencere.has(ay); })),
   };
 }
 

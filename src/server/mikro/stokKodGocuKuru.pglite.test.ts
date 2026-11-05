@@ -119,13 +119,14 @@ beforeAll(async () => {
     [JSON.stringify({ sto_Guid: `{${g(2).toUpperCase()}}` })]);
 
   const ka = (id: string, sku: string, ek: Record<string, unknown> = {}) => koy('inventory', id, { sku, name: 'GİZLİ AD', source: 'mikro_import', companyId: A, stockLevel: 3, ...ek });
-  await ka('k-eski', 'AKCALI-AKÇ.00312', { prices: { Retail: 10, Bayi: 8 }, costPrice: 4 });
+  // `location`: Y29 bulgu 3 ölçüsü (arşive giden eski kartta elle girilmiş raf konumu); `k-elle` eski kart değil, sayılmaz.
+  await ka('k-eski', 'AKCALI-AKÇ.00312', { prices: { Retail: 10, Bayi: 8 }, costPrice: 4, location: 'A-3 raf', warehouseId: '  ' });
   await ka('k-yeni', 'AKCALI-00312', { source: 'mikro_cron', prices: { Retail: 12 } });
   await koy('inventory', 'k-arg', { sku: 'ARGTGRI\u0307', source: 'mikro_import' });           // etiketsiz (DH19), NFD İ
   await ka('k-argy', 'ARAGONIT-SDD-GRI-20');
   await ka('k-ma', 'MA-HY-003'); await ka('k-mitre', 'MITREAPEL-HY-003'); await ka('k-apel', 'APEL-HY-003');
   await ka('k-kars', 'RENKLENDİRME15LT');
-  await ka('k-elle', 'ELLE-1', { source: 'manual' });
+  await ka('k-elle', 'ELLE-1', { source: 'manual', location: 'Z-9 raf', warehouseId: 'depo-9' });
   await ka('k-mikroda', 'MIKRODA-1');
   await ka('k-arag', 'ARAG0003');
   await koy('inventory', 'b-eski', { sku: 'AKCALI-AKÇ.00312', source: 'mikro_import', companyId: B });
@@ -199,6 +200,9 @@ describe('kuru koşu — kiracı A (Mikro kiracısı, ayna kanıtı açık)', ()
     expect(r.planOzeti.kesin).toEqual({ cift: 2, arsiveGidenKart: 2, kalanKartsiz: 0, belge: { orders: 1, inventoryMovements: 2, warehouseItems: 1, stockDiscrepancies: 1 }, toplamBelge: 5 });
     expect(r.planOzeti.ortakHedef).toEqual([{ yeni: 'APEL-HY-003', eskiler: ['MA-HY-003', 'MITREAPEL-HY-003'] }]);
     expect(r.planOzeti.pasif).toEqual({ kod: 1, kart: 1 });
+    // Y29 bulgu 3: arşive giden eski kartlarda dolu raf konumu / depo SAYISI (boşluk dolu sayılmaz; eski olmayan kart sayılmaz).
+    expect(r.eskiKartElleAlan).toEqual({ location: 1, warehouseId: 0 });
+    expect(JSON.stringify(r)).not.toContain('A-3 raf');
     expect(r.degismezler.ayniSkuOnce).toEqual([]);
     expect(r.degismezler.uzunHedef).toEqual([]);
   });

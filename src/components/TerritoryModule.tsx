@@ -25,6 +25,7 @@ import { byField } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
 import ModuleHeader from './ModuleHeader';
 import { useCountryList, useCitiesForCountry } from '../hooks/useWorldGeo';
+import { mfKaynaksizMi } from '../lib/mfKaynagi';
 import { oc } from '../i18n/ortak';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -52,7 +53,7 @@ interface Props {
   currentLanguage: string;
   isAuthenticated: boolean;
   /** Pass real orders so we can compute territory actuals */
-  orders?: Array<{ id: string; customerName: string; totalPrice?: number; deliveryCity?: string; city?: string; createdAt?: unknown }>;
+  orders?: Array<{ id: string; customerName: string; totalPrice?: number; deliveryCity?: string; city?: string; createdAt?: unknown; source?: unknown; mfKaynaksiz?: unknown }>;
   /** Pass real leads/customers */
   leads?: Array<{ id: string; company?: string; name?: string; city?: string; status?: string }>;
 }
@@ -132,7 +133,8 @@ export default function TerritoryModule({ currentLanguage, isAuthenticated, orde
       const city = (o.deliveryCity ?? o.city ?? '');
       return cityInTerritory(city, t);
     });
-    const actual = matchedOrders.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+    // B2 (şartname «Mikro bağlantı B»): işaretli kaynaksız MF ciro dışı; sipariş adedi ham `matchedOrders`.
+    const actual = matchedOrders.filter(o => !mfKaynaksizMi(o)).reduce((s, o) => s + (o.totalPrice ?? 0), 0);
     const matchedLeads = leads.filter(l => cityInTerritory(l.city ?? '', t));
     return { actual, ordersCount: matchedOrders.length, leadsCount: matchedLeads.length };
   }

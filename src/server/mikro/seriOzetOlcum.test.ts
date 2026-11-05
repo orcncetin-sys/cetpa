@@ -239,8 +239,22 @@ describe('(13) Satışlar çift sayımı — istemci kuralıyla (QH2) AYNI sonu�
         '(boş)|(tarihsiz)': { adet: 1, tutar: { toplam: 1, bilinen: 1, bilinmeyen: 0 } },
       },
       ikizliMfAdet: 3, ikizliMfTutar: { toplam: 105500.2, bilinen: 2, bilinmeyen: 1 }, ikizliMikroTutar: { toplam: 106200.2, bilinen: 3, bilinmeyen: 0 },
-      ikizsizMfAdet: 2, cetpaEvrakIleElenen: 1, mikroGidenAdet: 4,
+      ikizsizMfAdet: 2, kaynaksizMfAdet: 0, kaynaksizMfTutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, cetpaEvrakIleElenen: 1, mikroGidenAdet: 4,
     });
+  });
+  // Şartname «Mikro bağlantı B» BH8: kaynaksız sayacı ayrık; ikizli + işaretli olan yalnız «ikizli»de, ikizsiz + işaretli yalnız
+  // «kaynaksız»da. İstemci (`satisCiftSayimOzeti`) ile AYNI sonuç.
+  it('BH8: işaretli ikizsiz MF `kaynaksizMf*`da (ikizsizden düşer); işaretli ikizli MF yalnız ikizlide; istemci yolu aynı sayıyı verir', () => {
+    const isaretli = mf.map(r => (r.sira === '300' || r.sira === '101' ? { ...r, mfKaynaksiz: true } : r));
+    const o = satisCiftSayimOlcumu(isaretli, fatura, evrak).K1;
+    expect([o.ikizliMfAdet, o.ikizsizMfAdet, o.kaynaksizMfAdet]).toEqual([3, 1, 1]);
+    expect(o.kaynaksizMfTutar).toEqual({ toplam: 1, bilinen: 1, bilinmeyen: 0 });
+    const orders = isaretli.map(r => ({ source: MF_KAYNAGI, mikroEvrak: { seri: r.seri, sira: r.sira }, totalPrice: r.totalPrice, faturali: true, mfKaynaksiz: (r as { mfKaynaksiz?: boolean }).mfKaynaksiz }));
+    const gorunen = fatura.filter(f => (!f.companyId || f.companyId === 'K1') && !f.iptal && !f.gibRed)
+      .map((f, i) => mapMikroFatura(`f${i}`, { cha_evrakno_seri: f.seri, cha_evrakno_sira: f.sira, cha_tip: Number(f.tip), cha_meblag: f.meblag }));
+    const istemci = satisCiftSayimOzeti(orders, satisIkizAnahtarlari(gorunen, new Set(['500'])));
+    expect([istemci.eslesenAdet, istemci.ikizsizMfAdet, istemci.kaynaksizAdet]).toEqual([o.ikizliMfAdet, o.ikizsizMfAdet, o.kaynaksizMfAdet]);
+    expect(istemci.kaynaksizTutar).toEqual(o.kaynaksizMfTutar);
   });
   it('iki başlıklı fatura (aynı seri-sıra, iki giden doküman 12.000 + 3.000): Mikro meblağı İKİSİNİN toplamı (Satışlar paritesi)', () => {
     const o = satisCiftSayimOlcumu(

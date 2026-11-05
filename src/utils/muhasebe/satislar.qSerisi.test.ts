@@ -50,6 +50,9 @@ function ekran(orders: readonly SatisSiparisi[], faturalar: readonly SatisFatura
 const kurus = (n: number) => kurusaYuvarla(n);
 const toplam = (liste: readonly { totalPrice?: unknown }[]) => kurus(liste.reduce((t, o) => t + Number(o.totalPrice), 0));
 
+/** «Mikro bağlantı B» B2 #2: Finans sayaçlarının kaynaksız MF dışlanma sayacı (bu fikstürlerde işaretli MF yok). */
+const KAYNAKSIZ_YOK = { adet: 0, tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 } };
+
 describe('T10 — S1 (a): «Tümü»de MF ikizi düşer, satış Mikro faturasından BİR KEZ; Q-1 «Faturasız»da', () => {
   const orders = [MF_F0, MF_Q1, S0];
   const faturalar = [F0, Q1];
@@ -80,7 +83,8 @@ describe('T10 — S1 (a): «Tümü»de MF ikizi düşer, satış Mikro faturası
   });
 
   it('ölçü: eşleşen 2 MF, tutarları; faturasız eşleşen 0 (MF-Q1 geri doldurmadan önce faturalı); ikizsiz 0', () => {
-    expect(e.ozet).toEqual({ eslesenAdet: 2, eslesenTutar: { toplam: 105500.2, bilinen: 2, bilinmeyen: 0 }, eslesenFaturasizAdet: 0, ikizsizMfAdet: 0 });
+    expect(e.ozet).toEqual({ eslesenAdet: 2, eslesenTutar: { toplam: 105500.2, bilinen: 2, bilinmeyen: 0 }, eslesenFaturasizAdet: 0, ikizsizMfAdet: 0,
+      kaynaksizAdet: 0, kaynaksizTutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 } });   // «Mikro bağlantı B» BH8 ayrık sayaç (işaretli MF yok)
     // Geri doldurmadan SONRA (MF-Q1 `faturali: false`) aynı kümede faturasız eşleşen 1; ciro aynı.
     const sonra = ekran([MF_F0, { ...MF_Q1, faturali: false }, S0], faturalar, { yil: '2026', kaynak: 'hepsi' });
     expect(sonra.ozet.eslesenFaturasizAdet).toBe(1);
@@ -185,15 +189,15 @@ describe('T-FİNANS — Faturalı / Faturasız / Toplam Sipariş (QH3)', () => {
   const sip = (ek: Record<string, unknown>) => ek as { hasInvoice?: boolean; source?: string; mikroEvrak?: { seri?: unknown; sira?: unknown } };
   it('aynı fikstür → Faturalı 1 (F0) / Faturasız 2 (Q-1 + S0) / Toplam 3 (M38)', () => {
     const orders = [sip({ ...MF_F0 }), sip({ ...MF_Q1 }), sip({ ...S0 })];
-    expect(finansSiparisSayaclari(orders, [F0, Q1])).toEqual({ faturali: 1, faturasiz: 2, toplam: 3 });
+    expect(finansSiparisSayaclari(orders, [F0, Q1])).toEqual({ faturali: 1, faturasiz: 2, toplam: 3, kaynaksizDisi: KAYNAKSIZ_YOK });
   });
   it('ikizsiz MF bugünkü gibi sayılır (hasInvoice yok → faturasız)', () => {
     const orders = [sip({ ...MF_F0 }), sip({ ...mf('', '555', 1) }), sip({ customerName: 'K', hasInvoice: true })];
-    expect(finansSiparisSayaclari(orders, [F0])).toEqual({ faturali: 2, faturasiz: 1, toplam: 3 });
+    expect(finansSiparisSayaclari(orders, [F0])).toEqual({ faturali: 2, faturasiz: 1, toplam: 3, kaynaksizDisi: KAYNAKSIZ_YOK });
   });
   it('`faturasiz` alanı olmayan Mikro satırı faturalı sayılır (eski doküman paritesi)', () => {
     const eski = { yon: 'giden', faturaNo: 'Z-9' };
-    expect(finansSiparisSayaclari([], [eski])).toEqual({ faturali: 1, faturasiz: 0, toplam: 1 });
+    expect(finansSiparisSayaclari([], [eski])).toEqual({ faturali: 1, faturasiz: 0, toplam: 1, kaynaksizDisi: KAYNAKSIZ_YOK });
   });
 });
 

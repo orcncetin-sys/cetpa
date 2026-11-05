@@ -23,6 +23,7 @@ import { zamanla, isGunu } from './zamanla.js';
 // ikinci bir modül örneği oluşsa bekçi hep sıfır görürdü (server.ts içe aktarım notu).
 import { smtpYapilandirmasi, smtpDogrula } from './smtpPosta.js';
 import { ortamdanKiraci } from './kiraciOrtami.js';
+import { bakimKilidiDenetimi, bakimKilidiVar } from './bakimKilidi.js';
 import { magazaSayaclari, magazaTakipSayaclari } from './routes/magazaRoutes.js';
 import { magazaPanelSayaclari } from './routes/magazaPanelZinciri.js';
 import { magazaBayiSayaclari } from './routes/magazaBayiZinciri.js';
@@ -990,6 +991,14 @@ export async function runOpsWatchdog(): Promise<{ date: string; ok: boolean; che
       add('client_errors', n <= 50, `son 24 saatte ${n} client hatası (eşik ≤50)`);
     }
   } catch (e) { add('client_errors', false, e instanceof Error ? e.message : String(e)); }
+
+  // 10b) Bakım kilidi (2026-11-05, stok kodu göçü DH8): kilitte TTL yok; 2 saatten eski kilit yarım kalmış bakımdır ve saatlik
+  //      Mikro senkronunu / importları sessizce durdurur. Kural: bakimKilidi.ts `bakimKilidiDenetimi`.
+  try {
+    const havuz = deps().getPgPool();
+    if (!havuz) add('bakim_kilidi', true, 'deps().getPgPool() yok, atlandı');
+    else { const r = bakimKilidiDenetimi(await bakimKilidiVar(havuz), Date.now()); add('bakim_kilidi', r.ok, r.detail); }
+  } catch (e) { add('bakim_kilidi', false, e instanceof Error ? e.message : String(e)); }
 
   // 11) Veritabanı büyüme anomalisi — docs satır sayısı bir günde 2×+ VE
   //     10k+ artarsa kaçak yazan döngü/sync var demektir (dünkü değer

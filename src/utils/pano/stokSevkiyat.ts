@@ -94,6 +94,8 @@ import { adetYaz } from '../muhasebe/depoDeger';
 import { stokDegeri } from '../muhasebe/finansalOranlar';
 import { oranYuzde } from '../siparisler/lojistikKpi';
 import { zamanDate, zamanMs } from '../zaman';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
+import { mfKaynaksizSay, type MfKaynaksizDisi } from '../muhasebe/faturasizDisi';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stok değeri özeti (Phase 47) + düşük stok kapısı (Phase 24)
@@ -358,6 +360,25 @@ export function enCokSatanlar(siparisler: readonly SatisSiparisi[], n: number, t
   const ilkN = urunSatislari(siparisler, tutarSec ? { tutarSec } : {}).slice(0, n);
   const referans = olcekReferansi(ilkN.map(u => tutarSatiri(u.ciro)));
   return ilkN.map(u => ({ ...u, barOrani: cubukOrani(tutarSatiri(u.ciro), referans) }));
+}
+
+/** `panoEnCokSatanlar`ın okuduğu sipariş alanları (Order yapısal olarak uyar). */
+export interface PanoSatisSiparisi extends SatisSiparisi { source?: unknown; mfKaynaksiz?: unknown; totalPrice?: unknown }
+
+/**
+ * Pano «En Çok Satan Ürünler» (Y29 son inceleme bulgu 1, 06.11.2026). İşaretli kaynaksız MF (Mikro'da satış faturası olmayan MF
+ * siparişi; `lib/mfKaynagi.mfKaynaksizMi`) ÜRÜN cirosuna da girmez; kullanıcı kararı «ciro dışı». Eskiden Pano ham `orders`'ı
+ * `enCokSatanlar`a veriyordu: aynı kartın 6 aylık trendi (`aylikCiro` → `panoCirosu`) MF'yi dışlarken ürün paneli Mikro'da
+ * olmayan faturanın kalem netini ürüne katıyor, sıralamayı ve çubuk oranını kaydırıyordu.
+ *   • Kapı burada, sayaç girdinin KENDİSİNDEN (Pano not sözleşmesi: not panelin işlevinin kendi penceresinden; panel dönemsiz,
+ *     pencere tüm liste). Sayacın tutarı `mfKaynaksizSay` gereği sipariş tutarıdır (`totalPrice`), panelin kalem neti değil.
+ *   • İşaretsiz MF (QH2-1) bugünkü gibi sayılır. `enCokSatanlar` / `urunSatislari` kapısız kalır: Raporlar okuyucuları
+ *     `RaporlarPage` kapılı listesini okur (kaynak çiti (5), src/test/mfKaynaksizKapisi.cit.test.ts).
+ */
+export function panoEnCokSatanlar(
+  siparisler: readonly PanoSatisSiparisi[], n: number, tutarSec?: (s: SatisSatiri) => number,
+): { urunler: UrunSatis[]; kaynaksizDisi: MfKaynaksizDisi } {
+  return { urunler: enCokSatanlar(siparisler.filter(o => !mfKaynaksizMi(o)), n, tutarSec), kaynaksizDisi: mfKaynaksizSay(siparisler) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

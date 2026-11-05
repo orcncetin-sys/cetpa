@@ -300,6 +300,14 @@ describe('sunucuda `orders` okuyan / yazan yerlerin SAYISI sabit', () => {
     // 2026-10-19 (TB / TC): koşullu yazım + yeniden okuma (çağıranın kiracısı YA DA etiketsiz) ve kimliksiz takip ucunun kodla
     // araması (kiracısız — kod küresel tekil ve ~131 bit; yanıt maskeli, mağaza siparişi 404).
     'src/server/takipKodu.ts': 3,
+    // 2026-11-05 (şartname «Mikro bağlantı B» B2 § 4.2 / BH12): kaynaksız MF işaretinin iki doğrudan SQL'i (yaz + kaldır;
+    // `coll = 'orders'`). Tek çağıran `mikroRoutes.mfIptalEsle`: gece işi (sistem), `requireStaff` kapılı `import/faturadan-siparis`
+    // ve `mikroFaturalar` yazma kapılı `import/gib-durum` (iki uç `orders`'ı zaten bu işlevle okuyup yazıyordu; 13'ün içinde). İki
+    // SQL de `companyId = $cid` + `source = 'mikro-fatura'` koşulunu taşır, kullanıcıya satır döndürmez.
+    'src/server/mikro/mfKaynaksizIsareti.ts': 2,
+    // 2026-11-05 (şartname «Mikro bağlantı B» B3-a § 5.4): `GET /api/ops/cari-kod-tani` SALT OKUMA (kiracı + etiketsiz). Kapı ops
+    // jetonu (`opsJetonuGecerli`; kullanıcı oturumu yok, dış rol ulaşamaz); yanıt yalnız kod / kimlik / sayı (unvan, VKN yok).
+    'src/server/routes/cariKodTaniRoutes.ts': 1,
   };
   it('dosya başına sayım', () => {
     const desen = /collection\('orders'\)|loadCompanyDocs\('orders'|tenantSnap\('orders'|coll = 'orders'/g;

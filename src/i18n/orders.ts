@@ -240,6 +240,10 @@ export const ORDERS = {
     e_irsaliye_kesme_yetkiniz_yok_yonetici_lojistik_: 'e-İrsaliye kesme yetkiniz yok (Yönetici / Lojistik rolü gerekir).',
     mikro_siparisi_durumu_mikro_da_izlenir: 'Mikro siparişi — durumu Mikro\'da izlenir',
     mikro_dan_siparis_fisi_gelmedi: 'Mikro\'dan sipariş fişi gelmedi. Mikro faturalarından türeyen siparişler «Cetpa Siparişleri» sekmesinde. Senkron durumu: Ayarlar › Entegrasyonlar › Mikro › Senkronizasyon Geçmişi (SQL:SIPARISLER).',
+    // Kaynaksız MF (şartname «Mikro bağlantı B» B2 #9 / #10 / #8): rozet, durum metni ve CSV hücresi AYNI metin. `{tarih}` yer tutucusu.
+    mikroda_satis_faturasi_yok: 'Mikro\'da satış faturası yok',
+    mf_kaynaksiz_aciklama: 'Gece kontrolünde ({tarih}) bu numarada Mikro satış faturası bulunamadı. Ciroya ve KDV\'ye sayılmaz; sipariş silinmez.',
+    mf_kaynaksiz_q_seri_eki: 'Seri Q (faturasız) Mikro satırından türedi.',
   },
   en: {
     bu_siparis_iptal_edilmistir: 'This order has been cancelled.',
@@ -476,6 +480,9 @@ export const ORDERS = {
     e_irsaliye_kesme_yetkiniz_yok_yonetici_lojistik_: 'You are not allowed to issue e-waybills (Admin / Logistics role required).',
     mikro_siparisi_durumu_mikro_da_izlenir: 'Mikro order — status is tracked in Mikro',
     mikro_dan_siparis_fisi_gelmedi: 'No order slips came from Mikro. Orders derived from Mikro invoices are in the «Cetpa Orders» tab. Sync status: Settings › Integrations › Mikro › Sync History (SQL:SIPARISLER).',
+    mikroda_satis_faturasi_yok: 'No Mikro sales invoice',
+    mf_kaynaksiz_aciklama: 'The nightly check ({tarih}) found no Mikro sales invoice with this number. Not counted in revenue or VAT; the order is not deleted.',
+    mf_kaynaksiz_q_seri_eki: 'Derived from a series Q (uninvoiced) Mikro line.',
   },
 } as const;
 

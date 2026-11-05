@@ -20,3 +20,16 @@ export const MF_KIMLIK_ONEKI = 'mikrofat__';
  *  MF'nin `mikroFaturaNo`'su (`${seri}${sira}` → 'Q1') ANAHTAR DEĞİLDİR: Q'da Mikro satırının 'Q-1'iyle eşleşmez. */
 export const mikroFaturaAnahtari = (seri: unknown, sira: unknown): string =>
   [seri, sira].map(v => String(v ?? '').trim()).filter(v => v !== '').join('-');
+
+/** Mikro'da aynı numarada SATIŞ faturası olmayan MF siparişinin İŞARETİ ve ilk görülme zamanı (şartname «Mikro bağlantı B» B2,
+ *  kullanıcı kararı 05.11.2026: «Rozet + ciro dışı»; sipariş SİLİNMEZ, durumu değişmez). Yalnız sunucu yazar / siler (doğrudan
+ *  SQL, routes/mikroRoutes `mfIptalEsle`; istemciye kapalı: collections.SUNUCU_TURETILEN_ALANLAR). Değer `true` ya da anahtar yok. */
+export const MF_KAYNAKSIZ_ALANI = 'mfKaynaksiz';
+export const MF_KAYNAKSIZ_GORULDU_ALANI = 'mfKaynaksizGoruldu';
+
+/**
+ * İşaretli kaynaksız MF siparişi mi (TEK yüklem; ciro / KDV okuyucuları bunu çağırır; kaynak çiti
+ * `src/test/mfKaynaksizKapisi.cit.test.ts`). Alan YOKSA kaynaksız SAYILMAZ: eski fikstür ve henüz gece kontrolünden geçmemiş
+ * sipariş bugünkü sonucu verir (QH2-1: işaretsiz ikizsiz MF listede kalır). Kaynak işareti sunucuya özeldir (`source` korunur).
+ */
+export const mfKaynaksizMi = (o: { source?: unknown; mfKaynaksiz?: unknown }): boolean => o.source === MF_KAYNAGI && o.mfKaynaksiz === true;

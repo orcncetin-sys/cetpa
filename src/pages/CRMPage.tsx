@@ -36,6 +36,8 @@ import { hedefGirdisi, hedefOnDoldur } from '../utils/pano/hedefButce';
 import { zamanDate, zamanMs, gunFarki, ayAnahtari, gunAnahtari, tarihYaz } from '../utils/zaman';
 import { authFetch } from '../services/authFetch';
 import { exportLeadsCSV } from '../utils/export';
+import { mfKaynaksizMi } from '../lib/mfKaynagi';
+import { mfKaynaksizNotu, mfKaynaksizSay } from '../utils/muhasebe/faturasizDisi';
 import { formatCurrency, formatInCurrency, paraYaz, tlYaz, kisaTutar } from '../utils/currency';
 import { scoreLead } from '../services/geminiService';
 import { pushMikroEvrak, ziyaretPayload } from '../services/mikroEvrak';
@@ -162,6 +164,11 @@ export default function CRMPage({
     () => leads.filter(l => (l as unknown as { isMusteri?: boolean }).isMusteri !== true),
     [leads]
   );
+  // Kaynaksız MF (şartname «Mikro bağlantı B» B2, 2026-11-05): Mikro'da satış faturası olmayan, sunucunun işaretlediği MF siparişi
+  // CİRO DIŞIDIR. YALNIZ ciro toplayan bloklar bu listeyi (ya da toplama satırında `mfKaynaksizMi`) okur; sipariş listesi, durum ve
+  // SAYIM ham `orders`'ta kalır (sipariş silinmez, rozetiyle görünür). Kaynak çiti: src/test/mfKaynaksizKapisi.cit.test.ts (4).
+  const ciroSiparisleri = useMemo(() => orders.filter(o => !mfKaynaksizMi(o)), [orders]);
+  const crmKaynaksizNotu = mfKaynaksizNotu(mfKaynaksizSay(orders), currentLanguage);
   // ── Local state ──────────────────────────────────────────────────────────────
   const [crmSearch, setCrmSearch] = useState('');
   // Kalıcılaştırma (2026-07-21): kampanya metrik düzenleme modu
@@ -1561,16 +1568,23 @@ export default function CRMPage({
                 const revenueByMonth: Record<string, number> = {};
                 const dealsByMonth: Record<string, number> = {};
                 const repByMonth: Record<string, Record<string, { actual: number; deals: number }>> = {};
+                const repSatiri = (dateStr: string, rep: string) => {
+                  if (!repByMonth[dateStr]) repByMonth[dateStr] = {};
+                  if (!repByMonth[dateStr][rep]) repByMonth[dateStr][rep] = { actual: 0, deals: 0 };
+                  return repByMonth[dateStr][rep];
+                };
+                // SAYIM ham listeden (sipariş adedi değişmez); CİRO `ciroSiparisleri`nden (B2: işaretli kaynaksız MF ciro dışı).
                 for (const o of orders) {
                   const dateStr = ayAnahtari(o.createdAt);
                   if (!dateStr) continue;
-                  revenueByMonth[dateStr] = (revenueByMonth[dateStr] || 0) + (o.totalPrice || 0);
                   dealsByMonth[dateStr] = (dealsByMonth[dateStr] || 0) + 1;
-                  const rep = (o.assignedTo as string | undefined) || '—';
-                  if (!repByMonth[dateStr]) repByMonth[dateStr] = {};
-                  if (!repByMonth[dateStr][rep]) repByMonth[dateStr][rep] = { actual: 0, deals: 0 };
-                  repByMonth[dateStr][rep].actual += o.totalPrice || 0;
-                  repByMonth[dateStr][rep].deals++;
+                  repSatiri(dateStr, (o.assignedTo as string | undefined) || '—').deals++;
+                }
+                for (const o of ciroSiparisleri) {
+                  const dateStr = ayAnahtari(o.createdAt);
+                  if (!dateStr) continue;
+                  revenueByMonth[dateStr] = (revenueByMonth[dateStr] || 0) + (o.totalPrice || 0);
+                  repSatiri(dateStr, (o.assignedTo as string | undefined) || '—').actual += o.totalPrice || 0;
                 }
 
                 // ── Build last 12 months list ───────────────────────────────
@@ -1598,6 +1612,8 @@ export default function CRMPage({
                 const totalActual12 = months.reduce((s, m) => s + (revenueByMonth[m.key] || 0), 0);
                 const totalTarget12 = months.reduce((s, m) => s + (monthlyTargets[m.key] || (m.key === thisMonthKey ? monthlyTarget : 0)), 0);
                 const avg12Pct = totalTarget12 > 0 ? Math.round((totalActual12 / totalTarget12) * 100) : 0;
+                // Notun sayacı hedef penceresiyle (son 12 ay) AYNI süzgeçten: pencere dışındaki işaretli sipariş sayılmaz.
+                const hedefKaynaksizNotu = mfKaynaksizNotu(mfKaynaksizSay(orders.filter(o => { const k = ayAnahtari(o.createdAt); return !!k && months.some(m => m.key === k); })), currentLanguage);
                 const best12 = months.reduce<{ key: string; pct: number } | null>((best, m) => {
                   const t = monthlyTargets[m.key] || (m.key === thisMonthKey ? monthlyTarget : 0);
                   const a = revenueByMonth[m.key] || 0;
@@ -1654,6 +1670,7 @@ export default function CRMPage({
                         <div className={`h-full rounded-full transition-all duration-700 ${globalPct >= 100 ? 'bg-emerald-500' : globalPct >= 70 ? 'bg-amber-400' : 'bg-red-400'}`}
                           style={{ width: `${globalPct}%` }} />
                       </div>
+                      {hedefKaynaksizNotu && <p data-mf-kaynaksiz-notu="crm-hedefler" className="mt-2 text-xs text-[#86868B]">{hedefKaynaksizNotu}</p>}
                       {repList.length > 0 && (
                         <div className="mt-4 space-y-2 border-t border-gray-50 pt-3">
                           <p className="text-xs font-semibold text-gray-500 mb-2">{currentLanguage === 'tr' ? 'Temsilci Bazlı' : 'Per Rep'}</p>
@@ -1954,7 +1971,7 @@ export default function CRMPage({
                 const counts = stages.map(s => leads.filter(l => huniAsamasi(l) === s.key).length);
                 const maxCount = Math.max(...counts, 1);
                 const totalRev = (stageKey: string) =>
-                  orders.filter(o => leads.find(l => huniAsamasi(l) === stageKey && (l.name === o.customerName || l.id === o.leadId)))
+                  ciroSiparisleri.filter(o => leads.find(l => huniAsamasi(l) === stageKey && (l.name === o.customerName || l.id === o.leadId)))
                     .reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                 return (
                   <div className={cn("rounded-2xl border p-5", darkMode ? "bg-white/5 border-white/10" : "bg-white border-gray-100 shadow-sm")}>
@@ -2275,7 +2292,7 @@ export default function CRMPage({
                                 <p className="text-xs text-gray-500 truncate">{lead.company}</p>
                                 {/* Phase 49 + Phase 85: Lead-to-Order revenue badge with kpiCurrency */}
                                 {(() => {
-                                  const rev = orders
+                                  const rev = ciroSiparisleri
                                     .filter(o => o.customerName === lead.name || o.customerName === lead.company)
                                     .reduce((s, o) => s + (o.totalPrice || 0), 0);
                                   if (rev === 0) return null;
@@ -2485,7 +2502,7 @@ export default function CRMPage({
                     {/* ── Phase 45: Customer Revenue Leaderboard ── */}
                     {(() => {
                       const revenueMap: Record<string, number> = {};
-                      for (const o of orders) {
+                      for (const o of ciroSiparisleri) {
                         revenueMap[o.customerName] = (revenueMap[o.customerName] ?? 0) + (o.totalPrice || 0);
                       }
                       const top5 = Object.entries(revenueMap)
@@ -2522,6 +2539,7 @@ export default function CRMPage({
                               </div>
                             ))}
                           </div>
+                          {crmKaynaksizNotu && <p data-mf-kaynaksiz-notu="crm-siralama" className="mt-3 text-xs text-[#86868B]">{crmKaynaksizNotu}</p>}
                         </div>
                       );
                     })()}
@@ -2659,8 +2677,8 @@ export default function CRMPage({
                   repMap[rep].leads++;
                   if (l.status==='Closed Won'||l.status==='Closed') repMap[rep].won++;
                 });
-                // Add order revenue per assignedTo
-                orders.forEach(o => {
+                // Add order revenue per assignedTo (B2: işaretli kaynaksız MF ciro dışı)
+                ciroSiparisleri.forEach(o => {
                   if (o.status==='Cancelled'||!o.assignedTo) return;
                   if (!o.createdAt) return;
                   const d = zamanDate(o.createdAt);
@@ -2754,7 +2772,7 @@ export default function CRMPage({
                   if (!cn) return;
                   if (!customerScores[cn]) customerScores[cn]={name:cn,orders:0,revenue:0,recencyDays:999,score:0};
                   customerScores[cn].orders++;
-                  customerScores[cn].revenue+=(o.totalPrice||0);
+                  if (!mfKaynaksizMi(o)) customerScores[cn].revenue+=(o.totalPrice||0);   // B2: sayım ham, ciro kapılı
                   const d = zamanDate(o.createdAt);
                   if (d) {
                     const days=Math.floor((now585.getTime()-d.getTime())/86400000);
@@ -2815,7 +2833,7 @@ export default function CRMPage({
                   if (!cn) return;
                   if (!customerMap601[cn]) customerMap601[cn]={name:cn,orders:0,revenue:0,recencyDays:999,type:o.customerType||'Retail'};
                   customerMap601[cn].orders++;
-                  customerMap601[cn].revenue+=(o.totalPrice||0);
+                  if (!mfKaynaksizMi(o)) customerMap601[cn].revenue+=(o.totalPrice||0);   // B2: sayım ham, ciro kapılı
                   const d = zamanDate(o.createdAt);
                   if (d) {
                     const days=Math.floor((now601.getTime()-d.getTime())/86400000);
@@ -2897,7 +2915,7 @@ export default function CRMPage({
                 orders.filter(o=>o.status!=='Cancelled').forEach(o=>{
                   const key = (o.leadId as string) || o.customerName || 'unknown';
                   if(!custRevMap[key]) custRevMap[key]={name:o.customerName||'—',revenue:0,orderCount:0,customerType:o.customerType||'Retail'};
-                  custRevMap[key].revenue += o.totalPrice||0;
+                  if (!mfKaynaksizMi(o)) custRevMap[key].revenue += o.totalPrice||0;   // B2: sayım ham, ciro kapılı
                   custRevMap[key].orderCount++;
                 });
                 const custRows = Object.values(custRevMap).sort((a,b)=>b.revenue-a.revenue);
@@ -3012,7 +3030,7 @@ export default function CRMPage({
                 const now604 = new Date();
                 const monthStart604 = new Date(now604.getFullYear(), now604.getMonth(), 1);
                 const repRevMap: Record<string,number> = {};
-                orders.filter(o => {
+                ciroSiparisleri.filter(o => {
                   if (o.status==='Cancelled'||!o.assignedTo||!o.createdAt) return false;
                   const d = zamanDate(o.createdAt);
                   return !!d && d >= monthStart604;
@@ -3065,7 +3083,7 @@ export default function CRMPage({
                 const now633 = Date.now();
                 const scored = leads.filter(l=>!['Closed Lost'].includes(l.status)).map(l=>{
                   const cOrds = orders.filter(o=>o.customerName===l.name||(o as unknown as Record<string,unknown>)['customerId']===l.id);
-                  const cRev = cOrds.reduce((s,o)=>s+(o.totalPrice||0),0);
+                  const cRev = cOrds.filter(o => !mfKaynaksizMi(o)).reduce((s,o)=>s+(o.totalPrice||0),0);   // B2: sıklık ham, ciro kapılı
                   const lastOrd = cOrds.length>0?Math.max(...cOrds.map(o=>zamanMs(o.createdAt) ?? 0)):0;
                   const recency = lastOrd>0?Math.round((now633-lastOrd)/86400000):999;
                   const frequency = cOrds.length;
@@ -3224,7 +3242,7 @@ export default function CRMPage({
                           (o.leadId === selectedLead.id || o.customerName === selectedLead.name)
                           && o.status !== 'Cancelled'
                         );
-                        const clvTotal = clvOrders.reduce((s, o) => s + (o.totalPrice ?? o.totalAmount ?? 0), 0);
+                        const clvTotal = clvOrders.filter(o => !mfKaynaksizMi(o)).reduce((s, o) => s + (o.totalPrice ?? o.totalAmount ?? 0), 0);   // B2: adet ham, ciro kapılı
                         const clvCount = clvOrders.length;
                         return clvTotal > 0 ? (
                           <span
@@ -3403,8 +3421,10 @@ export default function CRMPage({
                       const custOrders = orders.filter(o => o.leadId === selectedLead.id || o.customerName === selectedLead.name);
                       const fmt       = (v: number) => tlYaz(v, { birim: kpiCurrency, rates: exchangeRates, ondalik: 0 });
                       if (custOrders.length === 0) return null;
-                      const totalRev  = custOrders.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
-                      const paidRev   = custOrders.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+                      // B2: işaretli kaynaksız MF ciro dışı — tutarlar kapılı listeden, adet / liste ham `custOrders`'tan.
+                      const custCiro  = custOrders.filter(o => !mfKaynaksizMi(o));
+                      const totalRev  = custCiro.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
+                      const paidRev   = custCiro.filter(o => o.paid).reduce((s, o) => s + (o.totalPrice ?? 0), 0);
                       const unpaidRev = totalRev - paidRev;
                       // Phase 104: CLV calculations
                       // Tarihsiz sipariş eskiden de epoch 0 sayılıyordu (sıralamada öne düşer); o sıra korunur.
@@ -3417,8 +3437,12 @@ export default function CRMPage({
                       const daysSinceLast = Math.floor((Date.now() - lastMs) / 86400000);
                       const tenureMonths = Math.max(1, (lastMs - firstMs) / (1000 * 60 * 60 * 24 * 30));
                       const ordersPerMonth = custOrders.length / tenureMonths;
-                      const aov = totalRev / custOrders.length;
-                      const clv12 = aov * ordersPerMonth * 12;
+                      // B2 (Y29 bulgu 0): ortalama bir tutardır → pay da payda da kapılı liste (finansKpi.ortalamaSiparisTutari ile aynı:
+                      // işaretli MF ne paya ne paydaya girer). Tek siparişi işaretli MF olan müşteride ortalama tanımsız → ekranda «—».
+                      const aov = custCiro.length > 0 ? totalRev / custCiro.length : 0;
+                      // Eski `aov × ordersPerMonth × 12` = `totalRev / tenureMonths × 12` (adet sadeleşir); CLV değişmez, sıklık ham kalır.
+                      const clv12 = (totalRev / tenureMonths) * 12;
+                      const clvKaynaksizNotu = mfKaynaksizNotu(mfKaynaksizSay(custOrders), currentLanguage);
                       const churnRisk = daysSinceLast > 90 ? 'high' : daysSinceLast > 45 ? 'medium' : 'low';
                       const churnColor = churnRisk === 'high' ? 'bg-red-50 text-red-700 border-red-100' : churnRisk === 'medium' ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-emerald-50 text-emerald-700 border-emerald-100';
                       const churnLabel = churnRisk === 'high' ? (currentLanguage === 'tr' ? '⚠ Kayıp Riski Yüksek' : '⚠ High Churn Risk') : churnRisk === 'medium' ? (currentLanguage === 'tr' ? '~ Orta Risk' : '~ Medium Risk') : (currentLanguage === 'tr' ? '✓ Aktif' : '✓ Active');
@@ -3445,7 +3469,7 @@ export default function CRMPage({
                             <div className="grid grid-cols-4 gap-2 text-center">
                               {[
                                 { label: currentLanguage === 'tr' ? '12A CLV' : '12M CLV', value: fmt(clv12), color: 'text-purple-700' },
-                                { label: currentLanguage === 'tr' ? 'Ort. Sipariş' : 'Avg Order', value: fmt(aov), color: 'text-blue-600' },
+                                { label: currentLanguage === 'tr' ? 'Ort. Sipariş' : 'Avg Order', value: custCiro.length > 0 ? fmt(aov) : '—', color: 'text-blue-600' },
                                 { label: currentLanguage === 'tr' ? 'Sıklık/Ay' : 'Freq/Mo', value: ordersPerMonth.toFixed(1), color: 'text-gray-800' },
                                 { label: currentLanguage === 'tr' ? 'Son Sipariş' : 'Last Order', value: `${daysSinceLast}g`, color: daysSinceLast > 60 ? 'text-red-500' : 'text-gray-600' },
                               ].map((m, i) => (
@@ -3455,6 +3479,7 @@ export default function CRMPage({
                                 </div>
                               ))}
                             </div>
+                            {clvKaynaksizNotu && <p data-mf-kaynaksiz-notu="crm-clv" className="text-[10px] text-amber-700">{clvKaynaksizNotu}</p>}
                           </div>
                         </>
                       );
@@ -3525,7 +3550,7 @@ export default function CRMPage({
                       if (!matches) return false;
                       return ayAnahtari(o.syncedAt ?? o.createdAt) === curPeriod;
                     });
-                    const actualSales = dealerOrders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                    const actualSales = dealerOrders.filter(o => !mfKaynaksizMi(o)).reduce((s, o) => s + (o.totalPrice || 0), 0);   // B2: ciro kapılı
                     const tier = selectedLead.priceTier || 'B2B Standard';
                     const rule = commissionRules.find(r => r.tier === tier);
                     const targetAmount = rule?.targetAmount || 100000;

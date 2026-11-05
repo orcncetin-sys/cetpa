@@ -14,6 +14,7 @@ import KpiCurrencyToggle from '../components/KpiCurrencyToggle';
 import { paraYaz } from '../utils/currency';
 import { zamanDate, gunBasi, gunAnahtari } from '../utils/zaman';
 import type { Order, Lead, Employee } from '../types';
+import { mfKaynaksizMi } from '../lib/mfKaynagi';
 import { oc } from '../i18n/ortak';
 
 const HRModule = React.lazy(() => import('../components/HRModule'));
@@ -880,7 +881,7 @@ export default function IKPage(props: Props) {
                     orders.filter(o=>{
                       if(o.status==='Cancelled'||!o.assignedTo||!o.createdAt) return false;
                       const d=zamanDate(o.createdAt); return !!d&&d>=start629&&d<=end629;
-                    }).forEach(o=>{ const r=o.assignedTo!; if(!repSales[r]) repSales[r]={orders:0,revenue:0}; repSales[r].orders++; repSales[r].revenue+=(o.totalPrice||0); });
+                    }).forEach(o=>{ const r=o.assignedTo!; if(!repSales[r]) repSales[r]={orders:0,revenue:0}; repSales[r].orders++; if (!mfKaynaksizMi(o)) repSales[r].revenue+=(o.totalPrice||0); });   // B2: adet ham, ciro kapılı (işaretli kaynaksız MF ciro dışı)
                     const rows = employees.filter(e=>e.status==='Aktif').map(e=>({...e,sales:repSales[e.name]||{orders:0,revenue:0}})).sort((a,b)=>b.sales.revenue-a.sales.revenue);
                     return (
                       <div className="apple-card p-5 space-y-4">

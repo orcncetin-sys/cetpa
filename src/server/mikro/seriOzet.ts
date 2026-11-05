@@ -773,7 +773,7 @@ export const SUBE_SORGUSU: PgSorgu = {
 /** (13) MF siparişleri: ikiz anahtarı (`mikroEvrak`), tutar, yıl (`orderDate`). */
 export const MF_IKIZ_SIPARIS_SORGUSU: PgSorgu = {
   sql: `SELECT data->>'companyId' AS "companyId", data->'mikroEvrak'->>'seri' AS seri, data->'mikroEvrak'->>'sira' AS sira, ` +
-    `data->'totalPrice' AS "totalPrice", data->>'orderDate' AS "orderDate" FROM docs WHERE coll = $1 AND data->>'source' = $2`,
+    `data->'totalPrice' AS "totalPrice", data->>'orderDate' AS "orderDate", data->'mfKaynaksiz' AS "mfKaynaksiz" FROM docs WHERE coll = $1 AND data->>'source' = $2`,
   params: ['orders', MF_KAYNAGI],
 };
 /** (13) Cetpa `mikroFaturalar` kopyaları — Satışlar'ın gördüğü küme: iptal (`cha_iptal`) ve GİB reddi (`gibRed`) DIŞI
@@ -904,8 +904,11 @@ export interface SatisCiftSayimKiracisi {
   seriYil: Record<string, { adet: number; tutar: Tutar }>;
   /** İkizi Satışlar'ın gördüğü Mikro giden kümesinde OLAN MF (QH2 anahtarı): adet, MF tutarı, aynı faturaların Mikro meblağı. */
   ikizliMfAdet: number; ikizliMfTutar: Tutar; ikizliMikroTutar: Tutar;
-  /** İkizi OLMAYAN MF — Satışlar'da listede kalır, bir kez sayılır. */
+  /** İkizi OLMAYAN ve kaynaksız işareti TAŞIMAYAN MF — Satışlar'da listede kalır, bir kez sayılır (QH2-1). */
   ikizsizMfAdet: number;
+  /** İkizi OLMAYAN, kaynaksız işaretli MF (şartname «Mikro bağlantı B» BH8; istemci `satisCiftSayimOzeti.kaynaksiz*` ile AYNI ayrık
+   *  sayaç): Satışlar'da listeden düşer. Önce / sonra ölçüsü (§ 4.5) bununla okunur. */
+  kaynaksizMfAdet: number; kaynaksizMfTutar: Tutar;
   /** `cetpaEvrakNolari` ile Satışlar'dan elenen Mikro giden satırı (sipariş evrak no ↔ fatura no karşılaştırması; değişmez — QH8-4). */
   cetpaEvrakIleElenen: number;
   /** Kiracının gördüğü (kendi + etiketsiz) iptal / red dışı Mikro giden fatura adedi. */
@@ -938,7 +941,10 @@ export function satisCiftSayimOlcumu(mfRows: readonly Satir[], faturaRows: reado
       const l = ikizler.get(f.no);
       if (l) l.push(f.meblag); else ikizler.set(f.no, [f.meblag]);
     }
-    const ikizli = mfler.filter(r => { const a = mikroFaturaAnahtari(r.seri, r.sira); return a !== '' && ikizler.has(a); });
+    const ikizliMi = (r: Satir) => { const a = mikroFaturaAnahtari(r.seri, r.sira); return a !== '' && ikizler.has(a); };
+    const ikizli = mfler.filter(ikizliMi);
+    // Kaynaksız işareti (B2): `mfKaynaksizMi` ile AYNI ölçüt (satır zaten MF kaynağından; işaret `true` olmalı).
+    const kaynaksiz = mfler.filter(r => r.mfKaynaksiz === true && !ikizliMi(r));
     const seriYil: Record<string, { adet: number; tutar: Tutar }> = {};
     for (const r of mfler) {
       const yil = /^\d{4}/.test(doluMetin(r.orderDate)) ? doluMetin(r.orderDate).slice(0, 4) : '(tarihsiz)';
@@ -950,7 +956,9 @@ export function satisCiftSayimOlcumu(mfRows: readonly Satir[], faturaRows: reado
       mfAdet: mfler.length, mfTutar: paraToplaBilinen(mfler, r => r.totalPrice), seriYil,
       ikizliMfAdet: ikizli.length, ikizliMfTutar: paraToplaBilinen(ikizli, r => r.totalPrice),
       ikizliMikroTutar: paraToplaBilinen(ikizli.flatMap(r => ikizler.get(mikroFaturaAnahtari(r.seri, r.sira)) ?? []), x => x),
-      ikizsizMfAdet: mfler.length - ikizli.length, cetpaEvrakIleElenen: elenen, mikroGidenAdet: gorunen.length,
+      ikizsizMfAdet: mfler.length - ikizli.length - kaynaksiz.length,
+      kaynaksizMfAdet: kaynaksiz.length, kaynaksizMfTutar: paraToplaBilinen(kaynaksiz, r => r.totalPrice),
+      cetpaEvrakIleElenen: elenen, mikroGidenAdet: gorunen.length,
     };
   }
   return sonuc;

@@ -51,6 +51,8 @@
 import { bilinenSayi, toplaBilinen, ekranTutari, tamTutar, sayiSirala, tahsilatOrani, type Tutar } from '../para';
 import { odemeTakipli, siparisTutari } from '../siparis';
 import { zamanMs, ayAnahtari, gunAnahtari } from '../zaman';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
+import { mfKaynaksizSay, type MfKaynaksizDisi } from '../muhasebe/faturasizDisi';
 
 // ── Girdi şekilleri ──────────────────────────────────────────────────────────
 
@@ -61,6 +63,8 @@ export interface KpiSiparis {
   status?: unknown;
   paid?: unknown;
   source?: string;
+  /** Kaynaksız MF kapısı (`aylikCiroDegisimi`, `ortalamaSiparisTutari`, `nakitPozisyonu`) okur. */
+  mfKaynaksiz?: unknown;
   customerName?: unknown;
   createdAt?: unknown;
   syncedAt?: unknown;
@@ -273,6 +277,8 @@ export interface AylikDegisim {
   yon: 'artis' | 'azalis' | null;
   /** Eski eşik: bu ay > geçen ay × 1,1. Türetilemiyorsa false (içgörü BASILMAZ). */
   belirginArtis: boolean;
+  /** B2: iki ayın (bu ay + geçen ay) dışlanan işaretli kaynaksız MF'si — Pano içgörü notu. */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 /**
@@ -283,18 +289,22 @@ export function aylikCiroDegisimi(siparisler: readonly KpiSiparis[], simdi: numb
   const ref = new Date(simdi);
   const buAyKey = ayAnahtari(ref);
   const gecenAyKey = ayAnahtari(new Date(ref.getFullYear(), ref.getMonth() - 1, 1));
+  // B2 (şartname «Mikro bağlantı B», 2026-11-05): işaretli kaynaksız MF ciroya GİRMEZ (kapı işlevin içinde, BH15 deseni);
+  // dışlanan, iki ayın kendi penceresinden sayılır (`kaynaksizDisi`).
   const ayinkiler = (key: string | null) =>
     siparisler.filter(o => { const k = ayAnahtari(kayitZamani(o)); return k !== null && k === key; });
+  const buAyListe = ayinkiler(buAyKey), gecenAyListe = ayinkiler(gecenAyKey);
+  const kaynaksizDisi = mfKaynaksizSay([...buAyListe, ...gecenAyListe]);
 
-  const buAy = toplaBilinen(ayinkiler(buAyKey), siparisTutari);
-  const gecenAy = toplaBilinen(ayinkiler(gecenAyKey), siparisTutari);
+  const buAy = toplaBilinen(buAyListe.filter(o => !mfKaynaksizMi(o)), siparisTutari);
+  const gecenAy = toplaBilinen(gecenAyListe.filter(o => !mfKaynaksizMi(o)), siparisTutari);
   // TÜRETME kapısı: kısmi bir aydan yüzde çıkarılmaz (para.ts tamTutar).
   const a = tamTutar(buAy), b = tamTutar(gecenAy);
   if (!Number.isFinite(a) || !Number.isFinite(b) || b <= 0) {
-    return { buAy, gecenAy, yuzde: null, yon: null, belirginArtis: false };
+    return { buAy, gecenAy, yuzde: null, yon: null, belirginArtis: false, kaynaksizDisi };
   }
   return {
-    buAy, gecenAy,
+    buAy, gecenAy, kaynaksizDisi,
     yuzde: Math.round(((a - b) / b) * 100),
     yon: a >= b ? 'artis' : 'azalis',
     belirginArtis: a > b * 1.1,
@@ -310,6 +320,8 @@ export interface AovSonuc {
   sayilan: number;
   /** Tutarı okunamadığı için ortalamaya GİRMEYEN sipariş sayısı (sayfa notu). */
   bilinmeyen: number;
+  /** B2: ortalamaya GİRMEYEN işaretli kaynaksız MF (girdi listesinin kendisinden) — Pano P42 notu. */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 /**
@@ -318,11 +330,13 @@ export interface AovSonuc {
  * sipariş sanıp ortalamayı sistematik olarak aşağı çekiyordu.
  */
 export function ortalamaSiparisTutari(siparisler: readonly KpiSiparis[]): AovSonuc {
-  const t = toplaBilinen(siparisler, siparisTutari);
+  // B2 (şartname «Mikro bağlantı B»): işaretli kaynaksız MF ne paya ne paydaya girer (kapı işlevin içinde, BH15 deseni).
+  const t = toplaBilinen(siparisler.filter(o => !mfKaynaksizMi(o)), siparisTutari);
   return {
     deger: t.bilinen > 0 ? t.toplam / t.bilinen : NaN,
     sayilan: t.bilinen,
     bilinmeyen: t.bilinmeyen,
+    kaynaksizDisi: mfKaynaksizSay(siparisler),
   };
 }
 
@@ -461,6 +475,8 @@ export interface NakitPozisyonu {
   tutarsizKayit: number;
   /** Kartlara basılacak EKRAN değerleri (kısmi toplam; hiç bilinen yoksa NaN → '—'). */
   ekran: { bugunCiro: number; bugunTahsil: number; toplamAlacak: number };
+  /** B2: seçili günün (iptal hariç) ciro ve tahsiline GİRMEYEN işaretli kaynaksız MF — Pano P130 notu. */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 /**
@@ -471,8 +487,10 @@ export function nakitPozisyonu(
   siparisler: readonly KpiSiparis[],
   { gun }: { gun: string },
 ): NakitPozisyonu {
-  const gununkiler = siparisler.filter(o =>
+  const gunun = siparisler.filter(o =>
     gunAnahtari(kayitZamani(o)) === gun && o.status !== 'Cancelled');
+  // B2 (şartname «Mikro bağlantı B»): işaretli kaynaksız MF günün cirosuna (ve tahsiline) GİRMEZ; sayacı günün penceresinden.
+  const gununkiler = gunun.filter(o => !mfKaynaksizMi(o));
   const bugunCiro = toplaBilinen(gununkiler, siparisTutari);
   const bugunTahsil = toplaBilinen(gununkiler.filter(o => o.paid === true), siparisTutari);
   const acikAlacaklar = siparisler.filter(acikAlacakMi);
@@ -484,6 +502,7 @@ export function nakitPozisyonu(
   }
   return {
     bugunCiro, bugunTahsil, toplamAlacak, tutarsizKayit: tutarsiz.size,
+    kaynaksizDisi: mfKaynaksizSay(gunun),
     ekran: {
       bugunCiro: ekranTutari(bugunCiro),
       bugunTahsil: ekranTutari(bugunTahsil),

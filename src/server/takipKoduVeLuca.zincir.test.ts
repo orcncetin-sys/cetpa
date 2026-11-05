@@ -319,7 +319,8 @@ describe('TA / LB — `/api/db` ile `takipKodu` ve LUCA işaretleri yazılamaz (
   };
 
   it('korunan liste: işaret + ETTN + takip kodu + üç LUCA alanı (tek kaynak)', () => {
-    expect(SUNUCU_TURETILEN_ALANLAR.get('orders')).toEqual([FATURA_GONDERIM_ALANI, 'ettn', 'takipKodu', 'lucaSynced', 'lucaFaturaNo', 'lucaSyncedAt']);
+    // 2026-11-05 (şartname «Mikro bağlantı B» B2): + kaynaksız MF işareti (davranış çiti: turetilenAlanlar.b.zincir.test).
+    expect(SUNUCU_TURETILEN_ALANLAR.get('orders')).toEqual([FATURA_GONDERIM_ALANI, 'ettn', 'takipKodu', 'lucaSynced', 'lucaFaturaNo', 'lucaSyncedAt', 'mfKaynaksiz', 'mfKaynaksizGoruldu']);
   });
 
   it('POST yeni kayda yazmaz; PUT / PUT?merge=1 / PATCH (nokta yolu, null, tünel) / cas satırdaki değeri DEĞİŞTİRMEZ; artırma 400 — Yönetici dâhil', async () => {

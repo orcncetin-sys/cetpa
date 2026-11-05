@@ -21,7 +21,9 @@ import type { Order, Lead, InventoryItem, Employee, Quotation, InventoryMovement
 import { oc } from '../i18n/ortak';
 import { ekranTutari, tamTutar, sayiSirala } from '../utils/para';
 import { siparisTutari } from '../utils/siparis';
-import { MF_KAYNAGI, mikroFaturaAnahtari } from '../lib/mfKaynagi';
+import { MF_KAYNAGI, mikroFaturaAnahtari, mfKaynaksizMi } from '../lib/mfKaynagi';
+import { mfIkiziListede } from '../utils/pano/mikroBirlesim';
+import { mfKaynaksizNotu, mfKaynaksizSay } from '../utils/muhasebe/faturasizDisi';
 import { trendOzeti, hedefOrani } from '../utils/muhasebe/kpiTrend';
 // ── Faz 3 6a: rapor veri katmanı (saf, testli yardımcılar) ───────────────────
 import { yuzdeYaz } from '../utils/rapor/bicim';
@@ -152,8 +154,12 @@ export default function RaporlarPage({
 
   // Cetpa siparişi + Mikro satış. GİDEN (satış) + cari yıl; mükerrer eleme: Cetpa
   // siparişi Mikro'ya gönderilince evrak no `mikroEvrakNo`ya yazılır, tekrar sayma.
-  const orders = useMemo<Order[]>(() => {
+  // Giden + cari yıl Mikro satırları TEK süzgeçte: sentetik satırlar ve kaynaksız notu aynı kümeden (Y29b delta, 06.11.2026).
+  const gidenCariYil = useMemo(() => {
     const cariYil = String(new Date().getFullYear());
+    return mikroFaturalar.filter(f => f.yon === 'giden' && f.tarih.startsWith(cariYil));
+  }, [mikroFaturalar]);
+  const orders = useMemo<Order[]>(() => {
     const cetpaEvrak = new Set(
       ordersProp.map(o => String((o as unknown as { mikroEvrakNo?: string }).mikroEvrakNo ?? '').trim()).filter(Boolean),
     );
@@ -162,14 +168,17 @@ export default function RaporlarPage({
     // evrak anahtarları (faturaNo = seri-sira) eleme setine girer. Türetilmiş
     // sipariş kalemli/tarihli olduğundan sentetiğe tercih edilir.
     // Anahtar tek kaynakta (lib/mfKaynagi.mikroFaturaAnahtari — Mikro satırının `faturaNo`'suyla aynı biçim; QH1-3).
+    // İşaretli kaynaksız MF'nin anahtarı kümeye GİRMEZ (Y29 son inceleme bulgu 2, 06.11.2026): MF aşağıda listeden düşüyor; işaret
+    // kalkmadan («Faturalar» tek başına çekildi, `mfIptalEsle` henüz koşmadı) aynı numaralı Mikro satış satırı görünürse o satır
+    // sentetik olarak BİR kez sayılır. Eskiden ikisi birden düşüyor, satış sıfır kez sayılıyordu (BH8 ayrık kuralı / Satışlar «Tümü» ile aynı sonuç).
     for (const o of ordersProp) {
-      if (o.source === MF_KAYNAGI && o.mikroEvrak) {
+      if (o.source === MF_KAYNAGI && o.mikroEvrak && !mfKaynaksizMi(o)) {
         const k = mikroFaturaAnahtari(o.mikroEvrak.seri, o.mikroEvrak.sira);
         if (k) cetpaEvrak.add(k);
       }
     }
-    const mikroOrders = mikroFaturalar
-      .filter(f => f.yon === 'giden' && f.tarih.startsWith(cariYil) && !cetpaEvrak.has(f.faturaNo))
+    const mikroOrders = gidenCariYil
+      .filter(f => !cetpaEvrak.has(f.faturaNo))
       .map(f => ({
         id: `mikro-${f.id}`,
         customerName: cariAdMap.get(f.cariKod) || f.cariKod || '—',
@@ -194,8 +203,16 @@ export default function RaporlarPage({
         // BILMEDIGINI anlamasini saglar.
         source: MF_KAYNAGI,
       })) as unknown as Order[];
-    return [...ordersProp, ...mikroOrders];
-  }, [ordersProp, mikroFaturalar, cariAdMap]);
+    // Kaynaksız MF (şartname «Mikro bağlantı B» BH13, 05.11.2026): Mikro'da satış faturası olmayan MF siparişi rapor listesine
+    // GİRMEZ (TEK kapı; tahmin / kâr merkezi işlev içinde de süzer, aynı yüklem). `cetpaEvrak`'a işaretli MF'nin anahtarı girmez
+    // (Y29 bulgu 2; BH13'teki «`cetpaEvrak` değişmez» varsayımı işaret kalkmadan önceki geçiş anında tutmuyordu): ikizsiz işaretli
+    // MF'de Mikro satırı yok, sentetik doğmaz (eskisiyle aynı); ikizli işaretli MF'de Mikro satırı bir kez sayılır. Not aşağıda (`raporKaynaksiz`).
+    return [...ordersProp.filter(o => !mfKaynaksizMi(o)), ...mikroOrders];
+  }, [ordersProp, gidenCariYil, cariAdMap]);
+  // Not yalnız GERÇEKTEN dışarıda kalanı sayar: ikizi giden listede olan işaretli MF'nin satışı yukarıda sentetik satırla bir kez
+  // sayılıyor (Y29 bulgu 2) — onu «dâhil değil» diye basmak yanlış olurdu (BH8 ayrık sayacı).
+  const gidenNo = useMemo(() => new Set(gidenCariYil.map(f => f.faturaNo)), [gidenCariYil]);
+  const raporKaynaksizNotu = mfKaynaksizNotu(mfKaynaksizSay(ordersProp.filter(o => !mfIkiziListede(o, gidenNo))), currentLanguage);
 
   // P619 talep eşlemesi: kalem → stok kartı (kimlik/sku, sonra kimlik/ad). Hook ÜST düzeyde ve
   // aşağıdaki erken dönüşten ÖNCE (IIFE içinde hook çağrılamaz).
@@ -208,6 +225,10 @@ export default function RaporlarPage({
   return (
     <>
       {!hasFullAccess('reports') && <ReadOnlyBanner currentLanguage={currentLanguage} />}
+      {/* Kaynaksız MF (B2 #3): bütün rapor sekmeleri aynı listeyi okur; not TEK kez burada. */}
+      {raporKaynaksizNotu && (
+        <p data-mf-kaynaksiz-notu="raporlar" className="text-[11px] text-amber-700">{raporKaynaksizNotu}</p>
+      )}
 
       {/* ── Export toolbar ── */}
       <div className="flex items-center gap-2 flex-wrap">

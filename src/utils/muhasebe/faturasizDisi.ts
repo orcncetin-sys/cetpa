@@ -9,8 +9,9 @@
  *
  * Tutarı / KDV'si okunamayan kayıt 0 SAYILMAZ: `Tutar` sayacına bilinmeyen olarak girer, not `ekranTutari` sözleşmesiyle basar.
  */
-import { toplaBilinen, ekranTutari, type Tutar } from '../para';
+import { toplaBilinen, ekranTutari, tutarBirlestir, type Tutar } from '../para';
 import { paraYaz } from '../currency';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
 
 export interface FaturasizDisi {
   /** Dışlanan faturasız (Q) kayıt adedi. */
@@ -61,4 +62,40 @@ export function faturasizDisiNotu(d: FaturasizDisi | null | undefined, dil: stri
   return tr
     ? `${tutar} faturasız (Q) dâhil değil · ${d.adet} kayıt${kdv}${tutarsiz}`
     : `${tutar} uninvoiced (Q) not included · ${d.adet} record${d.adet === 1 ? '' : 's'}${kdv}${tutarsiz}`;
+}
+
+// ── Kaynaksız MF (şartname «Mikro bağlantı B» B2 § 4.3, 05.11.2026) ──────────────────────────────────────────────────────────
+// Mikro'da aynı numarada SATIŞ faturası olmayan MF siparişi (sunucu işareti `mfKaynaksiz`; lib/mfKaynagi.mfKaynaksizMi) ciroya ve
+// KDV'ye SİPARİŞ TARAFINDAN girmez (kullanıcı kararı «Rozet + ciro dışı»). Sayaç + not sözleşmesi `faturasizDisiSay` /
+// `faturasizDisiNotu` ile AYNI: tutarı okunamayan kayıt 0 sayılmaz, «N kayıt tutarsız».
+
+export interface MfKaynaksizDisi {
+  /** Dışlanan işaretli MF adedi. */
+  adet: number;
+  /** Dışlananların `totalPrice` toplamı (KDV dâhil sipariş tutarı); bilinmeyen SAYILIR. */
+  tutar: Tutar;
+}
+
+/** Listedeki İŞARETLİ kaynaksız MF siparişlerini say (işaretsiz / MF dışı kayıt sayılmaz). */
+export function mfKaynaksizSay(liste: readonly { source?: unknown; mfKaynaksiz?: unknown; totalPrice?: unknown }[]): MfKaynaksizDisi {
+  const disi = liste.filter(mfKaynaksizMi);
+  return { adet: disi.length, tutar: toplaBilinen(disi, o => o.totalPrice) };
+}
+
+/** AYRIK pencerelerin sayaçlarını birleştir (ör. Pano P174'ün üç ayı, P159'un son 30 + önceki 30 günü); boş → adet 0. Kesişen
+ *  pencerelerde KULLANILMAZ: aynı sipariş iki kez sayılırdı. */
+export function mfKaynaksizBirlestir(...d: readonly MfKaynaksizDisi[]): MfKaynaksizDisi {
+  return { adet: d.reduce((s, x) => s + x.adet, 0), tutar: tutarBirlestir(...d.map(x => x.tutar)) };
+}
+
+/** Not: «₺X Mikro'da satış faturası olmayan MF siparişi dâhil değil · N kayıt» (tutarsız varsa «· M kayıt tutarsız»); adet 0 → null. */
+export function mfKaynaksizNotu(d: MfKaynaksizDisi | null | undefined, dil: string): string | null {
+  if (!d || d.adet <= 0) return null;
+  const tr = dil === 'tr';
+  const tutar = paraYaz(ekranTutari(d.tutar));
+  const b = d.tutar.bilinmeyen;
+  const tutarsiz = b > 0 ? (tr ? ` · ${b} kayıt tutarsız` : ` · ${b} records unknown`) : '';
+  return tr
+    ? `${tutar} Mikro'da satış faturası olmayan MF siparişi dâhil değil · ${d.adet} kayıt${tutarsiz}`
+    : `${tutar} MF orders without a Mikro sales invoice not included · ${d.adet} record${d.adet === 1 ? '' : 's'}${tutarsiz}`;
 }

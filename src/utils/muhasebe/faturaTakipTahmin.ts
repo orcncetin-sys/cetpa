@@ -32,6 +32,8 @@
 import { bilinenSayi, toplaBilinen, satirTutari, ekranTutari, type Tutar, tamTutar, tutarBirlestir } from '../para';
 import { gunFarki, ayAnahtari } from '../zaman';
 import { yaslandirmaAdayi, yasKovasi, alacakTarihi, type Kovalar } from './arYaslandirma';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
+import { mfKaynaksizSay, type MfKaynaksizDisi } from './faturasizDisi';
 
 // ── Phase 630: Fatura Yaşlandırma (dönem pencereli) ─────────────────────────────────────────────
 
@@ -119,6 +121,8 @@ export interface TahminSiparisi {
   source?: string;
   createdAt?: unknown;
   syncedAt?: unknown;
+  /** Kaynaksız MF işareti (şartname «Mikro bağlantı B» BH15): tahmine girmez. */
+  mfKaynaksiz?: unknown;
 }
 
 /** Ayın cirosu para.ts `Tutar` şeklinde (toplam + bilinen + bilinmeyen) + adet. */
@@ -154,6 +158,8 @@ export interface SatisTahmini {
   tarihsiz: number;
   wma: number;
   egim: number;
+  /** Tahmine GİRMEYEN kaynaksız MF (iptal olmayan; pencereden bağımsız). Ekran `mfKaynaksizNotu` (BH15). */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 export const TAHMIN_GECMIS_AY = 6;
@@ -194,8 +200,11 @@ export function satisTahmini(
     gecmis.push(a);
   }
   let tarihsiz = 0;
+  const kaynaksizlar: TahminSiparisi[] = [];
   for (const o of siparisler) {
     if (o.status === 'Cancelled') continue;
+    // İşlev içi TEK kapı (BH15): beş çağıranın (Muhasebe P565, Raporlar P620, Genel P190 …) hepsi ham listeyle gelir.
+    if (mfKaynaksizMi(o)) { kaynaksizlar.push(o); continue; }
     const anahtar = ayAnahtari(alacakTarihi(o));
     if (anahtar === null) { tarihsiz++; continue; }
     const a = aylar.get(anahtar);
@@ -226,7 +235,7 @@ export function satisTahmini(
     const ay = new Date(simdi.getFullYear(), simdi.getMonth() + k, 1);
     tahmin.push({ anahtar: ayAnahtari(ay) ?? '', ay, deger, alt: deger * (1 - bant), ust: deger * (1 + bant) });
   }
-  return { gecmis, tahmin, bilinen, bilinmeyen, tarihsiz, wma, egim };
+  return { gecmis, tahmin, bilinen, bilinmeyen, tarihsiz, wma, egim, kaynaksizDisi: mfKaynaksizSay(kaynaksizlar) };
 }
 
 /**
@@ -246,6 +255,9 @@ export interface KarSiparisi {
   status?: string;
   customerType?: string;
   lineItems?: readonly KarKalemi[];
+  /** Kaynaksız MF (BH15): kâr merkezine girmez. */
+  source?: string;
+  mfKaynaksiz?: unknown;
 }
 
 export interface KarMerkezi {
@@ -272,7 +284,8 @@ export interface KarMerkezi {
 export function karMerkezleri(siparisler: readonly KarSiparisi[], digerAdi = 'Diğer'): KarMerkezi[] {
   const kanallar = new Map<string, KarSiparisi[]>();
   for (const o of siparisler) {
-    if (o.status === 'Cancelled') continue;
+    // İşlev içi TEK kapı (BH15): kaynaksız MF (Mikro'da satış faturası yok) gelire girmez. Sayaç: `karMerkeziKaynaksizDisi`.
+    if (o.status === 'Cancelled' || mfKaynaksizMi(o)) continue;
     const ad = o.customerType || digerAdi;
     const liste = kanallar.get(ad);
     if (liste) liste.push(o); else kanallar.set(ad, [o]);
@@ -281,6 +294,14 @@ export function karMerkezleri(siparisler: readonly KarSiparisi[], digerAdi = 'Di
     karSatiri(ad, liste.length, toplaBilinen(liste, o => o.totalPrice), toplaBilinen(liste.flatMap(o => o.lineItems ?? []), li => satirTutari(li.costPrice, li.quantity))),
   );
   return sonuc.sort((a, b) => b.gelir.toplam - a.gelir.toplam);
+}
+
+/**
+ * `karMerkezleri`'nin DIŞLADIĞI kaynaksız MF (iptal olmayan) — ekran `mfKaynaksizNotu`. Şartname BH15 sayacı sonuca eklemek
+ * istiyor; `karMerkezleri` dizi döndürdüğü için (beş çağıran) dönüş şekli DEĞİŞMEDİ, sayaç aynı yüklemle bu işlevden (en küçük sapma).
+ */
+export function karMerkeziKaynaksizDisi(siparisler: readonly KarSiparisi[]): MfKaynaksizDisi {
+  return mfKaynaksizSay(siparisler.filter(o => o.status !== 'Cancelled'));
 }
 
 /** Kanal satırı ve toplam satırı AYNI kuralla: brüt kâr/marj yalnız iki taraf da tam bilinirken. */

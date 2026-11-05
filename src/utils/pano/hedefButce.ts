@@ -83,6 +83,13 @@ import { zamanDate } from '../zaman';
 import { ayAnahtariYerel } from '../muhasebe/karZarar';
 import { formSayisi, pozitifSayi } from '../muhasebe/irsaliyeCalisan';
 import { sayacOlcegi } from './cubuk';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
+import { mfKaynaksizSay, type MfKaynaksizDisi } from '../muhasebe/faturasizDisi';
+
+/** Ciroya giren sipariş: işaretli kaynaksız MF (Mikro'da satış faturası yok) DIŞARIDA (şartname «Mikro bağlantı B» B2, 2026-11-05).
+ *  Kapı İŞLEVLERİN İÇİNDE (BH15 deseni) — çağıran süzmez; işaretsiz MF bugünkü gibi sayılır (QH2-1). Dışlanan, her işlevin KENDİ
+ *  penceresinden (iptal hariç, pencere içi) `kaynaksizDisi` olarak döner; Pano paneli notu bundan basar. */
+const ciroya = (o: PanoSiparis): boolean => !mfKaynaksizMi(o);
 
 /** Panelin gerçekten okuduğu alanlar; hepsi `unknown` (DB'den null gelebilir, tip "number" demek dolu demek değil). */
 export interface PanoSiparis {
@@ -91,6 +98,9 @@ export interface PanoSiparis {
   status?: unknown;
   createdAt?: unknown;
   syncedAt?: unknown;
+  /** Kaynaksız MF kapısı (`ciroya`) okur. */
+  source?: unknown;
+  mfKaynaksiz?: unknown;
 }
 
 const iptalDegil = (o: PanoSiparis): boolean => o.status !== 'Cancelled';
@@ -113,6 +123,8 @@ export interface CiroPenceresi {
   ciro: Tutar;
   /** İptal olmayan ama tarihi çözülemeyen kayıt sayısı — hiçbir döneme giremez (sayfa sessizce düşürüyordu). */
   tarihsiz: number;
+  /** B2: pencere içindeki (iptal hariç) ciroya GİRMEYEN işaretli kaynaksız MF. */
+  kaynaksizDisi: MfKaynaksizDisi;
 }
 
 const pencere = (siparisler: readonly PanoSiparis[], tarihYedegi: boolean, kabul: (d: Date) => boolean): CiroPenceresi => {
@@ -124,7 +136,7 @@ const pencere = (siparisler: readonly PanoSiparis[], tarihYedegi: boolean, kabul
     if (!d) { tarihsiz++; continue; }
     if (kabul(d)) icerde.push(o);
   }
-  return { ciro: toplaBilinen(icerde, siparisTutari), tarihsiz };
+  return { ciro: toplaBilinen(icerde.filter(ciroya), siparisTutari), tarihsiz, kaynaksizDisi: mfKaynaksizSay(icerde) };
 };
 
 /**
@@ -153,7 +165,7 @@ export function ayCirosu(siparisler: readonly PanoSiparis[], ayAnahtar: string, 
     if (k === null) { tarihsiz++; continue; }
     if (k === ayAnahtar) icerde.push(o);
   }
-  return { ciro: toplaBilinen(icerde, siparisTutari), tarihsiz };
+  return { ciro: toplaBilinen(icerde.filter(ciroya), siparisTutari), tarihsiz, kaynaksizDisi: mfKaynaksizSay(icerde) };
 }
 
 // ── Hedef gerçekleşmesi (Phase 99 / Phase 174) ─────────────────────────────────────────────
@@ -258,6 +270,8 @@ export interface Hafta {
   /** 0 = en eski kova, `haftaSayisi - 1` = içinde bulunulan hafta (sayfadaki dizilim). */
   indeks: number;
   ciro: Tutar;
+  /** B2: bu haftanın kovasında (iptal hariç) ciroya GİRMEYEN işaretli kaynaksız MF. */
+  kaynaksizDisi: MfKaynaksizDisi;
   /**
    * Grafiğe verilecek değer: bilinen kısmi toplam, hiç bilinen yokken null (0 DEĞİL — çubuk/çizgi
    * sıfıra çakılmasın; `recharts` null'ı boşluk olarak çizer). Siparişsiz hafta gerçek 0'dır.
@@ -280,9 +294,9 @@ export function haftalikCiro(siparisler: readonly PanoSiparis[], simdi: Date, ha
     if (indeks >= 0 && indeks < haftaSayisi) kovalar[indeks].push(o);
   }
   return kovalar.map((liste, indeks) => {
-    const ciro = toplaBilinen(liste, siparisTutari);
+    const ciro = toplaBilinen(liste.filter(ciroya), siparisTutari);
     const ekran = ekranTutari(ciro);
-    return { indeks, ciro, deger: Number.isFinite(ekran) ? ekran : null };
+    return { indeks, ciro, kaynaksizDisi: mfKaynaksizSay(liste), deger: Number.isFinite(ekran) ? ekran : null };
   });
 }
 

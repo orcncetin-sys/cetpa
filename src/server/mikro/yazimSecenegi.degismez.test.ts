@@ -101,7 +101,8 @@ function cagrilar(): Cagri[] {
 /** 1. argümanı DEĞİŞKEN olan çağrıların adlı listesi: dosya + ilk argüman → yazan mı (sabit zorunlu) okuyan mı. */
 const DEGISKENLI: ReadonlyArray<{ dosya: string; ilk: string; tur: 'yazan' | 'okuyan'; neden: string }> = [
   { dosya: 'src/server/routes/mikroRoutes.ts', ilk: 'method', tur: 'yazan', neden: 'genel evrak ucu (POST /api/mikro/evrak/kaydet; yöntem beyaz listeden)' },
-  { dosya: 'src/server/crons.ts', ilk: 'method', tur: 'okuyan', neden: 'cronPullAll — StokListesiV2 / CariListesiV2' },
+  // 2026-11-05 («Mikro bağlantı B» BH19.4): cron'un sayfalayıcısı ortak gövdeye taşındı; cari-kod-tani kuru koşusu da onu çağırır.
+  { dosya: 'src/server/mikro/listeSayfalari.ts', ilk: 'method', tur: 'okuyan', neden: 'mikroListeTumu (eski cronPullAll) · StokListesiV2 / CariListesiV2' },
   { dosya: 'src/server/routes/mikroRoutes.ts', ilk: 'opts.method', tur: 'okuyan', neden: 'makeMikroListImport — liste importu' },
 ];
 

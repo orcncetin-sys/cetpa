@@ -32,6 +32,8 @@ interface SatislarTabProps {
   mikroSatisSatirlari: MikroSatisRow[];
   /** Mikro dahil görünümde yerel listeden düşen MF ikizleri (utils/muhasebe/satislar.satisCiftSayimOzeti); «Cetpa»da null. */
   satisCiftSayim: SatisCiftSayimOzeti | null;
+  /** «₺X Mikro'da satış faturası olmayan MF siparişi dâhil değil · N kayıt» (faturasizDisi.mfKaynaksizNotu); yoksa null. */
+  satisKaynaksizNotu?: string | null;
   satisSearch: string;
   setSatisSearch: (v: string) => void;
   satisYil: string;
@@ -45,7 +47,7 @@ interface SatislarTabProps {
 export default function SatislarTab({
   t, currentLanguage, satisKayitlari, setDrillDown, formatConv, kpiCurrency, setKpiCurrency,
   satisKaynak, setSatisKaynak, satisOzet, mikroDahil,
-  mikroSatisSatirlari, satisCiftSayim, satisSearch, setSatisSearch, satisYil, setSatisYil,
+  mikroSatisSatirlari, satisCiftSayim, satisKaynaksizNotu = null, satisSearch, setSatisSearch, satisYil, setSatisYil,
   satisSortKey, satisSortDir, toggleSatisSort, displayedSatis,
 }: SatislarTabProps) {
   // Bilinmeyen tutar 0 DEĞİL bilinmiyordur (CLAUDE.md): drill-down satırında '—',
@@ -222,6 +224,10 @@ export default function SatislarTab({
           <div data-mf-ikizi-notu className="mb-3 px-3 py-2 bg-blue-50 rounded-xl text-[11px] text-blue-700">
             {ac(currentLanguage).mfIkiziSayilmadi(satisCiftSayim.eslesenAdet, notlu(satisCiftSayim.eslesenTutar, formatTRY))}
           </div>
+        )}
+        {/* Kaynaksız MF (şartname «Mikro bağlantı B» B2): Mikro'da satış faturası olmayan MF siparişi ciroya girmedi. */}
+        {satisKaynaksizNotu && (
+          <div data-mf-kaynaksiz-notu="satislar" className="mb-3 px-3 py-2 bg-amber-50 rounded-xl text-[11px] text-amber-800">{satisKaynaksizNotu}</div>
         )}
         <div className="overflow-x-auto">
           <table className="apple-table">

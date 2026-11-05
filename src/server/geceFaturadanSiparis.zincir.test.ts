@@ -175,6 +175,11 @@ beforeAll(async () => {
   }, 60_000, 'tablolar hazır');
 
   await belgeKoy('users', 'ic-Admin', { email: eposta('ic-Admin'), role: 'Admin', companyId: KIRACI });
+  // «Mikro bağlantı B» B1-a (05.11.2026): canlıdaki gibi sahte ₺0 taşıyan Mikro banka / kasa belgesi + elle girilmiş değer. Gece
+  // adımının 0 → null geçişi server.ts'in GERÇEK PG havuzuyla koşar (rota düzeneğinde havuz yok → «PG havuzu yok» dalı).
+  await belgeKoy('bankAccounts', 'mb-sifir', { companyId: KIRACI, source: 'mikro', bankName: 'ZİRAAT', balance: 0 });
+  await belgeKoy('bankAccounts', 'mb-elle', { companyId: KIRACI, source: 'mikro', bankName: 'İŞ', balance: 125000, mikroKod: '102.02' });
+  await belgeKoy('kasalar', 'mk-sifir', { companyId: KIRACI, source: 'mikro', kasaAdi: 'MERKEZ', bakiye: 0 });
   // 501: Cetpa'dan kesilmiş fatura (Cetpa siparişi ETTN'i süslü parantezli + BÜYÜK harf, faturada küçük harf) → türetilmez (G3a).
   // 502: Mikro masaüstünden kesilmiş fatura → MF siparişi türetilir.
   await belgeKoy('mikroFaturalar', 'f501', satisFaturasi(501, { cha_uuid: ETTN.toLowerCase() }));
@@ -233,16 +238,17 @@ describe('03:20 gece işi (gerçek kayıt, elle koşturuldu) — faturadan-sipar
   });
 
   // «Mikro bağlantı A» (2026-11-05): gece işine iki adım eklendi: cari bakiye (Mikro boş döner → «satır yok», başarılı) ve SON adım
-  // stok miktarı (sürüm 16 + Mikro kartı yok → «V17 yoklaması geçmedi», başarısız). 15 → 17.
-  it('G4 — `acilis-tani` kod değişikliği OLMADAN sayar: satır `faturadan-siparis` / sistem; gün özetinde sistem satırı 17 (14 → 15 → 17)', async () => {
+  // stok miktarı (sürüm 16 + Mikro kartı yok → «V17 yoklaması geçmedi», başarısız). 15 → 17. «Mikro bağlantı B» BH17 (2026-11-05):
+  // banka / kasa bakiyesi adımı (0 → null geçişi; bu düzenekte 1 banka + 1 kasa sahte ₺0 taşıyor, başarılı). 17 → 18.
+  it('G4 — `acilis-tani` kod değişikliği OLMADAN sayar: satır `faturadan-siparis` / sistem; gün özetinde sistem satırı 18 (14 → 15 → 17 → 18)', async () => {
     const sistemSatiri = (await pg().query("SELECT count(*)::int AS n FROM docs WHERE coll = 'syncLog' AND data->>'userId' = 'system'")).rows[0].n;
-    expect(sistemSatiri).toBe(17);
+    expect(sistemSatiri).toBe(18);
     const r = await istek('GET', '/api/ops/acilis-tani', { 'X-Ops-Token': OPS_JETONU });
     expect(r.s, r.metin).toBe(200);
     const senkron = r.j.senkron as { satirlar: Array<Record<string, unknown>>; gunler: Array<{ basarili: number; hatali: number }> };
     // `⚠` (bekletme notu) açılış tanısında satırı UYARILI gösterir; satır yine başarılı (§ 9.A A6).
     expect(senkron.satirlar.filter(x => x.islem === 'faturadan-siparis')).toEqual([expect.objectContaining({ islem: 'faturadan-siparis', hedef: 'orders', sistem: true, basarili: true, uyari: true })]);
-    expect(senkron.gunler.reduce((t, g) => t + g.basarili + g.hatali, 0)).toBe(17);
+    expect(senkron.gunler.reduce((t, g) => t + g.basarili + g.hatali, 0)).toBe(18);
   });
 
   // «Mikro bağlantı A» A1.5 / A3 / AH12 (2026-11-05): yeni iki gece adımının denetim satırı da gerçek zincirde TEK ve HEDEF KİRACIDA.
@@ -256,6 +262,16 @@ describe('03:20 gece işi (gerçek kayıt, elle koşturuldu) — faturadan-sipar
     const bakiyeDenetim = (await satirlar('auditLog', 'action', 'SQL:CARI_HESAP_HAREKETLERI')).filter(x => String(x.details).startsWith('cariBalances/'));
     expect(bakiyeDenetim.map(x => x.companyId)).toEqual([KIRACI]);
     expect(await satirlar('auditLog', 'action', 'Mikro Bakiye Çekme')).toEqual([]);
+    // «Mikro bağlantı B» BH17 / § 3.5: banka / kasa adımı da TEK satır (server.ts'in GERÇEK havuzu; geçiş koştu), denetimi HEDEF
+    // KİRACIDA. Sahte ₺0 → null; elle girilmiş 125000 KALIR ve özette sayılır (BH2).
+    const bk = await satirlar('syncLog', 'operation', 'banka-kasa-bakiye');
+    expect(bk.map(x => [x.entityType, x.success, x.userId])).toEqual([['bankAccounts', true, 'system']]);
+    expect(String(bk[0].entityId)).toContain('0 → null geçişi: 1 banka (mb-sifir) · 1 kasa (mk-sifir) · elle girilmiş değer korundu: 1 (banka mb-elle [102.02]: 125000)');
+    const deger = async (coll: string, id: string, alan: string): Promise<unknown> =>
+      ((await pg().query('SELECT data FROM docs WHERE coll = $1 AND id = $2', [coll, id])).rows[0]?.data as Record<string, unknown> | undefined)?.[alan];
+    expect([await deger('bankAccounts', 'mb-sifir', 'balance'), await deger('bankAccounts', 'mb-elle', 'balance'), await deger('kasalar', 'mk-sifir', 'bakiye')])
+      .toEqual([null, 125000, null]);
+    expect((await satirlar('auditLog', 'action', 'banka-kasa-bakiye')).map(x => x.companyId)).toEqual([KIRACI]);
     expect(await satirlar('auditLog', 'action', 'Mikro Stok Miktarları')).toEqual([]);
   });
 
@@ -268,5 +284,22 @@ describe('03:20 gece işi (gerçek kayıt, elle koşturuldu) — faturadan-sipar
     const yeni = (await satirlar('auditLog', 'userId', 'ic-Admin')).slice(once);
     expect(yeni.map(x => [x.action, x.companyId]).sort()).toEqual([['Faturadan Sipariş', KIRACI], ['faturadan-siparis', KIRACI]]);
     expect(await belgeVar('orders', `mikrofat__${KIRACI}__-501`)).toBe(false);
+  });
+});
+
+// «Mikro bağlantı B» B3-a (05.11.2026): `GET /api/ops/cari-kod-tani` GERÇEK server.ts'te kayıtlı («yazıldı ama bağlanmadı» çiti) ve
+// GERÇEK zincirde ops jetonu kapısının arkasında. Salt okuma: `docs`'a satır eklenmez. Mikro sahte uç boş döner → canlı küme dalı
+// kapalı, kuru koşu atlanır (ölçünün geri kalanı yine döner).
+describe('B3-a · cari-kod-tani gerçek zincirde', () => {
+  it('jetonsuz 401; jetonla 200 ve ölçü şekli; kuru koşu atlandı; docs satır sayısı değişmez', async () => {
+    const say = async (): Promise<number> => Number((await pg().query('SELECT count(*)::int AS n FROM docs')).rows[0].n);
+    const once = await say();
+    expect((await istek('GET', '/api/ops/cari-kod-tani')).s).toBe(401);
+    const r = await istek('GET', '/api/ops/cari-kod-tani', { 'X-Ops-Token': OPS_JETONU });
+    expect(r.s, r.metin).toBe(200);
+    expect(r.j).toMatchObject({ success: true, kiraci: KIRACI, mikrodaOlmayanLeadKodu: null, ayniVknCokKodluGrup: 0 });
+    expect(Object.keys(r.j)).toEqual(expect.arrayContaining(['mikroKod', 'leadKod', 'kendiLeadiOlmayanKodlar', 'bagliCetpaVerisi', 'gruplar', 'kuruKosu', 'kaynak']));
+    expect(r.j.kuruKosu).toEqual({ atlandi: expect.stringContaining('kuru koşu yapılmadı') });
+    expect(await say()).toBe(once);
   });
 });

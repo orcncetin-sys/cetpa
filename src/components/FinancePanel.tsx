@@ -7,6 +7,7 @@ import { odemeTakipli, gorunenSiparisNo } from '../utils/siparis';
 import { tlYaz } from '../utils/currency';
 import { toplaBilinen, tahsilatOrani, tutarBirlestir, ekranTutari, tamTutar } from '../utils/para';
 import { mikroFaturaSuz, mikroCiroMaliyet, nativeCiroMaliyet, birlesikKar, finansSiparisSayaclari } from '../utils/muhasebe/mikroCiro';
+import { mfKaynaksizNotu } from '../utils/muhasebe/faturasizDisi';
 import { oc } from '../i18n/ortak';
 
 interface Order {
@@ -411,6 +412,10 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
           );
         })}
       </div>
+      {/* Kaynaksız MF (şartname «Mikro bağlantı B» B2 #2): Mikro'da satış faturası olmayan MF siparişi sayaçlara girmedi. */}
+      {mfKaynaksizNotu(siparisSayaclari.kaynaksizDisi, currentLanguage) && (
+        <p data-mf-kaynaksiz-notu="finans" className="text-[11px] text-amber-700 -mt-2">{mfKaynaksizNotu(siparisSayaclari.kaynaksizDisi, currentLanguage)}</p>
+      )}
 
       {/* ── Phase 109: Cash Flow Forecast ── */}
       {(() => {

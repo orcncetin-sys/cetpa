@@ -67,6 +67,8 @@ import { useMikroSiparisler } from "../hooks/useMikroSiparisler";
 import { mikroSiparisindenPanoSiparisi } from '../utils/pano/mikroBirlesim';
 import LocationStockReport from '../components/LocationStockReport';
 import { faturaTipiEtiketi, siparisDurumEtiketi, faturasizEtiketi } from '../utils/durumEtiketi';
+import MfKaynakRozeti from '../components/orders/MfKaynakRozeti';
+import { mfKaynaksizMi } from '../lib/mfKaynagi';
 import { sablonGetir, sablonRengi, bankaBilgisiBasilir, belgeAltBilgisiCiz } from '../utils/belgeSablonu';
 import { siparisStokPlani, stokGecisi, ATLANMA_SEBEBI } from '../utils/siparisStok';
 import { satirTutari, ekranTutari, sayiSirala, toplaBilinen } from '../utils/para';
@@ -1646,18 +1648,9 @@ export default function OrdersPage({
                                     faturaTipi/kdvOran YAZMIYOR; faturali dalı önce gelirse
                                     "e-FATURA • KDV%0" uydurulur (sahte kesinlik). */}
                                 {order.source === 'mikro-fatura' ? (
-                                  // Seri Q MF siparişi faturasızdır (K1, K4; şartname q-serisi v3 QH5-9): rozet seriden okunur.
-                                  faturasizEtiketi(order, currentLanguage) ? (
-                                    <span data-faturasiz-rozet={order.id} className="text-[9px] font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full"
-                                      title={currentLanguage === 'tr' ? `Mikro satış faturasından türetildi (${order.mikroEvrak ? order.mikroEvrak.seri + order.mikroEvrak.sira : ''})` : 'Derived from Mikro sales invoice'}>
-                                      {faturasizEtiketi(order, currentLanguage)}
-                                    </span>
-                                  ) : (
-                                  <span className="text-[9px] font-bold bg-[#1a3a5c]/10 text-[#1a3a5c] px-1.5 py-0.5 rounded-full"
-                                    title={currentLanguage === 'tr' ? `Mikro satış faturasından türetildi (${order.mikroEvrak ? order.mikroEvrak.seri + order.mikroEvrak.sira : ''})` : 'Derived from Mikro sales invoice'}>
-                                    {op(currentLanguage).mikro_fatura}
-                                  </span>
-                                  )
+                                  // MF rozeti TEK bileşende (components/orders/MfKaynakRozeti; şartname «Mikro bağlantı B» BH16): kaynaksız
+                                  // (Mikro'da satış faturası yok) → seri Q (K1, K4; q-serisi v3 QH5-9) → «MİKRO FATURA».
+                                  <MfKaynakRozeti order={order} currentLanguage={currentLanguage} />
                                 ) : magazaSiparisiMi(order) ? (
                                   // Çevrim içi mağaza siparişinde fatura durumu Cetpa'da İZLENMİYOR (sunucu `faturali` yazmaz) —
                                   // "FATURASIZ" rozeti "faturasız satış" demek olurdu (yanlış beyan). Rozet yok; "Online" rozeti yukarıda.
@@ -1673,7 +1666,8 @@ export default function OrdersPage({
                                 )}
                                 {/* Phase 67: Mikro sync badge. Gönderim işareti (D12, 2026-10-17): «gönderiliyor / sonucu bilinmiyor / reddetti /
                                     numarasız kesildi» rozeti; sarı «Mikro'ya gönderilmedi» noktası işaret varken ÇIKMAZ (fatura kesilmiş olabilir). */}
-                                {order.mikroFaturaNo ? (
+                                {/* Kaynaksız MF'de «✓ numara» basılmaz: numaranın faturası Mikro'da yok, rozet zaten söylüyor (B2). */}
+                                {mfKaynaksizMi(order) ? null : order.mikroFaturaNo ? (
                                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c] inline-flex items-center gap-0.5 max-w-[120px] truncate" title={`Mikro: ${order.mikroFaturaNo}`}>
                                     ✓ {order.mikroFaturaNo}
                                   </span>
@@ -1893,21 +1887,13 @@ export default function OrdersPage({
                         {/* Phase 67: invoice mini-badge on mobile */}
                         <div className="flex items-center justify-end gap-1 mt-0.5">
                           {order.source === 'mikro-fatura' ? (
-                            faturasizEtiketi(order, currentLanguage) ? (
-                              <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                                {faturasizEtiketi(order, currentLanguage)}
-                              </span>
-                            ) : (
-                            <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c]">
-                              {op(currentLanguage).mikro_ftr}
-                            </span>
-                            )
+                            <MfKaynakRozeti order={order} currentLanguage={currentLanguage} boyut="mobil" />
                           ) : order.faturali ? (
                             <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${order.faturaTipi === 'ihracat' ? 'bg-blue-100 text-blue-600' : order.faturaTipi === 'e-arsiv' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
                               {order.faturaTipi ? faturaTipiEtiketi(order.faturaTipi, currentLanguage) : 'e-FTR'}
                             </span>
                           ) : null}
-                          {order.mikroFaturaNo ? (
+                          {mfKaynaksizMi(order) ? null : order.mikroFaturaNo ? (
                             <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-[#1a3a5c]/10 text-[#1a3a5c]">✓ MKR</span>
                           ) : mikroFaturaDurumMetni(order, currentLanguage) ? (
                             <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-amber-50 text-amber-700">{mikroFaturaDurumMetni(order, currentLanguage)}</span>

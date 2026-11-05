@@ -18,7 +18,9 @@
  */
 import { bilinenSayi, toplaBilinen, tamTutar, type Tutar } from '../para';
 import { odemeTakipli } from '../siparis';
-import { mfIkiziListede, type MfIkizAlanlari } from '../pano/mikroBirlesim';
+import { mfIkiziListede, mfYerelDisi, type MfIkizAlanlari } from '../pano/mikroBirlesim';
+import { mfKaynaksizSay, type MfKaynaksizDisi } from './faturasizDisi';
+import { mfKaynaksizMi } from '../../lib/mfKaynagi';
 
 /** Mikro faturasının bu modülün okuduğu alanları (useMikroFaturalar `MikroFatura` yapısal olarak uyar). */
 export interface MikroCiroFaturasi {
@@ -129,10 +131,14 @@ export function birlesikKar(gelir: Tutar, gider: Tutar): number {
 // ── Finans «Faturalı / Faturasız / Toplam Sipariş» sayaçları (şartname q-serisi v3 QH3, 2026-11-05) ─────────
 
 /** Sayaçların okuduğu sipariş alanları (Order yapısal olarak uyar). */
-export interface FinansSayacSiparisi extends MfIkizAlanlari { hasInvoice?: boolean }
+export interface FinansSayacSiparisi extends MfIkizAlanlari { hasInvoice?: boolean; totalPrice?: unknown }
 /** Sayaçların okuduğu Mikro giden faturası alanları (`MikroFatura` uyar). */
 export interface FinansSayacFaturasi { faturaNo?: string; faturasiz?: boolean }
-export interface FinansSiparisSayaclari { faturali: number; faturasiz: number; toplam: number }
+export interface FinansSiparisSayaclari {
+  faturali: number; faturasiz: number; toplam: number;
+  /** Sayaçlara girmeyen kaynaksız MF (ikizi olmayan, işaretli; şartname «Mikro bağlantı B» B2 #2) — ekran `mfKaynaksizNotu`. */
+  kaynaksizDisi: MfKaynaksizDisi;
+}
 
 /**
  * Finans panelinin üç sayacı. Kullanıcı S1 (a): satış Mikro faturasından BİR KEZ sayılır — İKİZİ ekranın saydığı Mikro giden
@@ -148,11 +154,13 @@ export function finansSiparisSayaclari(
   mikroGiden: readonly FinansSayacFaturasi[],
 ): FinansSiparisSayaclari {
   const ikizler = new Set(mikroGiden.map(f => f.faturaNo ?? '').filter(Boolean));
-  const yerel = orders.filter(o => !mfIkiziListede(o, ikizler));
+  // Kaynaksız MF de düşer (şartname «Mikro bağlantı B» BH8: `mfYerelDisi` = ikizi Mikro'da ∨ Mikro'da satış faturası yok).
+  const yerel = orders.filter(o => !mfYerelDisi(o, ikizler));
   const mikroFaturasiz = mikroGiden.filter(f => f.faturasiz === true).length;
   return {
     faturali: yerel.filter(o => o.hasInvoice).length + (mikroGiden.length - mikroFaturasiz),
     faturasiz: yerel.filter(o => !o.hasInvoice).length + mikroFaturasiz,
     toplam: yerel.length + mikroGiden.length,
+    kaynaksizDisi: mfKaynaksizSay(orders.filter(o => mfKaynaksizMi(o) && !mfIkiziListede(o, ikizler))),
   };
 }

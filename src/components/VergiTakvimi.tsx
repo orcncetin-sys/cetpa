@@ -4,8 +4,9 @@ import { db } from '../firebase';
 import { Calendar, CheckCircle2, AlertTriangle, Clock, RefreshCw, TrendingUp } from 'lucide-react';
 import { byField } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
-import { ayAnahtari, gunFarki, gunAnahtari, bugunAnahtari, tarihYaz } from '../utils/zaman';
+import { gunFarki, gunAnahtari, bugunAnahtari, tarihYaz } from '../utils/zaman';
 import { oc } from '../i18n/ortak';
+import { ayKdvOnerisi, type VTOrder } from '../utils/muhasebe/vergiTakvimiKdv';
 
 interface VergiDeadline {
   id: string;
@@ -48,7 +49,6 @@ function generateDeadlines(year: number): Omit<VergiDeadline, 'id' | 'createdAt'
   return result.sort((a, b) => a.sonTarih.localeCompare(b.sonTarih));
 }
 
-type VTOrder = { totalPrice?: number; kdvOran?: number; faturali?: boolean; status?: string; createdAt?: unknown };
 export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders = [] }: { currentLanguage: string; isAuthenticated: boolean; orders?: VTOrder[] }) {
   const tr = currentLanguage === 'tr';
   const [deadlines, setDeadlines] = useState<VergiDeadline[]>([]);
@@ -62,18 +62,9 @@ export default function VergiTakvimi({ currentLanguage, isAuthenticated, orders 
     await updateDoc(doc(db, 'vergiTakvimi', id), { tahminiTutar: val });
     setEditTutarId(null);
   };
-  // Yaklaşım 1 — KDV Beyannamesi için dönemin satış KDV'sini faturalardan türet (öneri).
-  const ayKdvOner = (donem: string): number => {
-    const m = donem.match(/(\d{4})[/-](\d{2})/); if (!m) return 0;
-    const ym = `${m[1]}-${m[2]}`;
-    return orders.reduce((s, o) => {
-      if (o.status === 'Cancelled' || o.faturali === false) return s;
-      const d = ayAnahtari(o.createdAt);         // yerel ay; bilinmiyorsa null → öneriye girmez
-      if (d !== ym) return s;
-      const rate = (o.kdvOran ?? 20) / 100;
-      return s + (Number(o.totalPrice) || 0) * rate;
-    }, 0);
-  };
+  // Yaklaşım 1 — KDV Beyannamesi için dönemin satış KDV'sini faturalardan türet (öneri). Hesap saf modülde
+  // (utils/muhasebe/vergiTakvimiKdv.ayKdvOnerisi; kaynaksız MF kapısı, şartname «Mikro bağlantı B» B2 #4).
+  const ayKdvOner = (donem: string): number => ayKdvOnerisi(orders, donem);
 
   useEffect(() => {
     const unsub = onSnapshot(query(collection(db, 'vergiTakvimi')), snap => {

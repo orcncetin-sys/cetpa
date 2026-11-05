@@ -19,7 +19,7 @@
  * stockDiscrepancies / syncJobs / auditLog'u tam bu durumda buldu.
  */
 import { FATURA_GONDERIM_ALANI } from './faturaGonderimi';
-import { MF_KAYNAGI } from './mfKaynagi';
+import { MF_KAYNAGI, MF_KAYNAKSIZ_ALANI, MF_KAYNAKSIZ_GORULDU_ALANI } from './mfKaynagi';
 import { MAGAZA_KAYNAGI } from './magazaKaynagi';
 import { TAKIP_KODU_ALANI } from './takipKodu';
 
@@ -173,6 +173,10 @@ export const SAHIP_SATIR_ALANI: ReadonlyMap<string, string> = new Map([
   ['syncJobs', 'sahipUid'],
 ]);
 
+/** Gece banka / kasa adımının (server/mikro/bankaKasaBakiye) bakiye izi: kaynak (`'mikro-gece'`), zaman, hareket adedi, not.
+ *  `bankAccounts` ve `kasalar` için AYNI dört alan; yalnız sunucu yazar (`SUNUCU_TURETILEN_ALANLAR`, şartname «Mikro bağlantı B» BH20). */
+export const BAKIYE_TURETILEN_ALANLAR = ['bakiyeKaynagi', 'bakiyeZamani', 'bakiyeHareketAdedi', 'bakiyeNotu'] as const;
+
 /**
  * SUNUCUNUN TÜRETTİĞİ ALANLAR (2026-10-17, şartname «e-Fatura çift kesim» D3): koleksiyon → yalnız SUNUCUNUN yazıp sildiği
  * alanlar. `orders.mikroFaturaGonderimi` e-Fatura gönderim işaretidir (lib/faturaGonderimi): çift resmî belge güvenliği ona
@@ -203,9 +207,20 @@ export const SAHIP_SATIR_ALANI: ReadonlyMap<string, string> = new Map([
  *     (server/mikro/faturaGonderimi `FATURA_TALEP_SQL`) bunlarla Mikro'ya ikinci faturayı REDDEDER. Ölçüm 2026-10-19: istemcide bu
  *     alanları YAZAN yer yok (yalnız okuyanlar: MuhasebePage, faturaDurumu, faturaUstBilgisi); sunucunun TEK yazıcısı
  *     `/api/luca/sync/fatura` idi ve LA ile kapandı (uç kayıtlı, 400 döner). İşaretler bundan sonra yalnız eski kayıtlarda kalır.
+ *
+ * 2026-11-05 (şartname «Mikro bağlantı B» B2 § 4.2, BH20):
+ *   • `orders.mfKaynaksiz` / `mfKaynaksizGoruldu` (lib/mfKaynagi): Mikro'da aynı numarada SATIŞ faturası olmayan MF siparişinin
+ *     işareti: ciro ve KDV okuyucuları onu dışlar (`mfKaynaksizMi`). İstemci yazabilseydi bir MF siparişini ciroya sokar ya da
+ *     ciro dışı bırakırdı. Tek yazıcı / silici doğrudan SQL (routes/mikroRoutes `mfIptalEsle`); pgShim yazıcıları değeri korur.
+ *   • `bankAccounts` / `kasalar` bakiye türetme alanları (`BAKIYE_TURETILEN_ALANLAR`): gece banka / kasa adımının izi
+ *     (server/mikro/bankaKasaBakiye). 0 → null geçişi ve elle değer koruması (BH2) bu alanlara dayanır; istemci yazabilseydi
+ *     korumayı aşardı. Elle açılan hesap bu alanları hiç taşımaz. `balance` / `bakiye` LİSTEYE ALINMAZ: elle hesapta istemcinin
+ *     meşru değeridir (Mikro hesabında form kilitler, BH20 bilinçli kabul).
  */
-export const SUNUCU_TURETILEN_ALANLAR: ReadonlyMap<string, readonly string[]> = new Map([
-  ['orders', [FATURA_GONDERIM_ALANI, 'ettn', TAKIP_KODU_ALANI, 'lucaSynced', 'lucaFaturaNo', 'lucaSyncedAt']],
+export const SUNUCU_TURETILEN_ALANLAR: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
+  ['orders', [FATURA_GONDERIM_ALANI, 'ettn', TAKIP_KODU_ALANI, 'lucaSynced', 'lucaFaturaNo', 'lucaSyncedAt', MF_KAYNAKSIZ_ALANI, MF_KAYNAKSIZ_GORULDU_ALANI]],
+  ['bankAccounts', BAKIYE_TURETILEN_ALANLAR],
+  ['kasalar', BAKIYE_TURETILEN_ALANLAR],
 ]);
 
 /**
@@ -280,6 +295,12 @@ export const SERVER_ONLY_COLLECTIONS: readonly string[] = [
   // erişimler dönüşte yeniden açılırdı. `users` belgesine cari alanı KONMAZ (kişi kendi `users` belgesini yazabiliyor).
   'musteriHesaplari',
   'mikroGonderimleri',   // 2026-10-18 Mikro gönderim defteri (src/server/mikro/gonderimDefteri.ts; şartname yeniden-deneme v3) — yalnız sunucu
+  // 2026-11-05 stok kodu göçü (şartname «Mikro bağlantı D» D3 / D4 / DH10): kod eşleri ve geri alma kaydı (tam önce-görüntüler — ürün
+  // adı dâhil). Yalnız sunucu yazar / okur (src/server/mikro/stokKodGocuUygula.ts, stokKodGocuKuru.ts); her belge `companyId` taşır,
+  // okuyan her sorgu kiracı süzgeçlidir. DH10 «TENANT_COLLECTIONS'a da girer» hükmünden SAPMA: bir koleksiyon iki sınıfta olamaz
+  // (collections.test «hiçbir koleksiyon iki sınıfta birden değil»); emsal `mikroGonderimleri`. COLLECTION_PERMISSIONS'a GİRMEZ
+  // (DH10: `isAllowed` Admin'e kuraldan önce `true` döner) — /api/db'ye Yönetici dâhil herkese 403.
+  'stokKodEsleri', 'stokKodGocuKayitlari',
 ];
 
 /**
