@@ -61,3 +61,31 @@ describe.each(['/api/mikro/sema-kesif', '/api/mikro/ebelge-tani'])('%s — jeton
     expect(vi.mocked(mikroSql).mock.calls.length + vi.mocked(mikroPost).mock.calls.length).toBeGreaterThan(0);
   });
 });
+
+// Şartname «Mikro bağlantı A» A7 / AH16 (2026-11-05): `SIPARISLER` satır sayısı AYRI sorguda; tablo okunamazsa yalnız o satır hata.
+describe('GET /api/mikro/sema-kesif · SIPARISLER sayımı ayrı sorguda', () => {
+  const TABLOLAR = ['CARI_HESAP_HAREKETLERI', 'STOK_HAREKETLERI', 'CARI_HESAPLAR', 'STOKLAR', 'EBELGE_EVRAK_HAREKETLERI'];
+  const cagir = () => d.cagir('GET', '/api/mikro/sema-kesif', undefined, undefined, { headers: { 'x-ops-token': JETON } });
+
+  it('sorgu listesinde `siparisSatirSayisi` = yalnız COUNT; `tabloSatirSayilari` UNION\'ı aynı beş tablo, SIPARISLER YOK', async () => {
+    const r = await cagir();
+    expect(r.kod).toBe(200);
+    const sorgular = vi.mocked(mikroSql).mock.calls.map(c => String(c[0]));
+    expect(sorgular).toContain("SELECT 'SIPARISLER' t, COUNT(*) n FROM SIPARISLER");
+    const union = sorgular.find(q => q.includes('UNION ALL') && q.includes("'CARI_HESAP_HAREKETLERI' t"));
+    expect(union, 'tabloSatirSayilari sorgusu').toBeDefined();
+    expect([...String(union).matchAll(/FROM (\w+)/g)].map(m => m[1])).toEqual(TABLOLAR);
+    expect(union).not.toContain('SIPARISLER');
+  });
+
+  it('SIPARISLER okunamazsa YALNIZ o satır `{ hata }`; öteki sayımlar döner', async () => {
+    vi.mocked(mikroSql).mockImplementation((async (sql: string) => (sql.includes('FROM SIPARISLER')
+      ? { rows: [], hata: "Invalid object name 'SIPARISLER'" }
+      : { rows: [{ t: 'X', n: 3 }], hata: null })) as unknown as typeof mikroSql);
+    const r = await cagir();
+    const sonuc = (r.govde as { sonuc: Record<string, unknown> }).sonuc;
+    expect(sonuc.siparisSatirSayisi).toEqual({ hata: "Invalid object name 'SIPARISLER'" });
+    expect(sonuc.tabloSatirSayilari).toEqual([{ t: 'X', n: 3 }]);
+    vi.mocked(mikroSql).mockImplementation((async () => ({ rows: [] as Record<string, unknown>[], hata: null })) as unknown as typeof mikroSql);
+  });
+});

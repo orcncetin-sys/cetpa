@@ -14,7 +14,7 @@ import type { AdminDbLike, DocDaralt } from '../adminDbTypes.js';
 import { stokFiyatOzeti, stokFiyatDetay, faturaToplamlari, birimSapmalari, netCozumleri, mikroTutarsizliklari, dogrulanamayanSatirlar } from '../../lib/stokFiyat.js';
 import { bilinenSayi } from '../../utils/para.js';
 import { cariBakiyeToplamlari } from '../../utils/muhasebe/finansalOranlar.js';
-import { zamanMs } from '../../utils/zaman.js';
+import { sonGuncellemeMs } from '../../utils/zaman.js';
 import { siparisIptalMi } from '../../utils/siparis.js';
 
 /** server.ts'ten ihtiyac duyulan HER SEY - acik liste. */
@@ -172,8 +172,8 @@ export function reportsRoutes(app: Express, C: ReportsRouteCtx): void {
       const docs = await C.loadCompanyDocs('cariBalances', cid);
       if (docs.length === 0) return res.json({ success: true, veriYok: true, alacak: null, cariSayisi: 0, bilinmeyenCari: 0, guncellemeMs: null });
       const t = cariBakiyeToplamlari(docs.map(d => d.bakiye));
-      let guncellemeMs: number | null = null;
-      for (const d of docs) { const ms = zamanMs(d.updatedAt); if (ms !== null && (guncellemeMs === null || ms > guncellemeMs)) guncellemeMs = ms; }
+      // En büyük `updatedAt` TEK yardımcıdan (utils/zaman.sonGuncellemeMs; ekran damgaları da onu kullanır).
+      const guncellemeMs = sonGuncellemeMs(docs.map(d => d.updatedAt));
       res.json({ success: true, veriYok: false, alacak: t.bilinen > 0 ? t.ar : null, cariSayisi: t.bilinen, bilinmeyenCari: t.bilinmeyen, guncellemeMs });
     } catch (e) {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });

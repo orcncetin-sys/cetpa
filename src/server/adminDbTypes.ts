@@ -9,7 +9,7 @@
  * KANITLANDI (tahmin degil): modullerden birine `getAdminDb().collcetion(...)`
  * yazim hatasi enjekte edildi ve `tsc --noEmit` SIFIR hata verdi. Boyle bir
  * hata calisma aninda "is not a function" olarak patlar - ustelik cogu cagri
- * 04:00/08:30 cron'larinin icinde ve oradaki `catch` onu console.warn'a
+ * 03:20/08:30 cron'larinin icinde ve oradaki `catch` onu console.warn'a
  * cevirip sessizlestirir. Bu oturumda ayni sessiz-hata sinifi iki kez daha
  * yasandi (olu useDataSync dinleyicileri -> dosya 2026-08-25'te silindi,
  * initMikroMirror sira hatasi).

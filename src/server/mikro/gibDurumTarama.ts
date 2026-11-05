@@ -7,7 +7,8 @@
  * sayar — yarım tarama "hepsi soruldu" diye sunulmaz. Hata / zaman aşımı alan faturanın önceki durumu KORUNUR (hiçbir şey yazılmaz).
  * En yeni fatura önce: ret süresi içindeki faturalar bütçe dar olsa da sorulmuş olur.
  * DEVRE KESİCİ: art arda 3 çağrı FIRLATIRSA (zaman aşımı / bağlantı) tarama durur — Mikro asılıyken 400 × 15 sn boşa dönmesin ve
- * gece koşusu 04:00 stok cron'unun üstüne binmesin (şartname kapısı 2026-10-02). `IsError` yanıtı (ör. «İlgili e-belge
+ * gece bloğunun ardından gelen adımları (faturadan sipariş, SON adım stok miktarı; 2026-11-05'e kadar ayrı 04:00 cron'u) geciktirmesin
+ * (şartname kapısı 2026-10-02). `IsError` yanıtı (ör. «İlgili e-belge
  * bulunamadı») kesiciyi TETİKLEMEZ: Mikro yanıt veriyor demektir.
  * Aynı ETTN'yi taşıyan iki doküman (aynı numaralı iki başlık) TEK kez sorulur, sonuç ikisine de yazılır.
  */

@@ -48,7 +48,7 @@ export interface BakiyeliHesap { currency?: unknown; balance?: unknown }
 
 /**
  * Her birim için bilinen bakiye toplamı + bilinen/bilinmeyen sayaçları. Ekran: `ekranTutari(b.TRY)` →
- * paraYaz; `b.TRY.bilinmeyen > 0` ise kart altına "N hesap tutarsız" notu. Boş liste gerçek 0.
+ * paraYaz; `b.TRY.bilinmeyen > 0` ise kart altına "N hesabın bakiyesi bilinmiyor" notu (BankaTab). Boş liste gerçek 0.
  */
 export function dovizBakiyeleri(hesaplar: readonly BakiyeliHesap[]): Record<BankaBirimi, Tutar> {
   const birimde = (b: BankaBirimi): Tutar => toplaBilinen(hesaplar.filter(h => h.currency === b), h => h.balance);

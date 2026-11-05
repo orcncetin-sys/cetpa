@@ -153,9 +153,10 @@ const SERI_BOZUK = 'seri biçimi geçersiz — SQL üretilmedi';
  *  `REPLACE` / `NCHAR` SqlVeriOkuV2'de İLK kez bu uçta koşacak; ilk canlı çıktı geçmeden oraya taşınmaz. */
 const ettnVarIfadesi = (uuid: string) => `CASE WHEN REPLACE(REPLACE(ISNULL(CAST(cha.${uuid} AS nvarchar(40)), ''), NCHAR(48), ''), NCHAR(45), '') = '' THEN 0 ELSE 1 END`;
 
-/** Fatura başlığı koşulu (takma ad `cha`) — `mikroRoutes.ts` `FATURA_EVRAK_KOSULU` ile AYNI küme (SATIŞ = evrak tipi 63,
- *  ALIŞ = evrak tipi 0 + cinsi 6). Kolon adları şemadan süzülmüş kümeden gelir; iki metnin eşitliği testte çitlidir. JS yüklemi
- *  (dekont kapısı, dekont penceresi) aynı kümeyi lib/faturaEvrakKosulu.faturaEvrakiMi'de taşır (eşitlik `faturaEvrakKosulu.test.ts`). */
+/** Fatura başlığı koşulu (takma ad `cha`): SATIŞ = evrak tipi 63, ALIŞ = evrak tipi 0 + cinsi 6. TEK SQL kaynağı: `mikroRoutes.ts`
+ *  `FATURA_EVRAK_KOSULU` bu işlevden türetilir (`faturaKosuluIfadesi('cha_evrak_tip', 'cha_cinsi')`; «Mikro bağlantı A» AH10, çit
+ *  `seriOzet.test.ts`). Kolon adları şemadan süzülmüş kümeden gelir. JS yüklemi (dekont kapısı, dekont penceresi, Cari Ekstre) aynı
+ *  kümeyi lib/faturaEvrakKosulu.faturaEvrakiMi'de taşır; bayt eşitliği ve örnek tablosu `lib/faturaEvrakKosulu.test.ts`'te. */
 export const faturaKosuluIfadesi = (evrakTip: string, cinsi: string) => `(cha.${evrakTip} = 63 OR (cha.${evrakTip} = 0 AND cha.${cinsi} = 6))`;
 
 /** (1) TÜM seriler: seri × evrak tipi × cinsi × yön → adet, toplam meblağ, en eski / en yeni tarih, iptal adedi ve toplamı.

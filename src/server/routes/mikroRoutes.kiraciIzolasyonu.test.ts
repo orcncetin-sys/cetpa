@@ -15,8 +15,9 @@
  * vi.mock blokları burada KALMAK ZORUNDA (vitest hoisting) — tarif: `mikroRoutes.testDuzenegi.ts` `mikroMockTarifi`.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import cron from 'node-cron';
 import { duzenekKur, pgliteDocs, type Duzenek } from './mikroRoutes.testDuzenegi';
-import { mikroPost, mikroVergiOranlari } from '../mikroClient.js';
+import { mikroPost, mikroVergiOranlari, v17MetoduKullanilabilir } from '../mikroClient.js';
 
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
 vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS', resolveSentinels: (v: unknown) => v }));
@@ -30,6 +31,11 @@ vi.mock('../mikroClient.js', async (orig) => {
     ...gercek,
     getMikroCreds: vi.fn(async () => ({ firmaKodu: 'F' })),
     mikroPost: vi.fn(),
+    // Gece 03:20 işi (bakiye adımı testi, şartname «Mikro bağlantı A» A3) 13 SQL tanımını da koşturur: SQL kapısı ve şema
+    // keşfi BOŞ döner (gerçekleri modül içi `mikroPost`'u çağırır; Mikro'ya istek GİTMEMELİ). Yoklama sonucu testte verilir.
+    mikroSql: vi.fn(async () => ({ rows: [] as Record<string, unknown>[], hata: null })),
+    mikroKolonlar: vi.fn(async () => [] as string[]),
+    v17MetoduKullanilabilir: vi.fn(async () => false),
     mikroVergiOranlari: vi.fn(async () => new Map<number, number>()),
     vergiOraniCoz: vi.fn(() => null),
   };
@@ -61,6 +67,32 @@ describe('POST /api/mikro/pull/bakiye — yabancı kiracının lead\'ine bakiye 
     const yazilanLeadler = d.koleksiyon('leads').map(y => y.ref.id).sort();
     expect(yazilanLeadler).toEqual(['L-A', 'L-eski']);
     expect(d.koleksiyon('leads').find(y => y.ref.id === 'L-A')?.data).toEqual({ bakiye: 15000 });
+  });
+
+  // Şartname «Mikro bağlantı A» A3 (2026-11-05): aynı gövde (`bakiyeCekCalistir`) artık 03:20 gece işinde de koşar; kiracı
+  // işin çözdüğü `companyId` (burada ortam değeri). Kiracı `continue`'su ortak gövdede: gece yolu da yabancı lead'e YAZMAZ.
+  it('GECE (03:20) yolu da: yabancı kiracının lead\'i atlanır; A ve etiketsiz eski kayıt yazılır; cariBalances hedef kiracıyla', async () => {
+    vi.stubEnv('MIKRO_CRON_SYNC', 'true');
+    vi.stubEnv('MIKRO_CRON_COMPANY_ID', 'A');
+    vi.mocked(cron.schedule).mockClear();
+    const dg = duzenekKur();
+    dg.snapAyarla('leads', {
+      'L-A':    { name: 'Şirin İnşaat',  mikroCariKod: '120.01.001', companyId: 'A' },
+      'L-B':    { name: 'Başka Firma',   mikroCariKod: '120.01.001', companyId: 'B' },
+      'L-eski': { name: 'Çelik Yapı',    mikroCariKod: '120.01.002' },
+    });
+    yanitla({ SqlVeriOkuV2: { SQLResult1: [{ cha_kod: '120.01.001', bakiye: 15000 }, { cha_kod: '120.01.002', bakiye: -4200 }] } });
+    vi.mocked(v17MetoduKullanilabilir).mockResolvedValueOnce(false);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const gece = vi.mocked(cron.schedule).mock.calls.find(c => c[0] === '20 3 * * *');
+    if (!gece) throw new Error('03:20 işi kayıtlı değil');
+    await (gece[1] as () => Promise<void>)();
+    vi.unstubAllEnvs();
+    expect(dg.koleksiyon('leads').map(y => [y.ref.id, y.data?.bakiye]).sort()).toEqual([['L-A', 15000], ['L-eski', -4200]]);
+    expect(dg.koleksiyon('cariBalances').map(y => [y.ref.id, y.data?.companyId])).toEqual([['120.01.001', 'A'], ['120.01.002', 'A']]);
+    expect(dg.syncLog.mock.calls.filter(c => c[1] === 'cariBalances').map(c => [c[2], c[9]]))
+      .toEqual([['2 cari bakiyesi güncellendi (Mikro\'dan 2 satır, 0 okunamayan)', { denetimKiracisi: 'A' }]]);
   });
 });
 

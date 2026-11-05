@@ -232,15 +232,31 @@ describe('03:20 gece işi (gerçek kayıt, elle koşturuldu) — faturadan-sipar
     expect(gib.every(r => r.companyId === 'system')).toBe(true);
   });
 
-  it('G4 — `acilis-tani` kod değişikliği OLMADAN sayar: satır `faturadan-siparis` / sistem; gün özetinde sistem satırı 15 (14 → 15)', async () => {
+  // «Mikro bağlantı A» (2026-11-05): gece işine iki adım eklendi: cari bakiye (Mikro boş döner → «satır yok», başarılı) ve SON adım
+  // stok miktarı (sürüm 16 + Mikro kartı yok → «V17 yoklaması geçmedi», başarısız). 15 → 17.
+  it('G4 — `acilis-tani` kod değişikliği OLMADAN sayar: satır `faturadan-siparis` / sistem; gün özetinde sistem satırı 17 (14 → 15 → 17)', async () => {
     const sistemSatiri = (await pg().query("SELECT count(*)::int AS n FROM docs WHERE coll = 'syncLog' AND data->>'userId' = 'system'")).rows[0].n;
-    expect(sistemSatiri).toBe(15);
+    expect(sistemSatiri).toBe(17);
     const r = await istek('GET', '/api/ops/acilis-tani', { 'X-Ops-Token': OPS_JETONU });
     expect(r.s, r.metin).toBe(200);
     const senkron = r.j.senkron as { satirlar: Array<Record<string, unknown>>; gunler: Array<{ basarili: number; hatali: number }> };
     // `⚠` (bekletme notu) açılış tanısında satırı UYARILI gösterir; satır yine başarılı (§ 9.A A6).
     expect(senkron.satirlar.filter(x => x.islem === 'faturadan-siparis')).toEqual([expect.objectContaining({ islem: 'faturadan-siparis', hedef: 'orders', sistem: true, basarili: true, uyari: true })]);
-    expect(senkron.gunler.reduce((t, g) => t + g.basarili + g.hatali, 0)).toBe(15);
+    expect(senkron.gunler.reduce((t, g) => t + g.basarili + g.hatali, 0)).toBe(17);
+  });
+
+  // «Mikro bağlantı A» A1.5 / A3 / AH12 (2026-11-05): yeni iki gece adımının denetim satırı da gerçek zincirde TEK ve HEDEF KİRACIDA.
+  it("yeni gece adımları (cari bakiye, stok miktarı): syncLog satırı TEK; denetim satırı TEK ve `companyId` = HEDEF KİRACI ('system' DEĞİL)", async () => {
+    const stok = await satirlar('syncLog', 'operation', 'GenelAmacliMaliyetListesiV2');
+    expect(stok.map(x => [x.entityType, x.success, x.error, x.userId])).toEqual([['inventory', false, 'V17 yoklaması geçmedi; stok miktarı çekilmedi', 'system']]);
+    const stokDenetim = await satirlar('auditLog', 'action', 'GenelAmacliMaliyetListesiV2');
+    expect(stokDenetim.map(x => [x.companyId, x.userId])).toEqual([[KIRACI, 'system']]);
+    const bakiye = (await satirlar('syncLog', 'operation', 'SQL:CARI_HESAP_HAREKETLERI')).filter(x => x.entityType === 'cariBalances');
+    expect(bakiye.map(x => [x.entityId, x.success, x.userId])).toEqual([['satır yok; bakiye yazılmadı', true, 'system']]);
+    const bakiyeDenetim = (await satirlar('auditLog', 'action', 'SQL:CARI_HESAP_HAREKETLERI')).filter(x => String(x.details).startsWith('cariBalances/'));
+    expect(bakiyeDenetim.map(x => x.companyId)).toEqual([KIRACI]);
+    expect(await satirlar('auditLog', 'action', 'Mikro Bakiye Çekme')).toEqual([]);
+    expect(await satirlar('auditLog', 'action', 'Mikro Stok Miktarları')).toEqual([]);
   });
 
   it('panel ucu DEĞİŞMEDİ: aynı işlevi koşar, denetim İKİ satır (uç + writeSyncLog içi) ve çağıranın kiracısıyla; ikinci koşu kopya üretmez', async () => {

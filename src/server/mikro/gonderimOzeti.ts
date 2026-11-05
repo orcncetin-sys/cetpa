@@ -22,7 +22,9 @@ export function kanonikJson(v: unknown): string {
   return `{${anahtarlar.map(k => `${JSON.stringify(k)}:${kanonikJson(o[k])}`).join(',')}}`;
 }
 
-const sha256 = (metin: string): string => createHash('sha256').update(metin, 'utf8').digest('hex');
+/** UTF-8 metnin SHA-256 özeti (onaltılık). Dışa açık: `src/server/mikro/**` içindeki öteki karma da (stok kodu göçünün plan imzası,
+ *  şartname «Mikro bağlantı D» DH16) bu işlevi çağırır — K22 çiti `createHash`'i yalnız bu dosyada tutar. */
+export const sha256 = (metin: string): string => createHash('sha256').update(metin, 'utf8').digest('hex');
 
 /**
  * Gönderimin İÇERİK özeti: `sha256(kanonik { method, payload })`. İstek gövdesinin öteki alanları (`istemciIsNo`, `onayliTekrar`,

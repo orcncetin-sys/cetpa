@@ -87,6 +87,8 @@ export function useSekmeVerileri({
   user, activeTab, muhasebeTab, lojistikTab, purchasingSubTab, p625BudgetYear,
 }: SekmeVeriGirdi) {
   const [dashVergiDeadlines, setDashVergiDeadlines] = useState<{ id: string; vergiTuru: string; sonTarih: string; durum: string }[]>([]); // Phase 543
+  // `balance` bilinmiyorsa NaN (bankaHesabiOku; Mikro'nun açtığı yeni hesap `null` yazar, şartname «Mikro bağlantı A» A5): `number` tipi
+  // NaN'ı kapsar, Bilanço `dovizTopla` onu bilinmeyen sayar. 0 DEĞİL.
   const [p547BankAccounts, setP547BankAccounts] = useState<Array<{ id: string; bankName: string; accountType: string; balance: number; currency: string }>>([]);
   const [p547FixedAssets, setP547FixedAssets]   = useState<Array<{ id: string; name: string; cost: number; depreciation: number }>>([]);
   const [p548Masraflar, setP548Masraflar] = useState<Array<{

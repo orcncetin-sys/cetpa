@@ -9,6 +9,8 @@ import {
 } from "./src/server/pgShim.js";
 import { trackingRoutes } from "./src/server/routes/trackingRoutes.js";
 import { opsRoutes } from "./src/server/routes/opsRoutes.js";
+// Stok kodu göçü kuru koşusu (şartname «Mikro bağlantı D» D1): kendi gövde ayrıştırıcısı genel ayrıştırıcıdan ÖNCE bağlanır.
+import { STOK_KOD_GOCU_YOLLARI, stokKodGocuGovdeAyristiricisi, stokKodGocuRoutes } from "./src/server/routes/stokKodGocuRoutes.js";
 import { trafikRoutes } from './src/server/routes/trafikRoutes.js';
 import { surumRoutes } from './src/server/routes/surumRoutes.js';
 import { SURUM_DOSYASI } from './src/lib/surumKimligi.js';
@@ -2874,6 +2876,9 @@ async function startServer() {
   // siler). Bu yol için sınır ayrıca yükseltilir; gövdesi ayrıştırılmış isteği aşağıdaki genel ayrıştırıcı yeniden okumaz.
   // Sınırlayıcı (`webhookLimiter`, yukarıda bağlı) gövde ayrıştırıcıdan ÖNCE: sınırı aşan istek 5 MB'lık gövdeyi hiç okutmasın.
   app.use('/api/shopify/webhook', express.json({ limit: '5mb', verify: hamGovdeYakala }));
+  // Stok kodu göçü (şartname «Mikro bağlantı D» D1 / DH16): 2.000 satırlık onay listesi 100 KB genel sınırı aşabilir; bozuk JSON
+  // 400 (genel yakalayıcı 500 verirdi). Sınırlayıcı yukarıda bağlı; rotalar aşağıda (stokKodGocuRoutes) ayrıştırıcıdan SONRA.
+  app.use(STOK_KOD_GOCU_YOLLARI, ...stokKodGocuGovdeAyristiricisi());
   app.use(express.json({ verify: hamGovdeYakala }));
 
   // ... (keep existing routes)
@@ -4612,6 +4617,11 @@ async function startServer() {
   opsRoutes(app, {
     getPgPool: () => pgPool,   // bakım kilidi / yazıcı kaydı / ops yayını (bakimKilidi.ts, opsRoutes)
     getAdminDb: adminDbZorunlu, requireAuth, requireMfaVerified, requireSuperAdmin, serverTenantId,
+  });
+
+  // Stok kodu göçü KURU KOŞUSU (şartname «Mikro bağlantı D» D1; SALT OKUMA): ops jetonlu + Yönetici ucu, tek gövde.
+  stokKodGocuRoutes(app, {
+    getPgPool: () => pgPool, requireAuth, requireMfaVerified, getUserRole, isSuperAdmin, reqCompanyId, mikroIdCozucuIds,
   });
 
   // Cerezsiz trafik sayaci - /api/hit (kimliksiz, kendi hiz limitiyle) +

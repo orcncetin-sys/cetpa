@@ -55,6 +55,14 @@ function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
+/** syncLog `entityId` özetinin ⚠ ile başlayan parçaları (`' · '` ayırıcısıyla ve özetin başındaki `' — '` ayırıcısıyla; gece
+ *  «faturadan sipariş» notu: `… (442 satış faturası) — ⚠ …` ve `Satış faturası bulunamadı — … — ⚠ …`). `' — '` yalnız ardından ⚠
+ *  geliyorsa ayırır (ileri bakış): parçanın İÇİNDEKİ « — durum değiştirilmedi» / « — Siparişler'de…» bölünmez. Tam metin döner,
+ *  kesilmez (A8.1). ⚠ taşımayan parça dönmez (inceleme MBA2 #0, 2026-11-05). */
+export function uyariParcalari(ozet: string): string[] {
+  return ozet.split(/ · | — (?=⚠)/).map(p => p.trim()).filter(p => p.startsWith('⚠'));
+}
+
 function OpBadge({ op }: { op: string }) {
   const colors: Record<string, string> = {
     StokKaydetV2:    'bg-blue-100 text-blue-700',
@@ -1001,9 +1009,14 @@ export default function MikroSyncPanel({ currentLanguage = 'tr' }: MikroSyncPane
                       </td>
                       <td className="px-4 py-2.5 text-gray-600">
                         <span className="font-medium">{entry.entityType}</span>
-                        {entry.entityId !== 'bulk' && entry.entityId !== 'unknown' && (
+                        {/* ⚠ taşıyan özet (gece «faturadan sipariş» notu) KESİLMEZ: ⚠ ile başlayan parçalar ayrı satırlarda tam görünür
+                            (parçalar yalnız sayı ve sipariş adı taşır; şartname «Mikro bağlantı A» A8.1). ⚠ yoksa eski 8 karakter. */}
+                        {entry.entityId !== 'bulk' && entry.entityId !== 'unknown' && !entry.entityId.includes('⚠') && (
                           <span className="text-gray-300 ml-1">/{entry.entityId.substring(0, 8)}</span>
                         )}
+                        {entry.entityId.includes('⚠') && uyariParcalari(entry.entityId).map((p, i) => (
+                          <span key={i} data-sync-uyari className="block mt-0.5 text-amber-700 break-words">{p}</span>
+                        ))}
                         {entry.entityId === 'bulk' && (
                           <span className="ml-1 text-[10px] text-teal-500 font-bold">BULK</span>
                         )}

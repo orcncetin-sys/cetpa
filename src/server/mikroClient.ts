@@ -82,6 +82,14 @@ export async function v17MetoduKullanilabilir(
   return ok;
 }
 
+/** Son yoklamanın SALT OKUNUR görüntüsü (açılış tanısı, şartname «Mikro bağlantı A» A1.7 / AH3, 2026-11-05). Aynı
+ *  `v17Yoklama` haritası, kopya önbellek yok. Harita süreç belleğindedir: yeniden başlatmadan sonra ilk yoklamaya kadar
+ *  `null` («yoklanmadı»; «geçmedi» DEĞİL). Süresi dolmuş girdi de döner (zamanı `ts`'de; okuyan tazeliğini kendi değerlendirir). */
+export function v17YoklamaDurumu(metot: string): { ok: boolean; ts: number } | null {
+  const girdi = v17Yoklama.get(metot);
+  return girdi ? { ok: girdi.ok, ts: girdi.ts } : null;
+}
+
 export const MIKRO_V17_YOK = new Set([
   'BankaListesiV2', 'BarkodListesiV2', 'CariHareketKaydetV2', 'FaturaListesiV2',
   'KasaListesiV2', 'KdvOzetV2', 'MizanV2', 'OdemePlanListesiV2',

@@ -14,6 +14,8 @@ import OnlineSiparisBilgisi, { OnlineRozeti } from '../components/siparis/Online
 import FaturaSonucuSecenekleri, { type FaturaSonucEki } from '../components/siparis/FaturaSonucuSecenekleri';
 import FaturaEttnEkle from '../components/siparis/FaturaEttnEkle';
 import { magazaSiparisiMi } from '../utils/siparisler/magazaSiparisi';
+import { mikroSiparisFisiMi, mikroBosDurumu } from '../utils/siparisler/mikroSiparisFisi';
+import { bakiyeDamgasi } from '../utils/muhasebe/bakiyeDamgasi';
 import { kalemleriMikrodanOkunacak, mikroFaturaKalemleriGetir, mikroKalemTablosu, kayitliKalemTablosu, kayitliMikroKalemleri } from '../services/mikroFaturaKalemleri';
 import { kalemTutari, kalemBirimFiyati, kdvDahilKalemVar } from '../utils/pano/stokSevkiyat';
 import { authFetch } from '../services/authFetch';
@@ -445,11 +447,11 @@ export default function OrdersPage({
   // tutarı bilinmiyorsa `totalPrice` alanını HİÇ YAZMAZ (`siparisTutari` NaN döner, `toplaBilinen`
   // kaydı toplama katmaz ama SAYAR).
   //
-  // `tip === 0` süzgeci ve ekstra alanlar (belge no / açıklama / boş kalem listesi) bu sayfaya
-  // özgü olduğu için burada kaldı; modülün kendi `panoMikroSiparisleri` süzgeci `tip`i bilinmeyen
+  // `tip === 0` süzgeci TEK kural: `utils/siparisler/mikroSiparisFisi` (şartname «Mikro bağlantı A» A7 / AH9). Ekstra alanlar
+  // (belge no / açıklama / boş kalem listesi) bu sayfaya özgü olduğu için burada kaldı; modülün kendi `panoMikroSiparisleri` süzgeci `tip`i bilinmeyen
   // kaydı da alıyor — davranışı değiştirmemek için parite korundu.
   // NOT: `status: 'Pending'` sabiti de sahte kesinlik (Mikro sipariş durumu bilinmiyor) — Açık İş.
-  const mappedMikroSiparisler = mikroSiparisler.filter(ms => ms.tip === 0).map(ms => ({
+  const mappedMikroSiparisler = mikroSiparisler.filter(mikroSiparisFisiMi).map(ms => ({
     ...mikroSiparisindenPanoSiparisi(ms),
     mikroBelgeNo: ms.belgeNo,
     notes: ms.satirAciklamasi,
@@ -940,6 +942,8 @@ export default function OrdersPage({
                 // Süzgeç veriden türetilir, sekmeden değil: hepsi ÖDENMİŞ olduğu için 0 çıkan gerçek
                 // "alacağın yok" durumu (izlenen kayıt VAR) eskisi gibi yeşil ₺0 kalır.
                 const izlenenVar = activeOrders.some(odemeTakipli);
+                const alacakDamgasi = mikroAlacak !== null && mikroAlacak !== 'yok'
+                  ? bakiyeDamgasi(mikroAlacak.guncellemeMs, Date.now(), currentLanguage === 'tr' ? 'tr' : 'en') : null;
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
@@ -964,20 +968,22 @@ export default function OrdersPage({
                           ? (mikroAlacak !== null && mikroAlacak !== 'yok' && mikroAlacak.alacak !== null ? 'text-gray-900' : 'text-gray-400')
                           : !Number.isFinite(unpaidTotal) ? 'text-gray-400' : unpaidTotal > 0 ? 'text-red-600' : 'text-emerald-600',
                         bg: izlenenVar && Number.isFinite(unpaidTotal) && unpaidTotal > 0 ? 'bg-red-50' : 'bg-white',
+                        // «son bakiye çekimi: {tarih}» TEK metinden (utils/muhasebe/bakiyeDamgasi, A3.4); 48 saatten eskiyse sarı.
                         sub: !izlenenVar
                           ? (mikroAlacak !== null && mikroAlacak !== 'yok'
                             ? (currentLanguage === 'tr'
-                              ? `Mikro cari bakiyeleri · ${mikroAlacak.cariSayisi} cari${mikroAlacak.bilinmeyenCari > 0 ? ` · ${mikroAlacak.bilinmeyenCari} cari okunamadı` : ''}${mikroAlacak.guncellemeMs !== null ? ` · ${tarihYaz(mikroAlacak.guncellemeMs)} güncel` : ''}`
-                              : `Mikro account balances · ${mikroAlacak.cariSayisi} accounts${mikroAlacak.bilinmeyenCari > 0 ? ` · ${mikroAlacak.bilinmeyenCari} unreadable` : ''}${mikroAlacak.guncellemeMs !== null ? ` · as of ${tarihYaz(mikroAlacak.guncellemeMs)}` : ''}`)
+                              ? `Mikro cari bakiyeleri · ${mikroAlacak.cariSayisi} cari${mikroAlacak.bilinmeyenCari > 0 ? ` · ${mikroAlacak.bilinmeyenCari} cari okunamadı` : ''}${alacakDamgasi ? ` · ${alacakDamgasi.metin}` : ''}`
+                              : `Mikro account balances · ${mikroAlacak.cariSayisi} accounts${mikroAlacak.bilinmeyenCari > 0 ? ` · ${mikroAlacak.bilinmeyenCari} unreadable` : ''}${alacakDamgasi ? ` · ${alacakDamgasi.metin}` : ''}`)
                             : (op(currentLanguage).mikro_cari_hesapta_izleniyor))
                           : vadeOzeti.adet > 0
                             ? `${vadeOzeti.adet} ${oc(currentLanguage).siparis}${vadeOzeti.toplam.bilinmeyen > 0 ? (currentLanguage === 'tr' ? ` · ${vadeOzeti.toplam.bilinmeyen} kayıt tutarsız` : ` · ${vadeOzeti.toplam.bilinmeyen} without amount`) : ''}`
-                            : null },
+                            : null,
+                        subSinif: !izlenenVar && alacakDamgasi?.bayat ? 'text-amber-600 font-semibold' : undefined },
                     ].map((k, i) => (
                       <div key={i} className={cn("rounded-xl border border-gray-100 shadow-sm px-4 py-3", k.bg)}>
                         <p className={cn("text-xl font-black", k.color)}>{k.value}</p>
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">{k.label}</p>
-                        {k.sub && <p className="text-[9px] text-gray-400 mt-0.5">{k.sub}</p>}
+                        {k.sub && <p className={cn("text-[9px] mt-0.5", k.subSinif ?? 'text-gray-400')}>{k.sub}</p>}
                       </div>
                     ))}
                   </div>
@@ -1485,8 +1491,11 @@ export default function OrdersPage({
                           return true;
                         });
                         const sorted = siparisSirala(filtered, orderSort.key, orderSort.dir);
-                        return sorted.length === 0 ? (
-                          <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500">{currentT.no_orders_found}</td></tr>
+                        // Boş durum metni TEK yardımcıdan (utils/siparisler/mikroSiparisFisi, A7 / AH9): Mikro sekmesinde hiç sipariş
+                        // fişi yoksa sekmeye özel açıklama; süzgeç / arama boşalttıysa ya da başka sekmede eski genel metin.
+                        const bosDurum = mikroBosDurumu(orderSourceTab, mikroSiparisler, sorted.length);
+                        return bosDurum !== null ? (
+                          <tr><td colSpan={7} data-bos-durum={bosDurum} className="px-6 py-12 text-center text-gray-500">{bosDurum === 'mikroFisYok' ? op(currentLanguage).mikro_dan_siparis_fisi_gelmedi : currentT.no_orders_found}</td></tr>
                         ) : sorted.map(order => (
                           <React.Fragment key={order.id}>
                           <tr

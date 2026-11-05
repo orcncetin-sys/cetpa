@@ -92,6 +92,20 @@ function sayi(x: unknown): number | null {
 
 // ── 1. Stok kartı → inventory ────────────────────────────────────────────────
 
+/**
+ * Mikro'dan gelen stok kartının `source` değerleri: TEK KAYNAK (şartname «Mikro bağlantı A» A2, 2026-11-05).
+ * `mikro_import` elle «Stok kartlarını İçeri Al» (aşağıdaki `stokEsle`), `mikro_cron` saatlik senkronun AÇTIĞI kart
+ * (crons.ts; güncellemede `source`'a dokunmaz). Stok miktarı işi ve V17 yoklaması eskiden yalnız `== 'mikro_import'` okuyordu:
+ * saatlik senkronun açtığı kart (canlı 3) hiç miktar almıyordu. Kart anlamı değişmesin diye `mikro_cron` damgası KALIR
+ * (`lib/leadBirlestir.ts` lead tarafında bu ayrımı kullanır); okuyan bu yüklemle iki kaynağı da kabul eder.
+ */
+export const MIKRO_STOK_KAYNAKLARI = ['mikro_import', 'mikro_cron'] as const;
+const MIKRO_STOK_KAYNAK_KUMESI: ReadonlySet<unknown> = new Set<unknown>(MIKRO_STOK_KAYNAKLARI);
+/** `inventory.source` Mikro kaynaklı bir kartı mı gösteriyor? Bilinmeyen / eksik değer → false (elle açılmış sayılır). */
+export function mikroStokKartiMi(source: unknown): boolean {
+  return MIKRO_STOK_KAYNAK_KUMESI.has(source);
+}
+
 export interface StokAlanlari {
   sku: string;
   name?: string;
@@ -129,7 +143,7 @@ export function stokEsle(
     mikroStoKod: sku,
     mikroSynced: true,
     // Güncellemede de yazılır (parite): `/api/mikro/import/stok-miktar` ürünleri
-    // `where('source','==','mikro_import')` ile seçiyor — elle açılmış ama Mikro'da
+    // `mikroStokKartiMi(source)` ile seçiyor (yukarıda; `mikro_import` | `mikro_cron`) — elle açılmış ama Mikro'da
     // eşleşen ürün damgalanmazsa miktarı hiç güncellenmez.
     source: 'mikro_import',
   };

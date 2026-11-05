@@ -6,7 +6,10 @@ import { opsRoutes, type OpsRouteCtx } from './opsRoutes';
 vi.mock('../pgShim.js', () => ({ broadcastDocChange: vi.fn() }));
 vi.mock('../opsWatchdog.js', () => ({ runOpsWatchdog: vi.fn(), diskNobetcisi: vi.fn() }));
 const surum = vi.hoisted(() => ({ deger: 16 }));
-vi.mock('../mikroClient.js', () => ({ MIKRO_API_BASE: 'x', get MIKRO_JUMP_SURUM() { return surum.deger; }, MIKRO_LOCAL_MODE: false }));
+// Gece stok miktarı adımının son V17 yoklaması (şartname «Mikro bağlantı A» AH3): null = yeniden başlatmadan beri yoklanmadı.
+const yoklama = vi.hoisted(() => ({ durum: null as { ok: boolean; ts: number } | null }));
+vi.mock('../mikroClient.js', () => ({ MIKRO_API_BASE: 'x', get MIKRO_JUMP_SURUM() { return surum.deger; }, MIKRO_LOCAL_MODE: false,
+  v17YoklamaDurumu: (metot: string) => (metot === 'GenelAmacliMaliyetListesiV2' ? yoklama.durum : null) }));
 
 type Handler = (req: unknown, res: unknown) => Promise<unknown> | unknown;
 function sahteApp() {
@@ -84,7 +87,7 @@ describe('GET /api/ops/acilis-tani', () => {
         { ad: 'mikro_stoklar', satir: 2391, sonGuncelleme: '2026-10-07T21:00:05.000Z', damga: 'herKosu' },
         { ad: 'mikro_tablo_eslesme', satir: 16, sonGuncelleme: null, damga: null },
       ],
-      zamanlanmis: { mikroCronKayitli: true, mikroSurum: 16, geceStokMiktarIsiCalisir: false },
+      zamanlanmis: { mikroCronKayitli: true, mikroSurum: 16, geceStokMiktarIsiCalisir: null, geceStokMiktarSonYoklama: null },
       senkron: {
         gunler: [{ gun: '2026-10-07', basarili: 1, hatali: 1, ilk: '03:21', son: '03:23' }],
         gunlerKesildi: false, kesildi: false,
@@ -128,14 +131,27 @@ describe('GET /api/ops/acilis-tani', () => {
     expect(sorgular.find(x => x.includes("interval '5 days'"))).toContain('LIMIT 401');
   });
 
-  it('gece stok işi: cron kayıtlı DEĞİLSE sürüm 17 olsa da çalışmaz; ikisi birlikteyse çalışır; sürüm 16 ise çalışmaz', async () => {
+  // Şartname «Mikro bağlantı A» A1.7 / AH3 (2026-11-05): gece stok adımı artık 03:20 bloğunun son adımıdır ve sürüm 16'da metodu
+  // CANLI yoklar. Alan üç durumlu: yoklama süreç belleğinde olduğu için yeniden başlatmadan sonra «bilinmiyor» (null), «koşmaz» değil.
+  it('gece stok işi: cron kapalı → false; sürüm 17 → true; sürüm 16 → son yoklamanın sonucu, yoklama yoksa NULL (false DEĞİL)', async () => {
     const z = async () => ((await calistir('gizli-abc')).govde as { zamanlanmis: unknown }).zamanlanmis;
-    surum.deger = 17; process.env.MIKRO_CRON_SYNC = 'false';
-    expect(await z()).toEqual({ mikroCronKayitli: false, mikroSurum: 17, geceStokMiktarIsiCalisir: false });
+    const ZAMAN = Date.UTC(2026, 10, 5, 0, 25, 0);
+    surum.deger = 17; process.env.MIKRO_CRON_SYNC = 'false'; yoklama.durum = { ok: true, ts: ZAMAN };
+    expect(await z()).toMatchObject({ mikroCronKayitli: false, mikroSurum: 17, geceStokMiktarIsiCalisir: false });
     process.env.MIKRO_CRON_SYNC = 'true';
-    expect(await z()).toEqual({ mikroCronKayitli: true, mikroSurum: 17, geceStokMiktarIsiCalisir: true });
-    surum.deger = 16;
-    expect(await z()).toEqual({ mikroCronKayitli: true, mikroSurum: 16, geceStokMiktarIsiCalisir: false });
+    expect(await z()).toMatchObject({ mikroCronKayitli: true, mikroSurum: 17, geceStokMiktarIsiCalisir: true });
+    surum.deger = 16; yoklama.durum = null;
+    expect(await z()).toEqual({ mikroCronKayitli: true, mikroSurum: 16, geceStokMiktarIsiCalisir: null, geceStokMiktarSonYoklama: null });
+    yoklama.durum = { ok: true, ts: ZAMAN };
+    expect(await z()).toEqual({ mikroCronKayitli: true, mikroSurum: 16, geceStokMiktarIsiCalisir: true,
+      geceStokMiktarSonYoklama: { ok: true, zaman: '2026-11-05T00:25:00.000Z' } });
+    yoklama.durum = { ok: false, ts: ZAMAN };
+    expect(await z()).toEqual({ mikroCronKayitli: true, mikroSurum: 16, geceStokMiktarIsiCalisir: false,
+      geceStokMiktarSonYoklama: { ok: false, zaman: '2026-11-05T00:25:00.000Z' } });
+    // Değer taşımaz: yoklama nesnesinde yalnız bool + ISO zaman (SKU, hata metni YOK).
+    const sonYoklama = ((await z()) as { geceStokMiktarSonYoklama: Record<string, unknown> }).geceStokMiktarSonYoklama;
+    expect(Object.keys(sonYoklama).sort()).toEqual(['ok', 'zaman']);
+    yoklama.durum = null;
   });
 
   it('ayna damgasının anlamı tabloya göre: her koşuda damgalanan üç tablo "herKosu", diğer damgalı tablolar "yalnizYeniSatir"', async () => {

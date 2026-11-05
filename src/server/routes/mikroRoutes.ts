@@ -66,12 +66,12 @@ import {
   type YevmiyeGovde, type TahsilatGovde, type CariHareketGovde,
 } from '../mikro/govdeMuhasebe.js';
 import { isimAnahtari, firmaAnahtari } from '../../lib/isimAnahtari.js';
-import { yaziciyiIstegeBagla, yaziciOlarakCalistir } from '../bakimKilidi.js';
+import { aktifYazicilar, yaziciyiIstegeBagla, yaziciOlarakCalistir } from '../bakimKilidi.js';
 import { EXTERNAL_ROLES, type AppRole } from '../../lib/rbac.js';
 import { rolluKiracilar } from '../kiraciOrtami.js';
 import { mikroIsAdi } from '../../lib/mikroIsAdi.js';
 import { MIKRO_EVRAK_KAPILARI, evrakKapiKosullari, evrakYontemi } from '../../lib/mikroEvrakKapilari.js';
-import { arkaPlanIsiBaslat, arkaPlanOnKontrol, arkaPlanYaziciAdi, arkaPlanIsiKosan, bakimKilidiMesaji, type ArkaPlanBagimlilik, type BaslatSonucu } from '../mikro/arkaPlanIsi.js';
+import { arkaPlanIsiBaslat, arkaPlanIsiBekle, arkaPlanOnKontrol, arkaPlanYaziciAdi, arkaPlanIsiKosan, bakimKilidiMesaji, type Aktor, type ArkaPlanBagimlilik, type ArkaPlanIsi, type BaslatSonucu } from '../mikro/arkaPlanIsi.js';
 import { araligiTopla, ALT_STOK, ALT_CARI, type SayfaSayaclari } from '../mikro/adaptifSayfalama.js';
 import { bilinenSayi } from '../../utils/para.js';
 import { birimSapmasiRaporu } from '../mikro/birimSapmasi.js';
@@ -87,7 +87,7 @@ import { gibDurumCoz, gibRedMi, gibReddedildi, faturaEttn } from '../../lib/gibD
 import { durumDenemesiOzeti, ettnGecerli, hucreleriKes, type DurumDenemesi } from '../mikro/ebelgeDurumTani.js';
 import {
   CETPA_FATURA_SORGUSU, CETPA_SIPARIS_SORGUSU, SATIR_BAGI, chaPlani, sthPlani, seriGecerli,
-  serilerSorgusu, eBelgeSorgusu, sonBasliklarSorgusu, satirOzetiSorgusu,
+  serilerSorgusu, eBelgeSorgusu, sonBasliklarSorgusu, satirOzetiSorgusu, faturaKosuluIfadesi,
   serilerBicimle, eBelgeBicimle, sonBasliklarBicimle, cetpaFaturaOzeti, cetpaSiparisOzeti,
   sthEkPlani, chaEkPlani, vergiDeseniSorgusu, vergiDeseniBicimle, qSatirDeseniSorgusu, qSatirDeseniBicimle,
   qBaslikDeseniSorgusu, qBaslikDeseniBicimle, vergiKolonAdlari, vergiTablosuOzeti, kuyrukEttnSorgusu, kuyrukEttnBicimle,
@@ -125,6 +125,8 @@ import {
   // yüzden süzgeçsiz tarama HER stok import'unda "kolon adı/şema kontrol edin"
   // yanlış alarmı üretiyordu. Her çağrı kendi kritik kümesini verir.
   STOK_KRITIK, FIYAT_KRITIK, STOK_MIKTAR_KRITIK, DEPO_KRITIK,
+  // Mikro kaynaklı stok kartı (`mikro_import` | `mikro_cron`) TEK kural (şartname «Mikro bağlantı A» A2).
+  mikroStokKartiMi,
 } from '../mikro/eslemeStok.js';
 // Fatura eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeFatura.ts
 import {
@@ -133,6 +135,7 @@ import {
   kalemleriBirimle, okumaArizasiUyarisi, OKUMA_ARIZASI_ESIK, type SiparisSatiri,
 } from '../mikro/eslemeFatura.js';
 import { eBelgeNormalize, eBelgeleriNormalize, cariHareketYonOzeti } from '../mikro/eBelge.js';
+import { ilkBes, kaynaksizNotu } from '../mikro/faturadanSiparisNotu.js';
 import { belgeNoMetni, yanitAnahtarYollari } from '../mikro/belgeNo.js';
 import { iskontoTutarsizlikRaporu, satirKolonPlani } from '../mikro/iskontoTutarsizlik.js';
 // KDV özeti / mizan eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/raporKdvMizan.ts
@@ -306,7 +309,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           cronSync: {
             enabled: process.env.MIKRO_CRON_SYNC === 'true',
             program: process.env.MIKRO_CRON_SYNC === 'true'
-              ? ['saatlik: stok+cari kartları', '03:20 SQL listeleri (90 gün)', '04:00 stok miktar/maliyet']
+              ? ['saatlik: stok+cari kartları', '03:20 SQL listeleri (90 gün)', '03:20 son adım: stok miktar/maliyet']
               : [],
           },
         });
@@ -1359,7 +1362,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
      *  cari-hareket + fatura-listesi 'tam' (ÖLÇÜLDÜ: 1.594 satır); SIPARISLER/STOK_HAREKETLERI ÖLÇÜLMEDİ →
      *  90 gün KALIR, `SELECT COUNT(*)` ölçülünce 'tam'a alınır. */
     gecePenceresi?: 'tam' | { gun: number };
-    /** TERS süpürge (2026-09-25 `mikroIptalFaturalar`; 2026-10-02 `mikroFaturalar`): koşu başarılıysa, sayfa tavanına ÇARPMADIYSA,
+    /** TERS süpürge (2026-09-25 `mikroIptalFaturalar`; 2026-10-02 `mikroFaturalar`; 2026-11-05 `mikroCariHareketler`): koşu başarılıysa, sayfa tavanına ÇARPMADIYSA,
      *  üst sınır YOKSA, tüm satırlar GUID taşıyorsa VE Mikro'daki satır SAYISI okunanla tutuyorsa — bu koşunun tarih penceresine
      *  düşen ama sonuçta OLMAYAN kiracı dokümanı silinir (Mikro'da kayıt silindi / koşuldan çıktı / iptali geri alındı).
      *  NEDEN mikroFaturalar'da da: Mikro kayıt SİLEBİLİYOR (satış 325, ölçüm 2026-10-02 — Cetpa'da 709, Mikro'da 708 fatura);
@@ -1710,8 +1713,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    */
   const SQL_IMPORT_TANIMLARI: SqlImportOpts[] = [];
   /** Fatura başlığı koşulu (takma ad `cha`): SATIŞ = cha_evrak_tip 63, ALIŞ = cha_evrak_tip 0 + cha_cinsi 6 (2026-08-01
-   *  keşfi). TEK tanım — fatura-listesi ve iptal-faturalar AYNI kümeyi görür (şartname kapısı D1: düz metin kopyası). */
-  const FATURA_EVRAK_KOSULU = '(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6))';
+   *  keşfi). TEK tanım — fatura-listesi ve iptal-faturalar AYNI kümeyi görür (şartname kapısı D1: düz metin kopyası). Metin
+   *  `seriOzet.faturaKosuluIfadesi`'nden TÜRETİLİR (şartname «Mikro bağlantı A» A6.4 / AH10, 2026-11-05): eskiden aynı küme burada
+   *  ikinci kez literal yazılıydı. Çıktı bayt bayt aynı (`lib/faturaEvrakKosulu.test.ts`); takma adlı literal geri gelirse
+   *  `seriOzet.test.ts` çiti kırmızı. Takma adsız tanı sorgularındaki `cha_evrak_tip = 63` kopyaları bu dilimde kalır. */
+  const FATURA_EVRAK_KOSULU = faturaKosuluIfadesi('cha_evrak_tip', 'cha_cinsi');
 
   function makeMikroSqlImport(opts: SqlImportOpts) {
     SQL_IMPORT_TANIMLARI.push(opts);   // cron da aynı tanımları kullanır
@@ -1999,6 +2005,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // penceresi `cha_tarihi`'ye baktığı için GERİYE TARİHLİ dekontu (Hesap Açılış Fişi, 2025) HİÇ
     // getirmiyordu — ödemeler müşteri ekranına gelmiyordu (teşhis kök neden c). Her gece TAM.
     gecePenceresi: 'tam',
+    // Mikro'dan FİZİKSEL silinen hareket (şartname «Mikro bağlantı A» A9, 2026-11-05; canlı Cetpa 1.699 / Mikro 1.695) iptal
+    // süpürgesine görünmez (yalnız `<> 0` GUID'leri görür) ve Cari Ekstre / Tahsilat'ta sonsuza dek sayılırdı. Koleksiyon SAF
+    // ayna: tek yazıcı bu import (`grep -rn mikroCariHareketler src`). `ekKosul` yalnız ana tabloya başvurur (takma adsız),
+    // küme sorgusu `fromEk`'siz güvenle koşar. Koruma tanımın ortak gövdesindedir (SqlImportOpts.tersSupurge): eksik / tavanlı /
+    // üst sınırlı / GUID'siz / boş sonuçta, küme uyuşmazlığında ve silme tavanında HİÇBİR şey silinmez; `cha_tarihi` taşımayan
+    // ya da pencere dışı belge aday değildir.
+    tersSupurge: true,
     collection: 'mikroCariHareketler', label: 'Mikro Cari Hareketleri',
     postProcess: async (rows) => {
       // PG aynası (off-server yedek + raporlama). Fatura import'uyla aynı tablo.
@@ -2290,6 +2303,12 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
              "UNION ALL SELECT 'CARI_HESAPLAR', COUNT(*) FROM CARI_HESAPLAR " +
              "UNION ALL SELECT 'STOKLAR', COUNT(*) FROM STOKLAR " +
              "UNION ALL SELECT 'EBELGE_EVRAK_HAREKETLERI', COUNT(*) FROM EBELGE_EVRAK_HAREKETLERI" },
+      // Mikro sipariş fişi sayısı (şartname «Mikro bağlantı A» A7 / AH16, 2026-11-05): «Mikro Siparişleri» sekmesi boş
+      // (`mikroSiparisler` 0; `SQL:SIPARISLER` her gece başarılı, 0 kayıt) ve bu sayıyı hiçbir tanı ucu ölçmüyordu; sekmenin
+      // kaderi (kullanıcıya soru 16) buna bağlı. AYRI sorgu, yukarıdaki UNION'a EKLENMEZ: tablo okunamazsa yalnız BU satır
+      // `{ hata }` döner, öteki sayımlar etkilenmez. Yalnız COUNT; yeni kolon adı yok (tablo adı gece importunda kanıtlı).
+      { ad: 'siparisSatirSayisi',
+        sql: "SELECT 'SIPARISLER' t, COUNT(*) n FROM SIPARISLER" },
       // GİB / İPTAL KEŞFİ (2026-09-25 kullanıcı isteği: "GİB'den kabul edilmeyen faturaları da çekelim, iptal
       // faturaları iptal olarak görünsün ama başka bir hesaplamaya dahil olmasın"). Bir faturanın GİB ya da alıcı
       // tarafından reddedildiği bilgisi kodun HİÇBİR yerinde okunmuyor; kolon adı TAHMİN EDİLMEZ (cha_vergi /
@@ -3228,6 +3247,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     }
   });
 
+  /** Kiracı anlık görüntüsünden BU kiracının (ve etiketsiz eski) belge id'leri: CLAUDE.md deseni, yabancı kiracı atlanır.
+   *  `tenantSnap` üretimde zaten süzer; burada çağıran tarafta da süzülür (iki katman, «var olan» kararı yabancı belgeye kaymasın). */
+  const bizimBelgeIdleri = (snap: { docs: Array<{ id: string; data: () => Record<string, unknown> }> }, companyId: string): string[] =>
+    snap.docs.filter(d => { const dc = (d.data().companyId as string | undefined) || ''; return !dc || dc === companyId; }).map(d => String(d.id));
+
   // 4. Bankalar → mikroBankalar (ham) + bankAccounts (temiz)
   //
   // ⚠️ 2026-08-01 DÜZELTMESİ: ham ban_* satırları DOĞRUDAN `bankAccounts`a
@@ -3241,7 +3265,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     collection: 'mikroBankalar', label: 'Mikro Banka Listesi',
     postProcess: async (rows, companyId) => {
       if (!C.getAdminDb()) return null;
-      const bankaId = await C.mikroIdCozucu('bankAccounts', companyId);
+      // Var olan hesaplar BİR KEZ okunur (demirbaş deseni): çözücü aynı id'lerden kurulur (ikinci okuma yok) ve bakiye
+      // kararı bunlara bakar (aşağıda). Yabancı kiracının belgesi «var olan» SAYILMAZ (etiketsiz eski kayıt sayılır).
+      const mevcutBankaIdleri = new Set(bizimBelgeIdleri(await C.tenantSnap('bankAccounts', companyId), companyId));
+      const bankaId = C.mikroIdCozucuIds(mevcutBankaIdleri, companyId);
       // Alan adları çalışma anında bulunur — tahmin yok, bulunamazsa bildirilir.
       const ornek = rows[0];
       const adKey  = findKey(ornek, /ban_(adi|isim|ad)$/i) ?? findKey(ornek, /ban_.*ad/i);
@@ -3253,16 +3280,18 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         const guidKey = findKey(r, /_Guid$/i);
         const id = guidKey && r[guidKey] ? String(r[guidKey]) : null;
         if (!id) continue;
-        batch.set(C.getAdminDb().collection('bankAccounts').doc(bankaId(id)), {
+        const belgeId = bankaId(id);
+        batch.set(C.getAdminDb().collection('bankAccounts').doc(belgeId), {
           companyId,
           bankName:      String(r[adKey] ?? '').trim() || `Banka ${noKey ? r[noKey] : ''}`.trim(),
-          accountType:   'Vadesiz',
-          accountHolder: '',
-          currency:      'TRY',
-          // Bakiye Mikro'nun banka TANIMINDA yok (hareketlerde). 0 yazmak
-          // "bakiye sıfır" demek olur — UI'ın çökmemesi için gerekli asgari,
-          // gerçek bakiye banka hareketlerinden gelir.
-          balance:       0,
+          // Bakiye Mikro'nun banka TANIMINDA YOK (hareketlerdedir). Eski `balance: 0` her gece «bakiye sıfır» yazıyordu ve
+          // `merge: true` elle girilen bakiyeyi de ertesi gece 0'a eziyordu; 0 bilinen sayı sayıldığı için «tutarsız» notu da
+          // çıkmıyordu (şartname «Mikro bağlantı A» A5, 2026-11-05). Var olan belgede kullanıcının girdiği alanlara (bakiye, döviz,
+          // hesap türü, hesap sahibi) DOKUNULMAZ: anahtar hiç konmaz, merge alana dokunmaz. Döviz de bu yüzden yalnız yeni belgede:
+          // her gece `currency: 'TRY'` yazmak korunan USD / EUR bakiyesini TRY toplamına sokuyordu (inceleme MBA1 #3). Yeni belgede
+          // `balance: null` = BİLİNMİYOR (ekran «—»). Mikro'nun döviz kolonu bu dilimde okunmaz (ad tahmin edilmez; gerekirse Dilim B'de
+          // şemadan `findKey` / `secimKolonlari`). Mikro'dan gece bakiye hesaplama ayrı dilimde (kullanıcı kararı, Dilim B).
+          ...(mevcutBankaIdleri.has(belgeId) ? {} : { accountType: 'Vadesiz', accountHolder: '', currency: 'TRY', balance: null }),
           ...(hspKey && r[hspKey] ? { accountNo: String(r[hspKey]) } : {}),
           source: 'mikro', syncedAt: pgServerTimestamp(),
         }, { merge: true });
@@ -3280,7 +3309,9 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     collection: 'mikroKasalar', label: 'Mikro Kasa Listesi',
     postProcess: async (rows, companyId) => {
       if (!C.getAdminDb()) return null;
-      const kasaId = await C.mikroIdCozucu('kasalar', companyId);
+      // Banka ile AYNI kural (A5): var olan kasada `bakiye` anahtarı konmaz, yeni kasada `null`.
+      const mevcutKasaIdleri = new Set(bizimBelgeIdleri(await C.tenantSnap('kasalar', companyId), companyId));
+      const kasaId = C.mikroIdCozucuIds(mevcutKasaIdleri, companyId);
       const ornek = rows[0];
       const adKey = findKey(ornek, /kas_(adi|isim|ad)$/i) ?? findKey(ornek, /kas_.*ad/i);
       const noKey = findKey(ornek, /kas_no$/i) ?? findKey(ornek, /kas_kod/i);
@@ -3290,11 +3321,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         const guidKey = findKey(r, /_Guid$/i);
         const id = guidKey && r[guidKey] ? String(r[guidKey]) : null;
         if (!id) continue;
-        batch.set(C.getAdminDb().collection('kasalar').doc(kasaId(id)), {
+        const belgeId = kasaId(id);
+        batch.set(C.getAdminDb().collection('kasalar').doc(belgeId), {
           companyId,
           kasaAdi:  String(r[adKey] ?? '').trim() || `Kasa ${noKey ? r[noKey] : ''}`.trim(),
           currency: 'TRY',
-          bakiye:   0,
+          // Kasa bakiyesi Mikro'nun kasa TANIMINDA yok; eski `bakiye: 0` her gece sahte sıfır yazıyordu (banka gerekçesi).
+          ...(mevcutKasaIdleri.has(belgeId) ? {} : { bakiye: null }),
           source: 'mikro', syncedAt: pgServerTimestamp(),
         }, { merge: true });
         n++;
@@ -3793,8 +3826,10 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // 03:20 İstanbul (zamanla.ts). Yedek görevi 03:30 SUNUCU-yerel saattedir;
     // sunucu dilimi düzeltilene kadar ikisi arasında sıra ilişkisi yoktur.
     // CRON ÇAĞRI DESENİ DEĞİŞMEZ: SQL_IMPORT_TANIMLARI → mikroSqlImportCalistir DOĞRUDAN; arka plan
-    // yardımcısına (arkaPlanIsiBaslat) BAĞLANMAZ, kilit ALMAZ, `ilerle` geçmez (parite testi d). Bu kural SQL tanımları içindir;
-    // işin SON adımı (faturadan sipariş, 2026-10-18) bakım kilidi yazıcısı olarak koşar — aşağıda.
+    // yardımcısına (arkaPlanIsiBaslat) BAĞLANMAZ, kilit ALMAZ, `ilerle` geçmez (parite testi d). Bu kural YALNIZ SQL tanımları
+    // içindir. Ardından gelen üç adım YAZICIDIR ve bakım kilidine uyar (şartname «Mikro bağlantı A», 2026-11-05): cari bakiye
+    // (`yaziciOlarakCalistir`), faturadan sipariş (aynı) ve SON adım stok miktarı (arka plan işi; kilit + yazıcı kaydı
+    // `arkaPlanIsiBaslat`'ta). SIRA: SQL döngüsü → bakiye → GİB taraması → faturadan sipariş → stok miktarı.
     // BİLİNÇLİ FARK (S5/K-A ortak gövde, 2026-09-25): sayfa sorgusu + iptal süpürgesi listeZamanAsimiMs()
     // kullanır → burada da sayfa zaman aşımı 30 sn → 120 sn (env ile en çok 600 sn). SQL yolunda devre
     // kesici YOK (yalnız stok/cari adaptif sayfalamada): Mikro bağlantıyı kabul edip yanıt vermezse her
@@ -3806,6 +3841,20 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       if (!companyId) return;
       if (!(await getMikroCreds())) { console.warn('Mikro SQL senkron: kimlik yok, atlandı.'); return; }
       const actor = { uid: 'system', email: '' };
+      // Yazıcı adımlarının (bakiye, faturadan sipariş, stok miktarı) ORTAK günlüğü: adıma ulaşan her koşuda TAM BİR sistem
+      // syncLog satırı; denetim satırı da TEK (writeSyncLog'un içindeki) ve HEDEF KİRACIYA yazılır (`'system'` kiracısı yok).
+      // Günlük yazılamazsa adım düşmez, yalnız uyarı basılır.
+      const GECE_ADIMI = 'gece senkronu';
+      const geceKilitMetni = (k: { aciklama: string }) => `bakım kilidi: ${k.aciklama}`;
+      type GeceSatiri = { ozet: string; basarili: boolean; hata: string | null };
+      const geceGunlugu = async (islem: string, hedef: string, etiket: string, satir: GeceSatiri, t: number): Promise<void> => {
+        if (satir.basarili) console.log(`  ${etiket}: ${satir.ozet}`);
+        else console.warn(`  ${etiket}: ${satir.hata}`);
+        try {
+          await C.writeSyncLog(islem, hedef, satir.ozet, satir.basarili, null, satir.hata, Date.now() - t, actor,
+            undefined, { denetimKiracisi: companyId });
+        } catch (e) { console.warn(`  ${etiket} günlüğü yazılamadı:`, e instanceof Error ? e.message : String(e)); }
+      };
       // Üst sınır YOK (son = null): eski `mikroBugun()` sınırı ileri tarihli kaydı (30.09.2026 LUCA
       // satırı) düşürüyordu; `tarihKosulu` `>=` üretir.
       const son = null;
@@ -3820,9 +3869,42 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         } catch (e) { hata++; console.warn(`  ${opts.label} istisna:`, e instanceof Error ? e.message : String(e)); }
       }
       console.log(`Mikro SQL senkron bitti: ${ok} başarılı, ${hata} hatalı`);
+      // CARİ BAKİYE (şartname «Mikro bağlantı A» A3 / AH6 / AH12, 2026-11-05). `cariBalances` + `leads.bakiye` yalnız elle «Bakiye
+      // Çek» düğmesiyle tazeleniyordu (canlı son yazım 17.10.2026; Risk, Muhasebe AR/AP, Alacak Toplam 19 günlük bakiye
+      // gösteriyordu). SIRA: SQL tanımlarından SONRA (cari hareket aynası taze), GİB taramasından ÖNCE; ayrı try. Mikro'dan yalnız
+      // OKUMA (SqlVeriOkuV2 SELECT); yazım Cetpa önbelleğine. Elle uçla AYNI işlev (`bakiyeCekCalistir`), AYNI kiracı. GÜNLÜK:
+      // `tamam` satırını işlev KENDİ yazar (hedef kiracı, ayrı denetim satırı YOK); öteki her sonuç burada TEK satıra çevrilir:
+      // okuma hatası / bakım kilidi / saatlik senkron koşuyor / istisna → başarısız; Mikro satır döndürmedi → başarılı «satır yok;
+      // bakiye yazılmadı».
+      // SAATLİK SENKRON KAPISI (inceleme MBS #1, 2026-11-05): bakiye ve stok adımlarının ORTAK yardımcısı. Saatlik iş `leads`'e
+      // `batch.update`, bakiye adımı `batch.set(merge)` ile yazar; pgShim ikisini de kilitsiz SELECT + bütün belge yazımıyla yapar
+      // (aynı belgeye eşzamanlı iki yazıcıdan biri alan kaybeder). PG havuzu yoksa kapı yok (`yaziciOlarakCalistir` paritesi);
+      // `'mikro-cron:…'` önekli gece adımı kayıtları kapıya girmez (ad TAM `'mikro-cron'`).
+      const saatlikKosuyor = async (): Promise<boolean> => {
+        const havuz = C.getPgPool?.() ?? null;
+        return havuz !== null && (await aktifYazicilar(havuz, Date.now())).some(y => y.ad === 'mikro-cron');
+      };
+      {
+        const tB = Date.now();
+        let satir: GeceSatiri | null = null;
+        try {
+          // ÖNCE KAYDOL, SONRA BAK: kapı yazıcı kaydından SONRA, geri çağrının içinde (stok adımındaki MBA1 #2 kalıbı). Saatlik
+          // taraf da kendi kaydından sonra `'mikro-cron:pull-bakiye'` kaydına bakar (crons.ts): ikisinden biri ötekini görür.
+          const y = await yaziciOlarakCalistir(C.getPgPool?.() ?? null, 'mikro-cron:pull-bakiye',
+            async () => ((await saatlikKosuyor()) ? null : bakiyeCekCalistir(companyId, actor, { denetimKiracisi: companyId })));
+          if ('kilit' in y) satir = { ozet: GECE_ADIMI, basarili: false, hata: geceKilitMetni(y.kilit) };
+          else if (y.sonuc === null) satir = { ozet: GECE_ADIMI, basarili: false, hata: 'atlandı: saatlik senkron koşuyor' };
+          else if (y.sonuc.tur === 'okumaHatasi') satir = { ozet: GECE_ADIMI, basarili: false, hata: y.sonuc.mesaj };
+          else if (y.sonuc.tur === 'bos') satir = { ozet: 'satır yok; bakiye yazılmadı', basarili: true, hata: null };
+          else console.log(`  Cari bakiye: ${y.sonuc.updated} cari güncellendi`);
+        } catch (e) {
+          satir = { ozet: GECE_ADIMI, basarili: false, hata: e instanceof Error ? e.message : String(e) };
+        }
+        if (satir) await geceGunlugu('SQL:CARI_HESAP_HAREKETLERI', 'cariBalances', 'Cari bakiye', satir, tB);
+      }
       // GİB / alıcı durumu taraması — fatura-listesi İNDİKTEN SONRA (yeni faturalar aday olsun). Alıcının reddettiği e-Fatura
       // Mikro'da iptal bayrağı taşımaz (389, ölçüm 2026-10-02); durum yalnız buradan öğrenilir. Bütçe 10 dk: ilk dolum ~400
-      // belge × ~0,4 sn; sonraki geceler yalnız son 45 günün kesinleşmemişleri. 04:00 stok cron'undan önce biter.
+      // belge × ~0,4 sn; sonraki geceler yalnız son 45 günün kesinleşmemişleri.
       try {
         const { not } = await gibDurumCalistir(companyId, 10 * 60_000, actor);
         console.log(`  GİB durum taraması: ${not}`);
@@ -3833,18 +3915,17 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // `inventoryMovements`'tan) VE GİB taramasının (alıcının reddettiği faturaya hiç sipariş türetilmez) ARDINDAN, ayrı try.
       // Önkoşul / atlama kuralı YOK: varsayılan mod boş kalemi ertesi koşuda doldurur. Panel ucuyla AYNI işlev, AYNI kiracı
       // (yukarıda çözülen `companyId`), sistem aktörü; `kalemYenile` VERİLMEZ (kalem yenileme yalnız elle önizle → uygula).
-      // BAKIM KİLİDİ: gecenin kilide bakan TEK adımı (13 tanım ve GİB taraması bakmıyor — ayrı iş).
+      // BAKIM KİLİDİ: kilide bakan üç adımdan biri (bakiye, faturadan sipariş, stok miktarı; 13 tanım ve GİB taraması bakmıyor).
       // GÜNLÜK: adıma ulaşan her koşuda TAM BİR sistem syncLog satırı — tamam → true; satış faturası yok → true (yönsüz > 0 ise
       // false), nedeni metinde; bakım kilidi → false «bakım kilidi: …»; istisna → false, hata metni. Denetim satırı da TEK
       // (writeSyncLog'un içindeki) ve HEDEF KİRACIYA yazılır — ucun ayrı denetimi gecede yazılmaz, `'system'` kiracısı yok.
       {
         const t1 = Date.now();
-        const GECE_ADIMI = 'gece senkronu';
-        let satir: { ozet: string; basarili: boolean; hata: string | null };
+        let satir: GeceSatiri;
         try {
           const y = await yaziciOlarakCalistir(C.getPgPool?.() ?? null, 'mikro-cron:faturadan-siparis',
             () => faturadanSiparisCalistir(companyId, {}));
-          if ('kilit' in y) satir = { ozet: GECE_ADIMI, basarili: false, hata: `bakım kilidi: ${y.kilit.aciklama}` };
+          if ('kilit' in y) satir = { ozet: GECE_ADIMI, basarili: false, hata: geceKilitMetni(y.kilit) };
           else if (y.sonuc.tur === 'tamam') satir = { ozet: y.sonuc.denetimOzeti, basarili: true, hata: null };
           else if (y.sonuc.tur === 'faturaYok') {
             const metin = `${y.sonuc.message}${y.sonuc.note ? ` — ${y.sonuc.note}` : ''}`;
@@ -3853,12 +3934,48 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         } catch (e) {
           satir = { ozet: GECE_ADIMI, basarili: false, hata: e instanceof Error ? e.message : String(e) };
         }
-        if (satir.basarili) console.log(`  Faturadan sipariş: ${satir.ozet}`);
-        else console.warn(`  Faturadan sipariş: ${satir.hata}`);
+        await geceGunlugu('faturadan-siparis', 'orders', 'Faturadan sipariş', satir, t1);
+      }
+      // STOK MİKTAR / MALİYET: gecenin SON adımı (şartname «Mikro bağlantı A» A1 + AH1 / AH4, 2026-11-05). Eskiden ayrı 04:00
+      // cron'uydu (crons.ts) ve `MIKRO_JUMP_SURUM < 17` bayrağıyla ilk satırda dönüyordu: canlıda sürüm 16 olduğu için 17.10'dan beri
+      // hiç koşmadı (`warehouseItems` bayat). Elle uçla AYNI yoklama (`stokMiktarV17Var`) ve AYNI iş tanımı (`stokMiktarIsi`);
+      // SIRALI: iş bitene kadar beklenir (`arkaPlanIsiBekle`, reject etmez). Ayrı saate konmadı: 03:20 bloğu uzayabilir ve
+      // pgShim `set(merge)` / `update` kilitsiz SELECT + bütün belge yazımıdır, aynı `inventory` belgesine eşzamanlı iki yazıcıdan
+      // biri alan kaybeder. KAPILAR (sırayla; koşmayan her dal TEK başarısız satır, tek eşleyici `geceIsBaslamadi`):
+      //   1. saatlik kart senkronu (`'mikro-cron'` yazıcı kaydı) koşuyor → atlanır (havuz yoksa kapı yok: yaziciOlarakCalistir paritesi);
+      //   2. koşan arka plan işi / bakım kilidi (`arkaPlanOnKontrol`);
+      //   3. V17 yoklaması geçmedi;
+      //   4. `arkaPlanIsiBaslat` başlatmadı (kısa devre ya da yazıcı kaydından sonra görülen kilit).
+      // İş başlarsa bitiş satırını İŞİN KENDİSİ yazar (hedef kiracı; ayrı denetim satırı YOK, arkaPlanIsi `denetimKiracisi`).
+      // Ters yön: saatlik geri çağrı arka plan işi koşarken o saati atlar (crons.ts). Mikro'dan yalnız OKUMA.
+      {
+        const tS = Date.now();
+        const geceIsBaslamadi = (s: BaslatSonucu): string | null =>
+          'kilit' in s ? geceKilitMetni(s.kilit) : s.started ? null : `atlandı: başka iş koşuyor (${s.job})`;
+        let neden: string | null = null;
         try {
-          await C.writeSyncLog('faturadan-siparis', 'orders', satir.ozet, satir.basarili, null, satir.hata, Date.now() - t1, actor,
-            undefined, { denetimKiracisi: companyId });
-        } catch (e) { console.warn('  Faturadan sipariş günlüğü yazılamadı:', e instanceof Error ? e.message : String(e)); }
+          if (await saatlikKosuyor()) {
+            neden = 'atlandı: saatlik senkron koşuyor';
+          } else {
+            const onKontrol = await arkaPlanOnKontrol(arkaPlanDep(), { bakimKilidi: true });
+            if (onKontrol) neden = geceIsBaslamadi(onKontrol);
+            else if (!(await stokMiktarV17Var(companyId))) neden = 'V17 yoklaması geçmedi; stok miktarı çekilmedi';
+            // V17 yoklaması ağ çağrısıdır: o arada saatlik senkron başlamış olabilir. `arkaPlanIsiBaslat`'tan HEMEN önce yeniden
+            // bakılır (arada ağ çağrısı yok; başlatıcının rezervasyonu ilk await'ten önce). Saatlik taraf da kaydolduktan SONRA
+            // arka plan işine bakar (crons.ts): pencere tek PG gidiş-dönüşüne iner (inceleme MBA1 #2, 2026-11-05).
+            else if (await saatlikKosuyor()) neden = 'atlandı: saatlik senkron koşuyor';
+            else {
+              const sonuc = await arkaPlanIsiBaslat(arkaPlanDep(), stokMiktarIsi(companyId, actor, { denetimKiracisi: companyId }));
+              if (sonuc.started) {
+                await arkaPlanIsiBekle(sonuc.job);
+                console.log('  Stok miktarı: iş bitti (sonuç syncLog GenelAmacliMaliyetListesiV2 satırında)');
+              } else neden = geceIsBaslamadi(sonuc);
+            }
+          }
+        } catch (e) {
+          neden = e instanceof Error ? e.message : String(e);
+        }
+        if (neden !== null) await geceGunlugu('GenelAmacliMaliyetListesiV2', 'inventory', 'Stok miktarı', { ozet: GECE_ADIMI, basarili: false, hata: neden }, tS);
       }
     });
 
@@ -3901,25 +4018,23 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *  src/server/mikro/arkaPlanIsi.ts'e ÇIKARILDI — 15 import ucu aynı yardımcıyı kullanır;
    *  doküman id'si/alanları AYNEN (panel paritesi), +companyId/isAdi damgası.
    */
-  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`inventory` yazma).
-  app.post('/api/mikro/import/stok-miktar', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('inventory', 'write'), async (req: Request, res: Response) => {
-    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
-    if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
-    // Kısa devre ÖNCE (HEAD 2582 kuralı): iş zaten koşuyorsa ya da bakım kilidi varsa hiçbir yoklama/sorgu
-    // maliyeti ödeme. Delta hakem 2026-09-25 (bulgu 3/8): kısa devre helper'a taşınınca V17 yoklamasının
-    // ARKASINA kaymıştı — kilit doluyken yoklama koşan işe paralel Mikro'ya gidiyor, yük altında düşerse
-    // `false` 10 dk önbelleğe giriyor ve kullanıcı "Başka bir iş çalışıyor" yerine yanıltıcı 501 görüyordu.
-    // Otorite yine arkaPlanIsiBaslat (yoklama sürerken durum değişebilir); bu yalnız maliyet kısa devresi.
-    const onKontrol = await arkaPlanOnKontrol(arkaPlanDep(), { bakimKilidi: true });
-    if (onKontrol) return arkaPlanYaniti(res, onKontrol);
-    const cidStok = await C.reqCompanyId(req);
+  /** V17 yoklaması: elle uç ve gece 03:20 bloğunun son adımı ORTAK (şartname «Mikro bağlantı A» A1.1, 2026-11-05). Gece
+   *  işi eskiden `MIKRO_JUMP_SURUM < 17` bayrağıyla ilk satırda dönüyordu (canlıda 16: 17.10'dan beri hiç koşmadı); elle uç
+   *  aynı durumda metodu canlı yokluyor ve geçiyordu. Artık ikisi de bu yoklamadan geçer (10 dk önbellek mikroClient'ta ortak).
+   *  Yoklama kartı iş gövdesiyle AYNI kuraldan seçilir (`mikroStokKartiMi`, A2): kiracı süzgeci sorguda, kaynak süzgeci JS'te
+   *  (docs shim'inde `in` doğrulanmadı; şartname ortak kural 12). Süzgeçten ÖNCE `limit` YOK (AH13): ilk kart elle açılmışsa
+   *  `limit(1)` yoklamayı yanlışlıkla «geçmedi»ye düşürürdü. */
+  function stokMiktarV17Var(companyId: string): Promise<boolean> {
     // Bayrak "hayır" derse metodu GERÇEKTEN yokla (önbellekli — bkz. mikroClient).
-    const v17Var = await v17MetoduKullanilabilir('GenelAmacliMaliyetListesiV2', async () => {
+    return v17MetoduKullanilabilir('GenelAmacliMaliyetListesiV2', async () => {
       // Yoklama KENDİ kiracısının SKU'suyla yapılır (CLAUDE.md tenant deseni);
       // dönen SKU hata metnine girmez — kiracılar arası ad sızıntısı olmasın.
-      const probeSnap = await C.getAdminDb()!.collection('inventory')
-        .where('companyId', '==', cidStok).where('source', '==', 'mikro_import').limit(1).get();
-      const probeSku = ((probeSnap.docs[0]?.data()?.sku as string) || '').trim();
+      const probeSnap = await C.getAdminDb().collection('inventory').where('companyId', '==', companyId).get();
+      const probeSku = probeSnap.docs
+        .map(d => d.data() as Record<string, unknown>)
+        .filter(v => mikroStokKartiMi(v.source))
+        .map(v => ((v.sku as string) || '').trim())
+        .find(sku => sku !== '');
       if (!probeSku) return false;
       const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
         StokKod: probeSku, IlkTarih: '2000-01-01',
@@ -3929,28 +4044,26 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       const d = (r0?.Data ?? {}) as Record<string, unknown>;
       return ok && !!r0 && !r0.IsError && d.EldekiMiktar != null;
     });
-    if (!v17Var) {
-      return res.status(501).json({
-        success: false,
-        error: 'Stok miktarı/maliyet çekimi GenelAmacliMaliyetListesiV2 gerektirir — bu method yalnız Mikro Jump V17+ kurulumlarında var. ' +
-               'Mikro Jump V17 güncellemesi sonrası .env\'e MIKRO_JUMP_SURUM=17 ekleyin. (Canlı yoklama da doğrulayamadı.)',
-        requiresVersion: 17, currentVersion: MIKRO_JUMP_SURUM,
-      });
-    }
+  }
 
-    const actor = C.reqActor(req);
-    // 'stokMiktarImport' — panel paritesi, sözlük istisnası (src/lib/mikroIsAdi.ts). Kısa devre
-    // (alreadyRunning) + bakım kilidi (423) yoklamadan ÖNCE `arkaPlanOnKontrol` ile soruldu; helper aynı
-    // kararı yetkili olarak yeniden verir (yazıcı kaydıyla birlikte).
+  /** Stok miktarı / maliyet İŞ TANIMI: elle uç ve gece adımı ORTAK (şartname «Mikro bağlantı A» A1.2, 2026-11-05). `calistir`
+   *  gövdesi TEK: iş adı `stokMiktarImport`, `senkronKaydi` `GenelAmacliMaliyetListesiV2` / `inventory`, `jobAlanlari` şekli
+   *  panel paritesi. `secenek.denetimKiracisi` yalnız sistem aktörlü gece koşusunda verilir (arkaPlanIsi.ArkaPlanIsi). */
+  function stokMiktarIsi(companyId: string, actor: Aktor, secenek: { denetimKiracisi?: string } = {}): ArkaPlanIsi {
+    // 'stokMiktarImport' — panel paritesi, sözlük istisnası (src/lib/mikroIsAdi.ts).
     const isAdi = mikroIsAdi('/api/mikro/import/stok-miktar');
-    const sonuc = await arkaPlanIsiBaslat(arkaPlanDep(), {
-      isAdi, companyId: cidStok, actor,
+    return {
+      isAdi, companyId, actor,
       senkronKaydi: { operation: 'GenelAmacliMaliyetListesiV2', entityType: 'inventory', denetimEtiketi: 'Mikro Stok Miktarları' },
       // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts); kayıt İŞ ömrünce durur.
       yaziciAdi: arkaPlanYaziciAdi(isAdi, Date.now()),
+      ...(secenek.denetimKiracisi ? { denetimKiracisi: secenek.denetimKiracisi } : {}),
       calistir: async (ilerle) => {
         const t0 = Date.now();
         let processed = 0, updated = 0, failed = 0;
+        /** Cetpa'daki BİLİNEN stockLevel'ı Mikro'dan farklı olan kart sayısı (şartname «Mikro bağlantı A» AH2): Mikro değeri yine
+         *  yazılır (ezme kararı kullanıcıda, soru 19); yalnız SAYI özetlenir, kart adı / SKU yazılmaz. */
+        let cetpaFarkli = 0;
         /** Mikro yanıtında okunamayan alanların satır sayacı (miktar/maliyet). */
         const miktarSayac = sayacOlustur();
         // Per-depo dağılımı otoriter toplamla tutmayan SKU sayısı (bkz. mutabakat kontrolü).
@@ -3962,16 +4075,17 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         const uyusmazlikOrnek: { sku: string; toplam: number; beklenen: number }[] = [];
         // Kiracı süzgeci ŞART (inceleme bulgusu 2026-09-25): eskiden yalnız `source` ile
         // okunuyordu → iş, başka kiracının Mikro ürünlerine de bu kiracının Mikro'sundan
-        // okunan miktarı yazardı. Yoklama (yukarıda) ile AYNI koşul.
-        const invSnap = await C.getAdminDb()!.collection('inventory')
-          .where('companyId', '==', cidStok).where('source', '==', 'mikro_import').get();
+        // okunan miktarı yazardı. Yoklama (`stokMiktarV17Var`) ile AYNI koşul: kiracı sorguda, Mikro kaynağı
+        // (`mikro_import` | `mikro_cron`, A2) JS'te tek yüklemle.
+        const invSnap = await C.getAdminDb().collection('inventory').where('companyId', '==', companyId).get();
         const items = invSnap.docs
-          .map(d => ({ ref: d.ref, sku: ((d.data().sku as string) || '').trim() }))
+          .filter(d => mikroStokKartiMi(d.data().source))
+          // `mevcut`: Cetpa'daki stockLevel (AH2 sayacı); bilinmiyorsa sayılmaz.
+          .map(d => ({ ref: d.ref, sku: ((d.data().sku as string) || '').trim(), mevcut: d.data().stockLevel as unknown }))
           .filter(x => x.sku);
         const total = items.length;
-        // companyId + depo listesi bir kez (döngü içinde tekrar tekrar değil).
-        // Kiracı yanıt ÖNCESİ çözüldü (cidStok = reqCompanyId); `calistir` gövdesi req/res bilmez.
-        const companyId = cidStok;
+        // Depo listesi bir kez (döngü içinde tekrar tekrar değil). Kiracı ÇAĞIRANDA çözüldü
+        // (elle uç: reqCompanyId; gece: sqlSenkronHedefTenant); `calistir` gövdesi req/res bilmez.
         const wiId = await C.mikroIdCozucu('warehouseItems', companyId);
         // Depo numaraları warehouses'tan (mikro-depo-<n>). Kart sto_yer_kod GÜVENİLMEZ
         // (hepsi HAVALIMANI); gerçek stok yeri per-depo miktarla bulunur.
@@ -3991,6 +4105,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
              'SELECT sth_stok_kod, sth_cikis_depo_no AS depo, -sth_miktar AS net FROM STOK_HAREKETLERI WHERE sth_tip = 1 AND ISNULL(sth_iptal, 0) = 0' +
              ') t GROUP BY sth_stok_kod, depo HAVING SUM(net) <> 0';
         const { rows: perDepoRows, hata: sqlHata } = await mikroSql(sqlPerDepo);
+        // Dağılım BİLİNMİYOR: SQL hata verdiyse YA DA boş döndüyse. `mikroSql` veri dizisi taşımayan bir yanıtı da `rows: []`
+        // döndürür («gerçekten sıfır» ile «okunamadı» ayırt edilemez; ters süpürgedeki `allRows.length === 0` notu); STOK_HAREKETLERI
+        // fatura satırı taşıdığı için boş sonuç pratikte «okunamadı» demektir (inceleme MBS #0, 2026-11-05). Yalnız YAZMA koruması:
+        // özet metni yalnız `sqlHata`yı söyler (AH2 parite testleri başarılı SQL'i boş satırla taklit ediyor).
+        const depoBilinmiyor = !!sqlHata || perDepoRows.length === 0;
         const depoMap = new Map<string, Record<string, number>>();
         if (!sqlHata && perDepoRows) {
             // Gövde tek kaynakta (server/mikro/eslemeStok.ts → depoSatiriCoz): bakiye SAYI
@@ -4007,7 +4126,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             }
             const depoArizasi = okumaArizasiNotu(okumaArizalari(depoSayac, DEPO_KRITIK));
             if (depoArizasi) console.warn('[import/stok-miktar] per-depo:', depoArizasi);
-        }
+        } else if (sqlHata) console.warn('[import/stok-miktar] per-depo SQL:', sqlHata);
         
         // Helper başlangıç dokümanı (running/startedAt/finishedAt:null/error:null/companyId/isAdi) + bu
         // merge = eski 2671 alanları. GÖRÜNÜR fark: running:true birkaç sn ERKEN yazılır (envanter
@@ -4016,6 +4135,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 
         const sonTarih = mikroBugun();
         const CONCURRENCY = 8;
+        // DEVRE KESİCİ (inceleme MBS #2, 2026-11-05; GİB taramasıyla aynı anlam): art arda KESICI_TUR turda turun BÜTÜN çağrıları
+        // FIRLATIRSA (zaman aşımı / bağlantı) iş durur. Yoksa asılı Mikro'da ~2.700 SKU / 8 ≈ 340 tur × 30 sn ≈ 2,8 saat sürer; bu
+        // sürede arka plan işi kapısı saatlik kart senkronunu ve elle importları atlatır. `IsError` / `ok:false` yanıtı kesiciyi
+        // TETİKLEMEZ: Mikro yanıt veriyor demektir. Kesilen koşu başarısızdır, özet kaç üründe durduğunu söyler.
+        const KESICI_TUR = 3;
+        let ardisikFirlatan = 0;
+        let kesildi = false;
         let batch = C.getAdminDb()!.batch(); let ops = 0;
         const commitBatch = async () => { if (ops > 0) { await batch.commit(); batch = C.getAdminDb()!.batch(); ops = 0; } };
 
@@ -4030,7 +4156,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             // Satır yine `failed` sayılır (aşağıda `qty === null`), yani kaybolmaz.
             const bos = { it, qty: null as number | null, cost: null as number | null, depoQtys: null as Record<string, number> | null,
                           uyusmazlik: null as { sku: string; toplam: number; beklenen: number } | null,
-                          devirli: false, bilinmeyen: [] as string[], okunamadi: true };
+                          devirli: false, bilinmeyen: [] as string[], okunamadi: true, firlatti: false };
             try {
               // 1) Toplam (tüm depolar) — stockLevel + maliyet. AUTHORITATIVE, değişmez.
               const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
@@ -4091,8 +4217,8 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
                 }
               }
 
-              return { it, qty, cost, depoQtys, uyusmazlik, devirli, bilinmeyen, okunamadi: false };
-            } catch { return bos; }
+              return { it, qty, cost, depoQtys, uyusmazlik, devirli, bilinmeyen, okunamadi: false, firlatti: false };
+            } catch { return { ...bos, firlatti: true }; }
           }));
 
           for (const r of results) {
@@ -4110,6 +4236,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             // satırı 2367 ürüne yayılıyor, çoğunun hiç hareketi yok).
             if (r.depoQtys) depoDagilimliUrun++;
             if (r.qty === null) { failed++; continue; }
+            if (bilinenSayi(r.it.mevcut) && Number(r.it.mevcut) !== r.qty) cetpaFarkli++;
             batch.update(r.it.ref, {
               stockLevel: r.qty,
               // Yuvarlama (2 hane) stokMiktarEsle'de yapılıyor — burada tekrar yuvarlanmaz.
@@ -4120,12 +4247,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             // Depo sekmesindeki kayıt: TEK birincil depo YOK — stoğu olan HER depo
             // depoBreakdown'da (ekran her depoyu ayrı gösterir). Eski tek-depo atamasını
             // temizle (warehouseId:null) ki bayat HAVALIMANI kaydı kalmasın; depoBreakdown
-            // güvenilirse onu yaz, değilse (guard) yalnız temizle.
+            // güvenilirse onu yaz, değilse (guard) yalnız temizle. Depo SQL'i HATA verdiyse YA DA boş döndüyse (`depoBilinmiyor`)
+            // ve stok > 0 ise dağılım BİLİNMİYOR: alan hiç yazılmaz (merge dokunmaz, son bilinen dağılım kalır); null'a ezmek «hiçbir
+            // depoda stok yok» demek olurdu (inceleme MBA1 #1 + MBS #0, 2026-11-05). Stok ≤ 0 ise dağılım SQL'siz de bilinir (hiçbir depoda
+            // yok; yukarıda `qty > 0` dışında `depoQtys` hep null): null yazılır, bayat dağılım kalmaz (inceleme MBA2 #2).
             batch.set(C.getAdminDb()!.collection('warehouseItems').doc(wiId(r.it.sku.replace(/[/\\]/g, '_'))), {
               companyId,
               quantity: r.qty,
               warehouseId: null,
-              depoBreakdown: r.depoQtys ?? null,
+              ...(depoBilinmiyor && r.qty > 0 ? {} : { depoBreakdown: r.depoQtys ?? null }),
               updatedAt: pgServerTimestamp(),
             }, { merge: true });
             ops++;
@@ -4136,23 +4266,41 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             await commitBatch();
             await ilerle({ processed, updated, failed, total });
           }
+          if (results.every(r => r.firlatti)) {
+            if (++ardisikFirlatan >= KESICI_TUR) {
+              kesildi = true;
+              await commitBatch();
+              await ilerle({ processed, updated, failed, total });
+              break;
+            }
+          } else ardisikFirlatan = 0;
         }
         await commitBatch();
         const duration = Date.now() - t0;
         const depoNot =
           `, ${depoDagilimliUrun} üründe depo dağılımı yazıldı` +
           (depoDevirli > 0 ? ` (${depoDevirli}'inde devir kovası)` : '') +
-          (depoUyusmazlik > 0 ? `, ${depoUyusmazlik} üründe toplam tutmadı (dağılım yazılmadı)` : '');
+          (depoUyusmazlik > 0 ? `, ${depoUyusmazlik} üründe toplam tutmadı (dağılım yazılmadı)` : '') +
+          // SQL başarılıyken metin bayt bayt aynı (AH2 parite testleri).
+          (sqlHata ? ', depo dağılımı okunamadı (stoğu olan üründe değiştirilmedi)' : '');
         // Burada miktar KRİTİKTİR: rotanın tek işi odur (stok kartı import'unun aksine).
         const miktarArizaAlanlari = okumaArizalari(miktarSayac, STOK_MIKTAR_KRITIK);
         const miktarArizasi = okumaArizasiNotu(miktarArizaAlanlari);
         if (miktarArizasi) console.warn('[import/stok-miktar]', miktarArizasi);
         const miktarSayacMetni = sayacNotu(miktarSayac, miktarArizaAlanlari);
-        const miktarOzet = (miktarArizasi ? `${miktarArizasi} ` : '') +
+        // Sayaç 0 iken metin bugünküyle BAYT BAYT aynı (AH2).
+        const farkNotu = cetpaFarkli > 0 ? `${cetpaFarkli} kartta Cetpa miktarı Mikro'dan farklıydı; Mikro değeri yazıldı` : null;
+        // Kesici açılmazsa metin bayt bayt aynı (AH2).
+        const kesiciNotu = kesildi
+          ? `Mikro yanıt vermedi, ${processed} üründe durdu (art arda ${KESICI_TUR} turda bütün çağrılar zaman aşımı / bağlantı hatası verdi; ${total} üründen ${total - processed} ürün sorulmadı). `
+          : '';
+        const miktarOzet = kesiciNotu + (miktarArizasi ? `${miktarArizasi} ` : '') +
           `${updated} ürünün miktarı güncellendi, ${failed} hata${depoNot}` +
           (miktarSayacMetni ? `, ${miktarSayacMetni}` : '') +
-          ` (${Math.round(duration / 1000)}sn)`;
+          ` (${Math.round(duration / 1000)}sn)` +
+          (farkNotu ? ` · ${farkNotu}` : '');
         console.log(`Stok miktar import bitti: ${updated} güncellendi, ${failed} hata, depo uyuşmazlık ${depoUyusmazlik}, ${duration}ms`);
+        if (kesildi) console.warn(`[import/stok-miktar] devre kesici: Mikro yanıt vermedi, ${processed}/${total} üründe durdu`);
         if (uyusmazlikOrnek.length) console.warn('Depo dağılımı uyuşmazlık örnekleri:', uyusmazlikOrnek);
         // Bitiş dokümanı `jobs/stokMiktarImport` (helper merge'ler; şekil 2798-2803 ile BİREBİR — panel okur).
         // syncLog (2819) + audit 'Mikro Stok Miktarları' (2820) helper'da aynı argümanlarla.
@@ -4163,8 +4311,12 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             // kontrol edilmediği için "uyuşmazlık 0" tek başına "hepsi doğrulandı"
             // ANLAMINA GELMEZ — kapsamı da göstermeliyiz.
             depoUyusmazlik, depoDagilimliUrun, depoDevirli, uyusmazlikOrnek,
+            // Kart `note`u basar (useArkaPlanIsi); sayaç 0 iken alan YAZILMAZ (bitiş dokümanı şekli değişmez).
+            ...(farkNotu ? { cetpaFarkli, note: farkNotu } : {}),
           },
-          ozet: miktarOzet, basarili: failed === 0, hata: failed ? `${failed} SKU okunamadı` : null,
+          // Kesilen koşu zaten başarısız: kesici ancak art arda KESICI_TUR tamamen fırlatan turla açılır (`failed` ≥ KESICI_TUR).
+          ozet: miktarOzet, basarili: failed === 0,
+          hata: kesildi ? `Mikro yanıt vermedi (${processed}/${total} SKU soruldu)` : failed ? `${failed} SKU okunamadı` : null,
           // Okunamayan SKU İŞ HATASI DEĞİL (hakem 2026-09-25, parite): sayısı `failed`da, syncLog yukarıdaki
           // gibi success:false + 'N SKU okunamadı' (2819 AYNEN); jobs `error` null kalır — HEAD bitiş merge'i
           // (2798-2803) error'a dokunmuyordu. Dolu olsa kart '⚠ N hata · tamamlandı' yerine 'Son koşu hatası'
@@ -4172,7 +4324,32 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           isHatasi: null,
         };
       },
-    });
+    };
+  }
+
+  // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`inventory` yazma).
+  app.post('/api/mikro/import/stok-miktar', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('inventory', 'write'), async (req: Request, res: Response) => {
+    if (!(await getMikroCreds())) return res.status(503).json({ success: false, notConfigured: true });
+    if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
+    // Kısa devre ÖNCE (HEAD 2582 kuralı): iş zaten koşuyorsa ya da bakım kilidi varsa hiçbir yoklama/sorgu
+    // maliyeti ödeme. Delta hakem 2026-09-25 (bulgu 3/8): kısa devre helper'a taşınınca V17 yoklamasının
+    // ARKASINA kaymıştı — kilit doluyken yoklama koşan işe paralel Mikro'ya gidiyor, yük altında düşerse
+    // `false` 10 dk önbelleğe giriyor ve kullanıcı "Başka bir iş çalışıyor" yerine yanıltıcı 501 görüyordu.
+    // Otorite yine arkaPlanIsiBaslat (yoklama sürerken durum değişebilir); bu yalnız maliyet kısa devresi.
+    const onKontrol = await arkaPlanOnKontrol(arkaPlanDep(), { bakimKilidi: true });
+    if (onKontrol) return arkaPlanYaniti(res, onKontrol);
+    const cidStok = await C.reqCompanyId(req);
+    if (!(await stokMiktarV17Var(cidStok))) {
+      return res.status(501).json({
+        success: false,
+        error: 'Stok miktarı/maliyet çekimi GenelAmacliMaliyetListesiV2 gerektirir — bu method yalnız Mikro Jump V17+ kurulumlarında var. ' +
+               'Mikro Jump V17 güncellemesi sonrası .env\'e MIKRO_JUMP_SURUM=17 ekleyin. (Canlı yoklama da doğrulayamadı.)',
+        requiresVersion: 17, currentVersion: MIKRO_JUMP_SURUM,
+      });
+    }
+    // Kısa devre (alreadyRunning) + bakım kilidi (423) yoklamadan ÖNCE `arkaPlanOnKontrol` ile soruldu; helper aynı
+    // kararı yetkili olarak yeniden verir (yazıcı kaydıyla birlikte). İş tanımı gece adımıyla ORTAK (`stokMiktarIsi`).
+    const sonuc = await arkaPlanIsiBaslat(arkaPlanDep(), stokMiktarIsi(cidStok, C.reqActor(req)));
     return arkaPlanYaniti(res, sonuc);
   });
 
@@ -4890,14 +5067,14 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     if (iOps > 0) await iBatch.commit();
     return { iptalEdilen, iptalGeriAlinan, iptalBelirsiz, redIptal, kaynaksiz, cetpaSiparisliRed };
   }
-  const ilkBes = (l: readonly string[]) => `${l.slice(0, 5).join(', ')}${l.length > 5 ? ' …' : ''}`;
   const iptalNotlari = (r: IptalSonucu) => [
     r.iptalEdilen - r.redIptal > 0 ? `${r.iptalEdilen - r.redIptal} MF siparişi Mikro'da faturası iptal edildiği için 'İptal' yapıldı` : null,
     r.redIptal > 0 ? `${r.redIptal} MF siparişi faturasını alıcı reddettiği (GİB 2002) için 'İptal' yapıldı` : null,
     r.iptalGeriAlinan > 0 ? `${r.iptalGeriAlinan} MF siparişinin iptali geri alındı (fatura yeniden geçerli)` : null,
     r.iptalBelirsiz > 0 ? `${r.iptalBelirsiz} evrak numarasında hem geçerli hem iptal/reddedilmiş başlık var — sipariş durumuna DOKUNULMADI (faturaları yeniden çekin, GİB taramasını yeniden çalıştırın)` : null,
     r.cetpaSiparisliRed.length > 0 ? `⚠ ${r.cetpaSiparisliRed.length} reddedilen fatura Cetpa'dan kesilmiş siparişe bağlı: ${ilkBes(r.cetpaSiparisliRed)} — siparişi elle iptal edin` : null,
-    r.kaynaksiz.length > 0 ? `⚠ ${r.kaynaksiz.length} MF siparişinin kaynağı Mikro fatura listesinde yok (silinmiş olabilir): ${ilkBes(r.kaynaksiz)} — durum değiştirilmedi` : null,
+    // Üretici + açılış tanısının ayrıştırıcısı TEK modülde (mikro/faturadanSiparisNotu; şartname «Mikro bağlantı A» A8).
+    r.kaynaksiz.length > 0 ? kaynaksizNotu(r.kaynaksiz.length, r.kaynaksiz) : null,
   ].filter((x): x is string => x !== null);
 
   /** POST /api/mikro/import/faturadan-siparis — SATIŞ faturalarından Cetpa
@@ -5219,14 +5396,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     const { iptalEdilen, iptalGeriAlinan, iptalBelirsiz } = iptal;
     if (ops > 0) await batch.commit();
 
-    const kaynaksizNotu = kaynaksizBekleyen > 0
+    // (Ad `kalemKaynaksizNotu`: içe aktarılan `kaynaksizNotu` (fatura kaynağı yok) ile karışmasın; bu not KALEM kaynağı içindir.)
+    const kalemKaynaksizNotu = kaynaksizBekleyen > 0
       ? `${kaynaksizBekleyen} MF siparişinin kalemi boş/eski ama stok hareketi yok — önce "Stok Hareketleri"ni çekin` : null;
     const not = (yalnizKalem
       ? [
           yenileTutarsiz > 0 ? `${yenileTutarsiz} kalemin tutarı çözülemiyor — yenilenirse '—' görünür` : null,
           yenileMiktarsiz > 0 ? `${yenileMiktarsiz} kalemin miktarı bilinmiyor` : null,
           kalemAzalan > 0 ? `${kalemAzalan} siparişte kalem sayısı AZALIYOR — örnekleri kontrol edin` : null,
-          kaynaksizNotu,
+          kalemKaynaksizNotu,
         ]
       : [
           siparisTuretmeNotu({ turetilen: created, tutarsiz: tutarsizSiparis, yonsuz,
@@ -5251,7 +5429,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
           ...iptalNotlari(iptal),
           iptalAtlandi ? `${yonsuz} faturanın yönü okunamadığı için iptal eşlemesi ATLANDI — faturaları yeniden çekin` : null,
           kalemYenilenecek > 0 ? `${kalemYenilenecek} MF siparişinin kalemi eski biçimde ya da Mikro'daki satırlarla TUTMUYOR (eksik/değişmiş) — Entegrasyon → "MF Sipariş Kalemlerini Yenile"` : null,
-          kaynaksizNotu,
+          kalemKaynaksizNotu,
         ]).filter(Boolean).join(' · ') || null;
     if (not?.startsWith('UYARI:')) console.warn('[faturadan-siparis]', not);
     if (onizleme) {
@@ -6215,6 +6393,104 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
 // anında KİMLİKSİZ bir PII sızıntısına dönüşecekti. Kalıcı karşılığı zaten var:
 // POST /api/mikro/pull/personel (requireAuth + requireMfaVerified).
 
+/** Cari bakiye çekiminin SONUCU (şartname «Mikro bağlantı A» A3.1). `okumaHatasi` ve `bos` dallarında HİÇBİR yazım yoktur. */
+type BakiyeCekSonucu =
+  | { tur: 'okumaHatasi'; mesaj: string }
+  | { tur: 'bos'; not: string }
+  | { tur: 'tamam'; total: number; updated: number; skipped: number; unreadable: number; yabanciAtlanan: number; mikroRows: number; note?: string };
+
+/** Cari bakiye çekimi: elle uç (`POST /api/mikro/pull/bakiye`) ve gece 03:20 adımı ORTAK (şartname «Mikro bağlantı A» A3.1,
+ *  2026-11-05). Kiracı süzgeçli lead döngüsü, `okunamayanKodlar` atlaması, `cariBakiyesi`, `cariBalances` + `leads.bakiye`
+ *  yazımı ve başarı syncLog'u burada; bakım kilidi, kimlik ve adminDb kontrolleri ÇAĞIRANDA. `secenek.denetimKiracisi` yalnız
+ *  sistem aktörlü gece koşusunda verilir: syncLog satırı hedef kiracıya düşer, ayrı `'Mikro Bakiye Çekme'` denetimi YAZILMAZ. */
+async function bakiyeCekCalistir(companyId: string, actor: Aktor, secenek: { denetimKiracisi?: string } = {}): Promise<BakiyeCekSonucu> {
+    const t0 = Date.now();
+    const { ok, data } = await mikroPost('SqlVeriOkuV2', {
+      SQLSorgu:
+        'SELECT cha_kod, ' +
+        'SUM(CASE WHEN cha_tip = 0 THEN cha_meblag ELSE -cha_meblag END) AS bakiye ' +
+        // ISNULL(cha_iptal,0)=0 ZORUNLU (2026-08-22 denetim bulgusu C16):
+        // iptal edilmiş cari hareketler de toplama giriyordu — cari bakiyesi
+        // iptal edilen her fatura/tahsilat kadar yanlış çıkıyordu. Bu tablonun
+        // diğer okumaları (import/cari-hareket ekKosul, evrak_tip 63 listesi)
+        // zaten iptali dışlıyor; bu sorgu tek istisnaydı.
+        'FROM CARI_HESAP_HAREKETLERI WHERE ISNULL(cha_iptal, 0) = 0 GROUP BY cha_kod',
+    });
+    const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
+    if (!ok || !r0 || r0.IsError) {
+      // HİÇBİR ŞEY YAZMA. Sorgu başarısızsa bakiyeleri sıfırlamak, bilgi
+      // vermemekten çok daha kötü — tahsilat kararları bu rakama bakıyor.
+      const msg = (r0?.ErrorMessage as string) || 'Mikro SqlVeriOkuV2 yanıt vermedi.';
+      console.warn('[pull/bakiye] SqlVeriOkuV2 başarısız:', msg);
+      return { tur: 'okumaHatasi', mesaj: `Bakiye sorgusu çalıştırılamadı: ${msg}. Hiçbir bakiye değiştirilmedi.` };
+    }
+
+    const rows = mikroSatirlar(data);
+    if (!rows.length) return { tur: 'bos', not: 'Mikro hiç cari hareketi döndürmedi — bakiye yazılmadı.' };
+
+    // Eşleme TEK KAYNAKTA (server/mikro/eslemeCari.ts): işaret KORUNUR (eksi = CETPA
+    // borçlu, `Math.abs` yok), bilinmeyen bakiye 0 değil — haritaya hiç girmez ve sayılır.
+    // `''` artık okunamayan sayılıyor: eski `Number.isFinite(Number(''))` BOŞ hücreyi
+    // geçerli sıfır bakiye kabul ediyordu (Number('') === 0).
+    const { harita: bakiyeByKod, okunamayan: unreadable, okunamayanKodlar, okumaArizasi, not: eslemeNotu } = bakiyeHaritasi(rows);
+    // TOPLU SIFIRLAMA KAPISI: bakiye HİÇBİR satırda okunamadıysa bu veri değil OKUMA
+    // ARIZASIDIR (kolon adı/şema değişmiş). Aşağıdaki döngü haritada olmayan her cariye
+    // 0 yazar, yani TÜM bakiyeleri sıfırlardı — uyarıp devam etmek yetmez. Rotanın kendi
+    // ilkesi zaten bu: "Sorgu başarısızsa bakiyeleri sıfırlamak, bilgi vermemekten çok
+    // daha kötü — tahsilat kararları bu rakama bakıyor."
+    if (okumaArizasi.length) {
+      console.warn('[pull/bakiye] okuma arızası:', eslemeNotu);
+      return { tur: 'okumaHatasi', mesaj: `${eslemeNotu}. Hiçbir bakiye değiştirilmedi.` };
+    }
+
+    const leadsSnap = await C.getAdminDb().collection('leads').where('mikroCariKod', '!=', '').get();
+    let updated = 0, skipped = 0;
+    let batch = C.getAdminDb().batch(); let ops = 0;
+    const flush = async () => { if (ops > 0) { await batch.commit(); batch = C.getAdminDb()!.batch(); ops = 0; } };
+
+    let bakiyeYabanci = 0;
+    for (const leadDoc of leadsSnap.docs) {
+      const leadVeri = leadDoc.data() as Record<string, unknown>;
+      // KİRACI İZOLASYONU (2026-09-19): sorgu TÜM kiracıların lead'lerini döndürür; yabancı kiracının kaydına
+      // bakiye YAZILMAZ (aynı cari kodu iki firmada olabilir). Etiketsiz eski kayıt hâlâ güncellenir.
+      const dc = (leadVeri.companyId as string | undefined) || '';
+      if (dc && dc !== companyId) { bakiyeYabanci++; continue; }
+      const cariKod = String(leadVeri.mikroCariKod ?? '').trim();
+      if (!cariKod) { skipped++; continue; }
+      // Satırı GELDİ ama bakiyesi okunamadı → bu cariye HİÇ DOKUNMA. Aşağıdaki
+      // `cariBakiyesi` haritada olmayana 0 döner; o 0 yalnız "Mikro'da hiç hareketi
+      // yok" hâlinde doğrudur. İki hâl ayrılmazsa 48.000 TL borçlu bir cari tahsilat
+      // ekranında sıfır görünür (hakem bulgusu 2026-09-19). Yanıttaki `unreadable`
+      // ve `note` bunu zaten sayıyor; burada susup mevcut bakiyeyi KORUYORUZ
+      // ("bayat değer, silinmiş değerden iyidir").
+      if (okunamayanKodlar.has(cariKod)) { skipped++; continue; }
+      // Mikro'da hiç hareketi olmayan cari: SQL'de satırı yok. Bu GERÇEKTEN
+      // sıfır bakiyedir (hareket yok = borç yok), tespit edilememiş değil —
+      // sorgu başarılı döndüğü için bunu yazmak doğru. (`cariBakiyesi` tam olarak bu
+      // kararı uygular — aynı gerekçe fonksiyonun doc yorumunda da duruyor.)
+      const bakiye = cariBakiyesi(bakiyeByKod, cariKod);
+      batch.set(C.getAdminDb().collection('cariBalances').doc(cariKod), {
+        companyId, cariKod, bakiye, updatedAt: pgServerTimestamp(),
+      }, { merge: true });
+      ops++;
+      batch.set(leadDoc.ref, { bakiye }, { merge: true });
+      ops++;
+      updated++;
+      if (ops >= 400) await flush();
+    }
+    await flush();
+
+    const ozet = `${updated} cari bakiyesi güncellendi (Mikro'dan ${rows.length} satır, ${unreadable} okunamayan)`;
+    // Gece (denetimKiracisi): satır HEDEF kiracıya, denetim satırı TEK (writeSyncLog'un içindeki; AH12). Elle: bugünkü iki çağrı.
+    await C.writeSyncLog('SQL:CARI_HESAP_HAREKETLERI', 'cariBalances', ozet, true, null, null, Date.now() - t0, actor,
+      ...(secenek.denetimKiracisi ? [undefined, { denetimKiracisi: secenek.denetimKiracisi }] : []));
+    if (!secenek.denetimKiracisi) await C.writeAuditLog(actor, 'Mikro Bakiye Çekme', ozet);
+    // `eslemeNotu` burada yalnız KISMİ eksiği anlatır ("3 satırın bakiye alanı
+    // bilinmiyor") — tam okuma arızası yukarıda `okumaHatasi` ile dönmüştür.
+    return { tur: 'tamam', total: leadsSnap.size, updated, skipped, unreadable, yabanciAtlanan: bakiyeYabanci,
+             mikroRows: rows.length, ...(eslemeNotu ? { note: eslemeNotu } : {}) };
+}
+
 // Rol kapısı (2026-10-10): yalnız kimlik + MFA idi — dış rol (B2B / Bayi) ve rolsüz hesap dâhil oturum açmış herkese açıktı. Kapı = hedef koleksiyon (`cariBalances` yazma).
 app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, C.requireCollectionAccess('cariBalances', 'write'), async (req: Request, res: Response) => {
     { const kilit = await yaziciyiIstegeBagla(C.getPgPool?.(), `mikro-pull-bakiye:${Date.now().toString(36)}`, res); if (kilit) return res.status(423).json({ success: false, error: `Bakım kilidi: ${kilit.aciklama} (${kilit.baslangic}) — veri bakımı bitince tekrar deneyin.` }); }   // lead yazıcısı: bakım scripti bunun bitmesini bekler (bakimKilidi.ts)
@@ -6222,96 +6498,15 @@ app.post('/api/mikro/pull/bakiye', C.requireAuth, C.requireMfaVerified, C.requir
     if (!C.getAdminDb()) return res.status(503).json({ success: false, error: 'Firebase Admin başlatılamadı.' });
     const t0 = Date.now();
     try {
-      const { ok, data } = await mikroPost('SqlVeriOkuV2', {
-        SQLSorgu:
-          'SELECT cha_kod, ' +
-          'SUM(CASE WHEN cha_tip = 0 THEN cha_meblag ELSE -cha_meblag END) AS bakiye ' +
-          // ISNULL(cha_iptal,0)=0 ZORUNLU (2026-08-22 denetim bulgusu C16):
-          // iptal edilmiş cari hareketler de toplama giriyordu — cari bakiyesi
-          // iptal edilen her fatura/tahsilat kadar yanlış çıkıyordu. Bu tablonun
-          // diğer okumaları (import/cari-hareket ekKosul, evrak_tip 63 listesi)
-          // zaten iptali dışlıyor; bu sorgu tek istisnaydı.
-          'FROM CARI_HESAP_HAREKETLERI WHERE ISNULL(cha_iptal, 0) = 0 GROUP BY cha_kod',
-      });
-      const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
-      if (!ok || !r0 || r0.IsError) {
-        // HİÇBİR ŞEY YAZMA. Sorgu başarısızsa bakiyeleri sıfırlamak, bilgi
-        // vermemekten çok daha kötü — tahsilat kararları bu rakama bakıyor.
-        const msg = (r0?.ErrorMessage as string) || 'Mikro SqlVeriOkuV2 yanıt vermedi.';
-        console.warn('[pull/bakiye] SqlVeriOkuV2 başarısız:', msg);
-        return res.status(502).json({
-          success: false,
-          error: `Bakiye sorgusu çalıştırılamadı: ${msg}. Hiçbir bakiye değiştirilmedi.`,
-        });
+      // Gövde gece adımıyla ORTAK (`bakiyeCekCalistir`); sonuç bugünkü HTTP yanıtlarına BİREBİR çevrilir.
+      const sonuc = await bakiyeCekCalistir(await C.reqCompanyId(req), C.reqActor(req));
+      if (sonuc.tur === 'okumaHatasi') return res.status(502).json({ success: false, error: sonuc.mesaj });
+      if (sonuc.tur === 'bos') {
+        return res.json({ success: true, total: 0, updated: 0, skipped: 0, duration: Date.now() - t0, note: sonuc.not });
       }
-
-      const rows = mikroSatirlar(data);
-      if (!rows.length) {
-        return res.json({ success: true, total: 0, updated: 0, skipped: 0, duration: Date.now() - t0,
-                          note: 'Mikro hiç cari hareketi döndürmedi — bakiye yazılmadı.' });
-      }
-
-      // Eşleme TEK KAYNAKTA (server/mikro/eslemeCari.ts): işaret KORUNUR (eksi = CETPA
-      // borçlu, `Math.abs` yok), bilinmeyen bakiye 0 değil — haritaya hiç girmez ve sayılır.
-      // `''` artık okunamayan sayılıyor: eski `Number.isFinite(Number(''))` BOŞ hücreyi
-      // geçerli sıfır bakiye kabul ediyordu (Number('') === 0).
-      const { harita: bakiyeByKod, okunamayan: unreadable, okunamayanKodlar, okumaArizasi, not: eslemeNotu } = bakiyeHaritasi(rows);
-      // TOPLU SIFIRLAMA KAPISI: bakiye HİÇBİR satırda okunamadıysa bu veri değil OKUMA
-      // ARIZASIDIR (kolon adı/şema değişmiş). Aşağıdaki döngü haritada olmayan her cariye
-      // 0 yazar, yani TÜM bakiyeleri sıfırlardı — uyarıp devam etmek yetmez. Rotanın kendi
-      // ilkesi zaten bu: "Sorgu başarısızsa bakiyeleri sıfırlamak, bilgi vermemekten çok
-      // daha kötü — tahsilat kararları bu rakama bakıyor."
-      if (okumaArizasi.length) {
-        console.warn('[pull/bakiye] okuma arızası:', eslemeNotu);
-        return res.status(502).json({ success: false, error: `${eslemeNotu}. Hiçbir bakiye değiştirilmedi.` });
-      }
-
-      const companyId = await C.reqCompanyId(req);
-      const leadsSnap = await C.getAdminDb().collection('leads').where('mikroCariKod', '!=', '').get();
-      let updated = 0, skipped = 0;
-      let batch = C.getAdminDb().batch(); let ops = 0;
-      const flush = async () => { if (ops > 0) { await batch.commit(); batch = C.getAdminDb()!.batch(); ops = 0; } };
-
-      let bakiyeYabanci = 0;
-      for (const leadDoc of leadsSnap.docs) {
-        const leadVeri = leadDoc.data() as Record<string, unknown>;
-        // KİRACI İZOLASYONU (2026-09-19): sorgu TÜM kiracıların lead'lerini döndürür; yabancı kiracının kaydına
-        // bakiye YAZILMAZ (aynı cari kodu iki firmada olabilir). Etiketsiz eski kayıt hâlâ güncellenir.
-        const dc = (leadVeri.companyId as string | undefined) || '';
-        if (dc && dc !== companyId) { bakiyeYabanci++; continue; }
-        const cariKod = String(leadVeri.mikroCariKod ?? '').trim();
-        if (!cariKod) { skipped++; continue; }
-        // Satırı GELDİ ama bakiyesi okunamadı → bu cariye HİÇ DOKUNMA. Aşağıdaki
-        // `cariBakiyesi` haritada olmayana 0 döner; o 0 yalnız "Mikro'da hiç hareketi
-        // yok" hâlinde doğrudur. İki hâl ayrılmazsa 48.000 TL borçlu bir cari tahsilat
-        // ekranında sıfır görünür (hakem bulgusu 2026-09-19). Yanıttaki `unreadable`
-        // ve `note` bunu zaten sayıyor; burada susup mevcut bakiyeyi KORUYORUZ
-        // ("bayat değer, silinmiş değerden iyidir").
-        if (okunamayanKodlar.has(cariKod)) { skipped++; continue; }
-        // Mikro'da hiç hareketi olmayan cari: SQL'de satırı yok. Bu GERÇEKTEN
-        // sıfır bakiyedir (hareket yok = borç yok), tespit edilememiş değil —
-        // sorgu başarılı döndüğü için bunu yazmak doğru. (`cariBakiyesi` tam olarak bu
-        // kararı uygular — aynı gerekçe fonksiyonun doc yorumunda da duruyor.)
-        const bakiye = cariBakiyesi(bakiyeByKod, cariKod);
-        batch.set(C.getAdminDb().collection('cariBalances').doc(cariKod), {
-          companyId, cariKod, bakiye, updatedAt: pgServerTimestamp(),
-        }, { merge: true });
-        ops++;
-        batch.set(leadDoc.ref, { bakiye }, { merge: true });
-        ops++;
-        updated++;
-        if (ops >= 400) await flush();
-      }
-      await flush();
-
-      const ozet = `${updated} cari bakiyesi güncellendi (Mikro'dan ${rows.length} satır, ${unreadable} okunamayan)`;
-      await C.writeSyncLog('SQL:CARI_HESAP_HAREKETLERI', 'cariBalances', ozet, true, null, null, Date.now() - t0, C.reqActor(req));
-      await C.writeAuditLog(C.reqActor(req), 'Mikro Bakiye Çekme', ozet);
-      // `eslemeNotu` burada yalnız KISMİ eksiği anlatır ("3 satırın bakiye alanı
-      // bilinmiyor") — tam okuma arızası yukarıda 502 ile dönmüştür.
-      res.json({ success: true, total: leadsSnap.size, updated, skipped, unreadable, yabanciAtlanan: bakiyeYabanci,
-                 mikroRows: rows.length, duration: Date.now() - t0,
-                 ...(eslemeNotu ? { note: eslemeNotu } : {}) });
+      res.json({ success: true, total: sonuc.total, updated: sonuc.updated, skipped: sonuc.skipped, unreadable: sonuc.unreadable,
+                 yabanciAtlanan: sonuc.yabanciAtlanan, mikroRows: sonuc.mikroRows, duration: Date.now() - t0,
+                 ...(sonuc.note ? { note: sonuc.note } : {}) });
     } catch (err) {
       console.error('[pull/bakiye]', err);
       res.status(500).json({ success: false, error: 'Bakiye çekimi başarısız. Hiçbir bakiye değiştirilmedi.' });

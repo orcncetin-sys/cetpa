@@ -52,3 +52,15 @@ export function taramadanKiraci(belgeler: Iterable<KullaniciBelgesi>): string {
   const kiracilar = rolluKiracilar(belgeler);
   return kiracilar.length === 1 ? kiracilar[0] : '';
 }
+
+/**
+ * Mikro işlerinin hedef kiracısı — crons.ts `cronCompanyId` ve mikroRoutes.ts `sqlSenkronHedefTenant` ile AYNI kural: önce
+ * `MIKRO_CRON_COMPANY_ID`, yoksa `users` taramasında TEK rollü kiracı (yoksa / birden çoksa `''`). `SERVER_TENANT_COMPANY_ID`'e
+ * BAKMAZ (o `serverTenantId`'nin kuralıdır). Stok kodu göçünün kuru koşusu (şartname «Mikro bağlantı D» D1 / DH13) ops ucunun
+ * kiracısını ve kiracısız ayna kanıtının kullanılıp kullanılmayacağını buradan alır. İki eski kopya (crons, mikroRoutes) bu
+ * dilimde DEĞİŞMEDİ: gövdeleri bağlantı çitiyle kilitli (kiraciOrtami.test.ts); onları bu yardımcıya bağlamak ayrı iştir.
+ */
+export function cronKiracisi(ortam: NodeJS.ProcessEnv, belgeler: Iterable<KullaniciBelgesi>): string {
+  if (ortam.MIKRO_CRON_COMPANY_ID) return ortam.MIKRO_CRON_COMPANY_ID;
+  return taramadanKiraci(belgeler);
+}

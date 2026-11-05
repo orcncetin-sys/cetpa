@@ -351,11 +351,12 @@ describe('biçimleyiciler: sayı olmayan değer null (bilinmeyen ≠ 0)', () => 
     for (const b of [satis, alis, fatura, disi, tek]) expect('satirOzetiPaylasanBaslik' in b).toBe(false);
   });
 
-  it('ÇİT — fatura koşulu TEK küme: saf modülün ifadesi `mikroRoutes.ts` `FATURA_EVRAK_KOSULU` metniyle harfi harfine aynı', () => {
+  // AH10 (2026-11-05): sabit artık bu işlevden TÜRETİLİR; çit (1) türetme satırının varlığını, (2) takma adlı tam literalin
+  // dosyada YOKLUĞUNU doğrular. Bayt eşitliği lib/faturaEvrakKosulu.test.ts'te. Takma adsız tanı kopyaları bu çitin dışında.
+  it('ÇİT · fatura koşulu TEK küme: `mikroRoutes.ts` `FATURA_EVRAK_KOSULU` bu işlevden türetilir; takma adlı literal kopya YOK', () => {
     const rota = readFileSync(join(SRC_KOK, 'server/routes/mikroRoutes.ts'), 'utf8');
-    const m = /const FATURA_EVRAK_KOSULU = '([^']+)';/.exec(rota);
-    expect(m, 'mikroRoutes.ts içinde FATURA_EVRAK_KOSULU tanımı bulunamadı (çit kör kalmasın)').not.toBeNull();
-    expect(faturaKosuluIfadesi('cha_evrak_tip', 'cha_cinsi')).toBe(m?.[1]);
+    expect(rota).toContain("const FATURA_EVRAK_KOSULU = faturaKosuluIfadesi('cha_evrak_tip', 'cha_cinsi');");
+    expect(rota).not.toContain('(cha.cha_evrak_tip = 63 OR (cha.cha_evrak_tip = 0 AND cha.cha_cinsi = 6))');
   });
 
   it('(3) satır bağı MEVCUT koşulla: satış başlığı (cha_tip 0) → evrak tipi 4, alış → 3; başka evrak tipli satır gizlenmez, ayrı sayılır', () => {

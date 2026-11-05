@@ -16,6 +16,7 @@ import {
   stokEsle, fiyatEsle, stokMiktarEsle, depoSatiriCoz,
   sayacOlustur, sayacaEkle, sayacNotu, okumaArizalari, okumaArizasiNotu,
   STOK_KRITIK, FIYAT_KRITIK, STOK_MIKTAR_KRITIK, DEPO_KRITIK,
+  MIKRO_STOK_KAYNAKLARI, mikroStokKartiMi,
 } from './eslemeStok';
 
 const VERGI = new Map<number, number>([[3, 10], [4, 20]]);
@@ -307,5 +308,19 @@ describe('okuma arızası YALNIZ kritik alanlarda aranır (kalıcı yanlış ala
     for (let i = 0; i < 6; i++) sayacaEkle(s, stokEsle({ ...kart, sto_kod: `CMT-${i}` }, null, { vergiTablosu: VERGI }).bilinmeyen);
     expect(okumaArizalari(s, STOK_KRITIK)).toEqual([]);
     expect(sayacNotu(s, [])).toContain('6 satırın stok miktarı bilinmiyor');
+  });
+});
+
+// Şartname «Mikro bağlantı A» A2 (2026-11-05): saatlik senkronun açtığı kart (`mikro_cron`) stok miktarı işinde atlanıyordu.
+describe('mikroStokKartiMi · Mikro kaynaklı stok kartı yüklemi (TEK kural)', () => {
+  it("'mikro_import' ve 'mikro_cron' Mikro kartıdır; elle açılan, eksik ve tür dışı değer DEĞİLDİR", () => {
+    expect(MIKRO_STOK_KAYNAKLARI).toEqual(['mikro_import', 'mikro_cron']);
+    expect(mikroStokKartiMi('mikro_import')).toBe(true);
+    expect(mikroStokKartiMi('mikro_cron')).toBe(true);
+    expect(mikroStokKartiMi('manuel')).toBe(false);
+    expect(mikroStokKartiMi('mikro_sql')).toBe(false);     // SQL importunun hareket belgesi damgası; stok kartı değil
+    expect(mikroStokKartiMi(undefined)).toBe(false);
+    expect(mikroStokKartiMi(null)).toBe(false);
+    expect(mikroStokKartiMi('')).toBe(false);
   });
 });

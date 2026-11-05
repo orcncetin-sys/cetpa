@@ -34,7 +34,8 @@ import type { Order, Employee, Warehouse, Supplier, InventoryItem, Lead } from '
 import { faturaTipiEtiketi } from '../utils/durumEtiketi';
 import { teslimatAdresiMetni } from '../utils/siparisler/teslimatAdresi';
 import { faturaTakipFaturaVar, mikroFaturaDurumMetni } from '../utils/siparisler/faturaDurumu';
-import { zamanDate, zamanMs, gunAnahtari, gunBasi, bugunAnahtari, tarihYaz } from '../utils/zaman';
+import { zamanDate, zamanMs, gunAnahtari, gunBasi, bugunAnahtari, tarihYaz, sonGuncellemeMs } from '../utils/zaman';
+import BakiyeDamgasi from '../components/ortak/BakiyeDamgasi';
 import { cariHareketleri, cariOzet, krediLimiti, krediKullanimi, onayBekleyenler } from '../utils/muhasebe/cariEkstreOnay';
 import { butceGercekOzeti } from '../utils/muhasebe/butceGercek';
 import { butceGercekYili, kdvMutabakat, gelirButceYili, varyansAnalizi, type VaryansKalemi } from '../utils/muhasebe/butceVaryans';
@@ -131,6 +132,7 @@ interface Props {
   reconMonth: string;
   setReconMonth: React.Dispatch<React.SetStateAction<string>>;
 
+  /** `balance` bilinmiyorsa NaN (raporVeriKatmani.bankaHesabiOku; Mikro'dan açılan yeni hesap `null` yazar → NaN), 0 DEĞİL. */
   p547BankAccounts: Array<{ id: string; bankName: string; accountType: string; balance: number; currency: string }>;
   setP547BankAccounts: React.Dispatch<React.SetStateAction<Array<{ id: string; bankName: string; accountType: string; balance: number; currency: string }>>>;
   p547FixedAssets: Array<{ id: string; name: string; cost: number; depreciation: number }>;
@@ -298,11 +300,14 @@ export default function MuhasebePage(props: Props) {
   // gelmeden ve hata dalında ar/ap 0 — yani "yüklenmedi" ile "gerçekten 0" ayırt edilmiyor; null
   // başlatmak 6 başka paneli de değiştirdiğinden ayrı tura bırakıldı.
   const [cariBalanceToplam, setCariBalanceToplam] = useState<ReturnType<typeof cariBakiyeToplamlari>>({ ar: 0, ap: 0, bilinen: 0, bilinmeyen: 0 });
+  // «son bakiye çekimi» damgası (şartname «Mikro bağlantı A» A3.4): belgelerin en büyük `updatedAt`'i; belge yoksa / hata → null.
+  const [cariBakiyeSonMs, setCariBakiyeSonMs] = useState<number | null>(null);
   useEffect(() => {
     if (!userRole) return;
     const unsub = onSnapshot(collection(db, 'cariBalances'), (snap: { docs: Array<{ id: string; data: () => Record<string, unknown> }> }) => {
       setCariBalanceToplam(cariBakiyeToplamlari(snap.docs.map(d => d.data().bakiye)));
-    }, () => setCariBalanceToplam({ ar: 0, ap: 0, bilinen: 0, bilinmeyen: 0 }));
+      setCariBakiyeSonMs(sonGuncellemeMs(snap.docs.map(d => d.data().updatedAt)));
+    }, () => { setCariBalanceToplam({ ar: 0, ap: 0, bilinen: 0, bilinmeyen: 0 }); setCariBakiyeSonMs(null); });
     return () => unsub();
   }, [userRole]);
 
@@ -1207,6 +1212,9 @@ export default function MuhasebePage(props: Props) {
                         const dotCfg = { good: 'bg-emerald-400', warn: 'bg-amber-400', bad: 'bg-red-500', neutral: 'bg-gray-300' };
 
                         return (
+                          <>
+                          {/* AR / AP Mikro cari bakiyelerinden: bakiyenin yaşı görünsün (A3.4). */}
+                          <BakiyeDamgasi sonMs={cariBakiyeSonMs} dil={currentLanguage === 'tr' ? 'tr' : 'en'} />
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             {ratios.map(r => (
                               <div key={r.label} className={`border rounded-2xl p-5 ${statusCfg[r.status]}`}>
@@ -1223,6 +1231,7 @@ export default function MuhasebePage(props: Props) {
                               </div>
                             ))}
                           </div>
+                          </>
                         );
                       })()}
                     </motion.div>
@@ -1598,7 +1607,7 @@ export default function MuhasebePage(props: Props) {
                       { group: oc(tr547).donen_varliklar, items: [
                         { label: mc(tr547).kasa_2,          v: ekranTutari(kasaT547),  bilinmeyen: kasaT547.bilinmeyen + kasaT547.kurYok },
                         { label: mc(tr547).bankalar,      v: ekranTutari(bankaT547), bilinmeyen: bankaT547.bilinmeyen + bankaT547.kurYok },
-                        { label: mc(tr547).ticari_alacaklar,   v: ekranTutari(arT547),    bilinmeyen: arT547.bilinmeyen },
+                        { label: mc(tr547).ticari_alacaklar,   v: ekranTutari(arT547),    bilinmeyen: arT547.bilinmeyen, bakiyeDamgasi: true },
                         { label: mc(tr547).stoklar,         v: ekranTutari(stokT547),  bilinmeyen: stokT547.bilinmeyen },
                       ]},
                       { group: mc(tr547).duran_varliklar, items: [
@@ -1607,7 +1616,7 @@ export default function MuhasebePage(props: Props) {
                     ];
                     const pasifRows = [
                       { group: oc(tr547).kisa_vadeli_yukumlulukler, items: [
-                        { label: oc(tr547).ticari_borclar, v: ekranTutari(apT547), bilinmeyen: apT547.bilinmeyen },
+                        { label: oc(tr547).ticari_borclar, v: ekranTutari(apT547), bilinmeyen: apT547.bilinmeyen, bakiyeDamgasi: true },
                         { label: mc(tr547).kdv_borcu,         v: ekranTutari(kdvT547), bilinmeyen: kdvT547.bilinmeyen },
                       ]},
                       { group: oc(tr547).ozkaynaklar, items: [
@@ -1670,9 +1679,13 @@ export default function MuhasebePage(props: Props) {
                               <div key={grp.group} className="mb-3">
                                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">{grp.group}</p>
                                 {grp.items.map(it => (
-                                  <div key={it.label} className="flex justify-between py-1 border-b border-gray-50 text-sm">
-                                    <span className="text-gray-600">{it.label}</span>
-                                    <span className="font-semibold text-gray-900 tabular-nums" title={it.bilinmeyen > 0 ? satirNotu547(it.bilinmeyen) : undefined}>{fB(it.v)}{it.bilinmeyen > 0 && <span className="text-amber-600" aria-hidden="true">*</span>}</span>
+                                  <div key={it.label} className="py-1 border-b border-gray-50 text-sm">
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">{it.label}</span>
+                                      <span className="font-semibold text-gray-900 tabular-nums" title={it.bilinmeyen > 0 ? satirNotu547(it.bilinmeyen) : undefined}>{fB(it.v)}{it.bilinmeyen > 0 && <span className="text-amber-600" aria-hidden="true">*</span>}</span>
+                                    </div>
+                                    {/* Ticari alacak / borç Mikro cari bakiyesini taşır: bakiyenin yaşı satırın altında (A3.4). */}
+                                    {'bakiyeDamgasi' in it && it.bakiyeDamgasi && <BakiyeDamgasi sonMs={cariBakiyeSonMs} dil={tr547 ? 'tr' : 'en'} />}
                                   </div>
                                 ))}
                               </div>
@@ -1689,9 +1702,13 @@ export default function MuhasebePage(props: Props) {
                               <div key={grp.group} className="mb-3">
                                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">{grp.group}</p>
                                 {grp.items.map(it => (
-                                  <div key={it.label} className="flex justify-between py-1 border-b border-gray-50 text-sm">
-                                    <span className="text-gray-600">{it.label}</span>
-                                    <span className="font-semibold text-gray-900 tabular-nums" title={it.bilinmeyen > 0 ? satirNotu547(it.bilinmeyen) : undefined}>{fB(it.v)}{it.bilinmeyen > 0 && <span className="text-amber-600" aria-hidden="true">*</span>}</span>
+                                  <div key={it.label} className="py-1 border-b border-gray-50 text-sm">
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-600">{it.label}</span>
+                                      <span className="font-semibold text-gray-900 tabular-nums" title={it.bilinmeyen > 0 ? satirNotu547(it.bilinmeyen) : undefined}>{fB(it.v)}{it.bilinmeyen > 0 && <span className="text-amber-600" aria-hidden="true">*</span>}</span>
+                                    </div>
+                                    {/* Ticari alacak / borç Mikro cari bakiyesini taşır: bakiyenin yaşı satırın altında (A3.4). */}
+                                    {'bakiyeDamgasi' in it && it.bakiyeDamgasi && <BakiyeDamgasi sonMs={cariBakiyeSonMs} dil={tr547 ? 'tr' : 'en'} />}
                                   </div>
                                 ))}
                               </div>

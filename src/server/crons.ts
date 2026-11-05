@@ -4,10 +4,11 @@
  * server.ts'ten AYRILDI (2026-08-24) - D4 teknik borcunun 4. parcasi.
  * Onceki parcalar: opsWatchdog.ts, mikroClient.ts, mikroMirror.ts.
  *
- * NE ICERIR (3 cron):
+ * NE ICERIR (2 cron):
  *   0 * * * *   saatlik Mikro senkronu (stok + cari)
- *   0 4 * * *   gece stok miktar senkronu
  *   0 8 * * 1   haftalik ozet e-postasi (pazartesi)
+ * Gece stok miktarı / maliyet işi buradan ÇIKTI (şartname «Mikro bağlantı A» A1 / AH1, 2026-11-05): 03:20 Mikro bloğunun SON
+ * adımıdır (routes/mikroRoutes.ts). Eski 04:00 kaydı `MIKRO_JUMP_SURUM < 17` bayrağıyla ilk satırda dönüyordu (canlıda 16).
  *
  * NEDEN AYRI DOSYA: bunlar istek yolunda DEGIL, kendi takvimlerinde kosan
  * bagimsiz isler. server.ts icinde dururken rota tanimlariyla ic ice geciyor
@@ -21,9 +22,8 @@
 import { resendGonderici } from './eposta.js';
 import type { AdminDbLike, AdminDocRef, DocDaralt } from './adminDbTypes.js';
 import { zamanla, IS_SAAT_DILIMI } from './zamanla.js';
-import { getMikroCreds, mikroPost, mikroData, mikroBugun, mikroStokMiktari,
-         mikroSatisFiyatlari, mikroVergiOranlari, vergiOraniCoz,
-         MIKRO_JUMP_SURUM } from './mikroClient.js';
+import { getMikroCreds, mikroPost, mikroData, mikroStokMiktari,
+         mikroSatisFiyatlari, mikroVergiOranlari, vergiOraniCoz } from './mikroClient.js';
 import { mirrorMikroStoklar, mirrorMikroCariler } from './mikroMirror.js';
 // Cari eşlemesi TEK KAYNAK (saf + testli). 2026-09-19 delta bulgusu: bu dosya
 // eşlemenin KENDİ kopyasını taşıyordu (`email: (c.cari_EMail as string) || ''`,
@@ -37,8 +37,10 @@ import { isimAnahtari, firmaAnahtari } from '../lib/isimAnahtari.js';
 // Sipariş tutarı TEK KAYNAK: bilinmeyen tutar 0 SAYILMAZ, ayrıca sayılır.
 import { toplaBilinen, donemKarsilastir } from '../utils/para.js';
 import { siparisTutari, siparisIptalMi } from '../utils/siparis.js';
-import { bakimKilidiVar, yaziciOlarakCalistir, type SqlCalistirici } from './bakimKilidi.js';
+import { aktifYazicilar, bakimKilidiVar, yaziciOlarakCalistir, type SqlCalistirici } from './bakimKilidi.js';
 import { rolluKiracilar } from './kiraciOrtami.js';
+// Süreç-geneli arka plan işi (saf modül; mikroRoutes'u İÇE AKTARMAZ, döngü yok): saatlik senkron, koşan işle aynı belgelere yazmasın.
+import { arkaPlanIsiKosan } from './mikro/arkaPlanIsi.js';
 
 
 export interface CronDeps {
@@ -80,7 +82,7 @@ function kur(): void {
 // ── Mikro periodic sync (cron) ───────────────────────────────────────────────
 // Saatte bir: TÜM cari + stok kartlarını sayfalı çeker, UPSERT eder (yeni
 // kayıt ekler, mevcutları günceller, tedarikçi tipini işler) ve mikro_*
-// aynasına yazar. Gece 04:00: V17+ kurulumlarda stok miktar/maliyet senkronu.
+// aynasına yazar. Stok miktar/maliyet senkronu 03:20 Mikro bloğunun son adımıdır (mikroRoutes.ts).
 if (process.env.MIKRO_CRON_SYNC === 'true') {
   /**
    * Mikro cron'un yazacağı hedef tenant. Mikro creds deployment-global olduğundan
@@ -121,6 +123,12 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
   };
 
   zamanla('0 * * * *', async () => {
+    // ARKA PLAN İŞİ KAPISI (şartname «Mikro bağlantı A» AH1, 2026-11-05): koşan arka plan işi (gece stok miktarı adımı ya da gün
+    // içinde elle başlatılan import) varken bu saat ATLANIR, sonraki saat yeniden dener. pgShim `set(merge)` / `update` kilitsiz
+    // SELECT + bütün belge yazımıdır: aynı `inventory` / `leads` belgesine eşzamanlı iki yazıcıdan biri alan kaybeder. Ters yön
+    // (gece stok adımı saatlik senkron koşarken atlar) mikroRoutes.ts'te `'mikro-cron'` yazıcı kaydına bakar.
+    const kosanIs = arkaPlanIsiKosan();
+    if (kosanIs !== null) { console.warn(`[cron] arka plan işi koşuyor (${kosanIs}) — Mikro senkronu bu saat atlandı`); return; }
     // Yazıcı kaydı (2026-09-11): bakım scripti kilidi koyduktan sonra bu koşunun BİTMESİNİ bekler —
     // yalnız başlangıçta kilide bakmak yetmiyordu (T0 ref'leriyle silinen kopya diriliyordu).
     const yaziciSonucu = await yaziciOlarakCalistir(deps().getPgPool?.() ?? null, 'mikro-cron', async () => {
@@ -128,6 +136,18 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
     // kaydı pgShim UPSERT'iyle DİRİLTİR (inceleme). Kilit varken bu koşu atlanır, bir sonraki saatte tekrar denenir.
     const kilit = await bakimKilidiVar(deps().getPgPool?.() ?? null);
     if (kilit) { console.warn(`[cron] bakım kilidi var (${kilit.aciklama}, ${kilit.baslangic}) — Mikro senkronu bu saat atlandı`); return; }
+    // ÖNCE KAYDOL, SONRA BAK (inceleme MBA1 #2, 2026-11-05): baştaki kapı ile yazıcı kaydı arasında gece stok işi başlamış
+    // olabilir; kayıttan sonra yeniden bakılır. Gece tarafı da başlatmadan hemen önce bu kayda bakar (mikroRoutes.ts).
+    const kosanSonra = arkaPlanIsiKosan();
+    if (kosanSonra !== null) { console.warn(`[cron] arka plan işi koşuyor (${kosanSonra}) · Mikro senkronu bu saat atlandı`); return; }
+    // Gece cari bakiye adımı arka plan işi DEĞİLDİR (`arkaPlanIsiKosan` görmez); aynı `leads` belgelerine yazar. Kaydı
+    // (`'mikro-cron:pull-bakiye'`) varsa bu saat atlanır. Gece tarafı da kendi kaydından sonra `'mikro-cron'` kaydına bakar
+    // (mikroRoutes.ts `saatlikKosuyor`; inceleme MBS #1, 2026-11-05). Havuz yoksa kayıt mekanizması da yok.
+    const havuzS = deps().getPgPool?.() ?? null;
+    if (havuzS && (await aktifYazicilar(havuzS, Date.now())).some(y => y.ad === 'mikro-cron:pull-bakiye')) {
+      console.warn('[cron] gece cari bakiye adımı koşuyor · Mikro senkronu bu saat atlandı');
+      return;
+    }
     const cronCreds = await getMikroCreds();
     const db = deps().getAdminDb();
     if (!cronCreds || !db) return;
@@ -328,62 +348,7 @@ if (process.env.MIKRO_CRON_SYNC === 'true') {
     if ('kilit' in yaziciSonucu) console.warn(`[cron] bakım kilidi (${yaziciSonucu.kilit.aciklama}, ${yaziciSonucu.kilit.baslangic}) — Mikro senkronu bu saat atlandı`);
   });
 
-  // ── Gece 04:00: stok miktar + maliyet senkronu (yalnız V17+) ──────────────
-  zamanla('0 4 * * *', async () => {
-    if (MIKRO_JUMP_SURUM < 17) return; // GenelAmacliMaliyetListesiV2 V16'da yok
-    const cronCreds = await getMikroCreds();
-    const db = deps().getAdminDb();
-    if (!cronCreds || !db) return;
-    console.log('Mikro cron: gece stok miktar senkronu başlatıldı (V17)');
-    try {
-      // Kiracı ÇÖZÜLÜYOR: bu cron eskiden tüm kiracıların envanterini okuyup
-      // hepsinin stok/maliyetini cron kiracısının Mikro'suyla eziyordu.
-      const companyId = await cronCompanyId();
-      if (!companyId) { console.warn('Mikro gece cron: hedef tenant belirsiz, atlandı.'); return; }
-      const invSnap = await deps().tenantSnap('inventory', companyId);
-      const items = invSnap.docs
-        .map(d => ({ ref: d.ref, sku: ((d.data().sku as string) || '').trim() }))
-        .filter(x => x.sku);
-      const sonTarih = mikroBugun();
-      let updated = 0;
-      let batch = db.batch(); let ops = 0;
-      const flush = async () => { if (ops > 0) { await batch.commit(); batch = db.batch(); ops = 0; } };
-      for (let i = 0; i < items.length; i += 8) {
-        const results = await Promise.all(items.slice(i, i + 8).map(async (it) => {
-          try {
-            const { ok, data } = await mikroPost('GenelAmacliMaliyetListesiV2', {
-              StokKod: it.sku, IlkTarih: '2000-01-01', SonTarih: sonTarih, Depolar: '1,2,3,4,5',
-            });
-            const r0 = ((data as Record<string, unknown>)?.result as Record<string, unknown>[])?.[0];
-            if (!ok || !r0 || r0.IsError) return null;
-            const d = (r0.Data ?? {}) as Record<string, unknown>;
-            // Alan hiç yoksa "0 stok" DEĞİL, "yanıt okunamadı" demektir — 0 yazıp
-            // başarılı saymak gerçek stoğu siler. Başarısıza düşür.
-            if (d.EldekiMiktar == null) return null;
-            const qty = Number(d.EldekiMiktar);
-            if (!Number.isFinite(qty)) return null;
-            const totalCost = Number(d.MaliyetBedeli ?? 0);
-            return { it, qty, cost: qty > 0 ? totalCost / qty : null };
-          } catch { return null; }
-        }));
-        for (const r of results) {
-          if (!r) continue;
-          batch.update(r.it.ref, {
-            stockLevel: r.qty,
-            ...(r.cost !== null ? { costPrice: Math.round(r.cost * 100) / 100 } : {}),
-            mikroSyncedAt: deps().pgServerTimestamp(),
-          });
-          updated++;
-          if (++ops >= 400) await flush();
-        }
-      }
-      await flush();
-      console.log(`Mikro gece senkronu tamamlandı — ${updated} ürün miktarı güncellendi`);
-    } catch (err) {
-      console.error('Mikro gece senkron hatası:', err);
-    }
-  });
-  console.log('Mikro cron sync aktif (saatlik kart senkronu + 04:00 miktar senkronu) ✓');
+  console.log('Mikro cron sync aktif (saatlik kart senkronu) ✓');
 }
 
 // ── Weekly email report cron ────────────────────────────────────────────────

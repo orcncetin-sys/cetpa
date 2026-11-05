@@ -110,6 +110,20 @@ export function zamanMs(v: unknown): number | null {
   return null;
 }
 
+/**
+ * En son zaman damgası (epoch ms): «son bakiye çekimi» gibi damgalar için TEK yardımcı (şartname «Mikro bağlantı A» A3.4,
+ * 2026-11-05). Okunamayan değer ATLANIR; hiçbiri okunamıyorsa / liste boşsa `null` (uydurma tarih yok, «şimdi» de değil).
+ * Kullananlar: `server/routes/reportsRoutes.ts` (Alacak Toplam `guncellemeMs`); ekran damgaları 2. turda aynı yardımcıyla.
+ */
+export function sonGuncellemeMs(degerler: readonly unknown[]): number | null {
+  let son: number | null = null;
+  for (const v of degerler) {
+    const ms = zamanMs(v);
+    if (ms !== null && (son === null || ms > son)) son = ms;
+  }
+  return son;
+}
+
 /** `zamanMs`'in Date karşılığı. Çözemezse `null`. */
 export function zamanDate(v: unknown): Date | null {
   const ms = zamanMs(v);

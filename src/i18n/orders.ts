@@ -239,6 +239,7 @@ export const ORDERS = {
     siparis_kargoda_e_irsaliye_icin_siparis_detayind: 'Sipariş kargoda — e-İrsaliye için sipariş detayındaki düğmeyi kullanın.',
     e_irsaliye_kesme_yetkiniz_yok_yonetici_lojistik_: 'e-İrsaliye kesme yetkiniz yok (Yönetici / Lojistik rolü gerekir).',
     mikro_siparisi_durumu_mikro_da_izlenir: 'Mikro siparişi — durumu Mikro\'da izlenir',
+    mikro_dan_siparis_fisi_gelmedi: 'Mikro\'dan sipariş fişi gelmedi. Mikro faturalarından türeyen siparişler «Cetpa Siparişleri» sekmesinde. Senkron durumu: Ayarlar › Entegrasyonlar › Mikro › Senkronizasyon Geçmişi (SQL:SIPARISLER).',
   },
   en: {
     bu_siparis_iptal_edilmistir: 'This order has been cancelled.',
@@ -474,6 +475,7 @@ export const ORDERS = {
     siparis_kargoda_e_irsaliye_icin_siparis_detayind: 'Order shipped — use the e-waybill button in the order detail.',
     e_irsaliye_kesme_yetkiniz_yok_yonetici_lojistik_: 'You are not allowed to issue e-waybills (Admin / Logistics role required).',
     mikro_siparisi_durumu_mikro_da_izlenir: 'Mikro order — status is tracked in Mikro',
+    mikro_dan_siparis_fisi_gelmedi: 'No order slips came from Mikro. Orders derived from Mikro invoices are in the «Cetpa Orders» tab. Sync status: Settings › Integrations › Mikro › Sync History (SQL:SIPARISLER).',
   },
 } as const;
 

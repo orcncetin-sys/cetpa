@@ -99,6 +99,11 @@ export interface ArkaPlanIsi {
   senkronKaydi: { operation: string; entityType: string; kendiYazar?: boolean; denetimEtiketi?: string };
   /** undefined → bakım kilidi/yazıcı kaydı YOK. Verilirse kayıt iş BİTENE KADAR durur (dosya başlığı). */
   yaziciAdi?: string;
+  /** Sistem aktörlü gece koşusunun HEDEF kiracısı (şartname «Mikro bağlantı A» A1.5, 2026-11-05; 03:20 «faturadan sipariş»
+   *  kuralı). `uid:'system'` kullanıcısının belgesi yok: verilmezse bitiş syncLog'unun içindeki denetim satırı `companyId:'system'`
+   *  olur ve kiracının Denetim Kaydı'nda görünmez. Verilirse `writeSyncLog`'un 10. argümanına `{ denetimKiracisi }` geçer ve
+   *  `denetimEtiketi`'nin AYRI denetim satırı yazılmaz (gecede denetim satırı TEK: writeSyncLog'un içindeki). Elle uç vermez. */
+  denetimKiracisi?: string;
   calistir: (ilerle: (alanlar: IsIlerleme) => Promise<void>) => Promise<IsOzeti>;
 }
 
@@ -158,7 +163,10 @@ export function arkaPlanIsiBekle(isAdi: string): Promise<void> {
 
 export async function arkaPlanIsiBaslat(dep: ArkaPlanBagimlilik, is: ArkaPlanIsi): Promise<BaslatSonucu> {
   const simdi = dep.simdi ?? (() => Date.now());
-  const { isAdi, companyId, actor, senkronKaydi, yaziciAdi } = is;
+  const { isAdi, companyId, actor, senkronKaydi, yaziciAdi, denetimKiracisi } = is;
+  /** writeSyncLog'un 9. / 10. argümanı (ayrinti, secenek): yalnız `denetimKiracisi` verildiğinde eklenir: elle uçların
+   *  çağrı şekli BAYT BAYT aynı kalır (8 argüman; mevcut `toHaveBeenCalledWith` iddiaları). */
+  const kiraciEki: unknown[] = denetimKiracisi ? [undefined, { denetimKiracisi }] : [];
 
   // 1) Kısa devre ÖNCE (stok-miktar 2582 kuralı): bu yardımcı içinde hiçbir sorgu maliyeti ödenmez. Rotanın
   //    KENDİ pahalı adımı varsa (stok-miktar V17 yoklaması) onu `arkaPlanOnKontrol` ile ÖNCE sorar.
@@ -238,11 +246,12 @@ export async function arkaPlanIsiBaslat(dep: ArkaPlanBagimlilik, is: ArkaPlanIsi
         const ozet = sonuc.ozet;
         // kendiYazar: SQL import gövdesi (mikroSqlImportCalistir) syncLog'u zaten yazıyor — çift satır YASAK.
         if (!senkronKaydi.kendiYazar) {
-          await defter('syncLog', () => dep.writeSyncLog(senkronKaydi.operation, senkronKaydi.entityType, ozet.ozet, ozet.basarili, null, ozet.hata, durationMs, actor));
+          await defter('syncLog', () => dep.writeSyncLog(senkronKaydi.operation, senkronKaydi.entityType, ozet.ozet, ozet.basarili, null, ozet.hata, durationMs, actor, ...kiraciEki));
         }
         // 2820 paritesi: writeSyncLog aktörlüyken zaten audit yazıyor (server.ts); stok-miktar ayrıca
-        // etiketli bir kayıt daha atıyordu — çift kayıt BUGÜN de var, parite.
-        if (senkronKaydi.denetimEtiketi) {
+        // etiketli bir kayıt daha atıyordu — çift kayıt BUGÜN de var, parite. Gece koşusunda (denetimKiracisi) YAZILMAZ:
+        // sistem aktörünün ayrı satırı `'system'` kiracısına düşerdi; tek denetim satırı writeSyncLog'un içindekidir.
+        if (senkronKaydi.denetimEtiketi && !denetimKiracisi) {
           const etiket = senkronKaydi.denetimEtiketi;
           await defter('denetim kaydı', () => dep.writeAuditLog(actor, etiket, ozet.ozet));
         }
@@ -267,7 +276,7 @@ export async function arkaPlanIsiBaslat(dep: ArkaPlanBagimlilik, is: ArkaPlanIsi
         const msg = mesaj(sonuc.hata);
         console.error(`[arkaPlanIsi ${isAdi}] iş hatası:`, sonuc.hata);
         // HER ZAMAN (890/1020 paritesi; stok-miktar için yeni): geçmiş ekranı başarısız koşuyu görsün.
-        await defter('syncLog', () => dep.writeSyncLog(senkronKaydi.operation, senkronKaydi.entityType, 'bulk', false, null, msg, durationMs, actor));
+        await defter('syncLog', () => dep.writeSyncLog(senkronKaydi.operation, senkronKaydi.entityType, 'bulk', false, null, msg, durationMs, actor, ...kiraciEki));
         bitisYaz = async () => {
           await defter('hata dokümanı', () => jobRef.set({ running: false, error: msg, finishedAt: pgServerTimestamp() }, { merge: true }));
         };

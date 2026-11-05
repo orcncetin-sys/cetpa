@@ -104,19 +104,23 @@ describe('03:20 gece işi — faturadan sipariş adımı (G3)', () => {
     const denetimler = vi.mocked(d.C.writeAuditLog).mock.calls.map(c => String(c[1]));
     expect(denetimler.filter(a => /Faturadan Sipariş|faturadan-siparis/.test(a))).toEqual([]);
     expect(denetimler).toHaveLength(13);
-    // Adım işin SONUNDADIR.
-    expect(islemler(d).at(-1)).toBe('faturadan-siparis');
+    // Adım stok miktarı adımından (şartname «Mikro bağlantı A» AH1, 2026-11-05: gecenin SON adımı) hemen ÖNCEDİR.
+    expect(islemler(d).slice(-2)).toEqual(['faturadan-siparis', 'GenelAmacliMaliyetListesiV2']);
   });
 
-  it('SIRA: fatura aynası < stok hareketleri < GİB taraması < faturadan-siparis (syncLog çağrı sırası; adım en sonda, 15 satır)', async () => {
+  it('SIRA: fatura aynası < stok hareketleri < cari bakiye < GİB taraması < faturadan-siparis < stok miktarı (syncLog çağrı sırası; 17 satır)', async () => {
     const { d } = await kostur({ belgeler: { mikroFaturalar: [BASLIK] } });
     const ad = islemler(d);
     const ilk = (islem: string) => ad.indexOf(islem);
-    const sira = [ilk('SQL:CARI_HESAP_HAREKETLERI cha'), ilk('SQL:STOK_HAREKETLERI'), ilk('EBelgeDurumSorgulamaV2'), ilk('faturadan-siparis')];
+    // Bakiye satırının işlem adı cari hareket importuyla AYNI (`SQL:CARI_HESAP_HAREKETLERI`); hedefiyle (`cariBalances`) ayrılır.
+    const bakiye = d.syncLog.mock.calls.findIndex(c => c[0] === 'SQL:CARI_HESAP_HAREKETLERI' && c[1] === 'cariBalances');
+    const sira = [ilk('SQL:CARI_HESAP_HAREKETLERI cha'), ilk('SQL:STOK_HAREKETLERI'), bakiye, ilk('EBelgeDurumSorgulamaV2'), ilk('faturadan-siparis'),
+      ilk('GenelAmacliMaliyetListesiV2')];
     expect(sira.every(i => i >= 0), ad.join(' → ')).toBe(true);
     expect([...sira].sort((a, b) => a - b)).toEqual(sira);
-    expect(new Set(sira).size).toBe(4);
-    expect(ad).toHaveLength(15);                                   // 13 SQL tanımı + GİB + faturadan-siparis (G4: 14 → 15)
+    expect(new Set(sira).size).toBe(6);
+    // 13 SQL tanımı + bakiye + GİB + faturadan-siparis + stok miktarı (G4: 14 → 15; «Mikro bağlantı A»: 15 → 17).
+    expect(ad).toHaveLength(17);
     expect(ad.filter(x => x === 'faturadan-siparis')).toHaveLength(1);
   });
 
@@ -173,15 +177,15 @@ describe('gece adımının syncLog sözleşmesi — dört sonucun her biri TAM B
     expect(d.koleksiyon('orders')).toEqual([]);
   });
 
-  it('istisna → false, hata metni; öteki 14 iş etkilenmez (hepsi günlükte, adım yine EN SONDA tek satır)', async () => {
+  it('istisna → false, hata metni; öteki 16 iş etkilenmez (hepsi günlükte, adım yine stok miktarından hemen önce tek satır)', async () => {
     const { d } = await kostur({ belgeler: { mikroFaturalar: [BASLIK], orders: () => { throw new Error('orders okunamadı'); } } });
     const satirlar = geceSatirlari(d);
     expect(satirlar).toHaveLength(1);
     expect(satirlar[0].slice(3, 6)).toEqual([false, null, 'orders okunamadı']);
     const ad = islemler(d);
-    expect(ad).toHaveLength(15);
-    expect(ad.at(-1)).toBe('faturadan-siparis');
-    expect(ad.filter(x => x.startsWith('SQL:'))).toHaveLength(13);
+    expect(ad).toHaveLength(17);
+    expect(ad.slice(-2)).toEqual(['faturadan-siparis', 'GenelAmacliMaliyetListesiV2']);
+    expect(ad.filter(x => x.startsWith('SQL:'))).toHaveLength(14);     // 13 tanım + cari bakiye (`SQL:CARI_HESAP_HAREKETLERI` / cariBalances)
     expect(ad).toContain('EBelgeDurumSorgulamaV2');
   });
 });

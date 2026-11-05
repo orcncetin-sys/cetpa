@@ -64,6 +64,13 @@ describe('dovizBakiyeleri — birim bazlı bakiye toplamı', () => {
     expect(paraYaz(ekranTutari(b.TRY))).toBe('—');
   });
 
+  // Şartname «Mikro bağlantı A» A5 (2026-11-05): Mikro banka importu yeni hesabı `balance: null` ile açar (eski: her gece 0).
+  it('Mikro\'nun açtığı yeni hesap (`balance: null`): bilinen yok, bilinmeyen 1; hesap satırı `paraYaz(null)` → «—»', () => {
+    expect(dovizBakiyeleri([{ currency: 'TRY', balance: null }]).TRY).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 1 });
+    expect(paraYaz(null)).toBe('—');
+    expect(paraYaz(null, { birim: 'USD' })).toBe('—');
+  });
+
   it('boş liste GERÇEK 0 (hareketsiz), bilinmeyen değil', () => {
     const b = dovizBakiyeleri([]);
     for (const k of ['TRY', 'USD', 'EUR'] as const) {

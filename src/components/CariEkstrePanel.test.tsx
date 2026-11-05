@@ -163,3 +163,48 @@ describe('CariEkstrePanel — fatura detayına belge no geçirir', () => {
     expect((await pencereSatiri('Tarih')).textContent).toBe('Tarih—');
   });
 });
+
+// ── Şartname «Mikro bağlantı A» A6 / AH15 (2026-11-05): alış faturası (evrak tipi 0 + cinsi 6) «Hareket (tip 0)» basılıyor ve
+// detayını açmıyordu (canlı 336 satır). Kural tek kaynaktan (lib/faturaEvrakKosulu); cinsi 8 ve evrak tipi 1 DEĞİŞMEZ.
+describe('CariEkstrePanel · alış faturası etiketi ve detayı (A6)', () => {
+  const ALIS = { cha_evrak_tip: 0, cha_cinsi: 6, cha_tip: 1, cha_meblag: 1200, cha_tarihi: '2026-10-01', cha_evrakno_seri: '', cha_evrakno_sira: 77, id: 'a77' };
+  const yanitla = (satir: Record<string, unknown>) =>
+    authFetch.mockImplementation((url: string) => Promise.resolve({ ok: true, json: () => Promise.resolve(
+      url === '/api/mikro/fatura/kalemler' ? { success: true, kalemler: [] } : { success: true, satirlar: [satir] }) }));
+  const kalemCagrilari = () => authFetch.mock.calls.filter(c => c[0] === '/api/mikro/fatura/kalemler');
+
+  it("evrak tipi 0 + cinsi 6 + cha_tip 1 → «Alış Faturası · Alacak», tıklanır; detay `yon: 'gelen'` ile açılır (AH15)", async () => {
+    yanitla(ALIS);
+    render(<CariEkstrePanel cariKod="320.02" currentLanguage="tr" />);
+    expect(await screen.findByText('Alış Faturası · Alacak')).toBeInTheDocument();
+    fireEvent.click(await screen.findByTitle('Fatura detayını görüntüle'));
+    await screen.findByText(/stok satırı yok/);
+    const govde = JSON.parse(String((kalemCagrilari()[0]?.[1] as { body?: string } | undefined)?.body));
+    expect(govde).toEqual({ seri: '', sira: '77', yon: 'gelen' });
+  });
+
+  it('evrak tipi 0 + cinsi 8 → «Hareket (tip 0)» kalır; başlık yok, tıklama detay AÇMAZ', async () => {
+    yanitla({ ...ALIS, cha_cinsi: 8 });
+    render(<CariEkstrePanel cariKod="320.02" currentLanguage="tr" />);
+    const hucre = await screen.findByText('Hareket (tip 0) · Alacak');
+    expect(screen.queryByTitle('Fatura detayını görüntüle')).toBeNull();
+    fireEvent.click(hucre);
+    expect(kalemCagrilari()).toEqual([]);
+  });
+
+  it('evrak tipi 1 → «Hareket (tip 1)»; detay yok', async () => {
+    yanitla({ ...ALIS, cha_evrak_tip: 1 });
+    render(<CariEkstrePanel cariKod="320.02" currentLanguage="tr" />);
+    expect(await screen.findByText('Hareket (tip 1) · Alacak')).toBeInTheDocument();
+    expect(screen.queryByTitle('Fatura detayını görüntüle')).toBeNull();
+  });
+
+  it("evrak tipi '63' (metin) → «Fatura», tıklanır (tipe dayanıklı yüklem)", async () => {
+    yanitla({ ...ALIS, cha_evrak_tip: '63', cha_cinsi: 0, cha_tip: 0 });
+    render(<CariEkstrePanel cariKod="320.02" currentLanguage="tr" />);
+    expect(await screen.findByText('Fatura · Borç')).toBeInTheDocument();
+    fireEvent.click(await screen.findByTitle('Fatura detayını görüntüle'));
+    await screen.findByText(/stok satırı yok/);
+    expect(JSON.parse(String((kalemCagrilari()[0]?.[1] as { body?: string } | undefined)?.body)).yon).toBe('giden');
+  });
+});

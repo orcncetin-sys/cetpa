@@ -17,6 +17,7 @@
  * `mikroRoutes.testDuzenegi.ts` → `mikroMockTarifi`.
  */
 import { mfKalemleri } from '../mikro/eslemeFatura';
+import { kaynaksizAdetiOku } from '../mikro/faturadanSiparisNotu';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
 import { mikroPost, mikroSql, mikroKolonlar, v17MetoduKullanilabilir } from '../mikroClient.js';
@@ -345,6 +346,8 @@ describe('POST /api/mikro/import/faturadan-siparis', () => {
       const res = await d.cagir('POST', '/api/mikro/import/faturadan-siparis');
       expect(d.koleksiyon('orders').filter(y => y.ref.id === 'mikrofat__A__-325')).toEqual([]);
       expect(String((res.govde as { note?: string }).note)).toMatch(/1 MF siparişinin kaynağı Mikro fatura listesinde yok \(silinmiş olabilir\): MF-325 — durum değiştirilmedi/);
+      // Şartname «Mikro bağlantı A» A8.3: ROTANIN ürettiği not, açılış tanısının ayrıştırıcısıyla okunur (üretici rotaya bağlı).
+      expect(kaynaksizAdetiOku((res.govde as { note?: string }).note)).toBe(1);
     });
     it('zaten İPTAL edilmiş kaynaksız MF siparişi her koşuda yeniden uyarı ÜRETMEZ', async () => {
       iptalKur([BASLIK], [], [MF(321), MF(325, { status: 'Cancelled', iptalKaynagi: 'mikro' })]);

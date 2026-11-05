@@ -10,6 +10,8 @@
  * Hata METNİ dönmez (Mikro/SQL hata metni cari adı, kod, sorgu parçası taşıyabilir) — yalnız kaba SINIFI.
  */
 
+import { kaynaksizAdetiOku } from './mikro/faturadanSiparisNotu.js';
+
 export type HataSinifi = 'zamanAsimi' | 'baglanti' | 'kolon' | 'kimlik' | 'diger';
 
 /** Hata metninin kaba sınıfı; hata yoksa null. Metnin kendisi dışarı verilmez. */
@@ -40,6 +42,9 @@ export interface SenkronSatiri {
   tavan: boolean;
   /** Özet ⚠ işareti taşıyor (süpürge hatası, GUID'siz satır…). */
   uyari: boolean;
+  /** «faturadan sipariş» özetindeki kaynaksız MF siparişi SAYISI (şartname «Mikro bağlantı A» A8.3, 2026-11-05); parça yoksa null.
+   *  Yalnız sayı: sipariş adı / numarası DÖNMEZ (tanı değer taşımaz). Üretici ve ayrıştırıcı: mikro/faturadanSiparisNotu. */
+  kaynaksizAdet: number | null;
   hataSinifi: HataSinifi | null;
 }
 
@@ -77,6 +82,7 @@ export function senkronSatiri(data: Readonly<Record<string, unknown>>, zaman: st
     kayit: m ? Number(m[1]) : null,
     tavan: ozet.includes('TAVANINA ÇARPTI'),
     uyari: ozet.includes('⚠'),
+    kaynaksizAdet: kaynaksizAdetiOku(ozet),
     hataSinifi: data.success === true ? null : hataSinifi(data.error),
   };
 }

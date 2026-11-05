@@ -2,8 +2,9 @@
  * faturaEvrakKosulu.ts — «Bu Mikro cari hareketi bir FATURA evrakı mı?» yüklemi. TEK KAYNAK (saf; istemci + sunucu).
  * Şartname q-serisi v3 Q13 + «Kapı sonrası hükümler» QH9 (2026-11-05, Dilim 1).
  *
- * KURAL — `server/mikro/seriOzet.faturaKosuluIfadesi` SQL'iyle AYNI küme (iki metnin eşitliği `faturaEvrakKosulu.test.ts`'te
- * çitli): SATIŞ faturası `cha_evrak_tip = 63`; ALIŞ faturası `cha_evrak_tip = 0 AND cha_cinsi = 6`.
+ * KURAL — `server/mikro/seriOzet.faturaKosuluIfadesi` SQL'iyle AYNI küme (SQL metni ve JS yüklemi `faturaEvrakKosulu.test.ts`'te
+ * aynı örneklerde çitli; çit dosyası «Mikro bağlantı A» A6.5 ile yazıldı, 2026-11-05): SATIŞ faturası `cha_evrak_tip = 63`;
+ * ALIŞ faturası `cha_evrak_tip = 0 AND cha_cinsi = 6`. `mikroRoutes.ts` `FATURA_EVRAK_KOSULU` artık o ifadeden türetilir.
  *
  * NEDEN: dekont uçları (`/api/mikro/cari-hareket/kaydet`, `/api/mikro/evrak/kaydet` + `DekontKaydetV2`) istemcinin `cha_*`
  * alanlarını Mikro'ya geçiriyordu — fatura evrak tipi (63) ve keyfi seri ('Q') durdurulmuyordu (kapı a1-3). Dekont penceresi
@@ -21,6 +22,17 @@ export const evrakKodu = (v: unknown): number => Number(String(v).trim());
 export function faturaEvrakiMi(evrakTip: unknown, cinsi: unknown): boolean {
   const tip = evrakKodu(evrakTip);
   return tip === 63 || (tip === 0 && evrakKodu(cinsi) === 6);
+}
+
+/**
+ * Faturanın türü evrak tipinden: `'satis'` (63) / `'alis'` (0 + cinsi 6) / fatura değilse `null` (şartname «Mikro bağlantı A» A6,
+ * 2026-11-05). `faturaEvrakiMi` ile AYNI küme; ayrı kural yazılmaz. Cari Ekstre alış faturasını «Hareket (tip 0)» basıyor ve
+ * detayını açmıyordu (canlı: evrak tipi 0 olan 678 satırın 336'sı cinsi 6). Cinsi 8 / 14 / 15 ve evrak tipi 1 fatura SAYILMAZ
+ * (kanıt yok; [15] kullanıcıda).
+ */
+export function faturaTuruEvraktan(evrakTip: unknown, cinsi: unknown): 'satis' | 'alis' | null {
+  if (!faturaEvrakiMi(evrakTip, cinsi)) return null;
+  return evrakKodu(evrakTip) === 63 ? 'satis' : 'alis';
 }
 
 /**

@@ -17,7 +17,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import cron from 'node-cron';
 import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
-import { mikroKolonlar, mikroPost, mikroSql } from '../mikroClient.js';
+import { mikroKolonlar, mikroPost, mikroSql, v17MetoduKullanilabilir } from '../mikroClient.js';
+import { arkaPlanIsiBaslat } from '../mikro/arkaPlanIsi.js';
 
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
 vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS' }));
@@ -33,9 +34,16 @@ vi.mock('../mikroClient.js', async (orig) => {
     mikroPost: vi.fn(),
     mikroSql: vi.fn(),
     mikroKolonlar: vi.fn(async () => [] as string[]),
+    // Gece stok miktarı adımı (şartname «Mikro bağlantı A» AH8): yoklama sonucu testte AÇIKÇA verilir (AH7); çağrı sayılır.
+    v17MetoduKullanilabilir: vi.fn(gercek.v17MetoduKullanilabilir),
     mikroVergiOranlari: vi.fn(async () => new Map<number, number>()),
     vergiOraniCoz: vi.fn(() => null),
   };
+});
+// Yardımcı GERÇEK koşar; yalnız çağrı casuslanır (gece stok adımı işi hangi kiracıyla başlatıyor).
+vi.mock('../mikro/arkaPlanIsi.js', async (orig) => {
+  const gercek = await orig<typeof import('../mikro/arkaPlanIsi.js')>();
+  return { ...gercek, arkaPlanIsiBaslat: vi.fn(gercek.arkaPlanIsiBaslat) };
 });
 
 type Kullanicilar = Record<string, Record<string, unknown>>;
@@ -87,7 +95,7 @@ async function kostur(ifade: string, kullanicilar: Kullanicilar, ortamKiracisi?:
   };
 }
 
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.mocked(arkaPlanIsiBaslat).mockClear(); vi.mocked(v17MetoduKullanilabilir).mockClear(); });
 
 describe('gece SQL senkronu (03:20) — hedef kiracı `users` taramasında yalnız ROLÜ olan belgelerden çözülür', () => {
   it('sahip + personel + giriş ekranından hesap açan yabancı (rolsüz) + rol alanı geçersiz belge → iş KOŞAR, satır SAHİBİN kiracısına yazılır', async () => {
@@ -154,5 +162,39 @@ describe('aylık TAM senkron (ayın 1\'i 02:00) — AYNI çözüm', () => {
     const iki = await kostur(AYLIK, { ...SAHIP, ...IKINCI });
     expect(iki.belirsizIletisi).toHaveLength(1);
     expect([iki.sorguSayisi, iki.d.yazilan]).toEqual([0, []]);
+  });
+});
+
+// Şartname «Mikro bağlantı A» AH8 (2026-11-05): stok miktarı işi eski 04:00 cron'undan (crons.ts, kendi `cronCompanyId` çözücüsüyle)
+// 03:20 bloğunun SON adımına taşındı. Adım YENİ çözücü yazmaz: işin yukarıda çözdüğü `companyId` ile koşar; kiracı belirsizse hiç
+// koşmaz (yoklama da yapılmaz: Mikro'ya stok sorgusu gitmez).
+describe('gece stok miktarı adımı (03:20, son adım) · AYNI kiracı çözümü', () => {
+  const stokIsleri = () => vi.mocked(arkaPlanIsiBaslat).mock.calls.filter(c => c[1].isAdi === 'stokMiktarImport');
+
+  it('iki GERÇEK kiracı, ortam değeri yok → adım KOŞMAZ: `arkaPlanIsiBaslat` ve V17 yoklaması çağrılmaz', async () => {
+    const k = await kostur(GECE, { ...SAHIP, ...PERSONEL, ...IKINCI });
+    expect(k.belirsizIletisi).toHaveLength(1);
+    expect(arkaPlanIsiBaslat).not.toHaveBeenCalled();
+    expect(v17MetoduKullanilabilir).not.toHaveBeenCalled();
+    expect(k.d.syncLog.mock.calls.filter(c => c[0] === 'GenelAmacliMaliyetListesiV2')).toEqual([]);
+  });
+
+  it('yalnız rolsüz hesaplar → adım KOŞMAZ (yabancının kimliği hedef olamaz)', async () => {
+    const k = await kostur(GECE, { ...YABANCI, ...COP });
+    expect(k.belirsizIletisi).toHaveLength(1);
+    expect(arkaPlanIsiBaslat).not.toHaveBeenCalled();
+    expect(v17MetoduKullanilabilir).not.toHaveBeenCalled();
+  });
+
+  it('sahip + rolsüz yabancı, ortam değeri yok → iş `stokMiktarImport` ile SAHİBİN kiracısında başlar; bitiş satırı da o kiracıya', async () => {
+    vi.mocked(v17MetoduKullanilabilir).mockResolvedValueOnce(true);
+    const k = await kostur(GECE, { ...SAHIP, ...YABANCI });
+    expect(k.belirsizIletisi).toEqual([]);
+    expect(stokIsleri().map(c => [c[1].companyId, c[1].denetimKiracisi, c[1].actor])).toEqual([['sahip-uid', 'sahip-uid', { uid: 'system', email: '' }]]);
+    // Adım işi BEKLER (sıralı): bitiş satırı geri çağrı dönmeden yazılmıştır ve hedef kiracıyı taşır.
+    const bitis = k.d.syncLog.mock.calls.filter(c => c[0] === 'GenelAmacliMaliyetListesiV2');
+    expect(bitis).toHaveLength(1);
+    expect(bitis[0]?.[9]).toEqual({ denetimKiracisi: 'sahip-uid' });
+    expect(k.usersOkuma).toBe(1);                                          // kopya çözücü yok: `users` yine TEK kez taranır
   });
 });

@@ -68,9 +68,10 @@ export default function BankaTab({
   bankTxSort, setBankTxSort, showBankModal, setShowBankModal, editingBank, bankForm, setBankForm, saveBank,
 }: BankaTabProps) {
   // Bakiyesi bilinmeyen hesap toplama girmedi (bankaHesap.dovizBakiyeleri) — kart altına açık not;
-  // hiç bilinen yoksa değer zaten '—' basılır (ekranTutari → NaN → paraYaz).
+  // hiç bilinen yoksa değer zaten '—' basılır (ekranTutari → NaN → paraYaz). Mikro'dan açılan yeni hesap `balance: null` yazar
+  // (bakiye Mikro'nun banka tanımında yok; şartname «Mikro bağlantı A» A5): «tutarsız» değil «bilinmiyor».
   const bakiyeNotu = (n: number) => n > 0
-    ? (currentLanguage === 'tr' ? `${n} hesap tutarsız — toplama girmedi` : `${n} account(s) without balance — excluded from total`)
+    ? (currentLanguage === 'tr' ? `${n} hesabın bakiyesi bilinmiyor · toplama girmedi` : `${n} account(s) with unknown balance · excluded from total`)
     : null;
   return (
     <>

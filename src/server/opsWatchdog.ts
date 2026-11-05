@@ -1292,8 +1292,8 @@ export async function runOpsWatchdogAndAlert(): Promise<void> {
  */
 export function initOpsWatchdog(d: OpsDeps): void {
   D = d;
-  // Her sabah 08:30 İstanbul (zamanla.ts) — gece Mikro cron'ları (02:00/03:20/04:00
-  // İstanbul) ve 08:15 saklama süresi bittikten sonra. Off-site yedek görevi
+  // Her sabah 08:30 İstanbul (zamanla.ts) — gece Mikro cron'ları (02:00/03:20 İstanbul; stok
+  // miktarı 2026-11-05'ten beri 03:20 bloğunun son adımı) ve 08:15 saklama süresi bittikten sonra. Off-site yedek görevi
   // 03:30 SUNUCU-yerel saattedir; bekçi bir önceki yedeği en fazla ~19 saat
   // yaşında görür, 26 saatlik eşik tutar.
   zamanla('30 8 * * *', () => { void runOpsWatchdogAndAlert(); });

@@ -22,7 +22,7 @@ describe('senkronSatiri — syncLog dokümanından değer taşımayan tanı sat�
   const Z = '2026-10-08T00:21:07.000Z';
   it('başarılı SQL importu: kayıt sayısı özetin başından, süre, sistem bayrağı; hata sınıfı yok', () => {
     const s = senkronSatiri({ operation: 'SQL:CARI_HESAP_HAREKETLERI', entityType: 'mikroCariHareketler', entityId: '1594 kayıt — 2 iptal edilmiş kayıt silindi', success: true, duration: 8123, userId: 'system', error: null }, Z);
-    expect(s).toEqual({ zaman: Z, islem: 'SQL:CARI_HESAP_HAREKETLERI', hedef: 'mikroCariHareketler', basarili: true, sureMs: 8123, sistem: true, kayit: 1594, tavan: false, uyari: false, hataSinifi: null });
+    expect(s).toEqual({ zaman: Z, islem: 'SQL:CARI_HESAP_HAREKETLERI', hedef: 'mikroCariHareketler', basarili: true, sureMs: 8123, sistem: true, kayit: 1594, tavan: false, uyari: false, kaynaksizAdet: null, hataSinifi: null });
   });
   it('tavan ve ⚠ bayrakları özetten; elle başlatılan iş sistem DEĞİL', () => {
     const s = senkronSatiri({ operation: 'SQL:STOK_HAREKETLERI', entityType: 'inventoryMovements', entityId: '20000 kayıt — SAYFA TAVANINA ÇARPTI, veri eksik — ⚠ 3 satırda GUID yok', success: true, duration: 90000, userId: 'u-123' }, Z);
@@ -36,6 +36,20 @@ describe('senkronSatiri — syncLog dokümanından değer taşımayan tanı sat�
   });
   it('başarı alanı tam olarak true değilse başarısız; eksik alanlar boş metin / null', () => {
     expect(senkronSatiri({ success: 'true' }, Z)).toMatchObject({ basarili: false, islem: '', hedef: '', sureMs: null, sistem: false, hataSinifi: null });
+  });
+
+  // Şartname «Mikro bağlantı A» A8.3 (2026-11-05): gece «faturadan sipariş» ⚠ metni hiçbir tanı ucunda görünmüyordu (canlı 5/5 gece ⚠).
+  // Tanı yalnız SAYIYI döndürür; MF sipariş adları çıktıya GİRMEZ (değer taşımama kuralı).
+  it('faturadan-siparis özeti «⚠ 3 MF siparişinin kaynağı …» → kaynaksizAdet 3; çıktıda MF adı YOK', () => {
+    const ozet = "12 sipariş türetildi, 0 atlandı (442 satış faturası) — ⚠ 3 MF siparişinin kaynağı Mikro fatura listesinde yok (silinmiş olabilir): MF-325, MF-401, MF-77 — durum değiştirilmedi";
+    const s = senkronSatiri({ operation: 'faturadan-siparis', entityType: 'orders', entityId: ozet, success: true, userId: 'system', duration: 50 }, Z);
+    expect(s).toMatchObject({ islem: 'faturadan-siparis', uyari: true, kaynaksizAdet: 3 });
+    expect(JSON.stringify(s)).not.toMatch(/MF-325|MF-401|MF-77/);
+  });
+  it('⚠ var ama kaynaksız parça yok → kaynaksizAdet null (0 DEĞİL); ⚠ yok → null', () => {
+    const bekletme = "1 sipariş türetildi — ⚠ 1 fatura bekletildi: aynı müşterinin Mikro'ya gönderilmiş ama hangi faturaya karşılık geldiği bilinmeyen Cetpa siparişi var (SIP-0002)";
+    expect(senkronSatiri({ operation: 'faturadan-siparis', entityId: bekletme, success: true }, Z)).toMatchObject({ uyari: true, kaynaksizAdet: null });
+    expect(senkronSatiri({ operation: 'faturadan-siparis', entityId: '1 sipariş türetildi', success: true }, Z)).toMatchObject({ uyari: false, kaynaksizAdet: null });
   });
 });
 

@@ -8,6 +8,7 @@ import { db } from '../firebase';
 import { byField } from '../utils/fsSort';
 import { paraYaz } from '../utils/currency';
 import { bugunAnahtari } from '../utils/zaman';
+import { kasaKaydiOku, kasaKartBakiyesi, type KasaKaydi } from '../utils/muhasebe/kasaBakiye';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc,
   onSnapshot, query, serverTimestamp
@@ -19,14 +20,9 @@ type HareketTur = 'Giriş' | 'Çıkış';
 type KasaDoviz = 'TRY' | 'USD' | 'EUR';
 type KasaDurum = 'Aktif' | 'Pasif';
 
-interface Kasa {
-  id: string;
-  ad: string;
-  doviz: KasaDoviz;
-  sorumlu: string;
-  durum: KasaDurum;
-  createdAt?: unknown;
-}
+/** Ekran kaydı TEK okumadan (utils/muhasebe/kasaBakiye.kasaKaydiOku, şartname «Mikro bağlantı A» A5.4): Mikro kasası `kasaAdi` /
+ *  `currency` taşır; `durum` / `sorumlu` yoksa boş kalır (uydurulmaz). */
+type Kasa = KasaKaydi;
 
 interface KasaHareketi {
   id: string;
@@ -71,7 +67,7 @@ function useToast() {
   return { toast, show };
 }
 
-function fmtMoney(n: number, doviz: KasaDoviz = 'TRY') {
+function fmtMoney(n: number, doviz: string = 'TRY') {
   return paraYaz(n, { birim: doviz });
 }
 
@@ -79,7 +75,8 @@ const TODAY = bugunAnahtari();
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
+export default function KasaModule({ currentLanguage, isAuthenticated }: KasaModuleProps) {
+  const tr = currentLanguage !== 'en';
   const [activeTab, setActiveTab] = useState<'hareketler' | 'kapanis' | 'kasalar'>('hareketler');
   const { toast, show: showToast } = useToast();
 
@@ -116,7 +113,7 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
   useEffect(() => {
     if (!isAuthenticated) return;
     const u1 = onSnapshot(query(collection(db, 'kasalar')), snap =>
-      setKasalar(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Kasa, 'id'>) })).sort(byField('ad', 'asc'))));
+      setKasalar(snap.docs.map(d => kasaKaydiOku(d.id, d.data() as Record<string, unknown>)).sort(byField('ad', 'asc'))));
     const u2 = onSnapshot(query(collection(db, 'kasaHareketleri')), snap =>
       setHareketler(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<KasaHareketi, 'id'>) })).sort(byField('tarih', 'desc'))));
     const u3 = onSnapshot(query(collection(db, 'kasaKapanislar')), snap =>
@@ -153,15 +150,21 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
     [todayHareketler, tryKasaIds]
   );
 
-  // Balance per kasa
-  const kasaBakiye = useMemo(() => {
-    const map: Record<string, number> = {};
-    hareketler.forEach(h => {
-      const prev = map[h.kasaId] ?? 0;
-      map[h.kasaId] = prev + (h.tur === 'Giriş' ? h.tutar : -h.tutar);
-    });
-    return map;
-  }, [hareketler]);
+  // Kart bakiyesi kasa başına TEK kuraldan (utils/muhasebe/kasaBakiye.kasaKartBakiyesi; Giriş +, Çıkış −): Mikro kasası + hareket yok →
+  // null (Mikro kasa hareketleri aktarılmıyor; yeşil ₺0 bir ölçüm değildi). Eski satır içi toplayıcı yardımcıya taşındı (kopya yok).
+  const kasaBakiye = useMemo(
+    () => new Map(kasalar.map(k => [k.id, kasaKartBakiyesi(k, hareketler)] as const)),
+    [kasalar, hareketler]
+  );
+  const bilinmeyenKasa = useMemo(() => [...kasaBakiye.values()].filter(b => b === null).length, [kasaBakiye]);
+  // Başlık / KPI ₺ toplamı aynı kart kuralından: ₺ kasalardan birinin bakiyesi bilinmiyorsa toplam da bilinmiyor («—», ₺0 değil).
+  // USD / EUR kasalar ₺ toplamına zaten girmediği için sayılmaz (`tryKasaIds`). Toplayıcı (`toplamBakiye`) değişmez (A5.4); yalnız
+  // gösterim (inceleme MBA2 #1, 2026-11-05).
+  const tryBilinmeyenKasa = useMemo(
+    () => kasalar.filter(k => tryKasaIds.has(k.id) && kasaBakiye.get(k.id) === null).length,
+    [kasalar, tryKasaIds, kasaBakiye]
+  );
+  const toplamBilinmiyor = tryBilinmeyenKasa > 0;
 
   // ── Hareket save ──
   const handleSaveHareket = async () => {
@@ -221,9 +224,17 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
 
   // ── Günlük kapanış ──
   const alreadyClosedToday = kapanislar.some(k => k.tarih === TODAY);
+  /** Kapanış sekmesinin açılış bakiyesi: ₺ toplamı bilinmiyorsa `null` («—»; önceki kapanış olmasa da 0 uydurulmaz). Bilinirken
+   *  bugünkü kural: son kapanışın kapanış bakiyesi, kapanış hiç yoksa 0 (`handleGunuKapat` ile aynı). */
+  const kapanisAcilis: number | null = toplamBilinmiyor ? null : kapanislar.length > 0 ? kapanislar[0].kapanisBakiye : 0;
 
+  // ₺ toplamı bilinmiyorsa (bakiyesi bilinmeyen Mikro kasası) kapanış bakiyesi de bilinmez: «Günü Kapat» kayıt YAZMAZ. Yazsaydı
+  // `kapanisBakiye: 0` ölçülmüş bir değer gibi Geçmiş Kapanışlar'a ve ertesi günün açılışına geçerdi (inceleme MBS #3, 2026-11-05).
+  // Düğme pasif görünür ama tıklanınca nedeni söyler; kapı yine burada (tek yazım yolu).
+  const kapanisBakiyesiBilinmiyorMetni = 'Mikro kasalarının bakiyesi bilinmiyor · kapanış bakiyesi hesaplanamıyor.';
   const handleGunuKapat = async () => {
     if (alreadyClosedToday) { showToast('Bugün zaten kapatıldı.', 'error'); return; }
+    if (toplamBilinmiyor) { showToast(kapanisBakiyesiBilinmiyorMetni, 'error'); return; }
     const lastKapanis = kapanislar[0];
     const acilisBakiye = lastKapanis ? lastKapanis.kapanisBakiye : 0;
     try {
@@ -245,7 +256,8 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
   const openKasaModal = (kasa?: Kasa) => {
     if (kasa) {
       setEditingKasa(kasa);
-      setKForm({ ad: kasa.ad, doviz: kasa.doviz, sorumlu: kasa.sorumlu, durum: kasa.durum });
+      // Form üç döviz ve iki durum seçeneği sunar; kaydedilmemiş alan formda görünür seçenekle açılır, KULLANICI kaydedince yazılır.
+      setKForm({ ad: kasa.ad, doviz: kasa.doviz === 'USD' || kasa.doviz === 'EUR' ? kasa.doviz : 'TRY', sorumlu: kasa.sorumlu ?? '', durum: kasa.durum ?? 'Aktif' });
     } else {
       setEditingKasa(null);
       setKForm({ ad: '', doviz: 'TRY', sorumlu: '', durum: 'Aktif' });
@@ -273,25 +285,34 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
       </AnimatePresence>
 
       {/* Header / Balance card */}
+      {/* ₺ kasalardan birinin bakiyesi bilinmiyorsa (`toplamBilinmiyor`) toplam «—», renk / kenarlık nötr, altında not: ₺0 bilinen
+          tutar gibi basılmaz (kartlar o kasayı «Bakiye bilinmiyor» gösteriyor; inceleme MBA2 #1). */}
       <div className={cn(
         'apple-card p-5 flex items-center justify-between gap-4',
-        toplamBakiye > 0 ? 'border-l-4 border-green-500' : 'border-l-4 border-red-500'
+        toplamBilinmiyor ? 'border-l-4 border-gray-300' : toplamBakiye > 0 ? 'border-l-4 border-green-500' : 'border-l-4 border-red-500'
       )}>
         <div className="flex items-center gap-4">
           <div className={cn(
             'w-14 h-14 rounded-2xl flex items-center justify-center',
-            toplamBakiye > 0 ? 'bg-green-100' : 'bg-red-100'
+            toplamBilinmiyor ? 'bg-gray-100' : toplamBakiye > 0 ? 'bg-green-100' : 'bg-red-100'
           )}>
-            <Wallet size={26} className={toplamBakiye > 0 ? 'text-green-600' : 'text-red-500'} />
+            <Wallet size={26} className={toplamBilinmiyor ? 'text-gray-400' : toplamBakiye > 0 ? 'text-green-600' : 'text-red-500'} />
           </div>
           <div>
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">Toplam Kasa Bakiyesi</p>
             <p className={cn(
               'text-3xl font-bold tracking-tight',
-              toplamBakiye > 0 ? 'text-green-600' : 'text-red-500'
+              toplamBilinmiyor ? 'text-gray-400' : toplamBakiye > 0 ? 'text-green-600' : 'text-red-500'
             )}>
-              {fmtMoney(toplamBakiye)}
+              {toplamBilinmiyor ? '—' : fmtMoney(toplamBakiye)}
             </p>
+            {toplamBilinmiyor && (
+              <p data-kasa-toplam-bilinmiyor className="text-xs text-amber-700 mt-0.5">
+                {tr
+                  ? `${tryBilinmeyenKasa} kasanın bakiyesi bilinmiyor · toplam hesaplanamıyor`
+                  : `${tryBilinmeyenKasa} cash box(es) with unknown balance · total unavailable`}
+              </p>
+            )}
           </div>
         </div>
         <button
@@ -333,15 +354,16 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
             {[
               { label: 'Bugünkü Giriş', value: bugunGiris, icon: <TrendingUp size={16} />, color: 'text-green-600 bg-green-50', positive: true },
               { label: 'Bugünkü Çıkış', value: bugunCikis, icon: <TrendingDown size={16} />, color: 'text-red-600 bg-red-50', positive: false },
-              { label: 'Toplam Bakiye', value: toplamBakiye, icon: <DollarSign size={16} />, color: 'text-blue-600 bg-blue-50', positive: toplamBakiye >= 0 },
+              // Bilinmeyen ₺ kasa varken toplam «—» (null), nötr renk; başlıktaki not açıklar (inceleme MBA2 #1).
+              { label: 'Toplam Bakiye', value: toplamBilinmiyor ? null : toplamBakiye, icon: <DollarSign size={16} />, color: 'text-blue-600 bg-blue-50', positive: toplamBakiye >= 0 },
             ].map(kpi => (
               <div key={kpi.label} className="apple-card p-4 flex items-center gap-3">
                 <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0', kpi.color)}>
                   {kpi.icon}
                 </div>
                 <div>
-                  <p className={cn('text-xl font-bold', kpi.positive ? 'text-green-600' : 'text-red-500')}>
-                    {fmtMoney(kpi.value)}
+                  <p className={cn('text-xl font-bold', kpi.value === null ? 'text-gray-400' : kpi.positive ? 'text-green-600' : 'text-red-500')}>
+                    {kpi.value === null ? '—' : fmtMoney(kpi.value)}
                   </p>
                   <p className="text-xs text-gray-500">{kpi.label}</p>
                 </div>
@@ -414,26 +436,33 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
                   <CheckCircle size={13} /> Gün Kapatıldı
                 </span>
               ) : (
-                <button onClick={handleGunuKapat} className="apple-button-primary flex items-center gap-1.5 px-4 py-2 text-sm">
+                <button
+                  onClick={handleGunuKapat}
+                  aria-disabled={toplamBilinmiyor}
+                  title={toplamBilinmiyor ? kapanisBakiyesiBilinmiyorMetni : undefined}
+                  className={cn('apple-button-primary flex items-center gap-1.5 px-4 py-2 text-sm', toplamBilinmiyor && 'opacity-50 cursor-not-allowed')}
+                >
                   <Lock size={14} />
                   Günü Kapat
                 </button>
               )}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* ₺ toplamı bilinmiyorsa Açılış / Kapanış «—» ve nötr renk (başlıkla aynı kural; MBS #3). Toplam Giriş / Çıkış Cetpa
+                  hareketlerinden gelir, bilinen değerdir. */}
               {[
-                { label: 'Açılış Bakiyesi', value: kapanislar[0]?.kapanisBakiye ?? 0, color: 'text-gray-700' },
+                { label: 'Açılış Bakiyesi', value: kapanisAcilis, color: kapanisAcilis === null ? 'text-gray-400' : 'text-gray-700' },
                 { label: 'Toplam Giriş', value: bugunGiris, color: 'text-green-600' },
                 { label: 'Toplam Çıkış', value: bugunCikis, color: 'text-red-500' },
                 {
                   label: 'Kapanış Bakiyesi',
-                  value: (kapanislar[0]?.kapanisBakiye ?? 0) + bugunGiris - bugunCikis,
-                  color: toplamBakiye >= 0 ? 'text-green-600' : 'text-red-500',
+                  value: kapanisAcilis === null ? null : kapanisAcilis + bugunGiris - bugunCikis,
+                  color: kapanisAcilis === null ? 'text-gray-400' : toplamBakiye >= 0 ? 'text-green-600' : 'text-red-500',
                 },
               ].map(s => (
                 <div key={s.label} className="bg-gray-50 rounded-xl p-3">
                   <p className="text-xs text-gray-500 mb-1">{s.label}</p>
-                  <p className={cn('text-lg font-bold', s.color)}>{fmtMoney(s.value)}</p>
+                  <p className={cn('text-lg font-bold', s.color)}>{s.value === null ? '—' : fmtMoney(s.value)}</p>
                 </div>
               ))}
             </div>
@@ -491,6 +520,13 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
               Yeni Kasa
             </button>
           </div>
+          {bilinmeyenKasa > 0 && (
+            <p data-kasa-bilinmeyen className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+              {tr
+                ? `${bilinmeyenKasa} kasanın bakiyesi bilinmiyor · Mikro kasa hareketleri aktarılmıyor`
+                : `${bilinmeyenKasa} cash box(es) with unknown balance · Mikro cash movements are not imported`}
+            </p>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {kasalar.length === 0 ? (
               <div className="col-span-3 apple-card p-10 text-center text-gray-400">
@@ -498,7 +534,7 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
               </div>
             ) : (
               kasalar.map(kasa => {
-                const bakiye = kasaBakiye[kasa.id] ?? 0;
+                const bakiye = kasaBakiye.get(kasa.id) ?? null;
                 return (
                   <div key={kasa.id} className="apple-card p-5 space-y-3">
                     <div className="flex items-start justify-between">
@@ -507,26 +543,38 @@ export default function KasaModule({ isAuthenticated }: KasaModuleProps) {
                         <p className="text-xs text-gray-500 mt-0.5">{kasa.sorumlu || 'Sorumlu atanmamış'}</p>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <span className={cn(
-                          'px-2 py-0.5 rounded-full text-xs font-medium',
-                          kasa.durum === 'Aktif' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                        )}>
-                          {kasa.durum}
-                        </span>
+                        {/* Durum yoksa (Mikro kasası) rozet çizilmez: varsayılan uydurulmaz. */}
+                        {kasa.durum && (
+                          <span className={cn(
+                            'px-2 py-0.5 rounded-full text-xs font-medium',
+                            kasa.durum === 'Aktif' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                          )}>
+                            {kasa.durum}
+                          </span>
+                        )}
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
                           {kasa.doviz}
                         </span>
                       </div>
                     </div>
-                    <div className={cn(
-                      'rounded-xl p-3 text-center',
-                      bakiye >= 0 ? 'bg-green-50' : 'bg-red-50'
-                    )}>
-                      <p className="text-xs text-gray-500 mb-0.5">Güncel Bakiye</p>
-                      <p className={cn('text-xl font-bold', bakiye >= 0 ? 'text-green-600' : 'text-red-500')}>
-                        {fmtMoney(bakiye, kasa.doviz)}
-                      </p>
-                    </div>
+                    {bakiye === null ? (
+                      <div data-kasa-bakiye-bilinmiyor className="rounded-xl p-3 text-center bg-gray-50">
+                        <p className="text-xs text-gray-500 mb-0.5">Güncel Bakiye</p>
+                        <p className="text-sm font-semibold text-gray-500">
+                          {tr ? 'Bakiye bilinmiyor · Mikro kasa hareketleri aktarılmıyor' : 'Balance unknown · Mikro cash movements are not imported'}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className={cn(
+                        'rounded-xl p-3 text-center',
+                        bakiye >= 0 ? 'bg-green-50' : 'bg-red-50'
+                      )}>
+                        <p className="text-xs text-gray-500 mb-0.5">Güncel Bakiye</p>
+                        <p className={cn('text-xl font-bold', bakiye >= 0 ? 'text-green-600' : 'text-red-500')}>
+                          {fmtMoney(bakiye, kasa.doviz)}
+                        </p>
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <button
                         onClick={() => openKasaModal(kasa)}

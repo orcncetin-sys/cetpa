@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { zamanMs } from '../utils/zaman';
+import { zamanMs, sonGuncellemeMs } from '../utils/zaman';
+import { bilinenSayi } from '../utils/para';
+import { riskSatirlari, riskToplamlari, riskSiralaKarsilastir, bakiyesiBilinir } from '../utils/muhasebe/riskSatirlari';
+import BakiyeDamgasi from './ortak/BakiyeDamgasi';
 import { motion } from 'motion/react';
 import { AlertTriangle, TrendingUp, ShieldCheck, DollarSign, Users } from 'lucide-react';
 import { collection, onSnapshot } from '../lib/dbClient';
@@ -12,9 +15,13 @@ import { oc } from '../i18n/ortak';
 interface CustomerRisk {
   id: string;
   customerName: string;
+  /** Bilinmiyorsa NaN (`bakiyeBilinmiyor`). */
   currentBalance: number;
   creditLimit: number;
-  riskScore: number;
+  /** Bakiye bilinmiyorsa null. */
+  riskScore: number | null;
+  /** Mikro bakiye kaydı yok ya da sayı değil (şartname «Mikro bağlantı A» A4): listede kalır, toplamlara girmez. */
+  bakiyeBilinmiyor?: boolean;
   [key: string]: unknown;
 }
 
@@ -100,19 +107,26 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
   // customerRisks (Cetpa) hiç dolmuyor → panel hep ₺0 görünüyordu. Gerçek bakiye
   // cariBalances'ta (Mikro, /api/mikro/pull/bakiye doldurur; doc id = cariKod,
   // {cariKod, bakiye}). İsim/limit için leads (mikroCariKod ile eşleşir).
-  const [cariBalances, setCariBalances] = useState<Map<string, number>>(new Map());
+  // Değer: bilinen sayı ya da null (belge var, bakiye sayı değil); belge yoksa harita dışı (A4: ikisi de «bilinmiyor»).
+  const [cariBalances, setCariBalances] = useState<Map<string, number | null>>(new Map());
+  /** «son bakiye çekimi» damgası (A3.4): belgelerin en büyük `updatedAt`'i; belge yoksa null (damga basılmaz). */
+  const [bakiyeSonMs, setBakiyeSonMs] = useState<number | null>(null);
   const [mikroLeads, setMikroLeads] = useState<Array<{ cariKod: string; name: string; creditLimit: number }>>([]);
 
   useEffect(() => {
     if (!userRole) return;
     const unsub = onSnapshot(collection(db, 'cariBalances'), (snapshot) => {
-      const m = new Map<string, number>();
+      const m = new Map<string, number | null>();
+      const zamanlar: unknown[] = [];
       snapshot.docs.forEach(d => {
         const x = d.data() as Record<string, unknown>;
         const kod = String(x.cariKod ?? d.id).trim();
-        if (kod) m.set(kod, Number(x.bakiye ?? 0));
+        // Eski `Number(x.bakiye ?? 0)` sayı olmayan bakiyeyi ₺0 yapıyordu (A4).
+        if (kod) m.set(kod, bilinenSayi(x.bakiye) ? Number(x.bakiye) : null);
+        zamanlar.push(x.updatedAt);
       });
       setCariBalances(m);
+      setBakiyeSonMs(sonGuncellemeMs(zamanlar));
     }, (error) => logFirestoreError(error, OperationType.LIST, 'cariBalances'));
     return () => unsub();
   }, [userRole]);
@@ -137,25 +151,15 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
   // gerçek kaynak odur; customerRisks yalnız Mikro hiç çekilmemişse geriye-uyum.
   // Bakiye>0 = müşteri Cetpa'ya borçlu (exposure). Skor = kredi limiti kullanım
   // oranı; limit yoksa 0 (hesaplanamaz — uydurmuyoruz, bakiye yine listelenir).
+  // Satırlar + toplamlar TEK kaynakta (utils/muhasebe/riskSatirlari, A4): bakiye kaydı olmayan ya da sayı olmayan cari ₺0 sayılıp
+  // DÜŞÜRÜLMEZ; listede «Bakiye bilinmiyor» olarak kalır, toplamlara girmez, sayılır.
   const effectiveRisks = useMemo<CustomerRisk[]>(() => {
-    if (cariBalances.size && mikroLeads.length) {
-      return mikroLeads.map(l => {
-        const bakiye = cariBalances.get(l.cariKod) ?? 0;
-        const limit = l.creditLimit || 0;
-        const score = limit > 0 ? Math.min(100, Math.max(0, Math.round((bakiye / limit) * 100))) : 0;
-        return { id: l.cariKod, customerName: l.name, currentBalance: bakiye, creditLimit: limit, riskScore: score };
-      }).filter(r => r.currentBalance !== 0 || r.creditLimit > 0);
-    }
+    if (cariBalances.size && mikroLeads.length) return riskSatirlari(mikroLeads, cariBalances);
     return risks;
   }, [risks, cariBalances, mikroLeads]);
 
-  const kpis = useMemo(() => {
-    // Exposure = yalnız POZİTİF bakiyeler (müşteri borcu). Eksi = Cetpa borçlu, risk değil.
-    const totalExposure = effectiveRisks.reduce((sum, r) => sum + Math.max(0, Number(r.currentBalance) || 0), 0);
-    const highRiskCount = effectiveRisks.filter(r => Number(r.riskScore) > 70).length;
-    const avgRiskScore = effectiveRisks.length > 0 ? (effectiveRisks.reduce((sum, r) => sum + Number(r.riskScore), 0) / effectiveRisks.length).toFixed(1) : 0;
-    return { totalExposure, highRiskCount, avgRiskScore };
-  }, [effectiveRisks]);
+  // Exposure = yalnız POZİTİF bilinen bakiyeler (müşteri borcu). Eksi = Cetpa borçlu, risk değil.
+  const kpis = useMemo(() => riskToplamlari(effectiveRisks), [effectiveRisks]);
 
   const chartData = useMemo(() => {
     const tr = currentLanguage === 'tr';
@@ -164,7 +168,7 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
       [tr ? 'Orta' : 'Mid']: 0,
       [oc(tr).yuksek]: 0
     };
-    effectiveRisks.forEach(r => {
+    effectiveRisks.filter(bakiyesiBilinir).forEach(r => {
       const score = Number(r.riskScore);
       if (score < 40) categories[oc(tr).dusuk]++;
       else if (score < 70) categories[tr ? 'Orta' : 'Mid']++;
@@ -204,18 +208,10 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
 
   const filteredRisks = useMemo(() => {
     let base = effectiveRisks;
-    if (activeFilter === 'highRisk') base = effectiveRisks.filter(r => Number(r.riskScore) > 70);
-    else if (activeFilter === 'exposure') base = effectiveRisks.filter(r => (Number(r.currentBalance) || 0) > 0);
-    const yon = riskSort.dir === 'asc' ? 1 : -1;
-    return [...base].sort((a, b) => {
-      // Sütun tipine göre karşılaştır. Eskiden `Number(x) || String(x)` kalıbı
-      // gerçek 0 (bakiye/skor) falsy olduğu için String'e düşüyor, sayısal 0'lar
-      // metin gibi sıralanıyordu (code-review bulgusu). customerName metin, diğerleri sayı.
-      if (riskSort.key === 'customerName') {
-        return String(a.customerName ?? '').localeCompare(String(b.customerName ?? '')) * yon;
-      }
-      return ((Number(a[riskSort.key]) || 0) - (Number(b[riskSort.key]) || 0)) * yon;
-    });
+    if (activeFilter === 'highRisk') base = effectiveRisks.filter(r => bakiyesiBilinir(r) && Number(r.riskScore) > 70);
+    else if (activeFilter === 'exposure') base = effectiveRisks.filter(r => bakiyesiBilinir(r) && Number(r.currentBalance) > 0);
+    // Sütun tipine göre karşılaştır (customerName metin, diğerleri sayı); bakiyesi bilinmeyen satırlar iki yönde de SONDA (A4).
+    return [...base].sort(riskSiralaKarsilastir(riskSort.key, riskSort.dir));
   }, [effectiveRisks, activeFilter, riskSort]);
 
   const sortedOverdue = useMemo(() => [...overdueOrders].sort((a, b) => {
@@ -264,6 +260,12 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
           <div>
             <p className="text-[11px] text-[#86868B] font-medium uppercase tracking-wide">{tr ? 'Toplam Riskli Bakiye' : 'Total Exposure'}</p>
             <p className="text-2xl font-bold text-gray-900 mt-0.5">{formatAmount(kpis.totalExposure, activeCurrency, exchangeRates)}</p>
+            {kpis.bilinmeyen > 0 && (
+              <p data-risk-bilinmeyen className="text-[10px] text-amber-600 mt-1">
+                {tr ? `${kpis.bilinmeyen} carinin bakiyesi bilinmiyor` : `${kpis.bilinmeyen} accounts with unknown balance`}
+              </p>
+            )}
+            <BakiyeDamgasi sonMs={bakiyeSonMs} dil={tr ? 'tr' : 'en'} className="mt-1" />
           </div>
         </button>
 
@@ -383,18 +385,25 @@ const RiskPanel: React.FC<RiskPanelProps> = ({ orders = [], leads = [], currentL
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredRisks.length > 0 ? filteredRisks.map((c) => {
-                  const currentBalance = Number(c.currentBalance || 0);
+                  // Bakiye bilinmiyorsa tutar ve skor BASILMAZ (eski `Number(c.currentBalance || 0)` ₺0 basıyordu; A4).
+                  const bilinir = bakiyesiBilinir(c);
                   const creditLimit = Number(c.creditLimit || 0);
-                  const riskScore = Number(c.riskScore || 0);
+                  const riskScore = Number(c.riskScore);
                   return (
                     <tr key={c.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 font-medium">{String(c.customerName || '')}</td>
-                      <td className="px-6 py-4 text-right font-mono text-sm">{formatAmount(currentBalance, activeCurrency, exchangeRates)}</td>
+                      <td className="px-6 py-4 text-right font-mono text-sm">
+                        {bilinir
+                          ? formatAmount(Number(c.currentBalance), activeCurrency, exchangeRates)
+                          : <span data-bakiye-bilinmiyor className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-500 font-sans">{tr ? 'Bakiye bilinmiyor' : 'Balance unknown'}</span>}
+                      </td>
                       <td className="px-6 py-4 text-right font-mono text-sm">{formatAmount(creditLimit, activeCurrency, exchangeRates)}</td>
                       <td className="px-6 py-4 text-center">
-                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${riskScore > 70 ? 'bg-red-100 text-red-600' : riskScore > 40 ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>
-                          {riskScore}
-                        </span>
+                        {bilinir && Number.isFinite(riskScore) ? (
+                          <span className={`px-2 py-1 rounded-full text-xs font-bold ${riskScore > 70 ? 'bg-red-100 text-red-600' : riskScore > 40 ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>
+                            {riskScore}
+                          </span>
+                        ) : <span className="text-gray-400">—</span>}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <button onClick={() => setActiveTab?.('muhasebe')} className="action-btn-view" title={tr ? 'Muhasebe Detayı' : 'Accounting Detail'}>

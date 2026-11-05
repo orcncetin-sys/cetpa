@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { render, screen, fireEvent, act, waitFor, within } from '@testing-library/react';
-import MikroSyncPanel from './MikroSyncPanel';
+import MikroSyncPanel, { uyariParcalari } from './MikroSyncPanel';
 import { mikroIsAdi } from '../lib/mikroIsAdi';
 import { yayinla, sifirla, koleksiyonAyarla } from '../hooks/useArkaPlanIsi.testDuzenegi';
 import { tumunuCekSifirla } from '../hooks/useTumunuCek';
@@ -331,6 +331,64 @@ describe('MikroSyncPanel — Senkron Geçmişi: yetkisizlik ≠ boşluk', () => 
     expect(screen.getByText(/Yanıt alanları: result\[0\]\.Data\.sira, result\[0\]\.IsError/)).toBeInTheDocument();
   });
 
+  // Şartname «Mikro bağlantı A» A8.1 (2026-11-05): gece «faturadan sipariş» ⚠ notu `entityId`'de; panel 8 karaktere kesiyordu.
+  it('⚠ taşıyan özet KESİLMEZ: ⚠ ile başlayan parçalar ayrı satırlarda TAM; ⚠\'siz parça ayrı satıra çıkmaz', async () => {
+    const kaynaksiz = '⚠ 3 MF siparişinin kaynağı Mikro fatura listesinde yok (silinmiş olabilir): MF-325, MF-330, MF-331 — durum değiştirilmedi';
+    koleksiyonAyarla('syncLog', [{ id: 'k3', veri: {
+      operation: 'faturadan-siparis', entityType: 'orders', entityId: `12 sipariş türetildi · ${kaynaksiz} · ⚠ 2 kalemsiz`,
+      success: true, mikroRef: null, error: null, duration: 1500,
+    } }]);
+    await cizVeBekle();
+    fireEvent.click(screen.getByRole('button', { name: /Senkronizasyon Geçmişi/ }));
+    const parcalar = [...document.querySelectorAll('[data-sync-uyari]')].map(e => e.textContent);
+    expect(parcalar).toEqual([kaynaksiz, '⚠ 2 kalemsiz']);
+    expect(screen.queryByText('/12 sipar')).toBeNull();
+  });
+
+  // İnceleme MBA2 #0 (2026-11-05): GERÇEK sunucu özeti ⚠ notunu `' — '` ile ekler (`mikroRoutes.ts` `denetimOzeti` ve gece
+  // `faturaYok` metni); yalnız `' · '` ile bölmek ⚠ parçasını bulamıyordu (satırda hiçbir şey görünmüyordu).
+  it('sunucu `denetimOzeti` biçimi (`… (442 satış faturası) — ⚠ …`): ⚠ parçası TAM; içindeki « — durum değiştirilmedi» bölünmez', async () => {
+    const kaynaksiz = '⚠ 3 MF siparişinin kaynağı Mikro fatura listesinde yok (silinmiş olabilir): MF-325, MF-330, MF-331 — durum değiştirilmedi';
+    koleksiyonAyarla('syncLog', [{ id: 'k5', veri: {
+      operation: 'faturadan-siparis', entityType: 'orders',
+      entityId: '12 sipariş türetildi, 0 atlandı, 0 eski kayıt onarıldı, 0 kalemsiz sipariş dolduruldu, 0 siparişin kalemi yenilendi, 0 iptal edildi, 0 iptali geri alındı (442 satış faturası) — ' + kaynaksiz,
+      success: true, mikroRef: null, error: null, duration: 1500,
+    } }]);
+    await cizVeBekle();
+    fireEvent.click(screen.getByRole('button', { name: /Senkronizasyon Geçmişi/ }));
+    expect([...document.querySelectorAll('[data-sync-uyari]')].map(e => e.textContent)).toEqual([kaynaksiz]);
+    expect(screen.queryByText('/12 sipar')).toBeNull();
+  });
+
+  it('gece `faturaYok` biçimi (`Satış faturası bulunamadı — önce … — ⚠ …`): ⚠ parçası TAM; ⚠\'siz baş parça ayrı satıra çıkmaz', async () => {
+    const kaynaksiz = '⚠ 3 MF siparişinin kaynağı Mikro fatura listesinde yok (silinmiş olabilir): MF-325, MF-330, MF-331 — durum değiştirilmedi';
+    koleksiyonAyarla('syncLog', [{ id: 'k6', veri: {
+      operation: 'faturadan-siparis', entityType: 'orders',
+      entityId: 'Satış faturası bulunamadı — önce "Faturaları Çek" çalıştırın. — ' + kaynaksiz,
+      success: true, mikroRef: null, error: null, duration: 1500,
+    } }]);
+    await cizVeBekle();
+    fireEvent.click(screen.getByRole('button', { name: /Senkronizasyon Geçmişi/ }));
+    expect([...document.querySelectorAll('[data-sync-uyari]')].map(e => e.textContent)).toEqual([kaynaksiz]);
+    expect(screen.queryByText('/Satış fa')).toBeNull();
+  });
+
+  it("`uyariParcalari`: bekletme parçasının içindeki « — Siparişler'de…» bölünmez (ileri bakış)", () => {
+    const bekletme = "⚠ 1 fatura bekletildi: x (SIP-1) — Siparişler'de sonucu çözün";
+    expect(uyariParcalari(`1 sipariş türetildi — 2 siparişin tutarı bilinmiyor · ${bekletme}`)).toEqual([bekletme]);
+  });
+
+  it('⚠ yoksa entityId bugünkü gibi ilk 8 karakter', async () => {
+    koleksiyonAyarla('syncLog', [{ id: 'k4', veri: {
+      operation: 'FaturaKaydetV2', entityType: 'order', entityId: 'ord12345678',
+      success: true, mikroRef: null, error: null, duration: 900,
+    } }]);
+    await cizVeBekle();
+    fireEvent.click(screen.getByRole('button', { name: /Senkronizasyon Geçmişi/ }));
+    expect(screen.getByText('/ord12345')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-sync-uyari]')).toHaveLength(0);
+  });
+
   it("userRole 'Admin' + boş liste → 'Henüz senkronizasyon kaydı yok'", async () => {
     await cizVeBekle();
     fireEvent.click(screen.getByRole('button', { name: /Senkronizasyon Geçmişi/ }));
@@ -493,5 +551,14 @@ describe('MikroSyncPanel — rol kapısı: «Personel» ve «Üretim Reçeteleri
     // (`kapi` anahtarı 'POST …' ile başladığı için tırnaklı adres aramasına girmez.)
     expect(kodSay(`'${PERSONEL_UCU}'`)).toBe(1);
     expect(kodSay(`'${RECETE_UCU}'`)).toBe(1);
+  });
+});
+
+// Şartname «Mikro bağlantı A» A8.2: AdminPage denetim satırı `truncate` ile kesiliyordu; tamamı `title`'da, görünen metinle AYNI değer.
+// AdminPage bu testte çizilemeyecek kadar büyük (MfaSifirlaDugmesi.test.tsx emsali): kaynak çiti.
+describe('AdminPage · denetim satırı ayrıntısı kesilse de `title`\'da tam', () => {
+  it('`title={ayrintiMetni}` ve görünen metin aynı değişkenden', () => {
+    const kod = kodSatirlari(join(__dirname, '..', 'pages', 'AdminPage.tsx')).map(x => x.kod).join('\n');
+    expect(kod).toContain('<span className="block truncate" title={ayrintiMetni}>{ayrintiMetni}</span>');
   });
 });

@@ -762,6 +762,8 @@ export default function AdminPage({
                         : action.includes('CREATE') || action.includes('Oluştur') ? 'bg-emerald-100 text-emerald-700'
                         : action.includes('UPDATE') || action.includes('Güncelle') ? 'bg-blue-100 text-blue-700'
                         : 'bg-brand/10 text-brand';
+                      // Ayrıntı metni: hücre `truncate` keser; tamamı `title`'da (A8.2). İkisi AYNI değerden.
+                      const ayrintiMetni = (log.details as string)||(log.description as string)||'—';
                       return (
                         <tr key={i} className="hover:bg-gray-50 transition-colors">
                           <td className="py-2.5 px-3 text-xs text-gray-500 whitespace-nowrap font-mono">
@@ -772,7 +774,7 @@ export default function AdminPage({
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${actionColor}`}>{action}</span>
                           </td>
                           <td className="py-2.5 px-3 text-xs text-gray-500 hidden md:table-cell max-w-[320px]">
-                            <span className="block truncate">{(log.details as string)||(log.description as string)||'—'}</span>
+                            <span className="block truncate" title={ayrintiMetni}>{ayrintiMetni}</span>
                             {(() => {
                               const diff = log.diff as Record<string, { from: unknown; to: unknown }> | undefined;
                               if (!diff || !Object.keys(diff).length) return null;

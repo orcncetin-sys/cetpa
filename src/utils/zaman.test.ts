@@ -137,3 +137,25 @@ describe('ceyrekAnahtari — 6b eki: "YYYY-Qn" (kronolojik metin sırası)', () 
     }
   });
 });
+
+import { sonGuncellemeMs } from './zaman';
+
+// Şartname «Mikro bağlantı A» A3.4 (2026-11-05): «son bakiye çekimi» damgasının TEK yardımcısı.
+describe('sonGuncellemeMs · en son damga; okunamayan atlanır, hiçbiri yoksa null', () => {
+  it('boş liste → null (uydurma tarih / «şimdi» YOK)', () => {
+    expect(sonGuncellemeMs([])).toBeNull();
+  });
+  it('okunamayan değerler atlanır; hiçbiri okunamıyorsa null', () => {
+    expect(sonGuncellemeMs([null, undefined, '', 'tarih değil', {}])).toBeNull();
+    expect(sonGuncellemeMs([null, '2026-10-17T08:06:00.000Z', 'x'])).toBe(Date.UTC(2026, 9, 17, 8, 6));
+  });
+  it('biçimden bağımsız EN BÜYÜK döner (ISO, epoch ms, Timestamp zarfı, Date)', () => {
+    const ms = sonGuncellemeMs([
+      '2026-10-17T08:06:00.000Z',
+      Date.UTC(2026, 10, 5, 0, 21),
+      { _seconds: Date.UTC(2026, 10, 4) / 1000, _nanoseconds: 0 },
+      new Date(Date.UTC(2026, 9, 1)),
+    ]);
+    expect(ms).toBe(Date.UTC(2026, 10, 5, 0, 21));
+  });
+});

@@ -14,7 +14,7 @@
 import type { Express, Request, Response } from 'express';
 import type { AdminDbLike } from '../adminDbTypes.js';
 import { runOpsWatchdog, diskNobetcisi } from '../opsWatchdog.js';
-import { MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, getMikroCreds, mikroSql, stubSayaciOzeti } from '../mikroClient.js';
+import { MIKRO_API_BASE, MIKRO_JUMP_SURUM, MIKRO_LOCAL_MODE, getMikroCreds, mikroSql, stubSayaciOzeti, v17YoklamaDurumu } from '../mikroClient.js';
 // Gönderim defteri ölçüm özeti + kip yazıcısı (şartname yeniden-deneme v3 K0b). Modül düzeyi önbellek ve sayaçlar mikroRoutes /
 // server.ts ile AYNI yoldan (`.js`) içe aktarılır.
 import { gonderimKipiYaz, mikroGonderimOzetiOku } from '../mikro/gonderimDefteri.js';
@@ -294,17 +294,22 @@ export function opsRoutes(app: Express, C: OpsRouteCtx): void {
         r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at ?? ''));
       const satirlar = gunluk.rows.slice(0, SENKRON_LISTE_SINIRI).map(cevir);
       const sistemSatirlari = sistem.rows.slice(0, SENKRON_OZET_SINIRI).map(cevir);
+      // Gece stok miktarı adımı (şartname «Mikro bağlantı A» A1.7 / AH3, 2026-11-05): 03:20 Mikro bloğunun SON adımıdır (yalnız
+      // MIKRO_CRON_SYNC === 'true' iken kayıtlı) ve sürüm < 17 iken metodu CANLI yoklar. Yoklama süreç belleğindedir: yeniden
+      // başlatmadan sonra ilk yoklamaya kadar «bilinmiyor» (null; «koşmaz» DEĞİL). Değer taşımaz: yalnız bool + ISO zaman.
+      // Gece işinin GERÇEKTEN koştuğunun kalıcı kanıtı bu alan değil, sistem syncLog `GenelAmacliMaliyetListesiV2` satırıdır.
+      const stokYoklama = v17YoklamaDurumu('GenelAmacliMaliyetListesiV2');
+      const cronKayitli = process.env.MIKRO_CRON_SYNC === 'true';
       res.json({
         success: true,
         uretim: new Date().toISOString(),
         ...koleksiyonOlculeri(boyut.rows),
         aynalar,
         zamanlanmis: {
-          mikroCronKayitli: process.env.MIKRO_CRON_SYNC === 'true',
+          mikroCronKayitli: cronKayitli,
           mikroSurum: MIKRO_JUMP_SURUM,
-          // crons.ts: 04:00 stok miktar/maliyet işi yalnız MIKRO_CRON_SYNC === 'true' bloğunda KAYDEDİLİR ve sürüm < 17 iken
-          // ilk satırda döner (GenelAmacliMaliyetListesiV2 V16'da yok) — ikisi birlikte sağlanmadıkça ÇALIŞMAZ.
-          geceStokMiktarIsiCalisir: process.env.MIKRO_CRON_SYNC === 'true' && MIKRO_JUMP_SURUM >= 17,
+          geceStokMiktarIsiCalisir: !cronKayitli ? false : MIKRO_JUMP_SURUM >= 17 ? true : stokYoklama ? stokYoklama.ok : null,
+          geceStokMiktarSonYoklama: stokYoklama ? { ok: stokYoklama.ok, zaman: new Date(stokYoklama.ts).toISOString() } : null,
         },
         senkron: {
           gunler: geceOzeti(sistemSatirlari), gunlerKesildi: sistem.rows.length > SENKRON_OZET_SINIRI,

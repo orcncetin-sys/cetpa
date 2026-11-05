@@ -19,6 +19,7 @@ import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
 import { bilinenSayi } from '../utils/para';
 import { baslikMatrahi } from '../lib/faturaMatrahi';
+import { faturaEvrakiMi, faturaTuruEvraktan } from '../lib/faturaEvrakKosulu';
 import { belgeNoOku } from '../hooks/useMikroFaturalar';
 import { tarihYaz, zamanDate } from '../utils/zaman';
 import { FileText, AlertTriangle, CheckCircle2, Clock, TrendingUp, Download } from 'lucide-react';
@@ -233,7 +234,12 @@ export default function CariEkstrePanel({
           const borc = Number(x.cha_tip ?? 0) === 0;
           balanceAcc += borc ? amount : -amount;
           const yon = borc ? (t ? 'Borç' : 'Debit') : (t ? 'Alacak' : 'Credit');
-          const tipEtiket = hareketTipiEtiket(x.cha_evrak_tip);
+          // Alış faturası (evrak tipi 0 + cinsi 6) «Hareket (tip 0)» basılıyordu (şartname «Mikro bağlantı A» A6, 2026-11-05;
+          // canlı 336 satır). Kural TEK kaynaktan (lib/faturaEvrakKosulu); evrak tipi 63 etiketi, cinsi 8 / 14 / 15 ve evrak tipi 1
+          // değişmez (kanıt yok).
+          const tipEtiket = faturaTuruEvraktan(x.cha_evrak_tip, x.cha_cinsi) === 'alis'
+            ? (t ? 'Alış Faturası' : 'Purchase Invoice')
+            : hareketTipiEtiket(x.cha_evrak_tip);
           // Açıklama (cha_aciklama = "yemek masrafı" vb.) = ana etiket; masraf/dekont
           // hareketleri ne olduğuyla görünür (kullanıcı isteği). Yoksa evrak no'ya düş.
           const aciklama = String(x.cha_aciklama ?? '').trim();
@@ -479,7 +485,9 @@ export default function CariEkstrePanel({
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {displayed.map(row => {
-                  const isFatura = row.raw && Number(row.raw.cha_evrak_tip) === 63;
+                  // Satış (63) VE alış (0 + cinsi 6) faturası detay açar: tek yüklem (lib/faturaEvrakKosulu, A6). Alış satırı
+                  // `cha_tip` 1 olduğu için aşağıdaki `yon` 'gelen' olur.
+                  const isFatura = !!row.raw && faturaEvrakiMi(row.raw.cha_evrak_tip, row.raw.cha_cinsi);
                   return (
                   <tr
                     key={row.id}
@@ -512,7 +520,7 @@ export default function CariEkstrePanel({
                         // Aynı yön + evrak numaralı başka fatura başlığı bu cari listesinde var mı (canlıda giden 246): kalemler
                         // paylaşılır, detay matrahı/sağlamayı kalemden TÜRETMEZ. Liste yalnız bu carinin hareketleri — ikizi başka
                         // cariye aitse görülmez (sınır).
-                        ortakAnahtar: rows.filter(r => r.raw && Number(r.raw.cha_evrak_tip) === 63 && Number(r.raw.cha_tip ?? 0) === Number(x.cha_tip ?? 0)
+                        ortakAnahtar: rows.filter(r => r.raw && faturaEvrakiMi(r.raw.cha_evrak_tip, r.raw.cha_cinsi) && Number(r.raw.cha_tip ?? 0) === Number(x.cha_tip ?? 0)
                           && String(r.raw.cha_evrakno_seri ?? '').trim() === seri && String(r.raw.cha_evrakno_sira ?? '') === String(sira ?? '')).length > 1,
                         // Sınır: tevkifatlı faturada meblağ tevkifat kadar düşük → bu KDV o kadar eksik görünür (modellenmez).
                         kdv: tutar - matrah,
