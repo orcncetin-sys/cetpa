@@ -11,3 +11,12 @@ export const MF_KAYNAGI = 'mikro-fatura';
 
 /** MF siparişinin doküman kimliği öneki: `mikrofat__<cid>__<seri>-<sira>` (idempotentlik anahtarı — BİÇİM DEĞİŞMEZ). */
 export const MF_KIMLIK_ONEKI = 'mikrofat__';
+
+/** MF siparişi ↔ Mikro satış faturası ANAHTARI — TEK KAYNAK (şartname q-serisi v3 «Kapı sonrası hükümler» QH1-2, 2026-11-05).
+ *  Biçim `useMikroFaturalar.mapMikroFatura`'nın `faturaNo`'suyla BİREBİR: her parça `String(v ?? '').trim()`, boş parça atılır,
+ *  kalanlar `'-'` ile birleşir → Q-1 için `'Q-1'`, boş seride `'123'`. Girdi `unknown`: Mikro sırası sayı gelir (`0` geçerli
+ *  bir parçadır, atılmaz). Okuyanlar: `mapMikroFatura` (Mikro satırının `faturaNo`'su), Raporlar tekilleştirmesi, Satışlar /
+ *  Finans ikiz elemesi (`utils/pano/mikroBirlesim.mfIkiziListede`) — MF'nin `mikroEvrak.seri` / `.sira`'sından aynı anahtar.
+ *  MF'nin `mikroFaturaNo`'su (`${seri}${sira}` → 'Q1') ANAHTAR DEĞİLDİR: Q'da Mikro satırının 'Q-1'iyle eşleşmez. */
+export const mikroFaturaAnahtari = (seri: unknown, sira: unknown): string =>
+  [seri, sira].map(v => String(v ?? '').trim()).filter(v => v !== '').join('-');

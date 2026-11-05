@@ -6,9 +6,11 @@ import { bilinenSayi, ekranTutari, sayiSirala, tamTutar } from '../utils/para';
 import {
   cetpaEvrakNolari, cariAdHaritasi, mikroSatisSatirlari as mikroSatisSatirlariHesapla,
   cetpaSatisSatirlari, satisKayitlari as satisKayitlariHesapla, satisKpi,
+  satisIkizAnahtarlari, satisYerelListesi, satisCiftSayimOzeti,
 } from '../utils/muhasebe/satislar';
 import { faturaTutarlari, mikroFaturaSatirlari as mikroFaturaSatirlariHesapla } from '../utils/muhasebe/faturalar';
 import { mikroMizanSatirlari, mizanHesapla, fisDogrula } from '../utils/muhasebe/mizan';
+import { faturasizDisiNotu } from '../utils/muhasebe/faturasizDisi';
 import { kdvDonemi } from '../utils/muhasebe/kdvBeyan';
 import { gelirGiderOzeti, grafikTavani } from '../utils/muhasebe/gelirGider';
 import { dovizBakiyeleri, hareketleriAyikla } from '../utils/muhasebe/bankaHesap';
@@ -340,9 +342,10 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
   const [customers, setCustomers] = useState<Customer[]>([]);
   /** Mikro faturaları — Satışlar sekmesinde Cetpa satışlarının YANINDA gösterilir.
    *  Kullanıcı tanımı (2026-07-31): "satışlar = faturalar ama Q serisi = faturasız
-   *  satış; Mikro faturalarını DA orada görmem gerekli."
-   *  Bu yüzden mevcut orders tabanlı KPI'lara ve faturalı/faturasız ayrımına
-   *  DOKUNULMAZ — Mikro yalnız EK bir kaynak olarak eklenir. */
+   *  satış; Mikro faturalarını DA orada görmem gerekli." Mikro EK bir kaynaktır.
+   *  Q kuralı SERİYLE uygulanıyor (2026-11-05, şartname q-serisi v3 Dilim 1): hook
+   *  `faturasiz` alanını seriden türetir (lib/faturasizSeri) — resmî ekranlar (KDV, mizan,
+   *  Gelir/Gider 600) Q satırını dışlar + not; Satışlar onu «Faturasız» başlığında sayar. */
   // mikroFaturalar ortak hook'tan — cha_* eşlemesi tek yerde (useMikroFaturalar).
   const mikroFaturalar = useMikroFaturalar(isAuthenticated && !!userRole);
   // Varsayılan 'hepsi': Mikro satış faturaları da görünsün. Eskiden 'cetpa'
@@ -1547,9 +1550,9 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     : sortedMizanRows;
 
   // ── Mikro faturaları, Cetpa satışlarının YANINDA ────────────────────────
-  // Mevcut `displayedSatis` (orders tabanlı) ve tüm KPI kartları AYNEN kalır;
-  // burada yalnız EK satırlar hazırlanır. Varsayılan kaynak 'cetpa' olduğu için
-  // ekran davranışı değişmez — Mikro'yu görmek opt-in.
+  // Varsayılan kaynak «Tümü» ('hepsi', 2026-08-01). Mikro dahil görünümde Mikro faturasından
+  // türetilen MF siparişi İKİZ ANAHTARIYLA yerel listeden düşer — satış Mikro faturasından BİR
+  // KEZ sayılır (kullanıcı S1 (a), şartname q-serisi v3 QH2; 2026-11-05). «Cetpa» görünümü aynen.
   //
   // Hesap tek kaynakta (utils/muhasebe/satislar.cetpaEvrakNolari / cariAdHaritasi)
   // — mükerrer sayım elemesi ve Mikro cari kodu → müşteri adı eşlemesi orada.
@@ -1579,22 +1582,27 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
     arama: satisSearch,
     siralama: { anahtar: satisSortKey, azalan: satisSortDir === 'desc' },
   });
-  // Mikro satış faturaları tanım gereği FATURALI. Satışlar KPI'larına additive
-  // katılır (satisKaynak Mikro'yu içeriyorsa); orders mantığı (q-serisi faturasız
-  // dahil) korunur — kullanıcının "bu modülü bozma" uyarısı gereği toplamlar
-  // toplanır, drill-down/orders akışına dokunulmaz.
+  // Mikro satış faturaları FATURALI, seri Q satırı FATURASIZ (K4). Satışlar KPI'larına additive
+  // katılır (satisKaynak Mikro'yu içeriyorsa). Mikro dahilken İKİZİ Mikro'da olan MF siparişi yerel
+  // listeden düşer (ikiz kümesi yıl / arama süzgecinden ÖNCE — satislar.satisIkizAnahtarlari notu);
+  // ikizsiz MF ve Cetpa siparişleri kalır. Yerel liste BİR KEZ hesaplanır: kart, drill-down ve tablo
+  // AYNI listeyi alır (satisKpi ikinci kez süzmez).
   const mikroDahil = satisKaynak !== 'cetpa';
+  const satisIkizleri = satisIkizAnahtarlari(mikroFaturalar, cetpayaAitEvrakNo);
+  const satisYerel = satisYerelListesi(orders, { mikroDahil, ikizAnahtarlari: satisIkizleri });
+  // Ekran notu (QH2-10): kaç MF sayılmadı ve tutarı — aynı yüklem, sahte kesinlik yok.
+  const satisCiftSayim = mikroDahil ? satisCiftSayimOzeti(orders, satisIkizleri) : null;
   // Hesap tek kaynakta (utils/muhasebe/satislar.satisKpi) — additive toplama, Mikro
   // payı, müşteri/oran kırılımları; bilinmeyen tutar 0 sayılmaz, SAYILIR.
-  const satisOzet = satisKpi(orders, mikroSatisSatirlari, mikroDahil);
+  const satisOzet = satisKpi(satisYerel, mikroSatisSatirlari, mikroDahil);
   // Hesap tek kaynakta (utils/muhasebe/satislar.satisKayitlari) — Mikro faturaları
   // drill-down için orders şekline çevrilir (orders BOŞ olduğu için detaylar
   // "Kayıt bulunamadı" gösteriyordu — 2026-08-02).
-  const satisKayitlari = satisKayitlariHesapla(orders, mikroSatisSatirlari, mikroDahil);
+  const satisKayitlari = satisKayitlariHesapla(satisYerel, mikroSatisSatirlari, mikroDahil);
 
   // Satışlar computed — hesap tek kaynakta (utils/muhasebe/satislar.cetpaSatisSatirlari):
   // arama tr-TR küçük harf, bilinmeyen tutar/oran/tarih her iki yönde de sona.
-  const displayedSatis = cetpaSatisSatirlari(orders, {
+  const displayedSatis = cetpaSatisSatirlari(satisYerel, {
     arama: satisSearch,
     siralama: { anahtar: satisSortKey, azalan: satisSortDir === 'desc' },
   });
@@ -1972,6 +1980,8 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
           mizanNotu={[
             mizanBilinmeyen > 0 ? (currentLanguage === 'tr' ? `${mizanBilinmeyen} yevmiye kaydının tutarı bilinmiyor` : `${mizanBilinmeyen} journal entries have unknown amounts`) : null,
             mizanMikroBilinmeyen > 0 ? (currentLanguage === 'tr' ? `${mizanMikroBilinmeyen} Mikro faturası mizana alınamadı (matrah/KDV bilinmiyor)` : `${mizanMikroBilinmeyen} Mikro invoices not posted (net/VAT unknown)`) : null,
+            // Faturasız (seri Q) satış resmî mizana girmez (K3; şartname q-serisi v3 Q9).
+            faturasizDisiNotu(mikroMizan.faturasizDisi, currentLanguage),
           ].filter(Boolean).join(' · ') || null}
           kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency} formatConv={formatConv} setDrillDown={setDrillDown}
           mizanSearch={mizanSearch} setMizanSearch={setMizanSearch}
@@ -1992,6 +2002,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
           toplamGelir={toplamGelir} toplamGider={toplamGider} netKar={netKar}
           monthlyData={monthlyData} maxChartVal={maxChartVal}
           gelirTutarsiz={ggOzeti.gelir.bilinmeyen} giderTutarsiz={ggOzeti.gider.bilinmeyen} tarihsiz={ggOzeti.tarihsiz}
+          faturasizNotu={faturasizDisiNotu(ggOzeti.faturasizDisi, currentLanguage)}
         />
       )}
 
@@ -2037,7 +2048,7 @@ export default function AccountingModule({ orders = [], currentLanguage, isAuthe
           t={t} currentLanguage={currentLanguage} satisKayitlari={satisKayitlari}
           setDrillDown={setDrillDown} formatConv={formatConv} kpiCurrency={kpiCurrency} setKpiCurrency={setKpiCurrency}
           satisKaynak={satisKaynak} setSatisKaynak={setSatisKaynak}
-          satisOzet={satisOzet} mikroDahil={mikroDahil} mikroSatisSatirlari={mikroSatisSatirlari}
+          satisOzet={satisOzet} mikroDahil={mikroDahil} mikroSatisSatirlari={mikroSatisSatirlari} satisCiftSayim={satisCiftSayim}
           satisSearch={satisSearch} setSatisSearch={setSatisSearch} satisYil={satisYil} setSatisYil={setSatisYil}
           satisSortKey={satisSortKey} satisSortDir={satisSortDir} toggleSatisSort={toggleSatisSort}
           displayedSatis={displayedSatis}

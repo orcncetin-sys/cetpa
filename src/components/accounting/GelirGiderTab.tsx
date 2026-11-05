@@ -62,6 +62,8 @@ interface GelirGiderTabProps {
   giderTutarsiz: number;
   /** Tarihi çözülemeyen kayıt adedi — hiçbir döneme dahil edilmedi. */
   tarihsiz: number;
+  /** Seçili dönemde 600 (Mikro) gelirinden DIŞLANAN faturasız (Q) satışın notu (utils/muhasebe/faturasizDisi); yoksa null. */
+  faturasizNotu: string | null;
 }
 
 export default function GelirGiderTab({
@@ -69,7 +71,7 @@ export default function GelirGiderTab({
   gelirDateFrom, setGelirDateFrom, gelirDateTo, setGelirDateTo, gelirUseRange, setGelirUseRange,
   gelirCurrency, setGelirCurrency, exchangeRates, setDrillDown,
   gelirBreakdown, giderBreakdown, toplamGelir, toplamGider, netKar, monthlyData, maxChartVal,
-  gelirTutarsiz, giderTutarsiz, tarihsiz,
+  gelirTutarsiz, giderTutarsiz, tarihsiz, faturasizNotu,
 }: GelirGiderTabProps) {
   // NaN net ("bir kayıt bile bilinmiyor") `netKar >= 0` kıyasında false döner ve eskiden
   // sessizce 'Zarar' rozeti + kırmızı basardı; nötr gri + '—' + not için ayrı bayrak.
@@ -121,6 +123,7 @@ export default function GelirGiderTab({
         )}
       </div>
       {tarihsiz > 0 && <p className="text-[10px] text-amber-600 px-1">{tarihsiz} {ac(currentLanguage).kayit_tarihsiz_hicbir_doneme_dahil_edilmedi}</p>}
+      {faturasizNotu && <p data-faturasiz-notu="gelir-gider" className="text-[10px] text-gray-500 px-1">{faturasizNotu}</p>}
       {/* Currency switcher + KPI Cards */}
       <div className="flex items-center gap-1 apple-card px-3 py-2 w-fit">
         <span className="text-xs text-gray-400 font-medium mr-1">{oc(currentLanguage).para_birimi_2}</span>

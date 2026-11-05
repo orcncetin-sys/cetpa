@@ -99,7 +99,7 @@ describe('babsFormu — cari bazında ≥ ₺5.000 alım (Ba) / satış (Bs) bil
     expect(ekranTutari(zorunlu(ba.belirsiz[0] ?? null).tutar)).toBeNaN();
   });
   it('boş liste → boş form; eşik parametre ile değişir', () => {
-    expect(babsFormu([], 'gelen', '2026-09', cariAd)).toEqual({ satirlar: [], belirsiz: [], toplam: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, faturaSayisi: 0, tarihsiz: 0 });
+    expect(babsFormu([], 'gelen', '2026-09', cariAd)).toEqual({ satirlar: [], belirsiz: [], toplam: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, faturaSayisi: 0, tarihsiz: 0, faturasizDisi: { adet: 0, tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, kdv: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, tutarsiz: 0 } });
     expect(babsFormu(FATURALAR, 'gelen', '2026-09', cariAd, 1000).satirlar.map(s => s.ad)).toEqual(['Ülkü Boya', 'Şişecam İnşaat', 'Işık Çelik', 'Çağlar Nakliyat']);
   });
 });

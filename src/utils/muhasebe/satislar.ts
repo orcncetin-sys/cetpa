@@ -26,12 +26,18 @@
  *   • Dışlamalar AYNEN: yalnız `yon === 'giden'`; seçili yıl (`'hepsi'` = tümü); Cetpa'dan Mikro'ya gönderilmiş
  *     fatura (`mikroEvrakNo` eşleşmesi) çift sayılmaz; iptal edilenler hook'ta zaten elenmiş.
  *   • Toplamlar ADDİTİF: Cetpa sipariş cirosu + (Mikro dahilse) Mikro satış faturaları — kullanıcının
- *     "bu modülü bozma" uyarısı gereği orders mantığı (q-serisi faturasız dahil) korunur, Mikro EK kaynaktır.
- *   • Mikro satırları tanım gereği FATURALI; "Toplam Sipariş" ve "Ortalama Sipariş" kartı yalnız Cetpa
- *     siparişlerini sayar (Mikro faturası sipariş değildir); drill-down toplamı ise Mikro dahil kayıtların
- *     ortalamasıydı → iki değer ayrı alan (`ortalama` / `kayitOrtalamasi`).
+ *     "bu modülü bozma" uyarısı gereği orders mantığı (faturasız dahil) korunur, Mikro EK kaynaktır.
+ *   • ÇİFT SAYIM KAPANDI (2026-11-05, kullanıcı S1 (a); şartname q-serisi v3 QH2): Mikro dahil görünümde («Tümü» /
+ *     «Mikro») İKİZİ Mikro'da olan MF siparişi yerel listeden düşer (`satisYerelListesi`) — satış Mikro faturasından
+ *     BİR KEZ sayılır. İkiz kümesi yıl / arama süzgecinden ÖNCE kurulur (`satisIkizAnahtarlari`): Mikro kaynaklı satış
+ *     yıl ve aramaya bugünkü Mikro satırı gibi uyar. «Cetpa» görünümünde yerel liste BİREBİR bugünkü (MF'ler kalır).
+ *     Değişen: çift sayım, Q (faturasız) Mikro satırının «Faturasız»a geçişi (`faturasiz`) ve bunlara bağlı Toplam /
+ *     Ortalama Sipariş kartları; «Cetpa» görünümü ve Mikro şeridi aynı kalır.
+ *   • Mikro satırı FATURALI, yalnız seri Q (`faturasiz === true`) satır FATURASIZ (K4). "Toplam Sipariş" ve
+ *     "Ortalama Sipariş" kartı yalnız Cetpa siparişlerini sayar (Mikro faturası sipariş değildir); drill-down toplamı
+ *     ise Mikro dahil kayıtların ortalamasıydı → iki değer ayrı alan (`ortalama` / `kayitOrtalamasi`).
  *   • Mikro KPI toplamları ARANMIŞ/SÜZÜLMÜŞ listeden hesaplanır (sayfa `mikroSatisSatirlari`'nı öyle veriyordu);
- *     Cetpa KPI'ları aramadan bağımsız `orders` üzerinden. Çağıran aynı listeleri verir.
+ *     Cetpa KPI'ları aramadan bağımsız yerel liste üzerinden. Çağıran kart, drill-down ve tabloya AYNI yerel listeyi verir.
  * BİLİNÇLİ FARKLAR:
  *   • Oran kırılımında oranı bilinmeyen kayıt 'bilinmiyor' kovasına girer (eskiden atlanıyordu) → kova toplamı = KPI.
  *   • Arama Türkçe küçük harfle (`toLocaleLowerCase('tr-TR')`: 'İ'→'i'); tutarı bilinmeyen kayıt "0"/"nan" ile eşleşmez.
@@ -40,10 +46,12 @@
  */
 import { bilinenSayi, toplaBilinen, tutarBirlestir, tamTutar, ekranTutari, sayiSirala, type Tutar } from '../para';
 import { siparisTarihMs, type SiparisTarihAlanlari } from '../siparis';
+import { mfIkiziListede, type MfIkizAlanlari } from '../pano/mikroBirlesim';
+import { MF_KAYNAGI } from '../../lib/mfKaynagi';
 
 // ── Girdi tipleri: MİNİMAL ve yapısal — kanonik Order / Customer / MikroFatura uyar, bağımlı değil ──
 /** Cetpa siparişi (Order'ın Satışlar sekmesinde okunan alanları; DB'den null gelebilir → `unknown`). */
-export interface SatisSiparisi extends SiparisTarihAlanlari {
+export interface SatisSiparisi extends SiparisTarihAlanlari, MfIkizAlanlari {
   customerName?: string;
   totalPrice?: unknown;
   faturali?: boolean;
@@ -65,11 +73,14 @@ export interface SatisFaturasi {
   oran?: number | null;
   oranKarma?: boolean;
   yon?: string;
+  /** Seri Q satış faturası (useMikroFaturalar `faturasiz`); alan yoksa faturasız SAYILMAZ. */
+  faturasiz?: boolean;
 }
 /** Cari kaydı (Customer): Mikro cari kodu → görünen ad. */
 export interface CariKaydi { name?: string; mikroCariKod?: unknown }
-/** Drill-down satırı: sipariş ya da sipariş şekline çevrilmiş Mikro faturası (SatislarTab `SatisKayit`). */
-export interface SatisKaydi {
+/** Drill-down satırı: sipariş ya da sipariş şekline çevrilmiş Mikro faturası (SatislarTab `SatisKayit`). `source` / `mikroEvrak`
+ *  (MfIkizAlanlari) siparişten taşınır — drill-down rozeti `faturasizEtiketi` onları okur (MF-Q1 «FATURASIZ · MİKRO Q»). */
+export interface SatisKaydi extends MfIkizAlanlari {
   customerName?: string;
   totalPrice?: unknown;
   faturali?: boolean;
@@ -188,8 +199,9 @@ export function mikroSatisToplamlari(satirlar: readonly SatisFaturasi[]): MikroS
 /**
  * Satışlar sekmesi drill-down'ları için Mikro satış faturalarını orders şekline
  * çevir; drill-down'lar `satisKayitlari`'ni okur (orders BOŞ olduğu için detaylar
- * "Kayıt bulunamadı" gösteriyordu — 2026-08-02). Mikro faturaları FATURALI sayılır;
- * q-serisi/faturasız orders'ta korunur. (AccountingModule 1807-1823'ten taşındı.)
+ * "Kayıt bulunamadı" gösteriyordu — 2026-08-02). Mikro faturaları FATURALI sayılır,
+ * seri Q (`faturasiz`) satırı FATURASIZ; `orders` = `satisYerelListesi` çıktısı (kart ile AYNI liste).
+ * (AccountingModule 1807-1823'ten taşındı.)
  */
 export function satisKayitlari<T extends SatisSiparisi>(
   orders: readonly T[],
@@ -200,7 +212,8 @@ export function satisKayitlari<T extends SatisSiparisi>(
     ? mikroSatirlari.map(f => ({
         customerName: f.musteri,
         totalPrice: f.tutar,
-        faturali: true,
+        // Seri Q satış faturası FATURASIZ başlığına (K4; QH2-6) — alanı olmayan satır bugünkü gibi faturalı.
+        faturali: f.faturasiz !== true,
         kdvOran: f.oran ?? undefined,
         oranKarma: f.oranKarma,
         kdvTutari: f.kdv,
@@ -221,21 +234,83 @@ export function kdvOranAnahtari(kdvOran: unknown, oranKarma?: boolean): string {
   return bilinenSayi(kdvOran) ? String(Number(kdvOran)) : 'bilinmiyor';
 }
 
+// ── Çift sayım: MF siparişi ↔ Mikro satış faturası (S1 (a); şartname q-serisi v3 QH2, QH4) ─────────
+
+/**
+ * İkiz anahtar kümesi: GİDEN ∧ `cetpaEvrakNolari` elemesinden geçen Mikro faturalarının `faturaNo`'ları (anahtar biçimi
+ * lib/mfKaynagi.mikroFaturaAnahtari). Yıl ve arama süzgeci UYGULANMAZ (QH2-2/3, bilerek): süzülmüş küme kullanılsaydı
+ * «2026» görünümünde 2025 faturasının MF'si (yerel liste = tüm zamanlar) sayılırdı; bu kümeyle Mikro kaynaklı satış yıl ve
+ * aramaya bugünkü Mikro satırı gibi uyar — değişen tek şey çift sayımdır. `cetpaEvrakNolari` elemesi UYGULANIR: Mikro satırı
+ * ekranda elenmişse MF düşmemeli (satış hiç sayılmazdı).
+ */
+export function satisIkizAnahtarlari(faturalar: readonly SatisFaturasi[], cetpaEvrakNolari: ReadonlySet<string>): Set<string> {
+  const anahtarlar = new Set<string>();
+  for (const f of faturalar) {
+    if (f.yon !== 'giden' || !f.faturaNo) continue;
+    if (cetpaEvrakNolari.has(f.faturaNo)) continue;
+    anahtarlar.add(f.faturaNo);
+  }
+  return anahtarlar;
+}
+
+export interface SatisYerelSecenek {
+  /** `satisKaynak !== 'cetpa'`. false iken yerel liste BİREBİR girdi (MF'ler kalır; karşı tarafı görünmüyor). */
+  mikroDahil: boolean;
+  /** `satisIkizAnahtarlari` çıktısı. */
+  ikizAnahtarlari: ReadonlySet<string>;
+}
+
+/**
+ * Satışlar'ın YEREL listesi — kart (`satisKpi`), drill-down (`satisKayitlari`) ve tablo (`cetpaSatisSatirlari`) AYNI listeyi
+ * alır (a2-5). Mikro dahilken İKİZİ Mikro'da olan MF çıkar (`mfIkiziListede`); ikizsiz MF ve yerel sipariş kalır. Girdi
+ * değişmez (yeni dizi).
+ */
+export function satisYerelListesi<T extends SatisSiparisi>(orders: readonly T[], s: SatisYerelSecenek): T[] {
+  if (!s.mikroDahil) return [...orders];
+  return orders.filter(o => !mfIkiziListede(o, s.ikizAnahtarlari));
+}
+
+export interface SatisCiftSayimOzeti {
+  /** Yerel listeden düşen MF adedi (ikizi Mikro'da). */
+  eslesenAdet: number;
+  /** Düşen MF'lerin `totalPrice` toplamı — bilinmeyen tutar 0 sayılmaz, SAYILIR. */
+  eslesenTutar: Tutar;
+  /** Düşenlerden `faturali` olmayan adet (bugün «Faturasız» kartında sayılanlar). */
+  eslesenFaturasizAdet: number;
+  /** İkizi kümede OLMAYAN MF adedi — listede kalır, bir kez sayılır. */
+  ikizsizMfAdet: number;
+}
+
+/**
+ * «Önce / sonra» ölçüsü (QH4-1): aynı girdide `eskiCiro − yeniCiro = eslesenTutar` (kuruş). `satisYerelListesi` ile AYNI
+ * yüklem (`mfIkiziListede`); ekran notu (QH2-10) bunu basar. İkiz kümesi süzgeç öncesi olduğundan her yıl görünümünde aynıdır.
+ */
+export function satisCiftSayimOzeti(orders: readonly SatisSiparisi[], ikizAnahtarlari: ReadonlySet<string>): SatisCiftSayimOzeti {
+  const eslesen = orders.filter(o => mfIkiziListede(o, ikizAnahtarlari));
+  return {
+    eslesenAdet: eslesen.length,
+    eslesenTutar: toplaBilinen(eslesen, o => o.totalPrice),
+    eslesenFaturasizAdet: eslesen.filter(o => !o.faturali).length,
+    ikizsizMfAdet: orders.filter(o => o.source === MF_KAYNAGI && !mfIkiziListede(o, ikizAnahtarlari)).length,
+  };
+}
+
 // ── KPI ──────────────────────────────────────────────────────────────────────────────────────────
 
 export interface SatisKpi {
-  /** Toplam ciro: Cetpa siparişleri + (dahilse) Mikro satış faturaları. */
+  /** Toplam ciro = `faturaliCiro` + `faturasizCiro` (çit; bilinmeyen 0 sayılmaz). */
   ciro: Tutar;
-  /** Faturalı siparişler + (dahilse) Mikro (tanım gereği faturalı). */
+  /** Faturalı siparişler + (dahilse) faturasız OLMAYAN Mikro satırları. */
   faturaliCiro: Tutar;
-  /** Yalnız faturasız Cetpa siparişleri. */
+  /** Faturasız Cetpa siparişleri + (dahilse) faturasız (seri Q) Mikro satırları. */
   faturasizCiro: Tutar;
   /** Sipariş `kdvTutari` + (dahilse) Mikro `kdv`; KDV alanı olmayan sipariş bilinmeyen sayılır. */
   kdv: Tutar;
   /** Cetpa sipariş adedi (kart "Toplam Sipariş"). */
   adet: number;
-  /** Faturalı sipariş + (dahilse) Mikro satır adedi. */
+  /** Faturalı sipariş + (dahilse) faturasız OLMAYAN Mikro satır adedi. */
   faturaliAdet: number;
+  /** Faturasız sipariş + (dahilse) faturasız Mikro satır adedi. */
   faturasizAdet: number;
   /** Ortalama sipariş (kart): yalnız Cetpa; adet 0 ya da bir tutar bile bilinmiyorsa null. */
   ortalama: number | null;
@@ -265,10 +340,10 @@ function kirilim<T>(liste: readonly T[], anahtar: (o: T) => string, sec: (o: T) 
 }
 
 /**
- * Satışlar KPI kartları + drill-down kırılımları. `mikroSatirlari` = `mikroSatisSatirlari` çıktısı (süzülmüş);
- * `mikroDahil` = `satisKaynak !== 'cetpa'`. Mikro satış faturaları tanım gereği FATURALI; Satışlar KPI'larına
- * additive katılır; orders mantığı (q-serisi faturasız dahil) korunur — kullanıcının "bu modülü bozma" uyarısı
- * gereği toplamlar toplanır, drill-down/orders akışına dokunulmaz. (AccountingModule 1797-1806 + SatislarTab 60-140.)
+ * Satışlar KPI kartları + drill-down kırılımları. `orders` = `satisYerelListesi` çıktısı (kart, drill-down ve tablo AYNI
+ * listeyi alır — burada İKİNCİ KEZ süzülmez, yarım düzeltme sınıfı); `mikroSatirlari` = `mikroSatisSatirlari` çıktısı
+ * (süzülmüş); `mikroDahil` = `satisKaynak !== 'cetpa'`. Mikro satış faturaları FATURALI, seri Q satırı FATURASIZ (K4);
+ * Satışlar KPI'larına additive katılır (kullanıcının "bu modülü bozma" uyarısı). (AccountingModule 1797-1806 + SatislarTab 60-140.)
  */
 export function satisKpi<T extends SatisSiparisi>(
   orders: readonly T[],
@@ -276,18 +351,23 @@ export function satisKpi<T extends SatisSiparisi>(
   mikroDahil: boolean,
 ): SatisKpi {
   const mikro: MikroSatisToplam = mikroDahil ? mikroSatisToplamlari(mikroSatirlari) : { adet: 0, ciro: sifir(), kdv: sifir() };
+  const mikroFaturasiz = mikroDahil ? mikroSatirlari.filter(f => f.faturasiz === true) : [];
+  const mikroFaturali = mikroDahil ? mikroSatirlari.filter(f => f.faturasiz !== true) : [];
   const faturali = orders.filter(o => o.faturali);
   const faturasiz = orders.filter(o => !o.faturali);
   const cetpaCiro = toplaBilinen(orders, o => o.totalPrice);
   const kayitlar = satisKayitlari(orders, mikroSatirlari, mikroDahil);
+  const faturaliCiro = tutarBirlestir(toplaBilinen(faturali, o => o.totalPrice), toplaBilinen(mikroFaturali, f => f.tutar));
+  const faturasizCiro = tutarBirlestir(toplaBilinen(faturasiz, o => o.totalPrice), toplaBilinen(mikroFaturasiz, f => f.tutar));
   return {
-    ciro: tutarBirlestir(cetpaCiro, mikro.ciro),
-    faturaliCiro: tutarBirlestir(toplaBilinen(faturali, o => o.totalPrice), mikro.ciro),
-    faturasizCiro: toplaBilinen(faturasiz, o => o.totalPrice),
+    // Çit (QH2-7): toplam = faturalı + faturasız — iki kart ile toplam kartı aynı kümeden.
+    ciro: tutarBirlestir(faturaliCiro, faturasizCiro),
+    faturaliCiro,
+    faturasizCiro,
     kdv: tutarBirlestir(toplaBilinen(orders, o => o.kdvTutari), mikro.kdv),
     adet: orders.length,
-    faturaliAdet: faturali.length + mikro.adet,
-    faturasizAdet: faturasiz.length,
+    faturaliAdet: faturali.length + mikroFaturali.length,
+    faturasizAdet: faturasiz.length + mikroFaturasiz.length,
     ortalama: ortalamaHesapla(cetpaCiro, orders.length),
     kayitOrtalamasi: ortalamaHesapla(toplaBilinen(kayitlar, k => k.totalPrice), kayitlar.length),
     mikro,

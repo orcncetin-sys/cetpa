@@ -62,6 +62,7 @@
  */
 import { bilinenSayi, toplaBilinen, ekranTutari, tutarBirlestir, type Tutar } from '../para';
 import { odemeTakipli, siparisTutari, type SiparisKaynakAlani, type SiparisTutarAlanlari } from '../siparis';
+import { MF_KAYNAGI, mikroFaturaAnahtari } from '../../lib/mfKaynagi';
 
 /** Mikro SIPARISLER satırının pano için OKUNAN alanları (yapısal — hook tipine bağlı değil). */
 export interface PanoMikroSiparis {
@@ -193,6 +194,28 @@ export function panoSiparisleri<T extends { id: string }>(
 /** Bu kayıt Mikro'dan mı türedi? (çift sayım kapısı — `odemeTakipli`nin tersi, TEK kural) */
 export function mikroTurevi(o: SiparisKaynakAlani): boolean {
   return !odemeTakipli(o);
+}
+
+/** MF siparişinin ikiz anahtarını taşıyan alanlar (eslemeFatura.faturadanSiparis `source` + `mikroEvrak`). */
+export interface MfIkizAlanlari extends SiparisKaynakAlani {
+  mikroEvrak?: { seri?: unknown; sira?: unknown } | null;
+}
+
+/**
+ * Bu sipariş, İKİZİ (türediği Mikro satış faturası) verilen anahtar kümesinde olan bir MF siparişi mi? — şartname q-serisi v3
+ * «Kapı sonrası hükümler» QH2-1 / QH3-1 (2026-11-05). Satışlar «Tümü» ve Finans sayaçları bu yüklemle MF'yi yerel listeden
+ * düşürür: satış Mikro faturasından BİR KEZ sayılır (kullanıcı S1 (a)).
+ *
+ * `mikroTurevi` DEĞİL (bilerek): Mikro'da ikizi OLMAYAN MF (fatura silinmiş / içe aktarılmamış / ekran o satırı Cetpa evrak
+ * numarasıyla elemiş) düşerse satış HİÇ sayılmaz — o MF listede kalır, bir kez sayılır. `mikroEvrak` yoksa anahtar kurulamaz,
+ * MF listede KALIR. Anahtar tek kaynakta (`mikroFaturaAnahtari`); `mikroFaturaNo` ('Q1') anahtar DEĞİLDİR.
+ * Kaynak işareti sunucuya özel (`orders.source` istemciye kapalı — QH7): yerel sipariş MF gibi gösterilip gizlenemez.
+ * Dilim 2a (Cetpa'nın yazdığı Q, `qYazildi`) ikinci koşulu buraya ekleyecek — imza ona açık bırakıldı (QH3-5).
+ */
+export function mfIkiziListede(o: MfIkizAlanlari, anahtarlar: ReadonlySet<string>): boolean {
+  if (o.source !== MF_KAYNAGI || !o.mikroEvrak) return false;
+  const anahtar = mikroFaturaAnahtari(o.mikroEvrak.seri, o.mikroEvrak.sira);
+  return anahtar !== '' && anahtarlar.has(anahtar);
 }
 
 export interface PanoCiro {

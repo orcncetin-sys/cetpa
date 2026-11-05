@@ -4,6 +4,8 @@ import { db } from '../firebase';
 import { bilinenSayi } from '../utils/para';
 import { ebelgeTuruCoz } from '../utils/muhasebe/ebelgeTuru';
 import { gibReddedildi } from '../lib/gibDurum';
+import { mikroFaturaAnahtari } from '../lib/mfKaynagi';
+import { faturasizMikroFaturaMi } from '../lib/faturasizSeri';
 
 /** Mikro faturası — istemci tarafı normalize edilmiş şekil.
  *  KAYNAK: `mikroFaturalar` koleksiyonu (server: /api/mikro/import/fatura-listesi).
@@ -16,6 +18,12 @@ export interface MikroFatura {
   /** Fatura toplamı (cha_meblag). **NaN = BİLİNMİYOR** — doğrudan toplama, `para.toplaBilinen` kullan. */
   tutar: number;
   faturaNo: string;
+  /** Mikro evrak serisi (`cha_evrakno_seri`, kırpılmış; boş seri ''). */
+  seri: string;
+  /** Faturasız satış: GİDEN ∧ seri Q (lib/faturasizSeri.faturasizMikroFaturaMi; şartname q-serisi v3 Q2-3). TEK yerde burada
+   *  türetilir; okuyucular `f.faturasiz === true` okur — resmî ekranlar (KDV, Ba-Bs, mizan, e-belge) bu satırı DIŞLAR (K3),
+   *  yönetim ekranları «Faturasız» başlığı altında AYRI sayar (K4). */
+  faturasiz: boolean;
   /** Fatura satırlarından JOIN'li KDV (başlıkta yok). **NaN = BİLİNMİYOR** — `toplaBilinen` ile topla. */
   kdv: number;
   /** KDV matrahı = Mikro'nun NET okuması: başlıktan `cha_aratoplam − Σcha_ft_iskonto` (tek kaynak `lib/faturaMatrahi`),
@@ -89,7 +97,10 @@ export function mapMikroFatura(id: string, x: Record<string, unknown>): MikroFat
     cariKod:  String(x.cha_kod ?? '').trim(),
     tarih:    String(x.cha_tarihi ?? '').slice(0, 10),
     tutar:    paraOku(x.cha_meblag),
-    faturaNo: [seri, sira].filter(v => v !== '' && v != null).join('-'),
+    // Anahtar tek kaynakta (lib/mfKaynagi.mikroFaturaAnahtari): MF siparişinin `mikroEvrak`'ından aynı biçim kurulur (Satışlar /
+    // Finans ikiz elemesi, Raporlar tekilleştirmesi) — iki yerde elle kurulan anahtar ayrışırsa satış iki kez sayılır.
+    faturaNo: mikroFaturaAnahtari(seri, sira),
+    seri,
     kdv:      tutarOku(x.kdvTutari, kdvTuretilebilir),
     matrah:   tutarOku(x.matrah, matrahTuretilebilir),
     // Tanınmayan değer kaynak SAYILMAZ (undefined → detay notu eski dala düşer, açıklama uydurmaz).
@@ -104,6 +115,7 @@ export function mapMikroFatura(id: string, x: Record<string, unknown>): MikroFat
     // Bilinen sınır: yönü okunamayan fatura SATIŞ sayılır ve ciroyu şişirebilir; `yon`un üçüncü bir
     // durumu olmadığı için düzeltmesi tüm tüketicileri değiştirir — Açık İşler.
     yon:      Number(x.cha_tip ?? 0) === 1 ? 'gelen' : 'giden',
+    faturasiz: faturasizMikroFaturaMi({ yon: Number(x.cha_tip ?? 0) === 1 ? 'gelen' : 'giden', seri }),
     // Şube no da BİLİNMEYEBİLİR: `?? 0` okunamayan şubeyi "şube 0" (merkez) yapıyordu ve
     // faturanın cirosu YANLIŞ şubenin P&L'ine yazılabiliyordu. NaN eşleşmez → o fatura hiçbir
     // şubeye eklenmez (SubeModule'ün "yanlış şubeye yazmaktansa görünür boşluk" kararı).

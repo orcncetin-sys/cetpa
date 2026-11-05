@@ -120,6 +120,8 @@ export const ACCOUNTING = {
     lucaError: 'API Key ve Şirket Kodu gerekli.',
     lucaNotConnected: 'Önce bağlantıyı test edin.',
     lucaSynced: (n: number) => `${n} kayıt Luca'ya aktarıldı.`,
+    /** Satışlar mavi şeridinin altı — MF ikizi sayılmadı (şartname q-serisi v3 QH2-10). «Bir kez sayıldı» YAZILMAZ: seçili yılın dışındaki ikiz bu görünümde hiç sayılmaz. */
+    mfIkiziSayilmadi: (n: number, tutar: string) => `${n} Mikro faturasından türetilen sipariş (MF-…) sayılmadı; satış Mikro faturasından sayılır (yıl ve arama seçimine göre) · ${tutar}`,
     declarationPreparing: 'Beyanname hazırlanıyor...',
     csvImported: (n: number) => `${n} işlem yevmiyeye aktarıldı.`,
     csvSuccess: (n: number) => `${n} CSV işlemi aktarıldı.`,
@@ -464,6 +466,7 @@ export const ACCOUNTING = {
     lucaError: 'API Key and Company Code are required.',
     lucaNotConnected: 'Please test the connection first.',
     lucaSynced: (n: number) => `${n} records pushed to Luca.`,
+    mfIkiziSayilmadi: (n: number, tutar: string) => `${n} ${n === 1 ? 'order derived from Mikro invoices (MF-…) is' : 'orders derived from Mikro invoices (MF-…) are'} not counted; the sale is counted from the Mikro invoice (per the year and search selection) · ${tutar}`,
     declarationPreparing: 'Preparing declaration...',
     csvImported: (n: number) => `${n} transactions imported to journal.`,
     csvSuccess: (n: number) => `${n} CSV transactions imported.`,

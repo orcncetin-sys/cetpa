@@ -21,6 +21,7 @@ import type { Order, Lead, InventoryItem, Employee, Quotation, InventoryMovement
 import { oc } from '../i18n/ortak';
 import { ekranTutari, tamTutar, sayiSirala } from '../utils/para';
 import { siparisTutari } from '../utils/siparis';
+import { MF_KAYNAGI, mikroFaturaAnahtari } from '../lib/mfKaynagi';
 import { trendOzeti, hedefOrani } from '../utils/muhasebe/kpiTrend';
 // ── Faz 3 6a: rapor veri katmanı (saf, testli yardımcılar) ───────────────────
 import { yuzdeYaz } from '../utils/rapor/bicim';
@@ -160,11 +161,10 @@ export default function RaporlarPage({
     // faturanın kendisidir — sentetik mikroOrders kopyası eklenmesin diye
     // evrak anahtarları (faturaNo = seri-sira) eleme setine girer. Türetilmiş
     // sipariş kalemli/tarihli olduğundan sentetiğe tercih edilir.
+    // Anahtar tek kaynakta (lib/mfKaynagi.mikroFaturaAnahtari — Mikro satırının `faturaNo`'suyla aynı biçim; QH1-3).
     for (const o of ordersProp) {
-      const ev = (o as unknown as { source?: string; mikroEvrak?: { seri?: string; sira?: string } });
-      if (ev.source === 'mikro-fatura' && ev.mikroEvrak) {
-        const k = [String(ev.mikroEvrak.seri ?? '').trim(), String(ev.mikroEvrak.sira ?? '').trim()]
-          .filter(v => v !== '').join('-');
+      if (o.source === MF_KAYNAGI && o.mikroEvrak) {
+        const k = mikroFaturaAnahtari(o.mikroEvrak.seri, o.mikroEvrak.sira);
         if (k) cetpaEvrak.add(k);
       }
     }
@@ -182,6 +182,9 @@ export default function RaporlarPage({
         status: 'Delivered',
         totalPrice: f.tutar,
         totalAmount: f.tutar,
+        // Seri Q satış faturası FATURASIZDIR (K4; şartname q-serisi v3 Q10-2). Bugün etkisi yok: MF-Q1 var olduğu için Q-1
+        // sentetiği eklenmez; alan ileri uyum için yazılır. Diğer satırda alan YAZILMAZ (parite).
+        ...(f.faturasiz ? { faturali: false } : {}),
         createdAt: f.tarih,
         syncedAt: f.tarih,
         // KAYNAK ETIKETI ZORUNLU (2026-09-04 denetimi): bu sentetik kayitlarda
@@ -189,7 +192,7 @@ export default function RaporlarPage({
         // geciyorlar ve tahsilat yuzeylerinde "odenmemis alacak", marj kartlarinda
         // "maliyeti 0" sayiliyorlardi. Etiket, tuketicilerin bu kaydin neyi
         // BILMEDIGINI anlamasini saglar.
-        source: 'mikro-fatura',
+        source: MF_KAYNAGI,
       })) as unknown as Order[];
     return [...ordersProp, ...mikroOrders];
   }, [ordersProp, mikroFaturalar, cariAdMap]);

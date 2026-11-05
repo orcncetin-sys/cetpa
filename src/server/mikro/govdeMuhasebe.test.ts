@@ -290,3 +290,33 @@ describe('cariHareketGovdesi — VARSAYILAN YOK (zorunlu beşli)', () => {
     expect(() => cariHareketGovdesi({ ...DEKONT_SATIRI, cha_evrak_tip: 0 })).toThrow(MikroGovdeHatasi);
   });
 });
+
+// Şartname q-serisi v3 Q13 / «Kapı sonrası hükümler» QH9 (2026-11-05), test T8 (saf kol): dekont yolu FATURA evrakı yazamaz.
+// Rota zinciri `server/dekontFaturaKapisi.zincir.test.ts`'te; burada gövde kurucusunun kendisi (çağıran kim olursa olsun).
+describe('cariHareketGovdesi — fatura evrak tipi dekont yolundan yazılamaz (T8)', () => {
+  it("63 (sayı, metin '63' / ' 63', ondalık 63.0) → throw «fatura evrak tipi»; seri Q da durdurulur", () => {
+    for (const tip of [63, '63', ' 63', 63.0]) {
+      expect(() => cariHareketGovdesi({ ...DEKONT_SATIRI, cha_evrak_tip: tip, cha_evrakno_seri: 'Q' }), JSON.stringify(tip)).toThrow(/fatura evrak tipi/);
+    }
+  });
+  it('(0, cinsi 6) alış faturası → throw (evrak tipi 0 zaten reddediliyordu — kol yine kapalı)', () => {
+    expect(() => cariHareketGovdesi({ ...DEKONT_SATIRI, cha_evrak_tip: 0, cha_cinsi: 6 })).toThrow(MikroGovdeHatasi);
+  });
+  it('dekont (29) geçer; cinsi 6 dekont tipinde fatura sayılmaz', () => {
+    expect(cariHareketGovdesi(DEKONT_SATIRI).satir.cha_evrak_tip).toBe(29);
+    expect(cariHareketGovdesi({ ...DEKONT_SATIRI, cha_cinsi: 6 }).satir.cha_evrak_tip).toBe(29);
+  });
+  it('evrak tipi / cinsi anahtarının başka yazımı (`CHA_EVRAK_TIP`, `Cha_Evrak_Tip`, `CHA_CİNSİ`) → MikroGovdeHatasi; `...hareket` yayılımıyla gövdeye GİTMEZ (Q6)', () => {
+    const { cha_evrak_tip: _t, ...tipsiz } = DEKONT_SATIRI;
+    void _t;
+    for (const h of [{ ...tipsiz, CHA_EVRAK_TIP: 63 }, { ...DEKONT_SATIRI, CHA_EVRAK_TIP: 63 }, { ...DEKONT_SATIRI, Cha_Evrak_Tip: 63 },
+      { ...DEKONT_SATIRI, CHA_CİNSİ: 6 }, { ...DEKONT_SATIRI, cha_evrak_tıp: 63 }]) {
+      expect(() => cariHareketGovdesi(h), JSON.stringify(Object.keys(h))).toThrow(MikroGovdeHatasi);
+      expect(() => cariHareketGovdesi(h)).toThrow(/anahtarı yalnız «cha_(evrak_tip|cinsi)» yazımıyla kabul edilir/);
+    }
+    // Normal yazım: geçer ve gövdede ikinci evrak tipi anahtarı yok.
+    const g = cariHareketGovdesi({ ...DEKONT_SATIRI, cha_cinsi: 5 });
+    expect(g.satir.cha_evrak_tip).toBe(29);
+    expect(Object.keys(g.satir).filter(k => /^cha_(evrak_tip|cinsi)$/i.test(k))).toEqual(['cha_evrak_tip', 'cha_cinsi']);
+  });
+});

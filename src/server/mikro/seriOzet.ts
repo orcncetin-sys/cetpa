@@ -25,17 +25,23 @@
  */
 import { FT_ISKONTO_DESENI } from '../../lib/faturaMatrahi.js';
 import { MF_KAYNAGI } from '../../lib/mfKaynagi.js';
+import { seriAnahtari } from '../../lib/faturasizSeri.js';
 import { iptalMi } from './faturaTani.js';
 import { kes } from './ebelgeDurumTani.js';
+import { vergiIsaretcisiCoz } from './vergiIsaretci.js';
+import { faturaEvrakiMi } from '../../lib/faturaEvrakKosulu.js';
+import { mikroFaturaAnahtari } from '../../lib/mfKaynagi.js';
+import { MAGAZA_KAYNAGI } from '../../lib/magazaKaynagi.js';
+import { bilinenSayi, kurusaYuvarla, satirTutari, toplaBilinen as paraToplaBilinen, tutarBirlestir, type Tutar } from '../../utils/para.js';
+import { gunAnahtari } from '../../utils/zaman.js';
 
 // ── Seri ─────────────────────────────────────────────────────────────────────
 /** Seri biçimi (şartname Q1-7). Seri değeri SQL metnine YALNIZ bu desenden geçtikten sonra girer. */
 export const SERI_BICIMI = /^[A-Za-z0-9]{1,20}$/;
 export const seriGecerli = (v: unknown): v is string => typeof v === 'string' && SERI_BICIMI.test(v);
-/** Cetpa (PG) tarafında seri karşılaştırma anahtarı: kırpılmış + ASCII büyük harfe katlanmış (şartname Q2: 'q' ile 'Q' aynı
- *  seridir). KOD KİMLİĞİ karşılaştırmasıdır, ekrana basılmaz — burada `toUpperCase()` doğru olandır (CLAUDE.md «karşılaştırmada
- *  tersi geçerli»); saklanan yazım `yazimlar` kırılımında AYNEN görünür. */
-export const seriAnahtari = (v: unknown): string => String(v ?? '').trim().toUpperCase();
+/** Seri karşılaştırma anahtarı TEK KAYNAKTA: lib/faturasizSeri.seriAnahtari (gerekçesi orada; 2026-11-05 taşındı — istemci de
+ *  aynı anahtarla faturasız seriyi tanır). Buradan yeniden dışa aktarılır: rota ve testler eski yoldan içe aktarıyor. */
+export { seriAnahtari };
 
 // ── Kolon adları (kodda geçen yazımıyla) + kanıt ─────────────────────────────
 /** CARI_HESAP_HAREKETLERI — evrak başlığı. */
@@ -148,7 +154,8 @@ const SERI_BOZUK = 'seri biçimi geçersiz — SQL üretilmedi';
 const ettnVarIfadesi = (uuid: string) => `CASE WHEN REPLACE(REPLACE(ISNULL(CAST(cha.${uuid} AS nvarchar(40)), ''), NCHAR(48), ''), NCHAR(45), '') = '' THEN 0 ELSE 1 END`;
 
 /** Fatura başlığı koşulu (takma ad `cha`) — `mikroRoutes.ts` `FATURA_EVRAK_KOSULU` ile AYNI küme (SATIŞ = evrak tipi 63,
- *  ALIŞ = evrak tipi 0 + cinsi 6). Kolon adları şemadan süzülmüş kümeden gelir; iki metnin eşitliği testte çitlidir. */
+ *  ALIŞ = evrak tipi 0 + cinsi 6). Kolon adları şemadan süzülmüş kümeden gelir; iki metnin eşitliği testte çitlidir. JS yüklemi
+ *  (dekont kapısı, dekont penceresi) aynı kümeyi lib/faturaEvrakKosulu.faturaEvrakiMi'de taşır (eşitlik `faturaEvrakKosulu.test.ts`). */
 export const faturaKosuluIfadesi = (evrakTip: string, cinsi: string) => `(cha.${evrakTip} = 63 OR (cha.${evrakTip} = 0 AND cha.${cinsi} = 6))`;
 
 /** (1) TÜM seriler: seri × evrak tipi × cinsi × yön → adet, toplam meblağ, en eski / en yeni tarih, iptal adedi ve toplamı.
@@ -269,7 +276,7 @@ export function satirOzetiSorgusu(p: SthPlani, seri: unknown, siralar: readonly 
 }
 
 /** (4) Cetpa `mikroFaturalar` kopyaları: kiracı × SAKLANAN seri → adet. Kopyada seri `cha_evrakno_seri` alanındadır (import satırı
- *  aynen yazar: eslemeFatura.ts `faturaEsle`; fatura-tani de aynı alanı okur). Seri eşlemesi JS'te (`seriAnahtari`) — PG `upper()`
+ *  aynen yazar: eslemeFatura.ts `faturaEsle`; fatura-tani de aynı alanı okur). Seri eşlemesi JS'te (`seriAnahtari`, tek kaynak lib/faturasizSeri) — PG `upper()`
  *  veritabanı yereline bağlıdır. Yalnız SELECT; değer parametreyle. */
 export const CETPA_FATURA_SORGUSU: { sql: string; params: string[] } = {
   sql: `SELECT data->>'companyId' AS "companyId", data->>'cha_evrakno_seri' AS seri, COUNT(*)::int AS adet FROM docs WHERE coll = $1 GROUP BY 1, 2`,
@@ -502,13 +509,17 @@ export interface CetpaSiparisOzeti {
   yazimlar: Record<string, number>;
   /** Her seriden MF siparişi toplamı. */
   toplamMikroFaturaSiparisi: number;
+  /** `mikroEvrak.seri` alanı OLMAYAN (NULL) MF siparişi adedi — her seriden. Gece geri doldurmasının hedefi bunlarda bugünkü gibi
+   *  `true` (şartname q-serisi v3 QH5-5, 2026-11-05: yayından ÖNCE okunur, yayın notuna yazılır). Boş metin seri ('') SAYILMAZ. */
+  seriYok: number;
 }
 export function cetpaSiparisOzeti(rows: readonly Satir[], seri: string): CetpaSiparisOzeti {
   const hedef = seriAnahtari(seri);
-  const ozet: CetpaSiparisOzeti = { adet: 0, faturali: { true: 0, false: 0, yok: 0, diger: 0 }, kiracilar: {}, yazimlar: {}, toplamMikroFaturaSiparisi: 0 };
+  const ozet: CetpaSiparisOzeti = { adet: 0, faturali: { true: 0, false: 0, yok: 0, diger: 0 }, kiracilar: {}, yazimlar: {}, toplamMikroFaturaSiparisi: 0, seriYok: 0 };
   for (const r of rows) {
     const n = pgAdet(r.adet);
     ozet.toplamMikroFaturaSiparisi += n;
+    if (r.seri === null || r.seri === undefined) ozet.seriYok += n;
     if (seriAnahtari(r.seri) !== hedef) continue;
     ozet.adet += n;
     const kova = r.tur === null || r.tur === undefined || r.tur === 'null' ? 'yok'
@@ -519,4 +530,427 @@ export function cetpaSiparisOzeti(rows: readonly Satir[], seri: string): CetpaSi
     say(ozet.yazimlar, String(r.seri), n);
   }
   return ozet;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// (6)–(14) — Dilim 1 yayınından SONRA, Dilim 2 kodlanmadan ÖNCE okunacak ölçümler (şartname q-serisi v3 § 4.3 + «Kapı sonrası
+// hükümler» QH8-4 / QH8-5, 2026-11-05). Kural YAZMAZ: Q gövdesinin KDV ifadesi (Q3-3), satır / başlık sabitleri (a1-8(1)), %0
+// işaretçisinin canlı sırası, faturasız sipariş havuzunun ön koşul kapsamı, Satışlar çift sayımının kesin boyutu buradan okunur.
+// Mikro'ya yalnız SELECT (+ VergiListesiV2 okuması), Cetpa'ya yalnız SELECT. Müşteri kimliği / sipariş kimliği DÖKÜLMEZ: kiracı
+// başına sayılar ve toplamlar.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** (6)(7) için EK satır kolonları — her ad depoda ZATEN geçer (kanıt yanında; dosya düzeyi çit `seriOzetOlcum.test.ts`). */
+export const STH_EK_ADLARI = {
+  tip:        'sth_tip',                // server/mikro/govdeFaturaIrsaliye.ts:342 · server/mikro/iskontoTutarsizlik.ts:140
+  cins:       'sth_cins',               // server/mikro/govdeFaturaIrsaliye.ts:343
+  normalIade: 'sth_normal_iade',        // server/mikro/govdeFaturaIrsaliye.ts:344
+  vergisizFl: 'sth_vergisiz_fl',        // server/mikro/govdeFaturaIrsaliye.ts:356
+} as const;
+export type SthEkAnahtari = keyof typeof STH_EK_ADLARI;
+/** (7)(14) için EK başlık kolonları. */
+export const CHA_EK_ADLARI = {
+  normalIade: 'cha_normal_Iade',        // server/mikro/govdeFaturaIrsaliye.ts:381 (büyük 'I' ile)
+  cariCins:   'cha_cari_cins',          // server/mikro/govdeFaturaIrsaliye.ts:383
+  dCins:      'cha_d_cins',             // server/mikro/govdeFaturaIrsaliye.ts:415
+  guid:       'cha_Guid',               // server/mikro/eslemeFatura.ts:74 · server/mikroMirror.ts:378
+} as const;
+export type ChaEkAnahtari = keyof typeof CHA_EK_ADLARI;
+
+/** Gövde sabitleri (server/mikro/govdeFaturaIrsaliye.faturaGovdesi) — (7) bunlardan FARKLI deseni işaretler (fark → DUR, a1-8(1)). */
+export const GOVDE_SATIR_SABITLERI = { tip: 1, cins: 0, normalIade: 0, vergisizFl: false } as const;
+export const GOVDE_BASLIK_SABITLERI = { normalIade: 0, cariCins: 0, dCins: 0 } as const;
+
+export interface EkPlan<K extends string> {
+  kolon: Partial<Record<K, string>>;
+  /** Şemada bulunmayan EK adlar — kodda geçen yazımıyla (`eksikKolonlar`'a girer). */
+  eksik: string[];
+}
+function ekPlan<K extends string>(sema: readonly string[], adlar: Readonly<Record<K, string>>): EkPlan<K> {
+  const bul = gercekYazim(sema);
+  const kolon: Partial<Record<K, string>> = {};
+  const eksik: string[] = [];
+  for (const anahtar of Object.keys(adlar) as K[]) {
+    const gercek = bul(adlar[anahtar]);
+    if (gercek) kolon[anahtar] = gercek; else eksik.push(adlar[anahtar]);
+  }
+  return { kolon, eksik };
+}
+export const sthEkPlani = (sema: readonly string[]): EkPlan<SthEkAnahtari> => ekPlan(sema, STH_EK_ADLARI);
+export const chaEkPlani = (sema: readonly string[]): EkPlan<ChaEkAnahtari> => ekPlan(sema, CHA_EK_ADLARI);
+
+/** (6) Giden satış satırlarında (`sth_evraktip = 4`, iptal dışı) vergi işaretçisi × `sth_vergisiz_fl` × (`sth_vergi = 0`) → adet.
+ *  Q3-3 karar kuralının girdisi: KDV'siz satış satırı TEK desende mi. `sth_vergi` NULL ise «sıfır mı» BİLİNMİYOR (null kovası). */
+export function vergiDeseniSorgusu(p: SthPlani, ek: EkPlan<SthEkAnahtari>): SorguPlani {
+  const { evraktip, vergi, vergiPntr, iptal } = p.kolon;
+  if (!evraktip || !vergi) return { atlandi: yok(...(['evraktip', 'vergi'] as const).filter(a => !p.kolon[a]).map(a => STH_ADLARI[a])) };
+  const atlananAlanlar: Record<string, string> = {};
+  const sifir = `CASE WHEN ${vergi} IS NULL THEN NULL WHEN ${vergi} = 0 THEN 1 ELSE 0 END`;
+  const secim: string[] = [], grup: string[] = [];
+  if (vergiPntr) { secim.push(`${vergiPntr} AS vergiPntr`); grup.push(vergiPntr); } else atlananAlanlar.vergiIsaretcisi = yok(STH_ADLARI.vergiPntr);
+  const fl = ek.kolon.vergisizFl;
+  if (fl) { secim.push(`${fl} AS vergisizFl`); grup.push(fl); } else atlananAlanlar.vergisizFl = yok(STH_EK_ADLARI.vergisizFl);
+  secim.push(`${sifir} AS vergiSifir`, 'COUNT(*) AS adet');
+  grup.push(sifir);
+  if (!iptal) atlananAlanlar.iptalDisi = yok(STH_ADLARI.iptal);
+  return {
+    sql: `SELECT ${secim.join(', ')} FROM STOK_HAREKETLERI WHERE ${evraktip} = 4${iptal ? ` AND ISNULL(${iptal}, 0) = 0` : ''} ` +
+      `GROUP BY ${grup.join(', ')} ORDER BY ${grup.join(', ')}`,
+    atlananAlanlar,
+  };
+}
+
+export interface VergiDeseniSatiri { vergiIsaretcisi?: string | null; vergisizFl?: boolean | null; vergiSifir: boolean | null; adet: number | null }
+export interface VergiDeseniOzeti {
+  satirlar: VergiDeseniSatiri[];
+  /** KDV'siz (`sth_vergi = 0`) satış satırlarının desenleri — Q3-3: `tek` → Q gövdesi o deseni yazar; `karisik` → DUR;
+   *  `yok` → bugünkü %0 yolu; `olculemedi` → işaretçi ya da bayrak kolonu şemada yok (karar verilemez). */
+  kdvsiz: { durum: 'tek' | 'karisik' | 'yok' | 'olculemedi'; desenler: Array<{ vergiIsaretcisi: string | null; vergisizFl: boolean | null; adet: number | null }> };
+}
+export function vergiDeseniBicimle(rows: readonly Satir[], p: SthPlani, ek: EkPlan<SthEkAnahtari>): VergiDeseniOzeti {
+  const satirlar: VergiDeseniSatiri[] = rows.map(r => {
+    const n = sayi(r.vergiSifir);
+    return {
+      ...(p.kolon.vergiPntr ? { vergiIsaretcisi: metin(r.vergiPntr, 20) } : {}),
+      ...(ek.kolon.vergisizFl ? { vergisizFl: bayrak(r.vergisizFl) } : {}),
+      vergiSifir: n === null ? null : n !== 0,
+      adet: sayi(r.adet),
+    };
+  });
+  const desenler = satirlar.filter(r => r.vergiSifir === true)
+    .map(r => ({ vergiIsaretcisi: r.vergiIsaretcisi ?? null, vergisizFl: r.vergisizFl ?? null, adet: r.adet }));
+  const durum = !p.kolon.vergiPntr || !ek.kolon.vergisizFl ? 'olculemedi' : desenler.length === 0 ? 'yok' : desenler.length === 1 ? 'tek' : 'karisik';
+  return { satirlar, kdvsiz: { durum, desenler } };
+}
+
+/** (7a) İstenen serinin stok satırları: evrak tipi × `sth_tip` × `sth_cins` × `sth_normal_iade` × `sth_vergisiz_fl` × iptal → adet. */
+export function qSatirDeseniSorgusu(p: SthPlani, ek: EkPlan<SthEkAnahtari>, seri: unknown): SorguPlani {
+  if (!seriGecerli(seri)) return { atlandi: SERI_BOZUK };
+  const { seri: seriK, evraktip, iptal } = p.kolon;
+  if (!seriK || !evraktip) return { atlandi: yok(...(['seri', 'evraktip'] as const).filter(a => !p.kolon[a]).map(a => STH_ADLARI[a])) };
+  const atlananAlanlar: Record<string, string> = {};
+  const secim = [`${evraktip} AS evraktip`], grup = [evraktip];
+  for (const a of ['tip', 'cins', 'normalIade', 'vergisizFl'] as const) {
+    const k = ek.kolon[a];
+    if (k) { secim.push(`${k} AS ${a}`); grup.push(k); } else atlananAlanlar[a] = yok(STH_EK_ADLARI[a]);
+  }
+  if (iptal) { secim.push(`ISNULL(${iptal}, 0) AS iptal`); grup.push(`ISNULL(${iptal}, 0)`); } else atlananAlanlar.iptal = yok(STH_ADLARI.iptal);
+  secim.push('COUNT(*) AS adet');
+  return { sql: `SELECT ${secim.join(', ')} FROM STOK_HAREKETLERI WHERE ${seriK} = '${seri}' GROUP BY ${grup.join(', ')} ORDER BY ${grup.join(', ')}`, atlananAlanlar };
+}
+
+export interface QSatirDeseni {
+  evraktip: number | null; tip?: number | null; cins?: number | null; normalIade?: number | null; vergisizFl?: boolean | null; iptal?: boolean | null;
+  adet: number | null;
+  /** Yalnız satış satırında (evrak tipi 4): gövde sabitlerinden (1 / 0 / 0 / false) farklı mı; bir kolon okunamadıysa null. */
+  sabittenFarkli: boolean | null;
+}
+export function qSatirDeseniBicimle(rows: readonly Satir[]): QSatirDeseni[] {
+  return rows.map(r => {
+    const d: QSatirDeseni = { evraktip: sayi(r.evraktip), adet: sayi(r.adet), sabittenFarkli: null };
+    for (const a of ['tip', 'cins', 'normalIade'] as const) if (a in r) d[a] = sayi(r[a]);
+    if ('vergisizFl' in r) d.vergisizFl = bayrak(r.vergisizFl);
+    if ('iptal' in r) d.iptal = bayrak(r.iptal);
+    if (d.evraktip === 4 && 'tip' in d && 'cins' in d && 'normalIade' in d && 'vergisizFl' in d
+      && d.tip !== null && d.cins !== null && d.normalIade !== null && d.vergisizFl !== null) {
+      const s = GOVDE_SATIR_SABITLERI;
+      d.sabittenFarkli = d.tip !== s.tip || d.cins !== s.cins || d.normalIade !== s.normalIade || d.vergisizFl !== s.vergisizFl;
+    }
+    return d;
+  });
+}
+
+/** (7b) İstenen serinin başlıkları: evrak tipi × cinsi × yön × `cha_normal_Iade` × `cha_cari_cins` × `cha_d_cins` → adet. */
+export function qBaslikDeseniSorgusu(p: ChaPlani, ek: EkPlan<ChaEkAnahtari>, seri: unknown): SorguPlani {
+  if (!seriGecerli(seri)) return { atlandi: SERI_BOZUK };
+  const { seri: seriK, evrakTip, cinsi, tip } = p.kolon;
+  if (!seriK || !evrakTip || !cinsi || !tip) {
+    return { atlandi: yok(...(['seri', 'evrakTip', 'cinsi', 'tip'] as const).filter(a => !p.kolon[a]).map(a => CHA_ADLARI[a])) };
+  }
+  const atlananAlanlar: Record<string, string> = {};
+  const secim = [`cha.${evrakTip} AS evrakTip`, `cha.${cinsi} AS cinsi`, `cha.${tip} AS tip`];
+  const grup = [evrakTip, cinsi, tip].map(k => `cha.${k}`);
+  for (const a of ['normalIade', 'cariCins', 'dCins'] as const) {
+    const k = ek.kolon[a];
+    if (k) { secim.push(`cha.${k} AS ${a}`); grup.push(`cha.${k}`); } else atlananAlanlar[a] = yok(CHA_EK_ADLARI[a]);
+  }
+  secim.push('COUNT(*) AS adet');
+  return { sql: `SELECT ${secim.join(', ')} FROM CARI_HESAP_HAREKETLERI cha WHERE cha.${seriK} = '${seri}' GROUP BY ${grup.join(', ')} ORDER BY ${grup.join(', ')}`, atlananAlanlar };
+}
+
+export interface QBaslikDeseni {
+  evrakTip: number | null; cinsi: number | null; tip: number | null; normalIade?: number | null; cariCins?: number | null; dCins?: number | null;
+  adet: number | null;
+  /** Yalnız satış faturası başlığında (fatura koşulu ∧ yön 0): gövde sabitlerinden (0 / 0 / 0) farklı mı; okunamadıysa null. */
+  sabittenFarkli: boolean | null;
+}
+export function qBaslikDeseniBicimle(rows: readonly Satir[]): QBaslikDeseni[] {
+  return rows.map(r => {
+    const d: QBaslikDeseni = { evrakTip: sayi(r.evrakTip), cinsi: sayi(r.cinsi), tip: sayi(r.tip), adet: sayi(r.adet), sabittenFarkli: null };
+    for (const a of ['normalIade', 'cariCins', 'dCins'] as const) if (a in r) d[a] = sayi(r[a]);
+    const satis = faturaEvrakiMi(d.evrakTip, d.cinsi) && d.tip === 0;
+    const s = GOVDE_BASLIK_SABITLERI;
+    if (satis && d.normalIade != null && d.cariCins != null && d.dCins != null) {
+      d.sabittenFarkli = d.normalIade !== s.normalIade || d.cariCins !== s.cariCins || d.dCins !== s.dCins;
+    }
+    return d;
+  });
+}
+
+/** (8) Şemada adı `vergi` / `kdv` / `istisna` içeren kolonların ADLARI (INFORMATION_SCHEMA — `mikroKolonlar` çıktısı). Değer
+ *  kolonu SEÇİLMEZ, yalnız ad listesi: Q3-3'ün «Mikro KDV'siz satırı hangi alanla ifade ediyor» sorusuna aday ad kümesi. */
+export const VERGI_KOLON_DESENI = /vergi|kdv|istisna/i;
+export function vergiKolonAdlari(sema: readonly string[]): string[] {
+  return sema.filter(k => TANIMLAYICI.test(k) && VERGI_KOLON_DESENI.test(k)).sort((a, b) => a.localeCompare(b, 'en'));
+}
+
+/** (9) `mikroVergiOranlari()` tablosu + %0'ın işaretçisi (`vergiIsaretcisiCoz(0, tablo)`; tabloda %0 yoksa null). */
+export interface VergiTablosuOzeti { tablo: Record<string, number>; sifirIsaretcisi: number | null }
+export function vergiTablosuOzeti(tablo: ReadonlyMap<number, number>): VergiTablosuOzeti {
+  const t: Record<string, number> = {};
+  for (const [sira, oran] of [...tablo.entries()].sort((a, b) => a[0] - b[0])) t[String(sira)] = oran;
+  return { tablo: t, sifirIsaretcisi: vergiIsaretcisiCoz(0, tablo) };
+}
+
+/** (14) EBELGE_GONDERIM_KUYRUK_LOG'da istenen serinin FATURA başlıklarının ETTN'i (`cha_uuid`, geçerliyse) ya da GUID'i
+ *  (`cha_Guid`) geçen satır adedi. Kuyruk tablosunun hangi kolonu evrağı tuttuğu ÖLÇÜLMEDİ → kolon adı TAHMİN EDİLMEZ: şemadaki
+ *  HER kolon metne çevrilip (süslü parantez soyulur) karşılaştırılır. Bilinen sınır: bir kolonun tipi metne çevrilemiyorsa (ör.
+ *  `image`) Mikro sorguyu reddeder → bölüm `hata` ile döner, diğer bölümler etkilenmez. Tırnaklı sabit YALNIZ seridir. */
+export function kuyrukEttnSorgusu(p: ChaPlani, ek: EkPlan<ChaEkAnahtari>, kuyrukSema: readonly string[], seri: unknown): SorguPlani {
+  if (!seriGecerli(seri)) return { atlandi: SERI_BOZUK };
+  const { seri: seriK, evrakTip, cinsi, uuid } = p.kolon;
+  const guid = ek.kolon.guid;
+  if (!seriK || !evrakTip || !cinsi) return { atlandi: yok(...(['seri', 'evrakTip', 'cinsi'] as const).filter(a => !p.kolon[a]).map(a => CHA_ADLARI[a])) };
+  if (!uuid && !guid) return { atlandi: yok(CHA_ADLARI.uuid, CHA_EK_ADLARI.guid) };
+  const kolonlar = kuyrukSema.filter(k => TANIMLAYICI.test(k));
+  if (!kolonlar.length) return { atlandi: 'kuyruk tablosunun kolonu yok' };
+  const atlananAlanlar: Record<string, string> = {};
+  if (!uuid) atlananAlanlar.ettn = yok(CHA_ADLARI.uuid);
+  if (!guid) atlananAlanlar.guid = yok(CHA_EK_ADLARI.guid);
+  // Süslü parantez soyulur (Mikro uniqueidentifier'ı `{…}` ile döndürebiliyor — lib/gibDurum.faturaEttn notu). NCHAR(123) '{',
+  // NCHAR(125) '}' — tırnaklı sabit yazılmaz.
+  const metne = (ifade: string) => `REPLACE(REPLACE(CAST(${ifade} AS nvarchar(100)), NCHAR(123), ''), NCHAR(125), '')`;
+  const anahtarlar = [
+    ...(uuid ? [{ ifade: metne(`cha.${uuid}`), gecerli: `${ettnVarIfadesi(uuid)} = 1` }] : []),
+    ...(guid ? [{ ifade: metne(`cha.${guid}`), gecerli: null }] : []),
+  ];
+  const eslesme = kolonlar.flatMap(k => anahtarlar.map(a => `(${a.gecerli ? `${a.gecerli} AND ` : ''}${metne(`k.${k}`)} = ${a.ifade})`)).join(' OR ');
+  return {
+    sql: `SELECT COUNT(*) AS adet FROM EBELGE_GONDERIM_KUYRUK_LOG k WHERE EXISTS (SELECT 1 FROM CARI_HESAP_HAREKETLERI cha ` +
+      `WHERE cha.${seriK} = '${seri}' AND ${faturaKosuluIfadesi(evrakTip, cinsi)} AND (${eslesme}))`,
+    atlananAlanlar,
+  };
+}
+export const kuyrukEttnBicimle = (rows: readonly Satir[]): { adet: number | null } => ({ adet: rows.length ? sayi(rows[0].adet) : null });
+
+// ── Cetpa (PG) ölçümleri (10)(11)(13) — yalnız SELECT, değerler parametreyle ─────────────────────────────────────────────
+export type PgSorgu = { sql: string; params: unknown[] };
+
+/** (10) Faturasız Cetpa siparişleri (`faturali === false`): ön koşul kapsamının ham alanları (kimlik okunur ama YANITA GİRMEZ).
+ *  MF (`source = MF_KAYNAGI`) DIŞI: QH5 gece geri doldurması MF-Q1'e `faturali: false` yazar; MF kendi Mikro faturasının türevidir,
+ *  Cetpa siparişi değildir — (10) havuzuna ve (12) ikiz adayına girerse Q-1 kendi aynasıyla eşleşir, sonuç 03:20 öncesi / sonrası
+ *  değişir. `IS DISTINCT FROM`: `source` alanı olmayan (NULL) yerel sipariş dışlanmaz. */
+export const FATURASIZ_SIPARIS_SORGUSU: PgSorgu = {
+  sql: `SELECT data->>'companyId' AS "companyId", data->'kdvOran' AS "kdvOran", data->'kdvTutari' AS "kdvTutari", ` +
+    `data->'totalPrice' AS "totalPrice", data->'lineItems' AS "lineItems", data->'depoNo' AS "depoNo", data->>'leadId' AS "leadId", ` +
+    `data->'paid' AS paid, data->'createdAt' AS "createdAt", data->>'status' AS status, data->>'source' AS source, ` +
+    `data->>'mikroCariKod' AS "siparisCari" FROM docs WHERE coll = $1 AND data->'faturali' = 'false'::jsonb ` +
+    `AND data->>'source' IS DISTINCT FROM $2`,
+  params: ['orders', MF_KAYNAGI],
+};
+/** (10) Faturasız siparişlerin müşteri kayıtları — yalnız cari kodu alanları (Q4-2: `mikroCariKod || cariKod`). */
+export const leadCariSorgusu = (idler: readonly string[]): PgSorgu => ({
+  sql: `SELECT id, data->>'companyId' AS "companyId", data->>'mikroCariKod' AS "mikroCariKod", data->>'cariKod' AS "cariKod" ` +
+    `FROM docs WHERE coll = $1 AND id = ANY($2::text[])`,
+  params: ['leads', [...idler]],
+});
+/** (11) Şubeler: `subeKodu` (SubeModule — Mikro `cha_subeno` ile SAYISAL eşleşir; Cetpa'nın Q'su `cha_subeno 0` taşır). */
+export const SUBE_SORGUSU: PgSorgu = {
+  sql: `SELECT data->>'companyId' AS "companyId", data->'subeKodu' AS "subeKodu" FROM docs WHERE coll = $1`,
+  params: ['subeler'],
+};
+/** (13) MF siparişleri: ikiz anahtarı (`mikroEvrak`), tutar, yıl (`orderDate`). */
+export const MF_IKIZ_SIPARIS_SORGUSU: PgSorgu = {
+  sql: `SELECT data->>'companyId' AS "companyId", data->'mikroEvrak'->>'seri' AS seri, data->'mikroEvrak'->>'sira' AS sira, ` +
+    `data->'totalPrice' AS "totalPrice", data->>'orderDate' AS "orderDate" FROM docs WHERE coll = $1 AND data->>'source' = $2`,
+  params: ['orders', MF_KAYNAGI],
+};
+/** (13) Cetpa `mikroFaturalar` kopyaları — Satışlar'ın gördüğü küme: iptal (`cha_iptal`) ve GİB reddi (`gibRed`) DIŞI
+ *  (useMikroFaturalar ile aynı kural), yön `cha_tip` (1 gelen, diğer giden — hook paritesi). */
+export const MF_IKIZ_FATURA_SORGUSU: PgSorgu = {
+  sql: `SELECT data->>'companyId' AS "companyId", data->>'cha_evrakno_seri' AS seri, data->>'cha_evrakno_sira' AS sira, ` +
+    `data->>'cha_tip' AS tip, data->'cha_meblag' AS meblag, data->'cha_iptal' AS iptal, data->'gibRed' AS "gibRed" FROM docs WHERE coll = $1`,
+  params: ['mikroFaturalar'],
+};
+/** (13) Cetpa siparişlerinin Mikro evrak numaraları (`cetpaEvrakNolari` — Satışlar'ın çift sayım elemesi). */
+export const CETPA_EVRAK_SORGUSU: PgSorgu = {
+  sql: `SELECT data->>'companyId' AS "companyId", data->>'mikroEvrakNo' AS "mikroEvrakNo" FROM docs WHERE coll = $1 ` +
+    `AND COALESCE(data->>'mikroEvrakNo', '') <> ''`,
+  params: ['orders'],
+};
+
+/** createdAt biçimi: sunucu nöbetçisi `{ _seconds, _nanoseconds }`, ISO metni, yok / başka. Ara dönem kapısı (Q5-3) bunu okur. */
+export function createdAtBicimi(v: unknown): 'seconds' | 'iso' | 'metin' | 'yok' | 'diger' {
+  if (v === null || v === undefined) return 'yok';
+  if (typeof v === 'string') return Number.isFinite(Date.parse(v)) ? 'iso' : 'metin';
+  if (typeof v === 'object' && v !== null && typeof (v as { _seconds?: unknown })._seconds === 'number') return 'seconds';
+  return 'diger';
+}
+const kalemListesi = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object') : []);
+const doluMetin = (v: unknown): string => String(v ?? '').trim();
+
+export interface LeadCarisi { companyId: string; cari: string }
+/** (10) yardımcı: lead kimliği → { kiracı, cari kodu } (`mikroCariKod || cariKod`, kırpılmış). */
+export function leadCariHaritasi(rows: readonly Satir[]): Map<string, LeadCarisi> {
+  const m = new Map<string, LeadCarisi>();
+  for (const r of rows) m.set(String(r.id ?? ''), { companyId: doluMetin(r.companyId), cari: doluMetin(r.mikroCariKod) || doluMetin(r.cariKod) });
+  return m;
+}
+
+export interface FaturasizHavuzKiracisi {
+  adet: number;
+  iptal: number;
+  /** Mağaza / 'mikro…' kaynaklı (Q'ya yazılmaz — Q1-2). */
+  kaynakUygunDegil: number;
+  /** `kdvOran` bilinen ve 0 değil · `kdvOran` sayı değil (Q4-3 `kdvVar`'ın iki kolu ayrı). */
+  kdvOranSifirDegil: number; kdvOranBilinmiyor: number;
+  kdvTutariSifirDegil: number;
+  /** Kalem yok ya da bir kalemin fiyat / miktarı okunamıyor · tutar okunamıyor · Σ kuruş(fiyat × miktar) ≠ kuruş(totalPrice). */
+  kalemOkunamadi: number; tutarBilinmiyor: number; kalemTutarUyusmuyor: number;
+  depoYok: number;
+  leadYok: number;
+  /** `leadId` var ama kayıt bulunamadı / başka kiracının · lead var ama cari kodu boş. */
+  leadBulunamadi: number; leadCarisiz: number;
+  odenmis: number;
+  createdAt: Record<string, number>;
+}
+/** Faturasız sipariş satırını ikiz adayı ölçümü (12) için de taşı: çözülen cari + yerel ay + tutar (kimlik YOK). */
+export interface FaturasizAday { kiraci: string; cari: string; ay: string | null; tutar: number | null }
+
+export function faturasizHavuzOzeti(rows: readonly Satir[], leadler: ReadonlyMap<string, LeadCarisi>): { kiracilar: Record<string, FaturasizHavuzKiracisi>; adaylar: FaturasizAday[] } {
+  const kiracilar: Record<string, FaturasizHavuzKiracisi> = {};
+  const adaylar: FaturasizAday[] = [];
+  for (const r of rows) {
+    const kiraci = kiraciEtiketi(r.companyId);
+    let k = Object.prototype.hasOwnProperty.call(kiracilar, kiraci) ? kiracilar[kiraci] : undefined;
+    if (!k) {
+      k = { adet: 0, iptal: 0, kaynakUygunDegil: 0, kdvOranSifirDegil: 0, kdvOranBilinmiyor: 0, kdvTutariSifirDegil: 0, kalemOkunamadi: 0,
+        tutarBilinmiyor: 0, kalemTutarUyusmuyor: 0, depoYok: 0, leadYok: 0, leadBulunamadi: 0, leadCarisiz: 0, odenmis: 0, createdAt: {} };
+      kiracilar[kiraci] = k;
+    }
+    k.adet++;
+    if (r.status === 'Cancelled') k.iptal++;
+    const kaynak = doluMetin(r.source);
+    if (kaynak.startsWith('mikro') || kaynak === MAGAZA_KAYNAGI) k.kaynakUygunDegil++;
+    if (!bilinenSayi(r.kdvOran)) k.kdvOranBilinmiyor++; else if (Number(r.kdvOran) !== 0) k.kdvOranSifirDegil++;
+    if (bilinenSayi(r.kdvTutari) && Number(r.kdvTutari) !== 0) k.kdvTutariSifirDegil++;
+    const kalemler = kalemListesi(r.lineItems);
+    const satirlar = kalemler.map(x => satirTutari(x.price, x.quantity));
+    const kalemToplami = satirlar.length && satirlar.every(Number.isFinite) ? kurusaYuvarla(satirlar.reduce((a, b) => a + b, 0)) : NaN;
+    const tutar = bilinenSayi(r.totalPrice) ? kurusaYuvarla(Number(r.totalPrice)) : NaN;
+    if (!Number.isFinite(kalemToplami)) k.kalemOkunamadi++;
+    if (!Number.isFinite(tutar)) k.tutarBilinmiyor++;
+    if (Number.isFinite(kalemToplami) && Number.isFinite(tutar) && kalemToplami !== tutar) k.kalemTutarUyusmuyor++;
+    if (doluMetin(r.depoNo) === '') k.depoYok++;
+    const leadId = doluMetin(r.leadId);
+    let cari = '';
+    if (!leadId) k.leadYok++;
+    else {
+      const l = leadler.get(leadId);
+      // Kiracı süzgeci (tenant deseni): başka kiracının kaydı «bulunamadı» sayılır; etiketsiz eski kayıt eşleşir.
+      if (!l || (l.companyId && l.companyId !== doluMetin(r.companyId))) k.leadBulunamadi++;
+      else if (!l.cari) k.leadCarisiz++;
+      else cari = l.cari;
+    }
+    if (r.paid === true) k.odenmis++;
+    say(k.createdAt, createdAtBicimi(r.createdAt), 1);
+    const gun = gunAnahtari(r.createdAt);
+    // (12) Ek güvence (SQL süzgecinin yanında): 'mikro…' kaynaklı satır (MF) kendi Mikro faturasının türevidir, ikiz adayı DEĞİLDİR —
+    // kendi başlığıyla eşleşir. Sayaç (`kaynakUygunDegil`) yukarıda aynen sayılır; mağaza satırı aday listesinde kalır.
+    if (!kaynak.startsWith('mikro')) adaylar.push({ kiraci, cari: cari || doluMetin(r.siparisCari), ay: gun ? gun.slice(0, 7) : null, tutar: Number.isFinite(tutar) ? tutar : null });
+  }
+  return { kiracilar, adaylar };
+}
+
+/** (11) Kiracı × { şube adedi, `subeKodu` SAYISAL 0 olan şube adedi } — SubeModule eşleşmesi sayısal. */
+export function subeOzeti(rows: readonly Satir[]): Record<string, { toplam: number; kodSifir: number }> {
+  const o: Record<string, { toplam: number; kodSifir: number }> = {};
+  for (const r of rows) {
+    const kiraci = kiraciEtiketi(r.companyId);
+    const k = Object.prototype.hasOwnProperty.call(o, kiraci) ? o[kiraci] : (o[kiraci] = { toplam: 0, kodSifir: 0 });
+    k.toplam++;
+    if (bilinenSayi(r.subeKodu) && Number(r.subeKodu) === 0) k.kodSifir++;
+  }
+  return o;
+}
+
+/** (12) Mikro'daki istenen seri FATURA başlıklarının (3) Cetpa'da faturasız ikiz ADAYI: aynı cari + aynı ay. Kimlik dökülmez —
+ *  başlık sırası, ay, aday adedi ve tutarlar. Bulunursa kullanıcıya örnekle sorulur «aynı satış mı?». */
+export interface QIkizAdayi { sira: number | null; ay: string | null; adayAdet: number; adayTutarlari: Array<number | null> }
+export function qIkizAdaylari(basliklar: readonly BaslikOzeti[], adaylar: readonly FaturasizAday[]): QIkizAdayi[] {
+  return basliklar.filter(b => b.faturaKosulu === true && b.tip === 0).map(b => {
+    const ay = typeof b.tarih === 'string' && /^\d{4}-\d{2}/.test(b.tarih) ? b.tarih.slice(0, 7) : null;
+    const cari = doluMetin(b.cariKod);
+    const eslesen = ay && cari ? adaylar.filter(a => a.cari === cari && a.ay === ay) : [];
+    return { sira: b.sira, ay, adayAdet: eslesen.length, adayTutarlari: eslesen.map(a => a.tutar).sort((x, y) => (x ?? -Infinity) - (y ?? -Infinity)) };
+  });
+}
+
+export interface SatisCiftSayimKiracisi {
+  /** MF siparişi adedi ve `totalPrice` toplamı (bilinmeyen 0 sayılmaz). */
+  mfAdet: number; mfTutar: Tutar;
+  /** `seri|yıl` (yıl `orderDate`'ten; okunamazsa '(tarihsiz)') → adet + tutar. */
+  seriYil: Record<string, { adet: number; tutar: Tutar }>;
+  /** İkizi Satışlar'ın gördüğü Mikro giden kümesinde OLAN MF (QH2 anahtarı): adet, MF tutarı, aynı faturaların Mikro meblağı. */
+  ikizliMfAdet: number; ikizliMfTutar: Tutar; ikizliMikroTutar: Tutar;
+  /** İkizi OLMAYAN MF — Satışlar'da listede kalır, bir kez sayılır. */
+  ikizsizMfAdet: number;
+  /** `cetpaEvrakNolari` ile Satışlar'dan elenen Mikro giden satırı (sipariş evrak no ↔ fatura no karşılaştırması; değişmez — QH8-4). */
+  cetpaEvrakIleElenen: number;
+  /** Kiracının gördüğü (kendi + etiketsiz) iptal / red dışı Mikro giden fatura adedi. */
+  mikroGidenAdet: number;
+}
+/** (13) Satışlar «Tümü» çift sayımının KESİN boyutu — istemcideki `satisIkizAnahtarlari` + `mfIkiziListede` ile AYNI kural (anahtar
+ *  lib/mfKaynagi.mikroFaturaAnahtari; yıl / arama süzgeci öncesi). Kiracı kümesi: kendi etiketli + etiketsiz Mikro faturası
+ *  (`/api/db` kiracı süzgeci paritesi). QH4-8 çapraz ölçüsü: «Tüm yıllar × Tümü» ekran notu ≈ `ikizliMfTutar`. */
+export function satisCiftSayimOlcumu(mfRows: readonly Satir[], faturaRows: readonly Satir[], evrakRows: readonly Satir[]): Record<string, SatisCiftSayimKiracisi> {
+  const giden = faturaRows.filter(f => !(f.iptal === true || Number(f.iptal ?? 0) === 1) && f.gibRed !== true && Number(f.tip ?? 0) !== 1)
+    .map(f => ({ kiraci: doluMetin(f.companyId), no: mikroFaturaAnahtari(f.seri, f.sira), meblag: f.meblag }));
+  const sonuc: Record<string, SatisCiftSayimKiracisi> = {};
+  const kiracilarMf = new Map<string, Satir[]>();
+  for (const r of mfRows) {
+    const k = doluMetin(r.companyId);
+    const l = kiracilarMf.get(k);
+    if (l) l.push(r); else kiracilarMf.set(k, [r]);
+  }
+  for (const [kiraci, mfler] of kiracilarMf) {
+    const evrak = new Set(evrakRows.filter(e => !doluMetin(e.companyId) || doluMetin(e.companyId) === kiraci).map(e => doluMetin(e.mikroEvrakNo)).filter(Boolean));
+    const gorunen = giden.filter(f => !f.kiraci || f.kiraci === kiraci);
+    // Anahtar → o faturanın TÜM giden başlıklarının meblağı: içe aktarım her başlığı ayrı doküman (cha_Guid) yazar, iki başlıklı
+    // fatura (canlıda giden 246: 12.000 + 3.000) aynı anahtarda iki satırdır; Satışlar ikisini de sayar. Sorguda ORDER BY yok —
+    // «ilk başlık» belirsizdi.
+    const ikizler = new Map<string, unknown[]>();
+    let elenen = 0;
+    for (const f of gorunen) {
+      if (!f.no) continue;
+      if (evrak.has(f.no)) { elenen++; continue; }
+      const l = ikizler.get(f.no);
+      if (l) l.push(f.meblag); else ikizler.set(f.no, [f.meblag]);
+    }
+    const ikizli = mfler.filter(r => { const a = mikroFaturaAnahtari(r.seri, r.sira); return a !== '' && ikizler.has(a); });
+    const seriYil: Record<string, { adet: number; tutar: Tutar }> = {};
+    for (const r of mfler) {
+      const yil = /^\d{4}/.test(doluMetin(r.orderDate)) ? doluMetin(r.orderDate).slice(0, 4) : '(tarihsiz)';
+      const anahtar = `${etiket(r.seri)}|${yil}`;
+      const onceki = Object.prototype.hasOwnProperty.call(seriYil, anahtar) ? seriYil[anahtar] : { adet: 0, tutar: paraToplaBilinen([], x => x) };
+      seriYil[anahtar] = { adet: onceki.adet + 1, tutar: tutarBirlestir(onceki.tutar, paraToplaBilinen([r], x => x.totalPrice)) };
+    }
+    sonuc[kiraciEtiketi(kiraci)] = {
+      mfAdet: mfler.length, mfTutar: paraToplaBilinen(mfler, r => r.totalPrice), seriYil,
+      ikizliMfAdet: ikizli.length, ikizliMfTutar: paraToplaBilinen(ikizli, r => r.totalPrice),
+      ikizliMikroTutar: paraToplaBilinen(ikizli.flatMap(r => ikizler.get(mikroFaturaAnahtari(r.seri, r.sira)) ?? []), x => x),
+      ikizsizMfAdet: mfler.length - ikizli.length, cetpaEvrakIleElenen: elenen, mikroGidenAdet: gorunen.length,
+    };
+  }
+  return sonuc;
 }

@@ -76,7 +76,7 @@ describe('mikroMizanSatirlari — Mikro faturasından çift taraflı satır sent
     expect(r.bilinmeyen).toBe(0);
   });
   it('matrah 0 ve KDV 0 → satır yok, bilinmeyen 0', () => {
-    expect(mikroMizanSatirlari([{ yon: 'gelen', matrah: 0, kdv: 0 }])).toEqual({ satirlar: [], bilinmeyen: 0 });
+    expect(mikroMizanSatirlari([{ yon: 'gelen', matrah: 0, kdv: 0 }])).toEqual({ satirlar: [], bilinmeyen: 0, faturasizDisi: { adet: 0, tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, kdv: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, tutarsiz: 0 } });
   });
   it("matrah bilinmiyor (null/NaN/'abc') → satır ÜRETMEZ ama SAYILIR (eski `if (f.matrah)` sessizce düşürüyordu)", () => {
     const r = mikroMizanSatirlari([
@@ -98,7 +98,7 @@ describe('mikroMizanSatirlari — Mikro faturasından çift taraflı satır sent
     expect(r.bilinmeyen).toBe(0);
   });
   it('boş liste → satır yok, bilinmeyen 0', () => {
-    expect(mikroMizanSatirlari([])).toEqual({ satirlar: [], bilinmeyen: 0 });
+    expect(mikroMizanSatirlari([])).toEqual({ satirlar: [], bilinmeyen: 0, faturasizDisi: { adet: 0, tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, kdv: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, tutarsiz: 0 } });
   });
   it('SAYFA PARİTESİ: bilinen girdide eski sentezle birebir aynı satırlar', () => {
     const faturalar = [

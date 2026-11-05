@@ -18,6 +18,7 @@
  */
 import { bilinenSayi, toplaBilinen, tamTutar, type Tutar } from '../para';
 import { odemeTakipli } from '../siparis';
+import { mfIkiziListede, type MfIkizAlanlari } from '../pano/mikroBirlesim';
 
 /** Mikro faturasının bu modülün okuduğu alanları (useMikroFaturalar `MikroFatura` yapısal olarak uyar). */
 export interface MikroCiroFaturasi {
@@ -40,10 +41,10 @@ export interface MikroSuzgec {
 }
 
 /** Yön + (varsa) dönem + (varsa) şube süzgeci. Toplama YAPMAZ — sayım/liste isteyen ekranlar için ayrı. */
-export function mikroFaturaSuz(
-  faturalar: readonly MikroCiroFaturasi[],
+export function mikroFaturaSuz<T extends MikroCiroFaturasi>(
+  faturalar: readonly T[],
   s: MikroSuzgec,
-): MikroCiroFaturasi[] {
+): T[] {
   // `subeNo` süzgeci İSTENDİ ama çözülemiyorsa hiçbir şey eşleşmemeli: eskiden sayfa
   // `Number.isFinite(subeNoNum) ? ...reduce : 0` ile aynı kararı veriyordu (şubesiz şubeye
   // Mikro geliri yazılmaz). Burada da öyle — `undefined` ise süzgeç HİÇ İSTENMEMİŞ demektir.
@@ -123,4 +124,35 @@ export function nativeCiroMaliyet(
  */
 export function birlesikKar(gelir: Tutar, gider: Tutar): number {
   return tamTutar(gelir) - tamTutar(gider);
+}
+
+// ── Finans «Faturalı / Faturasız / Toplam Sipariş» sayaçları (şartname q-serisi v3 QH3, 2026-11-05) ─────────
+
+/** Sayaçların okuduğu sipariş alanları (Order yapısal olarak uyar). */
+export interface FinansSayacSiparisi extends MfIkizAlanlari { hasInvoice?: boolean }
+/** Sayaçların okuduğu Mikro giden faturası alanları (`MikroFatura` uyar). */
+export interface FinansSayacFaturasi { faturaNo?: string; faturasiz?: boolean }
+export interface FinansSiparisSayaclari { faturali: number; faturasiz: number; toplam: number }
+
+/**
+ * Finans panelinin üç sayacı. Kullanıcı S1 (a): satış Mikro faturasından BİR KEZ sayılır — İKİZİ ekranın saydığı Mikro giden
+ * kümesinde olan MF siparişi yerel listeden düşer (`mfIkiziListede`; anahtar = `mikroGiden`'in `faturaNo`'ları, süzgeç öncesi —
+ * Finans'ta yıl / arama yok; Satışlar ile TEK kural). İkizsiz MF bugünkü gibi sayılır.
+ *   • Faturalı  = yerel `hasInvoice` + faturasız OLMAYAN Mikro giden;
+ *   • Faturasız = yerel `!hasInvoice` + faturasız (seri Q) Mikro giden (k11);
+ *   • Toplam    = yerel + Mikro giden.
+ * v3'ün `odemeTakipli` formülü KULLANILMAZ (QH3-3). Finans CİROSU (`nativeCiroMaliyet`) bu dilimde değişmez (MF'yi zaten dışlar).
+ */
+export function finansSiparisSayaclari(
+  orders: readonly FinansSayacSiparisi[],
+  mikroGiden: readonly FinansSayacFaturasi[],
+): FinansSiparisSayaclari {
+  const ikizler = new Set(mikroGiden.map(f => f.faturaNo ?? '').filter(Boolean));
+  const yerel = orders.filter(o => !mfIkiziListede(o, ikizler));
+  const mikroFaturasiz = mikroGiden.filter(f => f.faturasiz === true).length;
+  return {
+    faturali: yerel.filter(o => o.hasInvoice).length + (mikroGiden.length - mikroFaturasiz),
+    faturasiz: yerel.filter(o => !o.hasInvoice).length + mikroFaturasiz,
+    toplam: yerel.length + mikroGiden.length,
+  };
 }

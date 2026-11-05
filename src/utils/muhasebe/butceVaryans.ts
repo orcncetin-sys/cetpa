@@ -147,7 +147,11 @@ export function butceGercekYili(
 
 // ── Phase 617: KDV Mutabakat ────────────────────────────────────────────────────────────────
 
-export interface KdvFaturasi { yon?: string; tarih?: unknown; tutar?: unknown; matrah?: unknown; kdv?: unknown; oran?: number | null; oranKarma?: boolean }
+export interface KdvFaturasi {
+  yon?: string; tarih?: unknown; tutar?: unknown; matrah?: unknown; kdv?: unknown; oran?: number | null; oranKarma?: boolean;
+  /** Seri Q satış faturası (useMikroFaturalar `faturasiz`); alan yoksa faturasız SAYILMAZ. */
+  faturasiz?: boolean;
+}
 export interface KdvSiparisi {
   totalPrice?: unknown; status?: string; source?: string; faturali?: boolean; hasInvoice?: boolean; createdAt?: unknown; syncedAt?: unknown;
 }
@@ -202,30 +206,49 @@ export function kdvBantlari(faturalar: readonly KdvFaturasi[]): KdvBandi[] {
 }
 
 export interface KdvMutabakatOzeti {
+  /** Faturasız (seri Q) OLMAYAN giden Mikro faturası adedi. */
   faturaAdedi: number;
+  /** Faturasız Cetpa siparişi + faturasız (Q) Mikro satırı adedi. */
   faturasizAdedi: number;
-  /** Faturasız satışlar (KDV=0 bandı). */
+  /** Faturasız satışlar (KDV=0 bandı): Cetpa siparişlerinin tutarı + Q satırlarının meblağı. */
   faturasizTutar: Toplam;
-  /** Fatura tutarları + faturasız satışlar. */
+  /** Faturasız satışların MATRAHI: Cetpa siparişlerinin tutarı (tamamen matrah) + Q satırlarının KENDİ matrahı. Dilim tablosunun
+   *  «Faturasız / muaf» satırı bunu basar: bant matrahları + bu = `matrah` kartı (meblağ basılsaydı satırlar kartı Q'nun KDV'si
+   *  kadar aşardı — canlı Q-1: 916,70). */
+  faturasizMatrah: Toplam;
+  /** Fatura tutarları + faturasız satışlar (Q satırı DÂHİL — toplam bugünkü gibi). */
   ciro: Toplam;
-  /** Fatura matrahları + faturasız satışlar (sayfa: faturasız tamamen matrah). */
+  /** Fatura matrahları + faturasız siparişler (tamamen matrah) + Q satırlarının KENDİ matrahı. */
   matrah: Toplam;
-  /** Yalnız faturaların KDV'si. */
+  /** Yalnız faturaların KDV'si — Q satırının KDV'si girmez. */
   kdv: Toplam;
+  /** Q satırlarının KDV'si (KDV toplamına dâhil DEĞİL) — 0 değilse ekran notu basar. */
+  faturasizKdv: Toplam;
   bantlar: KdvBandi[];
 }
 
+/**
+ * KDV Mutabakat (yönetim ekranı; K4 «Faturasız başlığı altında AYRI» — şartname q-serisi v3 Q10-1, 2026-11-05): faturasız
+ * (seri Q) Mikro satırı fatura kaleminden (adet, KDV, bantlar) ÇIKAR; `faturasizTutar`'a meblağıyla, `faturasizAdedi`'ne 1 ile,
+ * matraha kendi matrahıyla girer. Ciro değişmez. Alanı olmayan girdi bugünkü sonucu verir.
+ */
 export function kdvMutabakat(faturalar: readonly KdvFaturasi[], siparisler: readonly KdvSiparisi[], ay: string): KdvMutabakatOzeti {
-  const fl = donemFaturalari(faturalar, ay);
+  const donem = donemFaturalari(faturalar, ay);
+  const fl = donem.filter(f => f.faturasiz !== true);
+  const q = donem.filter(f => f.faturasiz === true);
   const sl = donemFaturasizSiparisler(siparisler, ay);
-  const faturasizTutar = topla(sl, o => o.totalPrice);
+  const siparisTutari = topla(sl, o => o.totalPrice);
+  const faturasizTutar = birlestir(siparisTutari, topla(q, f => f.tutar));
+  const faturasizMatrah = birlestir(siparisTutari, topla(q, f => f.matrah));
   return {
     faturaAdedi: fl.length,
-    faturasizAdedi: sl.length,
+    faturasizAdedi: sl.length + q.length,
     faturasizTutar,
+    faturasizMatrah,
     ciro: birlestir(topla(fl, f => f.tutar), faturasizTutar),
-    matrah: birlestir(topla(fl, f => f.matrah), faturasizTutar),
+    matrah: birlestir(topla(fl, f => f.matrah), faturasizMatrah),
     kdv: topla(fl, f => f.kdv),
+    faturasizKdv: topla(q, f => f.kdv),
     bantlar: kdvBantlari(fl),
   };
 }

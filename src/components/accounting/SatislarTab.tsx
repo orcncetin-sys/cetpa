@@ -7,8 +7,10 @@ import { tarihYaz } from '../../utils/zaman';
 import { oc } from '../../i18n/ortak';
 import { mc } from '../../i18n/muhasebe';
 import { bilinenSayi, ekranTutari, type Tutar } from '../../utils/para';
-import { kirilimSirala, type SatisKpi, type SatisKaydi } from '../../utils/muhasebe/satislar';
+import { kirilimSirala, type SatisKpi, type SatisKaydi, type SatisCiftSayimOzeti } from '../../utils/muhasebe/satislar';
 import { ac } from '../../i18n/accounting';
+import { faturasizEtiketi } from '../../utils/durumEtiketi';
+import { op } from '../../i18n/orders';
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type MikroSatisRow = MikroFatura & { musteri: string };
@@ -28,6 +30,8 @@ interface SatislarTabProps {
   satisOzet: SatisKpi;
   mikroDahil: boolean;
   mikroSatisSatirlari: MikroSatisRow[];
+  /** Mikro dahil görünümde yerel listeden düşen MF ikizleri (utils/muhasebe/satislar.satisCiftSayimOzeti); «Cetpa»da null. */
+  satisCiftSayim: SatisCiftSayimOzeti | null;
   satisSearch: string;
   setSatisSearch: (v: string) => void;
   satisYil: string;
@@ -41,7 +45,7 @@ interface SatislarTabProps {
 export default function SatislarTab({
   t, currentLanguage, satisKayitlari, setDrillDown, formatConv, kpiCurrency, setKpiCurrency,
   satisKaynak, setSatisKaynak, satisOzet, mikroDahil,
-  mikroSatisSatirlari, satisSearch, setSatisSearch, satisYil, setSatisYil,
+  mikroSatisSatirlari, satisCiftSayim, satisSearch, setSatisSearch, satisYil, setSatisYil,
   satisSortKey, satisSortDir, toggleSatisSort, displayedSatis,
 }: SatislarTabProps) {
   // Bilinmeyen tutar 0 DEĞİL bilinmiyordur (CLAUDE.md): drill-down satırında '—',
@@ -73,7 +77,7 @@ export default function SatislarTab({
       {/* KPI Cards Row 1 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {/* Toplam Sipariş — count, no currency toggle */}
-        <button onClick={() => setDrillDown({ title: oc(currentLanguage).tum_siparisler, rows: satisKayitlari.map((o) => ({ label: o.customerName || '—', sub: o.syncedAt ? tarihYaz(o.syncedAt) : '', badge: o.faturali ? 'FATURALI' : 'FATURASIZ', badgeColor: o.faturali ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400', value: tutarConv(o.totalPrice) })), total: notlu(satisOzet.ciro, formatConv) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+        <button onClick={() => setDrillDown({ title: oc(currentLanguage).tum_siparisler, rows: satisKayitlari.map((o) => ({ label: o.customerName || '—', sub: o.syncedAt ? tarihYaz(o.syncedAt) : '', badge: faturasizEtiketi(o, currentLanguage) ?? op(currentLanguage).faturali_rozet, badgeColor: faturasizEtiketi(o, currentLanguage) === null ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400', value: tutarConv(o.totalPrice) })), total: notlu(satisOzet.ciro, formatConv) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-brand/10 flex items-center justify-center">
               <ShoppingCart size={15} className="text-brand" />
@@ -97,7 +101,7 @@ export default function SatislarTab({
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Toplam Ciro{mikroDahil && satisOzet.mikro.ciro.toplam > 0 ? (oc(currentLanguage).mikro_dahil) : ''}</p>
         </div>
         {/* Faturalı / Faturasız — count, no currency toggle */}
-        <button onClick={() => setDrillDown({ title: ac(currentLanguage).faturali_siparisler, rows: satisKayitlari.filter((o) => o.faturali).map((o) => ({ label: o.customerName || '—', sub: o.syncedAt ? tarihYaz(o.syncedAt) : '', badge: 'FATURALI', badgeColor: 'bg-green-100 text-green-600', value: tutarConv(o.totalPrice) })), total: notlu(satisOzet.faturaliCiro, formatConv) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
+        <button onClick={() => setDrillDown({ title: ac(currentLanguage).faturali_siparisler, rows: satisKayitlari.filter((o) => o.faturali).map((o) => ({ label: o.customerName || '—', sub: o.syncedAt ? tarihYaz(o.syncedAt) : '', badge: faturasizEtiketi(o, currentLanguage) ?? op(currentLanguage).faturali_rozet, badgeColor: faturasizEtiketi(o, currentLanguage) === null ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400', value: tutarConv(o.totalPrice) })), total: notlu(satisOzet.faturaliCiro, formatConv) })} className="apple-card p-4 text-left cursor-pointer flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3">
             <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
               <FileText size={15} className="text-blue-600" />
@@ -212,6 +216,13 @@ export default function SatislarTab({
               : `${mikroSatisSatirlari.length} Mikro sales invoices · total ${notlu(satisOzet.mikro.ciro, formatTRY)}`}
           </div>
         )}
+        {/* Çift sayım notu (S1 (a), şartname q-serisi v3 QH2-10): ikizi Mikro'da olan MF siparişi yerel listeden düştü.
+            Rakam saf işlevden (satisCiftSayimOzeti) — sahte kesinlik yok; tutarı bilinmeyen MF «N kayıt tutarsız» ile. */}
+        {mikroDahil && satisCiftSayim && satisCiftSayim.eslesenAdet > 0 && (
+          <div data-mf-ikizi-notu className="mb-3 px-3 py-2 bg-blue-50 rounded-xl text-[11px] text-blue-700">
+            {ac(currentLanguage).mfIkiziSayilmadi(satisCiftSayim.eslesenAdet, notlu(satisCiftSayim.eslesenTutar, formatTRY))}
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="apple-table">
             <thead>
@@ -263,9 +274,11 @@ export default function SatislarTab({
                   </td>
                   <td className="py-2.5 px-3 text-right font-semibold">{formatTRY(o.totalPrice)}</td>
                   <td className="py-2.5 px-3 text-center">
-                    {o.faturali
-                      ? <span className="text-[9px] font-bold bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full">FATURALI</span>
-                      : <span className="text-[9px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full">FATURASIZ</span>
+                    {/* Rozet tek kaynaktan (utils/durumEtiketi.faturasizEtiketi): seri Q MF siparişi «FATURASIZ · MİKRO Q» (QH5-9).
+                        Faturalı kolun metni de sözlükten (`faturali_rozet`; büyük harf sözlükte yazılı) — iki dil karışmaz. */}
+                    {faturasizEtiketi(o, currentLanguage) === null
+                      ? <span className="text-[9px] font-bold bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full">{op(currentLanguage).faturali_rozet}</span>
+                      : <span className="text-[9px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full">{faturasizEtiketi(o, currentLanguage)}</span>
                     }
                   </td>
                   {/* Oranı bilinmeyen sipariş '%0' değil '—' (sahte kesinlik). */}

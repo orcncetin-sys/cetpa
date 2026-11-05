@@ -53,6 +53,7 @@ import { bilinenSayi, toplaBilinen, tamTutar, tutarBirlestir, type Tutar } from 
 import { kdvBantlari, type KdvFaturasi } from './butceVaryans';
 import { donemAnahtari } from './babsKdvAnaliz';
 import { fisTutari } from './gelirGider';
+import { faturasizDisiSay, faturasizMi, type FaturasizDisi } from './faturasizDisi';
 
 export type { KdvFaturasi };
 
@@ -103,6 +104,8 @@ export interface KdvDonemi<J> {
    * onlar kırılıma da girmiyor) + Mikro giden/gelen faturası.
    */
   tarihsiz: number;
+  /** Seçili ayın DIŞLANAN faturasız (Q) Mikro faturaları (K3): hesaplanan KDV'ye ve oran kırılımına girmez. */
+  faturasizDisi: FaturasizDisi;
 }
 
 /** `kdvOran` kovası: bilinen sayı → String(sayı); bilinmeyen → 'bilinmiyor'. (≤ 0 elemesi çağıranda.) */
@@ -165,8 +168,11 @@ export function kdvDonemi<J extends YevmiyeKaydi, F extends KdvFaturasi>(
     if (d === hedef) donemJournal.push(e);
   }
   const donemMikro: F[] = [];
+  const disi: F[] = [];
   for (const f of mikroFaturalar) {
     const d = donemAnahtari(f.tarih);
+    // Faturasız (Q) resmî KDV beyanına girmez (K3); seçili aydaysa ayrıca sayılır (tarihsiz Q da «tarihsiz» sayacına girmez).
+    if (faturasizMi(f)) { if (d === hedef) disi.push(f); continue; }
     // Giden KDV'si hesaplanana, gelen KDV'si indirilecege girer; başka bir yön değeri
     // hiçbir KPI'ya girmediği için sayılmaz da.
     if (d === null) { if (f.yon === 'giden' || f.yon === 'gelen') tarihsiz++; continue; }
@@ -204,5 +210,6 @@ export function kdvDonemi<J extends YevmiyeKaydi, F extends KdvFaturasi>(
     hesaplananListesi: hesaplananFisleri.map(e => ({ kayit: e, tutar: sayi(e.alacak) })),
     indirilecekListesi: indirilecekFisleri.map(e => ({ kayit: e, tutar: sayi(e.borc) })),
     tarihsiz,
+    faturasizDisi: faturasizDisiSay(disi),
   };
 }

@@ -38,6 +38,8 @@ import { zamanDate, zamanMs, gunAnahtari, gunBasi, bugunAnahtari, tarihYaz } fro
 import { cariHareketleri, cariOzet, krediLimiti, krediKullanimi, onayBekleyenler } from '../utils/muhasebe/cariEkstreOnay';
 import { butceGercekOzeti } from '../utils/muhasebe/butceGercek';
 import { butceGercekYili, kdvMutabakat, gelirButceYili, varyansAnalizi, type VaryansKalemi } from '../utils/muhasebe/butceVaryans';
+import { faturaTakipSiparisleri, faturaTakipMikroOzeti } from '../utils/muhasebe/faturalar';
+import { faturasizDisiNotu } from '../utils/muhasebe/faturasizDisi';
 import { oc } from '../i18n/ortak';
 import { mc } from '../i18n/muhasebe';
 
@@ -1635,6 +1637,10 @@ export default function MuhasebePage(props: Props) {
                             </p>
                           </div>
                         )}
+                        {/* KDV borcunun Mikro tarafı faturasız (seri Q) satışı saymaz (K3) — yalnız içinde bulunulan ay. */}
+                        {faturasizDisiNotu(kdvT547.faturasizDisi, currentLanguage) && (
+                          <p data-faturasiz-notu="kdv-borcu" className="text-[11px] text-gray-500">{mc(tr547).kdv_borcu}: {faturasizDisiNotu(kdvT547.faturasizDisi, currentLanguage)}</p>
+                        )}
                         {/* KPI strip */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           {[
@@ -1949,6 +1955,10 @@ export default function MuhasebePage(props: Props) {
                         {f.tarihsiz > 0 && (
                           <p className="mt-2 text-[11px] text-amber-700">{tr555 ? `${f.tarihsiz} ${yonTr} faturanın tarihi çözülemedi — hiçbir döneme girmiyor.` : `${f.tarihsiz} ${yonEn} invoices have no resolvable date — they fall into no period.`}</p>
                         )}
+                        {/* Faturasız (seri Q) satış Bs'ye girmez (K3; Q yalnız giden) — dönemdekiler ayrıca sayılır. */}
+                        {faturasizDisiNotu(f.faturasizDisi, currentLanguage) && (
+                          <p data-faturasiz-notu="babs" className="mt-2 text-[11px] text-gray-500">{faturasizDisiNotu(f.faturasizDisi, currentLanguage)}</p>
+                        )}
                       </>
                     );
                     return (
@@ -2167,6 +2177,10 @@ export default function MuhasebePage(props: Props) {
                           </div>
                         )}
 
+                        {/* Faturasız (seri Q) satış resmî KDV analizine girmez (K3; şartname q-serisi v3 Q9) — rakam saf işlevden. */}
+                        {faturasizDisiNotu(kdv.faturasizDisi, currentLanguage) && (
+                          <p data-faturasiz-notu="kdv-analizi" className="text-[11px] text-gray-500">{faturasizDisiNotu(kdv.faturasizDisi, currentLanguage)}</p>
+                        )}
                         {/* KPI bar */}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           {[
@@ -2491,7 +2505,10 @@ export default function MuhasebePage(props: Props) {
                   {/* ── Phase 564: e-Fatura Takip ─────────────────────────────────────── */}
                   {muhasebeTab === 'fatura-takip' && (() => {
                     const tr564 = currentLanguage === 'tr';
-                    const allBillable = orders.filter(o => o.status !== 'Cancelled');
+                    // Faturasız sipariş bu tabloya GİRMEZ (K3; şartname q-serisi v3 Q9-2): faturasız satışa fatura kesilmez,
+                    // «Fatura Eksik»te görünmesi yanlış iş üretirdi. Küme tek kaynakta (utils/muhasebe/faturalar.faturaTakipSiparisleri).
+                    const takip564 = faturaTakipSiparisleri(orders);
+                    const allBillable = takip564.liste;
                     // «Faturası var» TEK yüklemden (D12, 2026-10-17): gönderimi süren / sonucu bilinmeyen e-Fatura «Fatura yok» sayılmaz.
                     // «Bekliyor» da AYNI yüklemden (inceleme 1, İ1-5): eskiden yalnız `hasInvoice` sayılıyordu — gönderimi süren /
                     // sonucu bilinmeyen / numarasız kesilen sipariş ne «Fatura Eksik»te ne «Bekliyor»da görünüyor, yalnız «Tümü»nde
@@ -2519,19 +2536,20 @@ export default function MuhasebePage(props: Props) {
                             izliyor (boş). Kullanıcı: "Mikro'da girişini yapmadığım gelen
                             faturalar var (Metro vb.)". Mikro giden/gelen faturaları burada. */}
                         {mikroFaturalar.length > 0 && (() => {
-                          const giden564 = mikroFaturalar.filter(f => f.yon === 'giden');
-                          const gelen564 = mikroFaturalar.filter(f => f.yon === 'gelen');
-                          const buAy564 = bugunAnahtari().slice(0, 7); // yerel YYYY-MM
-                          const gelenBuAy564 = gelen564.filter(f => f.tarih.startsWith(buAy564));
+                          // Faturasız (seri Q) satış e-belge değildir: sayaçlara girmez, not satırında sayılır (K3; Q9-2).
+                          const ozet564 = faturaTakipMikroOzeti(mikroFaturalar, bugunAnahtari().slice(0, 7)); // yerel YYYY-MM
+                          const gelen564 = ozet564.gelen;
+                          const qNotu564 = faturasizDisiNotu(ozet564.faturasizDisi, currentLanguage);
                           return (
                             <div className="apple-card p-4 space-y-3">
                               <h4 className="font-bold text-sm text-gray-800">{mc(tr564).mikro_faturalari}</h4>
+                              {qNotu564 && <p data-faturasiz-notu="fatura-takip" className="text-[11px] text-gray-500">{qNotu564}</p>}
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                 {[
-                                  { label: mc(tr564).toplam_fatura_2, val: mikroFaturalar.length, color:'text-gray-700', bg:'bg-gray-50' },
-                                  { label: mc(tr564).giden_satis, val: giden564.length, color:'text-blue-700', bg:'bg-blue-50' },
+                                  { label: mc(tr564).toplam_fatura_2, val: ozet564.toplam, color:'text-gray-700', bg:'bg-gray-50' },
+                                  { label: mc(tr564).giden_satis, val: ozet564.giden.length, color:'text-blue-700', bg:'bg-blue-50' },
                                   { label: mc(tr564).gelen_alis, val: gelen564.length, color:'text-emerald-700', bg:'bg-emerald-50' },
-                                  { label: mc(tr564).gelen_bu_ay, val: gelenBuAy564.length, color:'text-amber-700', bg:'bg-amber-50' },
+                                  { label: mc(tr564).gelen_bu_ay, val: ozet564.gelenBuAy, color:'text-amber-700', bg:'bg-amber-50' },
                                 ].map(k => (
                                   <div key={k.label} className={`rounded-xl p-3 ${k.bg}`}>
                                     <p className="text-[10px] font-bold text-gray-400 uppercase">{k.label}</p>
@@ -2565,6 +2583,11 @@ export default function MuhasebePage(props: Props) {
                           );
                         })()}
 
+                        {takip564.faturasizAdet > 0 && (
+                          <p data-faturasiz-siparis-notu className="text-[11px] text-gray-500">
+                            {mc(tr564).faturasiz_siparis_listede_yok.replace('{n}', String(takip564.faturasizAdet))}
+                          </p>
+                        )}
                         {/* KPI strip */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           {[
@@ -3285,7 +3308,10 @@ export default function MuhasebePage(props: Props) {
                     const m617 = kdvMutabakat(mikroFaturalar, orders, p617Month);
                     const donemFaturalar = { length: m617.faturaAdedi };
                     const donemFaturasiz = { length: m617.faturasizAdedi };
-                    const faturasizTutar = ekranTutari(m617.faturasizTutar);
+                    // «Faturasız / muaf» satırı MATRAH basar (bant satırlarıyla aynı sütun): satırların toplamı = Toplam Matrah kartı.
+                    // Meblağ (`faturasizTutar`, KDV dâhil) basılınca Q'nun KDV'si kadar fazla çıkıyordu. Not: iki bilinmeyenin büyüğü.
+                    const faturasizMatrah = ekranTutari(m617.faturasizMatrah);
+                    const faturasizTutarsiz = Math.max(m617.faturasizMatrah.bilinmeyen, m617.faturasizTutar.bilinmeyen);
                     const totalRevenue = ekranTutari(m617.ciro);
                     const totalMatrah = ekranTutari(m617.matrah);
                     const totalKdv = ekranTutari(m617.kdv);
@@ -3302,7 +3328,11 @@ export default function MuhasebePage(props: Props) {
                           {[
                             {label:oc(tr617).toplam_ciro,val:paraYaz(totalRevenue, { ondalik: 0 }),color:'text-blue-600',bg:'bg-blue-50',not:tutarsiz617(m617.ciro.bilinmeyen)},
                             {label:mc(tr617).toplam_matrah,val:paraYaz(totalMatrah, { ondalik: 0 }),color:'text-purple-600',bg:'bg-purple-50',not:tutarsiz617(m617.matrah.bilinmeyen)},
-                            {label:oc(tr617).toplam_kdv,val:paraYaz(totalKdv, { ondalik: 0 }),color:'text-emerald-600',bg:'bg-emerald-50',not:tutarsiz617(m617.kdv.bilinmeyen)},
+                            {label:oc(tr617).toplam_kdv,val:paraYaz(totalKdv, { ondalik: 0 }),color:'text-emerald-600',bg:'bg-emerald-50',
+                              // Faturasız (Q) satırın KDV'si toplam KDV'ye girmez (K4; şartname q-serisi v3 Q10-1) — 0 değilse not.
+                              not:[tutarsiz617(m617.kdv.bilinmeyen),
+                                (m617.faturasizKdv.toplam !== 0 || m617.faturasizKdv.bilinmeyen > 0) ? mc(tr617).faturasiz_q_kdv_notu.replace('{kdv}', paraYaz(ekranTutari(m617.faturasizKdv))) : null,
+                              ].filter(Boolean).join(' · ') || null},
                             {label:mc(tr617).fatura_sayisi,val:String(donemFaturalar.length),color:'text-amber-600',bg:'bg-amber-50',not:null},
                           ].map(k=>(
                             <div key={k.label} className={`apple-card p-5 ${k.bg}`}>
@@ -3326,9 +3356,9 @@ export default function MuhasebePage(props: Props) {
                             {donemFaturasiz.length > 0 && (
                               <div key="faturasiz" className="grid grid-cols-4 px-4 py-3 text-xs bg-gray-50/60">
                                 <span className="font-bold text-gray-500">{mc(tr617).faturasiz_muaf}</span>
-                                <span className="tabular-nums text-gray-600">{paraYaz(faturasizTutar, { ondalik: 0 })}</span>
+                                <span className="tabular-nums text-gray-600">{paraYaz(faturasizMatrah, { ondalik: 0 })}</span>
                                 <span className="tabular-nums font-bold text-gray-800">₺0</span>
-                                <span className="text-gray-400">{donemFaturasiz.length} {mc(tr617).islem}{m617.faturasizTutar.bilinmeyen > 0 && <span className="text-amber-600"> · {tutarsiz617(m617.faturasizTutar.bilinmeyen)}</span>}</span>
+                                <span className="text-gray-400">{donemFaturasiz.length} {mc(tr617).islem}{faturasizTutarsiz > 0 && <span className="text-amber-600"> · {tutarsiz617(faturasizTutarsiz)}</span>}</span>
                               </div>
                             )}
                           </div>

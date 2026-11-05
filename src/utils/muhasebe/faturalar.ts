@@ -33,6 +33,7 @@
  * sayacı gerçekten dolar. Bu modül zaten hazırdı (tutar/kdv `unknown` okunur).
  */
 import { bilinenSayi, kdvAyristir, sayiSirala, toplaBilinen, tutarBirlestir, type Tutar } from '../para';
+import { faturasizDisiSay, faturasizMi, type FaturasizDisi } from './faturasizDisi';
 
 export type { Tutar };
 
@@ -52,6 +53,8 @@ export interface MikroFaturaGirdi {
   ebelgeTuru?: unknown;
   tutar?: unknown;
   kdv?: unknown;
+  /** Seri Q satış faturası (useMikroFaturalar `faturasiz`) — e-belge süzgeçlerine girmez (K3). */
+  faturasiz?: boolean;
 }
 
 export interface MikroFaturaSecim {
@@ -98,8 +101,11 @@ export function mikroFaturaSatirlari<F extends MikroFaturaGirdi>(
     //     mükellefi olmayan tedarikçinin e-Arşiv/kâğıt faturası da bu kümede olabilir) — FaturalarTab kaç tanesinin
     //     türünün bilinmediğini listenin üstünde yazar.
     //   • İhracat: Mikro başlığında karşılığı yok → Mikro faturası gösterilmez.
+    //   • Faturasız (seri Q) satış e-belge DEĞİLDİR (K3, şartname q-serisi v3 Q9): e-Fatura / e-Arşiv süzgecinde YOK, «Tümü»nde
+    //     «Faturasız (Q)» çipiyle görünür (FaturalarTab). Q-1 `cha_ebelge_Islemturu 2` taşıdığı için bugün e-Arşiv sayılıyordu.
     .filter(f => {
       if (s.ebelgeTuru === 'all') return true;
+      if (faturasizMi(f)) return false;
       if (s.ebelgeTuru === 'e-fatura') return f.ebelgeTuru === 0 || f.ebelgeTuru === -1;
       if (s.ebelgeTuru === 'e-arsiv') return f.ebelgeTuru === 1;
       return false; // ihracat
@@ -187,7 +193,7 @@ export type FaturaKaynagi = 'cetpa' | 'mikro' | 'hepsi';
 /** Cetpa'da kesilen fatura (`invoices` dokümanı) — yalnız KPI'nın okuduğu alanlar. */
 export interface CetpaFaturaGirdi { totalPrice?: unknown; faturaTipi?: unknown }
 /** `mikroFaturaSatirlari` çıktısının KPI'ya giren alanları. */
-export interface MikroKpiGirdi { yon?: string; tutar?: unknown }
+export interface MikroKpiGirdi { yon?: string; tutar?: unknown; kdv?: unknown; faturasiz?: boolean }
 
 export interface FaturaKpi {
   /** Toplam Fatura kartı: Cetpa + Mikro (kaynak filtresine göre). */
@@ -203,6 +209,8 @@ export interface FaturaKpi {
   satis: Tutar;
   /** Mikro-gelen. */
   alis: Tutar;
+  /** `satis` İÇİNDEKİ faturasız (seri Q) Mikro satırları — «Tümü»nde sayılır, ekran «içinde N faturasız (Q) · {tutar}» notu basar. */
+  faturasiz: FaturasizDisi;
 }
 
 /**
@@ -234,6 +242,48 @@ export function faturaKpi(
     eArsivAdet: cetpa.filter(i => i.faturaTipi === 'e-arsiv').length,
     satis: tutarBirlestir(toplaBilinen(cetpa, i => i.totalPrice), toplaBilinen(mikroGiden, f => f.tutar)),
     alis: toplaBilinen(mikroGelen, f => f.tutar),
+    faturasiz: faturasizDisiSay(mikroGiden.filter(faturasizMi)),
+  };
+}
+
+// ── e-Fatura Takip (MuhasebePage Phase 564) — faturasız (Q) DIŞLANIR (K3; şartname q-serisi v3 Q9-2, T4) ─────────
+
+export interface FaturaTakipSiparisi { status?: string; faturali?: boolean }
+
+/**
+ * e-Fatura Takip sipariş tablosu ve sayaçlarının kümesi: iptal dışı ∧ faturasız OLMAYAN sipariş. Faturasız satışa fatura
+ * kesilmez (talep SQL'i reddeder — server/mikro/faturaGonderimi) → «Fatura Eksik» sayacında görünmesi yanlış iş üretirdi.
+ * `faturali` alanı olmayan kayıt (ör. mağaza siparişi) bugünkü gibi listede kalır. `faturasizAdet` ekran notunu besler.
+ */
+export function faturaTakipSiparisleri<T extends FaturaTakipSiparisi>(orders: readonly T[]): { liste: T[]; faturasizAdet: number } {
+  const iptalDisi = orders.filter(o => o.status !== 'Cancelled');
+  const liste = iptalDisi.filter(o => o.faturali !== false);
+  return { liste, faturasizAdet: iptalDisi.length - liste.length };
+}
+
+export interface FaturaTakipFaturasi { yon?: string; tarih?: unknown; tutar?: unknown; kdv?: unknown; faturasiz?: boolean }
+export interface FaturaTakipMikroOzeti<F> {
+  /** Faturasız (Q) olmayan fatura adedi («Toplam Fatura»). */
+  toplam: number;
+  giden: F[];
+  gelen: F[];
+  /** Bu ayın ('YYYY-MM' öneki) gelen fatura adedi. */
+  gelenBuAy: number;
+  /** Sayaçlara girmeyen faturasız (Q) satırlar — ekran `faturasizDisiNotu`. */
+  faturasizDisi: FaturasizDisi;
+}
+
+/** e-Fatura Takip'in «Mikro faturaları» özeti: faturasız (Q) satır sayaçlara girmez, ayrıca sayılır. */
+export function faturaTakipMikroOzeti<F extends FaturaTakipFaturasi>(faturalar: readonly F[], buAy: string): FaturaTakipMikroOzeti<F> {
+  const resmi = faturalar.filter(f => !faturasizMi(f));
+  const giden = resmi.filter(f => f.yon === 'giden');
+  const gelen = resmi.filter(f => f.yon === 'gelen');
+  return {
+    toplam: resmi.length,
+    giden,
+    gelen,
+    gelenBuAy: gelen.filter(f => typeof f.tarih === 'string' && f.tarih.startsWith(buAy)).length,
+    faturasizDisi: faturasizDisiSay(faturalar.filter(faturasizMi)),
   };
 }
 

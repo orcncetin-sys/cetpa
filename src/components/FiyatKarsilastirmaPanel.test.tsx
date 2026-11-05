@@ -424,7 +424,7 @@ describe("Fiyat Karşılaştırma — KDV'yle doğrulanamadı süzgeci", () => {
 
   it('evrak başlığı Cetpa\'da VARSA fatura BAŞLIKLI açılır (ölçüt: evrak sırası + cari + tarih); istek fatura anahtarıyla gider', async () => {
     const baslik: MikroFatura = { id: 'f901', faturaNo: '901', cariKod: '320.07', tarih: '2026-08-31', oranKarma: false, ebelgeTuru: -1, subeNo: NaN,
-      tutar: 6120, kdv: 1020, matrah: 5100, oran: 20, yon: 'gelen' };
+      tutar: 6120, kdv: 1020, matrah: 5100, oran: 20, yon: 'gelen', seri: '', faturasiz: false };
     cizdir([baslik]);
     const kart = await kartD();
     fireEvent.click(within(kart).getByRole('button', { name: '901' }));

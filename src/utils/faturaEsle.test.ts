@@ -9,7 +9,7 @@ import type { MikroFatura } from '../hooks/useMikroFaturalar';
 
 const baslik = (p: Partial<MikroFatura>): MikroFatura => ({
   id: 'f1', faturaNo: '116', cariKod: '120.01', tarih: '2025-12-30', oranKarma: false, ebelgeTuru: -1, subeNo: NaN,
-  tutar: 6048, kdv: 1008, matrah: 5040, oran: 20, yon: 'giden', ...p,
+  tutar: 6048, kdv: 1008, matrah: 5040, oran: 20, yon: 'giden', seri: '', faturasiz: false, ...p,
 });
 
 describe('hareketFaturasi', () => {

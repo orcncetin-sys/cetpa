@@ -246,20 +246,20 @@ describe('kdvBorcu — faturalı siparişlerin KDV\'si + cari ayın Mikro net KD
     { tarih: '2026-09-20', yon: 'giden', kdv: undefined }, // bilinmeyen
   ];
   it('Eylül: 200 + (1000 − 300); bilinmeyen 2 (1 sipariş + 1 fatura)', () => {
-    expect(kdvBorcu(siparisler, faturalar, '2026-09')).toEqual({ toplam: 900, bilinen: 4, bilinmeyen: 2, mikroNet: 700 });
+    expect(kdvBorcu(siparisler, faturalar, '2026-09')).toEqual({ toplam: 900, bilinen: 4, bilinmeyen: 2, mikroNet: 700, faturasizDisi: { adet: 0, tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, kdv: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, tutarsiz: 0 } });
   });
   it('devreden KDV (gelen > giden) borç doğurmaz: Mikro payı 0, mikroNet negatif kalır', () => {
     const r = kdvBorcu(siparisler, [
       { tarih: '2026-09-02', yon: 'giden', kdv: 1000 },
       { tarih: '2026-09-15', yon: 'gelen', kdv: 3000 },
     ], '2026-09');
-    expect(r).toEqual({ toplam: 200, bilinen: 4, bilinmeyen: 1, mikroNet: -2000 });
+    expect(r).toEqual({ toplam: 200, bilinen: 4, bilinmeyen: 1, mikroNet: -2000, faturasizDisi: { adet: 0, tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, kdv: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, tutarsiz: 0 } });
   });
   it('tarihi olmayan/boş fatura o aya girmez, sayılmaz', () => {
-    expect(kdvBorcu([], [{ tarih: undefined, yon: 'giden', kdv: 100 }, { tarih: '', yon: 'giden', kdv: 100 }], '2026-09')).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 0, mikroNet: 0 });
+    expect(kdvBorcu([], [{ tarih: undefined, yon: 'giden', kdv: 100 }, { tarih: '', yon: 'giden', kdv: 100 }], '2026-09')).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 0, mikroNet: 0, faturasizDisi: { adet: 0, tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, kdv: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, tutarsiz: 0 } });
   });
   it('boş listeler', () => {
-    expect(kdvBorcu([], [], '2026-09')).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 0, mikroNet: 0 });
+    expect(kdvBorcu([], [], '2026-09')).toEqual({ toplam: 0, bilinen: 0, bilinmeyen: 0, mikroNet: 0, faturasizDisi: { adet: 0, tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, kdv: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, tutarsiz: 0 } });
   });
 });
 

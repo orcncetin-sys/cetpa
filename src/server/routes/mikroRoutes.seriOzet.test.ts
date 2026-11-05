@@ -5,7 +5,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { duzenekKur, type Duzenek } from './mikroRoutes.testDuzenegi';
 import { getMikroCreds, mikroPost, mikroSql, mikroKolonlar, v17MetoduKullanilabilir } from '../mikroClient.js';
-import { FT_ISKONTO_ADLARI } from '../mikro/seriOzet.js';
+import { FT_ISKONTO_ADLARI, CETPA_FATURA_SORGUSU, CETPA_SIPARIS_SORGUSU, FATURASIZ_SIPARIS_SORGUSU, SUBE_SORGUSU, MF_IKIZ_SIPARIS_SORGUSU,
+  MF_IKIZ_FATURA_SORGUSU, CETPA_EVRAK_SORGUSU } from '../mikro/seriOzet.js';
+import { mikroVergiOranlari } from '../mikroClient.js';
 
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
 vi.mock('../pgShim.js', () => ({ pgServerTimestamp: () => 'TS' }));
@@ -19,7 +21,7 @@ vi.mock('../mikroClient.js', async (orig) => {
     ...gercek,
     getMikroCreds: vi.fn(async () => ({ firmaKodu: 'F' })),
     mikroPost: vi.fn(),
-    mikroVergiOranlari: vi.fn(async () => ({})),
+    mikroVergiOranlari: vi.fn(async () => new Map<number, number>()),
     vergiOraniCoz: vi.fn(() => null),
     v17MetoduKullanilabilir: vi.fn(async () => true),
     mikroSql: vi.fn(async () => ({ rows: [] as Record<string, unknown>[], hata: null })),
@@ -30,10 +32,17 @@ vi.mock('../mikroClient.js', async (orig) => {
 const JETON = 'test-jetonu-abc';
 const yedek = process.env.OPS_SUMMARY_TOKEN;
 // Şemadaki GERÇEK yazım (Türkçe harmanlamada 'cha_ebelge_Islemturu' küçük harfle yazılırsa kolon bulunmaz).
+// (6)(7)(14) EK adları da şemada (2026-11-05, şartname q-serisi v3 § 4.3) — yoksa `eksikKolonlar`'a girerdi.
 const CHA = ['cha_Guid', 'cha_evrakno_seri', 'cha_evrakno_sira', 'cha_evrak_tip', 'cha_cinsi', 'cha_tip', 'cha_meblag', 'cha_tarihi', 'cha_kod',
-  'cha_iptal', 'cha_aratoplam', ...FT_ISKONTO_ADLARI, 'cha_vergi', 'cha_uuid', 'cha_ebelge_turu', 'cha_efatura_belge_tipi', 'cha_ebelge_Islemturu'];
+  'cha_iptal', 'cha_aratoplam', ...FT_ISKONTO_ADLARI, 'cha_vergi', 'cha_uuid', 'cha_ebelge_turu', 'cha_efatura_belge_tipi', 'cha_ebelge_Islemturu',
+  'cha_normal_Iade', 'cha_cari_cins', 'cha_d_cins'];
 const STH = ['sth_Guid', 'sth_evrakno_seri', 'sth_evrakno_sira', 'sth_evraktip', 'sth_tutar', 'sth_vergi', 'sth_vergi_pntr', 'sth_giris_depo_no',
-  'sth_cikis_depo_no', 'sth_iptal'];
+  'sth_cikis_depo_no', 'sth_iptal', 'sth_tip', 'sth_cins', 'sth_normal_iade', 'sth_vergisiz_fl'];
+/** (14) e-belge gönderim kuyruğu — test şeması (kolon adları ÖLÇÜLMEDİ; uç hepsini karşılaştırır). */
+const KUYRUK = ['kyr_id', 'kyr_create_date', 'kyr_belge_guid'];
+/** Dilim 1 ölçüm bölümlerinin (6)–(14) Mikro okuma sayısı (6, 7a, 7b, 14) ve bölüm adları. */
+const EK_MIKRO_OKUMA = 4;
+const OLCUM_BOLUMLERI = ['olcum.vergiDeseni', 'olcum.qSatirDeseni', 'olcum.qBaslikDeseni', 'olcum.kuyrukEttn', 'olcum.vergiKolonlari', 'olcum.vergiTablosu'];
 const olmadan = (sema: readonly string[], ...adlar: string[]) => sema.filter(k => !adlar.includes(k));
 const alansiz = (satir: Record<string, unknown>, ...alanlar: string[]): Record<string, unknown> =>
   Object.fromEntries(Object.entries(satir).filter(([k]) => !alanlar.includes(k)));
@@ -43,12 +52,16 @@ let d: Duzenek;
 let pgSorgulari: Array<{ sql: string; params: unknown[] | undefined }>;
 const FATURA_KOPYALARI = [{ companyId: 'K1', seri: 'Q', adet: 12 }, { companyId: 'K1', seri: '', adet: 700 }];
 const MF_SIPARISLERI = [{ companyId: 'K1', seri: 'Q', tur: 'boolean', deger: 'true', adet: 9 }, { companyId: 'K1', seri: 'Q', tur: 'boolean', deger: 'false', adet: 2 }];
-/** PG sahtesi: sorguyu kaydeder; koleksiyon parametresine göre satır döndürür. */
+/** PG sahtesi: sorguyu kaydeder; (4) ve (5) sorgusuna kendi satırlarını, Dilim 1 ölçüm sorgularına (10)–(13) boş liste döndürür. */
 const pgKur = (faturalar: Record<string, unknown>[] = FATURA_KOPYALARI, siparisler: Record<string, unknown>[] = MF_SIPARISLERI) => {
-  d.pgAyarla(async (sql, params) => { pgSorgulari.push({ sql, params }); return { rows: params?.[0] === 'orders' ? siparisler : faturalar }; });
+  d.pgAyarla(async (sql, params) => {
+    pgSorgulari.push({ sql, params });
+    return { rows: sql === CETPA_SIPARIS_SORGUSU.sql ? siparisler : sql === CETPA_FATURA_SORGUSU.sql ? faturalar : [] };
+  });
 };
-const tablolar = (cha: string[] = CHA, sth: string[] = STH) =>
-  vi.mocked(mikroKolonlar).mockImplementation(async (t: string) => (t === 'CARI_HESAP_HAREKETLERI' ? cha : t === 'STOK_HAREKETLERI' ? sth : []));
+const tablolar = (cha: string[] = CHA, sth: string[] = STH, kuyruk: string[] = KUYRUK) =>
+  vi.mocked(mikroKolonlar).mockImplementation(async (t: string) => (t === 'CARI_HESAP_HAREKETLERI' ? cha : t === 'STOK_HAREKETLERI' ? sth
+    : t === 'EBELGE_GONDERIM_KUYRUK_LOG' ? kuyruk : []));
 // Mikro okuma sırası: (1) seriler, (2) e-belge, (3a) başlıklar, (3b) satırlar.
 const sql = (...yanitlar: Array<Record<string, unknown>[] | string | Error>) => {
   for (const y of yanitlar) {
@@ -100,7 +113,8 @@ const cagir = (headers: Record<string, string> = { 'x-ops-token': JETON }, query
 type Bolum = Record<string, unknown> & { satirlar?: Array<Record<string, unknown>>; hata?: string; atlandi?: string; atlananAlanlar?: Record<string, string> };
 type Govde = { success: boolean; seri: string; sureMs: number; sureler: Record<string, number>; eksikKolonlar: string[]; semaOkunamadi: string[];
   hataliBolumler: string[]; seriler: Bolum; eBelge: Bolum; sonBasliklar: Bolum & { satirOzeti?: Record<string, unknown> };
-  cetpa: { mikroFaturalar: Record<string, unknown>; siparisler: Record<string, unknown> } };
+  cetpa: { mikroFaturalar: Record<string, unknown>; siparisler: Record<string, unknown> } & Record<string, Record<string, unknown>>;
+  olcum: Record<string, Bolum> };
 
 describe('GET /api/mikro/seri-ozet', () => {
   it('zincir BOŞ: tek halka işleyicinin kendisi (kimlik / rol ara katmanı yok — kapı ops jetonu)', () => {
@@ -160,9 +174,15 @@ describe('GET /api/mikro/seri-ozet', () => {
     sql(SERILER, EBELGE, BASLIKLAR, SATIRLAR);
     const g = (await cagir(undefined, { seri: 'q9A' })).govde as Govde;
     expect(g.seri).toBe('q9A');
-    for (const s of mikroSqlleri().slice(1)) {
+    for (const s of mikroSqlleri().slice(1, 4)) {
       expect(s).toContain("= 'q9A'");
       expect(s.replace(/''/g, '').split("'").length - 1).toBe(2);                 // boş metin sabitleri dışında tek tırnaklı sabit: seri
+    }
+    // (6)–(14): tırnaklı sabit ya HİÇ yok ((6) tüm giden satış satırları) ya da YALNIZ seri ((7a)(7b)(14)).
+    for (const s of mikroSqlleri().slice(4)) {
+      const tirnak = s.replace(/''/g, '').split("'").length - 1;
+      expect([0, 2], s).toContain(tirnak);
+      if (tirnak) expect(s).toContain("= 'q9A'");
     }
     expect(mikroSqlleri()[0]).not.toContain("'");                                 // (1) tüm seriler: seri süzgeci yok
   });
@@ -176,7 +196,9 @@ describe('GET /api/mikro/seri-ozet', () => {
     const g = y.govde as Govde;
     expect(g).toMatchObject({ success: true, seri: 'Q', eksikKolonlar: [], semaOkunamadi: [], hataliBolumler: [] });
     expect(typeof g.sureMs).toBe('number');
-    expect(Object.keys(g.sureler).sort()).toEqual(['basliklarMs', 'chaSemaMs', 'eBelgeMs', 'pgFaturaMs', 'pgSiparisMs', 'satirlarMs', 'serilerMs', 'sthSemaMs']);
+    expect(Object.keys(g.sureler).sort()).toEqual(['basliklarMs', 'chaSemaMs', 'eBelgeMs', 'kuyrukEttnMs', 'kuyrukSemaMs', 'pgEvrakMs', 'pgFaturaMs',
+      'pgFaturasizMs', 'pgMfFaturaMs', 'pgMfMs', 'pgSiparisMs', 'pgSubeMs', 'qBaslikDeseniMs', 'qSatirDeseniMs', 'satirlarMs', 'serilerMs',
+      'sthSemaMs', 'vergiDeseniMs', 'vergiTablosuMs']);
 
     // (1) Tüm seriler — boş seri ayrı satır.
     expect(g.seriler.satirlar?.map(s => [s.seri, s.evrakTip, s.cinsi, s.tip, s.adet, s.toplam, s.iptalAdet])).toEqual([['Q', 63, 7, 0, 12, 120000, 0], ['', 63, 6, 1, 700, 9000000, 0]]);
@@ -193,11 +215,11 @@ describe('GET /api/mikro/seri-ozet', () => {
     expect(String(g.sonBasliklar.satirOzeti?.bag)).toContain('sth_evraktip');
     // (4) + (5) Cetpa.
     expect(g.cetpa.mikroFaturalar).toEqual({ adet: 12, kiracilar: { K1: 12 }, yazimlar: { Q: 12 }, toplamKopya: 712 });
-    expect(g.cetpa.siparisler).toEqual({ adet: 11, faturali: { true: 9, false: 2, yok: 0, diger: 0 }, kiracilar: { K1: 11 }, yazimlar: { Q: 11 }, toplamMikroFaturaSiparisi: 11 });
+    expect(g.cetpa.siparisler).toEqual({ adet: 11, faturali: { true: 9, false: 2, yok: 0, diger: 0 }, kiracilar: { K1: 11 }, yazimlar: { Q: 11 }, toplamMikroFaturaSiparisi: 11, seriYok: 0 });
 
-    // Mikro: dört okuma, hepsi salt okunur tek deyim; şema iki tablo için okundu.
+    // Mikro: dört okuma + Dilim 1 ölçümleri (6)(7a)(7b)(14), hepsi salt okunur tek deyim; şema üç tablo için okundu.
     const sqller = mikroSqlleri();
-    expect(sqller).toHaveLength(4);
+    expect(sqller).toHaveLength(4 + EK_MIKRO_OKUMA);
     for (const s of sqller) {
       expect(s).toMatch(/^SELECT /);
       expect(s).not.toMatch(YASAK);
@@ -206,11 +228,15 @@ describe('GET /api/mikro/seri-ozet', () => {
       expect(s).not.toMatch(/[^\x20-\x7E]/);
     }
     for (const c of vi.mocked(mikroSql).mock.calls) expect(c[1]).toEqual({ zamanAsimiMs: 20000 });
-    expect(vi.mocked(mikroKolonlar).mock.calls.map(c => c[0])).toEqual(['CARI_HESAP_HAREKETLERI', 'STOK_HAREKETLERI']);
+    expect(vi.mocked(mikroKolonlar).mock.calls.map(c => c[0])).toEqual(['CARI_HESAP_HAREKETLERI', 'STOK_HAREKETLERI', 'EBELGE_GONDERIM_KUYRUK_LOG']);
     expect(sqller[0]).not.toMatch(/\bWHERE\b/);                                   // fatura koşulu ÖNCEDEN uygulanmaz
     expect(sqller[2]).toMatch(/^SELECT TOP 20 /);
-    // PG: iki okuma, yalnız SELECT, değerler parametreyle (seri metne gömülmez).
-    expect(pgSorgulari.map(p => p.params)).toEqual([['mikroFaturalar'], ['orders', 'mikro-fatura']]);
+    // PG: (4)(5) + (10)(11)(13) okumaları, yalnız SELECT, değerler parametreyle (seri metne gömülmez). (10)'un müşteri okuması
+    // faturasız sipariş yokken YAPILMAZ.
+    // (10) params bilerek değişti (MF dışı süzgeci: `source IS DISTINCT FROM $2`).
+    expect(pgSorgulari.map(p => p.params)).toEqual([['mikroFaturalar'], ['orders', 'mikro-fatura'], ['orders', 'mikro-fatura'], ['subeler'],
+      ['orders', 'mikro-fatura'], ['mikroFaturalar'], ['orders']]);
+    expect(pgSorgulari[2].sql).toContain(`data->>'source' IS DISTINCT FROM $2`);
     for (const p of pgSorgulari) {
       expect(p.sql).toMatch(/^SELECT /);
       expect(p.sql).not.toMatch(YASAK);
@@ -234,7 +260,7 @@ describe('GET /api/mikro/seri-ozet', () => {
     expect(g.semaOkunamadi).toEqual([]);
     expect(g.hataliBolumler).toEqual([]);
     const sqller = mikroSqlleri();
-    expect(sqller).toHaveLength(4);
+    expect(sqller).toHaveLength(4 + EK_MIKRO_OKUMA);
     for (const s of sqller) for (const ad of eksikler) expect(new RegExp(`\\b${ad}\\b`).test(s), `${ad} sorguda geçmemeli: ${s}`).toBe(false);
     expect(g.eBelge.atlananAlanlar).toEqual({ ettnVar: 'şemada yok: cha_uuid' });
     expect(g.sonBasliklar.atlananAlanlar).toEqual({ vergi: 'şemada yok: cha_vergi', ettnVar: 'şemada yok: cha_uuid' });
@@ -252,7 +278,10 @@ describe('GET /api/mikro/seri-ozet', () => {
     expect(g2.seriler).toEqual({ atlandi: 'şemada yok: cha_cinsi' });
     expect(g2.sonBasliklar).toEqual({ atlandi: 'şemada yok: cha_evrakno_sira' });
     expect(g2.eBelge.satirlar).toHaveLength(1);
-    expect(mikroSqlleri()).toHaveLength(1);
+    // (7b) ve (14) de evrak sırası / cinsi ister → atlandı; (6)(7a) satır tablosundan koşar.
+    expect(g2.olcum.qBaslikDeseni).toEqual({ atlandi: 'şemada yok: cha_cinsi' });
+    expect(g2.olcum.kuyrukEttn).toEqual({ atlandi: 'şemada yok: cha_cinsi' });
+    expect(mikroSqlleri()).toHaveLength(3);
     expect(g2.hataliBolumler).toEqual([]);
   });
 
@@ -265,8 +294,10 @@ describe('GET /api/mikro/seri-ozet', () => {
     expect(g.eksikKolonlar).toEqual([]);
     expect(g.semaOkunamadi).toEqual(['CARI_HESAP_HAREKETLERI']);
     for (const b of [g.seriler, g.eBelge, g.sonBasliklar]) expect(b.hata).toContain('Mikro şeması okunamadı (CARI_HESAP_HAREKETLERI');
-    expect(g.hataliBolumler).toEqual(['seriler', 'eBelge', 'sonBasliklar']);
-    expect(mikroSql).not.toHaveBeenCalled();
+    expect(g.hataliBolumler).toEqual(['seriler', 'eBelge', 'sonBasliklar', 'olcum.qBaslikDeseni', 'olcum.kuyrukEttn', 'olcum.vergiKolonlari']);
+    // Başlık tablosuna Mikro SQL'i GİTMEZ; yalnız satır tablosunun ölçümleri (6)(7a) koşar.
+    expect(mikroSqlleri()).toHaveLength(2);
+    for (const s of mikroSqlleri()) expect(s).toContain('FROM STOK_HAREKETLERI');
     expect(g.cetpa.mikroFaturalar).toMatchObject({ adet: 12 });
     expect(g.cetpa.siparisler).toMatchObject({ adet: 11 });
 
@@ -280,11 +311,11 @@ describe('GET /api/mikro/seri-ozet', () => {
     tablolar(CHA, []);
     sql(SERILER, EBELGE, BASLIKLAR);
     const g3 = (await cagir()).govde as Govde;
-    expect(g3.semaOkunamadi).toEqual(['STOK_HAREKETLERI']);
+    expect(g3.semaOkunamadi).toEqual(['STOK_HAREKETLERI']);                       // şema TEK kez okunur (3b + (6)(7a) paylaşır)
     expect(g3.sonBasliklar.satirlar).toHaveLength(2);
     expect(g3.sonBasliklar.satirlar?.[0].satirOzeti).toBeNull();
     expect(String(g3.sonBasliklar.satirOzeti?.hata)).toContain('Mikro şeması okunamadı (STOK_HAREKETLERI');
-    expect(g3.hataliBolumler).toEqual(['sonBasliklar.satirOzeti']);
+    expect(g3.hataliBolumler).toEqual(['sonBasliklar.satirOzeti', 'olcum.vergiDeseni', 'olcum.qSatirDeseni', 'olcum.vergiKolonlari']);
     expect(g3.eksikKolonlar).toEqual([]);
   });
 
@@ -314,7 +345,7 @@ describe('GET /api/mikro/seri-ozet', () => {
     sql(SERILER, EBELGE, 'başlık okunamadı');
     const g3 = (await cagir()).govde as Govde;
     expect(g3.sonBasliklar).toEqual({ hata: 'başlık okunamadı' });
-    expect(mikroSqlleri()).toHaveLength(3);
+    expect(mikroSqlleri()).toHaveLength(3 + EK_MIKRO_OKUMA);
     expect(g3.seriler.satirlar).toHaveLength(2);
 
     // PG: fatura okuması fırlatır, sipariş okuması bozuk satır döndürür → ikisi de kendi bölümünde; Mikro bölümleri sağlam.
@@ -328,7 +359,7 @@ describe('GET /api/mikro/seri-ozet', () => {
     expect(g4.cetpa.mikroFaturalar).toEqual({ hata: 'Error: relation "docs" does not exist' });
     expect(g4.cetpa.siparisler).toEqual({ hata: 'Error: PG adet değeri sayı değil' });
     expect(g4.seriler.satirlar).toHaveLength(2);
-    expect(g4.hataliBolumler).toEqual(['cetpa.mikroFaturalar', 'cetpa.siparisler']);
+    expect(g4.hataliBolumler).toEqual(['cetpa.mikroFaturalar', 'cetpa.siparisler', 'cetpa.satisCiftSayim']);
   });
 
   it('PG havuzu yoksa (DATABASE_URL tanımsız) Cetpa bölümleri `hata`; Mikro bölümleri döner', async () => {
@@ -344,15 +375,16 @@ describe('GET /api/mikro/seri-ozet', () => {
     expect(g.sonBasliklar.satirlar).toHaveLength(2);
   });
 
-  it('seride başlık yoksa satır şeması ve satırlar SORULMAZ; boş sonuç nedeniyle birlikte döner', async () => {
+  it('seride başlık yoksa (3b) satırları SORULMAZ; boş sonuç nedeniyle birlikte döner (satır ŞEMASI artık (6)(7a)(8) için okunur)', async () => {
     pgKur([], []);
     tablolar();
     sql(SERILER, [], []);
     const g = (await cagir(undefined, { seri: 'ZZ' })).govde as Govde;
     expect(g.eBelge.satirlar).toEqual([]);
     expect(g.sonBasliklar).toEqual({ satirlar: [], satirOzeti: { atlandi: 'seride başlık yok — satırlar sorulmadı' }, siralama: 'fatura koşuluna uyanlar önce; sonra tarih, sonra evrak sırası — yeniden eskiye' });
-    expect(mikroSqlleri()).toHaveLength(3);
-    expect(vi.mocked(mikroKolonlar).mock.calls.map(c => c[0])).toEqual(['CARI_HESAP_HAREKETLERI']);
+    expect(mikroSqlleri()).toHaveLength(3 + EK_MIKRO_OKUMA);
+    expect(mikroSqlleri().some(s => /sth_evrakno_sira IN/.test(s))).toBe(false);   // (3b) satır sorgusu yok
+    expect(vi.mocked(mikroKolonlar).mock.calls.map(c => c[0])).toEqual(['CARI_HESAP_HAREKETLERI', 'STOK_HAREKETLERI', 'EBELGE_GONDERIM_KUYRUK_LOG']);
     expect(g.cetpa.mikroFaturalar).toEqual({ adet: 0, kiracilar: {}, yazimlar: {}, toplamKopya: 0 });
     expect(g.cetpa.siparisler).toMatchObject({ adet: 0, toplamMikroFaturaSiparisi: 0 });
   });
@@ -372,7 +404,7 @@ describe('GET /api/mikro/seri-ozet', () => {
     expect(g.seriler.satirlar).toHaveLength(2);
     expect(g.sonBasliklar.satirlar).toHaveLength(2);                              // başlıklar okundu
     expect(g.sonBasliklar.satirOzeti).toEqual({ hata: 'süre bütçesi doldu — şema okunmadı' });
-    expect(g.hataliBolumler).toEqual(['sonBasliklar.satirOzeti']);
+    expect(g.hataliBolumler).toEqual(['sonBasliklar.satirOzeti', ...OLCUM_BOLUMLERI]);                // bütçe dolduysa ölçüm bölümleri de okunmaz
     expect(vi.mocked(mikroKolonlar).mock.calls.map(c => c[0])).toEqual(['CARI_HESAP_HAREKETLERI']);
     expect(g.semaOkunamadi).toEqual([]);                                          // okunmayan şema «okunamadı» sayılmaz
     expect(g.sureMs).toBe(96000);
@@ -398,7 +430,7 @@ describe('GET /api/mikro/seri-ozet', () => {
       expect(vi.mocked(mikroSql).mock.calls.map(c => c[1])).toEqual([{ zamanAsimiMs: 20000 }, { zamanAsimiMs: 20000 }, { zamanAsimiMs: 20000 }]);
       expect(g.sonBasliklar.satirlar).toHaveLength(2);
       expect(g.sonBasliklar.satirOzeti).toEqual({ hata: 'süre bütçesi doldu — şema okuması tamamlanmadı' });
-      expect(g.hataliBolumler).toEqual(['sonBasliklar.satirOzeti']);
+      expect(g.hataliBolumler).toEqual(['sonBasliklar.satirOzeti', ...OLCUM_BOLUMLERI]);                // bütçe dolduysa ölçüm bölümleri de okunmaz
       expect(g.semaOkunamadi).toEqual([]);                                        // yarıda kesildi — «okunamadı» sayılmaz
       expect(g.sureMs).toBe(100000);
     } finally { vi.useRealTimers(); }
@@ -424,7 +456,7 @@ describe('GET /api/mikro/seri-ozet', () => {
       expect(vi.mocked(mikroSql).mock.calls.map(c => c[1])).toEqual([{ zamanAsimiMs: 20000 }, { zamanAsimiMs: 20000 }, { zamanAsimiMs: 20000 }]);
       expect(g.sonBasliklar.satirlar).toHaveLength(2);
       expect(g.sonBasliklar.satirOzeti).toEqual({ hata: 'süre bütçesi doldu — okunmadı' });
-      expect(g.hataliBolumler).toEqual(['sonBasliklar.satirOzeti']);
+      expect(g.hataliBolumler).toEqual(['sonBasliklar.satirOzeti', ...OLCUM_BOLUMLERI.filter(b => b !== 'olcum.vergiKolonlari')]);   // şema okundu → (8) döner
       expect(g.semaOkunamadi).toEqual([]);                                        // şema OKUNDU — yarış kesmedi
       expect(g.sureMs).toBe(97000);
     } finally { vi.useRealTimers(); }
@@ -446,4 +478,57 @@ describe('GET /api/mikro/seri-ozet', () => {
       expect(g.seriler.satirlar).toHaveLength(2);
     } finally { vi.useRealTimers(); }
   });
+
+  it('Dilim 1 ölçümleri (6)–(14) uçtan uca: Mikro okumaları (3)\'ten SONRA, PG eş zamanlı; kimlik dökülmez; okunmayan kolon eksikKolonlar\'da (T9)', async () => {
+    const kiraci = 'K1';
+    const pgSatirlari = new Map<string, Record<string, unknown>[]>([
+      [CETPA_FATURA_SORGUSU.sql, FATURA_KOPYALARI], [CETPA_SIPARIS_SORGUSU.sql, MF_SIPARISLERI],
+      [FATURASIZ_SIPARIS_SORGUSU.sql, [{ companyId: kiraci, kdvOran: 0, kdvTutari: 0, totalPrice: 4583.5, lineItems: [{ price: 4583.5, quantity: 1 }],
+        depoNo: 2, leadId: 'L-gizli', paid: false, createdAt: '2026-10-01T10:00:00', status: 'Pending', source: null }]],
+      [SUBE_SORGUSU.sql, [{ companyId: kiraci, subeKodu: '0' }, { companyId: kiraci, subeKodu: '2' }]],
+      [MF_IKIZ_SIPARIS_SORGUSU.sql, [{ companyId: kiraci, seri: 'Q', sira: '15', totalPrice: 12000, orderDate: '2026-10-01' }]],
+      [MF_IKIZ_FATURA_SORGUSU.sql, [{ companyId: kiraci, seri: 'Q', sira: '15', tip: '0', meblag: 12000 }]],
+      [CETPA_EVRAK_SORGUSU.sql, []],
+    ]);
+    d.pgAyarla(async (sql, params) => {
+      pgSorgulari.push({ sql, params });
+      if (/coll = \$1 AND id = ANY/.test(sql)) return { rows: [{ id: 'L-gizli', companyId: kiraci, mikroCariKod: '120.01.001', cariKod: '' }] };
+      return { rows: pgSatirlari.get(sql) ?? [] };
+    });
+    tablolar(CHA, olmadan(STH, 'sth_vergisiz_fl'));
+    vi.mocked(mikroVergiOranlari).mockResolvedValueOnce(new Map([[1, 0], [4, 20]]));
+    sql(SERILER, EBELGE, BASLIKLAR.map(b => ({ ...b, faturaKosulu: 1 })), SATIRLAR,
+      [{ vergiPntr: 4, vergiSifir: 0, adet: 900 }, { vergiPntr: 1, vergiSifir: 1, adet: 3 }],                                // (6)
+      [{ evraktip: 4, tip: 1, cins: 0, normalIade: 0, iptal: 0, adet: 4 }],                                                   // (7a)
+      [{ evrakTip: 63, cinsi: 7, tip: 0, normalIade: 0, cariCins: 0, dCins: 0, adet: 12 }],                                   // (7b)
+      [{ adet: 0 }]);                                                                                                           // (14)
+    const g = (await cagir()).govde as Govde;
+    expect(g.hataliBolumler).toEqual([]);
+    expect(g.eksikKolonlar).toEqual(['sth_vergisiz_fl']);
+    const sqller = mikroSqlleri();
+    expect(sqller).toHaveLength(4 + EK_MIKRO_OKUMA);
+    expect(sqller[4]).toMatch(/FROM STOK_HAREKETLERI WHERE sth_evraktip = 4 /);
+    expect(sqller[4]).not.toMatch(/sth_vergisiz_fl/);
+    expect(sqller[5]).toContain("FROM STOK_HAREKETLERI WHERE sth_evrakno_seri = 'Q' GROUP BY");
+    expect(sqller[6]).toContain("FROM CARI_HESAP_HAREKETLERI cha WHERE cha.cha_evrakno_seri = 'Q' GROUP BY");
+    expect(sqller[7]).toMatch(/^SELECT COUNT\(\*\) AS adet FROM EBELGE_GONDERIM_KUYRUK_LOG k WHERE EXISTS/);
+    for (const k of KUYRUK) expect(sqller[7]).toContain(`k.${k}`);
+    expect(g.olcum.vergiDeseni).toMatchObject({ kdvsiz: { durum: 'olculemedi' }, atlananAlanlar: { vergisizFl: 'şemada yok: sth_vergisiz_fl' } });
+    expect(g.olcum.qSatirDeseni).toMatchObject({ satirlar: [{ evraktip: 4, tip: 1, cins: 0, normalIade: 0, adet: 4, sabittenFarkli: null }] });
+    expect(g.olcum.qBaslikDeseni).toEqual({ satirlar: [{ evrakTip: 63, cinsi: 7, tip: 0, normalIade: 0, cariCins: 0, dCins: 0, adet: 12, sabittenFarkli: false }] });
+    expect(g.olcum.kuyrukEttn).toEqual({ adet: 0 });
+    expect(g.olcum.vergiTablosu).toEqual({ tablo: { '1': 0, '4': 20 }, sifirIsaretcisi: 1 });
+    expect(g.olcum.vergiKolonlari).toEqual({ CARI_HESAP_HAREKETLERI: ['cha_vergi'], STOK_HAREKETLERI: ['sth_vergi', 'sth_vergi_pntr'] });
+    expect(g.cetpa.faturasizHavuz).toMatchObject({ kiracilar: { K1: { adet: 1, leadCarisiz: 0, leadBulunamadi: 0, depoYok: 0, kalemTutarUyusmuyor: 0 } } });
+    expect(g.cetpa.subeler).toEqual({ kiracilar: { K1: { toplam: 2, kodSifir: 1 } } });
+    // (12): başlık 15 (120.01.001, 2026-10) ile aynı cari + ayda 1 faturasız sipariş.
+    expect(g.cetpa.qIkizAdayi).toEqual({ basliklar: [{ sira: 15, ay: '2026-10', adayAdet: 1, adayTutarlari: [4583.5] }, { sira: 14, ay: '2026-09', adayAdet: 0, adayTutarlari: [] }] });
+    expect(g.cetpa.satisCiftSayim).toMatchObject({ kiracilar: { K1: { mfAdet: 1, ikizliMfAdet: 1, ikizsizMfAdet: 0 } } });
+    expect(JSON.stringify(g)).not.toContain('L-gizli');                         // sipariş / müşteri kimliği yanıta girmez
+    // Müşteri kayıtları yalnız faturasız siparişlerin kimlikleriyle, parametreyle okunur.
+    expect(pgSorgulari.find(q => /id = ANY/.test(q.sql))?.params).toEqual(['leads', ['L-gizli']]);
+    expect(d.yazilan).toEqual([]);
+    expect(mikroPost).not.toHaveBeenCalled();
+  });
 });
+

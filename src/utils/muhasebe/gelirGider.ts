@@ -32,10 +32,17 @@
  */
 import { bilinenSayi, toplaBilinen, tutarBirlestir, tamTutar, ekranTutari, type Tutar } from '../para';
 import { gunAnahtari } from '../zaman';
+import { faturasizDisiSay, faturasizMi, type FaturasizDisi } from './faturasizDisi';
 
 // ── Girdi tipleri: MİNİMAL ve yapısal — kanonik JournalEntry / MikroFatura uyar, bağımlı değil ──
 export interface GgFis { date?: unknown; debitHesap?: string; alacakHesap?: string; borc?: unknown; alacak?: unknown }
-export interface GgMikroFatura { yon?: string; tarih?: unknown; matrah?: unknown }
+export interface GgMikroFatura {
+  yon?: string; tarih?: unknown; matrah?: unknown;
+  /** Meblağ / KDV — yalnız dışlanan faturasız (Q) sayacı için okunur. */
+  tutar?: unknown; kdv?: unknown;
+  /** Seri Q satış faturası — 600 (Mikro) gelirine GİRMEZ (K3: mizanla aynı hesap → resmî; a2-7). */
+  faturasiz?: boolean;
+}
 /** Seçili dönem: ay/yıl; `aralik.from` ve `.to` İKİSİ de doluysa aralık modu (eski `gelirUseRange && from && to`). */
 export interface GgDonem { yil: number; ay: number; aralik?: { from?: string; to?: string } | null }
 
@@ -52,6 +59,8 @@ export interface GelirGiderOzeti {
   giderKirilimi: Record<string, Tutar>;
   /** Tarihi çözülemeyen gelir/gider fişi + Mikro giden faturası — döneme GİRMEDİ, sayfa not düşer. */
   tarihsiz: number;
+  /** Seçili dönemin DIŞLANAN faturasız (Q) Mikro satışları (K3) — 600 (Mikro) gelirine girmez. */
+  faturasizDisi: FaturasizDisi;
 }
 
 /** Mikro satış faturalarının gelir kırılımındaki anahtarı (sayfadaki sabit metin). */
@@ -138,12 +147,15 @@ const topla = (fisler: readonly GgFis[], mikroGiden: readonly GgMikroFatura[]): 
 export function gelirGiderOzeti(journalEntries: readonly GgFis[], mikroFaturalar: readonly GgMikroFatura[], donem: GgDonem): GelirGiderOzeti {
   // Yalnız gelir ya da gider fişi olabilecek kayıtlar; tarihsizleri SAYMAK için gün anahtarı bir kez çözülür.
   const fisler = gunle(journalEntries.filter(e => gelirFisiMi(e) || giderFisiMi(e)), e => e.date);
-  const mikroGiden = gunle(mikroFaturalar.filter(f => f.yon === 'giden'), f => f.tarih);
+  // Faturasız (seri Q) satış 600 (Mikro) gelirine girmez (K3; şartname q-serisi v3 Q9) — seçili dönemdekiler ayrıca sayılır.
+  const mikroGiden = gunle(mikroFaturalar.filter(f => f.yon === 'giden' && !faturasizMi(f)), f => f.tarih);
+  const mikroFaturasiz = gunle(mikroFaturalar.filter(f => f.yon === 'giden' && faturasizMi(f)), f => f.tarih);
   const tarihsiz = fisler.filter(x => x.gun === null).length + mikroGiden.filter(x => x.gun === null).length;
 
   const donemde = donemSuzgeci(donem);
   const donemFisleri = gunuOlan(fisler, donemde);
   const donemMikro = gunuOlan(mikroGiden, donemde);
+  const faturasizDisi = faturasizDisiSay(gunuOlan(mikroFaturasiz, donemde));
   const { gelir, gider, mikroGelir } = topla(donemFisleri, donemMikro);
   const net = tamTutar(gelir) - tamTutar(gider); // gelir = alacak (kredi) + Mikro; gider = borç (debit) — yalnız native, bkz. yukarıdaki not
 
@@ -159,7 +171,7 @@ export function gelirGiderOzeti(journalEntries: readonly GgFis[], mikroFaturalar
   Object.assign(gelirKirilimi, kirilim(donemFisleri.filter(gelirFisiMi), e => hesapKodu(e.alacakHesap), fisTutari));
   const giderKirilimi = kirilim(donemFisleri.filter(giderFisiMi), e => hesapKodu(e.debitHesap), e => e.borc);
 
-  return { gelir, gider, net, aylik, gelirKirilimi, giderKirilimi, tarihsiz };
+  return { gelir, gider, net, aylik, gelirKirilimi, giderKirilimi, tarihsiz, faturasizDisi };
 }
 
 /**

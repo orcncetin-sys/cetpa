@@ -17,6 +17,7 @@ import { pushMikroEvrak, dekontPayload } from '../services/mikroEvrak';
 import { authFetch } from '../services/authFetch';
 import { paraYaz } from '../utils/currency';
 import { bugunAnahtari } from '../utils/zaman';
+import { dekontTurleri } from '../lib/faturaEvrakKosulu';
 
 interface HareketTuru {
   cha_evrak_tip: number;
@@ -61,7 +62,9 @@ export default function DekontModal({ cariKod, cariAdi, mevcutBakiye, entityId, 
         const d = await r.json() as { success?: boolean; turler?: HareketTuru[]; error?: string };
         if (iptal) return;
         if (!r.ok || !d.success) { setTurHata(d.error || 'Türler alınamadı.'); return; }
-        const list = (d.turler ?? []).filter(x => x.cha_evrak_tip != null);
+        // Fatura tipleri (satış 63, alış 0 + cinsi 6) listeden ÇIKAR — liste `COUNT(*) DESC` sıralı ve canlıda ilk sıra 63 / 6 / 0;
+        // varsayılan tür fatura tipi olamaz (şartname q-serisi v3 Q13 / QH9). Güvence sunucuda; bu yalnız kolaylık.
+        const list = dekontTurleri(d.turler ?? []);
         setTurler(list);
         if (list.length) setEvrakTip(String(list[0].cha_evrak_tip));
       } catch {

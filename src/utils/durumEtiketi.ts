@@ -21,6 +21,9 @@
  */
 import type { Order, Shipment } from '../types';
 import type { MagazaTalepAsamasi } from '../lib/magazaTalep';
+import { MF_KAYNAGI } from '../lib/mfKaynagi';
+import { faturasizSeriMi } from '../lib/faturasizSeri';
+import { op } from '../i18n/orders';
 
 const SIPARIS_TR: Record<Order['status'], string> = {
   Pending: 'Bekliyor',
@@ -219,4 +222,25 @@ export function magazaKalemTeslimEtiketi(teslim: boolean, dil: string): string {
 /** Kalem rozetinin sınıfı — aşama tablosundan: işaretli `teslim` yeşili, bekleyen `iptal` grisi (yeni renk yok). */
 export function magazaKalemTeslimRengi(teslim: boolean): string {
   return teslim ? MAGAZA_ASAMA_RENGI.teslim : MAGAZA_ASAMA_RENGI.iptal;
+}
+
+/** Faturasız rozetinin okuduğu sipariş alanları (Order yapısal olarak uyar). */
+export interface FaturasizEtiketGirdisi {
+  faturali?: boolean;
+  source?: string;
+  mikroEvrak?: { seri?: unknown } | null;
+}
+
+/**
+ * Faturasız satış ROZETİ — şartname q-serisi v3 Q8-5 / QH5-9 (Dilim 1 kısmı, 2026-11-05). Metin sözlükte YAZILI büyük harfle
+ * (`i18n/orders` `faturasiz` / `faturasiz_mikro_q`); burada büyütme YOK (CLAUDE.md: `toUpperCase()` ekrana basılan Türkçede yasak).
+ *   • MF siparişi (Mikro faturasından türedi): seri Q ise «FATURASIZ · MİKRO Q», değilse null (rozeti «MİKRO FATURA» kalır).
+ *     Seri `mikroEvrak.seri`'den okunur — `faturali` gece geri doldurmasıyla döner (QH5); rozet bekletmez, ayrışma en çok bir gece.
+ *   • Diğer sipariş: faturalı değilse «FATURASIZ» (bugünkü dal), faturalıysa null.
+ * Dilim 2'nin «Mikro'ya Q yazıldı» kolu (`qYazildi`) bu dilimde YOK.
+ */
+export function faturasizEtiketi(o: FaturasizEtiketGirdisi, dil: string): string | null {
+  const s = op(dil);
+  if (o.source === MF_KAYNAGI) return faturasizSeriMi(o.mikroEvrak?.seri) ? s.faturasiz_mikro_q : null;
+  return o.faturali ? null : s.faturasiz;
 }

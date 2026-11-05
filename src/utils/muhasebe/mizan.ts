@@ -28,6 +28,7 @@
  * DB'den null, formdan string gelebilir; tip "number" demek dolu demek değildir.
  */
 import { bilinenSayi, toplaBilinen, tutarBirlestir, tamTutar, type Tutar } from '../para';
+import { faturasizDisiSay, faturasizMi, type FaturasizDisi } from './faturasizDisi';
 
 /** para.ts `Tutar` — ekran köprüsü `ekranTutari` de para.ts'te (tek sözleşme). */
 export type { Tutar };
@@ -39,7 +40,13 @@ export type { Tutar };
  * matrah/kdv ise Faz 3 2/n'e (2026-09-18) kadar sunucuda ISNULL(…, 0) ile sıfıra zorlanıyordu. O yedek
  * kalktı: okunamayan matrah/kdv buraya NaN gelir ve fatura SAYILIR (toplama girmez).
  */
-export interface MizanFaturasi { yon: 'gelen' | 'giden'; matrah?: unknown; kdv?: unknown }
+export interface MizanFaturasi {
+  yon: 'gelen' | 'giden'; matrah?: unknown; kdv?: unknown;
+  /** Fatura meblağı — yalnız dışlanan faturasız (Q) sayacı için okunur. */
+  tutar?: unknown;
+  /** Seri Q satış faturası (useMikroFaturalar `faturasiz`) — mizana GİRMEZ (K3). */
+  faturasiz?: boolean;
+}
 
 /** Mizan'ın tek satır girdisi — yevmiye kaydı (DB'den, tutarlar null olabilir) ya da Mikro sentezi. */
 export interface MizanGirdisi { debitHesap: string; alacakHesap: string; borc: unknown; alacak: unknown }
@@ -75,10 +82,13 @@ export const MIKRO_HESAP = {
  * Matrahı YA DA KDV'si bilinmeyen fatura satır üretmez ve `bilinmeyen` sayılır (sayfa "N Mikro faturası
  * mizana alınamadı" notu düşer). Bilinen 0 → satır yok, sayılmaz (istisna/KDV'siz fatura gerçek sıfırdır).
  */
-export function mikroMizanSatirlari(faturalar: readonly MizanFaturasi[]): { satirlar: MizanSentezSatiri[]; bilinmeyen: number } {
+export function mikroMizanSatirlari(faturalar: readonly MizanFaturasi[]): { satirlar: MizanSentezSatiri[]; bilinmeyen: number; faturasizDisi: FaturasizDisi } {
   const satirlar: MizanSentezSatiri[] = [];
+  const disi: MizanFaturasi[] = [];
   let bilinmeyen = 0;
   for (const f of faturalar) {
+    // Faturasız (seri Q) satış resmî mizana girmez (K3; şartname q-serisi v3 Q9) — ayrıca sayılır, ekranda not satırı.
+    if (faturasizMi(f)) { disi.push(f); continue; }
     if (!bilinenSayi(f.matrah) || !bilinenSayi(f.kdv)) { bilinmeyen++; continue; }
     const matrah = Number(f.matrah), kdv = Number(f.kdv);
     if (f.yon === 'giden') {
@@ -89,7 +99,7 @@ export function mikroMizanSatirlari(faturalar: readonly MizanFaturasi[]): { sati
       if (kdv !== 0)    satirlar.push({ debitHesap: MIKRO_HESAP.indirilecekKdv, alacakHesap: MIKRO_HESAP.saticilar, borc: kdv, alacak: kdv });
     }
   }
-  return { satirlar, bilinmeyen };
+  return { satirlar, bilinmeyen, faturasizDisi: faturasizDisiSay(disi) };
 }
 
 // ── Mizan (AccountingModule 1683-1705'ten taşındı) ───────────────────────────────────────────────────────

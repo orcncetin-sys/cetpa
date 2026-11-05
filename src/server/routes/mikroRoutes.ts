@@ -55,6 +55,8 @@ import { faturaEttnEkle, faturaGecisiYaz, faturaGuncelIsareti, faturaSonucunuYaz
 import { cetpaEttnAnahtari } from '../../lib/ettn.js';
 import { FATURA_GONDERIM_ALANI } from '../../lib/faturaGonderimi.js';
 import { MF_KAYNAGI, MF_KIMLIK_ONEKI } from '../../lib/mfKaynagi.js';
+import { faturasizSeriMi } from '../../lib/faturasizSeri.js';
+import { dekontGovdesiFaturaHatasi } from '../../lib/faturaEvrakKosulu.js';
 import { mikroGovdeHatasiMi } from '../mikro/govdeHatasi.js';
 import { stokGovdesi, cariGovdesi } from '../mikro/govdeStokCari.js';
 import { siparisGovdesi } from '../mikro/govdeSiparis.js';
@@ -87,7 +89,11 @@ import {
   CETPA_FATURA_SORGUSU, CETPA_SIPARIS_SORGUSU, SATIR_BAGI, chaPlani, sthPlani, seriGecerli,
   serilerSorgusu, eBelgeSorgusu, sonBasliklarSorgusu, satirOzetiSorgusu,
   serilerBicimle, eBelgeBicimle, sonBasliklarBicimle, cetpaFaturaOzeti, cetpaSiparisOzeti,
-  type SorguPlani, type SthPlani,
+  sthEkPlani, chaEkPlani, vergiDeseniSorgusu, vergiDeseniBicimle, qSatirDeseniSorgusu, qSatirDeseniBicimle,
+  qBaslikDeseniSorgusu, qBaslikDeseniBicimle, vergiKolonAdlari, vergiTablosuOzeti, kuyrukEttnSorgusu, kuyrukEttnBicimle,
+  FATURASIZ_SIPARIS_SORGUSU, leadCariSorgusu, leadCariHaritasi, faturasizHavuzOzeti, SUBE_SORGUSU, subeOzeti, qIkizAdaylari,
+  MF_IKIZ_SIPARIS_SORGUSU, MF_IKIZ_FATURA_SORGUSU, CETPA_EVRAK_SORGUSU, satisCiftSayimOlcumu,
+  type SorguPlani, type SthPlani, type PgSorgu, type BaslikOzeti,
 } from '../mikro/seriOzet.js';
 import { zamanAsimiMi } from '../mikro/adaptifSayfalama.js';
 // Varlık eşlemeleri TEK KAYNAK (saf + testli): src/server/mikro/eslemeVarlik.ts
@@ -2581,7 +2587,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
    *        `bagDisiSatirlar`'da: evrak tipi + adet + iptal adedi; aynı özeti paylaşan ikiz başlık `satirOzetiPaylasanBaslik` ile işaretli) (Σ tutar, Σ vergi, vergi
    *        işaretçisi ve depo dağılımı — Açık sorular 1: mevcut Q faturaları KDV'li mi);
    *    (4) `cetpa.mikroFaturalar`: Cetpa'daki aynı serili fatura kopyası adedi (kiracı kırılımıyla);
-   *    (5) `cetpa.siparisler`: o seriden türemiş MF siparişleri ve `faturali` değer dağılımı (Q6-4 onarımının kapsamı).
+   *    (5) `cetpa.siparisler`: o seriden türemiş MF siparişleri ve `faturali` değer dağılımı (Q6-4 onarımının kapsamı);
+   *        `seriYok`: `mikroEvrak.seri`'si olmayan MF adedi (geri doldurma hedefi `true` — QH5-5, yayın notuna).
+   *  EK (2026-11-05, şartname `.wf/SARTNAME-q-serisi-v3.md` § 4.3 + QH8-4 / QH8-5 — Dilim 1 sonrası, Dilim 2'den önce okunur):
+   *    `olcum.vergiDeseni` (6) giden satış satırı vergi işaretçisi × `sth_vergisiz_fl` × (KDV = 0) — Q3-3 karar kuralı;
+   *    `olcum.qSatirDeseni` / `olcum.qBaslikDeseni` (7) serinin satır / başlık sabitleri, gövde sabitlerinden farkı;
+   *    `olcum.vergiKolonlari` (8) adı vergi / kdv / istisna içeren kolon ADLARI; `olcum.vergiTablosu` (9) VergiListesiV2 + %0 işaretçisi;
+   *    `olcum.kuyrukEttn` (14) serinin fatura başlıklarının ETTN / GUID'i e-belge kuyruğunda geçen satır adedi;
+   *    `cetpa.faturasizHavuz` (10) faturasız sipariş ön koşul kapsamı; `cetpa.subeler` (11) kodu 0 şube; `cetpa.qIkizAdayi` (12)
+   *    aynı cari + ay faturasız sipariş; `cetpa.satisCiftSayim` (13) Satışlar çift sayımının kesin boyutu. Kimlik dökülmez.
    *  Kolon adları çalışma anında şemadan (mikroKolonlar) GERÇEK yazımıyla; şemada olmayan ad `eksikKolonlar`'da, ona bağlı
    *  bölüm `atlandi` ile döner — sessiz sıfır yok. Her bölüm kendi hatasını taşır (`hata`): biri düşerse diğerleri yine döner;
    *  şema okunamazsa (boş liste ≠ «kolon yok») üç Mikro bölümü `hata` ile döner, `eksikKolonlar` DOLDURULMAZ. Aynı jeton kapısı
@@ -2616,7 +2630,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     };
     // PG havuzu zaman aşımsız kurulu — tıkalıyken istek ARR sınırına kadar asılı kalmasın (fatura-tani kalıbı).
     const pool = C.getPgPool?.();
-    const pgOku = async (sorgu: { sql: string; params: string[] }, adim: string): Promise<Okuma> => {
+    const pgOku = async (sorgu: PgSorgu, adim: string): Promise<Okuma> => {
       if (!pool) return { rows: [], hata: 'DATABASE_URL tanımlı değil — Cetpa tarafı okunamadı' };
       if (kalan() < 5000) return { rows: [], hata: 'süre bütçesi doldu — okunmadı' };
       const a0 = Date.now(), sure = Math.max(1000, Math.min(OKUMA_MS, kalan()));
@@ -2638,6 +2652,15 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     try {
       // (4) + (5) Cetpa tarafı — Mikro okumalarıyla eş zamanlı; pgOku fırlatmaz.
       const cetpaSozu = Promise.all([pgOku(CETPA_FATURA_SORGUSU, 'pgFaturaMs'), pgOku(CETPA_SIPARIS_SORGUSU, 'pgSiparisMs')]);
+      // (10)(11)(13) Cetpa tarafı — aynı şekilde eş zamanlı. (10)'un müşteri kayıtları ancak sipariş satırları gelince okunur.
+      const ekCetpaSozu = Promise.all([
+        pgOku(FATURASIZ_SIPARIS_SORGUSU, 'pgFaturasizMs').then(async siparisler => {
+          const idler = siparisler.hata ? [] : [...new Set(siparisler.rows.map(r => String(r.leadId ?? '').trim()).filter(Boolean))];
+          return { siparisler, leadler: idler.length ? await pgOku(leadCariSorgusu(idler), 'pgLeadMs') : null };
+        }),
+        pgOku(SUBE_SORGUSU, 'pgSubeMs'),
+        pgOku(MF_IKIZ_SIPARIS_SORGUSU, 'pgMfMs'), pgOku(MF_IKIZ_FATURA_SORGUSU, 'pgMfFaturaMs'), pgOku(CETPA_EVRAK_SORGUSU, 'pgEvrakMs'),
+      ]);
 
       const eksik = new Set<string>();
       const semaOkunamadi: string[] = [];
@@ -2670,6 +2693,11 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       let seriler: object, eBelge: object, sonBasliklar: object;
       // (3)'ün alt okuması: başlıklar dönse de satırlar okunamamış olabilir — nedeni burada, `hataliBolumler`'e de girer.
       let satirDurumu: object | null = null;
+      // STOK_HAREKETLERI şeması TEK kez okunur: (3b) ve (6)(7a)(8) aynı sonucu paylaşır (`semaOkunamadi` iki kez yazılmasın).
+      let sthSema: { kolonlar: string[]; hata: string | null } | null = null;
+      const sthSemaAl = async () => (sthSema ??= await semaOku('STOK_HAREKETLERI', 'sthSemaMs'));
+      // (12) ikiz adayı (3)'ün başlıklarını okur.
+      let basliklarOzeti: BaslikOzeti[] | null = null;
       const cha = await semaOku('CARI_HESAP_HAREKETLERI', 'chaSemaMs');
       if (cha.hata) {
         seriler = eBelge = sonBasliklar = { hata: cha.hata };
@@ -2692,7 +2720,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
             satirDurumu = { atlandi: 'seride başlık yok — satırlar sorulmadı' };
             let satirlar: { gruplar: Record<string, unknown>[]; plan: SthPlani } | null = null;
             if (basliklar.rows.length) {
-              const sth = await semaOku('STOK_HAREKETLERI', 'sthSemaMs');
+              const sth = await sthSemaAl();
               if (sth.hata) {
                 satirDurumu = { hata: sth.hata };
               } else {
@@ -2713,6 +2741,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
               }
             }
             const ozet = bolumYap(basliklar, rows => ({ satirlar: sonBasliklarBicimle(rows, plan, satirlar) }));
+            if (!('hata' in ozet)) basliklarOzeti = ozet.satirlar;
             sonBasliklar = 'hata' in ozet ? ozet : {
               ...ozet, satirOzeti: satirDurumu, ...(baslikPlani.siralama ? { siralama: baslikPlani.siralama } : {}),
               ...(Object.keys(baslikPlani.atlananAlanlar).length ? { atlananAlanlar: baslikPlani.atlananAlanlar } : {}),
@@ -2721,20 +2750,85 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
         }
       }
 
+      // ── (6)–(9), (14): Dilim 1 sonrası ölçümler (şartname q-serisi v3 § 4.3 + QH8-4 / QH8-5). (3)'ten SONRA, aynı bütçeyle:
+      // bütçe dolduysa her biri «süre bütçesi doldu» ile döner (mikroOku / semaOku kapıları). Kolonlar şemadan; olmayan ad
+      // `eksikKolonlar`'da, bağlı alan `atlananAlanlar`'da.
+      // Anahtar sırası SABİT (yanıt ve `hataliBolumler` okunurken sıra kaymasın): (6), (7a), (7b), (14), (8), (9).
+      const olcum: Record<string, object> = { vergiDeseni: {}, qSatirDeseni: {}, qBaslikDeseni: {}, kuyrukEttn: {}, vergiKolonlari: {}, vergiTablosu: {} };
+      const sth = await sthSemaAl();
+      if (cha.hata) {
+        olcum.qBaslikDeseni = { hata: cha.hata };
+        olcum.kuyrukEttn = { hata: cha.hata };
+      }
+      if (sth.hata) {
+        olcum.vergiDeseni = { hata: sth.hata };
+        olcum.qSatirDeseni = { hata: sth.hata };
+      } else {
+        const sp = sthPlani(sth.kolonlar), se = sthEkPlani(sth.kolonlar);
+        for (const k of [...sp.eksik, ...se.eksik]) eksik.add(k);
+        // (6) KDV'siz satış satırlarının deseni (Q3-3).
+        olcum.vergiDeseni = await sorguCalistir(vergiDeseniSorgusu(sp, se), 'vergiDeseniMs', rows => vergiDeseniBicimle(rows, sp, se));
+        // (7a) Q satırlarının sabitleri.
+        olcum.qSatirDeseni = await sorguCalistir(qSatirDeseniSorgusu(sp, se, seri), 'qSatirDeseniMs', rows => ({ satirlar: qSatirDeseniBicimle(rows) }));
+      }
+      if (!cha.hata) {
+        const cp = chaPlani(cha.kolonlar), ce = chaEkPlani(cha.kolonlar);
+        for (const k of ce.eksik) eksik.add(k);
+        // (7b) Q başlıklarının sabitleri.
+        olcum.qBaslikDeseni = await sorguCalistir(qBaslikDeseniSorgusu(cp, ce, seri), 'qBaslikDeseniMs', rows => ({ satirlar: qBaslikDeseniBicimle(rows) }));
+        // (14) Q başlıklarının ETTN / GUID'i e-belge gönderim kuyruğunda geçiyor mu (k1 öneri 1).
+        const kuyruk = await semaOku('EBELGE_GONDERIM_KUYRUK_LOG', 'kuyrukSemaMs');
+        olcum.kuyrukEttn = kuyruk.hata ? { hata: kuyruk.hata }
+          : await sorguCalistir(kuyrukEttnSorgusu(cp, ce, kuyruk.kolonlar, seri), 'kuyrukEttnMs', kuyrukEttnBicimle);
+      }
+      // (8) Adı vergi / kdv / istisna içeren kolonların ADLARI — yalnız okunan şemalardan (okunamayan tablo `hata`).
+      olcum.vergiKolonlari = cha.hata || sth.hata
+        ? { hata: [cha.hata, sth.hata].filter(Boolean).join(' · ') }
+        : { CARI_HESAP_HAREKETLERI: vergiKolonAdlari(cha.kolonlar), STOK_HAREKETLERI: vergiKolonAdlari(sth.kolonlar) };
+      // (9) VergiListesiV2 tablosu + %0 işaretçisi. `mikroVergiOranlari` hatayı yutar ve boş tablo döner — boş tablo «ölçülemedi».
+      if (kalan() < 5000) olcum.vergiTablosu = { hata: 'süre bütçesi doldu — okunmadı' };
+      else {
+        const v0 = Date.now();
+        let sayac: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const tablo = await Promise.race([
+            mikroVergiOranlari(),
+            new Promise<never>((_, reddet) => { sayac = setTimeout(() => reddet(new Error('vergi tablosu süre bütçesinde okunamadı')), Math.min(OKUMA_MS, kalan())); }),
+          ]);
+          olcum.vergiTablosu = tablo.size ? vergiTablosuOzeti(tablo) : { atlandi: 'vergi tablosu boş — VergiListesiV2 okunamadı ya da satırsız' };
+        } catch (e) { olcum.vergiTablosu = { hata: hataMetni(e) }; }
+        finally { clearTimeout(sayac); sureler.vergiTablosuMs = Date.now() - v0; }
+      }
+
       const [pgFatura, pgSiparis] = await cetpaSozu;
+      const [faturasiz, pgSube, pgMf, pgMfFatura, pgEvrak] = await ekCetpaSozu;
+      // (10) Faturasız sipariş havuzu; (12) ikiz adayı bu havuzun satırlarından (kimlik dökülmez).
+      const havuz = faturasiz.siparisler.hata ? { hata: faturasiz.siparisler.hata }
+        : faturasiz.leadler?.hata ? { hata: `müşteri kayıtları okunamadı: ${faturasiz.leadler.hata}` }
+          : bolumYap(faturasiz.siparisler, rows => faturasizHavuzOzeti(rows, leadCariHaritasi(faturasiz.leadler?.rows ?? [])));
       const cetpa = {
         mikroFaturalar: bolumYap(pgFatura, rows => cetpaFaturaOzeti(rows, seri)),
         siparisler: bolumYap(pgSiparis, rows => cetpaSiparisOzeti(rows, seri)),
+        faturasizHavuz: 'hata' in havuz ? havuz : { kiracilar: havuz.kiracilar },
+        subeler: bolumYap(pgSube, rows => ({ kiracilar: subeOzeti(rows) })),
+        qIkizAdayi: 'hata' in havuz ? { hata: havuz.hata }
+          : basliklarOzeti ? { basliklar: qIkizAdaylari(basliklarOzeti, havuz.adaylar) } : { atlandi: '(3) başlıkları okunamadı — ikiz adayı aranmadı' },
+        satisCiftSayim: pgMf.hata || pgMfFatura.hata || pgEvrak.hata
+          ? { hata: [pgMf.hata, pgMfFatura.hata, pgEvrak.hata].filter(Boolean).join(' · ') }
+          : bolumYap(pgMf, rows => ({ kiracilar: satisCiftSayimOlcumu(rows, pgMfFatura.rows, pgEvrak.rows) })),
       };
       const bolumler: Record<string, object> = {
         seriler, eBelge, sonBasliklar, ...(satirDurumu ? { 'sonBasliklar.satirOzeti': satirDurumu } : {}),
         'cetpa.mikroFaturalar': cetpa.mikroFaturalar, 'cetpa.siparisler': cetpa.siparisler,
+        ...Object.fromEntries(Object.entries(olcum).map(([ad, b]) => [`olcum.${ad}`, b])),
+        'cetpa.faturasizHavuz': cetpa.faturasizHavuz, 'cetpa.subeler': cetpa.subeler, 'cetpa.qIkizAdayi': cetpa.qIkizAdayi,
+        'cetpa.satisCiftSayim': cetpa.satisCiftSayim,
       };
       res.json({
         success: true, seri, sureMs: Date.now() - istekT0, sureler,
         eksikKolonlar: [...eksik].sort(), semaOkunamadi,
         hataliBolumler: Object.keys(bolumler).filter(ad => 'hata' in bolumler[ad]),
-        seriler, eBelge, sonBasliklar, cetpa,
+        seriler, eBelge, sonBasliklar, cetpa, olcum,
       });
     } catch (e) {
       console.error('[mikro/seri-ozet]', e);
@@ -4197,6 +4291,13 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     if (!payload || typeof payload !== 'object') {
       return res.status(400).json({ success: false, error: 'payload zorunlu.' });
     }
+    // Dekont yolu FATURA evrakı yazamaz (şartname q-serisi v3 Q13 / QH9, 2026-11-05): HER `evraklar[i].satirlar[j]` satırı
+    // denetlenir (lib/faturaEvrakKosulu); dizi olmayan gövde de reddedilir. 400 denetimlerinin İÇİNDE, ölçüm defterinden ÖNCE:
+    // reddedilen gövde ölçüm kaydı açmaz, Mikro'ya gitmez (yeniden deneme kuyruğu da bu uçtan geçer).
+    if (method === 'DekontKaydetV2') {
+      const ret = dekontGovdesiFaturaHatasi(payload);
+      if (ret) return res.status(400).json({ success: false, error: ret });
+    }
     // ÖLÇÜM DEFTERİ (şartname yeniden-deneme v3 K0b, Dilim 0): kip yapılandırma ve 400 denetimlerinden SONRA, süre ölçümünden
     // ÖNCE okunur (10 sn önbellek; havuz yok / okunamadı → `kapali`). `kapali` (varsayılan): yol ve yanıt bugünküyle BİREBİR.
     // `olcum`: gövdesiz bir ölçüm kaydı Mikro çağrısını BEKLETMEDEN açılır, sonucu arkadan yazılır; ölçüm hatası yutulur ve
@@ -4946,9 +5047,17 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
     // hiç ulaşmıyordu. Sonuç: aynı listede kimi sipariş "MİKRO FATURA", kimi
     // "FATURASIZ" görünüyor ve zaten Mikro'da kesilmiş faturada "Mikro'ya e-Fatura
     // gönder" düğmesi duruyordu. Eksik alanı olan eski kayıtları onar.
+    // HEDEF SERİDEN (şartname q-serisi v3 QH5, 2026-11-05): seri Q MF faturasızdır (`false`), diğeri `true` — `faturadanSiparis`
+    // ile AYNI kural (lib/faturasizSeri). Seçim de hedefle karşılaştırır: yalnız `faturali !== true` kalsaydı yeni Q MF'si `false`
+    // doğar, ertesi gece `true`'ya çevrilirdi (her yeni Q bir gece faturasız, sonra kalıcı faturalı; MF-Q1 hiç dönmezdi).
+    // `mikroEvrak` yoksa hedef bugünkü gibi `true` (parite). Hedefiyle aynı kayda yazılmaz (iki ardışık koşu: ikincisi 0 yazım).
+    const faturaliHedefi = (x: Record<string, unknown>): boolean => {
+      const ev = x.mikroEvrak;
+      return ev && typeof ev === 'object' ? !faturasizSeriMi((ev as { seri?: unknown }).seri) : true;
+    };
     const backfillGerekli = mevcutSiparisler.filter(o => {
       const x = o as Record<string, unknown>;
-      return x.source === MF_KAYNAGI && (x.faturali !== true || !x.mikroFaturaNo);
+      return x.source === MF_KAYNAGI && (x.faturali !== faturaliHedefi(x) || !x.mikroFaturaNo);
     });
 
     // Cari adları: PG aynası (tek sorgu). Kalemler: kiracının stok hareketleri + stok adları (fatura başına sorgu YOK).
@@ -4984,7 +5093,7 @@ export function mikroRoutes(app: Express, C: MikroRouteCtx): void {
       // Evrak no yalnız mikroEvrak'tan türetilir; yoksa alan yazılmaz (uydurma yok).
       const evrakNo = ev.sira != null ? `${String(ev.seri ?? '')}${String(ev.sira)}` : null;
       batch.update(C.getAdminDb().collection('orders').doc(String(x.id)), {
-        faturali: true,
+        faturali: faturaliHedefi(x),
         ...(evrakNo ? { mikroFaturaNo: evrakNo } : {}),
       });
       onarilan++;

@@ -34,6 +34,7 @@ import { bilinenSayi, toplaBilinen, satirTutari, type Tutar, tamTutar } from '..
 import { odemeTakipli, siparisTutari } from '../siparis';
 import { ayAnahtari } from '../zaman';
 import { tlyeCevir } from '../currency';
+import { faturasizDisiSay, faturasizMi, type FaturasizDisi } from './faturasizDisi';
 
 /** kdvAylik `Tutar` ile aynı şekil (toplam + bilinen + bilinmeyen) — dışarıya bu adla açık kalır. */
 export type Toplam = Tutar;
@@ -207,10 +208,18 @@ export function ticariBorc(alislar: readonly AlisSiparisi[], mikroAp: unknown): 
 }
 
 export interface KdvSiparisi { faturali?: boolean; kdvTutari?: unknown }
-export interface KdvFaturasi { tarih?: unknown; yon?: unknown; kdv?: unknown }
+export interface KdvFaturasi {
+  tarih?: unknown; yon?: unknown; kdv?: unknown;
+  /** Meblağ — yalnız dışlanan faturasız (Q) sayacı için. */
+  tutar?: unknown;
+  /** Seri Q satış faturası — KDV borcunun Mikro tarafına GİRMEZ (K3). */
+  faturasiz?: boolean;
+}
 export interface KdvBorcu extends Toplam {
   /** Cari ayın Mikro net KDV'si (giden − gelen); negatifse devreden — borca 0 olarak girer. */
   mikroNet: number;
+  /** Cari ayın DIŞLANAN faturasız (Q) Mikro faturaları (K3). Sipariş tarafı DEĞİŞMEZ. */
+  faturasizDisi: FaturasizDisi;
 }
 
 /**
@@ -225,14 +234,17 @@ export interface KdvBorcu extends Toplam {
 export function kdvBorcu(siparisler: readonly KdvSiparisi[], faturalar: readonly KdvFaturasi[], ay: string): KdvBorcu {
   const s = toplaBilinen(siparisler.filter(o => o.faturali === true), o => o.kdvTutari);
   let mikroNet = 0, bilinenFatura = 0, bilinmeyenFatura = 0;
+  const disi: KdvFaturasi[] = [];
   for (const f of faturalar) {
     if (typeof f.tarih !== 'string' || !f.tarih.startsWith(ay)) continue;
+    // Faturasız (seri Q) satış resmî KDV borcuna girmez (K3; şartname q-serisi v3 Q9) — ayrıca sayılır.
+    if (faturasizMi(f)) { disi.push(f); continue; }
     const k = sayi(f.kdv);
     if (!Number.isFinite(k)) { bilinmeyenFatura++; continue; }
     bilinenFatura++;
     mikroNet += f.yon === 'giden' ? k : -k;
   }
-  return { toplam: s.toplam + Math.max(0, mikroNet), bilinen: s.bilinen + bilinenFatura, bilinmeyen: s.bilinmeyen + bilinmeyenFatura, mikroNet };
+  return { toplam: s.toplam + Math.max(0, mikroNet), bilinen: s.bilinen + bilinenFatura, bilinmeyen: s.bilinmeyen + bilinmeyenFatura, mikroNet, faturasizDisi: faturasizDisiSay(disi) };
 }
 
 export interface BilancoGirdisi {

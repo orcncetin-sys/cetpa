@@ -89,6 +89,7 @@ describe('kdvDonemi — sayfa paritesi (temiz veri, Mart 2026)', () => {
     expect(bos).toEqual({
       hesaplanan: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, indirilecek: { toplam: 0, bilinen: 0, bilinmeyen: 0 },
       odenecek: 0, oranKirilimi: {}, hesaplananListesi: [], indirilecekListesi: [], tarihsiz: 0,
+      faturasizDisi: { adet: 0, tutar: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, kdv: { toplam: 0, bilinen: 0, bilinmeyen: 0 }, tutarsiz: 0 },
     });
     expect(ekranTutari(bos.hesaplanan)).toBe(0);
   });

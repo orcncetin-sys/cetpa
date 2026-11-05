@@ -5,6 +5,7 @@ import { SortHeader, formatTRY, type AccountingT } from './shared';
 import { oc } from '../../i18n/ortak';
 import { ekranTutari, sayiSirala } from '../../utils/para';
 import { type KdvDonemi, type OranKovasi } from '../../utils/muhasebe/kdvBeyan';
+import { faturasizDisiNotu } from '../../utils/muhasebe/faturasizDisi';
 
 type DrillDown = { title: string; rows: { label: string; value: string; sub?: string; badge?: string; badgeColor?: string }[]; total?: string };
 type KdvSortKey = 'ay' | 'hesaplanan' | 'indirilecek' | 'odenecek' | 'oran' | 'matrah' | 'kdv';
@@ -72,6 +73,10 @@ export default function KdvTab({
               ? `${kdvDonem.tarihsiz} tarihsiz KDV kaydı hiçbir döneme dahil değil`
               : `${kdvDonem.tarihsiz} undated VAT records are in no period`}
           </span>
+        )}
+        {/* Faturasız (seri Q) satış resmî KDV beyanına girmez (K3; şartname q-serisi v3 Q9) — seçili ayda dışlanan. */}
+        {faturasizDisiNotu(kdvDonem.faturasizDisi, currentLanguage) && (
+          <span data-faturasiz-notu="kdv-donemi" className="text-xs text-gray-500">{faturasizDisiNotu(kdvDonem.faturasizDisi, currentLanguage)}</span>
         )}
       </div>
       {/* KPI Cards */}

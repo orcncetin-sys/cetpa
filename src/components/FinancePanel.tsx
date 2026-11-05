@@ -6,7 +6,7 @@ import { zamanMs, tarihYaz } from '../utils/zaman';
 import { odemeTakipli, gorunenSiparisNo } from '../utils/siparis';
 import { tlYaz } from '../utils/currency';
 import { toplaBilinen, tahsilatOrani, tutarBirlestir, ekranTutari, tamTutar } from '../utils/para';
-import { mikroFaturaSuz, mikroCiroMaliyet, nativeCiroMaliyet, birlesikKar } from '../utils/muhasebe/mikroCiro';
+import { mikroFaturaSuz, mikroCiroMaliyet, nativeCiroMaliyet, birlesikKar, finansSiparisSayaclari } from '../utils/muhasebe/mikroCiro';
 import { oc } from '../i18n/ortak';
 
 interface Order {
@@ -87,6 +87,9 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
   // aynı kısıt Finansal Oranlar sekmesinde de var).
   // Hesap tek kaynakta (utils/muhasebe/mikroCiro.ts) — SubeModule ve DashboardPage aynı toplamı oradan alır.
   const mikroGiden = mikroFaturaSuz(mikroFaturalar, { yon: 'giden' });
+  // Faturalı / Faturasız / Toplam Sipariş sayaçları — MF ikizi bir kez sayılır, seri Q Mikro satırı Faturasız'a
+  // (S1 (a); hesap tek kaynakta utils/muhasebe/mikroCiro.finansSiparisSayaclari).
+  const siparisSayaclari = finansSiparisSayaclari(orders, mikroGiden);
   const { ciro: mikroCiro, maliyet: mikroMaliyet } = mikroCiroMaliyet(mikroFaturalar);
   const ciroT    = tutarBirlestir(nativeCiro, mikroCiro);
   const maliyetT = tutarBirlestir(nativeMaliyet, mikroMaliyet);
@@ -392,9 +395,9 @@ const FinancePanel: React.FC<FinancePanelProps> = ({ orders = [], currentLanguag
       {/* Invoice / Order Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
-          { label: currentLanguage === 'tr' ? 'Faturalı Sipariş' : 'Invoiced Orders',   value: orders.filter(o => o.hasInvoice).length + mikroGiden.length,  icon: CheckCircle2, color: 'text-green-600' },
-          { label: currentLanguage === 'tr' ? 'Faturasız Sipariş' : 'Uninvoiced',        value: orders.filter(o => !o.hasInvoice).length,             icon: AlertCircle,  color: 'text-orange-500' },
-          { label: oc(currentLanguage).toplam_siparis,          value: orders.length + mikroGiden.length,                    icon: FileText,     color: 'text-blue-600' },
+          { label: currentLanguage === 'tr' ? 'Faturalı Sipariş' : 'Invoiced Orders',   value: siparisSayaclari.faturali,  icon: CheckCircle2, color: 'text-green-600' },
+          { label: currentLanguage === 'tr' ? 'Faturasız Sipariş' : 'Uninvoiced',        value: siparisSayaclari.faturasiz, icon: AlertCircle,  color: 'text-orange-500' },
+          { label: oc(currentLanguage).toplam_siparis,          value: siparisSayaclari.toplam,    icon: FileText,     color: 'text-blue-600' },
         ].map((s, i) => {
           const Icon = s.icon;
           return (

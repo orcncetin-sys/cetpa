@@ -33,6 +33,7 @@
  */
 import { bilinenSayi, toplaBilinen, type Tutar, tamTutar } from '../para';
 import { gunAnahtari } from '../zaman';
+import { faturasizDisiSay, faturasizMi, type FaturasizDisi } from './faturasizDisi';
 
 const bosTutar = (): Tutar => ({ toplam: 0, bilinen: 0, bilinmeyen: 0 });
 const tutarEkle = (a: Tutar, b: Tutar): Tutar => ({ toplam: a.toplam + b.toplam, bilinen: a.bilinen + b.bilinen, bilinmeyen: a.bilinmeyen + b.bilinmeyen });
@@ -53,6 +54,8 @@ export interface FaturaKaydi {
   kdv?: unknown;
   oran?: unknown;
   oranKarma?: boolean;
+  /** Seri Q satış faturası (useMikroFaturalar `faturasiz`) — resmî forma GİRMEZ, `faturasizDisi`'nde sayılır (K3). */
+  faturasiz?: boolean;
 }
 
 // ── Phase 555: Ba/Bs ───────────────────────────────────────────────────────────────────────
@@ -76,6 +79,8 @@ export interface BabsFormu {
   faturaSayisi: number;
   /** Bu yöndeki, tarihi çözülemeyen fatura adedi — hiçbir döneme giremez ("N faturanın tarihi yok"). */
   tarihsiz: number;
+  /** Bu yön + dönemde DIŞLANAN faturasız (Q) faturalar (K3; Q yalnız giden → yalnız Bs). Ekran: `faturasizDisiNotu`. */
+  faturasizDisi: FaturasizDisi;
 }
 
 /**
@@ -89,10 +94,13 @@ export function babsFormu(
   esik = BABS_ESIK,
 ): BabsFormu {
   const cariler = new Map<string, FaturaKaydi[]>();
+  const disi: FaturaKaydi[] = [];
   let tarihsiz = 0, faturaSayisi = 0;
   for (const f of faturalar) {
     if (f.yon !== yon) continue;
     const d = donemAnahtari(f.tarih);
+    // Faturasız (Q) resmî beyana girmez (K3); dönemindeyse ayrıca sayılır. Tarihsiz Q da resmî sayaca («tarihi yok») girmez.
+    if (faturasizMi(f)) { if (d === donem) disi.push(f); continue; }
     if (d === null) { tarihsiz++; continue; }
     if (d !== donem) continue;
     faturaSayisi++;
@@ -110,7 +118,7 @@ export function babsFormu(
   const azalan = (a: BabsSatir, b: BabsSatir) => b.tutar.toplam - a.tutar.toplam;
   satirlar.sort(azalan);
   belirsiz.sort(azalan);
-  return { satirlar, belirsiz, toplam: satirlar.reduce((t, s) => tutarEkle(t, s.tutar), bosTutar()), faturaSayisi, tarihsiz };
+  return { satirlar, belirsiz, toplam: satirlar.reduce((t, s) => tutarEkle(t, s.tutar), bosTutar()), faturaSayisi, tarihsiz, faturasizDisi: faturasizDisiSay(disi) };
 }
 
 // ── Phase 557: Senaryo Bütçesi ─────────────────────────────────────────────────────────────
@@ -256,14 +264,19 @@ export interface KdvAnalizi {
   faturaSayisi: number;
   /** Tarihi çözülemeyen fatura adedi — hiçbir yıla giremez. */
   tarihsiz: number;
+  /** Bu yılın DIŞLANAN faturasız (Q) faturaları (K3): aylara, oran dağılımına ve adede girmez. */
+  faturasizDisi: FaturasizDisi;
 }
 
 export function kdvAnalizi(faturalar: readonly FaturaKaydi[], yil: number): KdvAnalizi {
   const yilStr = String(yil);
   let tarihsiz = 0;
   const yilFaturalari: Array<{ f: FaturaKaydi; ay: string }> = [];
+  const disi: FaturaKaydi[] = [];
   for (const f of faturalar) {
     const d = donemAnahtari(f.tarih);
+    // Faturasız (Q) resmî KDV analizine girmez (K3); bu yıldaysa ayrıca sayılır.
+    if (faturasizMi(f)) { if (d !== null && d.slice(0, 4) === yilStr) disi.push(f); continue; }
     if (d === null) { tarihsiz++; continue; }
     if (d.slice(0, 4) === yilStr) yilFaturalari.push({ f, ay: d });
   }
@@ -292,5 +305,6 @@ export function kdvAnalizi(faturalar: readonly FaturaKaydi[], yil: number): KdvA
     oranDagilimi,
     faturaSayisi: yilFaturalari.length,
     tarihsiz,
+    faturasizDisi: faturasizDisiSay(disi),
   };
 }

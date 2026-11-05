@@ -418,8 +418,10 @@ describe('biçimleyiciler: sayı olmayan değer null (bilinmeyen ≠ 0)', () => 
       { companyId: 'K1', seri: 'q', tur: 'null', deger: null, adet: 1 },        // JSON null
       { companyId: 'K2', seri: 'Q', tur: 'string', deger: 'true', adet: 1 },    // metin "true" boolean true SAYILMAZ
       { companyId: 'K1', seri: '', tur: 'boolean', deger: 'true', adet: 300 },
+      { companyId: 'K1', seri: null, tur: 'boolean', deger: 'true', adet: 5 },  // mikroEvrak yok (QH5-5 «seri null adedi»)
     ], 'Q')).toEqual({
-      adet: 14, faturali: { true: 9, false: 2, yok: 2, diger: 1 }, kiracilar: { K1: 13, K2: 1 }, yazimlar: { Q: 13, q: 1 }, toplamMikroFaturaSiparisi: 314,
+      adet: 14, faturali: { true: 9, false: 2, yok: 2, diger: 1 }, kiracilar: { K1: 13, K2: 1 }, yazimlar: { Q: 13, q: 1 }, toplamMikroFaturaSiparisi: 319,
+      seriYok: 5,
     });
     expect(() => cetpaSiparisOzeti([{ companyId: 'K1', seri: 'Q', tur: 'boolean', deger: 'true', adet: 'x' }], 'Q')).toThrow('PG adet değeri sayı değil');
   });

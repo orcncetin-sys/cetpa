@@ -35,6 +35,7 @@
  */
 import { bilinenSayi } from '../../utils/para.js';
 import { MikroGovdeHatasi } from './govdeHatasi.js';
+import { faturaEvrakiMi, evrakAnahtariYazimHatasi } from '../../lib/faturaEvrakKosulu.js';
 
 // ── Ortak kapılar ────────────────────────────────────────────────────────────
 
@@ -287,9 +288,18 @@ export function cariHareketGovdesi(
   if (typeof tip !== 'number' || (tip !== 0 && tip !== 1)) {
     throw new MikroGovdeHatasi('borç/alacak yönü', satirNo, 'cha_tip 0 (borç) ya da 1 (alacak) olmalı');
   }
+  // Evrak tipi / cinsi anahtarı yalnız birebir küçük harf yazımıyla (lib/faturaEvrakKosulu; bulgu Q6): ikinci yazım (`CHA_EVRAK_TIP`)
+  // denetimden geçip aşağıdaki `...hareket` yayılımıyla Mikro'ya giderdi. `faturaEvrakiMi`'den ÖNCE.
+  const yazim = evrakAnahtariYazimHatasi(hareket);
+  if (yazim) throw new MikroGovdeHatasi('evrak tipi', satirNo, yazim);
   const evrakTip = hareket.cha_evrak_tip;
   if (!bilinenSayi(evrakTip) || !Number.isFinite(Number(evrakTip)) || Number(evrakTip) <= 0) {
     throw new MikroGovdeHatasi('evrak tipi', satirNo, 'cha_evrak_tip verilmeli (ör. dekont 29) — tahmin edilmez');
+  }
+  // Dekont yolu FATURA evrakı yazamaz (şartname q-serisi v3 Q13 / QH9): satış 63 ya da alış 0 + cinsi 6 — tek kaynak
+  // lib/faturaEvrakKosulu (seriOzet.faturaKosuluIfadesi ile aynı küme). Değer metin gelebilir ('63'); yüklem tipe dayanıklı.
+  if (faturaEvrakiMi(evrakTip, hareket.cha_cinsi)) {
+    throw new MikroGovdeHatasi('evrak tipi', satirNo, 'fatura evrak tipi (63, ya da 0 + cinsi 6) dekont yolundan yazılamaz — fatura yalnız fatura ucundan kesilir');
   }
 
   const satir: Record<string, unknown> = {

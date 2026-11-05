@@ -60,6 +60,7 @@
  */
 import { bilinenSayi } from '../../utils/para.js';
 import { MF_KAYNAGI, MF_KIMLIK_ONEKI } from '../../lib/mfKaynagi.js';
+import { faturasizSeriMi } from '../../lib/faturasizSeri.js';
 import { kalemleriCoz, faturaAnahtari, satirMasrafi, kdvOranaUymuyor, type StokHareketi, type NetKaynagi } from '../../lib/stokFiyat.js';
 
 /** Bir alanın "hiçbir satırda okunamadı" sayılması için gereken en az satır sayısı. */
@@ -381,9 +382,11 @@ export function faturadanSiparis(
     orderDate: tarih || null,
     source: MF_KAYNAGI,               // lib/mfKaynagi — TEK KAYNAK (okuyanlar ve `/api/db` kapısı aynı sabitten)
     mikroEvrak: { seri, sira },
-    // Kaynak zaten kesilmiş bir satış faturası — listede "FATURASIZ" rozeti yanlıştı
-    // (2026-09-03 SS bulgusu); ✓ Mikro rozeti evrak no'sunu gösterir.
-    faturali: true,
+    // Q serisi faturasızdır (K1, K4; şartname q-serisi v3 QH5, 2026-11-05): seri Q başlığından türeyen MF `faturali: false`.
+    // Diğer seri kesilmiş bir satış faturasıdır — listede "FATURASIZ" rozeti yanlıştı (2026-09-03 SS bulgusu); ✓ Mikro rozeti
+    // evrak no'sunu gösterir. Gece geri doldurması (routes/mikroRoutes `faturadanSiparisCalistir`) AYNI kuralı mevcut MF'lere
+    // uygular — tek kaynak lib/faturasizSeri.faturasizSeriMi.
+    faturali: !faturasizSeriMi(seri),
     mikroFaturaNo: `${seri}${sira}`,
     companyId: opts.companyId,
   };

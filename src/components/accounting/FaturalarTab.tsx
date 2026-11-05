@@ -35,7 +35,7 @@ const MIKRO_SORT_KEY: Record<string, keyof MikroFaturaRow> = {
 };
 
 /** Tür süzgeci çiplerinin etiketi — slug ('e-arsiv') ekrana BASILMAZ (ASCII'leşmiş Türkçe). */
-const TUR_CIPI = { 'e-fatura': { tr: 'e-Fatura', en: 'e-Invoice' }, 'e-arsiv': { tr: 'e-Arşiv', en: 'e-Archive' } } as const;
+const TUR_CIPI = { 'e-fatura': { tr: 'e-Fatura', en: 'e-Invoice' }, 'e-arsiv': { tr: 'e-Arşiv', en: 'e-Archive' }, faturasiz: { tr: 'Faturasız (Q)', en: 'Uninvoiced (Q)' } } as const;
 
 interface FaturalarTabProps {
   currentLanguage: string;
@@ -74,7 +74,8 @@ export default function FaturalarTab({
 }: FaturalarTabProps) {
   // Tablo ile "türü bilinmiyor" notu AYNI kümeyi sayar (arama kutusu dâhil) — not arama öncesi toplamı yazıyordu (hakem 2026-10-02).
   const mikroGorunen = mikroFaturaSatirlari.filter(f => eslesir(invoiceSearch, f.musteri, f.faturaNo, bilinenSayi(f.tutar) ? f.tutar : null));
-  const turuBilinmeyen = mikroGorunen.filter(f => f.ebelgeTuru === -1).length;
+  // Faturasız (seri Q) satış e-belge değildir — «türü bilinmiyor» sayılmaz (K3; şartname q-serisi v3 Q9-2).
+  const turuBilinmeyen = mikroGorunen.filter(f => f.ebelgeTuru === -1 && f.faturasiz !== true).length;
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
       {/* Invoice creation modal */}
@@ -186,6 +187,12 @@ export default function FaturalarTab({
                   ? `${tutar.bilinmeyen} kayıt tutarsız — toplama girmedi`
                   : `${tutar.bilinmeyen} records unknown — excluded from total`)
               : null;
+            // «Tümü»nde faturasız (seri Q) satış satış tutarına girer — içinde kaç tane olduğu söylenir (Q9-2).
+            const faturasizNotu = faturaYon !== 'gelen' && k.faturasiz.adet > 0
+              ? (currentLanguage==='tr'
+                  ? `içinde ${k.faturasiz.adet} faturasız (Q) · ${paraYaz(ekranTutari(k.faturasiz.tutar))}`
+                  : `incl. ${k.faturasiz.adet} uninvoiced (Q) · ${paraYaz(ekranTutari(k.faturasiz.tutar))}`)
+              : null;
             // Eski koşul `alisToplam > 0` idi; tutarı bilinmeyen alış faturası 0 sayıldığı için
             // hepsi bilinmiyorsa alış satırı hiç görünmüyordu — bilinmeyen varken de göster ('—').
             const tutarAlt = faturaYon==='hepsi' && (k.alis.toplam > 0 || k.alis.bilinmeyen > 0)
@@ -200,7 +207,7 @@ export default function FaturalarTab({
                       : null),
                 color: 'text-[#ff4000]' },
               { label: tutarLabel, value: tutarValue,
-                alt: [tutarAlt, tutarsizNotu].filter(Boolean).join(' · ') || null, color: 'text-green-600' },
+                alt: [tutarAlt, tutarsizNotu, faturasizNotu].filter(Boolean).join(' · ') || null, color: 'text-green-600' },
               { label: 'e-Fatura / e-Arşiv',
                 value: `${k.eFaturaAdet} / ${k.eArsivAdet}`,
                 alt: ac(currentLanguage).yalniz_cetpa, color: 'text-purple-600' },
@@ -380,12 +387,19 @@ export default function FaturalarTab({
                     <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${f.yon === 'gelen' ? 'bg-purple-100 text-purple-600' : 'bg-teal-100 text-teal-700'}`}>
                       {f.yon === 'gelen' ? (oc(currentLanguage).gelen) : (oc(currentLanguage).giden)}
                     </span>
-                    {/* Tür süzgeci neye göre süzdüyse satırda o görünür; bilinmeyen tür "e-Fatura" diye sunulmaz. */}
+                    {/* Tür süzgeci neye göre süzdüyse satırda o görünür; bilinmeyen tür "e-Fatura" diye sunulmaz.
+                        Faturasız (seri Q) satış e-belge değildir: e-belge çipi yerine «Faturasız (Q)» (K3; Q9-2). */}
+                    {f.faturasiz === true ? (
+                      <span data-faturasiz-cip={f.id} className="ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">
+                        {TUR_CIPI.faturasiz[currentLanguage==='tr'?'tr':'en']}
+                      </span>
+                    ) : (
                     <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${f.ebelgeTuru === 1 ? 'bg-amber-100 text-amber-700' : f.ebelgeTuru === 0 ? 'bg-gray-100 text-gray-600' : 'bg-gray-50 text-gray-400'}`}>
                       {f.ebelgeTuru === 0 ? TUR_CIPI['e-fatura'][currentLanguage==='tr'?'tr':'en']
                         : f.ebelgeTuru === 1 ? TUR_CIPI['e-arsiv'][currentLanguage==='tr'?'tr':'en']
                         : (currentLanguage === 'tr' ? 'tür bilinmiyor' : 'type unknown')}
                     </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{f.tarih || '—'}</td>
                   <td className="px-4 py-3 text-right text-gray-600">
